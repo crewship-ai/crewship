@@ -169,6 +169,22 @@ generates one. Reuse an explicit identifier only for the identical operation,
 base revision and source under the same human identity. The server returns the
 original result for an identical retry and rejects conflicting reuse.
 
+### crewship page artifact copy
+
+```bash
+crewship page artifact copy report report-copy --revision 3 --name "Report copy" --mutation-id copy-report-3
+```
+
+`--revision` selects the required positive source revision; `--name` names the new artifact.
+`--mutation-id` supplies the exact-retry identity (generated once when omitted).
+
+Copies the selected immutable revision into a new private artifact owned by you
+in the same workspace. Source read access and permission to create a Page are
+checked at execution. Grants, comments, requests and agent authority are not
+copied. Supply the same `--mutation-id` and unchanged arguments when retrying
+an unconfirmed response; a revision is required rather than inferred from a
+moving head.
+
 ### crewship page artifact restore
 
 ```bash
@@ -322,11 +338,57 @@ with `resolved: true` and the required `base_version`.
 crewship page artifact threads reopen report THREAD_ID --base-version 3 --mutation-id reopen-1
 ```
 
-The same endpoint reopens it with `resolved: false`. These initial discussion
-mutations require Page write access; readers can list threads. All mutation
+The same endpoint reopens it with `resolved: false`. Creating or replying requires
+Page comment access; resolving or reopening requires Page write access. Readers
+can list threads. All mutation
 commands generate an ID when `--mutation-id` is omitted. Supply your own stable
 ID when you need to retry after a network error, using the original payload and
 base version. Responses remain escaped JSON, including untrusted comment text.
+
+### crewship page artifact comments edit
+
+```bash
+crewship page artifact comments edit report THREAD_ID COMMENT_ID --body 'Corrected text' --base-version 3 --mutation-id edit-1
+```
+
+`PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}`
+edits your own human-authored comment. `--base-version` is the current **thread**
+version; replacement text must be nonempty UTF-8 and at most 4 KiB.
+
+### crewship page artifact comments delete
+
+```bash
+crewship page artifact comments delete report THREAD_ID COMMENT_ID --base-version 4 --mutation-id delete-1
+```
+
+`DELETE /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}`
+deletes your own human-authored comment. The comment becomes a tombstone;
+previous bodies remain in its private author history.
+
+### crewship page artifact comments react
+
+```bash
+crewship page artifact comments react report THREAD_ID COMMENT_ID --emoji '👀' --active=true --base-version 5 --mutation-id reaction-1
+```
+
+`PUT /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji}`
+adds or removes your reaction. Choose `👍`, `❤️`, `👀`, or `✅` and specify
+`--active=true` or `--active=false`. Each write requires current Page comment
+access and the current thread version. Keep the same `--mutation-id`, body, and
+version when retrying an uncertain result; a stale conflict is never retried
+automatically.
+
+### crewship page artifact comments history
+
+```bash
+crewship page artifact comments history report THREAD_ID COMMENT_ID
+```
+
+`GET /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/history`
+reads your own comment's versions and actions, including deleted-comment history,
+while you still have Page comment access. It does not dispatch or authorize an agent.
+
+
 
 ## Subcommands
 
@@ -516,6 +578,8 @@ most 24 panels and 256 KiB of spec.
 
 Remember that [`page update --file`](#crewship-page-update-slug) **replaces**
 the spec: omit any of these on a re-apply and they are deleted.
+
+
 
 ### `--owner crew/<slug>` — whose page it is
 

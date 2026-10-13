@@ -195,7 +195,21 @@ required; inaccessible results are omitted without revealing hidden counts.
 The response has at most 20 Pages, selected from 100 recent candidate revisions.
 A card's URL can use `/pages/{slug}?revision=N`.
 
-### Artifact discussion threads
+### Copy an artifact revision
+
+`POST /api/v1/pages/{slug}/artifact/copies` accepts
+`{source_revision,slug,name,mutation_id}`. It copies one explicitly selected
+retained revision into a new private human-owned Page in the same workspace.
+Source read access and destination Page creation permission are checked again
+inside the transaction. It returns `201 {page_slug,revision:1}`, or `200` for an
+exact authorized retry. A reused identity with different input returns `409`.
+
+The new revision is authored by the human making the copy. Source provenance
+is retained separately and is not a grant: permissions, agent delegations,
+comments and requests are not inherited. The new artifact references the source
+blob independently, so removing an old source revision does not delete the copy.
+
+## Artifact discussion threads
 
 Threads refer to an immutable artifact revision. Publishing or restoring the
 source does not delete them or retarget their anchors. Whole-document anchors
@@ -212,6 +226,10 @@ DOM identity or scroll offset inside an opaque frame, or move points to new revi
 | POST | `/api/v1/pages/{slug}/artifact/threads` | Start a revision-bound thread |
 | POST | `/api/v1/pages/{slug}/artifact/threads/{threadId}/replies` | Reply with an expected thread version |
 | PATCH | `/api/v1/pages/{slug}/artifact/threads/{threadId}` | Resolve or reopen with an expected thread version |
+| PATCH | `/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}` | Edit your own human-authored comment |
+| DELETE | `/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}` | Tombstone your own human-authored comment |
+| PUT | `/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji}` | Set or remove your reaction |
+| GET | `/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/history` | Read your own comment's private edit history |
 
 Readers can list threads. Creating threads and replies requires a human
 identity with Page comment or write access;
@@ -238,6 +256,26 @@ Resolve/reopen body:
 ```json
 {"resolved":true,"base_version":2,"mutation_id":"resolve-1"}
 ```
+
+Edit uses `{body,base_version,mutation_id}`; delete uses `{base_version,mutation_id}`.
+Here `base_version` is the **thread** version, not the comment body version.
+Only the original human author with current Page comment access may edit or
+delete; an agent reply's on-behalf human is not its human author. Deletion leaves
+a tombstone and returns an empty `body`, preserving the thread and its anchor.
+
+Reaction paths accept URL-encoded `👍`, `❤️`, `👀` or `✅`, with
+`{active,base_version,mutation_id}`. Each human may hold one of each reaction on
+a live comment. `active:false` removes it. Responses include bounded aggregate
+`reactions:[{emoji,count,reacted_by_me}]` and server-computed `can_edit`,
+`can_delete`, `can_react` and `can_view_history` flags.
+
+Comments also carry body `version`, `edited_at` and `deleted_at` when applicable.
+History returns `{history:[{version,body,action,actor_user_id,created_at}]}`;
+`action` is `create`, `edit` or `delete`. It is readable only by the original
+human author with current comment access, including after tombstoning. Previous
+text remains in the immutable audit and backup, not in the reader's tombstone.
+At most 50 body versions are retained per comment; the final slot is reserved
+for deletion. Reactions increment the thread version, not the body version.
 
 Use `resolved:false` to reopen. A stale `base_version` returns 409 with code
 `stale_thread`. Reusing a mutation ID with a different actor, operation or payload

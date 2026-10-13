@@ -12,6 +12,7 @@ func TestRemapArtifactCreationRunsPreservesHistoricalTies(t *testing.T) {
 		"page_artifact_mutation_receipts": {{"author_run_id": "original-run"}},
 		"page_artifact_comments":          {{"author_run_id": "original-run"}},
 		"page_artifact_comment_mutations": {{"actor_run_id": "original-run"}},
+		"page_artifact_comment_history":   {{"actor_run_id": "original-run"}},
 		"page_artifact_requests":          {{"run_id": "original-run", "thread_id": "thread"}},
 		"eval_runs":                       {{"trace_id": "original-run"}, {"trace_id": "unrelated-run"}},
 		"message_feedback":                {{"trace_id": "original-run"}, {"trace_id": "unrelated-run"}},
@@ -22,7 +23,7 @@ func TestRemapArtifactCreationRunsPreservesHistoricalTies(t *testing.T) {
 	if mapped == "original-run" || mapped == "" {
 		t.Fatalf("not forked: %v", mapped)
 	}
-	for _, ref := range []struct{ table, column string }{{"page_artifact_comments", "author_run_id"}, {"page_artifact_comment_mutations", "actor_run_id"}, {"page_artifact_creations", "run_id"}, {"page_artifact_revisions", "author_run_id"}, {"page_artifact_mutation_receipts", "author_run_id"}, {"page_artifact_requests", "run_id"}, {"journal_entries", "trace_id"}, {"eval_runs", "trace_id"}, {"message_feedback", "trace_id"}} {
+	for _, ref := range []struct{ table, column string }{{"page_artifact_comment_history", "actor_run_id"}, {"page_artifact_comments", "author_run_id"}, {"page_artifact_comment_mutations", "actor_run_id"}, {"page_artifact_creations", "run_id"}, {"page_artifact_revisions", "author_run_id"}, {"page_artifact_mutation_receipts", "author_run_id"}, {"page_artifact_requests", "run_id"}, {"journal_entries", "trace_id"}, {"eval_runs", "trace_id"}, {"message_feedback", "trace_id"}} {
 		if got := dump.Tables[ref.table][0][ref.column]; got != mapped {
 			t.Fatalf("%s link lost: %v want %v", ref.table, got, mapped)
 		}

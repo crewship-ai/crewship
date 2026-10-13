@@ -205,6 +205,9 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"page_board_comments":             IntentInclude,
 	"page_board_comment_mutations":    IntentInclude,
 	"page_artifact_threads":           IntentInclude,
+	"page_artifact_copies":            IntentInclude,
+	"page_artifact_comment_history":   IntentInclude,
+	"page_artifact_comment_reactions": IntentInclude,
 	"page_artifact_comments":          IntentInclude,
 	"page_artifact_comment_mutations": IntentInclude,
 	// Durable draft metadata and revision audit. Source files live outside

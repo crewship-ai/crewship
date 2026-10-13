@@ -307,6 +307,7 @@ var BackupTables = []string{
 	"page_artifacts",
 	"page_artifact_revisions",
 	"page_artifact_creations",
+	"page_artifact_copies",
 	"page_artifact_mutation_receipts",
 	"page_artifact_requests",
 	"page_board_threads",
@@ -314,6 +315,8 @@ var BackupTables = []string{
 	"page_board_comment_mutations",
 	"page_artifact_threads",
 	"page_artifact_comments",
+	"page_artifact_comment_history",
+	"page_artifact_comment_reactions",
 	"page_artifact_comment_mutations",
 	"page_boards",
 	"page_board_files",
@@ -467,15 +470,19 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "pipeline_run_step_outputs", "pipeline_step_executions", "pipeline_run_artifacts":
 		// No workspace_id column — scoped via its run.
 		return "run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "page_artifact_copies":
+		return "workspace_id = ?", []any{workspaceID}, true
 	case "page_board_source_history", "page_board_write_audit", "page_board_files", "page_board_elements", "page_board_mutations", "page_board_artifact_placements":
 		return "board_page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "page_board_threads", "page_board_comment_mutations", "page_boards", "page_artifact_mutation_receipts", "page_artifact_requests", "page_artifact_creations", "page_artifact_threads", "page_artifact_comment_mutations", "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
+	case "page_artifact_comment_history", "page_board_threads", "page_board_comment_mutations", "page_boards", "page_artifact_mutation_receipts", "page_artifact_requests", "page_artifact_creations", "page_artifact_threads", "page_artifact_comment_mutations", "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
 		// Scope through the owning page, never the nullable (or cross-workspace) editor.
 		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "page_board_request_previews", "page_board_request_files", "page_board_request_sources":
 		return "request_id IN (SELECT q.id FROM page_board_requests q WHERE q.workspace_id=?)", []any{workspaceID}, true
 	case "page_board_comments":
 		return "thread_id IN (SELECT t.id FROM page_board_threads t JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
+	case "page_artifact_comment_reactions":
+		return "comment_id IN (SELECT c.id FROM page_artifact_comments c JOIN page_artifact_threads t ON t.id=c.thread_id JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
 	case "page_artifact_comments":
 		return "thread_id IN (SELECT t.id FROM page_artifact_threads t JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
 	case "page_versions":

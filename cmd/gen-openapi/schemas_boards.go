@@ -19,7 +19,7 @@ func boardSchemaCatalog() map[string]DomainSchema {
 	placement["description"] = "Source is omitted unless the viewer can read both the Board and the artifact. Geometry remains as an unavailable placeholder."
 	snapshot := obj(map[string]any{
 		"format": map[string]any{"type": "string", "enum": []string{"crewship-board-excalidraw-0.18.1-v1"}},
-		"seq": integer, "can_write": boolean, "write_scope": map[string]any{"type": "string", "enum": []string{"all-elements", "own-elements"}}, "placements": array(placement),
+		"seq":    integer, "can_write": boolean, "write_scope": map[string]any{"type": "string", "enum": []string{"all-elements", "own-elements"}}, "placements": array(placement),
 		"placement_tombstones": array(obj(map[string]any{"id": str, "placement_rev": integer, "deleted": boolean}, "id", "placement_rev", "deleted")),
 		"records":              array(obj(map[string]any{"element_id": str, "element_rev": integer, "deleted": boolean, "author_user_id": str, "author_agent_id": str, "author_run_id": str, "element": mergeProps(element, map[string]any{"nullable": true})}, "element_id", "element_rev", "deleted", "element")),
 	}, "format", "seq", "can_write", "placements", "records")

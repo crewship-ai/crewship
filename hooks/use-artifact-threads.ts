@@ -13,7 +13,17 @@ export interface ArtifactComment {
   author_agent_id?: string
   author_run_id?: string
   created_at: string
+  version?: number
+  edited_at?: string
+  deleted_at?: string
+  can_edit?: boolean
+  can_delete?: boolean
+  can_react?: boolean
+  can_view_history?: boolean
+  reactions?: { emoji: string; count: number; reacted_by_me: boolean }[]
 }
+export interface ArtifactCommentHistory { version: number; body: string; action: string; actor_user_id: string; created_at: string }
+export type ArtifactCommentChange = { action: "edit"; commentId: string; body: string } | { action: "delete"; commentId: string } | { action: "react"; commentId: string; emoji: string; active: boolean }
 export type ArtifactAnchor = { schema_version: 1; type: "document" } | { schema_version: 1; type: "point"; coordinate_space: "viewport"; x: number; y: number; viewport_width: number; viewport_height: number }
 
 export interface ArtifactThread {
@@ -36,9 +46,10 @@ export class ArtifactCommentError extends Error {
   constructor(message: string, public status: number) { super(message) }
 }
 export type ArtifactReplyWrite = { action: "reply"; threadId: string; base_version: number; body: string }
-type ThreadWrite =
+export type ThreadWrite =
   | { action: "create"; revision: number; body: string; anchor?: ArtifactAnchor }
   | ArtifactReplyWrite
+  | (ArtifactCommentChange & { threadId: string; base_version: number })
   | { action: "resolve"; threadId: string; base_version: number; resolved: boolean }
 
 export function useArtifactThreads(workspace: string, slug: string) {
@@ -107,13 +118,19 @@ export function useArtifactThreads(workspace: string, slug: string) {
       } else if (input.action === "reply") {
         url = `${endpoint}/${encodeURIComponent(input.threadId)}/replies`
         body = { body: input.body, base_version: input.base_version, mutation_id }
+      } else if (input.action === "edit" || input.action === "delete" || input.action === "react") {
+        url = `${endpoint}/${encodeURIComponent(input.threadId)}/comments/${encodeURIComponent(input.commentId)}`
+        method = input.action === "edit" ? "PATCH" : input.action === "delete" ? "DELETE" : "PUT"
+        body = { base_version: input.base_version, mutation_id }
+        if (input.action === "edit") body.body = input.body
+        if (input.action === "react") { url += `/reactions/${encodeURIComponent(input.emoji)}`; body.active = input.active }
       } else {
         url = `${endpoint}/${encodeURIComponent(input.threadId)}`
         method = "PATCH"
         body = { resolved: input.resolved, base_version: input.base_version, mutation_id }
       }
       const response = await apiFetch(`${url}?${params}`, {
-        method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000),
       })
       if (!response.ok) {
         const result = await response.json().catch(() => null)
@@ -121,11 +138,14 @@ export function useArtifactThreads(workspace: string, slug: string) {
           ? "This thread changed. Refresh comments, review the latest replies, then try again. Your draft is still here."
           : result?.error ?? "Could not save the comment.", response.status)
       }
-      return response.json()
+      const result = await response.json()
+      if (!result || typeof result.id !== "string" || !Number.isSafeInteger(result.version)) throw new Error("The comment result was not confirmed. Retry the unchanged request.")
+      return result
     },
     onError: (error, input) => {
+      if (error instanceof ArtifactCommentError && error.status >= 400 && error.status < 500 && error.status !== 408) submissions.current.delete(fingerprintOf(input))
       if (error instanceof ArtifactCommentError && [401, 403, 404].includes(error.status)) { denyAccess(error); return }
-      if (input.action === "reply" && (!(error instanceof ArtifactCommentError) || error.status >= 500)) {
+      if (input.action === "reply" && (!(error instanceof ArtifactCommentError) || error.status >= 500 || error.status === 408)) {
         setUncertainReplies(old => [...old.filter(item => fingerprintOf(item) !== fingerprintOf(input)), input])
       }
     },
@@ -136,5 +156,16 @@ export function useArtifactThreads(workspace: string, slug: string) {
       await client.invalidateQueries({ queryKey: key })
     },
   })
-  return { query: { ...query, data: accessError ? undefined : query.data, error: accessError ?? query.error }, write, uncertainReplies }
+  const history = async (threadId: string, commentId: string): Promise<ArtifactCommentHistory[]> => {
+    const response = await apiFetch(`${endpoint}/${encodeURIComponent(threadId)}/comments/${encodeURIComponent(commentId)}/history?${params}`, { signal: AbortSignal.timeout(20000) })
+    if (!response.ok) {
+      const error = new ArtifactCommentError("Comment history is unavailable.", response.status)
+      if ([401,403,404].includes(response.status)) denyAccess(error)
+      throw error
+    }
+    const result = await response.json()
+    if (!Array.isArray(result?.history)) throw new Error("Invalid comment history.")
+    return result.history
+  }
+  return { history, query: { ...query, data: accessError ? undefined : query.data, error: accessError ?? query.error }, write, uncertainReplies }
 }

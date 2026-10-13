@@ -108964,6 +108964,38 @@
                       "description": "The pages in this folder the caller reaches, as index rows.",
                       "items": {
                         "properties": {
+                          "artifact_summary": {
+                            "properties": {
+                              "author_agent_id": {
+                                "type": "string"
+                              },
+                              "author_agent_name": {
+                                "type": "string"
+                              },
+                              "author_name": {
+                                "type": "string"
+                              },
+                              "author_run_id": {
+                                "type": "string"
+                              },
+                              "author_user_id": {
+                                "type": "string"
+                              },
+                              "head_rev": {
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "last_activity_at": {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              "published_at": {
+                                "format": "date-time",
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
                           "color": {
                             "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                             "type": "string"
@@ -110240,6 +110272,38 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "artifact_summary": {
+                          "properties": {
+                            "author_agent_id": {
+                              "type": "string"
+                            },
+                            "author_agent_name": {
+                              "type": "string"
+                            },
+                            "author_name": {
+                              "type": "string"
+                            },
+                            "author_run_id": {
+                              "type": "string"
+                            },
+                            "author_user_id": {
+                              "type": "string"
+                            },
+                            "head_rev": {
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "last_activity_at": {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            "published_at": {
+                              "format": "date-time",
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
                         "color": {
                           "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                           "type": "string"
@@ -110568,6 +110632,38 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "artifact_summary": {
+                          "properties": {
+                            "author_agent_id": {
+                              "type": "string"
+                            },
+                            "author_agent_name": {
+                              "type": "string"
+                            },
+                            "author_name": {
+                              "type": "string"
+                            },
+                            "author_run_id": {
+                              "type": "string"
+                            },
+                            "author_user_id": {
+                              "type": "string"
+                            },
+                            "head_rev": {
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "last_activity_at": {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            "published_at": {
+                              "format": "date-time",
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
                         "color": {
                           "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                           "type": "string"
@@ -110908,6 +111004,38 @@
                     "pages": {
                       "items": {
                         "properties": {
+                          "artifact_summary": {
+                            "properties": {
+                              "author_agent_id": {
+                                "type": "string"
+                              },
+                              "author_agent_name": {
+                                "type": "string"
+                              },
+                              "author_name": {
+                                "type": "string"
+                              },
+                              "author_run_id": {
+                                "type": "string"
+                              },
+                              "author_user_id": {
+                                "type": "string"
+                              },
+                              "head_rev": {
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              "last_activity_at": {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              "published_at": {
+                                "format": "date-time",
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
                           "color": {
                             "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                             "type": "string"
@@ -111332,6 +111460,38 @@
                 "schema": {
                   "items": {
                     "properties": {
+                      "artifact_summary": {
+                        "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
+                          "author_agent_name": {
+                            "type": "string"
+                          },
+                          "author_name": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
+                            "type": "string"
+                          },
+                          "author_user_id": {
+                            "type": "string"
+                          },
+                          "head_rev": {
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "last_activity_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "published_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
                       "color": {
                         "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                         "type": "string"
@@ -115959,8 +116119,31 @@
                     "can_comment": {
                       "type": "boolean"
                     },
+                    "can_copy": {
+                      "type": "boolean"
+                    },
                     "can_write": {
                       "type": "boolean"
+                    },
+                    "copy_provenance": {
+                      "nullable": true,
+                      "properties": {
+                        "source": {
+                          "properties": {
+                            "page_slug": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "source_revision": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "source_revision"
+                      ],
+                      "type": "object"
                     },
                     "head_rev": {
                       "type": "integer"
@@ -116010,7 +116193,9 @@
                     "html",
                     "revisions",
                     "can_write",
-                    "can_comment"
+                    "can_comment",
+                    "can_copy",
+                    "copy_provenance"
                   ],
                   "type": "object"
                 }
@@ -116143,6 +116328,295 @@
           "pages"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/copies": {
+      "post": {
+        "description": "Create page artifact copies (POST /api/v1/pages/{slug}/artifact/copies).",
+        "operationId": "post_api_v1_pages_slug_artifact_copies",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "mutation_id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string"
+                  },
+                  "source_revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "source_revision",
+                  "slug",
+                  "name",
+                  "mutation_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "page_slug": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "page_slug",
+                    "revision"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "page_slug": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "page_slug",
+                    "revision"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create page artifact copies",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/pages/{slug}/artifact/delegations": {
@@ -117907,16 +118381,65 @@
                                   "type": "string"
                                 },
                                 "body": {
-                                  "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent.",
-                                  "minLength": 1,
                                   "type": "string"
+                                },
+                                "can_delete": {
+                                  "type": "boolean"
+                                },
+                                "can_edit": {
+                                  "type": "boolean"
+                                },
+                                "can_react": {
+                                  "type": "boolean"
+                                },
+                                "can_view_history": {
+                                  "type": "boolean"
                                 },
                                 "created_at": {
                                   "format": "date-time",
                                   "type": "string"
                                 },
+                                "deleted_at": {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
+                                "edited_at": {
+                                  "format": "date-time",
+                                  "type": "string"
+                                },
                                 "id": {
                                   "type": "string"
+                                },
+                                "reactions": {
+                                  "items": {
+                                    "properties": {
+                                      "count": {
+                                        "type": "integer"
+                                      },
+                                      "emoji": {
+                                        "enum": [
+                                          "👍",
+                                          "❤️",
+                                          "👀",
+                                          "✅"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "reacted_by_me": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": [
+                                      "emoji",
+                                      "count",
+                                      "reacted_by_me"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "version": {
+                                  "type": "integer"
                                 }
                               },
                               "required": [
@@ -117924,7 +118447,13 @@
                                 "body",
                                 "author_user_id",
                                 "author_name",
-                                "created_at"
+                                "created_at",
+                                "version",
+                                "can_edit",
+                                "can_delete",
+                                "can_react",
+                                "can_view_history",
+                                "reactions"
                               ],
                               "type": "object"
                             },
@@ -118349,16 +118878,65 @@
                             "type": "string"
                           },
                           "body": {
-                            "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent.",
-                            "minLength": 1,
                             "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
                           },
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
                           },
+                          "deleted_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -118366,7 +118944,13 @@
                           "body",
                           "author_user_id",
                           "author_name",
-                          "created_at"
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_react",
+                          "can_view_history",
+                          "reactions"
                         ],
                         "type": "object"
                       },
@@ -118530,16 +119114,65 @@
                             "type": "string"
                           },
                           "body": {
-                            "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent.",
-                            "minLength": 1,
                             "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
                           },
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
                           },
+                          "deleted_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -118547,7 +119180,13 @@
                           "body",
                           "author_user_id",
                           "author_name",
-                          "created_at"
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_react",
+                          "can_view_history",
+                          "reactions"
                         ],
                         "type": "object"
                       },
@@ -118963,16 +119602,65 @@
                             "type": "string"
                           },
                           "body": {
-                            "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent.",
-                            "minLength": 1,
                             "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
                           },
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
                           },
+                          "deleted_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -118980,7 +119668,13 @@
                           "body",
                           "author_user_id",
                           "author_name",
-                          "created_at"
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_react",
+                          "can_view_history",
+                          "reactions"
                         ],
                         "type": "object"
                       },
@@ -119241,6 +119935,1584 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}": {
+      "delete": {
+        "description": "Delete page artifact thread comment (DELETE /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}).",
+        "operationId": "delete_api_v1_pages_slug_artifact_threads_threadId_comments_commentId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "commentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "threadId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "mutation_id": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "base_version",
+                  "mutation_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "anchor": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "document"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "description": "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision.",
+                          "properties": {
+                            "coordinate_space": {
+                              "enum": [
+                                "viewport"
+                              ],
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "point"
+                              ],
+                              "type": "string"
+                            },
+                            "viewport_height": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "viewport_width": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "x": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "y": {
+                              "minimum": 0,
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "coordinate_space",
+                            "x",
+                            "y",
+                            "viewport_width",
+                            "viewport_height"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "applied_version": {
+                      "type": "integer"
+                    },
+                    "comments": {
+                      "items": {
+                        "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
+                          "author_name": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
+                            "type": "string"
+                          },
+                          "author_user_id": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "deleted_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "body",
+                          "author_user_id",
+                          "author_name",
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_react",
+                          "can_view_history",
+                          "reactions"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "created_by_name": {
+                      "type": "string"
+                    },
+                    "created_by_user_id": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "resolved_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "resolved_by_user_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "enum": [
+                        "open",
+                        "resolved"
+                      ],
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "revision",
+                    "anchor",
+                    "status",
+                    "version",
+                    "created_by_user_id",
+                    "created_by_name",
+                    "created_at",
+                    "updated_at",
+                    "comments"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete page artifact thread comment",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      },
+      "patch": {
+        "description": "Update page artifact thread comment (PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}).",
+        "operationId": "patch_api_v1_pages_slug_artifact_threads_threadId_comments_commentId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "commentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "threadId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "body": {
+                    "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "mutation_id": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "base_version",
+                  "body",
+                  "mutation_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "anchor": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "document"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "description": "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision.",
+                          "properties": {
+                            "coordinate_space": {
+                              "enum": [
+                                "viewport"
+                              ],
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "point"
+                              ],
+                              "type": "string"
+                            },
+                            "viewport_height": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "viewport_width": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "x": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "y": {
+                              "minimum": 0,
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "coordinate_space",
+                            "x",
+                            "y",
+                            "viewport_width",
+                            "viewport_height"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "applied_version": {
+                      "type": "integer"
+                    },
+                    "comments": {
+                      "items": {
+                        "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
+                          "author_name": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
+                            "type": "string"
+                          },
+                          "author_user_id": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "deleted_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "body",
+                          "author_user_id",
+                          "author_name",
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_react",
+                          "can_view_history",
+                          "reactions"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "created_by_name": {
+                      "type": "string"
+                    },
+                    "created_by_user_id": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "resolved_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "resolved_by_user_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "enum": [
+                        "open",
+                        "resolved"
+                      ],
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "revision",
+                    "anchor",
+                    "status",
+                    "version",
+                    "created_by_user_id",
+                    "created_by_name",
+                    "created_at",
+                    "updated_at",
+                    "comments"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update page artifact thread comment",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/history": {
+      "get": {
+        "description": "Get page artifact thread comment history (GET /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/history).",
+        "operationId": "get_api_v1_pages_slug_artifact_threads_threadId_comments_commentId_history",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "commentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "threadId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "history": {
+                      "items": {
+                        "properties": {
+                          "action": {
+                            "enum": [
+                              "create",
+                              "edit",
+                              "delete"
+                            ],
+                            "type": "string"
+                          },
+                          "actor_user_id": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "version": {
+                            "minimum": 1,
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "history"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page artifact thread comment history",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji}": {
+      "put": {
+        "description": "Update page artifact thread comment reaction (PUT /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji}).",
+        "operationId": "put_api_v1_pages_slug_artifact_threads_threadId_comments_commentId_reactions_emoji",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "commentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "emoji",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "threadId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "base_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "mutation_id": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "base_version",
+                  "mutation_id",
+                  "active"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "anchor": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "document"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "description": "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision.",
+                          "properties": {
+                            "coordinate_space": {
+                              "enum": [
+                                "viewport"
+                              ],
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "point"
+                              ],
+                              "type": "string"
+                            },
+                            "viewport_height": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "viewport_width": {
+                              "maximum": 16384,
+                              "minimum": 1,
+                              "type": "number"
+                            },
+                            "x": {
+                              "minimum": 0,
+                              "type": "number"
+                            },
+                            "y": {
+                              "minimum": 0,
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "coordinate_space",
+                            "x",
+                            "y",
+                            "viewport_width",
+                            "viewport_height"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "applied_version": {
+                      "type": "integer"
+                    },
+                    "comments": {
+                      "items": {
+                        "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
+                          "author_name": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
+                            "type": "string"
+                          },
+                          "author_user_id": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "deleted_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "body",
+                          "author_user_id",
+                          "author_name",
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_react",
+                          "can_view_history",
+                          "reactions"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "created_by_name": {
+                      "type": "string"
+                    },
+                    "created_by_user_id": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "resolved_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "resolved_by_user_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "enum": [
+                        "open",
+                        "resolved"
+                      ],
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "revision",
+                    "anchor",
+                    "status",
+                    "version",
+                    "created_by_user_id",
+                    "created_by_name",
+                    "created_at",
+                    "updated_at",
+                    "comments"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update page artifact thread comment reaction",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/pages/{slug}/artifact/threads/{threadId}/replies": {
       "post": {
         "description": "Create page artifact thread replies (POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies).",
@@ -119398,16 +121670,65 @@
                             "type": "string"
                           },
                           "body": {
-                            "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent.",
-                            "minLength": 1,
                             "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
                           },
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
                           },
+                          "deleted_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -119415,7 +121736,13 @@
                           "body",
                           "author_user_id",
                           "author_name",
-                          "created_at"
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_react",
+                          "can_view_history",
+                          "reactions"
                         ],
                         "type": "object"
                       },
@@ -119579,16 +121906,65 @@
                             "type": "string"
                           },
                           "body": {
-                            "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent.",
-                            "minLength": 1,
                             "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
                           },
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
                           },
+                          "deleted_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "properties": {
+                                "count": {
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -119596,7 +121972,13 @@
                           "body",
                           "author_user_id",
                           "author_name",
-                          "created_at"
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_react",
+                          "can_view_history",
+                          "reactions"
                         ],
                         "type": "object"
                       },

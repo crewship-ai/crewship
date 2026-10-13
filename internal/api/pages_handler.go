@@ -319,6 +319,7 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
+	ArtifactSummary *pageArtifactSummary `json:"artifact_summary,omitempty"`
 	// See pageWire.HasProject: source that exists versus source that is live.
 	HasBoard           bool   `json:"has_board"`
 	HasArtifact        bool   `json:"has_artifact"`
@@ -400,6 +401,7 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
+	ArtifactSummary    *pageArtifactSummary
 	HasBoard           bool
 	HasArtifact        bool
 	HasProject         bool
@@ -536,8 +538,15 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
 		       COALESCE(l.published,0), COALESCE(l.version,0),
  EXISTS(SELECT 1 FROM page_boards WHERE page_id=p.id),
- EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=p.id)
+ EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=p.id),
+ COALESCE(ar.revision,0), COALESCE(ar.author_user_id,''), COALESCE(au.full_name,''),
+ COALESCE(ar.author_agent_id,''), COALESCE(aa.name,''), COALESCE(ar.author_run_id,''), COALESCE(ar.created_at,''),
+ MAX(COALESCE(ar.created_at,''),COALESCE((SELECT MAX(updated_at) FROM page_artifact_threads WHERE page_id=p.id),''),COALESCE((SELECT MAX(updated_at) FROM page_artifact_requests WHERE page_id=p.id),''))
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
+ LEFT JOIN page_artifacts pa ON pa.page_id=p.id
+ LEFT JOIN page_artifact_revisions ar ON ar.page_id=p.id AND ar.revision=pa.head_rev
+ LEFT JOIN users au ON au.id=ar.author_user_id
+ LEFT JOIN agents aa ON aa.id=ar.author_agent_id
 		WHERE p.workspace_id = ? AND `+scope.where+`
 		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
 	if err != nil {
@@ -548,11 +557,15 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 	var records []pageRecord
 	for rows.Next() {
 		var p pageRecord
+		var summary pageArtifactSummary
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasBoard, &p.HasArtifact); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasBoard, &p.HasArtifact, &summary.HeadRev, &summary.AuthorUserID, &summary.AuthorName, &summary.AuthorAgentID, &summary.AuthorAgentName, &summary.AuthorRunID, &summary.PublishedAt, &summary.LastActivityAt); err != nil {
 			return nil, err
+		}
+		if summary.HeadRev > 0 {
+			p.ArtifactSummary = &summary
 		}
 		records = append(records, p)
 	}
@@ -637,6 +650,9 @@ func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFol
 		PagesVersion: rec.PagesVersion,
 		Icon:         rec.Icon,
 		Color:        rec.Color,
+	}
+	if len(row.reach) > 0 {
+		out.ArtifactSummary = rec.ArtifactSummary
 	}
 	if rec.OwnerCrewID != "" {
 		out.Owner = "crew/" + row.ownerCrewSlug

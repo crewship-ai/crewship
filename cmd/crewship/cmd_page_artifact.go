@@ -61,7 +61,7 @@ func newPageArtifactCommand() *cobra.Command {
 	show.Flags().Int64("revision", 0, "Read a historical immutable revision; omit for the current head")
 	publish := newPageArtifactWriteCommand(false)
 	restore := newPageArtifactWriteCommand(true)
-	cmd.AddCommand(create, show, publish, restore, newPageArtifactThreadsCommand(), newPageArtifactDelegationCommand(false), newPageArtifactDelegationCommand(true), newPageArtifactRequestsCommand(), newPageArtifactCreationAuthorizationCommand(false), newPageArtifactCreationAuthorizationCommand(true))
+	cmd.AddCommand(create, show, publish, restore, newPageArtifactCopyCommand(), newPageArtifactThreadsCommand(), newPageArtifactCommentsCommand(), newPageArtifactDelegationCommand(false), newPageArtifactDelegationCommand(true), newPageArtifactRequestsCommand(), newPageArtifactCreationAuthorizationCommand(false), newPageArtifactCreationAuthorizationCommand(true))
 	cmd.AddCommand(newPageArtifactCreationStatusCommand(), newPageArtifactChatResultsCommand())
 	return cmd
 }

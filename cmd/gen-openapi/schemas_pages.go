@@ -181,9 +181,10 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	pageRow := obj(map[string]any{
-		"has_artifact": boolean(),
-		"has_board":    boolean(),
-		"has_project":  map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
+		"has_artifact":     boolean(),
+		"artifact_summary": obj(map[string]any{"head_rev": map[string]any{"type": "integer", "minimum": 1}, "author_user_id": str(), "author_name": str(), "author_agent_id": str(), "author_agent_name": str(), "author_run_id": str(), "published_at": timeString(), "last_activity_at": timeString()}),
+		"has_board":        boolean(),
+		"has_project":      map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": str(), "owner_crew_slug": str(),
 		"panel_count": map[string]any{"type": "integer",
@@ -468,7 +469,9 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	artifactResult := obj(map[string]any{"revision": integer(), "head_rev": integer()})
 	artifactResult["required"] = []string{"revision", "head_rev"}
 	artifactDocument := obj(map[string]any{"head_rev": integer(), "revision": integer(), "html": str(), "revisions": arr(artifactRevision), "can_write": boolean(), "can_comment": boolean()})
-	artifactDocument["required"] = []string{"head_rev", "revision", "html", "revisions", "can_write", "can_comment"}
+	artifactDocument["properties"].(map[string]any)["can_copy"] = boolean()
+	artifactDocument["properties"].(map[string]any)["copy_provenance"] = map[string]any{"type": "object", "nullable": true, "properties": map[string]any{"source_revision": integer(), "source": obj(map[string]any{"page_slug": str()})}, "required": []string{"source_revision"}}
+	artifactDocument["required"] = []string{"head_rev", "revision", "html", "revisions", "can_write", "can_comment", "can_copy", "copy_provenance"}
 	documentAnchor := obj(map[string]any{"schema_version": map[string]any{"type": "integer", "enum": []int{1}}, "type": map[string]any{"type": "string", "enum": []string{"document"}}})
 	documentAnchor["required"] = []string{"schema_version", "type"}
 	documentAnchor["additionalProperties"] = false
@@ -478,8 +481,11 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	pointAnchor["description"] = "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision."
 	commentAnchor := map[string]any{"oneOf": []any{documentAnchor, pointAnchor}}
 	commentBody := map[string]any{"type": "string", "minLength": 1, "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent."}
-	comment := obj(map[string]any{"id": str(), "body": commentBody, "author_user_id": str(), "author_name": str(), "author_agent_id": str(), "author_run_id": str(), "created_at": timeString()})
-	comment["required"] = []string{"id", "body", "author_user_id", "author_name", "created_at"}
+	reaction := obj(map[string]any{"emoji": map[string]any{"type": "string", "enum": []string{"👍", "❤️", "👀", "✅"}}, "count": integer(), "reacted_by_me": boolean()})
+	reaction["required"] = []string{"emoji", "count", "reacted_by_me"}
+	comment := obj(map[string]any{"id": str(), "body": str(), "author_user_id": str(), "author_name": str(), "author_agent_id": str(), "author_run_id": str(), "created_at": timeString(), "version": integer(), "edited_at": timeString(), "deleted_at": timeString(), "can_edit": boolean(), "can_delete": boolean(), "can_react": boolean(), "can_view_history": boolean(), "reactions": arr(reaction)})
+	comment["required"] = []string{"id", "body", "author_user_id", "author_name", "created_at", "version", "can_edit", "can_delete", "can_react", "can_view_history", "reactions"}
+
 	thread := obj(map[string]any{"id": str(), "revision": integer(), "anchor": commentAnchor, "status": map[string]any{"type": "string", "enum": []string{"open", "resolved"}}, "version": integer(), "created_by_user_id": str(), "created_by_name": str(), "created_at": timeString(), "updated_at": timeString(), "resolved_by_user_id": str(), "resolved_at": timeString(), "comments": arr(comment), "applied_version": integer()})
 	thread["required"] = []string{"id", "revision", "anchor", "status", "version", "created_by_user_id", "created_by_name", "created_at", "updated_at", "comments"}
 	threadList := obj(map[string]any{"threads": arr(thread), "can_comment": boolean(), "can_resolve": boolean()})
@@ -495,6 +501,14 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	threadResolve := obj(map[string]any{"base_version": positiveVersion, "resolved": boolean(), "mutation_id": mutationID})
 	threadResolve["required"] = []string{"base_version", "resolved", "mutation_id"}
 	threadResolve["additionalProperties"] = false
+	commentDelete := obj(map[string]any{"base_version": positiveVersion, "mutation_id": mutationID})
+	commentDelete["required"] = []string{"base_version", "mutation_id"}
+	commentDelete["additionalProperties"] = false
+	commentReact := obj(map[string]any{"base_version": positiveVersion, "mutation_id": mutationID, "active": boolean()})
+	commentReact["required"] = []string{"base_version", "mutation_id", "active"}
+	commentReact["additionalProperties"] = false
+	commentHistory := obj(map[string]any{"history": arr(obj(map[string]any{"version": positiveVersion, "body": str(), "action": map[string]any{"type": "string", "enum": []string{"create", "edit", "delete"}}, "actor_user_id": str(), "created_at": timeString()}))})
+	commentHistory["required"] = []string{"history"}
 	delegation := obj(map[string]any{"run_id": str(), "expires_at": timeString()})
 	delegation["required"] = []string{"run_id", "expires_at"}
 	delegationRequest := obj(map[string]any{"run_id": map[string]any{"type": "string", "minLength": 1}})
@@ -521,23 +535,32 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	artifactRequestCancelled["required"] = []string{"id", "status"}
 	createProps := mergeProps(writeBody["properties"].(map[string]any), map[string]any{"allow_empty": map[string]any{"type": "boolean", "description": "Stage an empty human-owned Page for its first HTML artifact revision. Requires human authentication, the normal page.create permission, no panels and self ownership."}})
 	createBody := obj(createProps)
+	artifactCopyRequest := obj(map[string]any{"source_revision": map[string]any{"type": "integer", "minimum": 1}, "slug": str(), "name": str(), "mutation_id": str()})
+	artifactCopyRequest["required"] = []string{"source_revision", "slug", "name", "mutation_id"}
+	artifactCopyResult := obj(map[string]any{"page_slug": str(), "revision": integer()})
+	artifactCopyResult["required"] = []string{"page_slug", "revision"}
 	return map[string]DomainSchema{
-		"GET /api/v1/chats/{chatId}/artifact-creation-authorization":     {Response: creationStatus},
-		"POST /api/v1/artifact-creation-authorizations/{runId}":          {Request: emptyCreationAuthorization, RequestRequired: true, Response: creationAuthorization, SuccessStatuses: []string{"200", "201"}},
-		"DELETE /api/v1/artifact-creation-authorizations/{runId}":        {Response: obj(map[string]any{}), SuccessStatuses: []string{"204"}},
-		"GET /api/v1/chats/{chatId}/artifact-results":                    {Response: obj(map[string]any{"results": arr(obj(map[string]any{"page_slug": str(), "title": str(), "revision": integer(), "created_at": timeString(), "agent_id": str(), "agent_name": str(), "run_id": str(), "on_behalf_of_user_id": str()}))})},
-		"GET /api/v1/pages/{slug}/artifact/requests":                     {Response: artifactRequestList},
-		"POST /api/v1/pages/{slug}/artifact/requests":                    {Request: artifactRequestCreate, RequestRequired: true, Response: artifactRequestAccepted, SuccessStatuses: []string{"202"}},
-		"POST /api/v1/pages/{slug}/artifact/requests/{requestId}/cancel": {Request: emptyCreationAuthorization, Response: artifactRequestCancelled, SuccessStatuses: []string{"200"}},
-		"GET /api/v1/pages/{slug}/artifact":                              {Response: artifactDocument},
-		"POST /api/v1/pages/{slug}/artifact/revisions":                   {Request: artifactMutation, RequestRequired: true, Response: artifactResult, SuccessStatuses: []string{"200", "201"}},
-		"POST /api/v1/pages/{slug}/artifact/restore":                     {Request: artifactRestore, RequestRequired: true, Response: artifactResult, SuccessStatuses: []string{"200", "201"}},
-		"GET /api/v1/pages/{slug}/artifact/threads":                      {Response: threadList},
-		"POST /api/v1/pages/{slug}/artifact/threads":                     {Request: threadCreate, RequestRequired: true, Response: thread, SuccessStatuses: []string{"200", "201"}},
-		"POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies":  {Request: threadReply, RequestRequired: true, Response: thread, SuccessStatuses: []string{"200", "201"}},
-		"PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}":         {Request: threadResolve, RequestRequired: true, Response: thread, SuccessStatuses: []string{"200"}},
-		"POST /api/v1/pages/{slug}/artifact/delegations":                 {Request: delegationRequest, RequestRequired: true, Response: delegation, SuccessStatuses: []string{"201"}},
-		"DELETE /api/v1/pages/{slug}/artifact/delegations/{runId}":       {Response: obj(map[string]any{}), SuccessStatuses: []string{"204"}},
+		"GET /api/v1/chats/{chatId}/artifact-creation-authorization":                                  {Response: creationStatus},
+		"POST /api/v1/artifact-creation-authorizations/{runId}":                                       {Request: emptyCreationAuthorization, RequestRequired: true, Response: creationAuthorization, SuccessStatuses: []string{"200", "201"}},
+		"DELETE /api/v1/artifact-creation-authorizations/{runId}":                                     {Response: obj(map[string]any{}), SuccessStatuses: []string{"204"}},
+		"GET /api/v1/chats/{chatId}/artifact-results":                                                 {Response: obj(map[string]any{"results": arr(obj(map[string]any{"page_slug": str(), "title": str(), "revision": integer(), "created_at": timeString(), "agent_id": str(), "agent_name": str(), "run_id": str(), "on_behalf_of_user_id": str()}))})},
+		"GET /api/v1/pages/{slug}/artifact/requests":                                                  {Response: artifactRequestList},
+		"POST /api/v1/pages/{slug}/artifact/requests":                                                 {Request: artifactRequestCreate, RequestRequired: true, Response: artifactRequestAccepted, SuccessStatuses: []string{"202"}},
+		"POST /api/v1/pages/{slug}/artifact/requests/{requestId}/cancel":                              {Request: emptyCreationAuthorization, Response: artifactRequestCancelled, SuccessStatuses: []string{"200"}},
+		"GET /api/v1/pages/{slug}/artifact":                                                           {Response: artifactDocument},
+		"POST /api/v1/pages/{slug}/artifact/revisions":                                                {Request: artifactMutation, RequestRequired: true, Response: artifactResult, SuccessStatuses: []string{"200", "201"}},
+		"POST /api/v1/pages/{slug}/artifact/restore":                                                  {Request: artifactRestore, RequestRequired: true, Response: artifactResult, SuccessStatuses: []string{"200", "201"}},
+		"POST /api/v1/pages/{slug}/artifact/copies":                                                   {Request: artifactCopyRequest, RequestRequired: true, Response: artifactCopyResult, SuccessStatuses: []string{"200", "201"}},
+		"GET /api/v1/pages/{slug}/artifact/threads":                                                   {Response: threadList},
+		"POST /api/v1/pages/{slug}/artifact/threads":                                                  {Request: threadCreate, RequestRequired: true, Response: thread, SuccessStatuses: []string{"200", "201"}},
+		"POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies":                               {Request: threadReply, RequestRequired: true, Response: thread, SuccessStatuses: []string{"200", "201"}},
+		"PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}":                 {Request: threadReply, RequestRequired: true, Response: thread},
+		"DELETE /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}":                {Request: commentDelete, RequestRequired: true, Response: thread},
+		"PUT /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji}": {Request: commentReact, RequestRequired: true, Response: thread},
+		"GET /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/history":           {Response: commentHistory},
+		"PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}":                                      {Request: threadResolve, RequestRequired: true, Response: thread, SuccessStatuses: []string{"200"}},
+		"POST /api/v1/pages/{slug}/artifact/delegations":                                              {Request: delegationRequest, RequestRequired: true, Response: delegation, SuccessStatuses: []string{"201"}},
+		"DELETE /api/v1/pages/{slug}/artifact/delegations/{runId}":                                    {Response: obj(map[string]any{}), SuccessStatuses: []string{"204"}},
 		"GET /api/v1/pages": {
 			Response: arr(pageRow),
 		},
