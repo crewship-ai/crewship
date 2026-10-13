@@ -1,99 +1,142 @@
 "use client"
 
+import type * as React from "react"
+import { ChevronRight, Sparkles } from "lucide-react"
+
 import { cn } from "@/lib/utils"
+import { WorkspaceTile } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import type { InstanceGovRow } from "./use-instance-keeper"
-import type { BulkSection } from "./bulk-governance"
 import { SAMPLE_DEFAULT } from "./bulk-governance"
-import { settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
+import { settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
 
 /**
- * What each workspace has switched on, one row per workspace: the answer to
- * "is the watchdog on everywhere?" without opening every workspace. A cell
- * opens that setting for that workspace. Off is red; a workspace never set
- * says it runs on the defaults.
+ * How each workspace is watched, one row per workspace: the answer to "is the
+ * watchdog on everywhere?" without opening every workspace. A row opens that
+ * workspace's security profile; with `selected` the rows can be ticked for a
+ * change to several at once. "New workspaces" — what a workspace starts with —
+ * closes the list and opens its own editor.
  */
 
-function fourEyes(r: InstanceGovRow): { text: string; off?: boolean } {
+export function fourEyes(r: Pick<InstanceGovRow, "require_second_approver" | "effective_second_approver">): { text: string; off?: boolean } {
   const e = r.effective_second_approver
   if (r.require_second_approver || e?.source === "workspace") return { text: "All levels" }
+  // Four-eyes as ENFORCED, not the toggle: the tier table requires a second
+  // approver for the top level whatever the toggle says (review R8).
   if (e?.source === "tier") return { text: `${(e.min_security_level_label ?? `L${e.min_security_level}`).split(" ")[0]} required` }
   return { text: "Off", off: true }
 }
 
-const lease = (s: number) => (!s ? "Standing" : s % 3600 === 0 ? `${s / 3600} h` : `${Math.round(s / 60)} min`)
+export const leaseLabel = (s: number) => (!s ? "Standing" : s % 3600 === 0 ? `${s / 3600} h` : `${Math.round(s / 60)} min`)
+/** The judge a workspace actually uses, and where that comes from (review R8). */
+export const judgeLabel = (r: Pick<InstanceGovRow, "gov_model_provider" | "gov_model_id">) =>
+  r.gov_model_provider ? `${r.gov_model_provider} · ${r.gov_model_id} (own)` : "Instance judge (inherited)"
+export const reviewLabel = (r: Pick<InstanceGovRow, "behavior_sample_every">) => `1 in ${r.behavior_sample_every || SAMPLE_DEFAULT}`
 
-const COLS: { section: BulkSection; label: string; show: (r: InstanceGovRow) => { text: string; off?: boolean } }[] = [
-  // The judge a workspace actually uses, and where that comes from: its own
-  // setting, or the instance judge it inherits (review R8).
-  { section: "workspace-judge", label: "Judge", show: (r) => ({ text: r.gov_model_provider ? `${r.gov_model_provider} · ${r.gov_model_id} (own)` : "Instance judge (inherited)" }) },
-  { section: "watchdog", label: "Watchdog", show: (r) => ({ text: r.enabled ? "On" : "Off", off: !r.enabled }) },
-  { section: "watchdog", label: "Review", show: (r) => ({ text: `1 in ${r.behavior_sample_every || SAMPLE_DEFAULT}` }) },
-  { section: "alerts", label: "DENY alert ≥", show: (r) => ({ text: String(r.deny_notify_min_risk) }) },
-  // Four-eyes as ENFORCED, not the toggle: the tier table requires a second
-  // approver for the top level whatever the toggle says (review R8).
-  { section: "alerts", label: "Four-eyes", show: (r) => fourEyes(r) },
-  { section: "leases", label: "Lease", show: (r) => ({ text: lease(r.auto_lease_seconds) }) },
-]
+/** A workspace's watch in a few words, for the panel. */
+export function watchSummary(r: InstanceGovRow): string {
+  return r.enabled ? `Watchdog on · ${reviewLabel(r)}` : "Watchdog off"
+}
 
-export function WhatsOnWhere({ rows, selected, onOpen, defaults, onOpenDefaults }: {
+function Cells({ r }: { r: InstanceGovRow }) {
+  const eyes = fourEyes(r)
+  return (
+    <>
+      <td className={settingsTd} data-col="watchdog">
+        <span className={cn("rounded-full px-2 py-0.5 font-mono text-micro",
+          r.enabled ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>{r.enabled ? "On" : "Off"}</span>
+      </td>
+      <td className={cn(settingsTd, "whitespace-nowrap font-mono text-label text-muted-foreground")} data-col="review">{reviewLabel(r)}</td>
+      <td className={cn(settingsTd, "whitespace-nowrap font-mono text-label text-muted-foreground")} data-col="deny">≥ {r.deny_notify_min_risk}</td>
+      <td className={cn(settingsTd, "whitespace-nowrap text-label", eyes.off ? "text-muted-foreground" : "text-foreground")} data-col="four-eyes">{eyes.text}</td>
+      <td className={cn(settingsTd, "whitespace-nowrap text-label text-muted-foreground")} data-col="lease">{leaseLabel(r.auto_lease_seconds)}</td>
+      <td className={cn(settingsTd, "max-w-[14rem] truncate text-label text-muted-foreground")} data-col="judge" title={judgeLabel(r)}>{judgeLabel(r)}</td>
+    </>
+  )
+}
+
+export function WhatsOnWhere({ rows, onOpen, defaults, onOpenDefaults, selected, onSelect, label = "Workspaces" }: {
   rows: InstanceGovRow[]
-  selected: Set<string>
-  onOpen: (section: BulkSection, workspaceId: string) => void
-  /** What a new workspace starts with, shown as the first row. */
+  onOpen: (workspaceId: string) => void
+  /** What a new workspace starts with, shown as the last row. */
   defaults?: InstanceGovRow
   onOpenDefaults?: () => void
+  /** With these the rows can be ticked. */
+  selected?: Set<string>
+  onSelect?: (ids: string[], on: boolean) => void
+  label?: string
 }) {
+  const selectable = !!selected && !!onSelect
+  const allOn = selectable && rows.length > 0 && rows.every((r) => selected!.has(r.workspace_id))
+  const open = (fn: () => void) => ({
+    tabIndex: 0, onClick: fn,
+    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter") fn() },
+  })
   return (
-    <div className="overflow-x-auto rounded-card border border-border bg-card" role="region" aria-label="What's on where">
-      <table className={settingsTable}>
+    <div className="overflow-x-auto">
+      <table className={settingsTable} aria-label={label}>
         <thead>
           <tr>
+            {selectable && (
+              <th className={cn(settingsTh, "w-9")}>
+                <input type="checkbox" aria-label="Select every workspace" checked={allOn} disabled={rows.length === 0}
+                  onChange={(e) => onSelect!(rows.map((r) => r.workspace_id), e.target.checked)} className="size-3.5 accent-[var(--primary)]" />
+              </th>
+            )}
             <th className={settingsTh}>Workspace</th>
-            {COLS.map((c) => <th key={c.label} className={settingsTh}>{c.label}</th>)}
+            <th className={settingsTh}>Watchdog</th>
+            <th className={settingsTh}>Review</th>
+            <th className={settingsTh}>DENY alert</th>
+            <th className={settingsTh}>Four-eyes</th>
+            <th className={settingsTh}>Lease</th>
+            <th className={settingsTh}>Judge</th>
+            <th className={cn(settingsTh, "w-6")} aria-hidden />
           </tr>
         </thead>
         <tbody>
-          {defaults && (
-            <tr data-workspace="defaults" className="bg-muted/40">
-              <td className={settingsTd}>
-                <div className="font-medium">New workspaces</div>
-                <div className="text-micro text-muted-foreground">copied when a workspace is created</div>
-              </td>
-              {COLS.map((c) => {
-                const v = c.show(defaults)
-                return (
-                  <td key={c.label} className="border-b border-border p-0">
-                    <button type="button" onClick={onOpenDefaults} aria-label={`${c.label} in New workspaces: ${v.text}`}
-                      className="kit-tap w-full whitespace-nowrap px-3 py-2 text-left italic text-muted-foreground hover:bg-muted">
-                      {v.text}
-                    </button>
-                  </td>
-                )
-              })}
-            </tr>
-          )}
           {rows.map((r) => (
-            <tr key={r.workspace_id} data-workspace={r.workspace_slug} className={cn(selected.has(r.workspace_id) && "bg-accent/40")}>
+            <tr key={r.workspace_id} data-workspace={r.workspace_slug} aria-label={r.workspace_name}
+              className={cn(settingsTableRowLink, selected?.has(r.workspace_id) && "bg-accent/40")} {...open(() => onOpen(r.workspace_id))}>
+              {selectable && (
+                <td className={settingsTd} onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox" aria-label={`Select ${r.workspace_name}`} checked={selected!.has(r.workspace_id)}
+                    onChange={(e) => onSelect!([r.workspace_id], e.target.checked)} className="size-3.5 accent-[var(--primary)]" />
+                </td>
+              )}
               <td className={settingsTd}>
-                <div className="font-medium">{r.workspace_name}</div>
-                {!r.configured && <div className="text-micro text-muted-foreground" title="No settings of its own; runs on the built-in opt-out">built-in</div>}
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <WorkspaceTile id={r.workspace_id} name={r.workspace_name} />
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <span className="truncate">{r.workspace_name}</span>
+                      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", r.enabled ? "bg-success" : "bg-warn")} aria-hidden />
+                    </span>
+                    {!r.configured && <span className="block text-micro text-muted-foreground" title="No settings of its own; runs on the built-in opt-out">built-in</span>}
+                  </span>
+                </span>
               </td>
-              {COLS.map((c) => {
-                const v = c.show(r)
-                return (
-                  <td key={c.label} className="border-b border-border p-0">
-                    <button type="button" onClick={() => onOpen(c.section, r.workspace_id)}
-                      aria-label={`${c.label} in ${r.workspace_name}: ${v.text}`}
-                      className="kit-tap w-full whitespace-nowrap px-3 py-2 text-left hover:bg-muted">
-                      {v.off
-                        ? <span className="rounded-full border border-destructive/40 px-1.5 font-mono text-micro text-destructive">{v.text}</span>
-                        : v.text}
-                    </button>
-                  </td>
-                )
-              })}
+              <Cells r={r} />
+              <td className={settingsTd}><ChevronRight className="h-3.5 w-3.5 text-muted-foreground-soft" aria-hidden /></td>
             </tr>
           ))}
+          {defaults && (
+            <tr data-workspace="defaults" aria-label="New workspaces" className={cn(settingsTableRowLink, "bg-muted/30")} {...open(() => onOpenDefaults?.())}>
+              {selectable && <td className={settingsTd} />}
+              <td className={settingsTd}>
+                <span className="flex items-center gap-2.5">
+                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground"><Sparkles className="h-3.5 w-3.5" /></span>
+                  <span>
+                    <span className="block text-muted-foreground">New workspaces</span>
+                    <span className="block text-micro text-muted-foreground-soft">what a workspace starts with</span>
+                  </span>
+                </span>
+              </td>
+              <Cells r={defaults} />
+              <td className={settingsTd}><ChevronRight className="h-3.5 w-3.5 text-muted-foreground-soft" aria-hidden /></td>
+            </tr>
+          )}
+          {rows.length === 0 && !defaults && (
+            <tr><td colSpan={9} className="px-3 py-6 text-center text-muted-foreground">No workspace matches.</td></tr>
+          )}
         </tbody>
       </table>
     </div>

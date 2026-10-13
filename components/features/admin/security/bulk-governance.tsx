@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { toastSaveError } from "@/components/ui/page-save-bar"
 import { SettingsCard, SettingsSaveBar, controlHeight, settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
@@ -99,7 +100,7 @@ function Segmented({ field, value, onPick, name }: { field: Field; value: unknow
 }
 
 export function BulkGovernanceForm({
-  section, rows, all, onSaved, onEditOne,
+  section, rows, all, onSaved, onEditOne, inDialog,
 }: {
   section: BulkSection
   /** The selected workspaces. */
@@ -111,6 +112,10 @@ export function BulkGovernanceForm({
   /** Open one workspace's full editor: the settings that belong to a single
    *  workspace (contact, judge key, watch rules) are not in this form. */
   onEditOne?: (workspaceId: string) => void
+  /** Drawn in the dialog the selection bar opens (Admin › Security ›
+   *  Workspaces): the fields and its own Cancel / Review, no card and no page
+   *  Save bar. The preview before writing is the same. */
+  inDialog?: { onCancel: () => void }
 }) {
   const fields = BULK_FIELDS[section]
   const [draft, setDraft] = React.useState<Draft>({})
@@ -174,6 +179,74 @@ export function BulkGovernanceForm({
 
   const byField = new Map(fields.map((f) => [f.key as string, f]))
 
+  const fieldRows = fields.filter((f) => !f.when || f.when(draft, rows)).map((f) => {
+    const shared = commonValue(rows, f.key)
+    const value = f.key in draft ? draft[f.key] : shared
+    const distinct = [...new Set(rows.map((r) => labelOf(f, eff(f.key, r[f.key]))))]
+    return (
+      <div key={f.key} className={cn("grid gap-2", !inDialog && "sm:grid-cols-[11rem_1fr] sm:items-center")} data-field={f.key}>
+        <div>
+          <div className="text-control">{f.label}</div>
+          <div className="text-label text-muted-foreground">{f.hint}</div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {f.text ? (
+            <Input aria-label={f.label} className={cn(controlHeight, "max-w-xs")} value={String(value ?? "")}
+              placeholder={shared === undefined ? "Mixed" : undefined}
+              onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} />
+          ) : (
+            <Segmented field={f} value={value} name={f.label} onPick={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+          )}
+          {shared === undefined && !(f.key in draft) && (
+            <span className="font-mono text-micro text-warn" data-slot="mixed">MIXED · {distinct.join(" / ")}</span>
+          )}
+          {f.key in draft && (
+            <button type="button" className="text-label text-muted-foreground underline-offset-2 hover:underline"
+              onClick={() => setDraft((d) => { const { [f.key]: _, ...rest } = d; return rest })}>
+              keep as is
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  })
+  const confirm = (
+    <ConfirmDialog
+      open={preview !== null}
+      onOpenChange={(o) => { if (!o) setPreview(null) }}
+      title={`Overwrite ${SECTION_TITLE[section]} in ${preview?.result.changed ?? 0} workspace${preview?.result.changed === 1 ? "" : "s"}?`}
+      destructive
+      confirmLabel={preview?.result.changed ? `Overwrite ${preview.result.changed} workspace${preview.result.changed === 1 ? "" : "s"}` : "Save"}
+      description={preview && <OverwriteTable result={preview.result} fields={byField} />}
+      consequences={[
+        { tone: "lost", text: "Each listed workspace's own value for these fields is replaced." },
+        { tone: "kept", text: "Fields you did not change stay as each workspace has them. Every change is in the instance audit log." },
+        { tone: "kept", text: "New workspaces are not changed; they start from Defaults for new workspaces." },
+      ]}
+      onConfirm={apply}
+    />
+  )
+
+  if (inDialog) {
+    const edits = Object.keys(draft).length
+    return (
+      <div className="flex flex-col gap-4" data-slot="bulk-dialog-form">
+        <div className="flex flex-col gap-3">{fieldRows}</div>
+        <p className="text-label text-muted-foreground">
+          Saving replaces the value in each of the {n} workspaces; fields you leave alone stay as each has them. New workspaces are not changed.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={inDialog.onCancel}>Cancel</Button>
+          <Button type="button" size="sm" disabled={edits === 0 || busy}
+            onClick={() => { review().catch((e: Error) => toastSaveError(SECTION_TITLE[section], e.message)) }}>
+            Review {edits === 0 ? "changes" : `${edits} change${edits === 1 ? "" : "s"}`}
+          </Button>
+        </div>
+        {confirm}
+      </div>
+    )
+  }
+
   return (
     <>
       <div role="alert" data-slot="bulk-warning" className="flex items-start gap-2.5 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2.5 text-label">
@@ -200,56 +273,13 @@ export function BulkGovernanceForm({
       )}
       <SettingsCard title={SECTION_TITLE[section]} description={all ? "Every existing workspace at once" : `Settings for ${n} workspaces at once`}>
         <div className="flex flex-col gap-3 px-4 py-3">
-          {fields.filter((f) => !f.when || f.when(draft, rows)).map((f) => {
-            const shared = commonValue(rows, f.key)
-            const value = f.key in draft ? draft[f.key] : shared
-            const distinct = [...new Set(rows.map((r) => labelOf(f, eff(f.key, r[f.key]))))]
-            return (
-              <div key={f.key} className="grid gap-2 sm:grid-cols-[11rem_1fr] sm:items-center" data-field={f.key}>
-                <div>
-                  <div className="text-control">{f.label}</div>
-                  <div className="text-label text-muted-foreground">{f.hint}</div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {f.text ? (
-                    <Input aria-label={f.label} className={cn(controlHeight, "max-w-xs")} value={String(value ?? "")}
-                      placeholder={shared === undefined ? "Mixed" : undefined}
-                      onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} />
-                  ) : (
-                    <Segmented field={f} value={value} name={f.label} onPick={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
-                  )}
-                  {shared === undefined && !(f.key in draft) && (
-                    <span className="font-mono text-micro text-warn" data-slot="mixed">MIXED · {distinct.join(" / ")}</span>
-                  )}
-                  {f.key in draft && (
-                    <button type="button" className="text-label text-muted-foreground underline-offset-2 hover:underline"
-                      onClick={() => setDraft((d) => { const { [f.key]: _, ...rest } = d; return rest })}>
-                      keep as is
-                    </button>
-                  )}
-                </div>
-              </div>
-            )
-          })}
+          {fieldRows}
         </div>
       </SettingsCard>
       <SettingsSaveBar label={SECTION_TITLE[section]} count={Object.keys(draft).length} saving={busy}
         onSave={review} onDiscard={() => setDraft({})} />
 
-      <ConfirmDialog
-        open={preview !== null}
-        onOpenChange={(o) => { if (!o) setPreview(null) }}
-        title={`Overwrite ${SECTION_TITLE[section]} in ${preview?.result.changed ?? 0} workspace${preview?.result.changed === 1 ? "" : "s"}?`}
-        destructive
-        confirmLabel={preview?.result.changed ? `Overwrite ${preview.result.changed} workspace${preview.result.changed === 1 ? "" : "s"}` : "Save"}
-        description={preview && <OverwriteTable result={preview.result} fields={byField} />}
-        consequences={[
-          { tone: "lost", text: "Each listed workspace's own value for these fields is replaced." },
-          { tone: "kept", text: "Fields you did not change stay as each workspace has them. Every change is in the instance audit log." },
-          { tone: "kept", text: "New workspaces are not changed; they start from Defaults for new workspaces." },
-        ]}
-        onConfirm={apply}
-      />
+      {confirm}
     </>
   )
 }

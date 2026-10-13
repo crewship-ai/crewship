@@ -1,9 +1,9 @@
-// Admin › Security as an instance admin uses it: the Keeper of every
-// workspace on one page. The settings cards are the existing ones and have
-// their own tests; here they are stubs, and what is pinned is where each
-// appears, that the panel's workspace ticks decide what the page covers, and
-// that a save for several workspaces never writes before the admin has seen
-// what it overwrites.
+// Admin › Security as an instance admin uses it, built like People &
+// workspaces: Overview · Workspaces · Activity, the instance settings in the
+// panel, and a profile per workspace. The settings cards are the existing ones
+// and have their own tests; here they are stubs, and what is pinned is where
+// each appears, which workspace an editor writes to, and that a save for
+// several workspaces never writes before the admin has seen what it overwrites.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, cleanup, within, waitFor } from "@testing-library/react"
@@ -22,7 +22,7 @@ vi.mock("@/components/features/admin/judge-models-card", () => ({ JudgeModelsCar
 vi.mock("@/components/features/admin/keeper-health-card", () => ({ KeeperHealthCard: () => <div data-testid="card-health" /> }))
 vi.mock("@/components/features/admin/keeper-governance-panel", () => ({
   KeeperGovernancePanel: ({ section, instance }: { section: string; instance?: { row: { workspace_id: string } } }) =>
-    <div data-testid={`gov-${section}`} data-workspace={instance?.row.workspace_id} />,
+    <div data-testid={`gov-${section ?? "policy"}`} data-workspace={instance?.row.workspace_id} />,
 }))
 
 import { SecurityPage } from "../security-page"
@@ -114,38 +114,35 @@ beforeEach(() => {
   })
 })
 
-const scope = () => document.querySelector("[data-slot=workspace-scope]") as HTMLElement
-const tick = (name: RegExp | string) => fireEvent.click(within(scope()).getByRole("button", { name }))
 
-describe("the Workspaces section of the panel", () => {
-  it("starts on every workspace, marks the one the admin sits in, and counts each", async () => {
+/** The page's floating Save bar: every Security form saves from there. */
+const saveBar = () => fireEvent.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" }))
+
+describe("the panel, like People & workspaces", () => {
+  it("offers three views, the instance settings, the activity and every workspace with how it is watched", async () => {
     render(<SecurityPage />)
-    await screen.findByRole("button", { name: /^Coolify/ })
-    expect(within(scope()).getByRole("button", { name: "All workspaces" })).toHaveAttribute("aria-pressed", "true")
-    expect(within(scope()).getByRole("button", { name: /^Dess/ })).toHaveTextContent("here")
-    expect(within(scope()).getByRole("button", { name: /^Coolify/ })).toHaveTextContent("2")
+    const coolify = await screen.findByRole("button", { name: /^Coolify/ })
+    expect(within(screen.getByRole("group", { name: "View" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["Overview", "Workspaces", "Activity"])
+    expect(screen.getByRole("button", { name: /^Credential judge/ })).toHaveTextContent("qwen2.5:7b")
+    expect(screen.getByRole("button", { name: /^New workspaces/ })).toBeInTheDocument()
+    expect(coolify).toHaveTextContent("Watchdog off")
+    expect(screen.getByRole("button", { name: /^Dess/ })).toHaveTextContent("Watchdog on · 1 in 10")
+    // The old tick list of workspaces is gone.
+    expect(document.querySelector("[data-slot=workspace-scope]")).toBeNull()
   })
 
-  it("keeps the ticks in the URL, so a link shows what its sender saw", async () => {
+  it("finds a workspace by name", async () => {
     render(<SecurityPage />)
     await screen.findByRole("button", { name: /^Coolify/ })
-    tick(/^Dess/)
-    expect(window.location.search).toContain("ws=coolify")
-    tick(/^Coolify/)
-    expect(window.location.search).toContain("ws=none")
-  })
-
-  it("greys out for an instance-wide setting", async () => {
-    window.history.replaceState(null, "", "/admin/security?section=judge")
-    render(<SecurityPage />)
-    await screen.findByTestId("card-judge")
-    expect(scope()).toHaveAttribute("aria-disabled", "true")
-    expect(screen.getByText("Instance setting · applies to every workspace")).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText("Search workspaces…"), { target: { value: "dess" } })
+    expect(screen.queryByRole("button", { name: /^Coolify/ })).toBeNull()
+    expect(screen.getByRole("button", { name: /^Dess/ })).toBeInTheDocument()
+    expect(window.location.search).toContain("q=dess")
   })
 })
 
 describe("Overview", () => {
-  it("says in one line whether Keeper and its judge work, with totals over the ticked workspaces", async () => {
+  it("says in one line whether Keeper and its judge work, with totals over every workspace", async () => {
     render(<SecurityPage />)
     const line = await screen.findByText(/Judge answering · qwen2.5:7b/)
     const summary = line.closest("[data-slot=security-summary]")!
@@ -167,11 +164,18 @@ describe("Overview", () => {
     expect(within(card).queryByRole("button")).toBeNull()
   })
 
-  it("shows each ticked workspace's judge health, and says when there is too little to judge", async () => {
+  it("shows each workspace's judge health, and says when there is too little to judge", async () => {
     render(<SecurityPage />)
     const card = await screen.findByRole("region", { name: "Judge health" })
     expect(within(card).getByText("Dess")).toBeInTheDocument()
     expect(within(card).getByText(/too few decisions/)).toBeInTheDocument()
+  })
+
+  it("shows how each workspace is watched, and a row opens that workspace", async () => {
+    render(<SecurityPage />)
+    const table = await screen.findByRole("table", { name: "What's on where" })
+    fireEvent.click(within(table).getByRole("row", { name: "Coolify" }))
+    expect(await screen.findByTestId("gov-policy")).toHaveAttribute("data-workspace", "ws-b")
   })
 })
 
@@ -185,15 +189,16 @@ describe("Activity", () => {
     expect(within(table).getAllByRole("row")[1]).toHaveTextContent(/Dess|Coolify/)
   })
 
-  it("narrows to the ticked workspaces through the server", async () => {
+  it("narrows to one workspace through the server", async () => {
     render(<SecurityPage />)
     fireEvent.click(await screen.findByRole("button", { name: /^Credential requests/ }))
     await screen.findByRole("region", { name: "Activity" })
-    tick(/^Dess/)
+    fireEvent.change(screen.getByRole("combobox", { name: "Workspace" }), { target: { value: "coolify" } })
     await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith(expect.stringContaining("workspace=ws-b")))
     const table = screen.getByRole("region", { name: "Activity" })
     await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(2))
     expect(within(table).getAllByRole("row")[1]).toHaveTextContent("Coolify")
+    expect(window.location.search).toContain("in=coolify")
   })
 
   it("opens a record with secrets redacted", async () => {
@@ -205,103 +210,6 @@ describe("Activity", () => {
     const prompt = await screen.findByRole("region", { name: "Judge prompt" })
     expect(prompt).not.toHaveTextContent("abcdefghijklmnopqrstuvwxyz0123")
     expect(prompt).toHaveTextContent("REDACTED")
-  })
-})
-
-describe("What's on where", () => {
-  it("shows every workspace's settings in one table and opens a cell for that workspace", async () => {
-    window.history.replaceState(null, "", "/admin/security?section=matrix")
-    render(<SecurityPage />)
-    const table = await screen.findByRole("region", { name: "What's on where" })
-    expect(within(table).getByRole("button", { name: "Watchdog in Coolify: Off" })).toBeInTheDocument()
-    expect(within(table).getByRole("button", { name: "Review in Dess: 1 in 10" })).toBeInTheDocument()
-    fireEvent.click(within(table).getByRole("button", { name: "Watchdog in Coolify: Off" }))
-    const card = await screen.findByTestId("gov-watchdog")
-    expect(card).toHaveAttribute("data-workspace", "ws-b")
-    expect(window.location.search).toContain("section=watchdog")
-    expect(window.location.search).toContain("ws=coolify")
-  })
-})
-
-describe("Settings", () => {
-  it.each([
-    ["Credential judge", "card-judge", "Instance"],
-    ["Decision rules", "card-rules", "Instance"],
-    ["Background checks", "card-background", "Instance"],
-  ])("%s shows its own card and says it reaches every workspace", async (label, testId, scope) => {
-    render(<SecurityPage />)
-    fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${label}`) }))
-    await waitFor(() => expect(screen.getByTestId(testId)).toBeInTheDocument())
-    expect(document.querySelector("[data-slot=security-scope]")).toHaveTextContent(scope)
-  })
-
-  it.each([
-    ["Judge per workspace", "gov-judge"],
-    ["Watchdog", "gov-watchdog"],
-    ["Alerts & approvals", "gov-alerts"],
-    ["Credential leases", "gov-leases"],
-  ])("%s edits the one ticked workspace with the existing card, through the instance route", async (label, testId) => {
-    window.history.replaceState(null, "", "/admin/security?ws=coolify")
-    render(<SecurityPage />)
-    fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${label}`) }))
-    const card = await screen.findByTestId(testId)
-    expect(card).toHaveAttribute("data-workspace", "ws-b")
-    expect(document.querySelector("[data-slot=security-scope]")).toHaveTextContent("Editing Coolify")
-  })
-
-  it("opens where the link points", async () => {
-    window.history.replaceState(null, "", "/admin/security?section=watchdog&ws=dess")
-    render(<SecurityPage />)
-    expect(await screen.findByTestId("gov-watchdog")).toHaveAttribute("data-workspace", "ws-a")
-  })
-})
-
-/** The page's floating Save bar: every Security form saves from there. */
-const saveBar = () => fireEvent.click(within(screen.getByRole("region", { name: "Unsaved changes" })).getByRole("button", { name: "Save" }))
-
-describe("several workspaces at once", () => {
-  it("warns, marks what differs, and writes nothing until the admin has seen what is overwritten", async () => {
-    window.history.replaceState(null, "", "/admin/security?section=watchdog")
-    render(<SecurityPage />)
-    expect(await screen.findByRole("alert")).toHaveTextContent("All 2 workspaces selected")
-    expect(screen.queryByTestId("gov-watchdog")).toBeNull()
-    const enabled = document.querySelector("[data-field=enabled]") as HTMLElement
-    expect(within(enabled).getByText(/MIXED · On \/ Off/)).toBeInTheDocument()
-
-    fireEvent.click(within(enabled).getByRole("radio", { name: "On" }))
-    saveBar()
-
-    const dialog = await screen.findByRole("alertdialog")
-    expect(puts()).toEqual([{ all: true, dry_run: true, set: { enabled: true } }])
-    const table = within(dialog).getByRole("table")
-    expect(within(table).getByText("Coolify").closest("tr")).toHaveTextContent("Watchdog: Off → On")
-    expect(within(table).getByText("Dess").closest("tr")).toHaveTextContent("no change")
-    // "All" is the scope of the selection: every existing workspace, not the
-    // defaults for new ones.
-    expect(dialog).not.toHaveTextContent("New workspaces will start")
-    expect(dialog).toHaveTextContent("New workspaces are not changed")
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "Overwrite 1 workspace" }))
-    await waitFor(() => expect(puts()).toHaveLength(2))
-    expect(puts()[1]).toEqual({ all: true, dry_run: false, expect_preview: "pv-1", set: { enabled: true } })
-  })
-
-  it("sends only the ticked workspaces when not all are ticked, and nothing on cancel", async () => {
-    GOV.workspaces.push(gov("ws-c", "Sandbox"))
-    try {
-      window.history.replaceState(null, "", "/admin/security?section=leases&ws=dess,coolify")
-      render(<SecurityPage />)
-      expect(await screen.findByRole("alert")).toHaveTextContent("2 workspaces selected")
-      fireEvent.click(screen.getByRole("radio", { name: "15 min" }))
-      saveBar()
-      const dialog = await screen.findByRole("alertdialog")
-      expect(puts()[0]).toEqual({ workspaces: ["ws-a", "ws-b"], dry_run: true, set: { auto_lease_seconds: 900 } })
-      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
-      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
-      expect(puts()).toHaveLength(1)
-    } finally {
-      GOV.workspaces.pop()
-    }
   })
 })
 
@@ -326,75 +234,123 @@ describe("Activity on the server (review R6)", () => {
   })
 })
 
-describe("What's on where says what is enforced (review R8)", () => {
-  it("shows the tier's four-eyes floor when the workspace toggle is off, and where the judge comes from", async () => {
+describe("the Workspaces view", () => {
+  it("shows every workspace's watch in one table, what is enforced included (review R8)", async () => {
     GOV.workspaces[1] = gov("ws-b", "Coolify", { effective_second_approver: { min_security_level: 4, min_security_level_label: "L4 · critical", source: "tier" } })
     try {
-      window.history.replaceState(null, "", "/admin/security?section=matrix")
+      window.history.replaceState(null, "", "/admin/security?view=workspaces")
       render(<SecurityPage />)
-      const table = await screen.findByRole("region", { name: "What's on where" })
-      expect(within(table).getByRole("button", { name: "Four-eyes in Coolify: L4 required" })).toBeInTheDocument()
-      expect(within(table).getByRole("button", { name: "Judge in Coolify: Instance judge (inherited)" })).toBeInTheDocument()
+      const table = await screen.findByRole("table", { name: "Workspaces" })
+      const coolify = within(table).getByRole("row", { name: "Coolify" })
+      expect(coolify.querySelector("[data-col=watchdog]")).toHaveTextContent("Off")
+      expect(coolify.querySelector("[data-col=four-eyes]")).toHaveTextContent("L4 required")
+      expect(coolify.querySelector("[data-col=judge]")).toHaveTextContent("Instance judge (inherited)")
+      expect(within(table).getByRole("row", { name: "Dess" }).querySelector("[data-col=review]")).toHaveTextContent("1 in 10")
     } finally {
       GOV.workspaces[1] = gov("ws-b", "Coolify")
     }
   })
-})
 
-describe("All means the same with one workspace (review R9)", () => {
-  it("saves for every existing workspace — never the defaults — even when the server has only one", async () => {
-    const saved = GOV.workspaces.splice(1)
-    try {
-      window.history.replaceState(null, "", "/admin/security?section=watchdog")
-      render(<SecurityPage />)
-      expect(await screen.findByRole("alert")).toHaveTextContent("All 1 workspace selected")
-      expect(screen.queryByTestId("gov-watchdog")).toBeNull()
-      fireEvent.click(within(document.querySelector("[data-field=enabled]") as HTMLElement).getByRole("radio", { name: "Off" }))
-      saveBar()
-      await screen.findByRole("alertdialog")
-      expect(puts()[0]).toMatchObject({ all: true, dry_run: true })
-    } finally {
-      GOV.workspaces.push(...saved)
-    }
-  })
-})
-
-describe("One workspace keeps its full editor (review follow-up)", () => {
-  it("offers the workspace on its own from the all-workspaces form, with the full editor", async () => {
-    const saved = GOV.workspaces.splice(1)
-    try {
-      window.history.replaceState(null, "", "/admin/security?section=watchdog")
-      render(<SecurityPage />)
-      expect(await screen.findByRole("alert")).toHaveTextContent("All 1 workspace selected")
-      fireEvent.click(screen.getByRole("button", { name: "Edit Dess on its own" }))
-      expect(await screen.findByTestId("gov-watchdog")).toHaveAttribute("data-workspace", "ws-a")
-      expect(window.location.search).toContain("ws=dess")
-    } finally {
-      GOV.workspaces.push(...saved)
-    }
-  })
-
-  it("opens the full editor for a workspace named in the link, even when it is the only one", async () => {
-    const saved = GOV.workspaces.splice(1)
-    try {
-      window.history.replaceState(null, "", "/admin/security?section=alerts&ws=dess")
-      render(<SecurityPage />)
-      expect(await screen.findByTestId("gov-alerts")).toHaveAttribute("data-workspace", "ws-a")
-      expect(within(scope()).getByRole("button", { name: "All workspaces" })).toHaveAttribute("aria-pressed", "false")
-    } finally {
-      GOV.workspaces.push(...saved)
-    }
-  })
-
-  it("leaves all-workspaces mode when a single workspace is unticked", async () => {
+  it("ends with what a new workspace starts with, which opens its own editor", async () => {
+    window.history.replaceState(null, "", "/admin/security?view=workspaces")
     render(<SecurityPage />)
-    await screen.findByRole("button", { name: /^Coolify/ })
-    tick(/^Dess/)
-    expect(within(scope()).getByRole("button", { name: "All workspaces" })).toHaveAttribute("aria-pressed", "false")
-    tick(/^Dess/)
-    // Both ticked by hand is two workspaces, not "all": no defaults for new ones.
-    expect(within(scope()).getByRole("button", { name: "All workspaces" })).toHaveAttribute("aria-pressed", "false")
-    expect(new URLSearchParams(window.location.search).get("ws")).toBe("dess,coolify")
+    const table = await screen.findByRole("table", { name: "Workspaces" })
+    const rows = within(table).getAllByRole("row")
+    expect(rows[rows.length - 1]).toHaveAccessibleName("New workspaces")
+    // Four-eyes as enforced for a new workspace, like every row.
+    expect(rows[rows.length - 1].querySelector("[data-col=four-eyes]")).toHaveTextContent("L4 required")
+    fireEvent.click(rows[rows.length - 1])
+    await waitFor(() => expect(window.location.search).toContain("section=defaults"))
+  })
+
+  it("opens a workspace's profile with every setting of its own, through the instance route", async () => {
+    window.history.replaceState(null, "", "/admin/security?view=workspaces")
+    render(<SecurityPage />)
+    fireEvent.click(within(await screen.findByRole("table", { name: "Workspaces" })).getByRole("row", { name: "Coolify" }))
+    expect(await screen.findByTestId("gov-policy")).toHaveAttribute("data-workspace", "ws-b")
+    expect(screen.getByTestId("gov-judge")).toHaveAttribute("data-workspace", "ws-b")
+    expect(document.querySelector("[data-slot=workspace-security-header]")).toHaveTextContent("Watchdog off")
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Workspaces")
+    expect(window.location.search).toContain("ws=coolify")
+  })
+})
+
+describe("several workspaces at once, from the selection bar", () => {
+  const pick = async () => {
+    window.history.replaceState(null, "", "/admin/security?view=workspaces")
+    render(<SecurityPage />)
+    const table = await screen.findByRole("table", { name: "Workspaces" })
+    fireEvent.click(within(table).getByRole("checkbox", { name: "Select Dess" }))
+    fireEvent.click(within(table).getByRole("checkbox", { name: "Select Coolify" }))
+    return screen.getByRole("toolbar", { name: "Change the selected workspaces" })
+  }
+
+  it("marks what differs, and writes nothing until the admin has seen what is overwritten", async () => {
+    const bar = await pick()
+    expect(bar).toHaveTextContent("2 selected")
+    fireEvent.click(within(bar).getByRole("button", { name: /^Watchdog/ }))
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog).toHaveTextContent("Watchdog for 2 workspaces")
+    const enabled = dialog.querySelector("[data-field=enabled]") as HTMLElement
+    expect(within(enabled).getByText(/MIXED · On \/ Off/)).toBeInTheDocument()
+    fireEvent.click(within(enabled).getByRole("radio", { name: "On" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Review 1 change" }))
+
+    const confirm = await screen.findByRole("alertdialog")
+    expect(puts()).toEqual([{ workspaces: ["ws-a", "ws-b"], dry_run: true, set: { enabled: true } }])
+    const table = within(confirm).getByRole("table")
+    expect(within(table).getByText("Coolify").closest("tr")).toHaveTextContent("Watchdog: Off → On")
+    expect(within(table).getByText("Dess").closest("tr")).toHaveTextContent("no change")
+    expect(confirm).toHaveTextContent("New workspaces are not changed")
+    fireEvent.click(within(confirm).getByRole("button", { name: "Overwrite 1 workspace" }))
+    await waitFor(() => expect(puts()).toHaveLength(2))
+    expect(puts()[1]).toEqual({ workspaces: ["ws-a", "ws-b"], dry_run: false, expect_preview: "pv-1", set: { enabled: true } })
+    await waitFor(() => expect(screen.queryByRole("toolbar", { name: "Change the selected workspaces" })).toBeNull())
+  })
+
+  it("sends nothing on cancel", async () => {
+    const bar = await pick()
+    fireEvent.click(within(bar).getByRole("button", { name: /^Lease/ }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("radio", { name: "15 min" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Review 1 change" }))
+    const confirm = await screen.findByRole("alertdialog")
+    expect(puts()[0]).toEqual({ workspaces: ["ws-a", "ws-b"], dry_run: true, set: { auto_lease_seconds: 900 } })
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(puts()).toHaveLength(1)
+  })
+})
+
+describe("instance settings", () => {
+  it.each([
+    ["Credential judge", "card-judge"],
+    ["Decision rules", "card-rules"],
+    ["Background checks", "card-background"],
+  ])("%s shows its own card and says it reaches every workspace", async (label, testId) => {
+    render(<SecurityPage />)
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${label}`) }))
+    await waitFor(() => expect(screen.getByTestId(testId)).toBeInTheDocument())
+    expect(document.querySelector("[data-slot=security-scope]")).toHaveTextContent("Instance")
+    expect(document.querySelector("[data-slot=security-scope]")).toHaveTextContent("Applies to every workspace on this server")
+  })
+})
+
+describe("old links still land", () => {
+  it.each([
+    ["/admin/security?section=watchdog&ws=dess", "ws-a"],
+    ["/admin/security?section=alerts&ws=coolify", "ws-b"],
+  ])("%s opens that workspace's profile", async (url, id) => {
+    window.history.replaceState(null, "", url)
+    render(<SecurityPage />)
+    expect(await screen.findByTestId("gov-policy")).toHaveAttribute("data-workspace", id)
+  })
+
+  it("a per-workspace section with several workspaces opens the Workspaces view", async () => {
+    window.history.replaceState(null, "", "/admin/security?section=leases&ws=dess,coolify")
+    render(<SecurityPage />)
+    expect(await screen.findByRole("table", { name: "Workspaces" })).toBeInTheDocument()
+    expect(screen.queryByTestId("gov-policy")).toBeNull()
   })
 })
 
@@ -408,7 +364,7 @@ describe("Defaults for new workspaces, an operation of its own", () => {
     render(<SecurityPage />)
     await waitFor(() => expect(document.querySelector("[data-field=enabled]")).not.toBeNull())
     const enabled = document.querySelector("[data-field=enabled]") as HTMLElement
-    expect(scope()).toHaveAttribute("aria-disabled", "true")
+    expect(document.querySelector("[data-slot=security-scope]")).toHaveTextContent("existing workspaces do not change")
     fireEvent.click(within(enabled).getByRole("radio", { name: "On" }))
     saveBar()
     const dialog = await screen.findByRole("alertdialog")
@@ -420,16 +376,4 @@ describe("Defaults for new workspaces, an operation of its own", () => {
     await waitFor(() => expect(defaultsPuts()).toHaveLength(2))
     expect(defaultsPuts()[1]).toEqual({ dry_run: false, expect_preview: "d-1", set: { enabled: true } })
   })
-
-  it("shows what new workspaces start with as the first row of What's on where", async () => {
-    window.history.replaceState(null, "", "/admin/security?section=matrix")
-    render(<SecurityPage />)
-    const table = await screen.findByRole("region", { name: "What's on where" })
-    expect(within(table).getAllByRole("row")[1]).toHaveTextContent("New workspaces")
-    // Four-eyes as enforced for a new workspace, like every row.
-    expect(within(table).getByRole("button", { name: "Four-eyes in New workspaces: L4 required" })).toBeInTheDocument()
-    fireEvent.click(within(table).getByRole("button", { name: "Watchdog in New workspaces: Off" }))
-    await waitFor(() => expect(window.location.search).toContain("section=defaults"))
-  })
 })
-
