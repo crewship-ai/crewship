@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, cleanup, within } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, within, waitFor } from "@testing-library/react"
 
 const h = vi.hoisted(() => ({ apiFetch: vi.fn(), push: vi.fn(), toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => h.apiFetch(...a) }))
@@ -11,85 +11,67 @@ vi.mock("next/link", () => ({ default: ({ href, children, ...p }: { href: string
 
 import { BackupsPage } from "../backups-page"
 
-// Admin › Backups is a nested page like Security and People: the side panel
-// holds the scope, the Runs facets, the plans and the settings; the content is
-// one section at a time, kept in the URL.
+// Admin › Backups is built like People & workspaces and Security: a panel with
+// three views (Overview · Runs · Restore), the plans, every workspace and the
+// instance settings; Runs filters above its table like the Audit log, and a
+// workspace opens its own backups. Everything is kept in the URL.
 function show(search = "?demo=1") {
   window.history.replaceState(null, "", `/admin/backups${search}`)
   return render(<BackupsPage />)
 }
 const panel = () => screen.getByRole("complementary", { name: "Backups navigation" })
+const views = () => within(panel()).getByRole("group", { name: "View" })
 const param = (k: string) => new URLSearchParams(window.location.search).get(k)
+/** Opens a filter menu above the runs and picks an option. */
+async function pick(filter: RegExp, option: RegExp) {
+  const trigger = screen.getByRole("button", { name: filter })
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+  fireEvent.click(await screen.findByRole("menuitem", { name: option }))
+}
 
 beforeEach(() => {
+  if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false
+  if (!Element.prototype.releasePointerCapture) Element.prototype.releasePointerCapture = () => {}
+  if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
   h.apiFetch.mockReset()
   h.apiFetch.mockResolvedValue(new Response("{}", { status: 404 }))
   h.push.mockReset()
+  h.toast.message.mockReset()
 })
 afterEach(() => cleanup())
 
-// The panel holds the filters that apply to the page on screen, then the
-// navigation. Filters and links never mix: the scope shows where it changes
-// what is listed, the run facets only on Backup history, nothing on the
-// instance settings.
-describe("BackupsPage panel", () => {
-  it("leads back to Admin from the sub-bar and navigates by Overview, Backup history, Plans, Recovery and Settings", async () => {
+describe("BackupsPage panel, like People & workspaces", () => {
+  it("leads back to Admin from the sub-bar and offers three views, the plans, the workspaces and the instance settings", async () => {
     show()
     const p = panel()
-    // The way back is the sub-bar's "← Admin" button, once — not repeated
-    // at the top of the panel.
     expect(screen.getByRole("link", { name: "Back to Admin" })).toHaveAttribute("href", "/admin")
-    expect(within(p).queryByRole("link", { name: /Admin/ })).toBeNull()
-    for (const label of ["Overview", "Backup history", "New plan", "New restore", "Storage", "Keys & alerts"]) {
+    expect(within(views()).getAllByRole("button").map((b) => b.textContent?.replace(/\d+$/, ""))).toEqual(["Overview", "Runs", "Restore"])
+    for (const label of ["New plan", "Storage", "Keys & alerts"]) {
       expect(within(p).getByRole("button", { name: new RegExp(label) })).toBeInTheDocument()
     }
+    expect(await within(p).findByRole("button", { name: /^Dess/ })).toBeInTheDocument()
+    // No scope block and no data retention in the panel.
+    expect(within(p).queryByText("Selected workspaces")).toBeNull()
     expect(within(p).queryByText("Data retention")).toBeNull()
   })
 
   it("opens Overview by default and another section from the panel, in the URL", async () => {
     show()
-    expect(within(panel()).getByRole("button", { name: /Overview/ })).toHaveAttribute("aria-current", "true")
+    expect(within(views()).getByRole("button", { name: /^Overview/ })).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(within(panel()).getByRole("button", { name: /Storage/ }))
     expect(param("section")).toBe("storage")
-  })
-
-  it("shows the run facets only on Backup history", async () => {
-    show()
-    expect(within(panel()).queryByRole("button", { name: /^Failed/ })).toBeNull()
-    fireEvent.click(within(panel()).getByRole("button", { name: /Backup history/ }))
-    fireEvent.click(await within(panel()).findByRole("button", { name: /^Failed/ }))
+    fireEvent.click(within(views()).getByRole("button", { name: "Runs" }))
     expect(param("section")).toBe("history")
-    expect(param("status")).toBe("failed")
   })
 
-  it("lists each plan as a row; picking one opens it in Schedules", async () => {
+  it("lists each plan as a row; picking one opens it", async () => {
     show()
     fireEvent.click(await within(panel()).findByRole("button", { name: /Complete recovery/ }))
     expect(param("section")).toBe("schedules")
     expect(param("plan")).toBeTruthy()
   })
 
-  it("drops the scope on an instance-only page", async () => {
-    show("?demo=1&section=keys")
-    await within(panel()).findByRole("button", { name: /Keys & alerts/ })
-    expect(within(panel()).queryByText("Whole instance")).toBeNull()
-  })
-
-  it("lists the workspaces only once Selected workspaces is picked, kept in ?scope=", async () => {
-    show()
-    expect(within(panel()).queryByText("All workspaces")).toBeNull()
-    fireEvent.click(within(panel()).getByRole("button", { name: /Selected workspaces/ }))
-    expect(param("scope")).toBe("workspaces")
-    expect(await within(panel()).findByText("All workspaces")).toBeInTheDocument()
-    fireEvent.click(within(panel()).getByRole("button", { name: /Whole instance/ }))
-    expect(param("scope")).toBe("instance")
-  })
-})
-
-// On Backup history the panel's search and facets narrow the runs; the counts
-// beside each facet are the rows it opens.
-describe("BackupsPage history filters", () => {
-  it("search narrows the plans in the panel", async () => {
+  it("search narrows the plans and workspaces in the panel", async () => {
     show()
     await within(panel()).findByRole("button", { name: /Complete recovery/ })
     fireEvent.change(within(panel()).getByPlaceholderText(/Search/), { target: { value: "memory" } })
@@ -97,19 +79,71 @@ describe("BackupsPage history filters", () => {
     expect(within(panel()).getByRole("button", { name: /Memory every 6 h/ })).toBeInTheDocument()
   })
 
-  it("Kind narrows the runs, kept in the URL", async () => {
+  it("opens a workspace's own backups from the panel", async () => {
+    show()
+    fireEvent.click(await within(panel()).findByRole("button", { name: /^Dess/ }))
+    expect(param("workspace")).toBe("dess")
+    const header = await waitFor(() => { const el = document.querySelector("[data-slot=workspace-backups-header]"); if (!el) throw new Error("no header"); return el })
+    expect(header).toHaveTextContent("Dess")
+    expect(within(header as HTMLElement).getByRole("button", { name: /Back up now/ })).toBeInTheDocument()
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Overview")
+  })
+})
+
+describe("Runs, like the Audit log", () => {
+  it("filters above the table and in the URL, the count is what is shown", async () => {
     show("?demo=1&section=history")
-    await within(panel()).findByRole("button", { name: /^All runs\s*5/ })
-    fireEvent.click(within(panel()).getByRole("button", { name: /^Environments/ }))
+    await waitFor(() => expect(document.querySelector("[data-slot=runs-scope]")).toHaveTextContent("5 runs in range"))
+    await pick(/^Kind:/, /^Environments/)
     expect(param("kind")).toBe("environments")
-    expect(within(panel()).getByRole("button", { name: /^All runs\s*1/ })).toBeInTheDocument()
+    await waitFor(() => expect(document.querySelector("[data-slot=runs-scope]")).toHaveTextContent("1 run in range"))
   })
 
   it("Proof keeps only runs proven that far", async () => {
     show("?demo=1&section=history")
-    await within(panel()).findByRole("button", { name: /^All runs\s*5/ })
-    fireEvent.click(within(panel()).getByRole("button", { name: /^Test restore/ }))
+    await waitFor(() => expect(document.querySelector("[data-slot=runs-scope]")).toHaveTextContent("5 runs in range"))
+    await pick(/^Proof:/, /^Test restore/)
     expect(param("proof")).toBe("3")
-    expect(within(panel()).getByRole("button", { name: /^All runs\s*2/ })).toBeInTheDocument()
+    await waitFor(() => expect(document.querySelector("[data-slot=runs-scope]")).toHaveTextContent("2 runs in range"))
+  })
+
+  it("Result narrows to failed or pinned runs", async () => {
+    show("?demo=1&section=history")
+    await screen.findByRole("button", { name: /^Result:/ })
+    await pick(/^Result:/, /^Pinned/)
+    expect(param("status")).toBe("pinned")
+  })
+
+  it("Scope switches between the whole instance, every workspace and one, kept in ?scope=", async () => {
+    show("?demo=1&section=history")
+    await screen.findByRole("button", { name: /^Scope: Whole instance/ })
+    await pick(/^Scope:/, /^All workspaces/)
+    expect(param("scope")).toBe("workspaces")
+    await pick(/^Scope:/, /^Whole instance/)
+    expect(param("scope")).toBe("instance")
+  })
+
+  it("draws the Crew Journal's chart and a time range in the sub-bar", async () => {
+    show("?demo=1&section=history")
+    expect(await screen.findByRole("combobox", { name: "Time range" })).toBeInTheDocument()
+    expect(document.querySelector("[data-slot=runs-histogram]")).not.toBeNull()
+  })
+
+  it("ticked runs are pinned from the green selection bar (demo sends nothing)", async () => {
+    show("?demo=1&section=history")
+    const box = (await screen.findAllByRole("checkbox", { name: /^Select the run of/ }))[0]
+    fireEvent.click(box)
+    const bar = screen.getByRole("toolbar", { name: "Change the selected runs" })
+    expect(bar).toHaveTextContent("1 selected")
+    fireEvent.click(within(bar).getByRole("button", { name: /^Pin$/ }))
+    await waitFor(() => expect(h.toast.message).toHaveBeenCalledWith("Demo data · nothing was sent"))
+  })
+})
+
+describe("Restore", () => {
+  it("switches New restore, History and Drills above the wizard, in the URL", async () => {
+    show("?demo=1&section=recovery")
+    fireEvent.click(within(await screen.findByRole("group", { name: "Restore" })).getByRole("button", { name: "Drills" }))
+    expect(param("view")).toBe("drills")
   })
 })

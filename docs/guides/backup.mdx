@@ -1490,24 +1490,27 @@ no secret.
 ## Admin UI
 
 Admin › Data › **Backups** is for instance administrators. It is a page of
-its own, `/admin/backups`, with a side panel like Admin › Security: the scope,
-Overview, the runs by result, the plans, Recovery and the instance settings.
-Each page is deep-linkable as `/admin/backups?section=<page>` (an old
+its own, `/admin/backups`, built like Admin › People & workspaces and
+Security: its side panel switches between **Overview**, **Runs** and
+**Restore**, and lists the plans, every workspace with its newest backup, and
+the two instance settings (Storage, Keys & alerts). Each page is
+deep-linkable as `/admin/backups?section=<page>` (an old
 `/admin?tab=backups&section=<page>` link still lands there):
 
 | Page | What it answers |
 |---|---|
-| Overview | What is protected, how often, where, for how long, and whether a restore really worked — three separate proofs (checksum, contents checked, test restore), never one "restorable" flag. Warns while every copy sits on this server. |
-| Backup history | Every run, its phases, and how far each backup is proven. Pin, check contents, download, or start a restore from a run. |
-| Schedules | Backup plans: a preset (Complete recovery, Workspace backup) or a custom choice that keeps its dependencies, when it runs, a calendar of done and planned runs, and how many copies are kept. |
+| Overview | The whole instance: what needs attention, then the five questions — what is protected, how often, where, for how long, and whether a restore really worked — with three separate proofs (checksum, contents checked, test restore), never one "restorable" flag. A table of workspaces says when each was last kept, by which plan and how far it is proven; a row opens that workspace. |
+| Runs (`?section=history`) | Every run, its phases, and how far each backup is proven, built like the Audit log: the time range in the sub-bar, a chart of runs by result (a click picks a bar, a drag a span, and that narrows the table), and filters for scope, result, kind and proof above it. Tick runs to pin, unpin or download them together; open one to check its contents or start a restore. |
+| A workspace (`?workspace=<slug>`) | That workspace alone: its newest backup and proof, the plan that covers it, its Needs attention and nights, its last runs, with Back up now and Restore. |
+| Schedules (a plan in the panel) | Backup plans: a preset (Complete recovery, Workspace backup) or a custom choice that keeps its dependencies, when it runs, a calendar of done and planned runs, and how many copies are kept. |
 | Storage | Where copies live, the room a run and a restore need, and the limits a backup runs under. |
-| Recovery | A guided restore: backup, target, keys, checks, dry run, restore, then resume what stayed held. A whole-instance restore runs from the CLI; see [Recovery in the console](#recovery-in-the-console). |
+| Restore (`?section=recovery`) | A guided restore: backup, target, keys, checks, dry run, restore, then resume what stayed held. History and Drills sit beside New restore. A whole-instance restore runs from the CLI; see [Recovery in the console](#recovery-in-the-console). |
 | Keys & alerts | The AGE public keys backups are encrypted to, the vault key versions restored secrets need, and who hears when a backup goes wrong. |
 
-The panel's **Scope** chooses **Whole instance** or **Selected
-workspaces**; the choice is kept in the URL. Admin › Data › **Data
-retention** sets how long each kind of live data is kept per workspace, and
-shows a dry run of what a change overwrites before it is saved.
+The **Scope** filter above Runs and New restore chooses the whole instance,
+every workspace or one; it is kept in the URL (`?scope=&ws=`). Admin › Data ›
+**Data retention** sets how long each kind of live data is kept per
+workspace, and shows a dry run of what a change overwrites before it is saved.
 
 ### Recovery in the console
 

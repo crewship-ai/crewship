@@ -44,6 +44,8 @@ export interface SectionCtx {
   recoveryView?: "new" | "history" | "drills"
   /** The side panel's search and Filter, applied to runs before the facet. */
   runQuery?: RunQuery
+  /** A span picked on the Runs chart: only runs started in it. */
+  runSlice?: { fromMs: number; toMs: number } | null
 }
 
 /** The panel toolbar's narrowing of runs: text, kind, least proof, last N days. */
@@ -51,7 +53,7 @@ export interface RunQuery {
   q: string
   kind: "" | "full" | "custom" | "environments"
   proof: "" | "1" | "2" | "3"
-  period: "" | "1" | "7" | "30"
+  period: "" | "1" | "7" | "30" | "90"
 }
 
 /** The Runs facets of the side panel. */
