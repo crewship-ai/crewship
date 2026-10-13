@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // IPCResolver implements ChatResolver by making HTTP calls to the internal API
@@ -308,6 +309,10 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 	payload := map[string]interface{}{
 		"id": runID, "agent_id": agentID, "chat_id": chatID,
 		"workspace_id": workspaceID, "trigger_type": triggerType,
+	}
+	if receipt := chataudience.ReceiptFromContext(ctx); receipt != nil {
+		payload["human_authority"] = receipt
+		payload["trigger_message_id"] = runauthority.TriggerMessageFromContext(ctx)
 	}
 	if metadata != nil {
 		payload["metadata"] = metadata

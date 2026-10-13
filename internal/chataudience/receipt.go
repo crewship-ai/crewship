@@ -35,7 +35,19 @@ func ReceiptFromContext(ctx context.Context) *Receipt {
 
 // CaptureTrusted authorizes and captures the epoch in one SQL snapshot. An
 // expected receipt fences retries: re-admission cannot silently refresh it.
+type Queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 func CaptureTrusted(ctx context.Context, db *sql.DB, chat, user string, expected *Receipt) (*Receipt, error) {
+	if db == nil {
+		return nil, nil
+	}
+	return CaptureTrustedQuery(ctx, db, chat, user, expected)
+}
+
+// CaptureTrustedQuery allows admission to be fenced in the caller's write transaction.
+func CaptureTrustedQuery(ctx context.Context, db Queryer, chat, user string, expected *Receipt) (*Receipt, error) {
 	if db == nil || chat == "" || user == "" {
 		return nil, nil
 	}

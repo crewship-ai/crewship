@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -611,19 +612,23 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// The human turn is recorded and emitted regardless of whether the agent
 	// will respond. The sender also receives the event, which acknowledges
 	// persistence; its UI suppresses the duplicate optimistic turn.
+	triggerMessageID := generateMsgID()
 	persistUserMsg := func() error {
-		return b.convStore.Append(ctx, chatID, conversation.Message{
-			ID:           generateMsgID(),
+		if err := b.convStore.Append(ctx, chatID, conversation.Message{
+			ID:           triggerMessageID,
 			AgentID:      info.AgentID,
 			Role:         conversation.RoleUser,
 			Content:      content,
 			Metadata:     userMsgMetadata,
 			AuthorUserID: userID,
 			Timestamp:    time.Now().UTC(),
-		})
+		}); err != nil {
+			return err
+		}
+		return b.convStore.SyncSession(ctx, chatID)
 	}
 	broadcastUserMsg := func() {
-		metadata := map[string]any{"author_user_id": userID}
+		metadata := map[string]any{"author_user_id": userID, "message_id": triggerMessageID}
 		if pageContext != nil {
 			// This event is emitted only after Append succeeds. Echo the
 			// server-derived Page identity so the sender can consume its
@@ -1097,6 +1102,20 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		},
 	})
 
+	runID := generateMsgID()
+	originalStream := streamFn
+	streamFn = func(event ws.ChatEvent) {
+		metadata := map[string]any{"run_id": runID, "trigger_message_id": triggerMessageID}
+		if existing, ok := event.Metadata.(map[string]any); ok {
+			for key, value := range existing {
+				metadata[key] = value
+			}
+		}
+		metadata["run_id"] = runID
+		metadata["trigger_message_id"] = triggerMessageID
+		event.Metadata = metadata
+		originalStream(event)
+	}
 	handler := func(event orchestrator.AgentEvent) {
 		// Stamp the RESOLVED model onto the terminal result event.
 		//
@@ -1146,7 +1165,6 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		base(event)
 	}
 
-	runID := generateMsgID()
 	// E0: the orchestrator derives this run's tmux session and its /tmp args /
 	// env / FIFO / exit files from RunID. Set from the id this path already
 	// mints for CreateRun and journal.WithRunID, so a chat turn and a
@@ -1159,8 +1177,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		"agent_slug":  info.AgentSlug,
 		"tags":        []string{"chat", info.CLIAdapter},
 	}
+	ctx = runauthority.WithTriggerMessage(ctx, triggerMessageID)
+	ctx = chataudience.WithReceipt(ctx, info.HumanAuthority)
 	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER", runMeta); err != nil {
-		b.logger.Warn("failed to create run record", "error", err)
+		b.logger.Error("failed to create durable run record", "error", err)
+		streamFn(ws.ChatEvent{Type: "error", Content: "failed to start a durable run"})
+		return fmt.Errorf("create durable run: %w", err)
 	}
 	// Put the run on the context so every journal entry emitted beneath it
 	// inherits trace_id = runID. The orchestrator's JournalEntry has no
@@ -1223,6 +1245,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
 				repliedAt := time.Now().UTC()
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
+					RunID:     runID,
 					ID:        generateMsgID(),
 					AgentID:   info.AgentID,
 					Role:      conversation.RoleAssistant,
@@ -1265,6 +1288,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
 				repliedAt := time.Now().UTC()
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
+					RunID:     runID,
 					ID:        generateMsgID(),
 					AgentID:   info.AgentID,
 					Role:      conversation.RoleAssistant,
@@ -1337,6 +1361,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 		}
 		if err := b.convStore.Append(ctx, chatID, conversation.Message{
+			RunID:     runID,
 			ID:        generateMsgID(),
 			AgentID:   info.AgentID,
 			Role:      conversation.RoleSystem,
@@ -1389,6 +1414,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// extractor is additionally pinned to the reserved setup-agent slug.
 	assistantMetadata := onboardingProposalMetadata(info.AgentSlug, acc.Text())
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
+		RunID:       runID,
 		ID:          assistantMessageID,
 		AgentID:     info.AgentID,
 		Role:        conversation.RoleAssistant,
@@ -1471,6 +1497,7 @@ func (b *Bridge) persistInBandFailureTurn(
 	failParts = append(failParts, parts...)
 	failParts = append(failParts, conversation.Part{Type: "error", Content: reason})
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
+		RunID:     journal.RunIDFromContext(ctx),
 		ID:        generateMsgID(),
 		AgentID:   info.AgentID,
 		Role:      role,

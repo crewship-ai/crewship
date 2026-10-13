@@ -60,6 +60,7 @@ type Part struct {
 // bridges that gap so they still render.
 type Message struct {
 	ID          string    `json:"id"`
+	RunID       string    `json:"run_id,omitempty"`
 	ChatID      string    `json:"session_id"`
 	AgentID     string    `json:"agent_id,omitempty"`
 	Role        Role      `json:"role"`
@@ -190,6 +191,7 @@ func (a *PartAccumulator) Parts() []Part {
 // JSONL via Read.
 type SearchHit struct {
 	ID          string    `json:"id"`
+	RunID       string    `json:"run_id,omitempty"`
 	SessionID   string    `json:"session_id"`
 	AgentID     string    `json:"agent_id"`
 	Role        Role      `json:"role"`
@@ -294,6 +296,24 @@ func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error
 	return nil
 }
 
+// SyncSession commits the triggering transcript before a run admission can
+// reference it. Unlike periodic Flush, errors must prevent execution.
+func (s *Store) SyncSession(ctx context.Context, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f := s.files[sessionID]
+	if f == nil {
+		return fmt.Errorf("conversation session has no appended message")
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync conversation session: %w", err)
+	}
+	return nil
+}
+
 // appendMirror inserts the searchable row. Triggers (migration v111) keep
 // conversation_messages_fts in sync, so this is a single INSERT.
 func (s *Store) appendMirror(ctx context.Context, sessionID string, msg Message) error {
@@ -302,10 +322,10 @@ func (s *Store) appendMirror(ctx context.Context, sessionID string, msg Message)
 		authorUserID = msg.AuthorUserID
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts, author_user_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts, author_user_id, run_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ID, sessionID, msg.AgentID, string(msg.Role), msg.Content, msg.ToolSummary,
-		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), authorUserID,
+		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), authorUserID, msg.RunID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert mirror row: %w", err)
