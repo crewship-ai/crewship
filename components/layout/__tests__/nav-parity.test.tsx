@@ -22,6 +22,7 @@ beforeEach(() => {
 
 vi.mock("@/hooks/use-auth", () => ({
   useIsInstanceAdmin: () => true,
+  useSessionSafe: () => ({ data: { user: { id: "u-demo", name: "Demo User", email: "demo@crewship.ai" } }, status: "authenticated" }),
   useAuth: () => ({
     session: { user: { name: "Demo User", email: "demo@crewship.ai" } },
     signOut: vi.fn().mockResolvedValue(undefined),

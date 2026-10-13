@@ -39,10 +39,8 @@ function jsonResponse(body: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => body }
 }
 
-// The component is ~1000 lines with unrelated CLI-token surface. It fetches
-// /api/v1/auth/cli-tokens on mount (SettingsCard "CLI Tokens") regardless of
-// what we're testing, so the stub always answers it with an empty list —
-// otherwise fetchTokens's promise never resolves and React logs act() noise.
+// CLI tokens and sessions moved to SessionsSection (sessions-section.test.tsx).
+// The stub still answers the tokens list so a stray fetch cannot hang a test.
 function mockApi({
   avatarPostStatus = 200,
   avatarDeleteStatus = 200,
@@ -196,123 +194,54 @@ describe("ProfileSection", () => {
   })
 })
 
-// Revoking a CLI token used to be unable to fail: the handler awaited
-// apiFetch without checking res.ok and wrapped the whole thing in
-// `catch { /* ignore */ }`. apiFetch resolves on a 403/500 rather than
-// throwing, so a refused delete closed the dialog and re-fetched the list
-// exactly like a successful one — the token stayed, and nothing said why.
-describe("ProfileSection — revoking a CLI token", () => {
-  const TOKEN = {
-    id: "tok-1",
-    name: "ci-deploy",
-    created_at: "2026-07-20T10:00:00Z",
-    last_used_at: "2026-07-27T09:00:00Z",
-    tier: "STANDARD" as const,
-  }
+describe("ProfileSection — sessions moved out", () => {
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+  })
 
-  function mockTokens(deleteStatus: number) {
-    apiFetch.mockImplementation(async (url: string) => {
-      if (url.includes("/api/v1/auth/cli-tokens/")) {
-        return jsonResponse(deleteStatus >= 400 ? { error: "token is already revoked" } : {}, deleteStatus)
-      }
-      if (url.includes("/api/v1/auth/cli-tokens")) return jsonResponse({ data: [TOKEN] })
-      if (url.includes("/api/v1/auth/sessions")) return jsonResponse([])
-      return jsonResponse({})
-    })
-  }
-
-  async function openRevokeDialog() {
+  // Sessions & tokens is its own section now (sessions-section.tsx); Profile
+  // must not keep a second copy of the card or its requests.
+  it("renders no sessions card and asks for no tokens or sessions", async () => {
+    mockApi()
     render(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
-    await screen.findByText("ci-deploy")
-    fireEvent.click(screen.getByRole("button", { name: /revoke ci-deploy/i }))
-    return screen.findByRole("button", { name: /^revoke$/i })
-  }
-
-  it("confirms when the server accepts the revoke", async () => {
-    mockTokens(200)
-    fireEvent.click(await openRevokeDialog())
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
-  })
-
-  it("says so when the server refuses, instead of looking like it worked", async () => {
-    mockTokens(403)
-    fireEvent.click(await openRevokeDialog())
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
-    expect(toastSuccess).not.toHaveBeenCalled()
-    // The token is still there — the list must not imply otherwise.
-    expect(screen.getByText("ci-deploy")).toBeTruthy()
-  })
-
-  it("reports a network failure rather than swallowing it", async () => {
-    apiFetch.mockImplementation(async (url: string) => {
-      if (url.includes("/api/v1/auth/cli-tokens/")) throw new Error("offline")
-      if (url.includes("/api/v1/auth/cli-tokens")) return jsonResponse({ data: [TOKEN] })
-      if (url.includes("/api/v1/auth/sessions")) return jsonResponse([])
-      return jsonResponse({})
-    })
-    fireEvent.click(await openRevokeDialog())
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByRole("region", { name: "Account" })).toBeTruthy())
+    expect(screen.queryByRole("region", { name: /Sessions/ })).toBeNull()
+    expect(apiFetch.mock.calls.map((c) => String(c[0])).filter((u) => /auth\/(cli-tokens|sessions)/.test(u))).toEqual([])
   })
 })
 
-// The card promises "everything that can sign in as you right now". A
-// revoked token cannot, so listing them inline contradicted the heading —
-// and on a real account seven struck-through rows pushed the two live ones
-// out of view, on a screen whose entire job is spotting live access.
-describe("ProfileSection — revoked CLI tokens", () => {
-  const ACTIVE = { id: "a1", name: "ci-deploy", created_at: "2026-07-20T10:00:00Z", tier: "STANDARD" as const }
-  const REVOKED = [
-    { id: "r1", name: "old-laptop", created_at: "2026-07-01T10:00:00Z", revoked_at: "2026-07-10T10:00:00Z", tier: "STANDARD" as const },
-    { id: "r2", name: "stale-ci", created_at: "2026-07-02T10:00:00Z", revoked_at: "2026-07-11T10:00:00Z", tier: "STANDARD" as const },
-  ]
 
-  function mockWith(tokens: unknown[]) {
-    apiFetch.mockImplementation(async (url: string) => {
-      if (url.includes("/api/v1/auth/cli-tokens")) return jsonResponse({ data: tokens })
-      if (url.includes("/api/v1/auth/sessions")) return jsonResponse([])
-      return jsonResponse({})
-    })
+describe("ProfileSection — change password", () => {
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+  })
+
+  async function submit(revokeTokens: boolean) {
+    apiFetch.mockImplementation(async (url: string) =>
+      url.includes("/users/me/password")
+        ? jsonResponse({ success: true, sessions_revoked: 1, cli_tokens_revoked: revokeTokens ? 2 : 0 })
+        : jsonResponse({ data: [] }))
+    render(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
+    fireEvent.click(screen.getByRole("button", { name: "Change" }))
+    fireEvent.change(await screen.findByLabelText("Current password"), { target: { value: "oldpassword1" } })
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "brandnew123" } })
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "brandnew123" } })
+    if (revokeTokens) fireEvent.click(screen.getByRole("checkbox", { name: "Also revoke all CLI tokens" }))
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }))
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith("/api/v1/users/me/password", expect.anything()))
+    const init = apiFetch.mock.calls.find(([u]) => String(u).includes("/users/me/password"))![1] as RequestInit
+    return JSON.parse(String(init.body))
   }
 
-  it("keeps revoked tokens out of the list by default", async () => {
-    mockWith([ACTIVE, ...REVOKED])
-    render(<ProfileSection userName="Ada" userEmail="ada@example.com" />)
-
-    expect(await screen.findByText("ci-deploy")).toBeTruthy()
-    expect(screen.queryByText("old-laptop")).toBeNull()
-    expect(screen.queryByText("stale-ci")).toBeNull()
+  it("keeps CLI tokens by default", async () => {
+    expect(await submit(false)).toMatchObject({ revoke_cli_tokens: false })
+    expect(await screen.findByText(/CLI tokens keep working/)).toBeInTheDocument()
   })
 
-  it("still admits they exist, with a count", async () => {
-    mockWith([ACTIVE, ...REVOKED])
-    render(<ProfileSection userName="Ada" userEmail="ada@example.com" />)
-    // Hiding is not the same as pretending — "did my revoke stick?" has to
-    // stay answerable without a trip to the audit log.
-    expect(await screen.findByRole("button", { name: /2 revoked/i })).toBeTruthy()
-  })
-
-  it("reveals them on request", async () => {
-    mockWith([ACTIVE, ...REVOKED])
-    render(<ProfileSection userName="Ada" userEmail="ada@example.com" />)
-
-    fireEvent.click(await screen.findByRole("button", { name: /2 revoked/i }))
-    expect(await screen.findByText("old-laptop")).toBeTruthy()
-    expect(screen.getByText("stale-ci")).toBeTruthy()
-  })
-
-  it("shows no disclosure when nothing has been revoked", async () => {
-    mockWith([ACTIVE])
-    render(<ProfileSection userName="Ada" userEmail="ada@example.com" />)
-
-    await screen.findByText("ci-deploy")
-    expect(screen.queryByRole("button", { name: /revoked/i })).toBeNull()
-  })
-
-  it("does not call an all-revoked account empty", async () => {
-    mockWith(REVOKED)
-    render(<ProfileSection userName="Ada" userEmail="ada@example.com" />)
-    // "No tokens yet" would be wrong: there are tokens, they are just dead.
-    await waitFor(() => expect(screen.queryByText(/no tokens yet/i)).toBeNull())
-    expect(await screen.findByRole("button", { name: /2 revoked/i })).toBeTruthy()
+  it("revokes CLI tokens when asked, and says how many", async () => {
+    expect(await submit(true)).toMatchObject({ revoke_cli_tokens: true })
+    expect(await screen.findByText(/2 CLI tokens revoked/)).toBeInTheDocument()
   })
 })

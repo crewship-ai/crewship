@@ -98,6 +98,7 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
     "id": "ws_cm1abc123",
     "name": "Acme Robotics",
     "slug": "acme-robotics",
+    "kind": "team",
     "logo_url": null,
     "preferred_language": "English",
     "created_at": "2026-04-12T09:18:22Z",
@@ -120,6 +121,7 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
 | `id` | string | Workspace ID (CUID) |
 | `name` | string | Display name (2-100 chars) |
 | `slug` | string | URL-safe identifier (2-50 chars, globally unique) |
+| `kind` | string | `team`, or `personal` for the one a sign-up without an invitation gets: that person's personal account, shown apart from workspaces in the switcher and in Admin. An instance administrator changes it with [`PATCH /admin/instance/workspaces/{id}`](/api-reference/admin). |
 | `logo_url` | string? | URL to workspace logo |
 | `preferred_language` | string? | Canonical language name (e.g. `"Czech"`, `"English"`) -- see [language list](#preferred_language-values) |
 | `currentUserRole` | string | Caller's role in this workspace (`OWNER` / `ADMIN` / `MANAGER` / `MEMBER` / `VIEWER`) |
@@ -627,7 +629,7 @@ Empty arrays are **rejected** (a `400`, not treated as a no-op) -- to reset a me
 GET /api/v1/workspaces/{workspaceId}/members/capabilities
 ```
 
-Returns the resolved capabilities for **every** member of the workspace in one round-trip -- this drives Settings → Members without an N+1 fan-out across the per-member endpoint. The roster fetches it once on load, whether or not any row is expanded, because each collapsed row summarises that member's grants. Rows are ordered by membership `created_at` ASC so the roster renders stably between page loads.
+Returns the resolved capabilities for **every** member of the workspace in one round-trip -- this drives Settings → Members without an N+1 fan-out across the per-member endpoint. The Members page fetches it once on load, because the list's capability chips, the side panel's per-capability counts and the matrix all read it. Rows are ordered by membership `created_at` ASC so the roster renders stably between page loads.
 
 **Auth:** `ADMIN` or `OWNER`.
 

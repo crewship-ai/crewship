@@ -19,6 +19,11 @@ vi.mock("@/hooks/use-workspace", () => ({
   useCurrentWorkspaceId: () => "ws",
 }))
 vi.mock("@/lib/api/inbox", () => ({ inboxBulk: (...a: unknown[]) => inboxBulk(...a) }))
+const waitpointDecide = vi.fn()
+vi.mock("@/lib/api/waitpoints", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/waitpoints")>()
+  return { ...actual, waitpointDecide: (...a: unknown[]) => waitpointDecide(...a) }
+})
 vi.mock("@/hooks/use-inbox", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/use-inbox")>()
   return {
@@ -201,5 +206,58 @@ describe("sections", () => {
 
     const rows = popover.getAllByRole("button").filter((b) => b.dataset.testid?.startsWith("bell-row-"))
     expect(rows.map((r) => r.dataset.testid)).toEqual(["bell-row-wp", "bell-row-esc", "bell-row-msg"])
+  })
+})
+
+// Inline Approve / Deny reuse waitpointDecide — the call KindActions' plain
+// waitpoint branch makes on /inbox — and re-read the list after, because the
+// server resolves the inbox row itself.
+describe("inline waitpoint decision", () => {
+  it.each([
+    { button: /^Approve Approve promote$/, approved: true },
+    { button: /^Deny Approve promote$/, approved: false },
+  ])("posts approved=$approved for the row's token and refreshes", async ({ button, approved }) => {
+    waitpointDecide.mockResolvedValueOnce({ ok: true })
+    render(<InboxBell />)
+    fireEvent.click(screen.getByTestId("bell-trigger"))
+
+    fireEvent.click(screen.getByRole("button", { name: button }))
+
+    await waitFor(() => expect(waitpointDecide).toHaveBeenCalledWith("ws", "s-wp", approved))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+  })
+
+  it("treats 'already decided' as a resolution and refreshes", async () => {
+    waitpointDecide.mockResolvedValueOnce({ ok: false, status: 409, error: "waitpoint already decided" })
+    render(<InboxBell />)
+    fireEvent.click(screen.getByTestId("bell-trigger"))
+    fireEvent.click(screen.getByRole("button", { name: /^Approve Approve promote$/ }))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+  })
+
+  it("leaves the list alone on a real failure", async () => {
+    waitpointDecide.mockResolvedValueOnce({ ok: false, status: 500, error: "boom" })
+    render(<InboxBell />)
+    fireEvent.click(screen.getByTestId("bell-trigger"))
+    fireEvent.click(screen.getByRole("button", { name: /^Approve Approve promote$/ }))
+    await waitFor(() => expect(waitpointDecide).toHaveBeenCalled())
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it("offers no inline buttons on an escalation — it opens instead", () => {
+    render(<InboxBell />)
+    fireEvent.click(screen.getByTestId("bell-trigger"))
+    expect(screen.queryByRole("button", { name: /Approve Skill review/ })).not.toBeInTheDocument()
+  })
+
+  it("follows a decision row's own jump target", () => {
+    ITEMS = [item({
+      id: "esc-run", kind: "escalation", title: "Question", blocking: true,
+      payload: { escalation_type: "TEXT", pipeline_run_id: "run-7" },
+    })]
+    render(<InboxBell />)
+    fireEvent.click(screen.getByTestId("bell-trigger"))
+    fireEvent.click(screen.getByRole("button", { name: "Open run" }))
+    expect(push).toHaveBeenCalledWith("/activity?run=run-7")
   })
 })

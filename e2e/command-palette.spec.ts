@@ -239,19 +239,19 @@ test.describe("⌘K — every row opens the thing it names", () => {
     await expect(page.locator(`[cmdk-item][data-href="/pages/${encodeURIComponent(fixture.slug)}"]`)).toHaveCount(0)
   })
 
-  test("a person opens that person's row on the roster", async ({ page }) => {
+  test("a person opens that person's panel on the Members page", async ({ page }) => {
     await openPalette(page)
-    const hit = await firstRow(page, /\/settings\?tab=members&member=/)
+    const hit = await firstRow(page, /\/settings\/members\?member=/)
     expect(hit, "seeded palette is missing members").not.toBeNull()
     await hit!.row.click()
 
-    // Two bugs in one step: the settings tab deep link worked on a full page
-    // load but not on a click (the layout read window.location during a
-    // client-side transition, so every ?tab= landed on Profile), and the
-    // roster then gave no sign of which person had been picked.
-    await expect(page).toHaveURL(/tab=members&member=/, { timeout: TIMEOUT })
-    await expect(page.getByRole("heading", { name: "Members", exact: true })).toBeVisible({ timeout: TIMEOUT })
-    await expect(page.locator('[aria-expanded="true"]').first()).toBeVisible({ timeout: TIMEOUT })
+    // Two bugs in one step, historically: the settings deep link worked on a
+    // full page load but not on a click (the layout read window.location
+    // during a client-side transition), and the roster then gave no sign of
+    // which person had been picked. Members is its own page now; the link
+    // must still land on it with that person open.
+    await expect(page).toHaveURL(/\/settings\/members\?member=/, { timeout: TIMEOUT })
+    await expect(page.getByRole("region", { name: /^Member details:/ })).toBeVisible({ timeout: TIMEOUT })
   })
 
   test("a credential opens that credential, not the vault", async ({ page }) => {

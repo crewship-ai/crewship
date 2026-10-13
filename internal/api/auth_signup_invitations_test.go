@@ -116,6 +116,51 @@ func TestSignup_WithoutInvitation_GetsItsOwnWorkspace(t *testing.T) {
 	if n := ownedWorkspaces(t, db, "solo@example.com"); n != 1 {
 		t.Errorf("OWNER memberships = %d, want 1", n)
 	}
+	// It is that person's own space, kept apart from shared ones in Admin.
+	var kind string
+	if err := db.QueryRow(`SELECT w.kind FROM workspaces w
+		JOIN workspace_members wm ON wm.workspace_id = w.id JOIN users u ON u.id = wm.user_id
+		WHERE u.email = 'solo@example.com'`).Scan(&kind); err != nil {
+		t.Fatalf("read kind: %v", err)
+	}
+	if kind != "personal" {
+		t.Errorf("kind = %q, want personal", kind)
+	}
+	// The switcher reads it from the list, to show it as their personal account.
+	var uid string
+	if err := db.QueryRow(`SELECT id FROM users WHERE email = 'solo@example.com'`).Scan(&uid); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	NewWorkspaceHandler(db, newTestLogger()).List(rr, requestWithUser("GET", "/api/v1/workspaces", uid, ""))
+	var list []struct {
+		ID              string `json:"id"`
+		Kind            string `json:"kind"`
+		PersonalOwnerID string `json:"personal_owner_id"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
+	if len(list) != 1 || list[0].Kind != "personal" || list[0].PersonalOwnerID != uid {
+		t.Fatalf("listed = %+v, want one personal workspace of %s", list, uid)
+	}
+	// Someone who joins it later as an owner too sees it as solo's, not
+	// their own: the switcher must not file it under their personal account.
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, created_at, updated_at) VALUES ('u-late', 'late@example.com', 'Late Owner', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '+1 minute'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '+1 minute'))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at, updated_at) VALUES ('m-late', ?, 'u-late', 'OWNER', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '+1 minute'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '+1 minute'))`, list[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	rr = httptest.NewRecorder()
+	NewWorkspaceHandler(db, newTestLogger()).List(rr, requestWithUser("GET", "/api/v1/workspaces", "u-late", ""))
+	list = nil
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
+	if len(list) != 1 || list[0].PersonalOwnerID != uid {
+		t.Errorf("late owner sees %+v, want it still %s's", list, uid)
+	}
 }
 
 func TestSignup_IgnoresExpiredAndAcceptedInvitations(t *testing.T) {
@@ -222,12 +267,13 @@ func TestSignup_InvitedPersonLandsInTheInvitingWorkspace(t *testing.T) {
 	rr := httptest.NewRecorder()
 	NewWorkspaceHandler(db, newTestLogger()).List(rr, requestWithUser("GET", "/api/v1/workspaces", uid, ""))
 	var list []struct {
-		ID string `json:"id"`
+		ID   string `json:"id"`
+		Kind string `json:"kind"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
 		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
 	}
-	if len(list) != 1 || list[0].ID != wsID {
+	if len(list) != 1 || list[0].ID != wsID || list[0].Kind != "team" {
 		t.Errorf("workspaces = %+v, want only the inviting workspace %s", list, wsID)
 	}
 }

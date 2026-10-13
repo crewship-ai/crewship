@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
-import { AlertTriangle, CreditCard, Key, Layers, LayoutDashboard, Plus, RefreshCw } from "lucide-react"
+import { AlertTriangle, CreditCard, Key, Layers, LayoutDashboard, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -58,6 +58,7 @@ import {
 } from "@/lib/credentials/facets"
 import { buildTierFacet, tierOf } from "@/lib/credentials/tiers"
 import { cn } from "@/lib/utils"
+import { selectionBar, selectionBarButton } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
 
 interface Credential {
@@ -858,21 +859,20 @@ export default function CredentialsPage() {
       </AlertDialog>
 
       {canDelete && selectMode && selectedIds.size > 0 && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-full border border-border bg-popover/95 backdrop-blur shadow-2xl px-4 py-2 flex items-center gap-3 text-xs">
-          <span className="font-medium">{selectedIds.size} selected</span>
-          <button type="button" onClick={() => setBulkDeleteOpen(true)} className="text-destructive hover:text-destructive/80">
-            Delete
-          </button>
-          <button
-            type="button"
+        // The selection bar's green, as in Members and Admin › People.
+        <div role="toolbar" aria-label="Change the selected credentials" data-slot="credentials-bulk"
+          className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)]")}>
+          <span className="px-1 font-medium tabular-nums">{selectedIds.size} selected</span>
+          <Button type="button" variant="outline" size="sm" className={cn(selectionBarButton, "text-destructive hover:text-destructive")} onClick={() => setBulkDeleteOpen(true)}>
+            <Trash2 />Delete
+          </Button>
+          <Button type="button" variant="ghost" size="sm" className={cn(selectionBarButton, "border-transparent px-2.5")}
             onClick={() => {
               setSelectedIds(new Set())
               setSelectMode(false)
-            }}
-            className="text-muted-foreground hover:text-foreground"
-          >
+            }}>
             Cancel
-          </button>
+          </Button>
         </div>
       )}
 

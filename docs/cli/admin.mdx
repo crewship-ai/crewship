@@ -507,13 +507,14 @@ crewship admin workspaces --format json | jq '.[0]._count_agents'
 ```
 
 ```
-NAME    SLUG  MEMBERS  AGENTS  CREWS  RUNS 7D  SPEND 30D  LAST ACTIVITY         CREATED
-Acme *  acme  3        8       2      41       $18.42     2026-09-29 08:12 UTC  2026-01-01T00:00:00Z
+NAME    SLUG  KIND  MEMBERS  AGENTS  CREWS  RUNS 7D  SPEND 30D  LAST ACTIVITY         CREATED
+Acme *  acme  team  3        8       2      41       $18.42     2026-09-29 08:12 UTC  2026-01-01T00:00:00Z
 ```
 
 `GET /api/v1/admin/workspaces`. A workspace ADMIN or OWNER gets one row, the
 workspace the CLI is authenticated against. An instance administrator (see
-`crewship admin instance`) gets every workspace on the instance; `*` marks the current one. RUNS 7D counts runs started in the
+`crewship admin instance`) gets every workspace on the instance; `*` marks the current one. KIND is `team` or `personal` (created at
+sign-up for one person; `update-workspace` changes it). RUNS 7D counts runs started in the
 last seven UTC days, SPEND 30D is the estimated spend over the last 30 days,
 LAST ACTIVITY is the newest audit-log entry. A server older than those fields
 prints `-` for them.
@@ -611,6 +612,23 @@ workspace admin removes them. The last owner stays.
 | `--slug` | yes | Workspace slug, 2–50 characters. |
 | `--owner` | yes | Email of the owner. |
 | `--language` | no | Agent language, for example `cs` or `en`. |
+
+### update-workspace \<slug\>
+
+`PATCH /api/v1/admin/instance/workspaces/{workspaceId}`. Renames any
+workspace, or marks it `team` (shared) or `personal` (created at sign-up for
+one person). You are not added to it, and the slug stays.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--name` | no | New name, 2–100 characters. |
+| `--kind` | no | `team` or `personal`. |
+
+Give at least one of them.
+
+```bash
+crewship admin instance update-workspace demo-user-s-workspace-1a2b3c4d --name Demo
+```
 
 ### transfer \<workspace-slug\>
 

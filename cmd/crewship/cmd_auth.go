@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -40,8 +41,11 @@ password on the first line and the new password on the second:
 
 Passwords are never passed as flags, so they don't leak into shell
 history or process listings. The new password must be at least 8
-characters. Changing your password revokes your OTHER active sessions;
-the session you run this from stays signed in.`,
+characters. Changing your password revokes your OTHER active browser
+sessions; the session you run this from stays signed in. CLI tokens keep
+working unless you pass --revoke-cli-tokens, which revokes every CLI token
+on your account — including the one this command runs with, so sign in
+again afterwards (crewship login).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -88,9 +92,10 @@ the session you run this from stays signed in.`,
 		client := newAPIClient()
 		// User-scoped endpoint — no workspace context.
 		client.WorkspaceID = ""
-		resp, err := client.Post("/api/v1/users/me/password", map[string]string{
-			"current_password": current,
-			"new_password":     newPw,
+		resp, err := client.Post("/api/v1/users/me/password", map[string]any{
+			"current_password":  current,
+			"new_password":      newPw,
+			"revoke_cli_tokens": authPasswdRevokeTokens,
 		})
 		if err != nil {
 			return err
@@ -98,9 +103,17 @@ the session you run this from stays signed in.`,
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
+		var result struct {
+			CLITokensRevoked int `json:"cli_tokens_revoked" yaml:"cli_tokens_revoked"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&result)
 		resp.Body.Close()
 
-		cli.PrintSuccess("Password changed. Your other sessions have been signed out.")
+		if authPasswdRevokeTokens {
+			cli.PrintSuccess(fmt.Sprintf("Password changed. Your other sessions have been signed out and %d CLI token(s) revoked.", result.CLITokensRevoked))
+		} else {
+			cli.PrintSuccess("Password changed. Your other sessions have been signed out.")
+		}
 		return nil
 	},
 }
@@ -480,7 +493,11 @@ by default, or json/yaml/ndjson for scripts).`,
 	},
 }
 
+// authPasswdRevokeTokens: also revoke every CLI token on the account.
+var authPasswdRevokeTokens bool
+
 func init() {
+	authPasswdCmd.Flags().BoolVar(&authPasswdRevokeTokens, "revoke-cli-tokens", false, "also revoke every CLI token on your account (including this one)")
 	authCmd.AddCommand(authPasswdCmd)
 	authAvatarCmd.Flags().BoolVar(&authAvatarClear, "clear", false, "remove your avatar (back to initials)")
 	authCmd.AddCommand(authAvatarCmd)
