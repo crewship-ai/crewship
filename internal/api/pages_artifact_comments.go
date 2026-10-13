@@ -22,13 +22,21 @@ const maxArtifactCommentMutations = 10000
 const maxArtifactCommentHourlyMutations = 60
 
 type artifactCommentWire struct {
-	ID            string `json:"id"`
-	Body          string `json:"body"`
-	AuthorUserID  string `json:"author_user_id"`
-	AuthorName    string `json:"author_name"`
-	AuthorAgentID string `json:"author_agent_id,omitempty"`
-	AuthorRunID   string `json:"author_run_id,omitempty"`
-	CreatedAt     string `json:"created_at"`
+	ID             string                    `json:"id"`
+	Body           string                    `json:"body"`
+	AuthorUserID   string                    `json:"author_user_id"`
+	AuthorName     string                    `json:"author_name"`
+	AuthorAgentID  string                    `json:"author_agent_id,omitempty"`
+	AuthorRunID    string                    `json:"author_run_id,omitempty"`
+	Version        int64                     `json:"version"`
+	EditedAt       string                    `json:"edited_at,omitempty"`
+	DeletedAt      string                    `json:"deleted_at,omitempty"`
+	CanEdit        bool                      `json:"can_edit"`
+	CanDelete      bool                      `json:"can_delete"`
+	CanReact       bool                      `json:"can_react"`
+	CanViewHistory bool                      `json:"can_view_history"`
+	Reactions      []artifactCommentReaction `json:"reactions"`
+	CreatedAt      string                    `json:"created_at"`
 }
 type artifactThreadWire struct {
 	ID               string                `json:"id"`
@@ -85,22 +93,54 @@ func (h *PageHandler) loadArtifactThread(ctx context.Context, pageID, threadID s
 	if err := json.Unmarshal([]byte(anchor), &v.Anchor); err != nil {
 		return nil, err
 	}
-	rows, err := q.QueryContext(ctx, `SELECT c.id,c.body,COALESCE(c.author_user_id,''),COALESCE(u.full_name,''),c.created_at,COALESCE(c.author_agent_id,''),COALESCE(c.author_run_id,'') FROM page_artifact_comments c LEFT JOIN users u ON u.id=c.author_user_id WHERE c.thread_id=? ORDER BY c.thread_version LIMIT 50`, threadID)
+	rows, err := q.QueryContext(ctx, `SELECT c.id,c.body,COALESCE(c.author_user_id,''),COALESCE(u.full_name,''),c.created_at,COALESCE(c.author_agent_id,''),COALESCE(c.author_run_id,''),c.version,COALESCE(c.edited_at,''),COALESCE(c.deleted_at,'') FROM page_artifact_comments c LEFT JOIN users u ON u.id=c.author_user_id WHERE c.thread_id=? ORDER BY c.thread_version LIMIT 50`, threadID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var c artifactCommentWire
-		if err := rows.Scan(&c.ID, &c.Body, &c.AuthorUserID, &c.AuthorName, &c.CreatedAt, &c.AuthorAgentID, &c.AuthorRunID); err != nil {
+		if err := rows.Scan(&c.ID, &c.Body, &c.AuthorUserID, &c.AuthorName, &c.CreatedAt, &c.AuthorAgentID, &c.AuthorRunID, &c.Version, &c.EditedAt, &c.DeletedAt); err != nil {
 			return nil, err
 		}
 		v.Comments = append(v.Comments, c)
 	}
-	return v, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err = h.artifactCommentDetails(ctx, pageID, v); err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 func (h *PageHandler) ListArtifactThreads(w http.ResponseWriter, r *http.Request) {
+	artifactCommentHeaders(w)
+	if !humanArtifactCommentCaller(w, r) {
+		return
+	}
+	tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		h.boardError(w, err)
+		return
+	}
+	defer tx.Rollback()
+	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
+	var role string
+	if err := tx.QueryRowContext(ctx, `SELECT m.role FROM workspace_members m JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL WHERE m.workspace_id=? AND m.user_id=?`, WorkspaceIDFromContext(ctx), UserFromContext(ctx).ID).Scan(&role); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			replyError(w, 404, "page not found")
+		} else {
+			h.boardError(w, err)
+		}
+		return
+	}
+	ctx = context.WithValue(ctx, ctxRole, role)
+	h.listArtifactThreadsSnapshot(w, r.WithContext(ctx))
+}
+func (h *PageHandler) listArtifactThreadsSnapshot(w http.ResponseWriter, r *http.Request) {
 	artifactCommentHeaders(w)
 	rec, ok := h.artifactCommentsPage(w, r, false)
 	if !ok {
@@ -399,6 +439,12 @@ func (h *PageHandler) mutateArtifactThread(w http.ResponseWriter, r *http.Reques
 		commentID = generateCUID()
 		if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_comments(id,thread_id,thread_version,body,author_user_id,created_at,author_agent_id,author_run_id) VALUES (?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''))`, commentID, threadID, applied, req.Body, user.ID, stamp, artifactAgentID(r), artifactRunID(r)); err != nil {
 			replyInternalError(w, h.logger, "save artifact comment", err)
+			return
+		}
+	}
+	if commentID != "" {
+		if err := h.recordArtifactCommentInitial(ctx, tx, rec.ID, threadID, commentID, req.Body, user.ID, artifactAgentID(r), artifactRunID(r), stamp); err != nil {
+			replyInternalError(w, h.logger, "audit initial comment", err)
 			return
 		}
 	}

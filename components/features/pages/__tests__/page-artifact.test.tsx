@@ -11,6 +11,7 @@ vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: vi.fn() }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
 vi.mock("@/hooks/use-pages", () => ({ pagesKeys: { all: (workspace: string) => ["pages", workspace] } }))
 let head = 1
+let copyable = false
 let writable = true
 let fail = 0
 let readFail = 0
@@ -25,11 +26,12 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/pages/report")
   DOMPurify.isSupported = false
   vi.mocked(useRealtimeEventSafe).mockClear()
-  head = 1; writable = true; fail = 0; readFail = 0; source = "<h1>Saved report</h1><script>alert(1)</script>"; calls.length = 0
+  head = 1; copyable = false; writable = true; fail = 0; readFail = 0; source = "<h1>Saved report</h1><script>alert(1)</script>"; calls.length = 0
   vi.mocked(apiFetch).mockImplementation(async (path, options) => {
     if (options?.method === "POST") {
       const body = JSON.parse(String(options.body)); calls.push({ path: String(path), body })
       if (fail) return new Response(JSON.stringify({ error: fail === 409 ? "artifact revision changed; reload before saving" : "denied" }), { status: fail })
+      if (String(path).includes("/copies")) return new Response(JSON.stringify({ page_slug: "private-copy", revision: 1 }), { status: 201 })
       head++; if (typeof body.html === "string") source = body.html
       return new Response(JSON.stringify({ head_rev: head, revision: head }))
     }
@@ -37,11 +39,35 @@ beforeEach(() => {
     if (String(path).includes("/threads")) return new Response(JSON.stringify({ can_comment: true, can_resolve: true, threads: [{ id: "thread1", revision: 1, status: "open", version: 1, anchor: { schema_version: 1, type: "document" }, comments: [{ id: "comment1", body: "Discuss this revision", author_user_id: "user1", author_name: "Alice", created_at: "2026-10-13T00:00:00Z" }] }] }))
     if (readFail) return new Response(JSON.stringify({ error: "Access denied" }), { status: readFail })
     const selected = new URL(String(path), "https://studio.test").searchParams.get("revision")
-    return new Response(JSON.stringify({ head_rev: head, revision: selected ? Number(selected) : head, html: source, can_write: writable, revisions: Array.from({ length: head }, (_, i) => ({ revision: i + 1, created_at: "2026-10-13T00:00:00Z", author_user_id: "user1" })) }))
+    return new Response(JSON.stringify({ head_rev: head, revision: selected ? Number(selected) : head, html: source, can_copy: copyable, can_write: writable, revisions: Array.from({ length: head }, (_, i) => ({ revision: i + 1, created_at: "2026-10-13T00:00:00Z", author_user_id: "user1" })) }))
   })
 })
 afterEach(() => { cleanup(); DOMPurify.isSupported = supported })
 describe("human page artifact", () => {
+  it("copies the selected published revision with exact uncertain retry and clears private copy UI on access loss", async () => {
+    copyable = true; head = 2; window.history.replaceState(null, "", "/pages/report?revision=1")
+    const dirty = vi.fn(); mount(dirty)
+    fireEvent.click(await screen.findByRole("button", { name: "Copy" }))
+    fireEvent.change(screen.getByLabelText("Copy name"), { target: { value: "Private copy" } })
+    fireEvent.change(screen.getByLabelText("Copy page address"), { target: { value: "private-copy" } })
+    fail = 500
+    fireEvent.click(screen.getByRole("button", { name: "Create private copy" }))
+    await screen.findByRole("button", { name: "Retry same copy" })
+    expect(screen.getByLabelText("Copy name")).toBeDisabled()
+    expect(calls[0].body.source_revision).toBe(1)
+    expect(dirty).toHaveBeenLastCalledWith(true)
+    fail = 0
+    fireEvent.click(screen.getByRole("button", { name: "Retry same copy" }))
+    await screen.findByRole("link", { name: "Open copy" })
+    expect(calls[1].body).toEqual(calls[0].body)
+    await waitFor(() => expect(dirty).toHaveBeenLastCalledWith(false))
+    readFail = 403
+    const callback = vi.mocked(useRealtimeEventSafe).mock.calls.find(call => call[0] === "page.updated")?.[1]
+    await act(async () => { (callback as (() => void))() })
+    await waitFor(() => expect(screen.queryByRole("link", { name: "Open copy" })).toBeNull())
+    expect(screen.queryByTitle("Artifact static preview")).toBeNull()
+  })
+
   it("opens a revision URL and keeps the selected immutable revision", async () => {
     window.history.replaceState(null, "", "/pages/report?revision=1")
     head = 2; mount()

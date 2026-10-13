@@ -11,6 +11,8 @@ export class PageArtifactError extends Error {
 }
 
 export interface PageArtifact {
+  can_copy?: boolean
+  copy_provenance?: { source_revision: number; source?: { page_slug: string } } | null
   head_rev: number
   revision: number
   html: string

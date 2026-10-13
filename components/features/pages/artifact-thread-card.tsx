@@ -1,12 +1,15 @@
 "use client"
 
 import { useEffect, useId, useState } from "react"
+import { ArtifactCommentItem } from "./artifact-comment-item"
 import { ArtifactSendButton, ArtifactThreadRequests } from "./artifact-agent-work"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import type { ArtifactThread, ArtifactAnchor } from "@/hooks/use-artifact-threads"
+import type { ArtifactThread, ArtifactAnchor, ArtifactCommentChange, ArtifactCommentHistory } from "@/hooks/use-artifact-threads"
 
-export function ArtifactThreadCard({ thread, currentRevision, canComment, canResolve, pending, uncertainReplies, onViewRevision, onViewAnchor, onReply, onResolve, onDirtyChange }: {
+export function ArtifactThreadCard({ thread, currentRevision, canComment, canResolve, pending, uncertainReplies, onViewRevision, onViewAnchor, onReply, onResolve, onDirtyChange, onCommentChange, onCommentHistory }: {
+  onCommentChange: (thread: ArtifactThread, change: ArtifactCommentChange) => Promise<void>
+  onCommentHistory: (threadId: string, commentId: string) => Promise<ArtifactCommentHistory[]>
   thread: ArtifactThread
   currentRevision: number
   canComment: boolean
@@ -40,16 +43,7 @@ export function ArtifactThreadCard({ thread, currentRevision, canComment, canRes
     </div>
     <ArtifactSendButton thread={thread} />
     <ol className="space-y-3">
-      {thread.comments.map(comment => <li key={comment.id} className="space-y-1">
-        <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
-          {comment.author_agent_id || comment.author_run_id ? <>
-            <span className="rounded-full bg-muted px-2 py-0.5" title={`${comment.author_agent_id ? `Agent ${comment.author_agent_id}` : "Removed agent"}${comment.author_run_id ? ` · Run ${comment.author_run_id}` : ""}`}>Agent reply</span>
-            <span title={comment.author_user_id}>On behalf of {comment.author_name || "workspace member"}</span>
-          </> : <span title={comment.author_user_id}>{comment.author_name || "Workspace member"}</span>}
-          <time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString()}</time>
-        </div>
-        <p className="whitespace-pre-wrap break-words text-sm">{comment.body}</p>
-      </li>)}
+      {thread.comments.map(comment => <ArtifactCommentItem key={comment.id} comment={comment} thread={thread} canComment={canComment} pending={pending} onChange={onCommentChange} onHistory={onCommentHistory} onDirtyChange={onDirtyChange} />)}
     </ol>
     {canComment && dirty && thread.status === "resolved" && <div className="space-y-2 rounded-md border border-warn/30 p-3"><p className="text-xs text-warn">This thread was resolved while you were writing. Reopen it to continue, or discard your reply.</p><p className="whitespace-pre-wrap text-sm">{reply}</p><Button size="sm" variant="ghost" onClick={() => setReply("")}>Discard reply draft</Button></div>}
     {canComment && thread.status === "open" && <form className="space-y-2" onSubmit={async event => {

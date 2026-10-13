@@ -201,12 +201,16 @@ Revision-bound discussion threads are stored separately from artifact source.
 Human Page commenters can start a revision-bound document or viewport-point thread and reply; editors can
 also resolve and reopen. Readers can view discussions. The `comment` grant is
 available to users, crews and the workspace, and never grants edit, production
-or agent-dispatch authority. Agent comment grants are not enabled. Thread writes require an expected version and an
+or agent-dispatch authority. Named-agent comment grants require a live verified human run and both the human’s and agent’s current comment authority. Thread writes require an expected version and an
 author-bound mutation ID, and recheck live Page rights inside the writer
 transaction. New artifact revisions preserve older threads with their original
 revision. UI drafts remain in memory, comments are escaped text, and mentions
 never start an agent or grant authority. See [the discussion API](../api-reference/pages.mdx#artifact-discussion-threads)
-for endpoint shapes and hard bounds.
+for endpoint shapes and hard bounds. A human may edit or tombstone only their own
+human-authored comment; an agent reply made on their behalf is not theirs to edit.
+Edits retain immutable private version history, readable only by the original human
+author while they still have comment access. Reactions require current comment
+access and do not grant publication or dispatch rights.
 
 Editors can explicitly **Send to agent** from the artifact or a current-revision
 thread. Only server-filtered private, unshared chats owned by that editor with an existing

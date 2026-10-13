@@ -158,6 +158,8 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/revisions", roleSelf, p.PublishArtifact)
 	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/restore", roleSelf, p.RestoreArtifact)
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/copies", roleSelf, p.CopyArtifact)
 	// openapi: query revision:integer; responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/threads", authed(wsCtx(http.HandlerFunc(p.ListArtifactThreads))))
 	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
@@ -166,6 +168,15 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/threads/{threadId}/replies", roleSelf, p.ReplyArtifactThread)
 	// openapi: responses 200,400,401,403,404,409,413,422,429,500,503
 	r.authedMut("PATCH", "/api/v1/pages/{slug}/artifact/threads/{threadId}", roleSelf, p.ResolveArtifactThread)
+	// openapi: responses 200,400,401,403,404,409,413,422,429,500
+	r.authedMut("PATCH", "/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}", roleSelf, p.EditArtifactComment)
+	// openapi: responses 200,400,401,403,404,409,429,500
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}", roleSelf, p.DeleteArtifactComment)
+	// openapi: responses 200,400,401,403,404,409,422,429,500
+	r.authedMut("PUT", "/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji}", roleSelf, p.ReactArtifactComment)
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/history", authed(wsCtx(http.HandlerFunc(p.GetArtifactCommentHistory))))
+
 	// openapi: responses 201,400,401,403,404,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/delegations", roleSelf, p.GrantArtifactRun)
 	// openapi: responses 204,401,403,404,500,503

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { ArtifactCommentError, useArtifactThreads, type ArtifactThread, type ArtifactAnchor } from "@/hooks/use-artifact-threads"
+import { ArtifactCommentError, useArtifactThreads, type ArtifactThread, type ArtifactAnchor, type ArtifactCommentChange } from "@/hooks/use-artifact-threads"
 import { ArtifactThreadCard } from "./artifact-thread-card"
 
 export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, onDirtyChange, selectedAnchor, onAnchorConsumed, onViewAnchor }: {
@@ -16,7 +16,7 @@ export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, 
   onViewAnchor?: (revision: number, anchor: ArtifactAnchor) => void
   onDirtyChange: (dirty: boolean) => void
 }) {
-  const { query, write, uncertainReplies } = useArtifactThreads(workspaceId, slug)
+  const { query, write, uncertainReplies, history } = useArtifactThreads(workspaceId, slug)
   const [body, setBody] = useState("")
   const [draftRevision, setDraftRevision] = useState<number | null>(null)
   const [draftAnchor, setDraftAnchor] = useState<ArtifactAnchor>()
@@ -40,6 +40,9 @@ export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, 
     try { await write.mutateAsync({ action: "reply", threadId: thread.id, base_version: thread.version, body: text }); return true }
     catch { return false }
   }
+  async function changeComment(thread: ArtifactThread, change: ArtifactCommentChange) {
+    await write.mutateAsync({ ...change, threadId: thread.id, base_version: thread.version })
+  }
   async function changeResolution(thread: ArtifactThread) {
     try { await write.mutateAsync({ action: "resolve", threadId: thread.id, base_version: thread.version, resolved: thread.status !== "resolved" }) }
     catch { /* Keep the failure visible without changing the thread locally. */ }
@@ -53,6 +56,7 @@ export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, 
   const previous = data.threads.filter(thread => thread.revision !== revision)
   const ordered = [...current, ...previous]
   const renderThread = (thread: ArtifactThread) => <ArtifactThreadCard
+    onCommentChange={changeComment} onCommentHistory={history}
     key={thread.id} thread={thread} currentRevision={revision}
     uncertainReplies={uncertainReplies.filter(input => input.threadId === thread.id)}
     canComment={data.can_comment} canResolve={data.can_resolve} pending={write.isPending}

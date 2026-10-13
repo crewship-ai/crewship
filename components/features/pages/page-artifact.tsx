@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Code2, Eye, History, MessageSquare, Upload, Columns2 } from "lucide-react"
+import { Code2, Eye, History, MessageSquare, Upload, Columns2, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ArtifactAgentWorkProvider, ArtifactAgentRequests, ArtifactSendButton } from "./artifact-agent-work"
 import { ArtifactComments } from "./artifact-comments"
@@ -9,6 +9,8 @@ import { ArtifactSource } from "./artifact-source"
 import { ContentPresence } from "./content-presence"
 import { ArtifactStaticPreview } from "./artifact-static-preview"
 import type { ArtifactAnchor } from "@/hooks/use-artifact-threads"
+import { ArtifactCopyDialog } from "./artifact-copy-dialog"
+import { ArtifactCopyError, useArtifactCopy } from "@/hooks/use-artifact-copy"
 import { ArtifactCompare } from "./artifact-compare"
 import { ArtifactHistory } from "./artifact-history"
 import { PageArtifactError, usePageArtifact } from "@/hooks/use-page-artifact"
@@ -19,6 +21,10 @@ const MAX_BYTES = 10 * 1024 * 1024
 export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: { workspaceId: string; slug: string; pageId?: string; onDirtyChange?: (dirty: boolean) => void }) {
   const [revision, setRevision] = useArtifactRevision()
   const { query, save } = usePageArtifact(workspaceId, slug, revision)
+  const copy = useArtifactCopy(workspaceId, slug)
+  const cancelCopy = copy.cancel
+  const [copyRevision, setCopyRevision] = useState<number | null>(null)
+  const [copyResult, setCopyResult] = useState<string | null>(null)
   const [view, setView] = useState<"preview" | "source" | "history" | "compare">("preview")
   const [pickingPoint, setPickingPoint] = useState(false)
   const [point, setPoint] = useState<{ revision: number; anchor: Extract<ArtifactAnchor, { type: "point" }> } | null>(null)
@@ -31,14 +37,17 @@ export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: {
   const [draft, setDraft] = useState<string | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
   useEffect(() => {
-    onDirtyChange?.(draft !== null || commentsDirty || agentDraftDirty)
+    onDirtyChange?.(draft !== null || commentsDirty || agentDraftDirty || copyRevision !== null)
     return () => onDirtyChange?.(false)
-  }, [draft, commentsDirty, agentDraftDirty, onDirtyChange])
+  }, [draft, commentsDirty, agentDraftDirty, copyRevision, onDirtyChange])
   const artifact = query.data
   const sourceAccessDenied = query.error instanceof PageArtifactError && [401, 403, 404].includes(query.error.status)
   useEffect(() => {
-    if (sourceAccessDenied) { setDraft(null); setCommentsDirty(false); setPoint(null); setSelectedAnchor(null); setPickingPoint(false) }
-  }, [sourceAccessDenied])
+    if (sourceAccessDenied) { setCopyRevision(null); setCopyResult(null); cancelCopy(); setDraft(null); setCommentsDirty(false); setPoint(null); setSelectedAnchor(null); setPickingPoint(false) }
+  }, [sourceAccessDenied, cancelCopy])
+  useEffect(() => {
+    if (artifact?.can_copy === false) { setCopyRevision(null); cancelCopy() }
+  }, [artifact?.can_copy, cancelCopy])
   const document = useMemo(() => artifact ? staticArtifactDocument(artifact.html) : "", [artifact])
   const error = fileError ?? save.error?.message
   async function upload(file?: File) {
@@ -70,11 +79,15 @@ export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: {
       {pageId && artifact.head_rev > 0 && <ContentPresence context={{ kind: "artifact", pageId, revision: artifact.revision }} />}
       {artifact.revisions.length > 1 && <Button variant={view === "compare" ? "secondary" : "ghost"} size="sm" className="coarse:h-12" aria-pressed={view === "compare"} onClick={() => setView("compare")}><Columns2 className="mr-1.5 h-4 w-4" />Compare</Button>}
       {artifact.head_rev > 0 && <ArtifactSendButton />}
+      {artifact.can_copy && artifact.head_rev > 0 && <Button variant="ghost" size="sm" className="coarse:h-12" onClick={() => { copy.reset(); setCopyRevision(artifact.revision) }}><Copy className="mr-1.5 h-4 w-4" />Copy</Button>}
       {artifact.head_rev > 0 && <Button variant={commentsOpen ? "secondary" : "ghost"} size="sm" className="coarse:h-12" aria-pressed={commentsOpen} onClick={() => { setCommentsVisited(true); setCommentsOpen(open => !open) }}><MessageSquare className="mr-1.5 h-4 w-4" />Comments</Button>}
       {artifact.can_write && <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted coarse:min-h-12"><Upload className="h-4 w-4" />Upload HTML<input aria-label="Upload HTML" type="file" accept=".html,.htm,text/html" className="sr-only" disabled={save.isPending} onChange={event => { void upload(event.target.files?.[0]); event.target.value = "" }} /></label>}
     </div>
     <p className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">Static preview · Scripts, navigation and external resources are disabled. Interactive artifacts are unavailable.</p>
     {query.error && <p role="alert" className="m-4 rounded-md border border-warn/30 p-3 text-sm text-warn">The artifact could not refresh. Showing the last authorized revision; drafts are preserved. <Button variant="outline" size="sm" onClick={() => void query.refetch()}>Retry artifact</Button></p>}
+    {copyResult && <p role="status" className="m-4 text-sm">Private copy created. <a className="underline" href={`/pages/${encodeURIComponent(copyResult)}`}>Open copy</a></p>}
+    {artifact.copy_provenance && <p className="border-b px-4 py-2 text-xs text-muted-foreground">Originally copied from revision {artifact.copy_provenance.source_revision}{artifact.copy_provenance.source ? <> · <a className="underline" href={`/pages/${encodeURIComponent(artifact.copy_provenance.source.page_slug)}?revision=${artifact.copy_provenance.source_revision}`}>Open original</a></> : ' · Original unavailable'}</p>}
+    {copyRevision !== null && <ArtifactCopyDialog revision={copyRevision} pending={copy.isPending} uncertain={copy.error instanceof ArtifactCopyError && copy.error.uncertain} error={copy.error?.message} onClose={() => { setCopyRevision(null); copy.reset() }} onCopy={input => { copy.mutate(input, { onSuccess: result => { setCopyResult(result.page_slug); setCopyRevision(null) } }) }} />}
     {error && <p role="alert" className="m-4 rounded-md border border-destructive/30 p-3 text-sm text-destructive">{error}<Button variant="outline" size="sm" className="ml-3" onClick={() => { void query.refetch(); save.reset(); setFileError(null) }}>Review latest revision</Button></p>}
     {artifact.head_rev === 0 && draft === null && <div className="space-y-3 p-6"><h2 className="text-base font-medium">Attach an HTML artifact</h2><p className="max-w-xl text-sm text-muted-foreground">Upload a report or paste HTML source. Each save creates an immutable revision on this page.</p>{artifact.can_write && <Button variant="outline" onClick={() => { setDraftBaseRev(artifact.head_rev); setDraft(""); setView("source") }}>Paste HTML</Button>}</div>}
     {view === "preview" && artifact.head_rev > 0 && <>

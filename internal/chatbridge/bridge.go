@@ -1225,9 +1225,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		costCancel()
 	}
 	if runErr != nil {
-		if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) || (errors.Is(runErr, orchestrator.ErrDetachedExecStopped) && ctx.Err() != context.Canceled) {
-			// Preserve partial replies for both detached outcomes. Only an
-			// unconfirmed stop remains nonterminal; a confirmed stop falls
+		if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) || errors.Is(runErr, orchestrator.ErrDetachedStillRunning) || (errors.Is(runErr, orchestrator.ErrDetachedExecStopped) && ctx.Err() != context.Canceled) {
+			// Preserve partial replies when execution observation is lost. An
+			// unconfirmed host capture or stop remains nonterminal; a confirmed stop falls
 			// through to normal failure/cancellation bookkeeping below.
 			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
 			defer cleanCancel()
@@ -1245,6 +1245,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
 			} else {
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
+			}
+			if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) {
+				b.logger.Warn("chat turn's protected host capture requires reconciliation; leaving the run nonterminal",
+					"chat_id", chatID, "run_id", runID, "error", runErr)
+				// Observer loss is not a terminal execution result, even if the
+				// request was cancelled. The retained-output projector owns it.
+				streamFn(ws.ChatEvent{Type: "done", Metadata: map[string]any{"reason": "host_capture_unconfirmed"}})
+				return nil
 			}
 			if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
 				b.logger.Warn("chat turn's exec detached after RunAgent's stop attempt; leaving the run nonterminal",

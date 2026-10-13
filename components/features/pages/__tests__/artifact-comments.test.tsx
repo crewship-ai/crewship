@@ -62,6 +62,10 @@ beforeEach(() => {
       changed = threads.find(item => path.includes(`/${item.id}/`))!
       changed.comments.push({ id: `reply${changed.comments.length}`, body: String(body.body), author_user_id: "user2", author_name: "Bob", created_at: "2026-10-13T12:01:00Z" })
       changed.version++
+    } else if (path.includes('/comments/')) {
+      changed = threads.find(item => path.includes(`/${item.id}/`))!
+      changed.comments[0].body = String(body.body)
+      changed.version++
     } else if (options.method === "PATCH") {
       changed = threads.find(item => path.endsWith(`/${item.id}`))!
       changed.status = body.resolved ? "resolved" : "open"; changed.version++
@@ -240,4 +244,20 @@ describe("artifact revision comment threads", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("fit within 4 KiB")
     expect(requests).toHaveLength(0)
   })
+})
+
+it("retries a committed edit with the same mutation and captured thread version", async () => {
+  threads = [thread()]
+  threads[0].comments[0].can_edit = true
+  mount()
+  fireEvent.click(await screen.findByRole("button", { name: "Edit comment" }))
+  fireEvent.change(screen.getByLabelText("Edit comment text"), { target: { value: "More precise" } })
+  loseCreateResponse = true
+  fireEvent.click(screen.getByRole("button", { name: "Save comment" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Retry unchanged comment update" }))
+  await waitFor(() => expect(requests).toHaveLength(2))
+  expect(requests[0]).toEqual(requests[1])
+  expect(requests[0]).toMatchObject({ method: "PATCH", path: "/api/v1/pages/report/artifact/threads/thread1/comments/comment1", body: { body: "More precise", base_version: 1 } })
+  await waitFor(() => expect(screen.queryByLabelText("Edit comment text")).toBeNull())
+  expect(threads[0].version).toBe(2)
 })

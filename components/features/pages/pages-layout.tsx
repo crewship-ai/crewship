@@ -60,6 +60,7 @@ import {
 } from "@/hooks/use-pages"
 import type { PanelState } from "@/components/features/pages/panels/types"
 import { PagesRail } from "@/components/features/pages/pages-rail"
+import { ArtifactGallery } from "./artifact-gallery"
 import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
 import { NewBoardDialog } from "./new-board-dialog"
@@ -506,7 +507,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 overflow-auto"
               >
-                <PagesOverview
+                {filters.content?.length === 1 && filters.content[0] === 'artifact' ? <ArtifactGallery pages={filtered} loading={loading} error={error} onSelect={openPage} onCreate={canCreatePage ? () => setCreatingArtifact(true) : undefined} onOpenChat={() => { window.location.assign('/chat') }} /> : <PagesOverview
                   pages={filtered}
                   allPages={pages}
                   loading={loading}
@@ -516,7 +517,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                     setFilters((f) => ({ ...f, states: togglePageFilter(f.states, state) }))
                   }
                   now={now}
-                />
+                />}
               </motion.div>
             )}
           </AnimatePresence>

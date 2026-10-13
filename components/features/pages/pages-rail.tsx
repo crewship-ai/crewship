@@ -461,8 +461,10 @@ export function PagesRail({
           panelClassName="w-[228px]"
           onClear={() => onFiltersChange(EMPTY_PAGE_FILTERS)}
         >
+          <SidebarFacet first label="Content" resetLabel="All content" resetActive={!filters.content?.length} onReset={() => onFiltersChange({ ...filters, content: [] })}>
+            {([['artifact', 'Artifacts'], ['board', 'Boards']] as const).map(([kind, label]) => <SidebarFacetOption key={kind} active={filters.content?.includes(kind) ?? false} onToggle={() => onFiltersChange({ ...filters, content: togglePageFilter(filters.content ?? [], kind) })}><span>{label}</span><Count n={pages.filter(page => kind === 'artifact' ? page.hasArtifact : page.hasBoard).length} /></SidebarFacetOption>)}
+          </SidebarFacet>
           <SidebarFacet
-            first
             label="Status"
             resetLabel="All"
             resetActive={filters.states.length === 0}
@@ -589,6 +591,7 @@ export function PagesRail({
           two multi-select facets the count badge alone cannot say WHICH picks
           are active. */}
       <SidebarActiveChips>
+        {filters.content?.map(kind => <SidebarActiveChip key={kind} onRemove={() => onFiltersChange({ ...filters, content: filters.content?.filter(value => value !== kind) })}>{kind === 'artifact' ? 'Artifacts' : 'Boards'}</SidebarActiveChip>)}
         {filters.states.map((s) => (
           <SidebarActiveChip
             key={`state-${s}`}
