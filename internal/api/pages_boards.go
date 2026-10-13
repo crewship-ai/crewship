@@ -326,7 +326,6 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &fields)
 	delete(fields, "mutation_id")
-	batchRaw, _ := json.Marshal(fields)
 	var base *int64
 	if err := json.Unmarshal(fields["base_seq"], &base); err != nil || base == nil || *base < 0 || *base >= 9007199254740991 {
 		replyError(w, 400, "explicit board sequence required")
@@ -334,7 +333,7 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	delete(fields, "placement_updates")
 	delete(fields, "placement_deletes")
-	batchRaw, _ = json.Marshal(fields)
+	batchRaw, _ := json.Marshal(fields)
 	batch := req.BoardBatch
 	batch.BaseSeq = *base
 	drawingCount := len(batch.Upserts) + len(batch.Deletes)

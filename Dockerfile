@@ -54,7 +54,7 @@ COPY public/ ./public/
 COPY config/*.json ./config/
 COPY schemas/*.json ./schemas/
 COPY e2e/ ./e2e/
-COPY scripts/prepare-pdf-assets.mjs scripts/check-control-accessibility.tsx ./scripts/
+COPY scripts/prepare-pdf-assets.mjs scripts/prepare-board-assets.mjs scripts/check-control-accessibility.tsx ./scripts/
 COPY tools/pages-build/sdk.ts ./tools/pages-build/
 ARG VERSION=dev
 ARG NEXT_PUBLIC_SENTRY_DSN=""
