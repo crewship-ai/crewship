@@ -74,6 +74,15 @@ omitted.
 
 All responses set `Cache-Control: no-store`.
 
+Limited CLI tokens cannot mint an unrestricted WebSocket ticket or enqueue
+steering text: both endpoints return `403 scoped_token_chat_unavailable` until
+scope-bearing chat authority is implemented. Unrestricted sessions/tokens and
+the global `*` scope retain access. A version marker rejects old WebSocket
+tickets that predate this gate, including cached tickets; clients must request
+a fresh ticket on reconnect. Access and refresh tokens are unchanged. Public
+journal projections omit human admission receipts and triggering-message IDs;
+their durable host records remain available for authorization.
+
 ## List references
 
 `GET /api/v1/chats/{chatId}/entity-refs`

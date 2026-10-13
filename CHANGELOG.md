@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Durable Issue references have an authorized API and CLI (#3068).** `crewship chat refs` reads bounded replacement snapshots with opaque viewer-bound cursors; `crewship operation get` exposes sanitized operation metadata. Issue revision endpoints support freshness checks. Restricted sessions and unreadable objects remain excluded. This backend surface does not yet add interactive frontend cards, deleted-object projections or dedicated entity WebSocket events.
+- **Agent Issue actions produce durable chat references (#3068).** Typed MCP tools create, update, comment on and show issues with host-verified requester authority and stable retry keys. `crewship chat refs` reads authorized replacement snapshots; `crewship operation get` exposes sanitized metadata. Issue responses include revisions and viewer actions, and human deletion retains minimal authorized receipts. Interactive frontend cards, proposals and dedicated entity WebSocket events remain follow-ups. Limited CLI tokens cannot acquire unrestricted chat authority; existing WebSocket tickets must be refreshed after this update.
 
 - **Local Linux Docker runs retain output across controller loss (#2845).** A private host helper keeps the actual CLI execution and redacted output independent of its reader. Recovery projects output and terminal results with durable acknowledgements, preserves work-generation ownership, and refuses duplicate launches. Capture has per-run and aggregate bounds and acknowledgement-based retention. Unsupported providers keep the existing transport; uncertain forced stops retain reconciliation rather than report completion.
 

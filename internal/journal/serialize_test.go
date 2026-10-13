@@ -46,3 +46,31 @@ func TestSerializeEntriesEmptyArray(t *testing.T) {
 		}
 	}
 }
+
+func TestSerializeEntryKeepsHostAuthorityOutOfPublicFeeds(t *testing.T) {
+	payload := map[string]any{
+		"human_authority":    map[string]any{"user_id": "private-user"},
+		"trigger_message_id": "private-message", "chat_id": "private-chat",
+		"host_admitted": true, "trigger_type": "USER",
+	}
+	e := Entry{Type: EntryRunStarted, Payload: payload}
+	wire, err := json.Marshal(SerializeEntry(e))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(wire, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	public := parsed["payload"].(map[string]any)
+	if len(public) != 1 || public["trigger_type"] != "USER" {
+		t.Fatalf("private admission leaked: %s", wire)
+	}
+	if len(payload) != 5 || payload["human_authority"] == nil {
+		t.Fatal("serialization altered persisted host authority")
+	}
+	privateOnly := Entry{Payload: map[string]any{"human_authority": payload["human_authority"], "chat_id": "private-chat"}}
+	if _, exists := SerializeEntry(privateOnly)["payload"]; exists {
+		t.Fatal("empty public payload must be omitted")
+	}
+}

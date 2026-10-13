@@ -1,6 +1,9 @@
 package journal
 
-import "time"
+import (
+	"maps"
+	"time"
+)
 
 // SerializeEntry turns one Entry into the JSON-friendly map that both the
 // SSE stream (internal/api journal handler) and the WebSocket journal
@@ -39,7 +42,19 @@ func SerializeEntry(e Entry) map[string]any {
 		row["trace_id"] = e.TraceID
 	}
 	if len(e.Payload) > 0 {
-		row["payload"] = e.Payload
+		// Run authority is durable host state, not workspace-wide feed data.
+		// Never mutate the original payload: replay and the journal hash chain
+		// must continue to see the exact persisted admission receipt.
+		payload := maps.Clone(e.Payload)
+		if _, privateOrigin := payload["human_authority"]; privateOrigin {
+			delete(payload, "chat_id")
+		}
+		delete(payload, "human_authority")
+		delete(payload, "trigger_message_id")
+		delete(payload, "host_admitted")
+		if len(payload) > 0 {
+			row["payload"] = payload
+		}
 	}
 	if len(e.Refs) > 0 {
 		row["refs"] = e.Refs
