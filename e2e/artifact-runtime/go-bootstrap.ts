@@ -1,11 +1,18 @@
 import http from 'node:http'
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { studio, runtime } from './fixture'
 
 export const artifactPreparationPath = '/api/v1/pages/runtime/artifact-preparation'
+
+export function parseGoRuntimePort(line: string): number | null {
+  const match = /^CREWSHIP_RUNTIME_READY_PORT=([1-9][0-9]{0,4})$/.exec(line)
+  if (!match || match[0] !== line) return null
+  const port = Number(match[1])
+  return port <= 65535 ? port : null
+}
 
 // Every response byte/header comes from the Go implementation, not a TS copy.
 export async function startGoArtifactBootstrap() {
@@ -23,9 +30,23 @@ export async function startGoArtifactBootstrap() {
     child.once('exit', () => { exited = true; resolve() })
     child.once('error', error => { log += error.message; exited = true; resolve() })
   })
-  child.stdout.on('data', data => { log = (log + String(data)).slice(-32768) })
+  let port = 0
+  let output = ''
+  let readinessError = ''
+  child.stdout.on('data', data => {
+    const chunk = String(data)
+    log = (log + chunk).slice(-32768)
+    output += chunk
+    if (output.length > 32768) { readinessError = 'Go bootstrap readiness output exceeds limit'; output = ''; return }
+    const lines = output.split('\n'); output = lines.pop()!
+    for (const line of lines) {
+      if (!line.startsWith('CREWSHIP_RUNTIME_READY_PORT=')) continue
+      const advertised = parseGoRuntimePort(line)
+      if (advertised === null || port !== 0) readinessError = 'Go bootstrap advertised an invalid or duplicate readiness port'
+      else port = advertised
+    }
+  })
   child.stderr.on('data', data => { log = (log + String(data)).slice(-32768) })
-  let address = ''
   let closing: Promise<void> | undefined
   const waitForExit = async (milliseconds: number) => {
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -34,7 +55,13 @@ export async function startGoArtifactBootstrap() {
   }
   const close = () => {
     closing ??= (async () => {
-      if (!exited && address) await fetch(new URL('/__stop', address), { signal: AbortSignal.timeout(1000) }).catch(() => {})
+      if (!exited && port) await new Promise<void>(resolve => {
+        const request = http.get({ hostname: '127.0.0.2', port, path: '/__stop' }, response => { response.resume(); response.once('end', () => { clearTimeout(deadline); resolve() }) })
+        const deadline = setTimeout(() => request.destroy(), 1000)
+        request.once('close', () => clearTimeout(deadline))
+        request.once('error', () => resolve())
+        request.once('close', () => resolve())
+      })
       if (!exited) { child.kill('SIGTERM'); await waitForExit(1000) }
       if (!exited) { child.kill('SIGKILL'); await waitForExit(1000) }
       await rm(directory, { recursive: true, force: true })
@@ -43,16 +70,15 @@ export async function startGoArtifactBootstrap() {
     return closing
   }
   try {
-    for (let attempt = 0; attempt < 200; attempt++) {
-      try { address = await readFile(file, 'utf8'); break } catch {
-        if (exited) throw new Error(`Go bootstrap exited: ${log}`)
-        await new Promise(resolve => setTimeout(resolve, 25))
-      }
+    const deadline = Date.now() + 5000
+    while (!port && !readinessError && Date.now() < deadline) {
+      if (exited) throw new Error(`Go bootstrap exited: ${log}`)
+      await new Promise(resolve => setTimeout(resolve, 25))
     }
-    if (!address || new URL(address).pathname !== artifactPreparationPath) throw new Error(`Go bootstrap did not advertise the preparation path: ${log}`)
+    if (readinessError || !port) throw new Error(readinessError || `Go bootstrap did not announce its readiness port: ${log}`)
     return {
       response: () => new Promise<{ status: number; headers: Record<string, string>; body: string }>((resolve, reject) => {
-        const request = http.get(address, { headers: { Host: new URL(runtime).host } }, response => {
+        const request = http.get({ hostname: '127.0.0.2', port, path: artifactPreparationPath, headers: { Host: new URL(runtime).host } }, response => {
           const chunks: Buffer[] = []
           let bytes = 0
           response.on('data', chunk => {

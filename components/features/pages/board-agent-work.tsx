@@ -11,6 +11,7 @@ import { renderSelectionPreview } from '@/lib/boards/selection-preview'
 import type { BinaryFileData } from '@excalidraw/excalidraw/types'
 import { requestRunningLabel } from '@/lib/pages/request-execution'
 import { RequestExecutionDetails } from './request-execution-details'
+import { BoardDiagramSource } from './board-diagram-source'
 type FocusWorkArea = (target: BoardRequestGeometry, label: string) => void
 export function BoardAgentWork({ workspaceId, slug, board, selectedIds, disabled, onDirtyChange, files = [], onFocusWorkArea }: { workspaceId: string; slug: string; board: PageBoard; selectedIds: string[]; disabled: boolean; onDirtyChange?: (dirty: boolean) => void; files?: BinaryFileData[]; onFocusWorkArea?: FocusWorkArea }) {
   const requests = useBoardRequests(workspaceId, slug)
@@ -51,7 +52,7 @@ export function BoardAgentWork({ workspaceId, slug, board, selectedIds, disabled
     <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-sm font-medium">Agent work</h3><p className="text-xs text-muted-foreground">Send an explicit request. Generated diagrams need your approval before insertion.</p></div>{data?.can_dispatch && <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={disabled} onClick={() => open('diagram')}>Generate diagram</Button><Button variant="outline" size="sm" disabled={disabled || !hasSavedSelection} onClick={() => open('artifact')}>Create artifact from selection</Button></div>}</div>
     {requests.query.error && <p role="alert" className="text-sm text-warn">Could not refresh agent work. {requests.query.error.message}</p>}
     {requests.cancel.error && <p role="alert" className="text-sm text-destructive">{requests.cancel.error.message}</p>}
-    {data?.requests.map(item => <BoardRequestCard onFocusWorkArea={onFocusWorkArea} key={item.id} item={item} board={board} disabled={disabled} requests={requests} onNew={() => open(item.kind, item.instruction, item.id)} />)}
+    {data?.requests.map(item => <BoardRequestCard onFocusWorkArea={onFocusWorkArea} key={`${workspaceId}:${slug}:${item.id}`} workspaceId={workspaceId} slug={slug} item={item} board={board} disabled={disabled} requests={requests} onNew={() => open(item.kind, item.instruction, item.id)} />)}
     {data && !data.requests.length && <p className="text-xs text-muted-foreground">No agent requests for this board.</p>}
     {draft && data?.can_dispatch && <Dialog open onOpenChange={value => { if (!value && !uncertain && !requests.send.isPending) closeDraft() }}><DialogContent><DialogHeader><DialogTitle>{draft.kind === 'diagram' ? 'Generate a diagram' : 'Create an artifact from selection'}</DialogTitle><DialogDescription>The selected private chat and its agent receive your instructions and the saved selection from board sequence {draft.base_seq}. Later edits are excluded. Sending authorizes this request only.</DialogDescription></DialogHeader>
       <p className="text-xs text-muted-foreground">{draft.selected_element_ids.length} drawing elements · {draft.selected_placement_ids.length} artifact pins. {draft.kind === 'artifact' ? 'The result is a private artifact. The server pins it only if your board access and original sequence still allow it.' : 'Only plain flowchart nodes and edges are supported. No HTML, links or styling.'}</p>
@@ -71,7 +72,7 @@ export function BoardAgentWork({ workspaceId, slug, board, selectedIds, disabled
     </DialogContent></Dialog>}
   </section>
 }
-function BoardRequestCard({ item, board, disabled, requests, onNew, onFocusWorkArea }: { item: BoardAgentRequest; board: PageBoard; disabled: boolean; requests: ReturnType<typeof useBoardRequests>; onNew: () => void; onFocusWorkArea?: FocusWorkArea }) {
+function BoardRequestCard({ workspaceId, slug, item, board, disabled, requests, onNew, onFocusWorkArea }: { workspaceId: string; slug: string; item: BoardAgentRequest; board: PageBoard; disabled: boolean; requests: ReturnType<typeof useBoardRequests>; onNew: () => void; onFocusWorkArea?: FocusWorkArea }) {
   const conversion = useRef<AbortController | null>(null)
   useEffect(() => () => conversion.current?.abort(), [])
   useEffect(() => { if (disabled || !item.can_insert) conversion.current?.abort() }, [disabled, item.can_insert])
@@ -104,6 +105,7 @@ function BoardRequestCard({ item, board, disabled, requests, onNew, onFocusWorkA
     {item.result && <a className="text-sm text-primary underline" href={`/pages/${encodeURIComponent(item.result.page_slug)}?revision=${item.result.revision}`} target="_blank" rel="noopener noreferrer">{item.result.title} · Revision {item.result.revision}</a>}
     {item.pin_status === 'pinned' && <p className="text-xs text-muted-foreground">Artifact pinned to the board.</p>}
     {item.pin_status === 'created_not_pinned' && <p className="text-xs text-muted-foreground">Artifact created without a pin. {item.pin_reason}</p>}
+    {item.kind === 'diagram' && ['ready_to_insert', 'inserted', 'succeeded'].includes(item.status) && <BoardDiagramSource workspaceId={workspaceId} slug={slug} requestId={item.id} boardSeq={board.seq} status={item.status} detail={requests.detail} />}
     {item.result_seq != null && <p className="text-xs text-muted-foreground">Inserted at board sequence {item.result_seq}</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     <div className="flex flex-wrap gap-2">{onFocusWorkArea && item.target && [item.target.x, item.target.y, item.target.width, item.target.height].every(value => Number.isFinite(value) && Math.abs(value) <= 1000000) && <Button variant="outline" size="sm" className="coarse:h-12" onClick={() => onFocusWorkArea(item.target, `${item.kind === "diagram" ? "Diagram" : "Artifact"} request · ${item.status.replaceAll("_", " ")} · saved sequence ${item.base_seq}`)}>Show work area</Button>}{item.can_insert && <Button variant="outline" size="sm" disabled={disabled || preparing || requests.insert.isPending || !boardConversionSupported(requests.query.data?.converter_url)} onClick={() => void insert()}>{preparing ? 'Preparing…' : prepared ? 'Retry insertion' : 'Insert diagram'}</Button>}{item.can_cancel && <Button variant="ghost" size="sm" disabled={requests.cancel.isPending} onClick={() => requests.cancel.mutate(item.id)}>Cancel request</Button>}{['failed','cancelled'].includes(item.status) && requests.query.data?.can_dispatch && <Button variant="ghost" size="sm" disabled={disabled} onClick={onNew}>New request</Button>}{prepared && canReview && <Button variant="ghost" size="sm" onClick={() => { setPrepared(null); requests.insert.reset(); setError(null) }}>Review current board before insertion</Button>}</div>

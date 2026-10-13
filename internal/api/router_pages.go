@@ -154,6 +154,10 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/board/threads/{threadId}/comments", roleSelf, p.ReplyBoardThread)
 	// openapi: responses 200,400,401,403,404,409,413,429,500
 	r.authedMut("POST", "/api/v1/pages/{slug}/board/threads/{threadId}/resolve", roleSelf, p.ResolveBoardThread)
+	r.authedMut("PATCH", "/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}", roleSelf, p.EditBoardComment)
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}", roleSelf, p.DeleteBoardComment)
+	r.authedMut("PUT", "/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/reactions/{emoji}", roleSelf, p.ReactBoardComment)
+	r.mux.Handle("GET /api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/history", authed(wsCtx(http.HandlerFunc(p.GetBoardCommentHistory))))
 	// openapi: responses 200,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages/{slug}/board/element-permissions", authed(wsCtx(http.HandlerFunc(p.ListBoardElementPermissions))))
 	// openapi: responses 200,201,400,401,403,404,409,413,429,500

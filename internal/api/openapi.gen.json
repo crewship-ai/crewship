@@ -129891,15 +129891,65 @@
                                   "type": "string"
                                 },
                                 "body": {
-                                  "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Comments grant no agent authority.",
-                                  "minLength": 1,
                                   "type": "string"
+                                },
+                                "can_delete": {
+                                  "type": "boolean"
+                                },
+                                "can_edit": {
+                                  "type": "boolean"
+                                },
+                                "can_react": {
+                                  "type": "boolean"
+                                },
+                                "can_view_history": {
+                                  "type": "boolean"
                                 },
                                 "created_at": {
                                   "type": "string"
                                 },
+                                "deleted_at": {
+                                  "type": "string"
+                                },
+                                "edited_at": {
+                                  "type": "string"
+                                },
                                 "id": {
                                   "type": "string"
+                                },
+                                "reactions": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "count": {
+                                        "minimum": 0,
+                                        "type": "integer"
+                                      },
+                                      "emoji": {
+                                        "enum": [
+                                          "👍",
+                                          "❤️",
+                                          "👀",
+                                          "✅"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "reacted_by_me": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": [
+                                      "emoji",
+                                      "count",
+                                      "reacted_by_me"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "version": {
+                                  "minimum": 1,
+                                  "type": "integer"
                                 }
                               },
                               "required": [
@@ -129907,7 +129957,13 @@
                                 "body",
                                 "author_user_id",
                                 "author_name",
-                                "created_at"
+                                "created_at",
+                                "version",
+                                "can_edit",
+                                "can_delete",
+                                "can_view_history",
+                                "can_react",
+                                "reactions"
                               ],
                               "type": "object"
                             },
@@ -130309,15 +130365,65 @@
                             "type": "string"
                           },
                           "body": {
-                            "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Comments grant no agent authority.",
-                            "minLength": 1,
                             "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
                           },
                           "created_at": {
                             "type": "string"
                           },
+                          "deleted_at": {
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "count": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "minimum": 1,
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -130325,7 +130431,13 @@
                           "body",
                           "author_user_id",
                           "author_name",
-                          "created_at"
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_view_history",
+                          "can_react",
+                          "reactions"
                         ],
                         "type": "object"
                       },
@@ -130502,15 +130614,65 @@
                             "type": "string"
                           },
                           "body": {
-                            "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Comments grant no agent authority.",
-                            "minLength": 1,
                             "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
                           },
                           "created_at": {
                             "type": "string"
                           },
+                          "deleted_at": {
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "count": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "minimum": 1,
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -130518,7 +130680,13 @@
                           "body",
                           "author_user_id",
                           "author_name",
-                          "created_at"
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_view_history",
+                          "can_react",
+                          "reactions"
                         ],
                         "type": "object"
                       },
@@ -130911,15 +131079,65 @@
                             "type": "string"
                           },
                           "body": {
-                            "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Comments grant no agent authority.",
-                            "minLength": 1,
                             "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
                           },
                           "created_at": {
                             "type": "string"
                           },
+                          "deleted_at": {
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "count": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "minimum": 1,
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -130927,7 +131145,13 @@
                           "body",
                           "author_user_id",
                           "author_name",
-                          "created_at"
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_view_history",
+                          "can_react",
+                          "reactions"
                         ],
                         "type": "object"
                       },
@@ -131104,15 +131328,65 @@
                             "type": "string"
                           },
                           "body": {
-                            "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Comments grant no agent authority.",
-                            "minLength": 1,
                             "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
                           },
                           "created_at": {
                             "type": "string"
                           },
+                          "deleted_at": {
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "count": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "minimum": 1,
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -131120,7 +131394,13 @@
                           "body",
                           "author_user_id",
                           "author_name",
-                          "created_at"
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_view_history",
+                          "can_react",
+                          "reactions"
                         ],
                         "type": "object"
                       },
@@ -131339,6 +131619,1283 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}": {
+      "delete": {
+        "description": "Delete page board thread comment (DELETE /api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}).",
+        "operationId": "delete_api_v1_pages_slug_board_threads_threadId_comments_commentId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "commentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "threadId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "mutation_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "base_version",
+                  "mutation_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "anchor": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "board_seq": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "board"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "board_seq"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "board_seq": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "element_id": {
+                              "type": "string"
+                            },
+                            "element_rev": {
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "snapshot": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "angle": {
+                                  "type": "number"
+                                },
+                                "element_type": {
+                                  "type": "string"
+                                },
+                                "height": {
+                                  "type": "number"
+                                },
+                                "width": {
+                                  "type": "number"
+                                },
+                                "x": {
+                                  "type": "number"
+                                },
+                                "y": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "x",
+                                "y",
+                                "width",
+                                "height",
+                                "angle",
+                                "element_type"
+                              ],
+                              "type": "object"
+                            },
+                            "type": {
+                              "enum": [
+                                "board-element"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "board_seq",
+                            "element_id",
+                            "element_rev",
+                            "snapshot"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "applied_version": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "comments": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "author_name": {
+                            "type": "string"
+                          },
+                          "author_user_id": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "deleted_at": {
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "count": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "minimum": 1,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "body",
+                          "author_user_id",
+                          "author_name",
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_view_history",
+                          "can_react",
+                          "reactions"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "created_by_name": {
+                      "type": "string"
+                    },
+                    "created_by_user_id": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "resolved_at": {
+                      "type": "string"
+                    },
+                    "resolved_by_user_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "open",
+                        "resolved"
+                      ],
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "anchor",
+                    "status",
+                    "version",
+                    "created_by_user_id",
+                    "created_by_name",
+                    "created_at",
+                    "updated_at",
+                    "comments"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete page board thread comment",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      },
+      "patch": {
+        "description": "Update page board thread comment (PATCH /api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}).",
+        "operationId": "patch_api_v1_pages_slug_board_threads_threadId_comments_commentId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "commentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "threadId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "body": {
+                    "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Comments grant no agent authority.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "mutation_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "base_version",
+                  "mutation_id",
+                  "body"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "anchor": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "board_seq": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "board"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "board_seq"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "board_seq": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "element_id": {
+                              "type": "string"
+                            },
+                            "element_rev": {
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "snapshot": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "angle": {
+                                  "type": "number"
+                                },
+                                "element_type": {
+                                  "type": "string"
+                                },
+                                "height": {
+                                  "type": "number"
+                                },
+                                "width": {
+                                  "type": "number"
+                                },
+                                "x": {
+                                  "type": "number"
+                                },
+                                "y": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "x",
+                                "y",
+                                "width",
+                                "height",
+                                "angle",
+                                "element_type"
+                              ],
+                              "type": "object"
+                            },
+                            "type": {
+                              "enum": [
+                                "board-element"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "board_seq",
+                            "element_id",
+                            "element_rev",
+                            "snapshot"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "applied_version": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "comments": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "author_name": {
+                            "type": "string"
+                          },
+                          "author_user_id": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "deleted_at": {
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "count": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "minimum": 1,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "body",
+                          "author_user_id",
+                          "author_name",
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_view_history",
+                          "can_react",
+                          "reactions"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "created_by_name": {
+                      "type": "string"
+                    },
+                    "created_by_user_id": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "resolved_at": {
+                      "type": "string"
+                    },
+                    "resolved_by_user_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "open",
+                        "resolved"
+                      ],
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "anchor",
+                    "status",
+                    "version",
+                    "created_by_user_id",
+                    "created_by_name",
+                    "created_at",
+                    "updated_at",
+                    "comments"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update page board thread comment",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/history": {
+      "get": {
+        "description": "Get page board thread comment history (GET /api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/history).",
+        "operationId": "get_api_v1_pages_slug_board_threads_threadId_comments_commentId_history",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "commentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "threadId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "history": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "action": {
+                            "enum": [
+                              "create",
+                              "edit",
+                              "delete"
+                            ],
+                            "type": "string"
+                          },
+                          "actor_user_id": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "minimum": 1,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "version",
+                          "body",
+                          "action",
+                          "actor_user_id",
+                          "created_at"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "history"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page board thread comment history",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/reactions/{emoji}": {
+      "put": {
+        "description": "Update page board thread comment reaction (PUT /api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/reactions/{emoji}).",
+        "operationId": "put_api_v1_pages_slug_board_threads_threadId_comments_commentId_reactions_emoji",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "commentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "emoji",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "threadId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "base_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "mutation_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "base_version",
+                  "mutation_id",
+                  "active"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "anchor": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "board_seq": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "type": {
+                              "enum": [
+                                "board"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "board_seq"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "board_seq": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "element_id": {
+                              "type": "string"
+                            },
+                            "element_rev": {
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "schema_version": {
+                              "enum": [
+                                1
+                              ],
+                              "type": "integer"
+                            },
+                            "snapshot": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "angle": {
+                                  "type": "number"
+                                },
+                                "element_type": {
+                                  "type": "string"
+                                },
+                                "height": {
+                                  "type": "number"
+                                },
+                                "width": {
+                                  "type": "number"
+                                },
+                                "x": {
+                                  "type": "number"
+                                },
+                                "y": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "x",
+                                "y",
+                                "width",
+                                "height",
+                                "angle",
+                                "element_type"
+                              ],
+                              "type": "object"
+                            },
+                            "type": {
+                              "enum": [
+                                "board-element"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "type",
+                            "board_seq",
+                            "element_id",
+                            "element_rev",
+                            "snapshot"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "applied_version": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "comments": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "author_name": {
+                            "type": "string"
+                          },
+                          "author_user_id": {
+                            "type": "string"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "deleted_at": {
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "count": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "minimum": 1,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "body",
+                          "author_user_id",
+                          "author_name",
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_view_history",
+                          "can_react",
+                          "reactions"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "created_by_name": {
+                      "type": "string"
+                    },
+                    "created_by_user_id": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "resolved_at": {
+                      "type": "string"
+                    },
+                    "resolved_by_user_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "open",
+                        "resolved"
+                      ],
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "anchor",
+                    "status",
+                    "version",
+                    "created_by_user_id",
+                    "created_by_name",
+                    "created_at",
+                    "updated_at",
+                    "comments"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update page board thread comment reaction",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/pages/{slug}/board/threads/{threadId}/resolve": {
       "post": {
         "description": "Resolve page board thread (POST /api/v1/pages/{slug}/board/threads/{threadId}/resolve).",
@@ -131511,15 +133068,65 @@
                             "type": "string"
                           },
                           "body": {
-                            "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Comments grant no agent authority.",
-                            "minLength": 1,
                             "type": "string"
+                          },
+                          "can_delete": {
+                            "type": "boolean"
+                          },
+                          "can_edit": {
+                            "type": "boolean"
+                          },
+                          "can_react": {
+                            "type": "boolean"
+                          },
+                          "can_view_history": {
+                            "type": "boolean"
                           },
                           "created_at": {
                             "type": "string"
                           },
+                          "deleted_at": {
+                            "type": "string"
+                          },
+                          "edited_at": {
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string"
+                          },
+                          "reactions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "count": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "emoji": {
+                                  "enum": [
+                                    "👍",
+                                    "❤️",
+                                    "👀",
+                                    "✅"
+                                  ],
+                                  "type": "string"
+                                },
+                                "reacted_by_me": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "emoji",
+                                "count",
+                                "reacted_by_me"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "version": {
+                            "minimum": 1,
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -131527,7 +133134,13 @@
                           "body",
                           "author_user_id",
                           "author_name",
-                          "created_at"
+                          "created_at",
+                          "version",
+                          "can_edit",
+                          "can_delete",
+                          "can_view_history",
+                          "can_react",
+                          "reactions"
                         ],
                         "type": "object"
                       },

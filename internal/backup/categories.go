@@ -244,6 +244,7 @@ var TableCategory = map[string]string{
 	"page_board_write_audit":      CategoryPages,
 	"page_board_request_previews": CategoryPages,
 	"page_board_requests":         CategoryPages, "page_board_request_files": CategoryPages, "page_board_request_sources": CategoryPages,
+	"page_board_comment_history": CategoryPages, "page_board_comment_reactions": CategoryPages,
 	"page_board_threads": CategoryPages, "page_board_comments": CategoryPages, "page_board_comment_mutations": CategoryPages,
 	"page_artifact_copies":          CategoryPages,
 	"page_artifact_comment_history": CategoryPages, "page_artifact_comment_reactions": CategoryPages,

@@ -12,7 +12,7 @@ export function BoardComments({ workspaceId, slug, board, selectedElementId, onD
   onDirtyChange: (dirty: boolean) => void
   onViewAnchor?: (anchor: BoardAnchor) => void
 }) {
-  const { query, write, uncertainReplies, uncertainCreate } = useBoardThreads(workspaceId, slug)
+  const { query, write, history, uncertainReplies, uncertainCreate } = useBoardThreads(workspaceId, slug)
   const [body, setBody] = useState("")
   const [draftAnchor, setDraftAnchor] = useState<BoardAnchor | null>(null)
   const [replyDrafts, setReplyDrafts] = useState<Record<string, boolean>>({})
@@ -63,6 +63,8 @@ export function BoardComments({ workspaceId, slug, board, selectedElementId, onD
             uncertainReplies={uncertainReplies.filter(input => input.threadId === thread.id)}
             canComment={data.can_comment} canResolve={data.can_resolve} pending={write.isPending}
             onViewAnchor={onViewAnchor} onReply={reply} onDirtyChange={markReplyDirty}
+            onCommentHistory={history}
+            onCommentChange={async (item, change) => { await write.mutateAsync({ ...change, threadId: item.id, base_version: item.version }) }}
             onResolve={async item => { try { await write.mutateAsync({ action: "resolve", threadId: item.id, base_version: item.version, resolved: item.status !== "resolved" }) } catch { /* Keep error visible. */ } }} />
         })}
       </div>

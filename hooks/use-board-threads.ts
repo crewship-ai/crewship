@@ -11,6 +11,14 @@ export interface BoardComment {
   author_user_id: string
   author_name?: string
   created_at: string
+  version?: number
+  edited_at?: string
+  deleted_at?: string
+  can_edit?: boolean
+  can_delete?: boolean
+  can_view_history?: boolean
+  can_react?: boolean
+  reactions?: { emoji: string; count: number; reacted_by_me: boolean }[]
 }
 export type BoardAnchor = { schema_version: 1; type: "board"; board_seq: number } | { schema_version: 1; type: "board-element"; board_seq: number; element_id: string; element_rev: number; snapshot?: { x: number; y: number; width: number; height: number; angle: number; element_type: string } }
 
@@ -32,10 +40,13 @@ interface ThreadsResult {
 export class BoardCommentError extends Error {
   constructor(message: string, public status: number) { super(message) }
 }
+export interface BoardCommentHistory { version: number; body: string; action: string; actor_user_id: string; created_at: string }
+export type BoardCommentChange = { action: "edit"; commentId: string; body: string } | { action: "delete"; commentId: string } | { action: "react"; commentId: string; emoji: string; active: boolean }
 export type BoardReplyWrite = { action: "reply"; threadId: string; base_version: number; body: string }
 type ThreadWrite =
   | { action: "create"; body: string; anchor: BoardAnchor }
   | BoardReplyWrite
+  | (BoardCommentChange & { threadId: string; base_version: number })
   | { action: "resolve"; threadId: string; base_version: number; resolved: boolean }
 type BoardCreateWrite = Extract<ThreadWrite, { action: "create" }>
 
@@ -108,7 +119,7 @@ export function useBoardThreads(workspace: string, slug: string) {
       }
       const mutation_id = submissions.current.get(fingerprint)!.id
       let url: string
-      const method = "POST"
+      let method = "POST"
       let body: Record<string, unknown>
       if (input.action === "create") {
         url = endpoint
@@ -116,6 +127,12 @@ export function useBoardThreads(workspace: string, slug: string) {
       } else if (input.action === "reply") {
         url = `${endpoint}/${encodeURIComponent(input.threadId)}/comments`
         body = { body: input.body, base_version: input.base_version, mutation_id }
+      } else if (input.action === "edit" || input.action === "delete" || input.action === "react") {
+        url = `${endpoint}/${encodeURIComponent(input.threadId)}/comments/${encodeURIComponent(input.commentId)}`
+        method = input.action === "edit" ? "PATCH" : input.action === "delete" ? "DELETE" : "PUT"
+        body = { base_version: input.base_version, mutation_id }
+        if (input.action === "edit") body.body = input.body
+        if (input.action === "react") { url += `/reactions/${encodeURIComponent(input.emoji)}`; body.active = input.active }
       } else {
         url = `${endpoint}/${encodeURIComponent(input.threadId)}/resolve`
         body = { resolved: input.resolved, base_version: input.base_version, mutation_id }
@@ -129,15 +146,18 @@ export function useBoardThreads(workspace: string, slug: string) {
           ? "This thread changed. Refresh comments, review the latest replies, then try again. Your draft is still here."
           : result?.error ?? "Could not save the comment.", response.status)
       }
-      return response.json()
+      const result = await response.json()
+      if (!result || typeof result.id !== "string" || !Number.isSafeInteger(result.version)) throw new Error("The comment result was not confirmed. Retry the unchanged request.")
+      return result
     },
     onError: (error, input) => {
+      if (error instanceof BoardCommentError && error.status >= 400 && error.status < 500 && error.status !== 408) submissions.current.delete(fingerprintOf(input))
       if (error instanceof BoardCommentError && [401, 403, 404].includes(error.status)) { denyAccess(error); return }
       if (input.action === "create") {
-        if (!(error instanceof BoardCommentError) || error.status >= 500) setUncertainCreate(input)
+        if (!(error instanceof BoardCommentError) || error.status >= 500 || error.status === 408) setUncertainCreate(input)
         else setUncertainCreate(old => old && fingerprintOf(old) === fingerprintOf(input) ? null : old)
       }
-      if (input.action === "reply" && (!(error instanceof BoardCommentError) || error.status >= 500)) {
+      if (input.action === "reply" && (!(error instanceof BoardCommentError) || error.status >= 500 || error.status === 408)) {
         setUncertainReplies(old => [...old.filter(item => fingerprintOf(item) !== fingerprintOf(input)), input])
       }
     },
@@ -149,5 +169,16 @@ export function useBoardThreads(workspace: string, slug: string) {
       await client.invalidateQueries({ queryKey: key })
     },
   })
-  return { query: { ...query, data: accessError ? undefined : query.data, error: accessError ?? query.error }, write, uncertainReplies, uncertainCreate }
+  const history = async (threadId: string, commentId: string): Promise<BoardCommentHistory[]> => {
+    const response = await apiFetch(`${endpoint}/${encodeURIComponent(threadId)}/comments/${encodeURIComponent(commentId)}/history?${params}`, { signal: AbortSignal.timeout(20000) })
+    if (!response.ok) {
+      const error = new BoardCommentError("Comment history is unavailable.", response.status)
+      if ([401,403,404].includes(response.status)) denyAccess(error)
+      throw error
+    }
+    const result = await response.json()
+    if (!Array.isArray(result?.history)) throw new Error("Invalid comment history.")
+    return result.history
+  }
+  return { history, query: { ...query, data: accessError ? undefined : query.data, error: accessError ?? query.error }, write, uncertainReplies, uncertainCreate }
 }

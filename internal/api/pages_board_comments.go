@@ -60,19 +60,27 @@ func (h *PageHandler) loadBoardThread(ctx context.Context, pageID, threadID stri
 	if err := json.Unmarshal([]byte(anchor), &v.Anchor); err != nil {
 		return nil, err
 	}
-	rows, err := q.QueryContext(ctx, `SELECT c.id,c.body,COALESCE(c.author_user_id,''),COALESCE(u.full_name,''),c.created_at FROM page_board_comments c LEFT JOIN users u ON u.id=c.author_user_id WHERE c.thread_id=? ORDER BY c.thread_version LIMIT 50`, threadID)
+	rows, err := q.QueryContext(ctx, `SELECT c.id,c.body,COALESCE(c.author_user_id,''),COALESCE(u.full_name,''),c.created_at,c.version,COALESCE(c.edited_at,''),COALESCE(c.deleted_at,'') FROM page_board_comments c LEFT JOIN users u ON u.id=c.author_user_id WHERE c.thread_id=? ORDER BY c.thread_version LIMIT 50`, threadID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var c artifactCommentWire
-		if err := rows.Scan(&c.ID, &c.Body, &c.AuthorUserID, &c.AuthorName, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Body, &c.AuthorUserID, &c.AuthorName, &c.CreatedAt, &c.Version, &c.EditedAt, &c.DeletedAt); err != nil {
 			return nil, err
 		}
 		v.Comments = append(v.Comments, c)
 	}
-	return v, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err = h.boardCommentDetails(ctx, pageID, v); err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 func (h *PageHandler) ListBoardThreads(w http.ResponseWriter, r *http.Request) {
@@ -363,6 +371,13 @@ func (h *PageHandler) mutateBoardThread(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 	}
+	if operation == "create" || operation == "reply" {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO page_board_comment_history(id,page_id,thread_id,comment_id,version,body,action,actor_user_id,created_at) VALUES(?,?,?,?,1,?,'create',?,?)`, generateCUID(), rec.ID, threadID, commentID, req.Body, user.ID, stamp); err != nil {
+			h.boardError(w, err)
+			return
+		}
+	}
+
 	if _, err := tx.ExecContext(ctx, `INSERT INTO page_board_comment_mutations(id,page_id,thread_id,comment_id,mutation_id,request_digest,actor_user_id,operation,result_version,created_at) VALUES (?,?,?,NULLIF(?,''),?,?,?,?,?,?)`, generateCUID(), rec.ID, threadID, commentID, req.MutationID, digest, user.ID, operation, applied, stamp); err != nil {
 		replyInternalError(w, h.logger, "save comment receipt", err)
 		return

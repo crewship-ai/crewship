@@ -1,11 +1,12 @@
 "use client"
 
 import { useEffect, useId, useState } from "react"
+import { ArtifactCommentItem } from "./artifact-comment-item"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import type { BoardThread, BoardAnchor } from "@/hooks/use-board-threads"
+import type { BoardThread, BoardAnchor, BoardCommentChange, BoardCommentHistory } from "@/hooks/use-board-threads"
 
-export function BoardThreadCard({ thread, elementStatus, canComment, canResolve, pending, uncertainReplies, onViewAnchor, onReply, onResolve, onDirtyChange }: {
+export function BoardThreadCard({ thread, elementStatus, canComment, canResolve, pending, uncertainReplies, onViewAnchor, onReply, onResolve, onCommentChange, onCommentHistory, onDirtyChange }: {
   thread: BoardThread
   elementStatus?: "current" | "changed" | "deleted"
   canComment: boolean
@@ -15,6 +16,8 @@ export function BoardThreadCard({ thread, elementStatus, canComment, canResolve,
   onViewAnchor?: (anchor: BoardAnchor) => void
   onReply: (thread: BoardThread, body: string) => Promise<boolean>
   onResolve: (thread: BoardThread) => void
+  onCommentChange: (thread: BoardThread, change: BoardCommentChange) => Promise<void>
+  onCommentHistory: (threadId: string, commentId: string) => Promise<BoardCommentHistory[]>
   onDirtyChange: (id: string, dirty: boolean) => void
 }) {
   const [reply, setReply] = useState("")
@@ -38,10 +41,7 @@ export function BoardThreadCard({ thread, elementStatus, canComment, canResolve,
       {canResolve && <Button size="sm" variant="ghost" disabled={pending} className="coarse:h-12" onClick={() => onResolve(thread)}>{thread.status === "resolved" ? "Reopen thread" : "Resolve thread"}</Button>}
     </div>
     <ol className="space-y-3">
-      {thread.comments.map(comment => <li key={comment.id} className="space-y-1">
-        <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground"><span title={comment.author_user_id}>{comment.author_name || "Workspace member"}</span><time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString()}</time></div>
-        <p className="whitespace-pre-wrap break-words text-sm">{comment.body}</p>
-      </li>)}
+      {thread.comments.map(comment => <ArtifactCommentItem key={comment.id} comment={comment} thread={thread} canComment={canComment} pending={pending} onChange={onCommentChange} onHistory={onCommentHistory} onDirtyChange={onDirtyChange} />)}
     </ol>
     {canComment && dirty && thread.status === "resolved" && <div className="space-y-2 rounded-md border border-warn/30 p-3"><p className="text-xs text-warn">This thread was resolved while you were writing. Reopen it to continue, or discard your reply.</p><p className="whitespace-pre-wrap text-sm">{reply}</p><Button size="sm" variant="ghost" onClick={() => setReply("")}>Discard reply draft</Button></div>}
     {canComment && thread.status === "open" && <form className="space-y-2" onSubmit={async event => {

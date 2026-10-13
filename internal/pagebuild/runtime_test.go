@@ -1,6 +1,7 @@
 package pagebuild
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -79,6 +80,9 @@ func TestServeRuntimeBrowserHarness(t *testing.T) {
 	if err := os.WriteFile(file, []byte("http://"+listener.Addr().String()+runtimePath), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// Parent-owned stdout exposes only the bound ephemeral loopback port.
+	// Preserve the URL file protocol for existing Pages runtime consumers.
+	fmt.Printf("CREWSHIP_RUNTIME_READY_PORT=%d\n", listener.Addr().(*net.TCPAddr).Port)
 	select {
 	case <-stop:
 	case <-time.After(45 * time.Second):
