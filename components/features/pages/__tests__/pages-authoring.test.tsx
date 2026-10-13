@@ -11,6 +11,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
+vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/hooks/use-workspace")>(),
+  useWorkspace: () => ({ workspaceId: "ws-1", role: "MANAGER", capabilities: [], loading: false, error: false, workspaces: [{ id: "ws-1" }] }),
+}))
 const push = vi.fn()
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn() }),

@@ -99,7 +99,7 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
           return (
             <div key={m.workspace_id} className="border-b border-border last:border-b-0">
               <div className="flex items-center gap-3 px-4 py-2.5">
-                <WorkspaceTile id={m.workspace_id} name={m.name} />
+                <WorkspaceTile id={m.workspace_id} name={m.name} logoUrl={workspaces.find((w) => w.id === m.workspace_id)?.logo_url} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-control">{m.name}</span>
                   <span className="block truncate text-label text-muted-foreground-soft">

@@ -45,4 +45,21 @@ describe("ThemeSwitcher", () => {
     expect(screen.getByRole("radio", { name: "System" }).getAttribute("aria-checked")).toBe("true")
     expect(screen.getByRole("radio", { name: "Dark" }).getAttribute("aria-checked")).toBe("false")
   })
+
+  // The inline form for a user-menu row: same three radios, smaller box.
+  it("renders a compact size for a menu row without changing behaviour", () => {
+    const { container } = render(<ThemeSwitcher size="sm" />)
+    const group = screen.getByRole("radiogroup", { name: "Theme" })
+    expect(group.className).toContain("w-[84px]")
+    for (const radio of screen.getAllByRole("radio")) expect(radio.className).toContain("h-6")
+    fireEvent.click(screen.getByRole("radio", { name: "Light" }))
+    expect(setTheme).toHaveBeenCalledWith("light")
+    expect(container.querySelectorAll("[role=radio]")).toHaveLength(3)
+  })
+
+  it("keeps the default size unchanged", () => {
+    render(<ThemeSwitcher />)
+    expect(screen.getByRole("radiogroup", { name: "Theme" }).className).not.toContain("w-[84px]")
+    for (const radio of screen.getAllByRole("radio")) expect(radio.className).toContain("h-8")
+  })
 })

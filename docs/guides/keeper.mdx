@@ -387,31 +387,41 @@ quotes still count.
 ## The admin page, in the order it asks
 
 Everything about Keeper lives on one page, **Admin → Security**
-(`/admin/security`), which also shows the server's security posture. Its side
-panel has three groups:
+(`/admin/security`), which also shows the server's security posture. It is
+built like Admin → People & workspaces: its side panel switches between three
+views, and lists the instance settings, the activity and every workspace.
 
 - **Overview**: whether Keeper and its judge work, what needs attention (with a
-  link to fix each item), the server's deploy-time setup, the judge's recent
-  record and the last few decisions.
+  link to fix each item), how each workspace is watched, the server's
+  deploy-time setup, the judge's recent record and the last few decisions.
+- **Workspaces**: one table of how each workspace is watched — watchdog, review
+  rate, DENY alert, four-eyes as enforced, lease and judge — ending with what a
+  **new** workspace starts with. A row opens that workspace's profile with all
+  of its own settings. Tick several and the selection bar changes the
+  watchdog, alerts, lease or judge in all of them; nothing is written until a
+  preview has shown, workspace by workspace, what is overwritten.
 - **Activity**: every credential request and every Phase-2 review in one list,
-  narrowed by kind and by decision. A row opens its intent, reason, command and
-  the judge's prompt and answer, with known secret formats redacted.
-- **Settings**: one section per subject, each labelled **Instance** (applies to
-  every workspace) or **Workspace** (this one only).
+  narrowed by kind, by decision and by workspace. A row opens its intent,
+  reason, command and the judge's prompt and answer, with known secret formats
+  redacted.
 
-Every section is deep-linkable: `/admin/security?section=judge`, `?section=activity&stream=behavior`, and so on. Paste
-one into a ticket or a runbook and it lands where you meant. The old
-`/admin?tab=security`, `?tab=reviews` and `?tab=posture` links still land here.
+Every view is deep-linkable: `/admin/security?section=judge`,
+`?view=workspaces`, `?ws=<slug>` for one workspace's profile,
+`?view=activity&stream=behavior&in=<slug>`, and so on. Paste one into a ticket
+or a runbook and it lands where you meant. Older `?section=watchdog&ws=<slug>`
+links open that workspace's profile, and `/admin?tab=security`, `?tab=reviews`
+and `?tab=posture` still land here.
 
-| Section | Scope | The question |
+| Setting | Where | The question |
 |------|------|--------------|
-| **Credential judge** | Instance | What decides: model server, model, time budget, and the on/off switch. |
-| **Decision rules** | Instance | What the judge may use when it decides, and when a person confirms. |
-| **This workspace** | Workspace | …unless this workspace needs its own judge. This is where a **hosted** judge lives: Anthropic or an OpenAI-compatible endpoint, on an API key picked **by name** from your stored credentials. |
-| **Background checks** | Instance | The scheduled evaluators and the models they run on. |
-| **Watchdog** | Workspace | The behaviour monitor: off by default, and it asks nothing else until you turn it on. |
-| **Alerts & approvals** | Workspace | Who a finding reaches, and whether an escalation needs a second approver. |
-| **Credential leases** | Workspace | Whether an approval lasts or expires. |
+| **Credential judge** | Panel · Instance | What decides: model server, model, time budget, and the on/off switch. |
+| **Decision rules** | Panel · Instance | What the judge may use when it decides, and when a person confirms. |
+| **Background checks** | Panel · Instance | The scheduled evaluators and the models they run on. |
+| **New workspaces** | Panel · Instance | What a new workspace's watch starts with; existing workspaces do not change. |
+| **Judge** | Workspace profile | …unless this workspace needs its own judge. This is where a **hosted** judge lives: Anthropic or an OpenAI-compatible endpoint, on an API key picked **by name** from your stored credentials. |
+| **Watchdog** | Workspace profile | The behaviour monitor: off by default, and it asks nothing else until you turn it on. |
+| **Alerts & approvals** | Workspace profile | Who a finding reaches, and whether an escalation needs a second approver. |
+| **Credential leases** | Workspace profile | Whether an approval lasts or expires. |
 
 Changing an **Instance** section needs an instance administrator.
 

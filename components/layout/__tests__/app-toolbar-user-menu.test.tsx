@@ -25,6 +25,9 @@ vi.mock("@/hooks/use-auth", () => ({
     signOut: vi.fn().mockResolvedValue(undefined),
   }),
 }))
+// The menu reads the session list and the build when it opens; neither is
+// what these tests are about.
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: () => Promise.resolve({ ok: false, json: () => Promise.resolve(null) }) }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtime: () => ({ status: "connected" }) }))
 vi.mock("@/hooks/use-engine-status", () => ({ useEngineStatus: () => ({ status: "connected" }) }))
 vi.mock("@/hooks/use-crews-status", () => ({ useCrewsStatus: () => null }))
@@ -58,32 +61,52 @@ function openUserMenu() {
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
 }
 
-describe("AppToolbar — user menu links", () => {
+describe("AppToolbar — user menu", () => {
+  beforeEach(() => cleanup())
+
   it("shows the actual membership and workspace in the profile header", () => {
     openUserMenu()
     expect(screen.getByText("Viewer")).toBeVisible()
-    expect(screen.getByText("Example workspace")).toBeVisible()
+    expect(screen.getByText("in Example workspace")).toBeVisible()
     expect(screen.queryByText("Owner")).not.toBeInTheDocument()
     expect(screen.queryByText("Unify Technology")).not.toBeInTheDocument()
   })
-  it("offers sound settings inside the profile menu", () => {
+
+  it("states the workspace but does not switch it — the rail owns that", () => {
     openUserMenu()
-    expect(screen.getByRole("menuitem", { name: "Notification sounds" })).toHaveAttribute("href", "/settings?tab=sounds")
+    expect(screen.queryByRole("menuitem", { name: /create workspace/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: /example workspace/i })).not.toBeInTheDocument()
   })
-  beforeEach(() => cleanup())
+
+  it("keeps a compact theme switch and moves accent to Settings", () => {
+    openUserMenu()
+    expect(screen.getByRole("radiogroup", { name: "Theme" })).toBeInTheDocument()
+    expect(screen.queryByRole("radiogroup", { name: /accent/i })).not.toBeInTheDocument()
+  })
 
   it.each([
-    ["Profile & Settings", "/settings"],
-    ["Help & Support", "https://github.com/crewship-ai/crewship/issues"],
-    ["Documentation", "https://docs.crewship.ai"],
-    ["GitHub", "https://github.com/crewship-ai/crewship"],
-  ])("%s routes to %s instead of being a dead item", async (label, href) => {
+    [/^your profile: demo user$/i, "/settings?tab=profile"],
+    [/^profile & account$/i, "/settings?tab=profile"],
+    [/^sessions & cli tokens/i, "/settings?tab=sessions"],
+  ])("%s routes to %s", async (name, href) => {
     openUserMenu()
-    const item = await screen.findByRole("menuitem", { name: new RegExp(label, "i") })
-    // The item must be an anchor (asChild) carrying the destination — the
-    // bug was that these were bare <div> items with no href, so clicking
-    // them did nothing.
-    expect(item).toHaveAttribute("href", href)
+    expect(await screen.findByRole("menuitem", { name })).toHaveAttribute("href", href)
+  })
+
+  it("collects the external links under one Help & resources submenu", async () => {
+    openUserMenu()
+    expect(screen.queryByRole("menuitem", { name: /documentation/i })).not.toBeInTheDocument()
+    const sub = screen.getByRole("menuitem", { name: /help & resources/i })
+    fireEvent.pointerMove(sub)
+    fireEvent.keyDown(sub, { key: "ArrowRight" })
+    for (const [label, href] of [
+      ["Documentation", "https://docs.crewship.ai"],
+      ["What's new", "https://github.com/crewship-ai/crewship/releases"],
+      ["Report an issue", "https://github.com/crewship-ai/crewship/issues"],
+      ["GitHub", "https://github.com/crewship-ai/crewship"],
+    ]) {
+      expect(await screen.findByRole("menuitem", { name: label })).toHaveAttribute("href", href)
+    }
   })
 
   it("Log out stays actionable", async () => {

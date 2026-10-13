@@ -83,7 +83,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
             Workspace users <span className="text-muted-foreground text-sm font-normal ml-1">{members?.length ?? 0}</span>
           </h2>
           <Link
-            href="/settings?tab=members"
+            href="/settings/members"
             className="text-xs px-2.5 py-1 rounded border border-foreground/10 hover:bg-foreground/5 text-foreground/80 flex items-center gap-1.5"
           >
             <Plus className="h-3 w-3" />

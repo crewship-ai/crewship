@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -541,6 +542,27 @@ func seedTargetServer() string {
 	return cli.EffectiveServer(flagServer, flagProfile, cliCfg)
 }
 
+// seedWorkspaceName is what the demo workspace is called. Bootstrap names the
+// first workspace after its owner ("Demo User's Workspace"), which reads like
+// the personal account sign-up makes; the demo data is a company's.
+const seedWorkspaceName = "Acme Company"
+
+// nameSeedWorkspace renames the workspace a fresh bootstrap just made. Only
+// then: on a re-run the name is the operator's. A failure only warns, the
+// demo data does not depend on the name.
+func nameSeedWorkspace(client *cli.Client, workspaceID string) {
+	resp, err := client.Patch("/api/v1/workspaces/"+url.PathEscape(workspaceID), map[string]string{"name": seedWorkspaceName})
+	if err == nil {
+		err = cli.CheckError(resp)
+		resp.Body.Close()
+	}
+	if err != nil {
+		cli.PrintWarning("could not name the demo workspace " + seedWorkspaceName + ": " + err.Error())
+		return
+	}
+	fmt.Fprintf(os.Stderr, "  Named it %s\n", seedWorkspaceName)
+}
+
 func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, "", err
@@ -605,7 +627,9 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 
 		fmt.Fprintf(os.Stderr, "  Bootstrapped admin: demo@crewship.ai\n")
 		fmt.Fprintf(os.Stderr, "  Workspace: %s\n", result.WorkspaceID)
-		return cli.NewClient(server, result.CLIToken, result.WorkspaceID).WithContext(ctx), result.UserID, nil
+		client := cli.NewClient(server, result.CLIToken, result.WorkspaceID).WithContext(ctx)
+		nameSeedWorkspace(client, result.WorkspaceID)
+		return client, result.UserID, nil
 	}
 	// Fall through to auth for 409 (already initialized) or any other status
 	// whose body mentions the "already initialized" sentinel. Server currently

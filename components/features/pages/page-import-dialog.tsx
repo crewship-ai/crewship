@@ -1,5 +1,7 @@
 "use client"
 
+import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
+
 /**
  * Installing a page somebody else exported.
  *
@@ -65,6 +67,7 @@ export interface PageImportDialogProps {
 const BUNDLE_FORMATS = new Set(["crewship-page-bundle/v1", "crewship-page-bundle/v2"])
 
 export function PageImportDialog({ workspaceId, onClose, onImported }: PageImportDialogProps) {
+  const canCreatePage = usePageCreationAccess(workspaceId)
   const [bundle, setBundle] = React.useState<WirePageBundle | null>(null)
   const [fileName, setFileName] = React.useState("")
   const [slug, setSlug] = React.useState("")
@@ -145,7 +148,7 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
   const overridden = bindable.filter((r) => bind[r.ref]?.trim()).length
 
   const submit = () => {
-    if (!bundle || install.isPending) return
+    if (!bundle || install.isPending || !canCreatePage) return
     setRefusal(null)
     setUnresolved([])
     install.mutate({
@@ -261,7 +264,7 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
           will not find. Each row keeps what it is used by, because that is
           what says which panel breaks if you leave it. */}
       <CreateSurfaceRefusal
-        message={refusal}
+        message={!canCreatePage ? "You do not currently have permission to import Pages in this workspace. Your draft is preserved." : refusal}
         fields={unresolved.map((u) => ({
           field: u.ref,
           reason: u.used_by.length > 0 ? `${u.reason} (used by ${u.used_by.join(", ")})` : u.reason,
@@ -272,7 +275,7 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
         onCancel={onClose}
         primaryLabel="Install"
         primaryIcon={Wand2}
-        primaryDisabled={!bundle}
+        primaryDisabled={!bundle || !canCreatePage}
         busy={install.isPending}
         onPrimary={submit}
       />

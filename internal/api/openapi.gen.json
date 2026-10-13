@@ -15857,6 +15857,13 @@
           "id": {
             "type": "string"
           },
+          "kind": {
+            "enum": [
+              "team",
+              "personal"
+            ],
+            "type": "string"
+          },
           "logo_url": {
             "nullable": true,
             "type": "string"
@@ -15895,6 +15902,9 @@
             },
             "type": "object"
           },
+          "personal_owner_id": {
+            "type": "string"
+          },
           "preferred_language": {
             "nullable": true,
             "type": "string"
@@ -15915,6 +15925,7 @@
           "id",
           "name",
           "slug",
+          "kind",
           "created_at",
           "updated_at",
           "allow_privileged_credentials",
@@ -29057,6 +29068,9 @@
                           "workspace_id": {
                             "type": "string"
                           },
+                          "workspace_logo_url": {
+                            "type": "string"
+                          },
                           "workspace_name": {
                             "type": "string"
                           },
@@ -29274,6 +29288,9 @@
                             "type": "array"
                           },
                           "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_logo_url": {
                             "type": "string"
                           },
                           "workspace_name": {
@@ -30110,6 +30127,9 @@
                             "type": "integer"
                           },
                           "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_logo_url": {
                             "type": "string"
                           },
                           "workspace_name": {
@@ -31371,6 +31391,9 @@
                           "workspace_id": {
                             "type": "string"
                           },
+                          "workspace_logo_url": {
+                            "type": "string"
+                          },
                           "workspace_name": {
                             "type": "string"
                           },
@@ -31617,6 +31640,9 @@
                             "type": "array"
                           },
                           "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_logo_url": {
                             "type": "string"
                           },
                           "workspace_name": {
@@ -32526,6 +32552,175 @@
           }
         ],
         "summary": "Delete admin instance workspace",
+        "tags": [
+          "admin"
+        ],
+        "x-crewship-read-only": false
+      },
+      "patch": {
+        "description": "Update admin instance workspace (PATCH /api/v1/admin/instance/workspaces/{workspaceId}).",
+        "operationId": "patch_api_v1_admin_instance_workspaces_workspaceId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "slug",
+                    "kind"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update admin instance workspace",
         "tags": [
           "admin"
         ],
@@ -41771,6 +41966,9 @@
                       "id": {
                         "type": "string"
                       },
+                      "kind": {
+                        "type": "string"
+                      },
                       "last_activity_at": {
                         "nullable": true,
                         "type": "string"
@@ -41807,6 +42005,9 @@
                       },
                       "pending_invitations": {
                         "type": "integer"
+                      },
+                      "personal_owner_id": {
+                        "type": "string"
                       },
                       "preferred_language": {
                         "nullable": true,

@@ -108,6 +108,8 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("POST", "/api/v1/admin/instance/workspaces", inst.CreateWorkspace)
 	// openapi: responses 200,400,401,403,404,409,500
 	r.authedInstance("POST", "/api/v1/admin/instance/workspaces/{workspaceId}/transfer-ownership", inst.TransferOwnership)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedInstance("PATCH", "/api/v1/admin/instance/workspaces/{workspaceId}", inst.UpdateWorkspace)
 	// openapi: responses 204,400,401,403,404,500
 	r.authedInstance("DELETE", "/api/v1/admin/instance/workspaces/{workspaceId}", inst.DeleteWorkspace)
 	// openapi: responses 200,401,403,500

@@ -549,8 +549,9 @@ have no browser session to preserve, so all browser sessions are revoked.
 |---|---|---|
 | `current_password` | string | Your existing password. |
 | `new_password` | string | At least 8 characters. |
+| `revoke_cli_tokens` | boolean | Optional, default `false`. Also revoke every live CLI token of the account — including the caller's own when it authenticates with one. |
 
-**Response:** `200 OK` — `{ "success": true, "sessions_revoked": <n> }`.
+**Response:** `200 OK` — `{ "success": true, "sessions_revoked": <n>, "cli_tokens_revoked": <n> }` (`cli_tokens_revoked` is `0` unless requested).
 
 | Status | Condition |
 |---|---|

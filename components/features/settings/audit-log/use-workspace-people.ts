@@ -18,9 +18,9 @@ export function useWorkspacePeople(workspaceId: string): AuditPerson[] {
       .then((rows: unknown) => {
         if (cancelled || !Array.isArray(rows)) return
         const list = rows
-          .map((r) => (r && typeof r === "object" ? (r as { user?: { id?: string; email?: string; full_name?: string | null } }).user : null))
-          .filter((u): u is { id: string; email: string; full_name?: string | null } => Boolean(u?.id))
-          .map((u) => ({ id: u.id, label: personLabel(u.full_name, u.email ?? "") || u.email }))
+          .map((r) => (r && typeof r === "object" ? (r as { user?: { id?: string; email?: string; full_name?: string | null; avatar_url?: string | null } }).user : null))
+          .filter((u): u is { id: string; email: string; full_name?: string | null; avatar_url?: string | null } => Boolean(u?.id))
+          .map((u) => ({ id: u.id, label: personLabel(u.full_name, u.email ?? "") || u.email, avatarUrl: u.avatar_url ?? null }))
           .sort((a, b) => a.label.localeCompare(b.label))
         setPeople(list)
       })

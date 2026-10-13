@@ -9,6 +9,7 @@ package main
 //	grant <email> --workspace <slug>    PUT    /api/v1/admin/instance/workspaces/{ws}/members/{user}
 //	revoke <email> --workspace <slug>   DELETE /api/v1/admin/instance/workspaces/{ws}/members/{user}
 //	create-workspace <name>             POST   /api/v1/admin/instance/workspaces
+//	update-workspace <slug>             PATCH  /api/v1/admin/instance/workspaces/{ws}
 //	transfer <slug> --to <email>        POST   /api/v1/admin/instance/workspaces/{ws}/transfer-ownership
 //	delete-workspace <slug>             DELETE /api/v1/admin/instance/workspaces/{ws}
 //	suspend | reactivate <email>        POST   /api/v1/admin/instance/people/{user}/suspend|reactivate
@@ -241,6 +242,55 @@ owned by --owner. You are not added to it.`,
 		}
 		return resolvedFormatter(cmd).AutoHuman(out, func() {
 			fmt.Fprintf(cmd.OutOrStdout(), "Created %s (%s), owned by %s.\n", args[0], out.Slug, owner)
+		})
+	},
+}
+
+var adminInstanceUpdateWorkspaceCmd = &cobra.Command{
+	Use:   "update-workspace <slug> [--name <name>] [--kind team|personal]",
+	Short: "Rename a workspace, or mark it a team or personal workspace",
+	Long: `PATCH /api/v1/admin/instance/workspaces/{ws}. Renames any workspace on its
+owner's behalf, and says what it is for: team (shared) or personal (created at
+sign-up for one person). The slug stays.
+
+  crewship admin instance update-workspace demo-user-s-workspace-1a2b3c4d --name Demo
+  crewship admin instance update-workspace ivana-viewer-s-workspace-9f8e7d6c --kind personal`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		body := map[string]string{}
+		if cmd.Flags().Changed("name") {
+			name, _ := cmd.Flags().GetString("name")
+			body["name"] = name
+		}
+		if cmd.Flags().Changed("kind") {
+			kind, _ := cmd.Flags().GetString("kind")
+			if kind != "team" && kind != "personal" {
+				return cli.WithExitCode(errors.New("--kind must be team or personal"), cli.ExitValidation)
+			}
+			body["kind"] = kind
+		}
+		if len(body) == 0 {
+			return cli.WithExitCode(errors.New("give --name, --kind or both"), cli.ExitValidation)
+		}
+		client, err := requireAuthInstance()
+		if err != nil {
+			return err
+		}
+		ws, err := instanceWorkspace(client, args[0])
+		if err != nil {
+			return err
+		}
+		var out struct {
+			ID   string `json:"id" yaml:"id"`
+			Name string `json:"name" yaml:"name"`
+			Slug string `json:"slug" yaml:"slug"`
+			Kind string `json:"kind" yaml:"kind"`
+		}
+		if err := patchJSON(client, "/api/v1/admin/instance/workspaces/"+url.PathEscape(ws.ID), body, &out); err != nil {
+			return err
+		}
+		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) is a %s workspace named %q.\n", out.Slug, out.ID, out.Kind, out.Name)
 		})
 	},
 }
@@ -551,6 +601,8 @@ func init() {
 	_ = adminInstanceCreateWorkspaceCmd.MarkFlagRequired("slug")
 	_ = adminInstanceCreateWorkspaceCmd.MarkFlagRequired("owner")
 
+	adminInstanceUpdateWorkspaceCmd.Flags().String("name", "", "New name (2-100 characters)")
+	adminInstanceUpdateWorkspaceCmd.Flags().String("kind", "", "team or personal")
 	adminInstanceTransferCmd.Flags().String("to", "", "Email of the new owner (required)")
 	_ = adminInstanceTransferCmd.MarkFlagRequired("to")
 
@@ -568,7 +620,7 @@ func init() {
 
 	adminInstanceCmd.AddCommand(
 		adminInstanceAddPersonCmd, adminInstanceGrantCmd, adminInstanceRevokeCmd,
-		adminInstanceCreateWorkspaceCmd, adminInstanceTransferCmd, adminInstanceDeleteWorkspaceCmd,
+		adminInstanceCreateWorkspaceCmd, adminInstanceUpdateWorkspaceCmd, adminInstanceTransferCmd, adminInstanceDeleteWorkspaceCmd,
 		adminInstanceSuspendCmd, adminInstanceReactivateCmd, adminInstanceSetupLinkCmd,
 		adminInstanceAddAdminCmd, adminInstanceRemoveAdminCmd, adminInstanceAuditCmd,
 	)

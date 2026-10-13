@@ -81,7 +81,10 @@ func TestBrokerRelayEOFStopsAndRemovesAttempt(t *testing.T) {
 	done <- io.EOF
 	select {
 	case <-s.Done():
-	case <-time.After(300 * time.Millisecond):
+	// Stop allows two seconds for subprocess cleanup and then persists the
+	// result. Wait for that lifecycle, with scheduling headroom on ARM/race
+	// runners, rather than imposing an unrelated 300 ms performance limit.
+	case <-time.After(5 * time.Second):
 		t.Fatal("relay EOF left attempt running")
 	}
 	if s.Record().Status != "terminated" {

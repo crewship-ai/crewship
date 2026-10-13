@@ -33,6 +33,8 @@ export interface InstanceGovRow extends InstanceGovSettings {
   workspace_id: string
   workspace_name: string
   workspace_slug: string
+  /** The workspace's uploaded logo, when it has one. */
+  workspace_logo_url?: string | null
   /** false = never set; the row shows the instance defaults it runs on. */
   configured: boolean
   effective_second_approver?: {

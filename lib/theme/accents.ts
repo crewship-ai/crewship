@@ -20,9 +20,12 @@
 
 export const ACCENTS = [
   { id: "blue", label: "Blue", swatch: "#1E7BFE" },
+  { id: "sky", label: "Sky", swatch: "#38BDF8" },
+  { id: "teal", label: "Teal", swatch: "#0EA5C4" },
   { id: "indigo", label: "Indigo", swatch: "#6366F1" },
   { id: "violet", label: "Violet", swatch: "#8B5CF6" },
-  { id: "teal", label: "Teal", swatch: "#0EA5C4" },
+  { id: "fuchsia", label: "Fuchsia", swatch: "#D946EF" },
+  { id: "pink", label: "Pink", swatch: "#EC4899" },
   { id: "graphite", label: "Graphite", swatch: "#64748B" },
 ] as const
 
@@ -50,9 +53,30 @@ export function isAccentId(value: unknown): value is AccentId {
   return typeof value === "string" && IDS.includes(value)
 }
 
+/**
+ * The workspace's own brand colour (Settings › General › Pages appearance ›
+ * Brand accent) as the accent. Not a preset: it has no block in accents.css.
+ * Its tokens are derived from the admin's colour at runtime
+ * (lib/theme/derive-accent.ts) and painted by a <style> element that
+ * components/layout/workspace-accent.tsx keeps current. While no workspace
+ * colour is known, data-accent="workspace" matches no block and the bare
+ * :root palette — Blue — shows.
+ */
+export const WORKSPACE_ACCENT = "workspace"
+export type AccentChoice = AccentId | typeof WORKSPACE_ACCENT
+
+export function isAccentChoice(value: unknown): value is AccentChoice {
+  return value === WORKSPACE_ACCENT || isAccentId(value)
+}
+
+/** localStorage copy of the last derived workspace stylesheet, so the boot
+ *  script can paint it before the workspace list has loaded. */
+export const WORKSPACE_ACCENT_CSS_KEY = "crewship-accent-workspace-css"
+export const WORKSPACE_ACCENT_STYLE_ID = "crewship-workspace-accent"
+
 /** Paint an accent now and remember it. The default is written too, so an
  *  explicit "Blue" survives a future change of default. */
-export function applyAccent(id: AccentId): void {
+export function applyAccent(id: AccentChoice): void {
   document.documentElement.dataset.accent = id
   try {
     localStorage.setItem(ACCENT_STORAGE_KEY, id)
@@ -62,23 +86,33 @@ export function applyAccent(id: AccentId): void {
 }
 
 /** The stored accent, or the default when nothing valid is stored. */
-export function readStoredAccent(): AccentId {
+export function readStoredAccent(): AccentChoice {
   try {
     const stored = localStorage.getItem(ACCENT_STORAGE_KEY)
-    return isAccentId(stored) ? stored : DEFAULT_ACCENT
+    return isAccentChoice(stored) ? stored : DEFAULT_ACCENT
   } catch {
     return DEFAULT_ACCENT
   }
 }
 
 /**
+ * A cached workspace stylesheet is only ever our own output — two rules of
+ * custom-property declarations — and is checked to be exactly that before
+ * the boot script injects it: nothing that can load a URL or nest a rule.
+ */
+export const WORKSPACE_ACCENT_CSS_PATTERN = /^:root\[data-accent="workspace"\]\{(--brand[a-z-]*:(#[0-9A-F]{6}|rgb\(\d{1,3} \d{1,3} \d{1,3} \/ [0-9.]{1,4}\));){7}\}:root\.dark\[data-accent="workspace"\]\{(--brand[a-z-]*:(#[0-9A-F]{6}|rgb\(\d{1,3} \d{1,3} \d{1,3} \/ [0-9.]{1,4}\));){7}\}$/
+
+/**
  * Inline in <head> (app/layout.tsx) so the stored accent is on <html> before
  * first paint — otherwise every load flashes Blue. Only a registered id is
- * ever written to the attribute.
+ * ever written to the attribute; "workspace" also re-injects its cached,
+ * pattern-checked stylesheet.
  */
-export const ACCENT_BOOT_SCRIPT = `(function(){try{var a=localStorage.getItem(${scriptJSON(
+export const ACCENT_BOOT_SCRIPT = `(function(){try{var s=localStorage,a=s.getItem(${scriptJSON(
   ACCENT_STORAGE_KEY,
-)});if(${scriptJSON(IDS)}.indexOf(a)>-1)document.documentElement.setAttribute("data-accent",a)}catch(e){}})()`
+)});if(a===${scriptJSON(WORKSPACE_ACCENT)}){var c=s.getItem(${scriptJSON(WORKSPACE_ACCENT_CSS_KEY)});if(c&&${WORKSPACE_ACCENT_CSS_PATTERN.toString()}.test(c)){var e=document.createElement("style");e.id=${scriptJSON(
+  WORKSPACE_ACCENT_STYLE_ID,
+)};e.textContent=c;document.head.appendChild(e)}document.documentElement.setAttribute("data-accent",a)}else if(${scriptJSON(IDS)}.indexOf(a)>-1)document.documentElement.setAttribute("data-accent",a)}catch(e){}})()`
 
 /** JSON that stays inert inside an inline <script>: no "</script>", no line
  *  separators that end a JS string. */
