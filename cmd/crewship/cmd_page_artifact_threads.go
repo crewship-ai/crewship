@@ -71,21 +71,21 @@ func newPageArtifactThreadsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			endpoint := "/api/v1/pages/" + pagePathEscape(args[0]) + "/artifact/threads"
 			var response *http.Response
 			switch verb {
 			case "list":
+				endpoint := "/api/v1/pages/" + pagePathEscape(args[0]) + "/artifact/threads"
 				if revision > 0 {
 					endpoint += fmt.Sprintf("?revision=%d", revision)
 				}
 				response, err = client.Get(endpoint)
 			case "create":
-				response, err = client.Post(endpoint, payload)
+				response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/threads", payload)
 			case "reply":
-				response, err = client.Post(endpoint+"/"+pagePathEscape(args[1])+"/replies", payload)
+				response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/threads/"+pagePathEscape(args[1])+"/replies", payload)
 			default:
 				payload["resolved"] = verb == "resolve"
-				response, err = client.Patch(endpoint+"/"+pagePathEscape(args[1]), payload)
+				response, err = client.Patch("/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/threads/"+pagePathEscape(args[1]), payload)
 			}
 			if err != nil {
 				return err
