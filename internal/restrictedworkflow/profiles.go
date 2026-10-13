@@ -7,6 +7,11 @@ type profileExecutor interface {
 }
 
 func (s *Service) supportsProfile(profile string) bool {
+	// Navigation checks supported declaration types, not installed executors.
+	// Graph/provider authority is still validated, and no execution uses this view.
+	if s.authorityOnly {
+		return profile == "responses_text" || profile == "native_api_key"
+	}
 	if executor, ok := s.executor.(profileExecutor); ok {
 		return executor.SupportsWorkflowProfile(profile)
 	}

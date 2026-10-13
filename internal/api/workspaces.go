@@ -218,7 +218,7 @@ func (ws *workspaceResponse) fillNestedCount() {
 // GET /api/v1/workspaces
 
 func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
-	if restrictedWorkspaceDirectory(h.db, w, r) {
+	if h.restrictedWorkspaceDirectory(w, r) {
 		return
 	}
 	user := UserFromContext(r.Context())

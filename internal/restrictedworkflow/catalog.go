@@ -2,6 +2,7 @@ package restrictedworkflow
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 
 	"github.com/crewship-ai/crewship/internal/access"
@@ -23,14 +24,26 @@ type CatalogInput struct {
 }
 
 func (s *Service) Catalog(ctx context.Context, user, workspace string) ([]CatalogRoutine, error) {
+	if _, ok := s.executor.(proofExecutor); !ok {
+		return nil, ErrDenied
+	}
+	return s.authorizedCatalog(ctx, user, workspace)
+}
+
+// AuthorizedCatalog evaluates visibility without requiring an installed execution runtime.
+// It shares all membership, recipe, graph and provider-authority checks with Catalog.
+func AuthorizedCatalog(ctx context.Context, db *sql.DB, user, workspace string) ([]CatalogRoutine, error) {
+	s := &Service{db: db, providers: workflowProviderAuthority(db), authorityOnly: true}
+	return s.authorizedCatalog(ctx, user, workspace)
+}
+
+func (s *Service) authorizedCatalog(ctx context.Context, user, workspace string) ([]CatalogRoutine, error) {
 	store := access.Store{DB: s.db}
 	member, err := store.Membership(ctx, user, workspace)
 	if err != nil || member.Mode != "restricted" || manualPolicy(ctx, s.db, user, workspace) != nil {
 		return nil, ErrDenied
 	}
-	if _, ok := s.executor.(proofExecutor); !ok {
-		return nil, ErrDenied
-	}
+
 	rows, err := s.db.QueryContext(ctx, `SELECT id,slug,name FROM pipelines WHERE workspace_id=? AND status='active' AND deleted_at IS NULL ORDER BY slug`, workspace)
 	if err != nil {
 		return nil, err

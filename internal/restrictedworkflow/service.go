@@ -30,6 +30,9 @@ type proofExecutor interface {
 	ExecuteWorkflowRun(context.Context, restricteddispatch.DelegatedRunRequest, func(string, string) error) (restricteddispatch.RunProof, error)
 }
 type Service struct {
+	// authorityOnly is used exclusively by read-only navigation projections.
+	// Execution services never enable it; profile installation stays mandatory.
+	authorityOnly bool
 	db            *sql.DB
 	executor      Executor
 	providers     providerAuthority

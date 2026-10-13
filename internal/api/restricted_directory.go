@@ -54,7 +54,8 @@ func restrictedDirectory(db *sql.DB, w http.ResponseWriter, r *http.Request) boo
 	writeJSON(w, http.StatusOK, result)
 	return true
 }
-func restrictedWorkspaceDirectory(db *sql.DB, w http.ResponseWriter, r *http.Request) bool {
+func (h *WorkspaceHandler) restrictedWorkspaceDirectory(w http.ResponseWriter, r *http.Request) bool {
+	db := h.db
 	user := UserFromContext(r.Context())
 	if user == nil {
 		return false
@@ -73,10 +74,6 @@ func restrictedWorkspaceDirectory(db *sql.DB, w http.ResponseWriter, r *http.Req
 		return true
 	}
 	defer rows.Close()
-	// The account is behind the restricted allowlist whichever workspace it
-	// names, so every row carries the same session-wide answer: what the shell
-	// may offer (#2861).
-	surfaces := allowedRestrictedSurfaces()
 	result := []map[string]any{}
 	for rows.Next() {
 		var id, name, slug, role, mode string
@@ -84,12 +81,22 @@ func restrictedWorkspaceDirectory(db *sql.DB, w http.ResponseWriter, r *http.Req
 			replyError(w, http.StatusInternalServerError, "directory unavailable")
 			return true
 		}
-		result = append(result, map[string]any{"id": id, "name": name, "slug": slug, "current_user_role": role, "currentUserRole": role, "currentUserAccessMode": mode, "restricted_session": true, "restricted_surfaces": surfaces})
+		result = append(result, map[string]any{"id": id, "name": name, "slug": slug, "current_user_role": role, "currentUserRole": role, "currentUserAccessMode": mode, "restricted_session": true})
 	}
 	if rows.Err() != nil {
 		replyError(w, http.StatusInternalServerError, "directory unavailable")
 		return true
 	}
+	rows.Close()
+	for _, row := range result {
+		surfaces, e := h.memberRestrictedSurfaces(r.Context(), user.ID, row["id"].(string))
+		if e != nil {
+			replyError(w, 500, "directory unavailable")
+			return true
+		}
+		row["restricted_surfaces"] = surfaces
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, result)
 	return true
 }

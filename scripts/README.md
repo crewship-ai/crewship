@@ -133,3 +133,19 @@ looking names can have different contracts; do not consolidate on name alone.
 `TestLiveRestrictedWorkflowBrowser` synthetic fixture and a production static
 export. It exercises private routine and declared Page action forms; it must not
 be pointed at a shared development instance.
+
+`acceptance-member-navigation-browser.mjs` is called only by the opt-in
+`TestMemberNavigationBrowser` test after `pnpm build`. It serves that static
+export through the production Router against a temporary synthetic database,
+checks desktop/mobile navigation and foreground revocation, then closes the
+owned httptest server. It creates no execution runtime or Docker resources and
+must not target a shared instance. Install Playwright Chromium and preserve its
+cache path explicitly when the Go test isolates HOME:
+
+```bash
+PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_MEMBER_NAV_BROWSER=1 go test ./internal/api -run '^TestMemberNavigationBrowser$' -count=1 -timeout 6m
+```
+
+`CREWSHIP_MEMBER_NAV_OUTPUT` optionally selects the report/screenshot directory;
+the default is an OS temporary path. The fixture JSON is created with mode 0600
+and deleted by the Go test; reports contain synthetic results, not session tokens.
