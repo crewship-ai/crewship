@@ -1,5 +1,7 @@
 "use client"
 
+import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
+
 import { PageApplicationView } from "./page-application"
 
 /**
@@ -108,6 +110,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     if (isMobile) setCollapsed(true)
   }, [isMobile])
 
+  const canCreatePage = usePageCreationAccess(workspaceId)
   const [importing, setImporting] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
   const [search, setSearch] = React.useState("")
@@ -347,12 +350,12 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {/* Import sits beside New page because they are the same intent —
                 "a page that is not here yet" — and it was the one authoring
                 door that existed only as a CLI command. */}
-            <SubBarSecondary icon={Upload} onClick={() => setImporting(true)}>
+            {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
-            </SubBarSecondary>
-            <SubBarPrimary icon={FilePlus2} onClick={() => setCreating(true)}>
+            </SubBarSecondary>}
+            {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
-            </SubBarPrimary>
+            </SubBarPrimary>}
           </>
         }
       />
@@ -404,7 +407,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onFiltersChange={setFilters}
               selectedSlug={selectedSlug}
               onSelectPage={openPage}
-              onCreatePage={() => setCreating(true)}
+              onCreatePage={canCreatePage ? () => setCreating(true) : undefined}
               onToggleCollapse={() => setCollapsed(true)}
               onMovePage={(page) => setFolderDialog({ kind: "move", slug: page.slug })}
               onRemoveFromFolder={(page) => void removeFromFolder(page)}
