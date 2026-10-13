@@ -838,10 +838,10 @@ export function PagesRail({
                       New page
                     </button>
                   )}
-                  <p className="mt-2">
+                  {onCreatePage && <p className="mt-2">
                     Or author one as YAML: crewship page create --file page.yaml, then push a
                     payload to a panel.
-                  </p>
+                  </p>}
                 </>
               ) : (
                 <p>No page matches. Clear a facet above, or search for another name.</p>

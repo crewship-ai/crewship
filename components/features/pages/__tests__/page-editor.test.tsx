@@ -20,6 +20,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react"
 
+const creationAccess = vi.hoisted(() => ({allowed:true}))
+vi.mock("@/hooks/use-page-creation-access", () => ({usePageCreationAccess: () => creationAccess.allowed}))
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
 }))
@@ -591,7 +593,7 @@ function renderEditor(
   })
   vi.stubGlobal("fetch", mockFetch)
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-  render(
+  const ui = () => (
     <QueryClientProvider client={qc}>
       <PageEditor
         workspaceId="ws-1"
@@ -599,14 +601,24 @@ function renderEditor(
         onClose={vi.fn()}
         {...props}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
-  return { calls }
+  const view = render(ui())
+  return { calls, refresh: () => view.rerender(ui()) }
 }
 
 describe("<PageEditor>", () => {
+  it("blocks button and keyboard after permission loss while preserving the open draft", () => {
+    const {calls,refresh}=renderEditor({page:null},()=>okJSON({slug:"new-page"}))
+    creationAccess.allowed=false;refresh()
+    expect(screen.getByRole("button", {name:/^Create page$/})).toBeDisabled()
+    fireEvent.keyDown(screen.getByRole("dialog"), {key:"Enter",metaKey:true})
+    expect(calls.filter(c=>c.method==="POST")).toHaveLength(0)
+    expect(screen.getByTestId("editor")).toBeTruthy()
+  })
   beforeEach(() => {
     cleanup()
+    creationAccess.allowed = true
     codeProps.length = 0
     emitDocChange = null
     liveBuffer = ""

@@ -1,5 +1,7 @@
 "use client"
 
+import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
+
 import { PageApplicationView } from "./page-application"
 
 /**
@@ -112,6 +114,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     if (isMobile) setCollapsed(true)
   }, [isMobile])
 
+  const canCreatePage = usePageCreationAccess(workspaceId)
+  React.useEffect(() => { if (!canCreatePage) { setCreatingBoard(false); setCreatingArtifact(false) } }, [canCreatePage])
   const [importing, setImporting] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
   const [search, setSearch] = React.useState("")
@@ -353,18 +357,18 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {/* Import sits beside New page because they are the same intent —
                 "a page that is not here yet" — and it was the one authoring
                 door that existed only as a CLI command. */}
-            <SubBarSecondary icon={Upload} onClick={() => setImporting(true)}>
+            {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
-            </SubBarSecondary>
-            <SubBarSecondary icon={FilePlus2} onClick={() => setCreatingBoard(true)}>
+            </SubBarSecondary>}
+            {canCreatePage && <SubBarSecondary icon={FilePlus2} onClick={() => canCreatePage && setCreatingBoard(true)}>
               New board
-            </SubBarSecondary>
-            <SubBarSecondary icon={FilePlus2} onClick={() => setCreatingArtifact(true)}>
+            </SubBarSecondary>}
+            {canCreatePage && <SubBarSecondary icon={FilePlus2} onClick={() => canCreatePage && setCreatingArtifact(true)}>
               New artifact
-            </SubBarSecondary>
-            <SubBarPrimary icon={FilePlus2} onClick={() => setCreating(true)}>
+            </SubBarSecondary>}
+            {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
-            </SubBarPrimary>
+            </SubBarPrimary>}
           </>
         }
       />
@@ -416,7 +420,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onFiltersChange={setFilters}
               selectedSlug={selectedSlug}
               onSelectPage={openPage}
-              onCreatePage={() => setCreating(true)}
+              onCreatePage={canCreatePage ? () => setCreating(true) : undefined}
               onToggleCollapse={() => setCollapsed(true)}
               onMovePage={(page) => setFolderDialog({ kind: "move", slug: page.slug })}
               onRemoveFromFolder={(page) => void removeFromFolder(page)}
@@ -585,8 +589,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           existing Page's document belongs to the editor's Content section,
           beside the panels it changes. */}
       {!editing && <UnsavedWorkDialog pending={nav.pending} onDiscard={() => {}} onReturnFocus={() => viewHeadingNode.current?.focus()} />}
-      {creatingBoard && <NewBoardDialog workspaceId={workspaceId} onClose={() => setCreatingBoard(false)} onCreated={openPage} />}
-      {creatingArtifact && <NewArtifactDialog workspaceId={workspaceId} onClose={() => setCreatingArtifact(false)} onCreated={openPage} />}
+      {canCreatePage && creatingBoard && <NewBoardDialog workspaceId={workspaceId} onClose={() => setCreatingBoard(false)} onCreated={openPage} />}
+      {canCreatePage && creatingArtifact && <NewArtifactDialog workspaceId={workspaceId} onClose={() => setCreatingArtifact(false)} onCreated={openPage} />}
       {creating && (
         <PageEditor
           workspaceId={workspaceId}
