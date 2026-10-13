@@ -41,7 +41,7 @@ export function ArtifactRequestsPanel({ data, error, writeError, loading, pendin
   return <section aria-label="Agent requests" className="space-y-3 border-t p-4 md:p-6">
     <div className="flex flex-wrap items-center gap-2"><h2 className="mr-auto text-sm font-semibold">Agent requests</h2><Button size="sm" variant="ghost" className="coarse:h-12" disabled={pending} onClick={onRefresh}>Refresh requests</Button></div>
     <p className="text-xs text-muted-foreground">Explicit requests only. A thread stays open until a person resolves it. Showing up to the latest 100 requests.</p>
-    {!data.can_dispatch && <p className="text-xs text-muted-foreground">Only this artifact’s owner can send requests or cancel runs.</p>}
+    {!data.can_dispatch && <p className="text-xs text-muted-foreground">Edit permission is required to send requests or cancel runs.</p>}
     {error && <p role="alert" className="text-sm text-warn">Request status could not refresh. Showing the last authorized snapshot. {error}</p>}
     {writeError && <p role="alert" className="text-sm text-destructive">{writeError}</p>}
     {acceptedId && !data.requests.some(item => item.id === acceptedId) && <p role="status" className="text-sm" title={acceptedId}>Request accepted. Refresh to see its current status.</p>}

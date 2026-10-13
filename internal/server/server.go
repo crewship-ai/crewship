@@ -1331,12 +1331,15 @@ func newLLMProxy(cfg *config.Config, logger *slog.Logger, wsHub *ws.Hub) (*llmpr
 	}
 	if cfg.LLMProxy.Enabled && cfg.Auth.InternalToken != "" {
 		internalToken := cfg.Auth.InternalToken
+		// Credential IPC belongs to this daemon. The browser/auth origin can
+		// point at an optional development frontend that is not running.
+		internalURL := cfg.InternalAPIURL()
 		tokenSyncer = llmproxy.NewTokenSyncer(
-			tokenPool, cfg.Auth.NextjsURL, internalToken,
+			tokenPool, internalURL, internalToken,
 			cfg.LLMProxy.TokenSyncInterval, logger,
 		)
 		credMonitor = llmproxy.NewCredentialMonitor(
-			tokenPool, cfg.Auth.NextjsURL, internalToken,
+			tokenPool, internalURL, internalToken,
 			cfg.LLMProxy.HealthCheckInterval, logger,
 		)
 		credMonitor.SetOnChange(func(connID string, oldStatus, newStatus llmproxy.ConnectionStatus) {

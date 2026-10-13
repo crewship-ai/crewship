@@ -1162,10 +1162,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		"artifact_human_receipt":    info.HumanAuthority,
 		"artifact_human_message_id": humanMessageID,
 		"artifact_request_id":       msgOpt.ArtifactRequestID,
+		"board_request_id":          msgOpt.BoardRequestID,
 	}
 	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER", runMeta); err != nil {
 		b.logger.Warn("failed to create run record", "error", err)
-		if msgOpt.ArtifactRequestID != "" {
+		if msgOpt.ArtifactRequestID != "" || msgOpt.BoardRequestID != "" {
 			message := "artifact request admission failed before execution"
 			_ = b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &message, nil)
 			streamFn(ws.ChatEvent{Type: "error", Content: message})

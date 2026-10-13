@@ -72,3 +72,38 @@ func TestBoardDeletedArtifactPlaceholderDoesNotRetainBlob(t *testing.T) {
 		t.Fatalf("deleted artifact blob retained: %d %v", n, err)
 	}
 }
+
+func TestBoardRequestHistoryPinsSourceAndResultRevisions(t *testing.T) {
+	for _, kind := range []string{"source", "result"} {
+		t.Run(kind, func(t *testing.T) {
+			h, _, _, ws, user, page := artifactFixture(t)
+			execOrFatal(t, h.db, `INSERT INTO page_artifacts(page_id,head_rev) VALUES(?,200)`, page)
+			for i := 1; i <= 200; i++ {
+				execOrFatal(t, h.db, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,mutation_id,request_digest,created_at) VALUES(?,?,?,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',?,'digest','2020-01-01T00:00:00.000Z')`, fmt.Sprint("request-pin-", i), page, i, fmt.Sprint("request-pin-", i))
+			}
+			seedStorageBoardPin(t, h, ws, user, page, 1)
+			execOrFatal(t, h.db, `DELETE FROM page_board_artifact_placements`)
+			execOrFatal(t, h.db, `INSERT INTO page_board_requests(id,workspace_id,board_page_id,original_board_id,human_user_id,kind,base_seq,submission_id,fingerprint,instruction,selected_element_ids_json,selected_placement_ids_json,snapshot_json,target_json,dialect,converter_version,receipt_json,status,created_at,updated_at) VALUES('pin-job',?,'storage-board','storage-board',?,'artifact',1,'job','fingerprint','instruction','[]','[]','{}','{}','','','','succeeded','2020-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')`, ws, user)
+			if kind == "source" {
+				execOrFatal(t, h.db, `INSERT INTO page_board_request_sources(id,request_id,placement_id,source_page_id,source_revision) VALUES('job-source','pin-job','deleted-placement',?,1)`, page)
+			} else {
+				execOrFatal(t, h.db, `UPDATE page_board_requests SET result_page_id=?,result_revision=1 WHERE id='pin-job'`, page)
+			}
+			tx, err := h.db.BeginTx(t.Context(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if err = reserveArtifactRevision(t.Context(), tx, page); err != nil {
+				t.Fatal(err)
+			}
+			var n int
+			if err = tx.QueryRow(`SELECT COUNT(*) FROM page_artifact_revisions WHERE page_id=? AND revision=1`, page).Scan(&n); err != nil || n != 1 {
+				t.Fatalf("history pin lost: %d %v", n, err)
+			}
+			if err = tx.QueryRow(`SELECT COUNT(*) FROM page_artifact_revisions WHERE page_id=? AND revision=2`, page).Scan(&n); err != nil || n != 0 {
+				t.Fatalf("unpinned revision retained: %d %v", n, err)
+			}
+		})
+	}
+}

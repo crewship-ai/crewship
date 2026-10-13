@@ -35,6 +35,8 @@ func reserveArtifactRevision(ctx context.Context, tx *sql.Tx, pageID string, res
  AND r.revision != ?
  AND r.revision != (SELECT head_rev FROM page_artifacts WHERE page_id=r.page_id)
  AND NOT EXISTS(SELECT 1 FROM page_board_artifact_placements b WHERE b.source_page_id=r.page_id AND b.source_revision=r.revision)
+ AND NOT EXISTS(SELECT 1 FROM page_board_request_sources q WHERE q.source_page_id=r.page_id AND q.source_revision=r.revision)
+ AND NOT EXISTS(SELECT 1 FROM page_board_requests q WHERE q.result_page_id=r.page_id AND q.result_revision=r.revision)
  AND NOT EXISTS(SELECT 1 FROM page_artifact_threads t WHERE t.page_id=r.page_id AND t.revision=r.revision)
  AND NOT EXISTS(SELECT 1 FROM page_artifact_requests q WHERE q.page_id=r.page_id AND (q.base_rev=r.revision OR q.result_revision=r.revision))
  AND NOT EXISTS(SELECT 1 FROM page_artifact_revisions s WHERE s.page_id=r.page_id AND s.restored_from=r.revision)

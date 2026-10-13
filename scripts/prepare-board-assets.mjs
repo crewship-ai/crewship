@@ -10,3 +10,5 @@ await mkdir(target, { recursive: true })
 await cp(source, path.join(target, 'fonts'), { recursive: true })
 
 await cp(path.resolve('public/fonts/excalidraw-notices'), path.join(target, 'notices'), { recursive: true })
+
+await import("./prepare-board-converter.mjs")

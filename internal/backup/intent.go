@@ -186,6 +186,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"page_versions":                   IntentInclude,
 	"page_boards":                     IntentInclude,
 	"page_board_files":                IntentInclude,
+	"page_board_element_permissions":  IntentExcludeRuntime, // Live one-batch human-element authority is never restored.
 	"page_board_run_delegations":      IntentExcludeRuntime, // live run edit authority is never restored
 	"page_board_elements":             IntentInclude,
 	"page_board_mutations":            IntentInclude,
@@ -194,6 +195,13 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"page_artifact_mutation_receipts": IntentInclude,
 	"page_artifact_creations":         IntentInclude,
 	"page_artifact_revisions":         IntentInclude,
+	"page_board_write_audit":          IntentInclude,
+	"page_board_requests":             IntentInclude,
+	"page_board_request_files":        IntentInclude,
+	"page_board_request_sources":      IntentInclude,
+	"page_board_threads":              IntentInclude,
+	"page_board_comments":             IntentInclude,
+	"page_board_comment_mutations":    IntentInclude,
 	"page_artifact_threads":           IntentInclude,
 	"page_artifact_comments":          IntentInclude,
 	"page_artifact_comment_mutations": IntentInclude,

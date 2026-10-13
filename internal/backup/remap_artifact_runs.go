@@ -17,11 +17,13 @@ func remapArtifactCreationRuns(dump *DBDump) {
 	}
 	for _, ref := range []struct{ table, column string }{
 		{"page_artifact_creations", "run_id"},
+		{"page_board_write_audit", "actor_run_id"},
 		{"page_board_elements", "author_run_id"},
 		{"page_board_mutations", "author_run_id"},
 		{"page_artifact_revisions", "author_run_id"},
 		{"page_artifact_mutation_receipts", "author_run_id"},
 		{"page_artifact_requests", "run_id"},
+		{"page_board_requests", "run_id"},
 		{"journal_entries", "trace_id"},
 		{"eval_runs", "trace_id"},
 		{"message_feedback", "trace_id"},

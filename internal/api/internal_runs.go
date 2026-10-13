@@ -34,6 +34,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		TriggerType            string                `json:"trigger_type"`
 		Metadata               json.RawMessage       `json:"metadata"`
 		ArtifactHumanReceipt   *chataudience.Receipt `json:"artifact_human_receipt"`
+		BoardRequestID         string                `json:"board_request_id"`
 		ArtifactRequestID      string                `json:"artifact_request_id"`
 		ArtifactHumanMessageID string                `json:"artifact_human_message_id"`
 	}
@@ -110,6 +111,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 				delete(md, "artifact_human_receipt")
 				delete(md, "artifact_human_message_id")
 				delete(md, "artifact_request_id")
+				delete(md, "board_request_id")
 				payload["metadata"] = md
 			}
 		}
@@ -137,12 +139,16 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 
 	if body.ArtifactHumanReceipt != nil {
 		if err := captureArtifactChatPrincipal(r, h.db, body.ID, body.WorkspaceID, body.AgentID, agentCrewID, body.ChatID, body.ArtifactHumanMessageID, body.ArtifactHumanReceipt); err != nil {
-			if body.ArtifactRequestID != "" {
+			if body.ArtifactRequestID != "" || body.BoardRequestID != "" {
 				replyError(w, 403, "artifact human admission refused")
 				return
 			}
 			h.logger.Warn("run has no artifact publication authority", "run_id", body.ID, "error", err)
 		}
+	}
+	if body.ArtifactRequestID != "" && body.BoardRequestID != "" {
+		replyError(w, 403, "one explicit request authority required")
+		return
 	}
 	if body.ArtifactRequestID != "" {
 		if body.ArtifactHumanReceipt == nil || bindArtifactRequestRun(r, h.db, body.ArtifactRequestID, body.ID, body.ArtifactHumanReceipt) != nil {
@@ -151,6 +157,12 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if body.BoardRequestID != "" {
+		if body.ArtifactRequestID != "" || body.ArtifactHumanReceipt == nil || bindBoardRequestRun(r, h.db, body.BoardRequestID, body.ID, body.ArtifactHumanReceipt) != nil {
+			replyError(w, 403, "board request admission refused")
+			return
+		}
+	}
 	// Now flip the agent to RUNNING. Failure is debug-only because the
 	// run trace already exists — recoverOrphanedRuns will clean up.
 	if _, err := h.db.ExecContext(r.Context(),

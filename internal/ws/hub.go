@@ -28,6 +28,7 @@ import (
 type ChatMessageOption struct {
 	// Server-owned fields. The WS decoder constructs only MaxTurns and Metadata.
 	HumanAuthority    *chataudience.Receipt `json:"-"`
+	BoardRequestID    string                `json:"-"`
 	ArtifactRequestID string                `json:"-"`
 	HumanResume       bool                  `json:"-"`
 	// MaxTurns overrides the adapter agent-loop cap for this run. 0 = leave the

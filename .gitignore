@@ -230,3 +230,6 @@ __pycache__/
 /e2e/board-editor/public/
 # Generated from pinned Excalidraw package; notices are tracked separately.
 /public/excalidraw-assets/
+
+# Trusted isolated converter bundle, generated from pinned source at build time.
+/public/board-converter/
