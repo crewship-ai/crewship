@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Restricted navigation follows each member’s grants (#3072).** Chat, Routines and Pages appear only when the selected workspace membership can access their catalog; account security remains available. Switching workspaces no longer borrows another membership’s screens. A missing execution runtime does not hide otherwise authorized navigation. Open screens recheck changed access through the existing foreground polling interval.
+
 - ⚠️ **Behaviour change:** Manual schedule runs record the requesting operator and follow their current workspace execution authority (#3070).
 
 - **Local Linux Docker runs retain output across controller loss (#2845).** A private host helper keeps the actual CLI execution and redacted output independent of its reader. Recovery projects output and terminal results with durable acknowledgements, preserves work-generation ownership, and refuses duplicate launches. Capture has per-run and aggregate bounds and acknowledgement-based retention. Unsupported providers keep the existing transport; uncertain forced stops retain reconciliation rather than report completion.
