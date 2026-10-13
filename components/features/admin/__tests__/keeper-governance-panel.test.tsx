@@ -202,6 +202,8 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={false} />)
 
     fireEvent.click(await screen.findByTestId("keeper-governance-switch"))
+    // Own rules are folded until there are some.
+    fireEvent.click(screen.getByRole("button", { name: /Own rules/ }))
     fireEvent.change(screen.getByTestId("keeper-watch-spec"), {
       target: { value: "flag egress to non-allowlisted hosts" },
     })
@@ -786,7 +788,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     expect(screen.getByTestId("keeper-governance-risk")).toBeDisabled()
     expect(screen.getByTestId("keeper-governance-second-approver")).toBeDisabled()
     expect(screen.getByTestId("keeper-governance-auto-lease")).toBeDisabled()
-    expect(screen.getByTestId("keeper-watch-spec")).toBeDisabled()
+    expect(screen.getByRole("button", { name: /Own rules/ })).toBeDisabled()
     for (const id of ["keeper-watchdog-save", "keeper-findings-save", "keeper-leases-save", "keeper-gov-model-save"]) {
       expect(screen.queryByTestId(id)).not.toBeInTheDocument()
     }
@@ -851,6 +853,8 @@ describe("WatchdogCard — how much it asks for before it is on", () => {
     // turning it on, and a round-trip in the middle of one decision is a place to
     // give up.
     expect(await screen.findByTestId("keeper-watch-preset-credentials")).toBeTruthy()
+    // Own rules are one click away, folded while there are none.
+    fireEvent.click(screen.getByRole("button", { name: /Own rules/ }))
     expect(screen.getByTestId("keeper-watch-spec")).toBeTruthy()
   })
 

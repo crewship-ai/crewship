@@ -273,7 +273,12 @@ describe("the Workspaces view", () => {
     fireEvent.click(within(await screen.findByRole("table", { name: "Workspaces" })).getByRole("row", { name: "Coolify" }))
     expect(await screen.findByTestId("gov-policy")).toHaveAttribute("data-workspace", "ws-b")
     expect(screen.getByTestId("gov-judge")).toHaveAttribute("data-workspace", "ws-b")
-    expect(document.querySelector("[data-slot=workspace-security-header]")).toHaveTextContent("Watchdog off")
+    // What protects it, at a glance: a tile each, with its state.
+    const glance = screen.getByRole("region", { name: "Protection at a glance" })
+    expect(glance.querySelector("[data-tile=Watchdog]")).toHaveTextContent("Off")
+    expect(glance.querySelector("[data-tile=Findings]")).toHaveTextContent("Managers")
+    expect(glance.querySelector("[data-tile=Leases]")).toHaveTextContent("Standing")
+    expect(glance.querySelector("[data-tile=Judge]")).toHaveTextContent("Instance")
     expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Workspaces")
     expect(window.location.search).toContain("ws=coolify")
   })

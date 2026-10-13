@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import {
-  Activity as ActivityIcon, BookOpen, Brain, Building2, ChevronDown, ChevronRight, Clock, Eye, Gavel, Home, KeyRound, ListChecks,
+  Activity as ActivityIcon, Bell, BookOpen, Brain, Building2, Radar, Timer, Users, ChevronDown, ChevronRight, Clock, Eye, Gavel, Home, KeyRound, ListChecks,
   RefreshCw, Shield, Sparkles, X, type LucideIcon,
 } from "lucide-react"
 
@@ -27,7 +27,7 @@ import { SecurityActivity } from "./security-activity"
 import { useSecurity } from "./use-security"
 import { useInstanceKeeper, type InstanceGovRow } from "./use-instance-keeper"
 import { BulkGovernanceForm, DefaultsForm, type BulkSection } from "./bulk-governance"
-import { WhatsOnWhere, judgeLabel, leaseLabel, watchSummary } from "./whats-on-where"
+import { WhatsOnWhere, fourEyes, judgeLabel, leaseLabel, reviewLabel, watchSummary } from "./whats-on-where"
 import { SETTINGS, STREAMS, type DecisionFilter, type Stream } from "./security-model"
 
 const STREAM_ICON: Record<Stream, LucideIcon> = {
@@ -393,25 +393,49 @@ function WorkspaceSecurityProfile({ row, requests, serverEnabled, onSaved }: {
   const saved = React.useRef(onSaved)
   saved.current = onSaved
   const instance = React.useMemo(() => ({ row, onSaved: () => saved.current() }), [row])
-  const chip = (text: React.ReactNode, tone?: "warn" | "success") => (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-label text-muted-foreground">
-      {tone && <span className={cn("h-1.5 w-1.5 rounded-full", tone === "warn" ? "bg-warn" : "bg-success")} aria-hidden />}{text}
-    </span>
-  )
+  const presets = row.watch_presets?.length ?? 0
+  const eyes = fourEyes(row)
+  // What protects this workspace, at a glance: each tile says whether it is on
+  // and how, and opens its card below.
+  const tiles: { key: string; icon: LucideIcon; tint: string; name: string; state: string; on: boolean; value: string }[] = [
+    { key: "watchdog", icon: Radar, tint: "var(--success)", name: "Watchdog", state: row.enabled ? "On" : "Off", on: row.enabled,
+      value: row.enabled ? `${reviewLabel(row)} tool calls${presets ? ` · ${presets} check${presets === 1 ? "" : "s"}` : ""}` : "Nothing is sampled" },
+    { key: "findings", icon: Bell, tint: "var(--warn)", name: "Findings", state: row.security_contact_user_id ? "One person" : "Managers", on: true,
+      value: `DENY alert from risk ${row.deny_notify_min_risk}` },
+    { key: "findings", icon: Users, tint: "var(--info)", name: "Four-eyes", state: eyes.off ? "Off" : row.require_second_approver ? "On" : "Tier", on: !eyes.off,
+      value: eyes.off ? "One person may approve" : row.require_second_approver ? "Every escalation" : `${eyes.text} by its tier` },
+    { key: "leases", icon: Timer, tint: "var(--info)", name: "Leases", state: leaseLabel(row.auto_lease_seconds), on: row.auto_lease_seconds > 0,
+      value: row.auto_lease_seconds ? "An approval expires" : "An approval lasts until revoked" },
+    { key: "judge", icon: Gavel, tint: "var(--purple)", name: "Judge", state: row.gov_model_provider ? "Own" : "Instance", on: true,
+      value: row.gov_model_provider ? `${row.gov_model_provider} · ${row.gov_model_id}` : "The instance judge decides" },
+  ]
+  const open = (key: string) => document.getElementById(`gov-card-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
   return (
     <>
-      <section className="flex items-start gap-3 rounded-card border border-border bg-card p-4" data-slot="workspace-security-header">
+      <section className="flex items-center gap-3 rounded-card border border-border bg-card p-4" data-slot="workspace-security-header">
         <WorkspaceTile id={row.workspace_id} name={row.workspace_name} size="lg" logoUrl={row.workspace_logo_url} />
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-semibold tracking-[-0.01em]">{row.workspace_name}</h2>
-          <p className="font-mono text-micro text-muted-foreground">{row.workspace_slug}{row.configured ? "" : " · built-in settings, never changed"}</p>
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            {chip(watchSummary(row), row.enabled ? "success" : "warn")}
-            {chip(judgeLabel(row))}
-            {chip(`Lease ${leaseLabel(row.auto_lease_seconds).toLowerCase()}`)}
-            {chip(`${requests} ${requests === 1 ? "request" : "requests"}`)}
-          </div>
+          <p className="font-mono text-micro text-muted-foreground">
+            {row.workspace_slug} · {requests} {requests === 1 ? "request" : "requests"}{row.configured ? "" : " · built-in settings, never changed"}
+          </p>
         </div>
+      </section>
+      <section aria-label="Protection at a glance" data-slot="protection-glance" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {tiles.map((t) => (
+          <button key={t.name} type="button" onClick={() => open(t.key)} data-tile={t.name}
+            className="flex min-w-0 flex-col gap-2 rounded-card border border-border bg-card p-3 text-left transition-colors hover:bg-[var(--row-hover-bg)]">
+            <span className="flex items-center gap-2">
+              <span className="icon-tile inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ "--ic": t.tint } as React.CSSProperties} aria-hidden>
+                <t.icon className="h-3.5 w-3.5" />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-control font-medium">{t.name}</span>
+              <span className={cn("shrink-0 rounded-full px-1.5 py-0.5 font-mono text-micro",
+                t.on ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>{t.state}</span>
+            </span>
+            <span className="truncate text-label text-muted-foreground" title={t.value}>{t.value}</span>
+          </button>
+        ))}
       </section>
       <KeeperGovernancePanel key={`${row.workspace_id}-policy`} workspaceId={row.workspace_id} serverEnabled={serverEnabled} section="policy" instance={instance} />
       <KeeperGovernancePanel key={`${row.workspace_id}-judge`} workspaceId={row.workspace_id} serverEnabled={serverEnabled} section="judge" instance={instance} />
