@@ -32,6 +32,45 @@ const pnpmDir = "node_modules/.pnpm";
 // Adding an entry requires citing where the declaration is observable and a
 // review note; versions not listed here fail hard.
 const EXCEPTIONS = {
+  // Excalidraw 0.18.1 integration: exact installed package declarations
+  // verified; npm tarballs omit root license files. Full upstream MIT texts
+  // and attribution are retained in THIRD-PARTY-NOTICES.md.
+  "@excalidraw/excalidraw@0.18.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/primitive@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/primitive@1.1.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-arrow@1.1.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-collection@1.0.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-compose-refs@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-compose-refs@1.1.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-context@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-context@1.1.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-direction@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-dismissable-layer@1.1.5": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-focus-guards@1.1.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-focus-scope@1.1.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-id@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-id@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-popover@1.1.6": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-popper@1.2.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-portal@1.1.4": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-presence@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-presence@1.1.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-primitive@1.0.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-primitive@2.0.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-roving-focus@1.0.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-slot@1.0.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-slot@1.1.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-tabs@1.0.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-callback-ref@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-callback-ref@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-controllable-state@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-controllable-state@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-escape-keydown@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-layout-effect@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-layout-effect@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-rect@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-size@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/rect@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
   // Dependency refresh (2026-10-05): inspected the exact registry tarballs
   // linked in PR #2915 and checked their package.json license declarations.
   // None ships a package-level license text; provider-utils only includes a

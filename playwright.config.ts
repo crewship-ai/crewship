@@ -12,6 +12,7 @@ export default defineConfig({
   //   /crews?agent=<slug> + /chat/[slug] flows, then drop testIgnore.
   testIgnore: [
     "**/artifact-runtime/**", // Independent HTTPS fixture; dedicated three-engine config.
+    "**/board-editor/**", // Independent real-editor fixture; dedicated three-engine config.
     "**/smoke.spec.ts",
     "**/manual-crews-walkthrough.spec.ts",
     "**/crews-unification.spec.ts",

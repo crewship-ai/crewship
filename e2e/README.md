@@ -9,6 +9,7 @@ authenticated-server and isolated-fixture tests.
 | Configuration | Tests and prerequisites | Caller |
 | --- | --- | --- |
 | [playwright.artifact-runtime.config.ts](../playwright.artifact-runtime.config.ts) | Public HTTPS CSP/sandbox characterization; suite-owned fixture, no app or credentials; all three engines | [artifact-runtime.yml](../.github/workflows/artifact-runtime.yml) |
+| [playwright.board-editor.config.ts](../playwright.board-editor.config.ts) | Real pinned Excalidraw editor with an isolated test store: conflict/undo correction, static artifact frames, explicit placeholder export and Mermaid conversion; no product server or credentials | [artifact-runtime.yml](../.github/workflows/artifact-runtime.yml) |
 | [playwright.config.ts](../playwright.config.ts) | Main local suite with an explicit `testIgnore` list; requires an authenticated test instance | `pnpm test:e2e`, `pnpm test:e2e:ui` |
 | [playwright.pr.config.ts](../playwright.pr.config.ts) | `pr-contract.spec.ts`: authenticated desktop workflow and phone contract | [ci.yml](../.github/workflows/ci.yml), `playwright-pr` job |
 | [playwright.fresh.config.ts](../playwright.fresh.config.ts) | `onboarding-wizard.spec.ts`; disposable, never-bootstrapped database, no shared login state | `onboarding-journey` in [ci.yml](../.github/workflows/ci.yml), plus the [devcontainer workflow](../.github/workflows/e2e-devcontainer.yml) |
@@ -21,6 +22,15 @@ The three isolated UI suites serve the built static export; follow their CI
 build prerequisites when reproducing them. Their fixed ports are separate
 from the live development slots. The shared server/URL settings for the main,
 fresh, PR and nightly suites live in [playwright.shared.ts](../playwright.shared.ts).
+
+The Board editor suite instead starts its own loopback Vite fixture. Prepare
+local fonts with `node scripts/prepare-board-assets.mjs`, then run
+`pnpm exec playwright test --config=playwright.board-editor.config.ts`.
+Its deterministic in-memory store is test scaffolding: passing these tests is
+not evidence of production authorization, durable storage, or live collaboration.
+The Mermaid case exercises a trusted literal and explicit insertion; untrusted
+generation input, converter isolation and durable job idempotency require their
+own product tests before enabling that feature.
 
 ## What fails CI
 

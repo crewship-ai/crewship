@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Board editor integration is under validation (#3069).** The pinned Excalidraw editor is exercised against conflict and undo scenarios, static artifact frames and selection export. This adds the integration test foundation; Board navigation and persisted collaborative drawing are not enabled yet.
+
 - **Artifacts can be sent back to an agent for a concrete revision (#3069).** Owners select an eligible private chat, send an instruction with a saved discussion snapshot, and see the request state and published result. Cancellation blocks further publication. A live-chat control can also authorize one new private artifact. Chat execution records survive optional artifact-admission failures; agent publication still fails closed. Workspace write limits, bounded upload concurrency and source retention protect the server without stopping ordinary edits at revision 200. Restoring history does not restart old agent work.
 
 - **Pages can store versioned HTML artifacts (#3069).** Create an artifact page, upload or paste a self-contained HTML document, inspect its static preview and source, and restore an older revision as a new revision. Existing Page permissions apply; simultaneous saves cannot silently overwrite each other. Revision-bound discussion threads support replies, resolution and reopening without being lost when the source changes. Owners can explicitly delegate an existing artifact to their own live chat run; agent updates require its run token, a separate Page write grant and current human authority, and stop after revocation or run completion. Scripts and external resources stay disabled in this first preview. The chat attachment tab is now called **Files**.

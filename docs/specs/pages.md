@@ -9,6 +9,30 @@ that every feature shipped. The current custom-application contract is
 Internal research, work allocation and session evidence are maintained in
 [private context](../development/private-context.md).
 
+## Board integration foundation (not enabled)
+
+There is no production Board endpoint or editor route yet. The pinned
+Excalidraw integration is exercised in the
+[isolated browser suite](../../e2e/README.md). Its in-memory canonical store
+does not establish database durability, Page authorization or agent authority.
+
+`internal/pages/board.go` and `board_apply.go` define a bounded drawing
+profile: plain shapes, text, lines, arrows, freehand and frames. Unknown fields,
+external links, image files and arbitrary embedded content are rejected.
+An atomic batch checks the Board sequence and each element's server revision,
+then validates the complete relationship graph. Editor `version` and
+`versionNonce` never authorize overwriting a newer element. Tombstones retain
+revisions so IDs cannot be silently reused; restoring one requires its current
+revision. HTTP authentication, idempotency receipts, persistence, retention and
+artifact placements remain separate work before this model can be exposed.
+
+The editor's built-in font definitions retain CDN fallbacks even with local
+assets. The embed fixture records the blocked attempts and requires host CSP
+to stop them before external routing; it does not claim that no attempts occur.
+Artifact selection export substitutes labelled placeholders for iframe content,
+never a claimed screenshot. Full collaborative undo, delayed network delivery
+and untrusted Mermaid conversion remain release gates.
+
 ## HTML artifacts: current first slice
 
 A human-owned empty Page can hold an immutable history of HTML documents.

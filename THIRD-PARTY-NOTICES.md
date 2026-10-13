@@ -45,6 +45,42 @@ edge case. It is excluded from the automated check and listed manually below.
 
 ## Frontend (npm) dependencies
 
+### Excalidraw integration
+
+`@excalidraw/excalidraw` 0.18.1 is distributed under the MIT License,
+Copyright (c) 2020 Excalidraw. Its pinned npm package omits the root license
+file; the upstream text is retained here from
+[the tagged source](https://github.com/excalidraw/excalidraw/blob/v0.18.1/LICENSE).
+The editor also pulls in older MIT-licensed Radix UI primitives whose npm
+packages omit their license text: Copyright (c) 2022 WorkOS,
+[upstream license](https://github.com/radix-ui/primitives/blob/main/LICENSE).
+Both use the following license; exact package versions and declarations are
+recorded in the generated frontend license inventory.
+
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+> SOFTWARE.
+
+The integration fixture serves font assets locally outside the product's
+`public/` tree. Font licenses are separate from the editor's MIT license;
+production asset packaging must preserve their upstream font notices.
+
+### Package inventory
+
 The Next.js bundle embedded in the binary pulls in roughly 750 npm packages
 (production only), the vast majority MIT or ISC. The full per-package list
 is *not* committed here because it duplicates `pnpm-lock.yaml` and changes
