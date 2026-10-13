@@ -36,9 +36,9 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("Chat agent context", () => {
-  it("shows the unified Artifacts panel without a Files or configuration entry", async () => {
+  it("shows the Files panel without a configuration entry", async () => {
     renderPanel({ hideTabs: true })
-    expect(screen.getByRole("heading", { name: "Artifacts" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument()
     expect(screen.getByText("Documents and outputs for Mařena")).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: /plan.csv/ })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /AGENTS.md/ })).toBeNull()
@@ -46,13 +46,13 @@ describe("Chat agent context", () => {
     expect(screen.queryByRole("button", { name: "Files" })).toBeNull()
   })
 
-  it("switches between Artifacts and Work when the mobile rail is absent", async () => {
+  it("switches between Files and Work when the mobile rail is absent", async () => {
     renderPanel()
-    expect(screen.queryByRole("tab", { name: "Files" })).toBeNull()
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "true")
     fireEvent.click(screen.getByRole("tab", { name: "Work" }))
     expect(screen.getByRole("heading", { name: "Work" })).toBeInTheDocument()
     expect(useDrawerStore.getState().activeTab).toBe("work")
-    fireEvent.click(screen.getByRole("tab", { name: "Artifacts" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }))
     expect(await screen.findByRole("button", { name: /report.pdf/ })).toBeInTheDocument()
   })
 

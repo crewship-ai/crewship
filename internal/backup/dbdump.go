@@ -301,9 +301,11 @@ var BackupTables = []string{
 	"page_folders",    // pages.folder_id → page_folders, so folders land first; FK owner_crew_id → crews
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
-	"page_panels",               // FK page_id → pages; FK owner_crew_id → crews
-	"page_panel_data",           // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
-	"page_versions",             // FK page_id → pages
+	"page_panels",     // FK page_id → pages; FK owner_crew_id → crews
+	"page_panel_data", // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
+	"page_versions",   // FK page_id → pages
+	"page_artifacts",
+	"page_artifact_revisions",
 	"page_project_builds",       // FK page_id → pages; nullable requested_by → users
 	"page_project_publications", // Build and Page rows precede immutable publications.
 	"page_project_live",
@@ -445,7 +447,7 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "pipeline_run_step_outputs", "pipeline_step_executions", "pipeline_run_artifacts":
 		// No workspace_id column — scoped via its run.
 		return "run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
+	case "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
 		// Scope through the owning page, never the nullable (or cross-workspace) editor.
 		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "page_versions":

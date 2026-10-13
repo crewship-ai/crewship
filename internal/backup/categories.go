@@ -239,6 +239,7 @@ var TableCategory = map[string]string{
 
 	// Pages and their files.
 	"page_folders": CategoryPages, "page_folder_acl": CategoryPages, "pages": CategoryPages,
+	"page_artifacts": CategoryPages, "page_artifact_revisions": CategoryPages,
 	"page_panels": CategoryPages, "page_panel_data": CategoryPages, "page_versions": CategoryPages,
 	"page_project_builds": CategoryPages, "page_project_publications": CategoryPages,
 	"page_project_live": CategoryPages, "page_project_withdrawals": CategoryPages,

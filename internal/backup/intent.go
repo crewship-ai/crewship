@@ -175,10 +175,12 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// page_folder_acl is the folder's sharing (#2533), inherited by every
 	// page in it: a restore that lost it would silently narrow who reaches
 	// those pages, the same audit-trail loss page_grants guards against.
-	"page_folder_acl": IntentInclude,
-	"pages":           IntentInclude,
-	"page_panels":     IntentInclude,
-	"page_versions":   IntentInclude,
+	"page_folder_acl":         IntentInclude,
+	"pages":                   IntentInclude,
+	"page_panels":             IntentInclude,
+	"page_versions":           IntentInclude,
+	"page_artifacts":          IntentInclude,
+	"page_artifact_revisions": IntentInclude,
 	// Durable draft metadata and revision audit. Source files live outside
 	// SQLite; until file-phase integration, back up page_projects_path alongside
 	// the DB (docs/prd/pages-apps-v1.md). Never silently drop the metadata.

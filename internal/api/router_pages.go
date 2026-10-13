@@ -57,6 +57,7 @@ func (r *Router) registerPageRoutes() {
 	// create/update/delete paths that write wake-gate rules, and the freshness
 	// sweeper has to run against the same clock and journal.
 	r.pages = p
+	p.artifactStoragePath = r.storagePath
 	if r.pageProjectsPath != "" {
 		p.SetProjectStore(&pages.ProjectStore{Directory: r.pageProjectsPath})
 	}
@@ -104,6 +105,12 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/pages/{slug}/access", authed(wsCtx(http.HandlerFunc(p.PageAccess))))
 	// openapi: query subject:string! subject_type:string limit:integer cursor:string; responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages/access", authed(wsCtx(http.HandlerFunc(p.SubjectAccess))))
+	// openapi: query revision:integer; responses 200,400,401,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact", authed(wsCtx(http.HandlerFunc(p.GetArtifact))))
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/revisions", roleSelf, p.PublishArtifact)
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/restore", roleSelf, p.RestoreArtifact)
 	r.authedMut("POST", "/api/v1/pages", roleInline, p.Create)
 	r.authedMut("PATCH", "/api/v1/pages/{slug}", roleSelf, p.Update)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}", roleSelf, p.Delete)

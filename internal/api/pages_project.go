@@ -55,6 +55,10 @@ func (h *PageHandler) projectPage(w http.ResponseWriter, r *http.Request) (*page
 		h.refusePageAction(w, r, rec, "reading or editing project sources requires page edit permission", "page not found")
 		return nil, false
 	}
+	if rec.HasArtifact {
+		replyError(w, 409, "artifact pages cannot contain applications")
+		return nil, false
+	}
 	if h.projectStore == nil {
 		replyError(w, 503, "Page project storage is not configured")
 		return nil, false
@@ -251,7 +255,7 @@ func (h *PageHandler) PutProject(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	res, err := tx.ExecContext(r.Context(), `INSERT INTO page_project_drafts(page_id,source_digest,revision,spec_json,updated_by,updated_at,git_commit)
-VALUES(?,?,1,?,NULLIF(?,''),?,?) ON CONFLICT(page_id) DO UPDATE SET source_digest=excluded.source_digest,spec_json=excluded.spec_json,revision=page_project_drafts.revision+1,updated_by=excluded.updated_by,updated_at=excluded.updated_at,git_commit=excluded.git_commit WHERE page_project_drafts.revision=?`, rec.ID, digest, spec, actorUser, now, commit, rev)
+SELECT ?,?,1,?,NULLIF(?,''),?,? WHERE NOT EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=?) ON CONFLICT(page_id) DO UPDATE SET source_digest=excluded.source_digest,spec_json=excluded.spec_json,revision=page_project_drafts.revision+1,updated_by=excluded.updated_by,updated_at=excluded.updated_at,git_commit=excluded.git_commit WHERE page_project_drafts.revision=?`, rec.ID, digest, spec, actorUser, now, commit, rec.ID, rev)
 	if err != nil {
 		replyInternalError(w, h.logger, "save project draft", err)
 		return

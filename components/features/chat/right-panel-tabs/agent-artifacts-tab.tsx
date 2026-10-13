@@ -66,11 +66,11 @@ export function AgentArtifactsTab({ agentId, workspaceId, crewId, agentSlug }: {
   return <div className="p-3 text-xs">
     <div className="mb-2 flex items-center justify-between gap-2">
       <span className="eyebrow">Documents and outputs <span className="text-muted-foreground-soft">· {artifacts.length}</span></span>
-      <button type="button" onClick={() => setRevision((n) => n + 1)} aria-label="Refresh artifacts" className="rounded p-1 hover:bg-accent"><RefreshCw className="size-3" /></button>
+      <button type="button" onClick={() => setRevision((n) => n + 1)} aria-label="Refresh files" className="rounded p-1 hover:bg-accent"><RefreshCw className="size-3" /></button>
     </div>
-    {loading ? <p role="status" className="py-3 text-muted-foreground">Loading artifacts…</p>
-      : error ? <p role="alert" className="py-3 text-muted-foreground">Artifacts could not be loaded. Try refresh.</p>
-      : artifacts.length === 0 ? <InlineEmpty icon={FileText} text="No artifacts yet. Documents, sheets and pages the agent writes appear here." />
+    {loading ? <p role="status" className="py-3 text-muted-foreground">Loading files…</p>
+      : error ? <p role="alert" className="py-3 text-muted-foreground">Files could not be loaded. Try refresh.</p>
+      : artifacts.length === 0 ? <InlineEmpty icon={FileText} text="No files yet. Documents, sheets and pages the agent writes appear here." />
       : <ul className="space-y-1.5">{artifacts.map((file) => {
         const ext = extension(file.name)
         const Icon = ext === "csv" || ext === "tsv" || ext === "xlsx" || ext === "xls" ? FileSpreadsheet : ext === "html" || ext === "htm" ? FileCode2 : ["png", "jpg", "jpeg", "webp"].includes(ext) ? FileImage : FileText

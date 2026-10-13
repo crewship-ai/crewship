@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Pages can store versioned HTML artifacts (#3069).** Create an artifact page, upload or paste a self-contained HTML document, inspect its static preview and source, and restore an older revision as a new revision. Existing Page permissions apply; simultaneous saves cannot silently overwrite each other. Scripts and external resources stay disabled in this first preview. The chat attachment tab is now called **Files**.
+
 - **Routine output files survive backup and restore (#3069).** Workspace backups now include immutable file blobs referenced by routine runs, even when no chat or issue attachment references the same file. Restoring into a new workspace remaps their storage paths along with the run metadata.
 
 - **Local Linux Docker runs retain output across controller loss (#2845).** A private host helper keeps the actual CLI execution and redacted output independent of its reader. Recovery projects output and terminal results with durable acknowledgements, preserves work-generation ownership, and refuses duplicate launches. Capture has per-run and aggregate bounds and acknowledgement-based retention. Unsupported providers keep the existing transport; uncertain forced stops retain reconciliation rather than report completion.

@@ -242,7 +242,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     }
     const relative = relativeToAgent(path, chatAgent?.crewId, chatAgent?.slug)
     if (!isClientArtifactPath(relative)) {
-      toast.error("This file is not available in Artifacts")
+      toast.error("This file is not available in Files")
       return
     }
     const title = path.split("/").pop() || path

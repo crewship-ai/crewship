@@ -61,7 +61,7 @@ func (v *pageViewer) isWorkspaceMember() bool {
 
 func (h *PageHandler) loadViewer(ctx context.Context, wsID, userID string) (*pageViewer, error) {
 	v := &pageViewer{UserID: userID, Role: RoleFromContext(ctx), Crews: map[string]bool{}}
-	rows, err := h.db.QueryContext(ctx, `
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
 		SELECT cm.crew_id
 		FROM crew_members cm
 		JOIN crews c ON c.id = cm.crew_id
@@ -273,7 +273,7 @@ func (h *PageHandler) isPageOwner(ctx context.Context, wsID, userID string, rec 
 		return false
 	}
 	var one int
-	err := h.db.QueryRowContext(ctx,
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx,
 		`SELECT 1 FROM crew_members WHERE crew_id = ? AND user_id = ?`, rec.OwnerCrewID, userID).Scan(&one)
 	return err == nil
 }
