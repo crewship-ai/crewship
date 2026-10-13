@@ -25,8 +25,11 @@ func (s *Service) PageActionFingerprint(ctx context.Context, user, workspace str
 }
 
 // AuthorizedPageActionFingerprint checks authority independent of runtime installation.
-func AuthorizedPageActionFingerprint(ctx context.Context, db *sql.DB, user, workspace string, action pipeline.PageActionInvocation) (string, error) {
+func AuthorizedPageActionFingerprint(ctx context.Context, db *sql.DB, user, workspace string, action pipeline.PageActionInvocation, profiles ...func(string) bool) (string, error) {
 	s := &Service{db: db, providers: workflowProviderAuthority(db), authorityOnly: true}
+	if len(profiles) > 0 {
+		s.declaredProfiles = profiles[0]
+	}
 	return s.authorizedPageActionFingerprint(ctx, user, workspace, action)
 }
 

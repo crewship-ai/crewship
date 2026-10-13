@@ -38,6 +38,12 @@ try {
     contexts[actor] = await browser.newContext({ viewport: { width, height: 900 } })
     await contexts[actor].addCookies([{ name: 'authjs.session-token', value: fixture.tokens[user], url: fixture.server, httpOnly: true, sameSite: 'Lax' }])
     await contexts[actor].addInitScript(id => localStorage.setItem('crewship.workspaceId', id), fixture.workspace)
+    await contexts[actor].addInitScript(() => {
+      window.__navigationUnavailableShown = false
+      new MutationObserver(() => {
+        if ([...document.querySelectorAll('h1')].some(node => node.textContent === 'Not available with your access')) window.__navigationUnavailableShown = true
+      }).observe(document, { childList: true, subtree: true, characterData: true })
+    })
     pages[actor] = await contexts[actor].newPage()
   }
   await directDenied('desktop'); await directDenied('phone'); await directDenied('other')
@@ -48,6 +54,7 @@ try {
     if (actor === 'phone') await pages[actor].getByRole('button', { name: 'Show conversations', exact: true }).click()
     await expect(pages[actor].getByText('Alex', { exact: true }).first()).toBeVisible()
     await check(`${actor} granted Chat navigation and Alex content visible`, true)
+    await check(`${actor} initial loading never flashes access denial`, !(await pages[actor].evaluate(() => window.__navigationUnavailableShown)))
   }
   await directDenied('other')
   // Switch using the real workspace control, without replacing the session.

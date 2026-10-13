@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"reflect"
 	"runtime"
@@ -101,8 +102,36 @@ func TestMemberNavigationFollowsGrantsAndWorkspace(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('nav-other-member','nav-other','nav-a','VIEWER')`)
 	for _, operation := range []string{"discover", "chat"} {
 		replace([]access.Right{{Kind: "agent", ID: agent, Operation: operation}})
-		if got := surfaces("nav-a"); !reflect.DeepEqual(got, []any{"chat", "account_security"}) {
+		expected := []any{"account_security"}
+		if operation == "discover" {
+			expected = []any{"chat", "account_security"}
+		}
+		if got := surfaces("nav-a"); !reflect.DeepEqual(got, expected) {
 			t.Fatalf("%s surfaces=%v", operation, got)
+		}
+		directoryReq := httptest.NewRequest("GET", "/api/v1/agents?workspace_id="+ws, nil)
+		directoryReq.Header.Set("Authorization", "Bearer "+tokens["nav-a"])
+		directoryReply := httptest.NewRecorder()
+		router.ServeHTTP(directoryReply, directoryReq)
+		var agents []map[string]any
+		if directoryReply.Code != 200 || json.Unmarshal(directoryReply.Body.Bytes(), &agents) != nil {
+			t.Fatalf("agent directory=%d %s", directoryReply.Code, directoryReply.Body.String())
+		}
+		wantCount := 0
+		if operation == "discover" {
+			wantCount = 1
+		}
+		if len(agents) != wantCount {
+			t.Fatalf("%s must preserve discover-only directory: %v", operation, agents)
+		}
+		if operation == "chat" {
+			chatReq := httptest.NewRequest("GET", "/api/v1/agents/"+agent+"/chats?workspace_id="+ws, nil)
+			chatReq.Header.Set("Authorization", "Bearer "+tokens["nav-a"])
+			chatReply := httptest.NewRecorder()
+			router.ServeHTTP(chatReply, chatReq)
+			if chatReply.Code != 200 {
+				t.Fatalf("chat-only known agent lost direct chat: %d %s", chatReply.Code, chatReply.Body.String())
+			}
 		}
 		if got := surfaces("nav-a", "nav-other"); !reflect.DeepEqual(got, []any{"account_security"}) {
 			t.Fatalf("workspace switch borrowed grant: %v", got)
@@ -159,6 +188,19 @@ func TestMemberNavigationFollowsGrantsAndWorkspace(t *testing.T) {
 		t.Fatalf("missing Page runtime=%d %s", rr.Code, rr.Body.String())
 	}
 
+	checkNavigationProfiles(t, db, router, agent, func() []any { return surfaces("nav-a") })
+
+	// Scale regression: navigation needs existence, not all 50 frozen recipes
+	// and 10 action catalogs. Count real SQL statements, not elapsed wall time.
+	for i := 1; i < 50; i++ {
+		execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) SELECT ?,workspace_id,?,name,definition_json,definition_hash,author_crew_id,status FROM pipelines WHERE id='nav-recipe'`, fmt.Sprintf("nav-recipe-%d", i), fmt.Sprintf("nav-work-%02d", i))
+	}
+	for i := 1; i < 10; i++ {
+		execOrFatal(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) SELECT ?,workspace_id,?,name,owner_user_id,spec_json FROM pages WHERE id='nav-page'`, fmt.Sprintf("nav-page-%d", i), fmt.Sprintf("nav-page-%02d", i))
+		execOrFatal(t, db, `INSERT INTO page_panels(id,page_id,panel_id,schema,owner_crew_id,producer_kind,producer_ref,sla_seconds,span) SELECT ?,? ,panel_id,schema,owner_crew_id,producer_kind,producer_ref,sla_seconds,span FROM page_panels WHERE id='nav-panel'`, fmt.Sprintf("nav-panel-%d", i), fmt.Sprintf("nav-page-%d", i))
+	}
+	checkNavigationScale(t, db, "nav-a", true)
+
 	// Main's GET read contract is principal-based; a navigation hint is not
 	// permission to execute with a narrowed CLI token.
 	const limited = "crewship_cli_11223344556677889900aabbccddeeff"
@@ -196,6 +238,7 @@ func TestMemberNavigationFollowsGrantsAndWorkspace(t *testing.T) {
 	if got := surfaces("nav-a"); !reflect.DeepEqual(got, []any{"account_security"}) {
 		t.Fatalf("revoked runtime-offline navigation=%v", got)
 	}
+	checkNavigationScale(t, db, "nav-a", false)
 
 }
 
@@ -224,5 +267,92 @@ func TestMemberNavigationDirectoryFailureIsNotAnEmptyGrantProjection(t *testing.
 	}
 	if got := rr.Header().Get("Cache-Control"); got != "" && got != "no-store" {
 		t.Fatalf("failure cached: %q", got)
+	}
+}
+
+// PR regression: a malformed workspace-local Page must not remove another
+// membership's usable workspace directory. Main does not inspect Page catalogs.
+func TestMemberNavigationIsolatesWorkspaceCatalogFailure(t *testing.T) {
+	db := setupTestDB(t)
+	owner := seedTestUser(t, db)
+	good := seedTestWorkspace(t, db, owner)
+	execOrFatal(t, db, `INSERT INTO users(id,email) VALUES('nav-isolated','nav-isolated@example.test')`)
+	execOrFatal(t, db, `INSERT INTO workspaces(id,name,slug) VALUES('nav-bad','Bad','nav-bad')`)
+	store := access.Store{DB: db}
+	for _, ws := range []string{good, "nav-bad"} {
+		execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,'nav-isolated','VIEWER')`, "isolated-"+ws, ws)
+		m, err := store.Membership(t.Context(), "nav-isolated", ws)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = store.Replace(t.Context(), owner, "nav-isolated", ws, "restricted", m, nil); err != nil {
+			// The owner also needs membership in the additional synthetic workspace.
+			execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('bad-owner','nav-bad',?,'OWNER')`, owner)
+			if _, err = store.Replace(t.Context(), owner, "nav-isolated", ws, "restricted", m, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	badCrew := seedTestCrew(t, db, "nav-bad")
+	badAgent := seedAgentRow(t, db, "nav-bad-agent", "nav-bad", badCrew, "Bad Agent", "bad-agent", "AGENT")
+	execOrFatal(t, db, `UPDATE workspace_members SET role='MANAGER' WHERE workspace_id='nav-bad' AND user_id='nav-isolated'`)
+	badMember, err := store.Membership(t.Context(), "nav-isolated", "nav-bad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Replace(t.Context(), owner, "nav-isolated", "nav-bad", "restricted", badMember, []access.Right{{Kind: "agent", ID: badAgent, Operation: "run"}}); err != nil {
+		t.Fatal(err)
+	}
+	execOrFatal(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,pages_version,spec_json) VALUES('nav-bad-page','nav-bad','broken','Broken',?,'not-an-integer','{}')`, owner)
+	req := httptest.NewRequest("GET", "/api/v1/workspaces", nil)
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: "nav-isolated"}))
+	rr := httptest.NewRecorder()
+	NewWorkspaceHandler(db, newTestLogger()).List(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("one bad workspace hid all memberships: %d %s", rr.Code, rr.Body.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0]["id"] != good {
+		t.Fatalf("must omit only failing workspace: %v", rows)
+	}
+	if !reflect.DeepEqual(rows[0]["restricted_surfaces"], []any{"account_security"}) {
+		t.Fatalf("healthy projection changed: %v", rows)
+	}
+}
+
+func TestMemberNavigationGlobalCatalogFailureWithHealthyWorkspace(t *testing.T) {
+	db := setupTestDB(t)
+	owner := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, owner)
+	execOrFatal(t, db, `INSERT INTO users(id,email) VALUES('nav-global','nav-global@example.test')`)
+	execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,capabilities) VALUES('global-member',?,'nav-global','MEMBER','["routine.run"]')`, ws)
+	store := access.Store{DB: db}
+	m, err := store.Membership(t.Context(), "nav-global", ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Replace(t.Context(), owner, "nav-global", ws, "restricted", m, nil); err != nil {
+		t.Fatal(err)
+	}
+	execOrFatal(t, db, `INSERT INTO workspaces(id,name,slug) VALUES('global-healthy','Healthy','aaa-healthy')`)
+	execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('global-healthy','global-healthy','nav-global','VIEWER')`)
+	globalAgent := seedAgentRow(t, db, "nav-global-agent", ws, seedTestCrew(t, db, ws), "Global Agent", "global-agent", "AGENT")
+	m, err = store.Membership(t.Context(), "nav-global", ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Replace(t.Context(), owner, "nav-global", ws, "restricted", m, []access.Right{{Kind: "agent", ID: globalAgent, Operation: "run"}}); err != nil {
+		t.Fatal(err)
+	}
+	execOrFatal(t, db, `DROP TABLE pipelines`)
+	req := httptest.NewRequest("GET", "/api/v1/workspaces", nil)
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: "nav-global"}))
+	rr := httptest.NewRecorder()
+	NewWorkspaceHandler(db, newTestLogger()).List(rr, req)
+	if rr.Code != 500 {
+		t.Fatalf("global SQL store failure was mistaken for workspace-local corruption: %d %s", rr.Code, rr.Body.String())
 	}
 }

@@ -207,6 +207,4 @@
 #                     groups execute as UID65534 in the required managed lane;
 #                     its source-list check and verifier reject omissions/skips.
 #                     Track an ordinary/race isolated-UID runner in #3055.
-# 2026-10-13 (#3072): +1 opt-in real frontend navigation acceptance check;
-#                     provisioned static export/Chromium lane tracked in #3077.
-160
+159

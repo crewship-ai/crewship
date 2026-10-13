@@ -10,11 +10,12 @@ package api
 // chatbridge auto-provision).
 
 import (
-	"github.com/crewship-ai/crewship/internal/provider"
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 )
 
 // registerCrewsRoutes wires the entire "crews + agents + connections"
@@ -26,6 +27,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	wsCtx := func(h http.Handler) http.Handler { return r.authMw.RequireWorkspace(r.providerAccountPolicy(h)) }
 
 	ws := NewWorkspaceHandler(r.db, r.logger)
+	ws.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	if r.hub != nil {
 		ws.SetHub(r.hub)
 	}

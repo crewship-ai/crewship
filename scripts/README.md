@@ -143,9 +143,16 @@ must not target a shared instance. Install Playwright Chromium and preserve its
 cache path explicitly when the Go test isolates HOME:
 
 ```bash
-PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_MEMBER_NAV_BROWSER=1 go test ./internal/api -run '^TestMemberNavigationBrowser$' -count=1 -timeout 6m
+PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_MEMBER_NAV_BROWSER=1 go test -tags member_navigation_browser ./internal/api -run '^TestMemberNavigationBrowser$' -count=1 -timeout 6m
 ```
 
 `CREWSHIP_MEMBER_NAV_OUTPUT` optionally selects the report/screenshot directory;
 the default is an OS temporary path. The fixture JSON is created with mode 0600
 and deleted by the Go test; reports contain synthetic results, not session tokens.
+
+The member-navigation browser harness is compiled only on Linux with
+`member_navigation_browser` or `conformance`. The existing required Go CI job
+runs `go vet -tags conformance ./...`, which compiles this test but does not
+execute Chromium. Executing either tagged test set requires the explicit browser
+environment and real static export; missing configuration fails rather than skips.
+`go test -tags conformance ./...` therefore also requires those prerequisites.

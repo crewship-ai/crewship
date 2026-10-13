@@ -65,7 +65,7 @@ For an account with a restricted membership, every row of `GET /api/v1/workspace
 carries `restricted_session: true` and `restricted_surfaces`: the screens the
 selected workspace membership may open, narrowed within the server route allowlist
 (`internal/api/restricted_surfaces.go`). A surface is listed only when **every**
-route it needs is allowlisted. Chat requires a discover or chat grant on a live
+route it needs is allowlisted. Chat navigation requires a discover grant on a live
 agent. Routines and Pages require an authorized recipe or declared action, using
 the same graph, provider and Page policies as their catalogs. Runtime installation
 is independent: an unavailable executor does not revoke otherwise authorized
@@ -80,3 +80,15 @@ another membership's projection. Settings shows
 only account security: password, browser sessions and revoking CLI tokens.
 Profile edits and issuing new tokens are not on the allowlist. A restricted row
 without `restricted_surfaces` allows nothing (fail closed).
+
+Navigation is an existence projection: it stops after the first authorized
+routine or Page action rather than constructing every frozen execution contract.
+Denied candidates may still require a scan; this is not a constant-cost promise.
+A workspace-local catalog failure omits that workspace row, while healthy rows
+remain usable. Failure of every workspace projection returns an error, never an
+empty grant projection. Logs contain no resource names or session credentials.
+A chat grant alone still permits direct access to a known agent's private chat;
+it does not grant directory discovery. Assign discover and chat for navigable chat.
+Installed adapters' static profile declarations constrain navigation. Missing
+runtime installation preserves known declaration authority; unknown profiles
+remain denied. Operational readiness checks stay at execution time.

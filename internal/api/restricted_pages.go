@@ -58,7 +58,7 @@ func (h *PageHandler) RestrictedCatalog(w http.ResponseWriter, req *http.Request
 
 // restrictedPageCatalog is shared by executable catalogs and runtime-independent
 // navigation authority. It never invokes actions or grants execution authority.
-func (h *PageHandler) restrictedPageCatalog(ctx context.Context, user, workspace string, fingerprint func(context.Context, string, string, pipeline.PageActionInvocation) (string, error)) ([]restrictedPage, error) {
+func (h *PageHandler) restrictedPageCatalog(ctx context.Context, user, workspace string, fingerprint func(context.Context, string, string, pipeline.PageActionInvocation) (string, error), firstOnly ...bool) ([]restrictedPage, error) {
 	viewer, err := h.loadViewer(ctx, workspace, user)
 	if err != nil {
 		return nil, err
@@ -112,6 +112,9 @@ func (h *PageHandler) restrictedPageCatalog(ctx context.Context, user, workspace
 					wire.Inputs = append(wire.Inputs, restrictedPageInput{Name: input.Name, Label: input.Label, Type: input.EffectiveType(), Required: input.Required && input.Default == "", Options: input.Options})
 				}
 				entry.Actions = append(entry.Actions, wire)
+				if len(firstOnly) > 0 && firstOnly[0] {
+					return append(result, entry), nil
+				}
 			}
 		}
 		if len(entry.Actions) > 0 {
