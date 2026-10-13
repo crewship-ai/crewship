@@ -8,6 +8,10 @@ tag: Experimental
 
 # crewship hooks
 
+<Warning>
+  **Paused — work in progress.** Lifecycle hooks are switched off: hooks do not fire, every `/api/v1/hooks` endpoint answers `503` with the reason, `crewship hooks` is hidden, and Settings no longer links to the page. Hooks registered earlier are kept in `hooks_config` and do not run. The feature returns once hooks can reach tools like Slack or Teams directly. For development, `CREWSHIP_HOOKS_ENABLED=1` on the server process turns them back on. The rest of this page describes the feature as built.
+</Warning>
+
 Manage the lifecycle-hook registry -- shell commands, HTTP webhooks, or subagents that fire on platform events (`pre_agent_start`, `post_agent_stop`, `on_approval_requested`, ...). See the [Hooks guide](/guides/hooks) for the full 14-event catalog and the three handler kinds. There is no `pre_tool_call` -- the platform has no interception point before a tool runs. Every one of the 14 catalog events, including `post_tool_call`, now dispatches from a real call site -- see [Currently-dispatched events](#currently-dispatched-events) below.
 
 ```bash

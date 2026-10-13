@@ -8,6 +8,10 @@ tag: Experimental
 
 # Lifecycle Hooks
 
+<Warning>
+  **Paused — work in progress.** Lifecycle hooks are switched off: hooks do not fire, every `/api/v1/hooks` endpoint answers `503` with the reason, `crewship hooks` is hidden, and Settings no longer links to the page. Hooks registered earlier are kept in `hooks_config` and do not run. The feature returns once hooks can reach tools like Slack or Teams directly. For development, `CREWSHIP_HOOKS_ENABLED=1` on the server process turns them back on. The rest of this page describes the feature as built.
+</Warning>
+
 Hooks let workspace admins run arbitrary logic when platform events fire -- pre/post task delegation, agent start/stop, tool calls, LLM calls, memory writes, peer conversations, approvals, budget overruns, guardrail trips. They are the orchestration-layer equivalent of Claude Code's shell hooks but generalised across three handler kinds: **shell**, **http**, and **subagent**.
 
 ## Events
@@ -275,30 +279,51 @@ crewship hooks disable hk_abc
 
 ## Web UI
 
-**Settings → Workspace → Lifecycle hooks** (`/settings?tab=hooks`) is the read-only
-registry: one row per hook with its event, handler kind, target, crew scope, last
-result and enable switch.
+**Settings → Lifecycle hooks** (`/settings/hooks`; old `/settings?tab=hooks` links
+redirect there) is a map of one agent run. Rows are its steps in order — task
+handed off, agent starts, model call, tool call, memory write, agents talk,
+agent stops — and the columns are **Before · can stop it** and **After · gets
+told**. Policy alerts (approval requested, budget exceeded, guardrail tripped)
+have their own row, since they can come at any point. Each slot shows the hooks
+on that event as cards (type, target, `STOPS` where it blocks, last run); an
+empty slot offers **+ Add** with the event already chosen. A side with no event
+says why (nothing can stop a tool call — the tool already ran inside the agent).
+With no hooks registered the map still shows every point a hook could run.
+
+Clicking a hook opens it in a side panel (full screen on a phone): what it runs,
+signing, scope, mode, recent runs from the journal, the on/off switch, Edit and
+Delete. Search and the All / On / Off / Can stop / Failed last time filters
+narrow the map; **List** shows the same hooks as rows in run order. On a phone
+the steps stack as cards, steps with hooks first. `/settings/hooks?hook=<id>`
+opens one hook directly.
 
 - **Every workspace member sees the list.** `GET /api/v1/hooks` is open to any
   authenticated member, and a member asking "why was my agent's memory write
-  refused" needs exactly this list. The switch is `roleManage`, so it renders for
-  OWNER and ADMIN only.
+  refused" needs exactly this list. Every write is `roleManage`, so the switch,
+  **New hook**, **Edit** and **Delete hook** are available to OWNER and ADMIN only.
+- **New hook / Edit** walk three steps: when (one of the 14 events, marked
+  where it can block), what to do, and details. *Send a webhook* takes a URL and
+  an optional signing secret. *Run a command on the server* is OWNER-only, as the
+  API enforces, and an ADMIN cannot edit an existing shell hook. *Hand to an
+  agent* is shown as "Coming later": the subagent handler is not wired in this
+  build. The **Block the action** switch appears only for events that can block;
+  severities only for `on_guardrail_triggered`, tool names only for
+  `post_tool_call`.
 - **The shell command is shown in full**, matching what the API already returns
   to every member and what `crewship hooks list` prints. If a command may carry a
   secret, redact it server-side rather than in the browser — masking a value that
   is already on the wire protects nobody.
-- **Last result comes from the journal**, not from a new endpoint: the screen
-  reads `GET /api/v1/journal?entry_type=hook.fired,hook.blocked` and keeps the
-  newest entry per `payload.hook_id`.
-- **`blocking` is read off the event, not off the row.** A post- or on-event may
-  carry `blocking: true` in the database; the column shows `n/a` there, because
-  the dispatcher never asks those handlers for a veto.
+- **Recent runs come from the journal**, not from a new endpoint: the screen
+  reads `GET /api/v1/journal?entry_type=hook.fired,hook.blocked` and groups the
+  entries by `payload.hook_id`.
+- **Blocking is read off the event, not off the row.** A post- or on-event may
+  carry `blocking: true` in the database; the screen shows it as observing,
+  because the dispatcher never asks those handlers for a veto.
 - **`pre_tool_call` rows are marked retired** and explained, rather than listed as
   if they work. See [Coverage status](#coverage-status).
 
-Registration, editing and a workspace-wide pause are not in the UI. The first two
-are a follow-up; the third has no endpoint — the API has per-hook enable and
-disable only.
+A workspace-wide pause is not in the UI: it has no endpoint — the API has
+per-hook enable and disable only.
 
 ## Journal entries
 
@@ -327,4 +352,4 @@ Payload includes `hook_id`, `handler_kind`, `outcome`, `latency_ms`, `blocking`,
 - [Lookout](/guides/lookout) -- emits `on_guardrail_triggered` via the GuardListener context callback.
 - [Crew Journal](/guides/crew-journal) -- `hook.fired`, `hook.blocked`, `system.hook_toggled`.
 - [`crewship hooks`](/cli/hooks), [Hooks API](/api-reference/hooks).
-- Settings → Workspace → Lifecycle hooks (`/settings?tab=hooks`) -- the registry in the browser.
+- Settings → Lifecycle hooks (`/settings/hooks`) -- the registry in the browser.

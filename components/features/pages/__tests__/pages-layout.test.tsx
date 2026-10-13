@@ -14,7 +14,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
 const access = vi.hoisted(() => ({role: "MANAGER" as string | null, capabilities: [] as string[], loading: false, error: false}))
-vi.mock("@/hooks/use-workspace", () => ({useWorkspace: () => ({...access, workspaceId: "ws-1", workspaces: [{id:"ws-1",currentUserRole:access.role}], workspace:{id:"ws-1"}})}))
+vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/hooks/use-workspace")>(),
+  useWorkspace: () => ({...access, workspaceId: "ws-1", workspaces: [{id:"ws-1",currentUserRole:access.role}], workspace:{id:"ws-1"}}),
+}))
 const push = vi.fn()
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn() }),

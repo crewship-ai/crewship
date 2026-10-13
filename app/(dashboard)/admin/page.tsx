@@ -383,11 +383,11 @@ function AdminConsole() {
               <SheetHeader className="sr-only">
                 <SheetTitle>Admin navigation</SheetTitle>
               </SheetHeader>
-              <div className="flex h-full flex-col bg-sidebar">{adminNav}</div>
+              <div className="flex h-full flex-col bg-card">{adminNav}</div>
             </SheetContent>
           </Sheet>
         ) : (
-          <aside className={cn(SIDEBAR_WIDTH, "shrink-0 border-r border-border bg-sidebar flex flex-col overflow-hidden")}>
+          <aside className={cn(SIDEBAR_WIDTH, "shrink-0 border-r border-foreground/[0.06] bg-card flex flex-col overflow-hidden")}>
             {adminNav}
           </aside>
         )}

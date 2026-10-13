@@ -54,6 +54,16 @@ const stack: symbol[] = []
  */
 let unwinding = false
 
+/**
+ * An unwind that has been decided but not yet done. It waits one microtask
+ * because React's StrictMode (every dev build) mounts, unmounts and mounts
+ * each effect again in one go: unwinding at once spent the entry the second
+ * mount then answered as a real back press, so a controlled sheet closed the
+ * moment it opened. An overlay that mounts before the microtask runs takes
+ * the entry over instead of pushing another.
+ */
+let pendingUnwind: { cancelled: boolean } | null = null
+
 const isTop = (token: symbol) => stack.length > 0 && stack[stack.length - 1] === token
 
 const holdsOwnEntry = () =>
@@ -82,7 +92,12 @@ export function useOverlayBackButton(enabled = true, stillOpen?: () => boolean) 
 
     const token = Symbol("overlay")
     stack.push(token)
-    pushOwnEntry()
+    if (pendingUnwind && holdsOwnEntry()) {
+      pendingUnwind.cancelled = true
+      pendingUnwind = null
+    } else {
+      pushOwnEntry()
+    }
 
     let settle: number | undefined
 
@@ -139,11 +154,18 @@ export function useOverlayBackButton(enabled = true, stillOpen?: () => boolean) 
       // (app/(dashboard)/chat/chat-client.tsx:73-136, :383), and is the
       // surface that showed this.
       if (wasTop && holdsOwnEntry()) {
-        // Only an overlay still on the stack can mistake the unwind for a
-        // back press; with nobody left to fool, a flag set here would sit
-        // until the next sheet opened and swallow its first real back.
-        unwinding = stack.length > 0
-        window.history.back()
+        const job = { cancelled: false }
+        pendingUnwind = job
+        queueMicrotask(() => {
+          if (job.cancelled) return
+          if (pendingUnwind === job) pendingUnwind = null
+          if (!holdsOwnEntry()) return
+          // Only an overlay still on the stack can mistake the unwind for a
+          // back press; with nobody left to fool, a flag set here would sit
+          // until the next sheet opened and swallow its first real back.
+          unwinding = stack.length > 0
+          window.history.back()
+        })
       } else if (stack.length === 0) {
         unwinding = false
       }

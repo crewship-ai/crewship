@@ -38,8 +38,12 @@ Passwords are **never** passed as flags — that would leak them into shell
 history and process listings. For scripting, pipe two lines on stdin: the
 current password first, the new password second.
 
-Changing your password **signs out your other active sessions** — the
-session you run this from stays logged in. It calls
+Changing your password **signs out your other active browser sessions** —
+the session you run this from stays logged in. **CLI tokens keep working**
+unless you pass `--revoke-cli-tokens`, which revokes every CLI token on your
+account, including the one the command runs with (sign in again with
+`crewship login` afterwards). The web dialog offers the same choice as
+"Also revoke all CLI tokens". It calls
 [`POST /api/v1/users/me/password`](/api-reference/auth#post-/api/v1/users/me/password).
 
 Wrong current-password guesses count against the **same account lockout as
@@ -54,7 +58,14 @@ crewship auth passwd
 
 # Non-interactive (CI/scripts) — current on line 1, new on line 2:
 printf '%s\n%s\n' "$OLD_PW" "$NEW_PW" | crewship auth passwd
+
+# Rotate after a leak: also cut every CLI token on the account
+crewship auth passwd --revoke-cli-tokens
 ```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--revoke-cli-tokens` | `false` | Also revoke every CLI token on your account (body field `revoke_cli_tokens`; the response reports `cli_tokens_revoked`). |
 
 ## `auth avatar`
 

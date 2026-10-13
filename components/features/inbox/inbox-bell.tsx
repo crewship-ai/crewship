@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { useInbox } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { inboxBulk } from "@/lib/api/inbox"
+import { isAlreadyDecidedError, waitpointDecide } from "@/lib/api/waitpoints"
 
 import { InboxBellView } from "./inbox-bell-new"
 import type { WorkspaceRole } from "./inbox-derive"
@@ -35,6 +36,27 @@ export function InboxBell() {
       role={(role as WorkspaceRole | null) ?? null}
       onOpenItem={(id) => router.push(`/inbox?item=${encodeURIComponent(id)}`)}
       onOpenInbox={() => router.push("/inbox")}
+      onOpenHref={(href) => router.push(href)}
+      // The same call, and the same three outcomes, as KindActions' plain
+      // waitpoint branch on /inbox: success re-reads (the server cascades the
+      // inbox row via ResolveBySource — PATCHing it ourselves would 409, it is
+      // source-managed); "already decided" is a resolution somebody else made,
+      // so it re-reads too and says so instead of showing a red error; anything
+      // else is a real failure and leaves the row where it was.
+      onDecideWaitpoint={async (item, approved) => {
+        const res = await waitpointDecide(item.workspace_id, item.source_id, approved)
+        if (!res.ok) {
+          if (isAlreadyDecidedError(res.status, res.error)) {
+            toast.info("Already decided elsewhere — refreshing")
+            await refresh()
+            return
+          }
+          toast.error(res.error)
+          return
+        }
+        toast.success(approved ? "Approved" : "Denied")
+        await refresh()
+      }}
       onMarkAllRead={async (ids) => {
         if (!workspaceId || ids.length === 0) return
         // Chunked to the backend's 500-id cap, same as the list's bulk bar.

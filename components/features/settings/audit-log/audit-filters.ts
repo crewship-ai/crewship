@@ -70,6 +70,11 @@ export interface AuditFilters {
   userId: string
   /** How a run ended, or "". Workspace trail only. */
   result: AuditResult | ""
+  /** A slice of the range picked on the chart, as two ISO instants (from
+   *  inclusive, to exclusive) — the Crew Journal's bucket selection. It
+   *  narrows the range without changing it; "" when none is picked. */
+  sliceFrom: string
+  sliceTo: string
 }
 
 export const DEFAULT_AUDIT_FILTERS: AuditFilters = {
@@ -81,6 +86,8 @@ export const DEFAULT_AUDIT_FILTERS: AuditFilters = {
   q: "",
   userId: "",
   result: "",
+  sliceFrom: "",
+  sliceTo: "",
 }
 
 /** Which filters a trail honours on the server. */
@@ -95,9 +102,17 @@ export const resultAction = (result: AuditResult) => `agent.run.${result}`
 const DAY_MS = 86_400_000
 const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`))
 const dayStart = (v: string) => new Date(`${v}T00:00:00Z`).toISOString()
+const isInstant = (v: string) => /^\d{4}-\d{2}-\d{2}T/.test(v) && !Number.isNaN(Date.parse(v))
 
 /** The instants to send as date_from / date_to. */
 export function rangeBounds(filters: AuditFilters, now: Date): { from?: string; to?: string } {
+  if (isInstant(filters.sliceFrom) && isInstant(filters.sliceTo)) return { from: filters.sliceFrom, to: filters.sliceTo }
+  return windowBounds(filters, now)
+}
+
+/** The range the picker chose, ignoring a slice picked on the chart — what
+ *  the chart itself spans. */
+export function windowBounds(filters: AuditFilters, now: Date): { from?: string; to?: string } {
   if (filters.range === "custom") {
     return {
       from: isDay(filters.from) ? dayStart(filters.from) : undefined,
@@ -135,6 +150,8 @@ const URL_KEYS: Record<keyof AuditFilters, string> = {
   q: "audit_q",
   userId: "audit_user",
   result: "audit_result",
+  sliceFrom: "audit_at",
+  sliceTo: "audit_until",
 }
 
 /** Merge the filters into an existing query string; defaults are omitted. */
@@ -166,6 +183,8 @@ export function filtersFromSearch(search: string): AuditFilters {
     q: get("q"),
     userId: get("userId"),
     result: AUDIT_RESULTS.some((x) => x.value === get("result")) ? (get("result") as AuditResult) : "",
+    sliceFrom: isInstant(get("sliceFrom")) && isInstant(get("sliceTo")) ? get("sliceFrom") : "",
+    sliceTo: isInstant(get("sliceFrom")) && isInstant(get("sliceTo")) ? get("sliceTo") : "",
   }
 }
 
@@ -187,8 +206,16 @@ export function rangeLabel(filters: AuditFilters): string {
   return "Custom range"
 }
 
+/** "14:05 – 16:40", or with the day when the slice crosses one. */
+export function sliceLabel(from: string, to: string): string {
+  const f = new Date(from), t = new Date(to)
+  const clock = (d: Date) => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+  const day = (d: Date) => d.toLocaleDateString(undefined, { day: "numeric", month: "short" })
+  return f.toDateString() === t.toDateString() ? `${day(f)} ${clock(f)} – ${clock(t)}` : `${day(f)} ${clock(f)} – ${day(t)} ${clock(t)}`
+}
+
 export interface FilterChip {
-  key: "q" | "userId" | "category" | "result" | "range"
+  key: "q" | "userId" | "category" | "result" | "range" | "slice"
   label: string
 }
 
@@ -205,5 +232,6 @@ export function activeFilterChips(filters: AuditFilters, people: Record<string, 
     chips.push({ key: "result", label: `Runs: ${AUDIT_RESULTS.find((x) => x.value === filters.result)?.label.toLowerCase()}` })
   }
   if (filters.range !== DEFAULT_AUDIT_FILTERS.range) chips.push({ key: "range", label: rangeLabel(filters) })
+  if (isInstant(filters.sliceFrom) && isInstant(filters.sliceTo)) chips.push({ key: "slice", label: sliceLabel(filters.sliceFrom, filters.sliceTo) })
   return chips
 }
