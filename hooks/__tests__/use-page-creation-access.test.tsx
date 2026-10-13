@@ -1,7 +1,10 @@
 import {beforeEach,describe,expect,it,vi} from "vitest"
 import {renderHook} from "@testing-library/react"
 const state=vi.hoisted(()=>({workspaceId:"ws-1",role:"VIEWER" as string|null,capabilities:[] as string[],loading:false,error:false,workspaces:[{id:"ws-1"}] as {id:string;currentUserAccessMode?:"trusted"|"restricted"}[]}))
-vi.mock("@/hooks/use-workspace",()=>({useWorkspace:()=>state}))
+vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/hooks/use-workspace")>(),
+  useWorkspace: () => state,
+}))
 import {usePageCreationAccess} from "@/hooks/use-page-creation-access"
 describe("Page creation affordance",()=>{
  beforeEach(()=>Object.assign(state,{workspaceId:"ws-1",role:"VIEWER",capabilities:[],loading:false,error:false,workspaces:[{id:"ws-1"}]}))
