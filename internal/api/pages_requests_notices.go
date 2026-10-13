@@ -82,6 +82,7 @@ func (h *PageHandler) pageRequestNoticeTx(ctx context.Context, tx *sql.Tx, kind,
 		}
 		if err == nil {
 			auth := context.WithValue(ctx, pageAuthReaderKey{}, tx)
+			auth = context.WithValue(auth, ctxRole, role)
 			rec, err := h.loadPage(auth, workspace, slug)
 			if err != nil {
 				return err

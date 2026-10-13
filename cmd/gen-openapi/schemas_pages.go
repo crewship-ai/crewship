@@ -534,6 +534,10 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	creationStatus["properties"].(map[string]any)["policy_allowed"] = boolean()
 	artifactRequest := obj(map[string]any{"id": str(), "chat_id": str(), "agent_id": str(), "thread_id": str(), "base_rev": positiveVersion, "status": map[string]any{"type": "string", "enum": []string{"queued", "running", "succeeded", "failed", "cancelled"}}, "run_id": str(), "result_revision": positiveVersion, "error": str(), "created_at": timeString(), "updated_at": timeString()})
 	artifactRequest["properties"].(map[string]any)["instruction"] = str()
+	resultKind := map[string]any{"type": "string", "enum": []string{"revision", "reply"}}
+	artifactRequest["properties"].(map[string]any)["result_kind"] = resultKind
+	artifactRequest["properties"].(map[string]any)["reply"] = obj(map[string]any{"body": str(), "agent_id": str(), "run_id": str(), "on_behalf_of_user_id": str(), "created_at": timeString()})
+	artifactRequest["properties"].(map[string]any)["agent_reported_phase"] = obj(map[string]any{"phase": map[string]any{"type": "string", "enum": []string{"preparing", "waiting_for_input", "uploading", "finalizing"}}, "message": str(), "reported_at": timeString()})
 	artifactRequest["properties"] = mergeProps(artifactRequest["properties"].(map[string]any), requestExecutionProperties())
 	artifactRequest["required"] = []string{"id", "chat_id", "agent_id", "instruction", "base_rev", "status", "created_at", "updated_at"}
 	artifactRequestTarget := obj(map[string]any{"chat_id": str(), "title": str(), "agent_id": str(), "agent_name": str(), "agent_slug": str()})
@@ -541,6 +545,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	artifactRequestList := obj(map[string]any{"requests": arr(artifactRequest), "can_dispatch": boolean(), "eligible_chats": arr(artifactRequestTarget)})
 	artifactRequestList["required"] = []string{"requests", "can_dispatch", "eligible_chats"}
 	artifactRequestCreate := obj(map[string]any{"chat_id": str(), "thread_id": str(), "instruction": map[string]any{"type": "string", "minLength": 1, "description": "Explicit human instruction, at most 4096 UTF-8 bytes. Dispatch can incur agent usage costs."}, "base_rev": positiveVersion, "submission_id": mutationID, "retry_of_request_id": map[string]any{"type": "string", "maxLength": 128}})
+	artifactRequestCreate["properties"].(map[string]any)["result_kind"] = resultKind
 	artifactRequestCreate["required"] = []string{"chat_id", "instruction", "base_rev", "submission_id"}
 	artifactRequestCreate["additionalProperties"] = false
 	artifactRequestAccepted := obj(map[string]any{"id": str(), "retry_of_request_id": str(), "retry_warning": str()})
@@ -565,6 +570,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"POST /api/v1/artifact-creation-authorizations/{runId}":                                       {Request: emptyCreationAuthorization, RequestRequired: true, Response: creationAuthorization, SuccessStatuses: []string{"200", "201"}},
 		"DELETE /api/v1/artifact-creation-authorizations/{runId}":                                     {Response: obj(map[string]any{}), SuccessStatuses: []string{"204"}},
 		"GET /api/v1/chats/{chatId}/artifact-results":                                                 {Response: obj(map[string]any{"results": arr(obj(map[string]any{"page_slug": str(), "title": str(), "revision": integer(), "created_at": timeString(), "agent_id": str(), "agent_name": str(), "run_id": str(), "on_behalf_of_user_id": str()}))})},
+		"GET /api/v1/pages/{slug}/artifact/lease":                                                     {Response: obj(map[string]any{"page_id": str(), "revision": positiveVersion, "content_sha256": str(), "runtime_profile": str(), "expires_at": timeString()})},
 		"GET /api/v1/pages/{slug}/artifact/requests":                                                  {Response: artifactRequestList},
 		"POST /api/v1/pages/{slug}/artifact/requests":                                                 {Request: artifactRequestCreate, RequestRequired: true, Response: artifactRequestAccepted, SuccessStatuses: []string{"202"}},
 		"POST /api/v1/pages/{slug}/artifact/requests/{requestId}/cancel":                              {Request: emptyCreationAuthorization, Response: artifactRequestCancelled, SuccessStatuses: []string{"200"}},

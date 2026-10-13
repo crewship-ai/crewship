@@ -2918,3 +2918,43 @@ Completion inserts a generic private Inbox message transactionally. It contains
 opaque pointers, not source content, titles or instructions. No external channel
 is called. Recovery retries pending notices with deduplication; restore suppresses
 pending delivery. The Inbox uses this resolver before rendering a result link.
+
+### GET /api/v1/pages/\{slug\}/artifact/lease
+
+```http
+GET /api/v1/pages/{slug}/artifact/lease?revision=3&workspace_id=WORKSPACE_ID
+```
+
+**Authentication:** current human Page reader. Agent, delegated-run and restricted
+identities are refused. The handler rechecks active account/workspace membership,
+current database role and Page access in one read-only transaction.
+
+**Request:** exactly one positive `revision` query parameter; no body.
+
+**Response:** `{page_id,revision,content_sha256,runtime_profile,expires_at}`.
+`expires_at` is an RFC 3339 timestamp, at most 15 seconds after the check began.
+Only metadata for the exact retained revision is read; this does not fetch HTML,
+verify blob bytes or enable scripts. The response is not a transferable capability
+and does not prevent permissions changing before expiry. Subsequent checks repeat
+authorization. The supported profile remains `static-html-v1`.
+
+**Statuses:** 200 current metadata; 400 missing, duplicate or invalid revision;
+401 missing human identity; 403 inactive/restricted membership; 404 missing or
+inaccessible Page/revision; 409 unsupported or inconsistent manifest metadata;
+500 database failure. Responses must not be cached as continuing authority.
+
+### Artifact request outcome selection and phase reporting
+
+Artifact request creation accepts `result_kind:"revision"` (default) or `"reply"`.
+The admitted kind is immutable. Reply-only requests cannot publish or restore a
+revision; revision requests cannot complete with a text answer alone.
+
+Authorized run-bound `artifact_request_update` operations append idempotent
+progress reports or a typed reply. Phases are `preparing`, `waiting_for_input`,
+`uploading` and `finalizing`; messages are plain text. They are explicitly
+agent-reported and do not extend deadlines, create heartbeats or prove completion.
+A reply-only result is atomically persisted with the agent/run/human provenance,
+terminal request state and private completion notice. List responses include
+`result_kind`, optional `agent_reported_phase:{phase,message,reported_at}` and
+optional `reply:{body,agent_id,run_id,on_behalf_of_user_id,created_at}`. Deleted
+identity references may be omitted. Existing Page read authorization still applies.

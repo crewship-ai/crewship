@@ -24,7 +24,7 @@ const modeReceipts = new Map<string, object>()
 const writes: { path: string; body: Record<string, unknown> }[] = []
 const clients: QueryClient[] = []
 beforeEach(() => {
-  canonical = { format: "board/v1", seq: 1, records: [{ element_id: "shape", element_rev: 1, deleted: false, element: { id: "shape", type: "rectangle", x: 0, y: 0, width: 100, height: 100, boundElements: null } }], placements: [], can_write: true }
+  canonical = { format: "crewship-board-excalidraw-0.18.1-v1", seq: 1, records: [{ element_id: "shape", element_rev: 1, deleted: false, element: { id: "shape", type: "rectangle", x: 0, y: 0, width: 100, height: 100, boundElements: null } }], placements: [], can_write: true }
   readStatus = 200; lost = false; initFail = false; missingUndoProof = false; expiredUndo = false; sourceHead = 3; loseModeResponse = false; modeReceipts.clear(); writes.length = 0
   vi.mocked(apiFetch).mockImplementation(async (url, options) => {
     const path = new URL(String(url), "https://studio.test").pathname

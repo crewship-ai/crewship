@@ -46,6 +46,14 @@ export function ArtifactRequestDialog({ open, onOpenChange, draft, head, targets
           <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={onRefresh}>Refresh chat choices</Button>
         </div>
         <div className="space-y-2">
+          <label htmlFor={`${id}-result`} className="text-sm font-medium">Expected result</label>
+          <select id={`${id}-result`} className="w-full rounded-md border bg-background p-2 text-sm coarse:min-h-12" disabled={pending} value={draft.result_kind ?? "revision"} onChange={event => onChange({ ...draft, result_kind: event.target.value as "revision" | "reply" })}>
+            <option value="revision">Update the artifact</option>
+            <option value="reply">Reply only</option>
+          </select>
+          <p className="text-xs text-muted-foreground">{draft.result_kind === "reply" ? "Ask for analysis or an answer. This request cannot publish a new artifact revision." : "Completion requires a published revision. A text reply alone does not complete the request."}</p>
+        </div>
+        <div className="space-y-2">
           <label htmlFor={`${id}-instruction`} className="text-sm font-medium">Instructions</label>
           <Textarea id={`${id}-instruction`} className="min-h-32 text-sm" maxLength={4096} disabled={pending} value={draft.instruction} onChange={event => onChange({ ...draft, instruction: event.target.value })} placeholder="Describe the change you want the agent to make…" />
           <p className="text-xs text-muted-foreground">Up to 4 KiB. Work uses the agent’s configured model and budget. A comment or mention alone does not send a request.</p>

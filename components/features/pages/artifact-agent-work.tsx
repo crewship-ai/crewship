@@ -7,7 +7,7 @@ import { useArtifactRequests, type ArtifactAgentRequest, type ArtifactRequestDra
 import { ArtifactRequestDialog } from "./artifact-request-dialog"
 import { ArtifactRequestStatus, ArtifactRequestsPanel } from "./artifact-requests-panel"
 
-interface RequestSource { base_rev: number; thread_id?: string; instruction?: string; chat_id?: string; retry_of_request_id?: string }
+interface RequestSource { result_kind?: "revision" | "reply"; base_rev: number; thread_id?: string; instruction?: string; chat_id?: string; retry_of_request_id?: string }
 interface AgentWorkContext {
   service: ReturnType<typeof useArtifactRequests>
   revision: number
@@ -49,7 +49,7 @@ export function ArtifactAgentWorkProvider({ workspaceId, slug, revision, head, o
     // Closing with Escape retains the private draft. Another entry point must
     // reopen that same draft rather than silently changing its revision/thread.
     if (!draft?.instruction.trim()) {
-      setDraft({ intent_id: crypto.randomUUID(), chat_id: source.chat_id ?? "", instruction: source.instruction ?? "", base_rev: source.base_rev, ...(source.thread_id ? { thread_id: source.thread_id } : {}), ...(source.retry_of_request_id ? { retry_of_request_id: source.retry_of_request_id } : {}) })
+      setDraft({ result_kind: source.result_kind ?? "revision", intent_id: crypto.randomUUID(), chat_id: source.chat_id ?? "", instruction: source.instruction ?? "", base_rev: source.base_rev, ...(source.thread_id ? { thread_id: source.thread_id } : {}), ...(source.retry_of_request_id ? { retry_of_request_id: source.retry_of_request_id } : {}) })
       service.send.reset()
     }
     setOpen(true)
@@ -94,7 +94,7 @@ export function ArtifactAgentRequests() {
     pending={work.pending} head={work.head} acceptedId={work.acceptedId}
     onRefresh={() => { work.service.cancel.reset(); void work.service.query.refetch() }}
     onCancel={async id => { try { await work.service.cancel.mutateAsync(id) } catch { /* Server state is refreshed; never invent cancellation. */ } }}
-    onRetry={(request: ArtifactAgentRequest) => work.open({ base_rev: work.head, thread_id: request.base_rev === work.head ? request.thread_id : undefined, instruction: request.instruction, chat_id: request.chat_id, retry_of_request_id: request.id })}
+    onRetry={(request: ArtifactAgentRequest) => work.open({ base_rev: work.head, thread_id: request.base_rev === work.head ? request.thread_id : undefined, instruction: request.instruction, chat_id: request.chat_id, retry_of_request_id: request.id, result_kind: request.result_kind })}
     onViewRevision={work.viewRevision}
   />
 }

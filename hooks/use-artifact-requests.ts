@@ -15,6 +15,8 @@ export interface ArtifactRequestTarget {
 }
 export interface ArtifactAgentRequest extends RequestExecution {
   id: string
+  result_kind?: "revision" | "reply"
+  reply?: { body: string; agent_id?: string; run_id: string; on_behalf_of_user_id?: string; created_at: string }
   chat_id: string
   agent_id: string
   agent_name?: string
@@ -38,6 +40,7 @@ export class ArtifactRequestError extends Error {
   constructor(message: string, public status: number) { super(message) }
 }
 export interface ArtifactRequestDraft {
+  result_kind?: "revision" | "reply"
   intent_id: string // Local draft identity, never sent as platform authority.
   chat_id: string
   thread_id?: string
@@ -100,7 +103,7 @@ export function useArtifactRequests(workspace: string, slug: string) {
         if (identities.current.size >= 64) throw new ArtifactRequestError("Too many unconfirmed requests. Retry an existing submission before sending another.", 400)
         identities.current.set(stamp, crypto.randomUUID())
       }
-      const payload = { chat_id: input.chat_id, instruction: input.instruction, base_rev: input.base_rev, ...(input.thread_id ? { thread_id: input.thread_id } : {}), ...(input.retry_of_request_id ? { retry_of_request_id: input.retry_of_request_id } : {}) }
+      const payload = { chat_id: input.chat_id, instruction: input.instruction, base_rev: input.base_rev, ...(input.thread_id ? { thread_id: input.thread_id } : {}), ...(input.retry_of_request_id ? { retry_of_request_id: input.retry_of_request_id } : {}), ...(input.result_kind === "reply" ? { result_kind: "reply" } : {}) }
       let response: Response
       try {
         response = await apiFetch(`${endpoint}?${params}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, submission_id: identities.current.get(stamp) }), signal: AbortSignal.timeout(20000) })

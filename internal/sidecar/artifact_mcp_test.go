@@ -135,3 +135,74 @@ func TestArtifactMCPBoardInputsUseExactScopedRoutesAndLiveDenial(t *testing.T) {
 		t.Fatalf("unsafe path reached host: %s", w.Body.String())
 	}
 }
+
+func TestArtifactMCPRequestUpdatePreservesRunAndTypedBody(t *testing.T) {
+	s, key := newRunIdentityServer(t)
+	token := internaltoken.DeriveAgentRunToken(key, "ws-1", "agent-boot", "run-boot")
+	calls := 0
+	denied := false
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "run-status") {
+			w.WriteHeader(503)
+			return
+		}
+		calls++
+		if r.Method != "POST" || r.URL.Path != "/api/v1/internal/artifact-requests/job/updates" || r.Header.Get("Authorization") != "Bearer "+token {
+			t.Fatal("lost exact request transport")
+		}
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body["operation"] != "reply" || body["body"] != "Answer" || body["mutation_id"] != "same" {
+			t.Errorf("wrong body %v", body)
+		}
+		if denied {
+			w.WriteHeader(403)
+			_, _ = w.Write([]byte(`{"error":"run revoked"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"succeeded","result_kind":"reply"}`))
+	}))
+	defer host.Close()
+	s.ipc.BaseURL = host.URL
+	args := `{"request_id":"job","operation":"reply","body":"Answer","mutation_id":"same"}`
+	w := artifactMCPCall(t, s, token, "artifact_request_update", args)
+	if strings.Contains(w.Body.String(), `"isError":true`) || calls != 1 {
+		t.Fatal(w.Body.String())
+	}
+	denied = true
+	w = artifactMCPCall(t, s, token, "artifact_request_update", args)
+	if !strings.Contains(w.Body.String(), "run revoked") {
+		t.Fatal(w.Body.String())
+	}
+	w = artifactMCPCall(t, s, token, "artifact_request_update", strings.TrimSuffix(args, "}")+`,"run_id":"other"}`)
+	if calls != 2 || !strings.Contains(w.Body.String(), `"isError":true`) {
+		t.Fatal("accepted caller identity")
+	}
+}
+
+func TestArtifactRequestUpdateRouterTerminatesAfterControlHandler(t *testing.T) {
+	s, key := newRunIdentityServer(t)
+	token := internaltoken.DeriveAgentRunToken(key, "ws-1", "agent-boot", "run-boot")
+	calls := 0
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "run-status") {
+			w.WriteHeader(503)
+			return
+		}
+		calls++
+		if r.Method != "POST" || r.URL.Path != "/api/v1/internal/artifact-requests/job/updates" {
+			t.Errorf("unexpected control dispatch %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"status":"succeeded","result_kind":"reply"}`))
+	}))
+	defer host.Close()
+	s.ipc.BaseURL = host.URL
+	r := httptest.NewRequest("POST", "/artifact-requests/job/updates", strings.NewReader(`{"operation":"reply","body":"Answer","mutation_id":"same"}`))
+	r.Host = "127.0.0.1:9119"
+	r.RemoteAddr = "127.0.0.1:12345"
+	r.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	s.buildHandler(nil).ServeHTTP(w, r)
+	if calls != 1 || w.Code != 200 || w.Body.String() != `{"status":"succeeded","result_kind":"reply"}` {
+		t.Fatalf("calls=%d status=%d body=%s", calls, w.Code, w.Body.String())
+	}
+}

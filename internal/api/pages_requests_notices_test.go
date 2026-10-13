@@ -246,3 +246,61 @@ func TestPageRequestNoticeRecoveryCursorDoesNotStarveLaterNotices(t *testing.T) 
 		t.Fatalf("later notice starved=%d %v", n, err)
 	}
 }
+
+func TestPageRequestResultUsesLiveRoleNotMiddlewareRole(t *testing.T) {
+	h, workspace, user, id, _ := lifecycleFixture(t, "artifact")
+	pagesSeedUser(t, h, workspace, "result-new-owner", "result-new-owner@example.test", "MEMBER")
+	execOrFatal(t, h.db, `UPDATE pages SET owner_user_id='result-new-owner' WHERE id=(SELECT page_id FROM page_artifact_requests WHERE id=?)`, id)
+	call := func(role string) *httptest.ResponseRecorder {
+		r := pagesGrantRequest(t, "GET", "/", workspace, user, role, "")
+		r.SetPathValue("kind", "artifact")
+		r.SetPathValue("requestId", id)
+		w := httptest.NewRecorder()
+		h.ResolvePageRequestResult(w, r)
+		return w
+	}
+	// Actual administrator visibility remains available even with stale low context.
+	artifactExpect(t, call("MEMBER"), 200)
+	execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, workspace, user)
+	artifactExpect(t, call("OWNER"), 404)
+	execOrFatal(t, h.db, `UPDATE workspace_members SET role='OWNER' WHERE workspace_id=? AND user_id=?`, workspace, user)
+	execOrFatal(t, h.db, `INSERT INTO workspaces(id,name,slug) VALUES('result-restricted-ws','Restricted','result-restricted-ws')`)
+	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('result-restricted-member','result-restricted-ws',?,'MEMBER','restricted')`, user)
+	artifactExpect(t, call("OWNER"), 404)
+}
+func TestPageRequestNoticeUsesRecipientLiveRoleNotWorkerOrCancellerRole(t *testing.T) {
+	for _, admin := range []bool{false, true} {
+		t.Run(fmt.Sprint(admin), func(t *testing.T) {
+			h, workspace, user, id, _ := lifecycleFixture(t, "artifact")
+			pagesSeedUser(t, h, workspace, "notice-new-owner", "notice-new-owner@example.test", "MEMBER")
+			execOrFatal(t, h.db, `UPDATE pages SET owner_user_id='notice-new-owner' WHERE id=(SELECT page_id FROM page_artifact_requests WHERE id=?)`, id)
+			execOrFatal(t, h.db, `UPDATE page_artifact_requests SET status='failed',notice_pending=1 WHERE id=?`, id)
+			role := "MEMBER"
+			if admin {
+				role = "OWNER"
+			}
+			execOrFatal(t, h.db, `UPDATE workspace_members SET role=? WHERE workspace_id=? AND user_id=?`, role, workspace, user)
+			// Deliberately wrong caller role: worker has none, another cancelling editor
+			// may be administrator. Neither supplies the recipient's authority.
+			callerRole := "OWNER"
+			if admin {
+				callerRole = ""
+			}
+			ctx := context.WithValue(t.Context(), ctxRole, callerRole)
+			if err := h.reconcilePageRequestNotices(ctx); err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id=?`, "page-request:artifact:"+id).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			want := 0
+			if admin {
+				want = 1
+			}
+			if count != want {
+				t.Fatalf("notice count=%d want=%d", count, want)
+			}
+		})
+	}
+}

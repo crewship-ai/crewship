@@ -17,7 +17,9 @@ const STATUS: Record<ArtifactAgentRequest["status"], StatusConfigEntryWithIcon> 
   cancelled: { label: "Cancelled", icon: Ban, className: STATUS_STYLES.gray },
 }
 export function ArtifactRequestStatus({ request }: { request: ArtifactAgentRequest }) {
-  const entry = request.status === "succeeded" && !request.result_revision
+  const entry = request.status === "succeeded" && request.result_kind === "reply" && request.reply
+    ? { label: "Reply received", icon: CheckCircle2, className: STATUS_STYLES.emerald }
+    : request.status === "succeeded" && !request.result_revision
     ? { label: "Result unavailable", icon: CircleAlert, className: STATUS_STYLES.amber }
     : request.status === "running"
       ? { ...STATUS.running, label: requestRunningLabel(request), ...(request.execution_state && request.execution_state !== "observed" ? { icon: CircleAlert, className: STATUS_STYLES.amber } : {}) }
@@ -61,6 +63,7 @@ export function ArtifactRequestsPanel({ data, error, writeError, loading, pendin
         <time className="block text-xs text-muted-foreground" dateTime={request.updated_at}>Updated {new Date(request.updated_at).toLocaleString()}</time>
         <RequestExecutionDetails request={request} />
         {request.instruction && <details className="text-sm"><summary className="cursor-pointer text-muted-foreground">Instructions sent</summary><p className="mt-2 whitespace-pre-wrap break-words">{request.instruction}</p></details>}
+        {request.status === "succeeded" && request.result_kind === "reply" && request.reply && <div aria-label="Agent reply" className="rounded-md border p-3 text-sm"><p className="mb-2 font-medium">Reply from {name}</p><p className="whitespace-pre-wrap break-words">{request.reply.body}</p></div>}
         {request.error && <p className="whitespace-pre-wrap text-sm text-destructive">{request.error}</p>}
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="ghost" className="coarse:h-12" onClick={() => onViewRevision(request.base_rev)}>View source revision {request.base_rev}</Button>

@@ -10,6 +10,7 @@ function EvidenceTime({ label, value }: { label: string; value?: string | null }
 export function RequestExecutionDetails({ request }: { request: RequestExecution & { status: string } }) {
   const unconfirmed = !request.run_status && ["awaiting_confirmation", "unknown", "deadline_exceeded"].includes(request.execution_state ?? "")
   return <div className="space-y-1 text-xs text-muted-foreground">
+    {request.agent_reported_phase && <div><p>Agent-reported phase: {request.agent_reported_phase.phase.replaceAll("_", " ")}</p>{request.agent_reported_phase.message && <p className="whitespace-pre-wrap break-words">{request.agent_reported_phase.message}</p>}<EvidenceTime label="Phase reported" value={request.agent_reported_phase.reported_at} /></div>}
     {request.retry_of_request_id && <p>New submission linked to an earlier request.</p>}
     {request.retry_warning && <p className="text-warn">{request.retry_warning}</p>}
     {unconfirmed && <p>Run status could not be confirmed. The agent may still be running; starting another request can duplicate work.</p>}

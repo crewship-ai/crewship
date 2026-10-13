@@ -117193,6 +117193,194 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/artifact/lease": {
+      "get": {
+        "description": "Get page artifact lease (GET /api/v1/pages/{slug}/artifact/lease).",
+        "operationId": "get_api_v1_pages_slug_artifact_lease",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "content_sha256": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "page_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "runtime_profile": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page artifact lease",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/pages/{slug}/artifact/requests": {
       "get": {
         "description": "List page artifact requests (GET /api/v1/pages/{slug}/artifact/requests).",
@@ -117261,6 +117449,27 @@
                           "agent_id": {
                             "type": "string"
                           },
+                          "agent_reported_phase": {
+                            "properties": {
+                              "message": {
+                                "type": "string"
+                              },
+                              "phase": {
+                                "enum": [
+                                  "preparing",
+                                  "waiting_for_input",
+                                  "uploading",
+                                  "finalizing"
+                                ],
+                                "type": "string"
+                              },
+                              "reported_at": {
+                                "format": "date-time",
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
                           "base_rev": {
                             "minimum": 1,
                             "type": "integer"
@@ -117311,6 +117520,34 @@
                           "last_activity_at": {
                             "format": "date-time",
                             "nullable": true,
+                            "type": "string"
+                          },
+                          "reply": {
+                            "properties": {
+                              "agent_id": {
+                                "type": "string"
+                              },
+                              "body": {
+                                "type": "string"
+                              },
+                              "created_at": {
+                                "format": "date-time",
+                                "type": "string"
+                              },
+                              "on_behalf_of_user_id": {
+                                "type": "string"
+                              },
+                              "run_id": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "result_kind": {
+                            "enum": [
+                              "revision",
+                              "reply"
+                            ],
                             "type": "string"
                           },
                           "result_revision": {
@@ -117536,6 +117773,13 @@
                   "instruction": {
                     "description": "Explicit human instruction, at most 4096 UTF-8 bytes. Dispatch can incur agent usage costs.",
                     "minLength": 1,
+                    "type": "string"
+                  },
+                  "result_kind": {
+                    "enum": [
+                      "revision",
+                      "reply"
+                    ],
                     "type": "string"
                   },
                   "retry_of_request_id": {

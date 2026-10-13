@@ -41,3 +41,12 @@ it("retains a confirmed published result instead of replacing it with a runtime 
   render(<ArtifactRequestStatus request={{ ...request, status: "succeeded", result_revision: 2, execution_state: "unknown" }} />)
   expect(screen.getByText("Revision published")).toBeTruthy()
 })
+
+it("labels agent-reported phase separately and never manufactures a heartbeat", () => {
+  render(<RequestExecutionDetails request={{ ...request, execution_state: "unknown", agent_reported_phase: { phase: "preparing", message: "<img onerror=alert(1)>", reported_at: "2026-10-13T12:00:00Z" } }} />)
+  expect(screen.getByText("Agent-reported phase: preparing")).toBeTruthy()
+  expect(screen.getByText("<img onerror=alert(1)>")).toBeTruthy()
+  expect(screen.getByText(/agent may still be running/)).toBeTruthy()
+  expect(screen.queryByText(/Last run heartbeat/)).toBeNull()
+  expect(document.querySelector("img")).toBeNull()
+})
