@@ -22,6 +22,7 @@ func (s *Service) checkJob(ctx context.Context, q pipeline.PageActionQuery, j jo
 	var one int
 	err = q.QueryRowContext(ctx, `SELECT 1 FROM access_attempts a
  JOIN workspace_members wm ON wm.id=a.member_id AND wm.workspace_id=a.workspace_id AND wm.user_id=a.principal_id AND wm.access_revision=a.member_revision AND wm.access_mode='restricted'
+ JOIN users principal ON principal.id=a.principal_id AND (principal.suspended_at IS NULL OR principal.suspended_at='')
  JOIN workspaces w ON w.id=a.workspace_id AND w.deleted_at IS NULL
  JOIN chats c ON c.id=a.chat_id AND c.workspace_id=a.workspace_id AND c.agent_id=a.agent_id AND c.created_by=a.principal_id AND c.visibility='private' AND c.authority_generation=a.chat_generation AND c.authority_revision=a.chat_revision
  JOIN agents ag ON ag.id=a.agent_id AND ag.workspace_id=a.workspace_id AND ag.deleted_at IS NULL AND ag.restricted_execution_profile=?

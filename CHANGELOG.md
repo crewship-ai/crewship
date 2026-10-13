@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Private workflow dispatch follows current account status.** Queued and recovered work retains its existing resource, role and execution safety checks.
+
 - **Pages creation and import controls follow current workspace permissions (#3081).** Readers keep access to existing content; authorized roles and explicit `page.create` grants retain authoring. An open draft survives permission loss while submission is disabled.
 
 - **Deferred and resumed human routine runs follow current account status (#3079).** Autonomous triggers and dry-run validation retain their existing behavior.
