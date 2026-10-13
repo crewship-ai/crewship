@@ -217,14 +217,14 @@ function CoverageCard({ rows, ctx, now, onOpen }: { rows: WorkspaceCoverage[]; c
                 onClick={onOpen ? () => onOpen(r.workspace_id) : undefined}
                 onKeyDown={onOpen ? (e) => { if (e.key === "Enter") onOpen(r.workspace_id) } : undefined}>
                 <td className={td}>
-                  <span className="flex items-center gap-2.5">
+                  <span className="flex items-center gap-2.5 whitespace-nowrap">
                     <WorkspaceTile id={r.workspace_id} name={r.name} logoUrl={logo(r.workspace_id)} />
                     <span className="font-medium">{r.name}</span>
                     {r.workspace_id === ctx.currentWorkspaceId && <span className="text-xs text-muted-foreground">· here</span>}
                   </span>
                 </td>
                 <td className={cn(td, "whitespace-nowrap", !r.last_backup_at && "text-muted-foreground")}>{formatAgo(r.last_backup_at, now)}</td>
-                <td className={cn(td, !r.plan && "text-muted-foreground")}>{r.plan ?? "no plan covers it"}</td>
+                <td className={cn(td, "whitespace-nowrap", !r.plan && "text-muted-foreground")}>{r.plan ?? "no plan covers it"}</td>
                 <td className={cn(td, "text-muted-foreground")}>{proofLabel(r.proof)}</td>
                 <td className={cn(td, "text-right")}>
                   <span className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>

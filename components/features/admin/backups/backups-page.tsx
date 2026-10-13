@@ -86,7 +86,9 @@ function readView(search: string): View {
     status: isRunFilter(status) ? status : "all",
     plan: p.get("plan"),
     recovery: rec === "history" || rec === "drills" ? rec : "new",
-    query: { q: p.get("q") ?? "", kind: oneOf(p.get("kind"), KINDS), proof: oneOf(p.get("proof"), PROOFS), period: oneOf(p.get("period"), PERIODS) },
+    // Runs open on the last 30 days; ?period=all is every run.
+    query: { q: p.get("q") ?? "", kind: oneOf(p.get("kind"), KINDS), proof: oneOf(p.get("proof"), PROOFS),
+      period: !p.has("period") ? "30" : p.get("period") === "all" ? "" : oneOf(p.get("period"), PERIODS) },
   }
 }
 
@@ -149,7 +151,7 @@ export function BackupsPage() {
       set("q", v.query.q.trim() || null)
       set("kind", v.query.kind || null)
       set("proof", v.query.proof || null)
-      set("period", v.query.period || null)
+      set("period", v.query.period === "30" ? null : v.query.period || "all")
       window.history.replaceState(window.history.state, "", url.toString())
       return v
     })
@@ -234,11 +236,13 @@ export function BackupsPage() {
   ]
   const workspaceDot = (id: string) => {
     const c = coverage.find((x) => x.workspace_id === id)
-    return c?.status === "ok" ? "bg-success" : c?.status === "warn" ? "bg-warn" : "bg-destructive"
+    if (!c) return "bg-muted-foreground/40"
+    return c.status === "ok" ? "bg-success" : c.status === "warn" ? "bg-warn" : "bg-destructive"
   }
   const workspaceSub = (id: string) => {
     const c = coverage.find((x) => x.workspace_id === id)
-    if (!c) return coverageRes.status === "loading" ? "…" : "No backup yet"
+    // A workspace without crews has nothing to back up; the server leaves it out.
+    if (!c) return coverageRes.data ? "No crews · nothing to back up" : "…"
     return c.last_backup_at ? `Backed up ${formatAgo(c.last_backup_at)}` : "Never backed up"
   }
 
@@ -346,7 +350,7 @@ export function BackupsPage() {
         {/* The Crew Journal's chart: runs stacked by result across the range;
             a click picks a bar, a drag a span, and that narrows the table. */}
         <div className="overflow-hidden rounded-card border border-border bg-card [&>div]:border-b-0 [&>div]:bg-transparent [&>div]:px-4 [&>div]:py-3" data-slot="runs-histogram">
-          <LogsHistogram entries={chartEntries} timeRange={range} selected={slice} onSelect={setSlice} height={72} />
+          <LogsHistogram entries={chartEntries} timeRange={range} selected={slice} onSelect={setSlice} height={72} title="Runs · by result" />
         </div>
         <BackupsHistory ctx={ctx} />
       </>

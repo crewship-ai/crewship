@@ -50,7 +50,7 @@ export function WorkspaceBackups({ ws, coverage, ctx, onOpenRuns }: {
           <p className="font-mono text-micro text-muted-foreground">{ws.slug}</p>
           <div className="mt-2.5 flex flex-wrap gap-1.5">
             {chip(coverage?.last_backup_at ? `Backed up ${formatAgo(coverage.last_backup_at, now)}` : "Never backed up", tone)}
-            {coverage && chip(proofLabel(coverage.proof))}
+            {coverage && coverage.proof > 0 && chip(proofLabel(coverage.proof))}
             {chip(coverage?.plan ?? "No plan covers it", coverage?.plan ? undefined : "warn")}
           </div>
         </div>
@@ -61,7 +61,8 @@ export function WorkspaceBackups({ ws, coverage, ctx, onOpenRuns }: {
       </section>
 
       <Gate resource={overview} what="This workspace's backups" skeleton="h-[240px]">
-        {(data) => <OverviewBody data={data} ctx={wsCtx} hideSpace />}
+        {/* Its own row is the header above: no table of one workspace. */}
+        {(data) => <OverviewBody data={data} ctx={wsCtx} hideSpace coverage={[]} />}
       </Gate>
 
       <SettingsCard icon={History} title="Its runs" description="The last few · all of them in Runs, narrowed to it"
