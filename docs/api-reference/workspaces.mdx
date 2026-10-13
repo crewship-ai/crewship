@@ -121,7 +121,7 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
 | `id` | string | Workspace ID (CUID) |
 | `name` | string | Display name (2-100 chars) |
 | `slug` | string | URL-safe identifier (2-50 chars, globally unique) |
-| `kind` | string | `team`, or `personal` for the one a sign-up without an invitation gets: that person's personal account, shown apart from workspaces in the switcher and in Admin. An instance administrator changes it with [`PATCH /admin/instance/workspaces/{id}`](/api-reference/admin#patch-api-v1-admin-instance-workspaces-workspaceid). |
+| `kind` | string | `team`, or `personal` for the one a sign-up without an invitation gets: that person's personal account, shown apart from workspaces in the switcher and in Admin. An instance administrator changes it with [`PATCH /admin/instance/workspaces/{id}`](/api-reference/admin). |
 | `logo_url` | string? | URL to workspace logo |
 | `preferred_language` | string? | Canonical language name (e.g. `"Czech"`, `"English"`) -- see [language list](#preferred_language-values) |
 | `currentUserRole` | string | Caller's role in this workspace (`OWNER` / `ADMIN` / `MANAGER` / `MEMBER` / `VIEWER`) |

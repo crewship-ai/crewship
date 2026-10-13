@@ -4,6 +4,7 @@ import { webcrypto } from "node:crypto"
 import { ageKeyFile, bech32Encode, encodeAgeKeys, generateAgeKey } from "../age-key"
 
 // age's own test vector (testkit x25519): the scalar 0x42… and its key pair.
+// Public, and allowlisted by fingerprint in .gitleaksignore.
 const SCALAR = new Uint8Array(32).fill(0x42)
 const IDENTITY = "AGE-SECRET-KEY-1GFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPQ4EGAEX"
 const RECIPIENT = "age1zvkyg2lqzraa2lnjvqej32nkuu0ues2s82hzrye869xeexvn73equnujwj"
