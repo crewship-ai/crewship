@@ -33,6 +33,15 @@ func HumanInvocationAuthority(userID, authority string) string {
 func NewInvocationAuthorityChecker(db *sql.DB) func(context.Context, RunInput) error {
 	return func(ctx context.Context, in RunInput) error {
 		if in.InvokingUserID != "" && db != nil {
+			// Persisted human work must retain a live account, including after
+			// waits or restarts. Autonomous triggers have no human identity.
+			var active bool
+			if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND (suspended_at IS NULL OR suspended_at=''))`, in.InvokingUserID).Scan(&active); err != nil {
+				return fmt.Errorf("routine account authority: %w", err)
+			}
+			if !active {
+				return ErrInvocationAuthorityRevoked
+			}
 			restricted, err := (access.Store{DB: db}).HasRestrictedMembership(ctx, in.InvokingUserID)
 			if err != nil {
 				return fmt.Errorf("routine resource authority: %w", err)

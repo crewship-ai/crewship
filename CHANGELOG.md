@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Deferred and resumed human routine runs follow current account status (#3079).** Autonomous triggers and dry-run validation retain their existing behavior.
+
 - ⚠️ **Behaviour change:** Signup invitation handoff requires the matching invitation link; existing accounts can explicitly accept after signing in or through `workspace invite accept`. Invitation listings retain metadata without redemption tokens; pending links can be reissued or revoked. Legacy unaccepted invitation links stored as raw tokens are invalidated on upgrade; an authorized inviter must create a new invitation or reissue the pending invitation. Accepted invitation history is preserved. New proofs are stored hashed, and browser/CLI handoff avoids putting proof in redirect URLs or command arguments (#3071).
 - **Restricted navigation follows each member’s grants (#3072).** Chat, Routines and Pages appear only when the selected workspace membership can access their catalog; account security remains available. Switching workspaces no longer borrows another membership’s screens. A missing execution runtime does not hide otherwise authorized navigation. Open screens recheck changed access through the existing foreground polling interval.
 
