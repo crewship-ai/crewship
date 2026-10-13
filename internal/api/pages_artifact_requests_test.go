@@ -117,8 +117,8 @@ func TestArtifactRequestBusyRetryAndUnknownOutcome(t *testing.T) {
 	}
 	h.dispatchNextArtifactRequest(context.Background())
 	_ = h.db.QueryRow(`SELECT status FROM page_artifact_requests WHERE id=?`, id).Scan(&state)
-	if state != "failed" {
-		t.Fatal(state)
+	if state != "running" {
+		t.Fatalf("bound unknown admission must remain unconfirmed, got %s", state)
 	}
 }
 

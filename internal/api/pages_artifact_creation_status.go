@@ -27,7 +27,7 @@ func (h *PageHandler) ArtifactCreationStatus(w http.ResponseWriter, r *http.Requ
 		replyError(w, 404, "chat not found")
 		return
 	}
-	result := map[string]any{"run_id": "", "can_authorize": false, "authorized": false, "remaining": 0, "expires_at": "", "revoked": false}
+	result := map[string]any{"run_id": "", "can_authorize": false, "authorized": false, "remaining": 0, "expires_at": "", "revoked": false, "policy_allowed": false}
 	if !h.artifactRequestChatPrivate(r.Context(), chat, user.ID) || !h.artifactPrincipalMayCreate(r.Context(), workspace, user.ID) {
 		writeJSON(w, 200, result)
 		return
@@ -47,7 +47,9 @@ func (h *PageHandler) ArtifactCreationStatus(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, 200, result)
 		return
 	}
-	result["run_id"], result["expires_at"], result["can_authorize"] = a.RunID, expires, true
+	policyAllowed := h.artifactAgentPolicyAllows(r.Context(), workspace, a.CrewID)
+	result["policy_allowed"] = policyAllowed
+	result["run_id"], result["expires_at"], result["can_authorize"] = a.RunID, expires, policyAllowed
 	var deadline string
 	var revoked, consumed sql.NullString
 	err = h.db.QueryRowContext(r.Context(), `SELECT expires_at,revoked_at,consumed_at FROM artifact_creation_authorizations WHERE run_id=? AND authorized_by_user_id=?`, a.RunID, user.ID).Scan(&deadline, &revoked, &consumed)
@@ -58,7 +60,7 @@ func (h *PageHandler) ArtifactCreationStatus(w http.ResponseWriter, r *http.Requ
 	if err == nil {
 		limit, parseErr := time.Parse(time.RFC3339Nano, deadline)
 		valid := parseErr == nil && time.Now().Before(limit) && !revoked.Valid
-		result["revoked"], result["authorized"], result["can_authorize"] = revoked.Valid, valid, valid
+		result["revoked"], result["authorized"], result["can_authorize"] = revoked.Valid, valid, valid && policyAllowed
 		if valid && !consumed.Valid {
 			result["remaining"] = 1
 		}

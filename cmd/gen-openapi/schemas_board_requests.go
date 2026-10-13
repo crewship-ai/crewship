@@ -1,5 +1,16 @@
 package main
 
+func requestExecutionProperties() map[string]any {
+	return map[string]any{
+		"execution_state":  map[string]any{"type": "string", "enum": []string{"observed", "awaiting_confirmation", "unknown", "deadline_exceeded"}},
+		"heartbeat_at":     map[string]any{"type": "string", "format": "date-time", "nullable": true, "description": "Actual work attempt heartbeat only; null when no such evidence exists."},
+		"last_activity_at": map[string]any{"type": "string", "format": "date-time", "nullable": true},
+		"deadline_at":      map[string]any{"type": "string", "format": "date-time", "nullable": true},
+		"deadline_source":  map[string]any{"type": "string", "enum": []string{"recorded", "legacy_derived"}},
+		"run_status":       map[string]any{"type": "string", "enum": []string{"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"}, "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result."},
+	}
+}
+
 func boardRequestSchemaCatalog() map[string]DomainSchema {
 	str := map[string]any{"type": "string"}
 	integer := map[string]any{"type": "integer", "minimum": 0}
@@ -11,6 +22,7 @@ func boardRequestSchemaCatalog() map[string]DomainSchema {
 	array := func(item map[string]any) map[string]any { return map[string]any{"type": "array", "items": item} }
 	geometry := obj(map[string]any{"x": number, "y": number, "width": number, "height": number}, "x", "y", "width", "height")
 	props := map[string]any{"id": str, "kind": map[string]any{"type": "string", "enum": []string{"diagram", "artifact"}}, "status": map[string]any{"type": "string", "enum": []string{"queued", "running", "ready_to_insert", "inserted", "succeeded", "failed", "cancelled"}}, "base_seq": integer, "instruction": str, "selected_element_ids": array(str), "selected_placement_ids": array(str), "target": geometry, "agent_id": str, "agent_name": str, "run_id": str, "human_user_id": str, "created_at": str, "updated_at": str, "error": str, "dialect": str, "converter_version": str, "converter_url": str, "source_hash": str, "can_insert": boolean, "can_cancel": boolean, "result_seq": map[string]any{"type": "integer", "nullable": true}, "inserted_by_user_id": str, "result": obj(map[string]any{"page_slug": str, "title": str, "revision": integer}, "page_slug", "title", "revision"), "pin_status": str, "pin_reason": str, "result_placement_id": str, "has_preview": boolean}
+	props = mergeProps(props, requestExecutionProperties())
 	record := obj(props, "id", "kind", "status", "base_seq", "instruction", "selected_element_ids", "selected_placement_ids", "target", "created_at", "updated_at", "can_insert", "can_cancel", "result_seq", "converter_url")
 	detail := obj(mergeProps(props, map[string]any{"mermaid_source": str, "inserted_element_ids": array(str), "edited_since_insert": boolean}), "id", "kind", "status", "mermaid_source", "source_hash", "converter_version", "converter_url", "inserted_element_ids", "edited_since_insert")
 	target := obj(map[string]any{"chat_id": str, "title": str, "agent_id": str, "agent_name": str, "agent_slug": str}, "chat_id", "agent_id", "agent_name", "agent_slug")

@@ -2817,3 +2817,66 @@ separate runtime site. Other browsers retain the prepared source without executi
 it in Studio. Insertion always requires explicit human confirmation and server
 validation; a source hash does not prove the client-generated geometry came from
 the converter.
+
+### Agent artifact policy
+
+`GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy` and
+`PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy` require a current
+human workspace OWNER/ADMIN. The path must identify the authenticated workspace.
+GET returns `{enabled,crew_ids,version}`. An unsaved policy is disabled, with an
+empty allowlist and version 0. PUT requires the complete
+`{enabled,crew_ids,base_version}` replacement; at most 500 distinct current crew
+IDs from this workspace are accepted. A stale version returns 409.
+
+The workspace switch and crew allowlist are checked when an agent creates or
+publishes an artifact, including artifact output requested from a Board.
+Disabling the policy stops subsequent agent publication even for previously
+authorized runs. It does not grant any Page rights: the live run, verified human,
+explicit per-run authorization and Page grants are still required. Human
+publication and copying, agent reads/comments and Board geometry retain their
+own authorization rules.
+
+### Revision format manifest
+
+Artifact reads include `manifest` and `manifest_status`. New revisions record an
+immutable manifest with `format_version:1`, `runtime_profile:"static-html-v1"`,
+`entrypoint:"index.html"` and exactly one file containing its path, UTF-8 MIME,
+byte count and SHA-256 digest. `source:null` means no original React/TypeScript
+project bundle is attached; HTML is the published build.
+
+An unpublished Page returns `manifest:null` and status `unpublished`. A retained
+legacy revision has status `legacy_derived`: its manifest is derived from the
+verified stored bytes without rewriting history. A new stored manifest has
+status `recorded`. Reads, restore and copy reject a manifest that disagrees with
+the content or names an unsupported profile. Restore/copy create new recorded
+revisions while preserving the selected content.
+
+Publication may explicitly send `runtime_profile:"static-html-v1"` and
+`format_version:1`, or omit both for compatibility. Unsupported values are
+rejected before blob storage changes. This profile does not enable scripts.
+
+
+### Request outcome and runtime evidence
+
+Artifact and Board request records distinguish their durable result `status` from
+`execution_state`. A lost observer or a server restart does not prove that a
+bound agent run failed. Such requests remain pending until an authoritative
+terminal result or their admitted deadline is observed; they are never
+redispatched automatically.
+
+- `observed`: current work lease evidence or a confirmed terminal run outcome.
+- `awaiting_confirmation`: recent recorded activity without a confirmed lease or outcome.
+- `unknown`: no current trustworthy runtime evidence.
+- `deadline_exceeded`: the admitted request deadline elapsed without a confirmed outcome.
+
+`heartbeat_at` is an actual work-attempt heartbeat, or null. Journal activity is
+reported separately as `last_activity_at`; neither polling nor the request's
+`updated_at` creates a heartbeat. `run_status` appears only for a confirmed
+terminal run outcome. `deadline_source` distinguishes a persisted `recorded`
+deadline from a conservative `legacy_derived` deadline for an older running job.
+
+Expiring or cancelling a request revokes acceptance of its future result. It does
+not prove the agent process has stopped, release its runtime capacity or start a
+replacement. A committed revision or inserted diagram remains the authoritative
+successful result even if a later observer fails. New work requires an explicit
+human submission and may duplicate an unconfirmed run's work.

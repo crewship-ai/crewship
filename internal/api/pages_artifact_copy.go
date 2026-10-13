@@ -72,9 +72,10 @@ func (h *PageHandler) CopyArtifact(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "check artifact copy retry", err)
 		return
 	}
-	var sha string
+	var sha, manifestJSON string
 	if existing == 0 {
-		if err := h.db.QueryRowContext(r.Context(), `SELECT sha256 FROM page_artifact_revisions WHERE page_id=? AND revision=?`, source.ID, req.SourceRevision).Scan(&sha); err != nil {
+		var recorded sql.NullString
+		if err := h.db.QueryRowContext(r.Context(), `SELECT sha256,manifest_json FROM page_artifact_revisions WHERE page_id=? AND revision=?`, source.ID, req.SourceRevision).Scan(&sha, &recorded); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				replyError(w, 404, "artifact revision not found")
 			} else {
@@ -92,6 +93,16 @@ func (h *PageHandler) CopyArtifact(w http.ResponseWriter, r *http.Request) {
 		data, err := readArtifactCopySource(h.artifactStoragePath, ws, sha)
 		if err != nil || len(data) == 0 || len(data) > maxArtifactHTMLBytes || !utf8.Valid(data) || attachmentDigest(data) != sha {
 			replyError(w, 503, "artifact content is missing or failed integrity verification")
+			return
+		}
+		manifest, _, err := resolveArtifactManifest(recorded, data, sha)
+		if err != nil {
+			replyError(w, 503, "artifact manifest is unsupported or failed integrity verification")
+			return
+		}
+		manifestJSON, err = artifactManifestJSON(manifest)
+		if err != nil {
+			replyInternalError(w, h.logger, "encode copied artifact manifest", err)
 			return
 		}
 	}
@@ -184,7 +195,7 @@ func (h *PageHandler) CopyArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	revisionDigest := attachmentDigest([]byte(fmt.Sprintf("%d/%t/%d/%s", 0, false, 0, sha)))
-	if _, err = tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,created_at) VALUES(?,?,1,?,?,?,?,?)`, generateCUID(), targetID, sha, user.ID, req.MutationID, revisionDigest, stamp); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,created_at,manifest_json) VALUES(?,?,1,?,?,?,?,?,?)`, generateCUID(), targetID, sha, user.ID, req.MutationID, revisionDigest, stamp, manifestJSON); err != nil {
 		replyInternalError(w, h.logger, "save copied revision", err)
 		return
 	}

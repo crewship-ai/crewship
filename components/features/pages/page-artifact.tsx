@@ -43,6 +43,24 @@ export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: {
   const artifact = query.data
   const sourceAccessDenied = query.error instanceof PageArtifactError && [401, 403, 404].includes(query.error.status)
   useEffect(() => {
+    if (view !== "preview" || !artifact?.can_comment || !artifact.head_rev || sourceAccessDenied) return
+    const keydown = (event: KeyboardEvent) => {
+      const target = event.target instanceof Element ? event.target : null
+      if (event.defaultPrevented || event.isComposing || event.repeat || event.metaKey || event.ctrlKey || event.altKey || target?.closest("input, textarea, select, [contenteditable], [role='textbox'], [role='dialog'], [role='alertdialog']")) return
+      if (event.key === "Escape") {
+        setPickingPoint(false)
+        setPoint(null)
+      } else if (event.key.toLowerCase() === "c" && !commentsDirty) {
+        event.preventDefault()
+        setPickingPoint(value => !value)
+        setPoint(null)
+      }
+    }
+    // Events inside the opaque document are intentionally not intercepted.
+    window.addEventListener("keydown", keydown)
+    return () => window.removeEventListener("keydown", keydown)
+  }, [view, artifact?.can_comment, artifact?.head_rev, sourceAccessDenied, commentsDirty])
+  useEffect(() => {
     if (sourceAccessDenied) { setCopyRevision(null); setCopyResult(null); cancelCopy(); setDraft(null); setCommentsDirty(false); setPoint(null); setSelectedAnchor(null); setPickingPoint(false) }
   }, [sourceAccessDenied, cancelCopy])
   useEffect(() => {
@@ -92,7 +110,7 @@ export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: {
     {artifact.head_rev === 0 && draft === null && <div className="space-y-3 p-6"><h2 className="text-base font-medium">Attach an HTML artifact</h2><p className="max-w-xl text-sm text-muted-foreground">Upload a report or paste HTML source. Each save creates an immutable revision on this page.</p>{artifact.can_write && <Button variant="outline" onClick={() => { setDraftBaseRev(artifact.head_rev); setDraft(""); setView("source") }}>Paste HTML</Button>}</div>}
     {view === "preview" && artifact.head_rev > 0 && <>
       <div className="flex flex-wrap gap-2 px-4 py-2">
-        {artifact.can_comment && <Button size="sm" variant="outline" disabled={commentsDirty} onClick={() => { setPickingPoint(value => !value); setPoint(null) }}>{pickingPoint ? "Cancel point selection" : "Comment on a point"}</Button>}
+        {artifact.can_comment && <Button size="sm" variant="outline" aria-keyshortcuts="C" title="Comment on a point (C); Escape closes the overlay" disabled={commentsDirty} onClick={() => { setPickingPoint(value => !value); setPoint(null) }}>{pickingPoint ? "Cancel point selection" : "Comment on a point"}</Button>}
         {point && <Button size="sm" variant="ghost" onClick={() => setPoint(null)}>Close point overlay</Button>}
       </div>
       <ArtifactStaticPreview document={document} revision={artifact.revision} picking={pickingPoint && artifact.can_comment === true} shown={point} onPick={anchor => {

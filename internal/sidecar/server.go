@@ -610,6 +610,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/artifacts":
 				s.handleArtifactCreate(w, r)
 				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/artifacts/") && strings.HasSuffix(r.URL.Path, "/restore"):
+				s.handleArtifactPublish(w, r)
+				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/artifacts/") && strings.HasSuffix(r.URL.Path, "/revisions"):
 				s.handleArtifactPublish(w, r)
 				return
@@ -618,6 +621,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/artifacts/") && strings.Contains(r.URL.Path, "/threads/") && strings.HasSuffix(r.URL.Path, "/comments"):
 				s.handleArtifactComments(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/artifacts":
+				s.handleArtifactToolRead(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/artifacts/") && strings.HasSuffix(r.URL.Path, "/diff"):
+				s.handleArtifactToolRead(w, r)
 				return
 			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/artifacts/"):
 				s.handleArtifactPublish(w, r)

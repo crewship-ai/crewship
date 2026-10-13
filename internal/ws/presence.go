@@ -10,6 +10,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -31,6 +32,7 @@ type presenceState struct {
 type presenceMember struct {
 	ID    string
 	User  string
+	Name  string
 	State presenceState
 	At    time.Time
 }
@@ -49,6 +51,26 @@ func isContentRoom(channel string) bool {
 	return ok && id != "" && len(id) <= 128 && !strings.Contains(id, ":") && (kind == "artifact" || kind == "board")
 }
 func (h *Hub) joinPresence(c *Client, channel string, now time.Time) bool {
+	// Existing cursor updates do not resolve identity or perform extra IO.
+	h.presenceMu.Lock()
+	resolver := h.presenceDisplayName
+	if room := h.presenceRooms[channel]; room != nil && room.Members[c] != nil {
+		h.presenceMu.Unlock()
+		return true
+	}
+	h.presenceMu.Unlock()
+	name := ""
+	if resolver != nil {
+		parent := c.ctx
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(parent, 200*time.Millisecond)
+		if resolved, err := resolver(ctx, c.userID); err == nil {
+			name = boundedPresenceName(resolved)
+		}
+		cancel()
+	}
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
 	if h.presenceRooms == nil {
@@ -81,7 +103,7 @@ func (h *Hub) joinPresence(c *Client, channel string, now time.Time) bool {
 		room = &presenceRoom{Members: map[*Client]*presenceMember{}, Rates: map[string]presenceRate{}}
 		h.presenceRooms[channel] = room
 	}
-	room.Members[c] = &presenceMember{ID: rand.Text(), User: c.userID, At: now, State: presenceState{Schema: 1}}
+	room.Members[c] = &presenceMember{ID: rand.Text(), User: c.userID, Name: name, At: now, State: presenceState{Schema: 1}}
 	return true
 }
 func (h *Hub) emitPresence(channel string) {
@@ -108,7 +130,7 @@ func (h *Hub) emitPresence(channel string) {
 	members := []map[string]any{}
 	if room := h.presenceRooms[channel]; room != nil {
 		for _, m := range room.Members {
-			members = append(members, map[string]any{"connection_id": m.ID, "user_id": m.User, "revision": m.State.Revision, "board_seq": m.State.BoardSeq, "cursor": m.State.Cursor})
+			members = append(members, map[string]any{"connection_id": m.ID, "user_id": m.User, "display_name": m.Name, "revision": m.State.Revision, "board_seq": m.State.BoardSeq, "cursor": m.State.Cursor})
 		}
 	}
 	data, err := json.Marshal(ServerMessage{Type: "presence.snapshot", Channel: channel, Payload: map[string]any{"schema_version": 1, "members": members}})
@@ -323,4 +345,28 @@ func (c *Client) handlePresence(msg ClientMessage) {
 	}
 	h.presenceMu.Unlock()
 	h.emitPresence(msg.Channel)
+}
+
+// Configure at startup. Names are resolved only for authenticated, authorized
+// room participants, never from browser-supplied presence fields.
+func (h *Hub) SetPresenceDisplayNameResolver(resolve func(context.Context, string) (string, error)) {
+	h.presenceMu.Lock()
+	defer h.presenceMu.Unlock()
+	h.presenceDisplayName = resolve
+}
+func boundedPresenceName(name string) string {
+	if !utf8.ValidString(name) {
+		return ""
+	}
+	runes := make([]rune, 0, 128)
+	for _, r := range name {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		if len(runes) >= 128 {
+			break
+		}
+		runes = append(runes, r)
+	}
+	return strings.TrimSpace(string(runes))
 }

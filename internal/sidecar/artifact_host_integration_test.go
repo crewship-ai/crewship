@@ -73,6 +73,7 @@ func TestArtifactHostHTTPDelegatedLifecycle(t *testing.T) {
 		}
 		return b
 	}
+	call("PUT", "/api/v1/workspaces/"+r6WS+"/artifact-creation-policy?workspace_id="+r6WS, "", human, map[string]any{"enabled": true, "crew_ids": []string{r6Crew}, "base_version": 0}, 200)
 	call("POST", "/api/v1/pages?workspace_id="+r6WS, "", human, map[string]any{"slug": "report", "name": "Report", "panels": []any{}, "allow_empty": true}, 201)
 	var page string
 	if err := h.db.QueryRow(`SELECT id FROM pages WHERE slug='report'`).Scan(&page); err != nil {
@@ -129,7 +130,46 @@ func TestArtifactHostHTTPDelegatedLifecycle(t *testing.T) {
 	agentCall("POST", "/artifacts/report/revisions", `{"html":"x","base_rev":0,"mutation_id":"first","agent_id":"forged"}`, 400)
 	agentCall("POST", "/artifacts/report/revisions", `{"html":"<h1>Report</h1>","base_rev":0,"mutation_id":"first"}`, 201)
 	agentCall("GET", "/artifacts/report?revision=1", "", 200)
+	mcpCall := func(run, tool string, arguments map[string]any, wantError bool) {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": arguments}})
+		request, _ := http.NewRequest("POST", side.URL+"/mcp/routines", bytes.NewReader(payload))
+		request.Header.Set("Authorization", "Bearer "+r6RunToken(run))
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		raw, _ := io.ReadAll(response.Body)
+		var envelope struct {
+			Result struct {
+				IsError bool `json:"isError"`
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(raw, &envelope); err != nil || len(envelope.Result.Content) != 1 || envelope.Result.IsError != wantError {
+			t.Fatalf("MCP %s error=%t response=%s decode=%v", tool, wantError, raw, err)
+		}
+	}
+	mcpCall(r6RunA, "artifact_read", map[string]any{"slug": "report", "revision": 1}, false)
+	mcpCall(r6RunB, "artifact_read", map[string]any{"slug": "report", "revision": 1}, true)
+	mcpCall(r6RunA, "artifact_publish", map[string]any{"slug": "report", "html": "<h1>MCP published</h1>", "base_rev": 1, "mutation_id": "mcp-publish"}, false)
+	mcpCall(r6RunA, "artifact_publish", map[string]any{"slug": "report", "html": "<h1>MCP published</h1>", "base_rev": 1, "mutation_id": "mcp-publish"}, false)
+	mcpCall(r6RunA, "artifact_list", map[string]any{}, false)
+	mcpCall(r6RunB, "artifact_list", map[string]any{}, true)
+	mcpCall(r6RunA, "artifact_diff", map[string]any{"slug": "report", "from_revision": 1, "to_revision": 2}, false)
+	mcpCall(r6RunB, "artifact_diff", map[string]any{"slug": "report", "from_revision": 1, "to_revision": 2}, true)
+	mcpCall(r6RunA, "artifact_restore", map[string]any{"slug": "report", "revision": 1, "base_rev": 2, "mutation_id": "mcp-restore"}, false)
+	mcpCall(r6RunA, "artifact_restore", map[string]any{"slug": "report", "revision": 1, "base_rev": 2, "mutation_id": "mcp-restore"}, false)
+	mcpCall(r6RunB, "artifact_restore", map[string]any{"slug": "report", "revision": 1, "base_rev": 3, "mutation_id": "foreign-restore"}, true)
 	call("DELETE", "/api/v1/pages/report/artifact/delegations/"+r6RunA+"?workspace_id="+r6WS, "", human, nil, 204)
+	mcpCall(r6RunA, "artifact_read", map[string]any{"slug": "report", "revision": 1}, true)
+	mcpCall(r6RunA, "artifact_list", map[string]any{}, false)
+	mcpCall(r6RunA, "artifact_diff", map[string]any{"slug": "report", "from_revision": 1, "to_revision": 2}, true)
+	mcpCall(r6RunA, "artifact_restore", map[string]any{"slug": "report", "revision": 1, "base_rev": 3, "mutation_id": "revoked-restore"}, true)
+
 	agentCall("GET", "/artifacts/report", "", 403)
 	agentCall("POST", "/artifacts/report/revisions", `{"html":"blocked","base_rev":1,"mutation_id":"second"}`, 403)
 }

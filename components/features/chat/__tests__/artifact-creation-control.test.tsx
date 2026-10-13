@@ -43,3 +43,17 @@ it("rechecks a grant after a lost response rather than sending a second opt-in",
   await screen.findByRole("button", { name: "Revoke artifact creation" })
   expect(posts).toBe(1)
 })
+it("shows a blocked policy hint without offering a grant, but permits revoking an existing consumed permission", async () => {
+  let granted = false
+  const methods:string[]=[]
+  vi.mocked(apiFetch).mockImplementation(async(_url,options)=>{
+    if(options?.method){methods.push(options.method);granted=false;return new Response('{}')}
+    return new Response(JSON.stringify({run_id:'trusted-run',can_authorize:false,policy_allowed:false,authorized:granted,remaining:0,revoked:false,expires_at:''}))
+  })
+  const view=render(<ArtifactCreationControl workspaceId="ws" sessionId="chat" isStreaming={false}/>)
+  expect(await screen.findByRole('button',{name:'Allow artifact creation'})).toBeDisabled()
+  expect(screen.getByText(/Workspace policy blocks/)).toBeInTheDocument()
+  granted=true;view.rerender(<ArtifactCreationControl workspaceId="ws" sessionId="other-chat" isStreaming={false}/>)
+  fireEvent.click(await screen.findByRole('button',{name:'Revoke artifact creation'}))
+  await waitFor(()=>expect(methods).toEqual(['DELETE']))
+})

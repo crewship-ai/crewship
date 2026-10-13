@@ -507,7 +507,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 overflow-auto"
               >
-                {filters.content?.length === 1 && filters.content[0] === 'artifact' ? <ArtifactGallery pages={filtered} loading={loading} error={error} onSelect={openPage} onCreate={canCreatePage ? () => setCreatingArtifact(true) : undefined} onOpenChat={() => { window.location.assign('/chat') }} /> : <PagesOverview
+                {filters.content?.length === 1 && filters.content[0] === 'artifact' ? <ArtifactGallery workspaceId={workspaceId} pages={filtered} loading={loading} error={error} onSelect={openPage} onCreate={canCreatePage ? () => setCreatingArtifact(true) : undefined} onOpenChat={() => { window.location.assign('/chat') }} /> : <PagesOverview
                   pages={filtered}
                   allPages={pages}
                   loading={loading}

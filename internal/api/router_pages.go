@@ -54,6 +54,7 @@ func (r *Router) registerPageRoutes() {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
 	if r.hub != nil {
 		r.hub.SetPageContentAuthorizer(p.CanReadPageContent)
+		r.hub.SetPresenceDisplayNameResolver(p.PresenceDisplayName)
 	}
 	p.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	// Held on the Router so cmd_start can reach THIS instance: it owns the
@@ -93,6 +94,11 @@ func (r *Router) registerPageRoutes() {
 	// aliases keep the registration lines readable (router_orchestration.go).
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
+	// Human workspace administrators own this policy; it never grants Page access.
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy", authed(wsCtx(http.HandlerFunc(p.GetArtifactCreationPolicy))))
+	// openapi: responses 200,400,401,403,404,409,422,500
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/artifact-creation-policy", roleManage, p.UpdateArtifactCreationPolicy)
 	// 503 carries code restricted_runtime_unavailable when no private runtime is installed (#2877).
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-pages", authed(wsCtx(http.HandlerFunc(p.RestrictedCatalog))))

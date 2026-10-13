@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { usePresenceTransportSafe, useRealtimeChannelSafe, useRealtimeEventSafe, type RealtimeEvent, type ContentPresenceCursor } from "@/hooks/use-realtime"
 export type ContentPresenceContext = { kind: "artifact"; pageId: string; revision: number } | { kind: "board"; pageId: string; boardSeq: number }
-export interface PresenceMember { connection_id: string; user_id: string; revision: number | null; board_seq: number | null; cursor: ContentPresenceCursor | null }
+export interface PresenceMember { display_name?: string; connection_id: string; user_id: string; revision: number | null; board_seq: number | null; cursor: ContentPresenceCursor | null }
 function membersFrom(payload: Record<string, unknown>): PresenceMember[] | null {
   if (payload.schema_version !== 1 || !Array.isArray(payload.members) || payload.members.length > 64) return null
   const result: PresenceMember[] = []
@@ -22,7 +22,8 @@ function membersFrom(payload: Record<string, unknown>): PresenceMember[] | null 
         else if (point.coordinate_space === "viewport" && typeof point.viewport_width === "number" && point.viewport_width > 0 && point.viewport_width <= 16384 && typeof point.viewport_height === "number" && point.viewport_height > 0 && point.viewport_height <= 16384 && point.x >= 0 && point.x <= point.viewport_width && point.y >= 0 && point.y <= point.viewport_height) cursor = { x: point.x, y: point.y, coordinate_space: "viewport", viewport_width: point.viewport_width, viewport_height: point.viewport_height }
       }
     }
-    result.push({ cursor, connection_id: item.connection_id, user_id: item.user_id, revision: revision as number | null, board_seq: seq as number | null })
+    const name = typeof item.display_name === "string" && item.display_name.length <= 512 && Array.from(item.display_name).length <= 128 && !/[\p{Cc}\p{Cf}]/u.test(item.display_name) ? item.display_name.trim() : undefined
+    result.push({ display_name: name, cursor, connection_id: item.connection_id, user_id: item.user_id, revision: revision as number | null, board_seq: seq as number | null })
   }
   return result
 }
@@ -74,5 +75,5 @@ export function useContentPresence(context: ContentPresenceContext, enabled = tr
     sendPresence(channel, { schema_version: 1, board_seq: position, cursor: cursor.current })
   }, [channel, sendPresence, status, context.kind, position])
   const hereMembers = useMemo(() => visible.filter(item => context.kind === "artifact" ? item.revision === position : item.board_seq === position), [visible, context.kind, position])
-  return { members: hereMembers, currentUserId, setCursor, available: Boolean(channel && status === "connected" && sendPresence && !stale), confirmed: Boolean(snapshot && snapshot.channel === channel && status === "connected"), people, here }
+  return { allMembers: visible, members: hereMembers, currentUserId, setCursor, available: Boolean(channel && status === "connected" && sendPresence && !stale), confirmed: Boolean(snapshot && snapshot.channel === channel && status === "connected"), people, here }
 }

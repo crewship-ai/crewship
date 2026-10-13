@@ -1,3 +1,5 @@
+//go:build unix
+
 package memory
 
 import (
@@ -31,7 +33,7 @@ func TestRootedMemoryReadPinsParentAcrossSwap(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, parent); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("create required symlink fixture: %v", err)
 	}
 	got, err := file.read()
 	if err != nil || string(got) != "canonical inside" {
@@ -59,7 +61,7 @@ func TestReindexPathRejectsReplacedParentWithoutIndexingOutside(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(base, "daily")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("create required symlink fixture: %v", err)
 	}
 	n, err := engine.ReindexPath(context.Background(), "daily/entry.md")
 	if err != nil || n != 0 {
@@ -99,7 +101,7 @@ func TestRestoreWithStorageRootRejectsReplacedParent(t *testing.T) {
 	}
 	parent := filepath.Join(root, "agent")
 	if err := os.Symlink(outside, parent); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("create required symlink fixture: %v", err)
 	}
 	if _, err := Restore(context.Background(), db, filepath.Join(parent, "AGENT.md"), "ws_test", "AGENT.md", v.Sha256, "operator", blobs, TierAgent, root); err == nil {
 		t.Fatal("restore followed outside parent")
