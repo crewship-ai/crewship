@@ -90,6 +90,41 @@ describe("BackupsPage panel, like People & workspaces", () => {
   })
 })
 
+describe("ticking workspaces in the panel", () => {
+  it("picks what the page covers, several at once, kept in ?scope=&ws=; none is the whole instance", async () => {
+    show()
+    const p = panel()
+    fireEvent.click(await within(p).findByRole("button", { name: "Select Dess" }))
+    expect(param("scope")).toBe("workspaces")
+    fireEvent.click(within(p).getByRole("button", { name: "Select Coolify" }))
+    expect(param("ws")?.split(",").sort()).toEqual(["coolify", "dess"])
+    expect(document.querySelector("[data-slot=backups-scope-summary]")).toHaveTextContent("2 of")
+    expect(screen.getByRole("button", { name: "Back up now" })).toHaveAttribute("title", "Back up 2 workspaces now")
+    fireEvent.click(within(p).getByRole("button", { name: "Select Dess" }))
+    fireEvent.click(within(p).getByRole("button", { name: "Select Coolify" }))
+    expect(param("scope")).toBe("instance")
+    expect(screen.getByRole("button", { name: "Back up now" })).toHaveAttribute("title", "Back up the whole instance now")
+  })
+
+  it("ticks every workspace at once, and a name still opens the workspace", async () => {
+    show()
+    fireEvent.click(await within(panel()).findByRole("button", { name: "Select every workspace" }))
+    expect(param("scope")).toBe("workspaces")
+    expect(document.querySelector("[data-slot=backups-scope-summary]")).toHaveTextContent(/^All of \d+ ticked/)
+    fireEvent.click(within(panel()).getByRole("button", { name: /^Dess/ }))
+    expect(param("workspace")).toBe("dess")
+  })
+
+  it("Restore from a workspace's page restores that workspace", async () => {
+    show("?demo=1&workspace=dess")
+    const header = await waitFor(() => { const el = document.querySelector("[data-slot=workspace-backups-header]"); if (!el) throw new Error("no header"); return el as HTMLElement })
+    fireEvent.click(within(header).getByRole("button", { name: /Restore/ }))
+    expect(param("section")).toBe("recovery")
+    expect(param("scope")).toBe("workspaces")
+    expect(param("ws")).toBe("dess")
+  })
+})
+
 describe("Runs, like the Audit log", () => {
   it("filters above the table and in the URL, the count is what is shown", async () => {
     show("?demo=1&section=history")

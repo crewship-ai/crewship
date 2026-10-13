@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Shield, Database, History, CalendarClock, Plus, HardDrive, KeyRound, ChevronDown, ChevronRight, X, Check } from "lucide-react"
+import { Shield, Database, History, CalendarClock, Plus, HardDrive, KeyRound, ChevronDown, ChevronRight, X, Check, Minus } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -127,6 +127,20 @@ function FilterMenu<T extends string>({ label, value, options, onChange, any = "
   )
 }
 
+/** A workspace's tick in the panel, beside the row that opens it. */
+function TickBox({ state, label, onClick }: { state: "on" | "off" | "mixed"; label: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} aria-label={label} aria-pressed={state === "mixed" ? "mixed" : state === "on"}
+      className="kit-tap grid h-8 w-6 shrink-0 place-items-center rounded-md hover:bg-accent">
+      <span aria-hidden className={cn("grid h-3.5 w-3.5 place-items-center rounded-[4px] border",
+        state === "off" ? "border-control-border" : "border-primary bg-primary text-primary-foreground")}>
+        {state === "on" && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+        {state === "mixed" && <Minus className="h-2.5 w-2.5" strokeWidth={3} />}
+      </span>
+    </button>
+  )
+}
+
 export function BackupsPage() {
   const { workspaceId, demo, workspaces, selected, scope, commit, backUpNow } = useBackupsScope()
   const [view, setView] = React.useState<View>(() => readView(typeof window === "undefined" ? "" : window.location.search))
@@ -160,6 +174,7 @@ export function BackupsPage() {
 
   const runs = useBackupRuns(scope, selected, workspaces)
   const plans = useBackupPlans()
+  // The panel's Overview badge counts the whole instance.
   const overview = useBackupsOverview("instance", selected, workspaces)
   // Each workspace's newest backup, for the panel and the Overview's table:
   // the server lists it for a workspaces scope, so ask for all of them.
@@ -179,8 +194,19 @@ export function BackupsPage() {
       go(section)
     },
   }
-  // Overview is the whole instance, whatever scope the Runs filter holds.
-  const instanceCtx: SectionCtx = { ...ctx, scope: "instance" }
+  // The workspaces ticked in the panel are the scope of Overview, Runs, a new
+  // restore and Back up now; none ticked is the whole instance.
+  const ticked = scope === "workspaces" ? selected : new Set<string>()
+  const tick = (id: string) => {
+    const next = new Set(ticked)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    if (next.size === 0) commit("instance", next)
+    else commit("workspaces", next)
+  }
+  const tickAll = () => (ticked.size === workspaces.length && workspaces.length > 0
+    ? commit("instance", new Set())
+    : commit("workspaces", new Set(workspaces.map((w) => w.id))))
 
   const newPlan = () => {
     setNewPlanSignal((x) => x + 1)
@@ -271,12 +297,26 @@ export function BackupsPage() {
         <DrillNavItem index={shownPlans.length} selected={!ws && view.section === "schedules" && view.plan === "new"} onSelect={newPlan}
           icon={<Plus className="h-3.5 w-3.5 text-primary-hover" />} label={<span className="text-primary-hover">New plan</span>} />
       </DrillNavSection>
-      <DrillNavSection label="Workspaces" count={shownWorkspaces.length}>
+      <DrillNavSection label="Workspaces" count={ticked.size ? `${ticked.size}/${workspaces.length}` : shownWorkspaces.length}>
+        {/* A tick picks what the page covers; the name opens the workspace. */}
+        <div className="flex items-center">
+          <TickBox state={ticked.size === 0 ? "off" : ticked.size === workspaces.length ? "on" : "mixed"} label="Select every workspace" onClick={tickAll} />
+          <span className="px-2 py-1.5 text-[13px] text-muted-foreground">All workspaces</span>
+        </div>
         {shownWorkspaces.map((w, i) => (
-          <DrillNavItem key={w.id} index={i} selected={ws?.id === w.id} onSelect={() => openWorkspace(w.id)} title={`${w.name} · ${w.slug}`}
-            icon={<WorkspaceTile id={w.id} name={w.name} logoUrl={w.logoUrl} />} label={w.name} sub={workspaceSub(w.id)}
-            meta={<span className={cn("inline-block h-1.5 w-1.5 rounded-full", workspaceDot(w.id))} aria-hidden />} />
+          <div key={w.id} className="flex items-center">
+            <TickBox state={ticked.has(w.id) ? "on" : "off"} label={`Select ${w.name}`} onClick={() => tick(w.id)} />
+            <div className="min-w-0 flex-1">
+              <DrillNavItem index={i} selected={ws?.id === w.id} onSelect={() => openWorkspace(w.id)} title={`${w.name} · ${w.slug}`}
+                icon={<WorkspaceTile id={w.id} name={w.name} logoUrl={w.logoUrl} />} label={w.name} sub={workspaceSub(w.id)}
+                meta={<span className={cn("inline-block h-1.5 w-1.5 rounded-full", workspaceDot(w.id))} aria-hidden />} />
+            </div>
+          </div>
         ))}
+        <p className="px-2 pb-1 pt-1 text-label text-muted-foreground" data-slot="backups-scope-summary">
+          {ticked.size === 0 ? "None ticked · the page covers the whole instance"
+            : `${ticked.size === workspaces.length ? "All" : ticked.size} of ${workspaces.length} ticked · Overview, Runs, Restore and Back up now cover ${ticked.size === 1 ? "it" : "them"}`}
+        </p>
       </DrillNavSection>
       <DrillNavSection label="Instance settings" count={2}>
         <DrillNavItem selected={!ws && view.section === "storage"} onSelect={() => go("storage")}
@@ -312,7 +352,12 @@ export function BackupsPage() {
     body = (
       <>
         {crumb("Overview", () => go("overview"), ws.name)}
-        <WorkspaceBackups ws={ws} coverage={coverage.find((c) => c.workspace_id === ws.id)} ctx={ctx}
+        <WorkspaceBackups ws={ws} coverage={coverage.find((c) => c.workspace_id === ws.id)}
+          ctx={{ ...ctx, go: (section, opts) => {
+            // Restore from a workspace's page restores that workspace.
+            if (section === "recovery") commit("workspaces", new Set([ws.id]))
+            ctx.go(section, opts)
+          } }}
           onOpenRuns={(run) => {
             commit("workspaces", new Set([ws.id]))
             setFocus({ run: run ?? null, path: null })
@@ -321,7 +366,7 @@ export function BackupsPage() {
       </>
     )
   } else if (view.section === "overview") {
-    body = <BackupsOverview ctx={instanceCtx} coverage={coverage} onOpenWorkspace={openWorkspace} />
+    body = <BackupsOverview ctx={ctx} coverage={scope === "instance" ? coverage : undefined} onOpenWorkspace={openWorkspace} />
   } else if (view.section === "history") {
     const chips = [
       slice && { key: "slice", label: `${new Date(slice.fromMs).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} – ${new Date(slice.toMs).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`, clear: () => setSlice(null) },
@@ -394,7 +439,9 @@ export function BackupsPage() {
           )}
           {/* Icons only on a phone, so the sub-bar keeps room for Filters. */}
           <Button size="sm" variant="outline" className="h-7 text-xs max-md:w-8 max-md:px-0" aria-label="New plan" onClick={newPlan}><Plus /><span className="max-md:hidden">New plan</span></Button>
-          <Button size="sm" className="h-7 text-xs max-md:w-8 max-md:px-0" aria-label="Back up now" onClick={() => backUpNow()}><History /><span className="max-md:hidden">Back up now</span></Button>
+          <Button size="sm" className="h-7 text-xs max-md:w-8 max-md:px-0" aria-label="Back up now"
+            title={scope === "instance" ? "Back up the whole instance now" : `Back up ${selected.size === 1 ? workspaces.find((w) => selected.has(w.id))?.name ?? "1 workspace" : `${selected.size} workspaces`} now`}
+            onClick={() => backUpNow()}><History /><span className="max-md:hidden">Back up now</span></Button>
         </>
       }
     >

@@ -1507,8 +1507,11 @@ deep-linkable as `/admin/backups?section=<page>` (an old
 | Restore (`?section=recovery`) | A guided restore: backup, target, keys, checks, dry run, restore, then resume what stayed held. History and Drills sit beside New restore. A whole-instance restore runs from the CLI; see [Recovery in the console](#recovery-in-the-console). |
 | Keys & alerts | The AGE public keys backups are encrypted to, the vault key versions restored secrets need, and who hears when a backup goes wrong. |
 
-The **Scope** filter above Runs and New restore chooses the whole instance,
-every workspace or one; it is kept in the URL (`?scope=&ws=`). Admin › Data ›
+The **ticks** beside the workspaces in the panel pick what Overview, Runs, a
+new restore and **Back up now** cover: none ticked is the whole instance, or
+any number of workspaces (*All workspaces* ticks every one). The **Scope**
+filter above Runs and New restore sets the same thing; it is kept in the URL
+(`?scope=&ws=`). A workspace's name opens its own backups. Admin › Data ›
 **Data retention** sets how long each kind of live data is kept per
 workspace, and shows a dry run of what a change overwrites before it is saved.
 
