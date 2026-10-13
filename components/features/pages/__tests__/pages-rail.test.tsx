@@ -194,8 +194,17 @@ describe("PagesRail", () => {
     expect(screen.getByText(/clear a facet/i)).toBeTruthy()
 
     cleanup()
-    renderRail({ pages: [] })
+    renderRail({ pages: [], onCreatePage: vi.fn() })
     expect(screen.getByText(/crewship page create/i)).toBeTruthy()
+  })
+})
+
+describe("reader empty state", () => {
+  it("names empty content without suggesting an unauthorized creation command", () => {
+    cleanup()
+    renderRail({pages:[]})
+    expect(screen.getByText("No pages yet.")).toBeTruthy()
+    expect(screen.queryByText(/crewship page create/i)).toBeNull()
   })
 })
 

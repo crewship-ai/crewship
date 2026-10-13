@@ -34,7 +34,7 @@ async function directDenied(actor) {
   await check(`${actor} denied direct Chat URL never mounts agent directory`, !sentAgentDirectory)
 }
 try {
-  for (const [actor, user, width] of [['owner', fixture.owner, 1280], ['desktop', 'nav-client-a', 1280], ['phone', 'nav-client-a', 390], ['other', 'nav-client-b', 1280]]) {
+  for (const [actor, user, width] of [['owner', fixture.owner, 1280], ['desktop', 'nav-client-a', 1280], ['phone', 'nav-client-a', 390], ['other', 'nav-client-b', 1280], ['reader', 'nav-page-reader', 1280]]) {
     contexts[actor] = await browser.newContext({ viewport: { width, height: 900 } })
     await contexts[actor].addCookies([{ name: 'authjs.session-token', value: fixture.tokens[user], url: fixture.server, httpOnly: true, sameSite: 'Lax' }])
     await contexts[actor].addInitScript(id => localStorage.setItem('crewship.workspaceId', id), fixture.workspace)
@@ -46,6 +46,36 @@ try {
     })
     pages[actor] = await contexts[actor].newPage()
   }
+  // Page creation uses the existing role-or-capability contract; reads remain available.
+  await open('reader', '/pages')
+  await expect(pages.reader.getByRole('button', {name:'New page', exact:true})).toHaveCount(0)
+  await expect(pages.reader.getByRole('button', {name:'Import', exact:true})).toHaveCount(0)
+  await check('trusted VIEWER reads Pages without creation/import shortcuts', true)
+  await open('owner', '/pages')
+  await expect(pages.owner.getByRole('button', {name:'New page', exact:true}).first()).toBeVisible()
+  await expect(pages.owner.getByRole('button', {name:'Import', exact:true}).first()).toBeVisible()
+  await check('OWNER creation and import remain available', true)
+  const capabilityPath = `${fixture.server}/api/v1/workspaces/${fixture.workspace}/members/nav-page-reader/capabilities`
+  let capResponse = await contexts.owner.request.patch(capabilityPath, {data:{grant:['page.create']}})
+  await check('real owner grants page.create', capResponse.status() === 200)
+  await open('reader', '/pages')
+  await expect(pages.reader.getByRole('button', {name:'Import', exact:true}).first()).toBeVisible()
+  await pages.reader.getByRole('button', {name:'New page', exact:true}).first().click()
+  const creationDialog = pages.reader.getByRole('dialog', {name:/New page/})
+  await expect(creationDialog).toBeVisible()
+  await check('explicit capability enables VIEWER creation editor', true)
+  let creationRequests = 0
+  pages.reader.on('request', request => {if(request.method()==='POST' && new URL(request.url()).pathname==='/api/v1/pages') creationRequests++})
+  capResponse = await contexts.owner.request.patch(capabilityPath, {data:{revoke:['page.create']}})
+  await check('real owner revokes page.create', capResponse.status() === 200)
+  const revokeStarted = Date.now()
+  await expect(creationDialog.getByRole('button', {name:'Create page', exact:true})).toBeDisabled({timeout:70000})
+  await creationDialog.press('Meta+Enter')
+  await expect(creationDialog).toBeVisible()
+  await check('open draft survives capability revoke and keyboard sends no create', creationRequests===0, {elapsed_ms:Date.now()-revokeStarted})
+  await creationDialog.getByRole('button', {name:'Cancel',exact:true}).click()
+  await expect(pages.reader.getByRole('button', {name:'New page',exact:true})).toHaveCount(0)
+  await expect(pages.reader.getByRole('button', {name:'Import',exact:true})).toHaveCount(0)
   await directDenied('desktop'); await directDenied('phone'); await directDenied('other')
   await policy([{ kind: 'agent', id: 'nav-alex', operation: 'discover' }, { kind: 'agent', id: 'nav-alex', operation: 'chat' }])
   for (const actor of ['desktop', 'phone']) {

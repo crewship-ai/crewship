@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Pages creation and import controls follow current workspace permissions (#3081).** Readers keep access to existing content; authorized roles and explicit `page.create` grants retain authoring. An open draft survives permission loss while submission is disabled.
+
 - **Deferred and resumed human routine runs follow current account status (#3079).** Autonomous triggers and dry-run validation retain their existing behavior.
 
 - ⚠️ **Behaviour change:** Signup invitation handoff requires the matching invitation link; existing accounts can explicitly accept after signing in or through `workspace invite accept`. Invitation listings retain metadata without redemption tokens; pending links can be reissued or revoked. Legacy unaccepted invitation links stored as raw tokens are invalidated on upgrade; an authorized inviter must create a new invitation or reissue the pending invitation. Accepted invitation history is preserved. New proofs are stored hashed, and browser/CLI handoff avoids putting proof in redirect URLs or command arguments (#3071).

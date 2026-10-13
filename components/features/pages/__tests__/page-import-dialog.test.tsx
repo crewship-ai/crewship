@@ -22,6 +22,8 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
+const creationAccess = vi.hoisted(() => ({allowed:true}))
+vi.mock("@/hooks/use-page-creation-access", () => ({usePageCreationAccess: () => creationAccess.allowed}))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }))
 
 import { PageImportDialog } from "@/components/features/pages/page-import-dialog"
@@ -76,12 +78,13 @@ function mount(install?: Response) {
   vi.stubGlobal("fetch", mockFetch)
 
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-  render(
+  const ui = () => (
     <QueryClientProvider client={qc}>
       <PageImportDialog workspaceId="ws-1" onClose={onClose} onImported={onImported} />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
-  return { calls, onImported, onClose }
+  const view=render(ui())
+  return { calls, onImported, onClose, refresh: () => view.rerender(ui()) }
 }
 
 /** Drop a file on the surface's one file input and wait for it to be read. */
@@ -101,7 +104,7 @@ function surface(): HTMLElement {
   return document.querySelector<HTMLElement>('[data-slot="dialog-content"]')!
 }
 
-beforeEach(() => cleanup())
+beforeEach(() => {cleanup();creationAccess.allowed=true})
 afterEach(() => vi.unstubAllGlobals())
 
 // ── 1. The shell ───────────────────────────────────────────────────────────
@@ -150,6 +153,15 @@ describe("the shell", () => {
 // ── 2. What the shell now wires that nobody had wired by hand ──────────────
 
 describe("the keyboard and the discard guard", () => {
+  it("blocks an already-open import after permission loss, including keyboard submission", async () => {
+    const {calls,refresh}=mount()
+    await choose(JSON.stringify(BUNDLE))
+    creationAccess.allowed=false;refresh()
+    expect(screen.getByRole("button", {name:/^Install$/})).toBeDisabled()
+    fireEvent.keyDown(surface(), {key:"Enter",metaKey:true})
+    expect(importCalls(calls)).toHaveLength(0)
+    expect(screen.getByText("fleet-health.json")).toBeTruthy()
+  })
   it("installs on ⌘↵", async () => {
     const { calls } = mount()
     await choose(JSON.stringify(BUNDLE))
