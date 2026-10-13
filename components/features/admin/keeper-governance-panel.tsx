@@ -248,7 +248,8 @@ function QuickPick({ label, value, options, onPick, disabled }: {
   disabled?: boolean
 }) {
   return (
-    <span role="group" aria-label={label} className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5">
+    // A phone keeps the field alone: the row has no room for both.
+    <span role="group" aria-label={label} className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5 max-sm:hidden">
       {options.map((o) => (
         <button key={o.value} type="button" aria-pressed={value === o.value} disabled={disabled} onClick={() => onPick(o.value)}
           className={cn("h-7 rounded-md px-2.5 text-xs transition-colors disabled:opacity-50",
@@ -665,7 +666,7 @@ function WatchdogCard({
           <span className="flex flex-wrap items-center justify-end gap-1.5">
             <QuickPick label="Review" value={form.draft.sampleEvery} disabled={!canEdit} onPick={(v) => form.set("sampleEvery", v)}
               options={[{ value: "1", label: "Every call" }, { value: "2", label: "1 in 2" }, { value: "5", label: "1 in 5" }, { value: "10", label: "1 in 10" }, { value: "20", label: "1 in 20" }]} />
-            <span className="text-xs text-muted-foreground">or 1 in</span>
+            <span className="text-xs text-muted-foreground"><span className="max-sm:hidden">or </span>1 in</span>
             <Input
               type="number"
               min={SAMPLE_EVERY_MIN}
@@ -911,7 +912,7 @@ function FindingsRoutingCard({
           <span className="flex flex-wrap items-center justify-end gap-1.5">
           <QuickPick label="DENY alert from risk" value={form.draft.risk} disabled={!canEdit} onPick={(v) => form.set("risk", v)}
             options={["3", "5", "7", "9"].map((v) => ({ value: v, label: v }))} />
-          <span className="text-xs text-muted-foreground">or</span>
+          <span className="text-xs text-muted-foreground max-sm:hidden">or</span>
           <Input
             type="number"
             min={1}
@@ -1059,7 +1060,7 @@ function CredentialLeasesCard({
             <QuickPick label="Approved access lasts" disabled={!canEdit}
               value={form.draft.minutes === "0" ? "" : form.draft.minutes} onPick={(v) => form.set("minutes", v)}
               options={[{ value: "", label: "Standing" }, { value: "15", label: "15 min" }, { value: "60", label: "1 h" }, { value: "480", label: "8 h" }, { value: "1440", label: "24 h" }]} />
-            <span className="text-xs text-muted-foreground">or</span>
+            <span className="text-xs text-muted-foreground max-sm:hidden">or</span>
             <Input
               type="number"
               min={0}

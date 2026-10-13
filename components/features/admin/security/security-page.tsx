@@ -27,7 +27,7 @@ import { SecurityActivity } from "./security-activity"
 import { useSecurity } from "./use-security"
 import { useInstanceKeeper, type InstanceGovRow } from "./use-instance-keeper"
 import { BulkGovernanceForm, DefaultsForm, type BulkSection } from "./bulk-governance"
-import { WhatsOnWhere, fourEyes, judgeLabel, leaseLabel, reviewLabel, watchSummary } from "./whats-on-where"
+import { WhatsOnWhere, fourEyes, leaseLabel, reviewLabel, watchSummary } from "./whats-on-where"
 import { SETTINGS, STREAMS, type DecisionFilter, type Stream } from "./security-model"
 
 const STREAM_ICON: Record<Stream, LucideIcon> = {
@@ -421,7 +421,7 @@ function WorkspaceSecurityProfile({ row, requests, serverEnabled, onSaved }: {
           </p>
         </div>
       </section>
-      <section aria-label="Protection at a glance" data-slot="protection-glance" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      <section aria-label="Protection at a glance" data-slot="protection-glance" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
         {tiles.map((t) => (
           <button key={t.name} type="button" onClick={() => open(t.key)} data-tile={t.name}
             className="flex min-w-0 flex-col gap-2 rounded-card border border-border bg-card p-3 text-left transition-colors hover:bg-[var(--row-hover-bg)]">
@@ -430,10 +430,10 @@ function WorkspaceSecurityProfile({ row, requests, serverEnabled, onSaved }: {
                 <t.icon className="h-3.5 w-3.5" />
               </span>
               <span className="min-w-0 flex-1 truncate text-control font-medium">{t.name}</span>
-              <span className={cn("shrink-0 rounded-full px-1.5 py-0.5 font-mono text-micro",
-                t.on ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>{t.state}</span>
             </span>
-            <span className="truncate text-label text-muted-foreground" title={t.value}>{t.value}</span>
+            <span className={cn("self-start rounded-full px-1.5 py-0.5 font-mono text-micro",
+              t.on ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>{t.state}</span>
+            <span className="line-clamp-2 text-label text-muted-foreground" title={t.value}>{t.value}</span>
           </button>
         ))}
       </section>
