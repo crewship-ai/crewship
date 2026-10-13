@@ -25,6 +25,8 @@ export function useBoardRequests(workspace: string, slug: string) {
   const key = ['board-requests', workspace, slug] as const
   const endpoint = `/api/v1/pages/${encodeURIComponent(slug)}/board/requests`
   const params = new URLSearchParams({ workspace_id: workspace })
+  const scope = useRef('')
+  scope.current = JSON.stringify([workspace, slug])
   const identities = useRef(new Map<string, string>())
   const [denied, setDenied] = useState<BoardRequestError | null>(null)
   const invalidate = useCallback(() => { void client.invalidateQueries({ queryKey: ['board-requests', workspace, slug] }) }, [client, workspace, slug])
@@ -79,6 +81,17 @@ export function useBoardRequests(workspace: string, slug: string) {
     const { id, ...payload } = input
     return mutate<{seq:number;result_seq:number}>('insert', { ...payload, converter_version: '2.2.2' }, `${endpoint}/${encodeURIComponent(id)}/insert`)
   }, onSuccess: async () => { await client.invalidateQueries({ queryKey: ['page-board', workspace, slug] }) }, onError: invalidate })
-  const detail = (id: string) => request<BoardRequestDetail>(`${endpoint}/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(20000) })
+  const detail = async (id: string, signal?: AbortSignal) => {
+    const expectedScope = JSON.stringify([workspace, slug])
+    try {
+      return await request<BoardRequestDetail>(`${endpoint}/${encodeURIComponent(id)}`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000) })
+    } catch (error) {
+      if (scope.current === expectedScope && error instanceof BoardRequestError && [401,403,404].includes(error.status)) {
+        identities.current.clear(); setDenied(error)
+        client.removeQueries({ queryKey: key, exact: true })
+      }
+      throw error
+    }
+  }
   return { query: { ...query, data: accessDenied || denied ? undefined : query.data, error: denied ?? query.error }, send, cancel, insert, detail }
 }

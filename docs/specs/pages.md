@@ -56,8 +56,9 @@ A pin grants no access to its source: its title, slug, revision and bytes
 require both Board and artifact read access. Otherwise it remains an anonymous
 geometry placeholder that editors may move or remove. Exact pinned revisions
 are retained. Workspace backup includes Board content, images, pins and
-comment history, remaps typed identities on fork and restores no live agent
-authority.
+comment history and reactions, remaps typed identities on fork and restores no
+live agent authority. Historical discussion authors are included even after
+membership removal; this does not include discussions from other workspaces.
 
 Image uploads are bounded PNG/JPEG rasters, fully decoded and re-encoded into
 private content-addressed storage. Scenes persist opaque Board file IDs;
@@ -74,6 +75,16 @@ may resolve. Posting text never dispatches or authorizes an agent. Retry
 receipts are scoped to the human and Board, and thread replies use a version
 precondition. The UI retains a draft across conflicts and hides it on denied
 access.
+
+Human authors with current comment access may edit or tombstone their own
+comments and read their immutable private history. Other commenters may react
+with the supported emoji set; neither reactions nor history grant edit or agent
+authority. Edits, deletion and reactions use the observed thread version and a
+stable mutation ID. A deleted comment keeps its place in the thread but exposes
+no body or reactions. History is bounded to 50 versions per comment, reserving
+the last slot for deletion; the existing Board discussion rate and receipt
+limits apply to all these mutations. New revisions or moved drawings never
+rewrite the original comment anchor.
 
 Agent access is explicit: a live trusted human-initiated run needs its own
 credential, an agent Page write grant, and a human delegation to that run.
@@ -103,6 +114,13 @@ conversion without losing the prepared result. Wireframe jobs create one
 private artifact; pinning requires current Board authority and a matching
 sequence, otherwise the result remains available without a pin. Deleting a
 Board does not delete its already authorized output job or private artifact.
+Automatic pin placement searches at most 20 positions, avoiding existing pins
+and conservative rotated drawing bounds, including freehand points. An occupied
+or unreadable target leaves the private result unpinned without changing drawings.
+Diagram requests expose their saved Mermaid source through an explicit private
+read. The UI renders it as escaped text and reports changes since insertion;
+changing the Board invalidates that assessment until refreshed. This source is
+not a reconstruction of later manual edits or proof of server-verified conversion.
 
 Current scene bounds are 500 live elements, 1,000 retained element IDs,
 100 pins, 500 operations/batch, 2 MiB scene/request, 200 Board writes/hour,

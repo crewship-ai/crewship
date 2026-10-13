@@ -74,7 +74,7 @@ describe("server sync on mount", () => {
     await waitFor(() => expect(result.current[2].ready).toBe(true))
     expect(result.current[0]).toBe("dark") // server wins on initial sync
     expect(storage.get(`${LS_PREFIX}theme`)).toBe(JSON.stringify("dark"))
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/me/preferences", { credentials: "include" })
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/me/preferences", { credentials: "include", signal: expect.any(AbortSignal) })
   })
 
   it("keeps the local value when the server agrees (no churn)", async () => {

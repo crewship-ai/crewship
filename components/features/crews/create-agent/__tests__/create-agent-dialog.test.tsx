@@ -2,8 +2,23 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { _resetWorkspaceStoreForTests, refreshWorkspaceSettings } from "@/hooks/use-workspace"
 import { CreateAgentDialog } from "../create-agent-dialog"
+
+// These standalone dialogs normally run under the dashboard workspace loader.
+// Load the real store rather than disabling the transport availability gate.
+beforeEach(async () => {
+  cleanup()
+  _resetWorkspaceStoreForTests()
+  const bootstrap = vi.spyOn(global, "fetch").mockImplementation(async (input) =>
+    String(input) === "/api/v1/workspaces"
+      ? new Response(JSON.stringify([{ id: "ws-1", name: "Test workspace", slug: "test-workspace", currentUserRole: "OWNER", currentUserCapabilities: [] }]))
+      : new Response("{}", { status: 404 }),
+  )
+  await refreshWorkspaceSettings()
+  bootstrap.mockRestore()
+})
 
 // Stub next/navigation — the dialog calls router.replace on success.
 vi.mock("next/navigation", () => ({

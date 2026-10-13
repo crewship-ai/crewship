@@ -80,6 +80,30 @@ func TestMemberNavigationBrowser(t *testing.T) {
 	}
 	t.Cleanup(router.Shutdown)
 	mux := http.NewServeMux()
+	// Test-only control mutates only this owned synthetic workspace. The
+	// directory and every application request still use the production Router.
+	mux.HandleFunc("POST /__fixture/workspace-availability", func(w http.ResponseWriter, req *http.Request) {
+		if req.Header.Get("X-Fixture-Control") != "synthetic-workspace-availability" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		var command struct {
+			Omit bool `json:"omit"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&command); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var deleted any
+		if command.Omit {
+			deleted = "2026-10-13T00:00:00Z"
+		}
+		if _, err := db.ExecContext(req.Context(), `UPDATE workspaces SET deleted_at=? WHERE id=?`, deleted, ws); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.Handle("/api/", router)
 	mux.Handle("/ws", router)
 	mux.Handle("/", StaticFileHandler(os.DirFS(filepath.Join(repo, "out"))))
@@ -93,7 +117,7 @@ func TestMemberNavigationBrowser(t *testing.T) {
 	if err = os.WriteFile(fixturePath, fixture, 0600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, "node", filepath.Join(repo, "scripts/acceptance-member-navigation-browser.mjs"))
 	command.Env = append(os.Environ(), "CREWSHIP_MEMBER_NAV_FIXTURE="+fixturePath)

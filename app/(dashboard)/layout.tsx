@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useRouteScrollRestoration } from "@/hooks/use-route-scroll-restoration"
@@ -16,7 +16,8 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { RealtimeProvider } from "@/hooks/use-realtime"
 import { JournalLookupProvider } from "@/hooks/use-journal-lookup"
 import { ActiveRoutineRunsProvider } from "@/hooks/use-active-routine-runs"
-import { useWorkspace } from "@/hooks/use-workspace"
+import { WorkspaceAvailabilityBoundary } from "@/components/layout/workspace-availability-boundary"
+import { bindWorkspaceSession, useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode, useAccessModeWatcher, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
 import { restrictedHome, restrictedPathAllowed } from "@/lib/restricted-surfaces"
 import { RestrictedUnavailable } from "@/components/layout/restricted-unavailable"
@@ -33,8 +34,11 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { status } = useSession()
-  const { error: workspacesError, refresh: refreshWorkspaces } = useWorkspace()
+  const { status, data: session } = useSession()
+  useLayoutEffect(() => {
+    if (status !== "loading") bindWorkspaceSession(status === "authenticated" ? session?.user.id ?? null : null)
+  }, [status, session?.user.id])
+  const { error: workspacesError, refresh: refreshWorkspaces, workspaceUnavailable } = useWorkspace()
   // Session-level, not per workspace: one restricted membership puts the
   // whole account behind the restricted allowlist (see use-access-mode.ts).
   const accessMode = useAccessMode()
@@ -85,7 +89,7 @@ export default function DashboardLayout({
   // Until the access mode is known, nothing below may mount: the shell and
   // every page start requests that a restricted session is refused. The
   // workspace list (allowlisted for everyone) is the only request in flight.
-  if (accessMode === "loading") {
+  if (accessMode === "loading" && !workspaceUnavailable) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background">
         {workspacesError ? (
@@ -124,11 +128,13 @@ export default function DashboardLayout({
             {trusted && <RuntimeBanner />}
             {trusted && <UpdateBanner />}
             <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
-              {restrictedBlocked
+              <WorkspaceAvailabilityBoundary>
+              {restrictedBlocked && !workspaceUnavailable
                 ? restrictedLanding
                   ? <div className="flex justify-center py-16"><Spinner className="h-6 w-6 text-muted-foreground-soft" /></div>
                   : <RestrictedUnavailable home={surfaces ? restrictedHome(surfaces) : null} />
                 : children}
+              </WorkspaceAvailabilityBoundary>
             </div>
             {/* A flex sibling, not a fixed bar: it takes real space, so the
                 scroll container above it needs no compensating padding and

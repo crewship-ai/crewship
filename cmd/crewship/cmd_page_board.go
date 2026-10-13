@@ -28,6 +28,7 @@ import (
 
 func newPageBoardCommand() *cobra.Command {
 	root := &cobra.Command{Use: "board", Short: "Read and update Boards with explicit server revisions"}
+	root.AddCommand(newPageBoardCommentsCommand())
 	root.AddCommand(newPageBoardThreadsCommand(), newPageBoardRequestsCommand(), newPageBoardPermissionsCommand())
 	for _, operation := range []struct {
 		name, method, short string

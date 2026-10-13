@@ -1,20 +1,23 @@
+import { FixtureResources } from './resources'
 import { test, expect } from '@playwright/test'
-import { artifactRuntimePreparationCSP, artifactRuntimePreparationDocument } from '../../lib/pages/artifact-runtime-bootstrap'
+import { startGoArtifactBootstrap, artifactPreparationPath } from './go-bootstrap'
 import { startFixture, studio, runtime, sink } from './fixture'
 
 test('prepared bootstrap retains response CSP after one HTML transfer', async ({ browser }) => {
-  const fixture = await startFixture()
-  fixture.documents.set('/prepared', artifactRuntimePreparationDocument(studio))
-  const context = await browser.newContext({ proxy: { server: fixture.proxy }, ignoreHTTPSErrors: true })
+  const resources = new FixtureResources()
   try {
-    // Apply the candidate constant response-header policy, never a meta policy.
-    await context.route(`${runtime}/prepared*`, async route => {
-      const response = await route.fetch()
-      await route.fulfill({ response, headers: { ...response.headers(), 'content-security-policy': artifactRuntimePreparationCSP(studio) } })
+    const fixture = await startFixture()
+    resources.own(fixture.close)
+    const bootstrap = await startGoArtifactBootstrap()
+    resources.own(bootstrap.close)
+    const context = await browser.newContext({ proxy: { server: fixture.proxy }, ignoreHTTPSErrors: true })
+    resources.own(() => context.close())
+    await context.route(`${runtime}${artifactPreparationPath}*`, async route => {
+      await route.fulfill(await bootstrap.response())
     })
     const page = await context.newPage()
     await page.goto(studio)
-    await page.evaluate(({ runtime, sink }) => {
+    await page.evaluate(({ runtime, sink, artifactPreparationPath }) => {
       const nonce = crypto.randomUUID()
       const frame = document.createElement('iframe')
       frame.sandbox.add('allow-scripts')
@@ -31,9 +34,9 @@ test('prepared bootstrap retains response CSP after one HTML transfer', async ({
         channel.port1.postMessage({ type: 'load', protocol: 1, identity: { artifactId: 'exact-page', revision: 7, profile: 'interactive-html-v1' }, html: `<h1>Executed revision 7</h1><script>document.body.dataset.executed='yes';fetch('${sink}/fetch').catch(()=>{});try{parent.document.body.dataset.compromised='yes'}catch{}<\/script><img src="${sink}/image"><iframe src="${sink}/frame"></iframe><style>@import '${sink}/style';</style>` })
       }
       addEventListener('message', ready)
-      frame.src = `${runtime}/prepared#${nonce}`
+      frame.src = `${runtime}${artifactPreparationPath}#${nonce}`
       document.body.append(frame)
-    }, { runtime, sink })
+    }, { runtime, sink, artifactPreparationPath })
     await expect(page.frameLocator('iframe[title="Prepared runtime"]').getByRole('heading', { name: 'Executed revision 7' })).toBeVisible()
     await expect(page.frameLocator('iframe[title="Prepared runtime"]').locator('body')).toHaveAttribute('data-executed', 'yes')
     await expect.poll(() => page.evaluate(() => (window as unknown as { telemetry: { type: string }[] }).telemetry.some(item => item.type === 'ready'))).toBe(true)
@@ -41,5 +44,5 @@ test('prepared bootstrap retains response CSP after one HTML transfer', async ({
     expect(fixture.hits).toEqual([])
     expect(await page.locator('body').getAttribute('data-compromised')).toBeNull()
     expect(page.url()).toBe(`${studio}/`)
-  } finally { await context.close(); await fixture.close() }
+  } finally { await resources.close() }
 })

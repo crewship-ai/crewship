@@ -71,15 +71,19 @@ func (h *PageHandler) completeBoardJobCreation(r *http.Request, tx *sql.Tx, a *a
 				pinReason = "board mutation quota reached"
 			}
 			if live < 100 && total < 1000 && mutationCount < 10000 && mutationHour < 200 {
-				// Never overlap another artifact placement; bounded search can leave a
+				// Avoid live drawings as well as artifact placements; bounded search can leave a
 				// usable private result instead of forcing an unsafe/overwriting pin.
 				available := false
-				for attempt := 0; attempt < 20; attempt++ {
+				drawings, boundsErr := loadBoardDrawingBounds(r.Context(), tx, board)
+				if boundsErr != nil && !errors.Is(boundsErr, errBoardDrawingBounds) {
+					return boundsErr
+				}
+				for attempt := 0; attempt < 20 && boundsErr == nil; attempt++ {
 					var occupied int
 					if err = tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM page_board_artifact_placements WHERE board_page_id=? AND deleted_at IS NULL AND x<? AND x+width>? AND y<? AND y+height>?`, board, *g.X+*g.Width, *g.X, *g.Y+*g.Height, *g.Y).Scan(&occupied); err != nil {
 						return err
 					}
-					if occupied == 0 {
+					if occupied == 0 && !boardDrawingsOverlap(drawings, g) {
 						available = true
 						break
 					}
@@ -89,6 +93,9 @@ func (h *PageHandler) completeBoardJobCreation(r *http.Request, tx *sql.Tx, a *a
 					}
 				}
 				pinReason = "target area occupied"
+				if boundsErr != nil {
+					pinReason = "drawing bounds unavailable; pin the private result explicitly"
+				}
 				if available {
 					placement = generateCUID()
 					if _, err = tx.ExecContext(r.Context(), `INSERT INTO page_board_artifact_placements(id,board_page_id,source_page_id,source_revision,x,y,width,height,updated_seq,author_user_id) VALUES(?,?,?,1,?,?,?,?,?,?)`, placement, board, page, *g.X, *g.Y, *g.Width, *g.Height, seq+1, a.HumanUserID); err != nil {

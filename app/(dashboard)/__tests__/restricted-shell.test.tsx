@@ -3,7 +3,8 @@
 // dashboard layout makes is recorded and judged by the same rule the server
 // applies (lib/__tests__/restricted-route-oracle.ts reads the Go source).
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { act, render, screen, within } from "@testing-library/react"
+import { useState } from "react"
+import { act, render, screen, within, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { serverAllowsRestricted } from "@/lib/__tests__/restricted-route-oracle"
@@ -11,6 +12,7 @@ import { serverAllowsRestricted } from "@/lib/__tests__/restricted-route-oracle"
 const requests: string[] = []
 let workspacesPayload: unknown = []
 let workspacesPending = false
+let workspacesStatus = 200
 
 function respond(status: number, body: unknown = {}): Response {
   return { ok: status >= 200 && status < 300, status, headers: new Headers(), json: async () => body } as unknown as Response
@@ -25,7 +27,7 @@ vi.mock("@/lib/api-fetch", async (importOriginal) => {
       requests.push(`${(init?.method ?? "GET").toUpperCase()} ${url}`)
       if (url.split("?")[0] === "/api/v1/workspaces" && (init?.method ?? "GET") === "GET") {
         if (workspacesPending) return new Promise<Response>(() => {})
-        return respond(200, workspacesPayload)
+        return respond(workspacesStatus, workspacesPayload)
       }
       // Everything else: what the restricted allowlist answers.
       return respond(404, { error: "Resource not found" })
@@ -73,7 +75,7 @@ class RecordingWebSocket {
 import DashboardLayout from "../layout"
 import RoutinesPage from "../routines/page"
 import { SettingsLayout } from "@/components/features/settings/settings-layout"
-import { _resetWorkspaceStoreForTests } from "@/hooks/use-workspace"
+import { _resetWorkspaceStoreForTests, refreshWorkspaceSettings } from "@/hooks/use-workspace"
 
 // As internal/api/restricted_directory.go answers a restricted account: every
 // row carries the session-wide surfaces derived from the allowlist.
@@ -107,6 +109,7 @@ beforeEach(() => {
   sockets.length = 0
   workspacesPayload = [RESTRICTED_A]
   workspacesPending = false
+  workspacesStatus = 200
   mobile = false
   nav.pathname = "/chat"
   nav.replace.mockReset()
@@ -129,6 +132,28 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     expect(requests.some((r) => r.includes("/ws-token"))).toBe(false)
     expect(sockets).toEqual([])
     expect(screen.queryByText(/Reconnecting|Connection lost/)).toBeNull()
+  })
+
+  it("keeps the mounted draft unavailable through an empty directory and failed Retry", async () => {
+    function Draft() {
+      const [value,setValue]=useState("")
+      return <input data-testid="local-draft" value={value} onChange={event=>setValue(event.target.value)}/>
+    }
+    mount(<Draft/>)
+    const input=await screen.findByTestId("local-draft")
+    fireEvent.change(input,{target:{value:"preserved draft"}})
+    workspacesPayload=[]
+    await act(async()=>{await refreshWorkspaceSettings()})
+    expect(screen.getByRole("dialog",{name:"Selected workspace is unavailable"})).toBeInTheDocument()
+    workspacesStatus=500
+    await act(async()=>{await refreshWorkspaceSettings()})
+    expect(screen.getByRole("dialog",{name:"Selected workspace is unavailable"})).toBeInTheDocument()
+    expect(screen.getByTestId("local-draft")).toBe(input)
+    workspacesStatus=200
+    workspacesPayload=[RESTRICTED_A]
+    await act(async()=>{await refreshWorkspaceSettings()})
+    expect(screen.getByTestId("local-draft")).toHaveValue("preserved draft")
+    expect(screen.getByTestId("local-draft")).toBe(input)
   })
 
   it("sends nothing but the workspace list while the access mode is still loading", async () => {

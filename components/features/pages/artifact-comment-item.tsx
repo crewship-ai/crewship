@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { ArtifactCommentError, type ArtifactComment, type ArtifactCommentChange, type ArtifactCommentHistory, type ArtifactThread } from "@/hooks/use-artifact-threads"
+import { type ArtifactComment, type ArtifactCommentChange, type ArtifactCommentHistory, type ArtifactThread } from "@/hooks/use-artifact-threads"
 
-export function ArtifactCommentItem({ comment, thread, canComment, pending, onChange, onHistory, onDirtyChange }: {
-  comment: ArtifactComment; thread: ArtifactThread; canComment: boolean; pending: boolean
-  onChange: (thread: ArtifactThread, change: ArtifactCommentChange) => Promise<void>
+export function ArtifactCommentItem<T extends Pick<ArtifactThread, "id" | "version">>({ comment, thread, canComment, pending, onChange, onHistory, onDirtyChange }: {
+  comment: ArtifactComment; thread: T; canComment: boolean; pending: boolean
+  onChange: (thread: T, change: ArtifactCommentChange) => Promise<void>
   onHistory: (threadId: string, commentId: string) => Promise<ArtifactCommentHistory[]>
   onDirtyChange: (id: string, dirty: boolean) => void
 }) {
@@ -39,7 +39,8 @@ export function ArtifactCommentItem({ comment, thread, canComment, pending, onCh
     } catch (failure) {
       if (intent !== epoch.current) return
       setError(failure instanceof Error ? failure.message : "Could not update comment.")
-      if (!(failure instanceof ArtifactCommentError) || failure.status >= 500 || failure.status === 408) setUncertain({ change, version })
+      if (!(failure instanceof Error && "status" in failure && typeof failure.status === "number") || failure.status >= 500 || failure.status === 408) setUncertain({ change, version })
+      else setUncertain(null)
     }
   }
   const stale = (editing || removing) && base !== thread.version

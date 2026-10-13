@@ -113,11 +113,11 @@ beforeEach(() => {
   )
 })
 
-function renderPanel() {
+function renderPanel(sessionId = "chat-1") {
   return render(
     <ChatPanel
       agentId="agent-1"
-      sessionId="chat-1"
+      sessionId={sessionId}
       agentName="Riley"
       agentSlug="riley"
     />,
@@ -168,5 +168,23 @@ describe("chat panel history → loadHistory", () => {
     expect(user.role).toBe("user")
     expect(user.content).toBe("Please file this receipt.")
     expect(user.timestamp).toBeInstanceOf(Date)
+  })
+})
+
+
+describe("chat history URL path boundaries", () => {
+  it.each(["../auth/session?x=#fragment", "chat/child", "chat?query", "chat#fragment"])("encodes session %s for history and participants", async (sessionId) => {
+    renderPanel(sessionId)
+    await waitFor(() => {
+      const urls = vi.mocked(fetch).mock.calls.map(([url]) => String(url))
+      expect(urls).toContain(`/api/v1/chats/${encodeURIComponent(sessionId)}/messages?workspace_id=ws-test`)
+      expect(urls).toContain(`/api/v1/chats/${encodeURIComponent(sessionId)}/participants?workspace_id=ws-test`)
+    })
+  })
+  it.each([".", ".."]) ("rejects exact dot session %s for history and participants", async (sessionId) => {
+    renderPanel(sessionId)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const urls = vi.mocked(fetch).mock.calls.map(([url]) => String(url))
+    expect(urls.filter((url) => /\/(messages|participants)\?/.test(url))).toEqual([])
   })
 })

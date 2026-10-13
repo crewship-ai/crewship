@@ -2702,6 +2702,10 @@ Board's lifetime; deleting the Board releases references for ordinary blob GC.
 | POST | `/api/v1/pages/{slug}/board/threads` | Create an anchored thread |
 | POST | `/api/v1/pages/{slug}/board/threads/{threadId}/comments` | Reply at an observed thread version |
 | POST | `/api/v1/pages/{slug}/board/threads/{threadId}/resolve` | Resolve or reopen a thread |
+| PATCH | `/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}` | Edit your own human comment |
+| DELETE | `/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}` | Tombstone your own human comment |
+| PUT | `/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/reactions/{emoji}` | Add or remove your reaction |
+| GET | `/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/history` | Read your private comment history |
 
 **Auth:** human Page read for listing, Page comment for creation/replies, Page
 write for resolve/reopen. Authorization is rechecked inside each transaction.
@@ -2715,7 +2719,7 @@ Replies take `mutation_id`, `body` and `base_version`; resolve/reopen replaces
 `body` with `resolved:true/false`. Keep the exact mutation ID and body after a
 lost response. Anchors cannot be changed after creation.
 
-**Response:** listing returns `{threads}`; mutations return the current thread
+**Response:** listing returns `{threads,can_comment,can_resolve}`; mutations return the current thread
 with `applied_version` identifying the committed retry result. Each thread has
 `id`, `anchor`, `status`, `version`, author/timestamps and `comments`.
 Comments are plain text, limited to 4 KiB, with 50 replies per thread.
@@ -2723,6 +2727,22 @@ Comments are plain text, limited to 4 KiB, with 50 replies per thread.
 401 unsupported identity; 403 insufficient rights; 404 inaccessible Board/thread;
 409 stale anchor/version or mutation identity conflict; 413 oversized request;
 422 invalid anchor; 429 discussion quota; 500 storage failure.
+
+Edits, deletion and reactions require current Page comment access and the
+captured **thread** `base_version`, plus `mutation_id`. Edit adds `body`; deletion
+accepts neither body nor reaction fields. Reaction adds `active:true/false` and
+uses one of `👍`, `❤️`, `👀`, `✅` in the path. Only the actual human author may
+edit/delete or read history, including after tombstone deletion. Other readers
+never receive prior bodies. Agent-authored discussion is not supported here.
+
+Each comment supplies `version`, optional `edited_at`/`deleted_at`,
+`can_edit`, `can_delete`, `can_react`, `can_view_history`, and
+`reactions:[{emoji,count,reacted_by_me}]`. Deleted comments return an empty body
+and no reactions. History returns `{history:[{version,body,action,actor_user_id,created_at}]}`
+newest first. A comment retains at most 50 immutable body-history records;
+editing reserves the final record for deletion. Discussion writes share the
+existing 10,000 receipts/Board and 200 writes/hour limits. Exact retries recheck
+current authorization before receipt lookup and do not consume another slot.
 
 ### One-use element permissions
 
