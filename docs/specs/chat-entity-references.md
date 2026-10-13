@@ -40,7 +40,7 @@ and replay. A missing agent never removes a stored human origin. Human-origin
 routine mutations still require an identified agent. Explicit show requires a
 human chat origin.
 
-Legacy crews without run tokens retain unkeyed HTTP and MCP issue mutations; the sidecar drops keys it cannot bind to a verified run. Once run tokens are enabled, old agent tokens cannot mutate issues. This
+Legacy crews without run tokens retain unkeyed HTTP and MCP issue mutations; the sidecar drops keys it cannot bind to a verified run. These calls retain legacy permissions and do not claim verified requester guarantees. Normal current execution provisions v2 tokens, including channel jobs and delegated runs; a v2 token cannot downgrade through an old sidecar. Replace retained pre-v2 sidecars and agent processes with old v1 credentials during rollout before claiming the new authority guarantees for them. Once run tokens are enabled, old agent tokens cannot mutate issues. This
 delivery supports human-run create, update, comment and show. Work execution,
 relations and attachment writes from human runs return
 `403 chat_issue_action_not_supported` until their host paths implement the same
