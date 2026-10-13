@@ -1,0 +1,35 @@
+{
+  "reset": false,
+  "next_cursor": "\u003copaque cursor\u003e",
+  "snapshot_id": "\u003csnapshot id\u003e",
+  "snapshot_complete": true,
+  "has_more": false,
+  "refs": [
+    {
+      "event_id": "event-3",
+      "kind": "issue",
+      "verb": "created",
+      "entity": {
+        "id": "entity-3",
+        "identifier": "ENG-3",
+        "workspace_id": "test-workspace-id"
+      },
+      "provenance": {
+        "actor": {
+          "type": "agent",
+          "id": "entity-agent"
+        },
+        "at": "2026-10-13T09:00:00Z"
+      },
+      "anchor": {
+        "trigger_message_id": "trigger-message",
+        "run_id": "entity-run",
+        "run_status": null
+      },
+      "revision_at_action": {
+        "revision": 1,
+        "aggregate_revision": 1
+      }
+    }
+  ]
+}

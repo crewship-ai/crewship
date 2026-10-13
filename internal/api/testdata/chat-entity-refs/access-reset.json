@@ -1,0 +1,61 @@
+{
+  "reset": true,
+  "next_cursor": "\u003copaque cursor\u003e",
+  "snapshot_id": "\u003csnapshot id\u003e",
+  "snapshot_complete": false,
+  "has_more": true,
+  "refs": [
+    {
+      "event_id": "event-1",
+      "kind": "issue",
+      "verb": "created",
+      "entity": {
+        "id": "entity-1",
+        "identifier": "ENG-1",
+        "workspace_id": "test-workspace-id"
+      },
+      "provenance": {
+        "actor": {
+          "type": "agent",
+          "id": "entity-agent"
+        },
+        "at": "2026-10-13T09:00:00Z"
+      },
+      "anchor": {
+        "trigger_message_id": "trigger-message",
+        "run_id": "entity-run",
+        "run_status": null
+      },
+      "revision_at_action": {
+        "revision": 1,
+        "aggregate_revision": 1
+      }
+    },
+    {
+      "event_id": "event-2",
+      "kind": "issue",
+      "verb": "created",
+      "entity": {
+        "id": "entity-2",
+        "identifier": "ENG-2",
+        "workspace_id": "test-workspace-id"
+      },
+      "provenance": {
+        "actor": {
+          "type": "agent",
+          "id": "entity-agent"
+        },
+        "at": "2026-10-13T09:00:00Z"
+      },
+      "anchor": {
+        "trigger_message_id": "trigger-message",
+        "run_id": "entity-run",
+        "run_status": null
+      },
+      "revision_at_action": {
+        "revision": 1,
+        "aggregate_revision": 1
+      }
+    }
+  ]
+}
