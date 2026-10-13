@@ -243,7 +243,7 @@ func (h *MemoryVersionsHandler) Restore(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	res, err := memory.Restore(r.Context(), h.db, body.CanonicalPath, wsID, body.Path, sha, user.ID, h.blobRoot, tier)
+	res, err := memory.Restore(r.Context(), h.db, body.CanonicalPath, wsID, body.Path, sha, user.ID, h.blobRoot, tier, filepath.Dir(h.blobRoot))
 	if err != nil {
 		if errors.Is(err, memory.ErrVersionNotFound) {
 			replyError(w, http.StatusNotFound, "memory version not found")

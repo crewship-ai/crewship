@@ -201,3 +201,18 @@ func OpenRootNoFollow(root *os.Root, name string) (*os.File, error) {
 func ReadFileNoFollow(path string) ([]byte, error) {
 	return readRegularNoFollow(path)
 }
+
+// ReadFileNoFollowRoot reads a regular file through a pinned storage-root
+// capability. Unlike ReadFileNoFollow, parent components cannot escape by
+// being replaced between pathname validation and the actual read.
+func ReadFileNoFollowRoot(storageRoot, path string) ([]byte, error) {
+	file, err := openRootedMutationFile(storageRoot, path, false)
+	if err != nil {
+		return nil, err
+	}
+	defer file.close()
+	if file.missing {
+		return nil, os.ErrNotExist
+	}
+	return readRegularRootNoFollow(file.root, file.name)
+}
