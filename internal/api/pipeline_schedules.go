@@ -959,6 +959,11 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
+	user := UserFromContext(r.Context())
+	if user == nil {
+		replyError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
 	scheduleID := r.PathValue("scheduleId")
 	if scheduleID == "" {
 		replyError(w, http.StatusBadRequest, "scheduleId required")
@@ -1012,6 +1017,10 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
 		PipelineID: p.ID,
+		// Manual force-fire retains the authenticated operator. Its create-tier
+		// floor matches batch execution, not an autonomous scheduler trigger.
+		InvokingUserID:      user.ID,
+		InvocationAuthority: pipeline.HumanInvocationAuthority(user.ID, pipeline.RoutineBatchAuthority),
 		// Force-fire honours the schedule's version pin exactly like the
 		// cron path — `schedules now` exists to smoke-test what the cron
 		// will do, so it must execute the same definition.
@@ -1023,6 +1032,10 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		TriggeredByID: sched.ID,
 	})
 	if err != nil {
+		if errors.Is(err, pipeline.ErrInvocationAuthorityRevoked) || errors.Is(err, pipeline.ErrInvokingUserNotMember) {
+			replyError(w, http.StatusForbidden, "Scheduled run is not available with your access")
+			return
+		}
 		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
 			w.Header().Set("Retry-After", "5")
 			replyError(w, http.StatusTooManyRequests,
