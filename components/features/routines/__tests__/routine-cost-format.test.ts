@@ -4,6 +4,8 @@ import {
   extractStepID,
   formatStepCost,
   formatStepDuration,
+  formatReportedUsage,
+  REPORTED_USAGE_HINT,
 } from "../routine-cost-format"
 
 // ---------------------------------------------------------------------------
@@ -145,5 +147,22 @@ describe("formatStepCost", () => {
     //   (chars/4 + chars/4 * 0.25) / 1_000_000
     // For a 4000-char prompt that's 0.00125 — must not round to 0.
     expect(formatStepCost(0.00125)).toBe("$0.0013") // banker's rounding tolerant
+  })
+})
+
+// #2193: a run's cost_usd is usage the agent CLIs reported, not a billed
+// amount. Run surfaces render it through formatReportedUsage.
+describe("formatReportedUsage", () => {
+  it("marks a reported figure approximate", () => {
+    expect(formatReportedUsage(0.0123)).toBe("~$0.0123")
+  })
+  it("says nothing was reported rather than printing $0.0000", () => {
+    expect(formatReportedUsage(0)).toBe("none reported")
+    expect(formatReportedUsage(undefined)).toBe("none reported")
+    expect(formatReportedUsage(null)).toBe("none reported")
+    expect(formatReportedUsage(Number.NaN)).toBe("none reported")
+  })
+  it("explains it is not a bill", () => {
+    expect(REPORTED_USAGE_HINT).toMatch(/not a billed amount/)
   })
 })

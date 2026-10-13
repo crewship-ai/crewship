@@ -7,7 +7,7 @@ import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
 import { StatusPill } from "@/components/ui/status-pill"
 
 import { ROLE_LABEL, aboveRole, type Member } from "./members-model"
-import { AreaChips, AreaIcons, RolePill } from "./member-bits"
+import { AreaChips, AreaIcons, RestrictedPill, RolePill } from "./member-bits"
 import { daysUntil, expiryText, type Invitation } from "./use-invitations"
 
 export interface PeopleGroup {
@@ -111,6 +111,7 @@ export function PeopleTable({
                 <td className={cell}>
                   <span className="inline-flex items-center gap-1.5">
                     <RolePill role={m.role} />
+                    <RestrictedPill mode={m.access_mode} />
                     {above.length > 0 && (
                       <span className="text-warn" title={`Above their role: a ${ROLE_LABEL[m.role]} who holds high-stakes access`}>
                         <TriangleAlert className="h-3.5 w-3.5" aria-label="Above their role" />
@@ -160,6 +161,7 @@ export function PeopleList({ groups, caps, currentUserId, onOpen }: {
                   </span>
                   <span className="mt-0.5 flex items-center gap-2 text-label text-muted-foreground">
                     {ROLE_LABEL[m.role] ?? m.role}
+                    {m.access_mode === "restricted" && <><span className="text-muted-foreground-soft">·</span>Restricted</>}
                     {caps && <><span className="text-muted-foreground-soft">·</span><AreaIcons granted={caps[m.user.id]} /></>}
                   </span>
                 </span>

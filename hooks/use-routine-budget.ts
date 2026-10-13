@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { toApiError } from "@/lib/api-error"
 
 // RoutineBudget mirrors internal/api.budgetResponse
 // (GET/PATCH /pipelines/{slug}/budget, #1422 item 3). Distinct from a
@@ -94,8 +95,7 @@ export function useRoutineBudget(
         },
       )
       if (!res.ok) {
-        const txt = await res.text()
-        throw new Error(`set budget failed: ${res.status} ${txt}`)
+        throw await toApiError(res, `set budget failed: HTTP ${res.status}`)
       }
       const out: RoutineBudget = await res.json()
       if (activeRefresh.current === refresh) {

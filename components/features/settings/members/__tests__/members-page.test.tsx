@@ -379,3 +379,36 @@ describe("Members — on a phone", () => {
     expect(await sheet()).toHaveAccessibleName("Member details: Mel Member")
   })
 })
+
+/**
+ * #2878 — a restricted member looked exactly like a trusted one. The roster
+ * carries `access_mode` (sent only to a trusted OWNER/ADMIN); the page marks
+ * the exception next to the role and names the mode in the person's panel.
+ */
+describe("Members — access mode", () => {
+  const withMode = (m: ReturnType<typeof member>, access_mode?: "trusted" | "restricted") => ({ ...m, ...(access_mode ? { access_mode } : {}) })
+
+  it("marks a restricted member's row and leaves a trusted member's row unmarked", async () => {
+    roster = [withMode(member("m-rita", "MEMBER", "u-rita", "Rita Restricted"), "restricted"), withMode(member("m-tom", "MEMBER", "u-tom", "Tom Trusted"), "trusted")]
+    renderPage()
+    await table()
+    expect(within(rowOf("u-rita")).getByText("Restricted")).toBeTruthy()
+    // Role and access are two facts: the role pill still reads Member.
+    expect(within(rowOf("u-rita")).getByText("Member")).toBeTruthy()
+    expect(within(rowOf("u-tom")).queryByText("Restricted")).toBeNull()
+  })
+
+  it("names the access mode in the person's panel", async () => {
+    roster = [withMode(member("m-rita", "MEMBER", "u-rita", "Rita Restricted"), "restricted")]
+    renderPage("/settings/members?member=u-rita")
+    expect((await screen.findByTestId("member-access-mode")).textContent).toMatch(/^Restricted/)
+  })
+
+  it("does not guess an access mode the server withheld", async () => {
+    roster = [member("m-rita", "MEMBER", "u-rita", "Rita Restricted")]
+    renderPage("/settings/members?member=u-rita")
+    expect(await sheet()).toHaveAccessibleName("Member details: Rita Restricted")
+    expect(screen.queryByTestId("member-access-mode")).toBeNull()
+    expect(screen.queryByText("Restricted")).toBeNull()
+  })
+})

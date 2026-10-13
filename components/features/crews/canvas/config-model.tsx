@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/command"
 import { MODEL_META } from "@/components/features/crews/model-library-picker"
 import { apiFetch } from "@/lib/api-fetch"
+import { toApiError } from "@/lib/api-error"
 import { cn } from "@/lib/utils"
 
 import { ConfigRow } from "./config-field"
@@ -63,7 +64,7 @@ export function ConfigModel({ label, hint, workspaceId, provider, value, onSave,
         `/api/v1/models?provider=${encodeURIComponent(provider)}&workspace_id=${encodeURIComponent(workspaceId)}`,
         { signal },
       )
-      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`)
+      if (!res.ok) throw await toApiError(res, `HTTP ${res.status}`)
       const body = (await res.json()) as { models?: ModelInfo[]; source?: string }
       if (signal.aborted) return
       setModels(body.models ?? [])

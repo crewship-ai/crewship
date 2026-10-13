@@ -21,7 +21,7 @@ import {
   ACCESS_PROFILES, AREAS, ASSIGNABLE_ROLES, CAPABILITY_HINT, CAPABILITY_SHORT, ROLE_LABEL, ROLE_SUMMARY_BY_ROLE,
   aboveRole, accessProfile, exceptionCount, roleChoices, type Member,
 } from "./members-model"
-import { AREA_ICON, CAPABILITY_ICON, MemberDialogIcon, RolePill } from "./member-bits"
+import { AREA_ICON, CAPABILITY_ICON, MemberDialogIcon, RestrictedPill, RolePill } from "./member-bits"
 import { joinedDate } from "./people-table"
 
 export { RolePill } from "./member-bits"
@@ -52,6 +52,7 @@ export function MemberDetail({
   onProfile,
   onRevoke,
   revealEnabled = null,
+  onAccessSaved,
 }: {
   member: Member
   workspaceId: string
@@ -71,6 +72,8 @@ export function MemberDetail({
   onRevoke: (m: Member, caps: CapabilityValue[]) => void
   /** The workspace's reveal switch (Access & Secrets); null when unknown. */
   revealEnabled?: boolean | null
+  /** A saved access mode changes the roster's Restricted marker; reload it. */
+  onAccessSaved?: () => void
 }) {
   const label = personLabel(member.user.full_name, member.user.email)
   const isSelf = currentUserId === member.user.id
@@ -95,6 +98,7 @@ export function MemberDetail({
           {member.user.full_name?.trim() && <p className="truncate font-mono text-micro text-muted-foreground">{member.user.email}</p>}
           <p className="mt-2 flex flex-wrap items-center gap-1.5">
             <RolePill role={member.role} />
+            <RestrictedPill mode={member.access_mode} />
             <span className="inline-flex h-[22px] items-center rounded-md bg-surface-subtle px-2 font-mono text-micro text-muted-foreground">joined {joinedDate(member.created_at)}</span>
           </p>
         </div>
@@ -207,7 +211,16 @@ export function MemberDetail({
       {showCaps && (
         <SettingsCard icon={Boxes} tint="var(--purple)" title="Crews & agents" description="Where they may use the abilities above">
           <div className="px-4 pb-3 [&>section]:mt-3">
-            <MemberResourceAccess workspaceId={workspaceId} memberId={member.id} label={label} role={member.role} />
+            {member.access_mode && (
+              <p className="mt-3 text-label text-muted-foreground" data-testid="member-access-mode">
+                <span className="font-medium text-foreground">{member.access_mode === "restricted" ? "Restricted" : "Trusted"}</span>
+                {" — "}
+                {member.access_mode === "restricted"
+                  ? "only the crews, agents and projects granted below."
+                  : "everything the role and abilities allow."}
+              </p>
+            )}
+            <MemberResourceAccess workspaceId={workspaceId} memberId={member.id} label={label} role={member.role} onSaved={onAccessSaved} />
           </div>
         </SettingsCard>
       )}

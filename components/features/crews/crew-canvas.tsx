@@ -12,6 +12,7 @@ import { MemoryWorkspace } from "./memory-workspace"
 import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-picker-dialog"
 import { usePagedList } from "@/hooks/use-paged-list"
 import { apiFetch } from "@/lib/api-fetch"
+import { toApiError } from "@/lib/api-error"
 import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
 
 import { ProvisioningBanner } from "./crew-canvas-banner"
@@ -211,7 +212,7 @@ export function CrewCanvas({
     setNeedBusy("build")
     try {
       const r = await apiFetch(`/api/v1/crews/${crew.id}/provision?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST" })
-      if (!r.ok) throw new Error(await r.text())
+      if (!r.ok) throw await toApiError(r, `HTTP ${r.status}`)
       toast.success(`Rebuilding ${crew.name}'s image — usually 30–90 s`)
     } catch (err) {
       toast.error(`Build did not start: ${err instanceof Error ? err.message : err}`)
@@ -229,7 +230,7 @@ export function CrewCanvas({
     try {
       await patch({ devcontainer_config: withDevcontainerFeature(crew.devcontainer_config, need.action.feature) })
       const r = await apiFetch(`/api/v1/crews/${crew.id}/provision?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST" })
-      if (!r.ok) throw new Error(await r.text())
+      if (!r.ok) throw await toApiError(r, `HTTP ${r.status}`)
       toast.success(`Installing ${need.action.tool} — ${crew.name}'s image is rebuilding`)
     } catch (err) {
       toast.error(`Could not install ${need.action.tool}: ${err instanceof Error ? err.message : err}`)

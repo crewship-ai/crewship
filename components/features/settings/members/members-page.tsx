@@ -496,7 +496,7 @@ export function MembersPage() {
           {opened && (
             <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin}
               granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading} busy={busy}
-              onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} revealEnabled={revealEnabled} />
+              onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} revealEnabled={revealEnabled} onAccessSaved={roster.refresh} />
           )}
           {/* The page's own save bar sits under the sheet's overlay; the same
               bar, from the same context, docks to the bottom of the sheet. */}

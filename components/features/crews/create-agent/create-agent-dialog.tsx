@@ -40,6 +40,7 @@ import {
 import { cn } from "@/lib/utils"
 import { CrewPicker } from "@/components/features/crews/crew-picker"
 import { apiFetch } from "@/lib/api-fetch"
+import { ApiError, toApiError } from "@/lib/api-error"
 import { storeAgentAvatar } from "@/lib/agent-avatar-persist"
 import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
@@ -111,6 +112,9 @@ export function CreateAgentDialog({
   useAvatarStylesVersion()
   const router = useRouter()
   const [section, setSection] = useState("identity")
+  // A server refusal that names a field (#2862) is shown under that field
+  // rather than toasted: slug conflicts under Slug, a second lead under Role.
+  const [fieldErrors, setFieldErrors] = useState<{ slug?: string; agent_role?: string }>({})
   const [providerConfirmed, setProviderConfirmed] = useState(!!agent)
   const [draft, setDraft] = useState(() => initialAgentDraft(defaultCrewSlug))
   const [persona, setPersona] = useState<string | null | undefined>(undefined)
@@ -155,6 +159,7 @@ export function CreateAgentDialog({
     if (open && !wasOpenRef.current) {
       const next = agent ? draftFromAgent(agent, crews) : initialAgentDraft(defaultCrewSlugRef.current)
       setSection("identity")
+      setFieldErrors({})
       setProviderConfirmed(!!agent)
       setDraft(next)
       setBaseline(next)
@@ -180,6 +185,11 @@ export function CreateAgentDialog({
       .replace(/^-|-$/g, "")
     if (derived !== draft.slug) setDraft((d) => ({ ...d, slug: derived }))
   }, [draft.name, draft.slug, draft.slugTouched])
+  // A slug refusal describes the slug that was sent; any new slug (typed or
+  // derived from the name) is a new question.
+  useEffect(() => {
+    setFieldErrors((f) => (f.slug ? { ...f, slug: undefined } : f))
+  }, [draft.slug])
 
   const seed = draft.avatarSeed || draft.slug || draft.name || "agent"
   const avatarUrl = getAgentAvatarUrl(seed, draft.avatarStyle)
@@ -247,6 +257,7 @@ export function CreateAgentDialog({
     submittingRef.current = true
     setSubmitting(true)
     setRefusal(null)
+    setFieldErrors({})
     try {
       const targetCrew = draft.crewSlug
         ? crews.find((c) => c.slug === draft.crewSlug) ?? null
@@ -292,8 +303,7 @@ export function CreateAgentDialog({
         },
       )
       if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `HTTP ${res.status}`)
+        throw await toApiError(res, `HTTP ${res.status}`)
       }
       const created = await res.json()
       if (agent && persona !== undefined) {
@@ -355,6 +365,12 @@ export function CreateAgentDialog({
       onCreated(created.slug)
       router.replace(`/crews?agent=${encodeURIComponent(created.slug)}`)
     } catch (err) {
+      if (err instanceof ApiError && (err.field === "slug" || err.field === "agent_role")) {
+        const field = err.field
+        setFieldErrors({ [field]: err.message })
+        setSection("identity")
+        return
+      }
       const message = `Could not ${agent ? "save" : "create"} agent: ${err instanceof Error ? err.message : String(err)}`
       toast.error(message)
       setRefusal(message)
@@ -618,11 +634,13 @@ export function CreateAgentDialog({
                 />
               </CreateSurfaceField>
 
-              <CreateSurfaceField label="Slug" htmlFor="agent-slug" hint="auto from name">
+              <CreateSurfaceField label="Slug" htmlFor="agent-slug" hint="auto from name" error={fieldErrors.slug}>
                 <input
                   id="agent-slug"
                   type="text"
                   value={draft.slug}
+                  aria-invalid={fieldErrors.slug ? true : undefined}
+                  aria-describedby={fieldErrors.slug ? "agent-slug-error" : undefined}
                   onChange={(e) =>
                     setDraft({ ...draft, slug: e.target.value, slugTouched: true })
                   }
@@ -636,11 +654,14 @@ export function CreateAgentDialog({
                   <select> loses: both are visible without opening anything,
                   each hint explains the role rather than stating a limit, and
                   the tap target is the chip instead of a 16px caret. */}
-              <CreateSurfaceField label="Role">
+              <CreateSurfaceField label="Role" error={fieldErrors.agent_role}>
                 <CreateSurfaceChoice
                   ariaLabel="Agent role"
                   value={draft.agentRole}
-                  onChange={(agentRole) => setDraft({ ...draft, agentRole })}
+                  onChange={(agentRole) => {
+                    setFieldErrors((f) => ({ ...f, agent_role: undefined }))
+                    setDraft({ ...draft, agentRole })
+                  }}
                   options={[
                     { value: "AGENT", label: "Agent", hint: "Works on what it is given" },
                     { value: "LEAD", label: "Lead", hint: "Can plan and delegate to the crew" },

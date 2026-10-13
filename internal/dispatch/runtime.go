@@ -50,7 +50,13 @@ const (
 	// success, not failure — so the dispatcher keeps the attempt supervised
 	// and waits for the runtime's own termination before settling (#2626).
 	OutcomeDetached
+	// OutcomeRetained transfers observation to protected capture recovery.
+	// Execution may continue independently; no absence probe, retry or
+	// terminal run projection is licensed by the controller's return.
+	OutcomeRetained
 )
+
+const RetainedCapturePendingReason = "protected host capture awaiting retained result"
 
 func (o Outcome) String() string {
 	switch o {
@@ -62,6 +68,8 @@ func (o Outcome) String() string {
 		return "retryable"
 	case OutcomeDetached:
 		return "detached"
+	case OutcomeRetained:
+		return "retained"
 	default:
 		return "unclear"
 	}

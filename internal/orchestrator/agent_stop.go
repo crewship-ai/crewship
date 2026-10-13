@@ -16,6 +16,8 @@ import (
 // cancellation, and is never used as proof that a process has stopped.
 var ErrAgentStopped = errors.New("agent stopped by user")
 
+var ErrRunAlreadyOwned = errors.New("run identity already owned")
+
 // AgentStopOutcome is the success half of StopAgentOutcome (#2879).
 type AgentStopOutcome string
 
@@ -86,9 +88,27 @@ type agentRunControl struct {
 	done              chan struct{}
 }
 
-func (o *Orchestrator) trackAgentRun(ctx context.Context, req *AgentRunRequest) (context.Context, func()) {
+func (o *Orchestrator) trackAgentRun(ctx context.Context, req *AgentRunRequest) (context.Context, func(), error) {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &agentRunControl{agentID: req.AgentID, location: RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID, Managed: o.managedLaunchCrews[req.CrewID]}, cancel: cancel, done: make(chan struct{})}
+	o.runRecoveryMu.Lock()
+	if req.DurableOutputDir != "" || req.HostOutputDir != "" {
+		raw, err := o.state.Get(ctx, "agent_runs", req.RunID)
+		if err != nil || len(raw) != 0 {
+			o.runRecoveryMu.Unlock()
+			cancel()
+			if err != nil {
+				return ctx, nil, fmt.Errorf("read durable execution identity: %w", err)
+			}
+			return ctx, nil, fmt.Errorf("%w: %s", ErrRunAlreadyOwned, req.RunID)
+		}
+	}
+	_, loaded := o.agentRuns.LoadOrStore(req.RunID, c)
+	o.runRecoveryMu.Unlock()
+	if loaded {
+		cancel()
+		return ctx, nil, fmt.Errorf("%w: %s", ErrRunAlreadyOwned, req.RunID)
+	}
 	prior := req.ExecGate
 	live := o.agentLiveness()
 	agentID := req.AgentID
@@ -120,16 +140,13 @@ func (o *Orchestrator) trackAgentRun(ctx context.Context, req *AgentRunRequest) 
 		return nil
 	}
 
-	o.runRecoveryMu.Lock()
-	o.agentRuns.Store(req.RunID, c)
-	o.runRecoveryMu.Unlock()
 	return ctx, func() {
 		cancel()
 		close(c.done)
 		o.runRecoveryMu.Lock()
-		o.agentRuns.Delete(req.RunID)
+		o.agentRuns.CompareAndDelete(req.RunID, c)
 		o.runRecoveryMu.Unlock()
-	}
+	}, nil
 }
 
 // StopAgent is StopAgentOutcome without the outcome: nil means the agent is

@@ -396,7 +396,10 @@ type workspaceMemberRow struct {
 	FullName  string `json:"full_name" yaml:"full_name"`
 	Role      string `json:"role" yaml:"role"`
 	CreatedAt string `json:"created_at" yaml:"created_at"`
-	User      *struct {
+	// AccessMode is "trusted" or "restricted". The server sends it only to a
+	// trusted OWNER/ADMIN (it is part of the member access policy).
+	AccessMode string `json:"access_mode,omitempty" yaml:"access_mode,omitempty"`
+	User       *struct {
 		ID       string `json:"id" yaml:"id"`
 		Email    string `json:"email" yaml:"email"`
 		FullName string `json:"full_name" yaml:"full_name"`
@@ -514,13 +517,20 @@ var workspaceMemberListCmd = &cobra.Command{
 		// `member role` / `member remove` commands PATCH/DELETE by. Show it
 		// first so the CLI advertises the same id the API consumes; USER ID
 		// stays for cross-referencing user-scoped commands.
-		headers := []string{"MEMBER ID", "USER ID", "EMAIL", "NAME", "ROLE", "JOINED"}
+		// ACCESS is the member's access mode, kept apart from ROLE: a
+		// restricted MEMBER and a trusted MEMBER share a role. "-" means the
+		// caller may not read access policies.
+		headers := []string{"MEMBER ID", "USER ID", "EMAIL", "NAME", "ROLE", "ACCESS", "JOINED"}
 		var rows [][]string
 		for i, m := range members {
 			// Normalise in place so json/yaml/ndjson render the same values
 			// the table below prints — see normalized().
 			members[i] = m.normalized()
-			rows = append(rows, []string{m.ID, truncateID(m.UserID, 12), m.email(), m.fullName(), m.Role, m.CreatedAt})
+			access := m.AccessMode
+			if access == "" {
+				access = "-"
+			}
+			rows = append(rows, []string{m.ID, truncateID(m.UserID, 12), m.email(), m.fullName(), m.Role, access, m.CreatedAt})
 		}
 		return f.Auto(members, headers, rows)
 	},

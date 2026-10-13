@@ -73,7 +73,8 @@ describe("pipeline webhook configuration", () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     await act(async () => {
       const pending = operation === "create" ? result.current.create({ name: "Deploy" }) : result.current.update("hook", { name: "Deploy" })
-      await expect(pending).rejects.toThrow(`${operation} webhook: 403 permission denied`)
+      // The server's sentence, with the status on the error (#2862).
+      await expect(pending).rejects.toMatchObject({ message: "permission denied", status: 403 })
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(result.current.webhooks).toEqual([webhook])

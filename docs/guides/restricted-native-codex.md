@@ -47,3 +47,37 @@ the bounded per-call accounting contract required here. See the official
 Acceptance uses synthetic TLS upstreams and real pinned CLI/tool execution; no
 paid provider calls. Run the explicit tagged native live canary with
 `CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_NATIVE_IMAGE=sha256:... go test -tags restrictedruntime_live ./internal/restricteddispatch -run TestLiveNativeFrozenToolsAndDurableAccounting`. <!-- docs-inventory: ignore (the LIVE opt-in is read only by tagged acceptance tests) -->
+
+## Independent release candidates
+
+`Native Worker Release` is a separate, main-only manual producer. Dispatch with
+`publish=false` to prepare an artifact containing the exact runner, authenticated
+upstream Codex binary, existing pinned runtime Dockerfile, and distributed legal
+notices. It requires successful CI, Security and CodeQL for that exact main SHA.
+The preparation helper refuses an existing output directory and verifies both
+the official release archive and extracted executable hashes. Codex's LICENSE
+and NOTICE come from upstream commit
+`687a119f0fcaace47e1f1abcc77cec6c813fd6da` and have their own pinned hashes;
+Crewship's Go dependency bundle and project notices accompany them.
+
+An operator may explicitly authorize publication with `publish=true`. This
+creates a unique `codex159-<source SHA>-<run>-<attempt>` candidate in
+`ghcr.io/<owner>/crewship-restricted-native`, with BuildKit provenance, SBOM,
+distributed-content verification and critical vulnerability scanning. Successful
+candidates are keylessly signed by the main workflow. An unsigned or failed
+candidate is not approved for use. No mutable release/latest tag is promoted.
+The `native-worker-candidate-<SHA>` artifact records its digest, source SHA,
+upstream identity and publisher run. This workflow does not load host policy,
+run native acceptance or invoke a model provider.
+
+Before supplying a digest to native acceptance, the operator must review the
+publisher run and its provenance/source SHA, verify the signature against
+`https://github.com/<owner>/<repo>/.github/workflows/native-worker-release.yml@refs/heads/main`
+and issuer `https://token.actions.githubusercontent.com`, and explicitly approve
+that immutable reference. The consuming acceptance job pulls the approved
+release digest; it never builds a substitute. Host AppArmor policy provisioning
+remains a separate infrastructure action through the supported Ansible process.
+
+Adding this producer does not establish that an approved image or qualified host
+exists. Publication must be dispatched separately by an authorized operator,
+and the released-image acceptance receipt is still required for #2952.

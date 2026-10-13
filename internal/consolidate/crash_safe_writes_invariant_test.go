@@ -154,7 +154,7 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 		// *os.Root-anchored twins of the three entries above. These
 		// were invisible to this guard until #1807 widened the regex
 		// from `os.OpenFile(` to `.OpenFile(` — see the comment there.
-		"../memory/durable_write.go|f, err := root.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)":          "durable_write.go: this line IS the WriteFileDurableRoot primitive, the root-anchored form of writeFileDurable — same standing as its os.OpenFile twin above",
+		"../memory/durable_write.go|f, err := root.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, createMode)":    "durable_write.go: this line IS the shared root-anchored durable primitive, with private creation and optional exact chmod before file fsync, rename and parent fsync; covered by durable-root tests and the AI reconnect umask/rollback matrix",
 		"../memory/writer_lock_unix.go|f, err := l.root.OpenFile(l.name, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)": "writer_lock_unix.go: root-anchored form of the flock sentinel open — same reasoning as its os.OpenFile twin above, only its existence as an flock anchor matters",
 		"../memory/writer_lock_windows.go|f, err := l.root.OpenFile(l.name, os.O_CREATE|os.O_RDWR, 0o600)":              "writer_lock_windows.go: same flock-sentinel reasoning as the unix build's root-anchored open",
 

@@ -43,6 +43,7 @@ func TestRecoveryChecksPersistedRuntimeLiveness(t *testing.T) {
 		err             error
 		terminal        bool
 		state, identity string
+		output          bool
 	}{
 		{name: "gone", answer: "ABSENT", terminal: true},
 		{name: "alive", answer: "PRESENT"},
@@ -50,6 +51,8 @@ func TestRecoveryChecksPersistedRuntimeLiveness(t *testing.T) {
 		{name: "stopped-container", state: "stopped", err: errors.New("must not exec a stopped container"), terminal: true},
 		{name: "unknown-container-state", state: "creating", answer: "ABSENT"},
 		{name: "different-container", identity: "replacement-runtime", answer: "ABSENT"},
+		{name: "retained-output-running-container", answer: "ABSENT", output: true},
+		{name: "retained-output-stopped-container", state: "stopped", output: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestServerWithDeps(t)
@@ -59,7 +62,11 @@ func TestRecoveryChecksPersistedRuntimeLiveness(t *testing.T) {
 			mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
 			mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
 			seedRecoveryTrace(t, s, "recovered-run", "a")
-			raw, err := json.Marshal(orchestrator.RunState{ID: "recovered-run", AgentID: "a", AgentSlug: "a", ContainerID: "runtime", Status: "running"})
+			persisted := orchestrator.RunState{ID: "recovered-run", AgentID: "a", AgentSlug: "a", ContainerID: "runtime", Status: "running"}
+			if tc.output {
+				persisted.Output = &orchestrator.RunOutputState{Version: 1, Directory: "/persistent/recovered-run/output"}
+			}
+			raw, err := json.Marshal(persisted)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -83,6 +90,38 @@ func TestRecoveryChecksPersistedRuntimeLiveness(t *testing.T) {
 				t.Fatalf("durable runtime status=%q", run.Status)
 			}
 		})
+	}
+}
+
+func TestRecoveryRetainsCompletedResultBeforeOutputReplay(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	c := &recoveredProbeContainer{mockContainer: &mockContainer{}, answer: `{"version":1,"sequence":3,"complete":true,"result":{"exit_code":7,"reason":"exited"}}`}
+	s.container = c
+	s.orchestrator = orchestrator.New(c, s.state, s.logger)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('rw','Recovery','rw')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('a','rw','Agent','a','RUNNING')`)
+	seedRecoveryTrace(t, s, "retained-run", "a")
+	run := orchestrator.RunState{ID: "retained-run", AgentID: "a", AgentSlug: "a", ContainerID: "runtime", Status: "running", Output: &orchestrator.RunOutputState{Version: 1, Directory: "/runs/retained-run/output"}}
+	raw, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.state.Set(t.Context(), "agent_runs", run.ID, raw); err != nil {
+		t.Fatal(err)
+	}
+	s.recoverOrphanedRuns(t.Context())
+	raw, err = s.state.Get(t.Context(), "agent_runs", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(raw, &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "running" || run.Output.RetainedResult == nil || run.Output.RetainedResult.Result.ExitCode != 7 {
+		t.Fatalf("recovered state=%s", raw)
+	}
+	if count := recoveryTerminalCount(t, s, run.ID); count != 0 {
+		t.Fatalf("published completion before replay: %d", count)
 	}
 }
 

@@ -9,11 +9,12 @@ import (
 )
 
 var pathEnvironment = map[string]string{
-	"storage.base_path":   "CREWSHIP_STORAGE_BASE_PATH",
-	"storage.log_path":    "CREWSHIP_LOG_PATH",
-	"storage.memory_root": "CREWSHIP_STORAGE_MEMORY_ROOT",
-	"state.bolt_path":     "CREWSHIP_BOLT_PATH",
-	"ipc.socket_path":     "CREWSHIP_SOCKET_PATH",
+	"storage.base_path":       "CREWSHIP_STORAGE_BASE_PATH",
+	"storage.log_path":        "CREWSHIP_LOG_PATH",
+	"storage.memory_root":     "CREWSHIP_STORAGE_MEMORY_ROOT",
+	"storage.run_output_path": "CREWSHIP_RUN_OUTPUT_PATH",
+	"state.bolt_path":         "CREWSHIP_BOLT_PATH",
+	"ipc.socket_path":         "CREWSHIP_SOCKET_PATH",
 }
 
 func capturePathEnvSources(cfg *Config) {
@@ -58,18 +59,20 @@ func ResolvePaths(cfg *Config, root, databaseFlag string) (*ResolvedPaths, error
 	}
 	result.Paths["database"] = result.DatabaseURL
 	fields := map[string]*string{
-		"storage.base_path":   &cfg.Storage.BasePath,
-		"storage.log_path":    &cfg.Storage.LogPath,
-		"storage.memory_root": &cfg.Storage.MemoryRoot,
-		"state.bolt_path":     &cfg.State.BoltPath,
-		"ipc.socket_path":     &cfg.IPC.SocketPath,
+		"storage.base_path":       &cfg.Storage.BasePath,
+		"storage.log_path":        &cfg.Storage.LogPath,
+		"storage.memory_root":     &cfg.Storage.MemoryRoot,
+		"storage.run_output_path": &cfg.Storage.RunOutputPath,
+		"state.bolt_path":         &cfg.State.BoltPath,
+		"ipc.socket_path":         &cfg.IPC.SocketPath,
 	}
 	defaults := map[string]string{
-		"storage.base_path":   filepath.Join(root, "output"),
-		"storage.log_path":    filepath.Join(root, "logs"),
-		"storage.memory_root": filepath.Join(root, "memory"),
-		"state.bolt_path":     filepath.Join(root, "state.db"),
-		"ipc.socket_path":     DefaultSocketPathFor(root),
+		"storage.base_path":       filepath.Join(root, "output"),
+		"storage.log_path":        filepath.Join(root, "logs"),
+		"storage.memory_root":     filepath.Join(root, "memory"),
+		"storage.run_output_path": filepath.Join(root, "run-output"),
+		"state.bolt_path":         filepath.Join(root, "state.db"),
+		"ipc.socket_path":         DefaultSocketPathFor(root),
 	}
 	for key, field := range fields {
 		legacy := *field
@@ -94,7 +97,7 @@ func ResolvePaths(cfg *Config, root, databaseFlag string) (*ResolvedPaths, error
 			source = "derived"
 			*field = defaults[key]
 		}
-		if key != "storage.memory_root" && strings.TrimSpace(*field) == "" {
+		if key != "storage.memory_root" && key != "storage.run_output_path" && strings.TrimSpace(*field) == "" {
 			return nil, fmt.Errorf("%s must not be empty (source: %s)", key, source)
 		}
 		result.Sources[key], result.Paths[key] = source, *field

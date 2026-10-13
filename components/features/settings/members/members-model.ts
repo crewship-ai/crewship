@@ -12,6 +12,9 @@ export interface Member {
   id: string
   role: string
   created_at: string
+  /** Sent only to a trusted OWNER/ADMIN — the same gate as the member access
+   *  policy it summarises. Absent means "not yours to read", not "trusted". */
+  access_mode?: "trusted" | "restricted"
   user: {
     id: string
     email: string

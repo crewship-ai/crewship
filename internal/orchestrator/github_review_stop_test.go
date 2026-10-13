@@ -73,7 +73,11 @@ func TestReviewStopFindsOwnerRegisteredDuringStateList(t *testing.T) {
 	state := stopReviewState{StateProvider: store, list: func(ctx context.Context) (map[string][]byte, error) {
 		req = AgentRunRequest{RunID: "late-owner", AgentID: "a", AgentSlug: "a", ContainerID: "c"}
 		var finish func()
-		runCtx, finish = o.trackAgentRun(ctx, &req)
+		var trackErr error
+		runCtx, finish, trackErr = o.trackAgentRun(ctx, &req)
+		if trackErr != nil {
+			return nil, trackErr
+		}
 		go func() { <-runCtx.Done(); finish() }()
 		raw, _ := json.Marshal(RunState{ID: req.RunID, AgentID: "a", AgentSlug: "a", ContainerID: "c", Status: "running"})
 		_ = store.Set(ctx, "agent_runs", req.RunID, raw)

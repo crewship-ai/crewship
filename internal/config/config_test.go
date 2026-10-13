@@ -401,3 +401,26 @@ func TestExplicitInternalToken(t *testing.T) {
 		t.Errorf("expected explicit token, got %q", cfg.Auth.InternalToken)
 	}
 }
+
+func TestRetainedOutputCapacityValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		bytes   int64
+		runs    int
+		invalid bool
+	}{
+		{"defaults", 0, 0, false}, {"one full reservation", 64*1024*1024 + 64*1024, 1, false},
+		{"missing metadata capacity", 64 * 1024 * 1024, 1, true}, {"negative runs", 0, -1, true},
+		{"excessive bytes", 1024*1024*1024*1024 + 1, 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Default()
+			c.Storage.RunOutputMaxBytes = tc.bytes
+			c.Storage.RunOutputMaxRuns = tc.runs
+			err := c.Validate()
+			if (err != nil) != tc.invalid {
+				t.Fatalf("invalid=%v err=%v", tc.invalid, err)
+			}
+		})
+	}
+}

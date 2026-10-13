@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -148,7 +149,13 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("run agent: %w", err)
 	}
 
-	ctx, finishTrackedRun := o.trackAgentRun(ctx, &req)
+	if err := o.configureHostOutput(&req); err != nil {
+		return err
+	}
+	ctx, finishTrackedRun, trackErr := o.trackAgentRun(ctx, &req)
+	if trackErr != nil {
+		return trackErr
+	}
 	defer func() {
 		if errors.Is(err, context.Canceled) && o.agentStopRequested(req.RunID) {
 			err = fmt.Errorf("%w: %v", ErrAgentStopped, err)
@@ -482,6 +489,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// paths reuse the CALLER's chat id — so two live runs of one agent shared
 	// this row and each terminal status overwrote the other's. RunState keeps
 	// ChatID as its own field, so nothing is lost by the change.
+	if err := o.qualifyHostOutput(ctx, &req); err != nil {
+		return err
+	}
 	req.runtimeImageID = o.observeRunImage(ctx, req.ContainerID)
 	if err := o.admitManagedLaunch(ctx, &req, runtimeUse); err != nil {
 		return err
@@ -489,6 +499,8 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	runState := RunState{
 		ManagedLaunch:  req.managedLaunch,
 		WorkspaceID:    req.WorkspaceID,
+		CrewID:         req.CrewID,
+		MissionID:      req.MissionID,
 		RuntimeImageID: req.runtimeImageID,
 		ID:             req.RunID,
 		AgentID:        req.AgentID,
@@ -497,6 +509,28 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		Status:         "running",
 		StartedAt:      time.Now(),
 		ContainerID:    req.ContainerID,
+	}
+	if req.DurableOutputDir != "" {
+		directory, err := durableRunDirectory(req)
+		if err != nil {
+			return err
+		}
+		if req.TimeoutSecs <= 0 {
+			return fmt.Errorf("durable execution requires an explicit positive timeout")
+		}
+		req.durableDeadline = time.Now().Add(time.Duration(req.TimeoutSecs) * time.Second)
+		runState.Output = &RunOutputState{Version: 1, Directory: path.Join(directory, "output"), Deadline: req.durableDeadline, Adapter: req.CLIAdapter}
+	}
+	if req.HostOutputDir != "" {
+		if req.DurableOutputDir != "" || !filepath.IsAbs(req.HostOutputDir) || filepath.Clean(req.HostOutputDir) != req.HostOutputDir {
+			return fmt.Errorf("host capture requires one absolute host-owned directory")
+		}
+		deadlineSecs := req.TimeoutSecs
+		if deadlineSecs <= 0 {
+			deadlineSecs = 1800
+		}
+		req.durableDeadline = time.Now().Add(time.Duration(deadlineSecs) * time.Second)
+		runState.Output = &RunOutputState{Version: 2, Directory: filepath.Join(req.HostOutputDir, req.RunID, "output"), Deadline: req.durableDeadline, Adapter: req.CLIAdapter}
 	}
 
 	cred := o.selectCredential(req.Credentials)
@@ -510,6 +544,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			return fmt.Errorf("managed launch: durable run identity persistence failed: %w", err)
 		}
 		o.logger.Error("failed to persist run state", "error", err)
+		if runState.Output != nil {
+			return fmt.Errorf("persist durable execution before launch: %w", err)
+		}
 	}
 
 	if err := o.assembleSystemPrompt(ctx, &req); err != nil {
@@ -620,6 +657,26 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		o.cleanupRunHome(req.ContainerID, req.AgentSlug, req.RunID, runEndToken)
 	}()
 
+	transferHostHold := func(execID string) {
+		agentExecStillRunning = true
+		crewRelease := o.RetainCrewContainer(req.CrewID, req.ContainerID)
+		hold := &detachedHold{runID: req.RunID, containerID: req.ContainerID, agentSlug: req.AgentSlug, execID: execID, req: req, startedAt: runState.StartedAt,
+			release: func() { crewRelease(); releaseRunSlot() },
+			finalize: func() {
+				releaseRunHome(req.ContainerID, req.AgentSlug, req.RunID)
+				o.cleanupRunHome(req.ContainerID, req.AgentSlug, req.RunID, runEndToken)
+				if fileCreds && o.releaseAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID) {
+					o.cleanupAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID)
+				}
+			},
+		}
+		if holdErr := o.registerDetachedHold(hold, o.detachedPollInterval); holdErr != nil {
+			// Duplicate registration already owns this identity. Never release
+			// possibly live capacity merely because bookkeeping could not register.
+			o.logger.Error("protected host hold registration failed; retaining resources", "run_id", req.RunID, "error", holdErr)
+		}
+		slotTransferredToHold = true
+	}
 	env, workDir, err := o.preparePreflightDirs(ctx, req, env, fileCreds, keeperEnabled, runState.ID)
 	if err != nil {
 		return err
@@ -748,8 +805,17 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			return refused
 		}
 	}
-	result, err := o.container.Exec(execCtx, execCfg)
+	var result *provider.ExecResult
+	if req.HostOutputDir != "" {
+		result, err = o.startHostExec(execCtx, req, runState, execCfg, secretValues)
+	} else {
+		result, err = o.container.Exec(execCtx, execCfg)
+	}
 	if err != nil {
+		if req.HostOutputDir != "" && errors.Is(err, ErrHostCaptureUnconfirmed) {
+			transferHostHold("")
+			return err
+		}
 		o.logger.Error("exec agent failed", "error", err, "agent_id", req.AgentID)
 		o.failRun(ctx, req, runState.ID, "error")
 		// Emit the terminal exec.command event for the failure path
@@ -957,7 +1023,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// so any secret straddling the final chunk (or short output held back
 	// entirely) is scrubbed and the redacted tail still reaches the user.
 	flushScrub()
-	if response := strings.TrimSpace(responseBuf.String()); response != "" {
+	if response := strings.TrimSpace(responseBuf.String()); response != "" && req.HostOutputDir == "" {
 		responseSummary := response
 		if len(responseSummary) > 240 {
 			responseSummary = responseSummary[:240] + "…"
@@ -996,6 +1062,15 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// failure so the journal/UI shows "stuck in a loop" rather than a generic
 	// non-zero exit, and so cost triage can tell runaway loops apart from real
 	// crashes. Uses a fresh context because execCtx is now cancelled.
+	if req.HostOutputDir != "" && (guard.Tripped() || ctx.Err() != nil || execCtx.Err() != nil) {
+		if guard.Tripped() {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+			_, _ = o.StopRunAt(stopCtx, RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID})
+			stopCancel()
+		}
+		transferHostHold(result.ExecID)
+		return fmt.Errorf("%w: controller observer ended", ErrHostCaptureUnconfirmed)
+	}
 	if guard.Tripped() {
 		cleanCtx := context.Background()
 		o.failRun(cleanCtx, req, runState.ID, "error")
@@ -1026,7 +1101,27 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("run cancelled: %w", ctx.Err())
 	}
 
-	running, exitCode, inspErr := o.awaitExecTerminal(ctx, result.ExecID)
+	var running bool
+	var exitCode int
+	var inspErr error
+	if req.HostOutputDir != "" {
+		snapshot, snapshotErr := o.ReadRetainedRunResult(ctx, RunState{ID: runState.ID, ContainerID: runState.ContainerID, ExecID: result.ExecID, Output: runState.Output})
+		if snapshotErr != nil || !snapshot.Complete || snapshot.Result.Reason != "exited" {
+			transferHostHold(result.ExecID)
+			return fmt.Errorf("%w: protected terminal output requires reconciliation", ErrHostCaptureUnconfirmed)
+		}
+		analysisRun := runState
+		analysisRun.ExecID = result.ExecID
+		analysis, analysisErr := o.AnalyzeRetainedRun(ctx, analysisRun)
+		if analysisErr != nil || analysis.Unknown {
+			transferHostHold(result.ExecID)
+			return fmt.Errorf("%w: protected CLI terminal semantics require reconciliation", ErrHostCaptureUnconfirmed)
+		}
+		exitCode = snapshot.Result.ExitCode
+	} else {
+		running, exitCode, inspErr = o.awaitExecTerminal(ctx, result.ExecID)
+	}
+
 	if inspErr != nil {
 		// ExecInspect itself failed — daemon unreachable, exec id already
 		// reaped, whatever — so `running` and `exitCode` above are their zero
@@ -1993,6 +2088,24 @@ func shellJoin(args ...string) string {
 // the run. Pure extraction from RunAgent; the only error is the shared E2BIG
 // guard for arg-path adapters.
 func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest, cmd, env []string, workDir string) (provider.ExecConfig, error) {
+	if req.HostOutputDir != "" {
+		if req.managedLaunch != nil {
+			return managedExecConfig(req, cmd, env, workDir)
+		}
+		cfg := provider.ExecConfig{ContainerID: req.ContainerID, Cmd: cmd, Env: env, WorkingDir: workDir, User: "1001:1001"}
+		if getAdapter(req.CLIAdapter).PromptViaStdin(req) {
+			cfg.Stdin = strings.NewReader(req.UserMessage)
+		} else if tooLarge, _ := firstOversizedArg(cmd); tooLarge {
+			return provider.ExecConfig{}, fmt.Errorf("agent argument exceeds execve limit")
+		}
+		return cfg, nil
+	}
+	if req.DurableOutputDir != "" {
+		if req.managedLaunch != nil {
+			return provider.ExecConfig{}, fmt.Errorf("durable output is not qualified with managed native launch")
+		}
+		return buildDurableExecCommand(req, cmd, env, workDir)
+	}
 	if req.managedLaunch != nil {
 		return managedExecConfig(req, cmd, env, workDir)
 	}

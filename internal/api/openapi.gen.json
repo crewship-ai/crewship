@@ -3982,6 +3982,31 @@
                           "binary": {
                             "type": "string"
                           },
+                          "launch_artifact": {
+                            "properties": {
+                              "format": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": "string"
+                              },
+                              "sha256": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "sha256",
+                              "format"
+                            ],
+                            "type": "object"
+                          },
+                          "managed_path": {
+                            "type": "string"
+                          },
+                          "managed_version": {
+                            "type": "string"
+                          },
                           "path": {
                             "type": "string"
                           },
@@ -6979,12 +7004,19 @@
           "crew_slug": {
             "nullable": true,
             "type": "string"
+          },
+          "missing_credentials": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "agent_id",
           "agent_slug",
-          "agent_name"
+          "agent_name",
+          "missing_credentials"
         ],
         "type": "object"
       },
@@ -10710,17 +10742,81 @@
       },
       "RemainingCrewProvisionStatusV1": {
         "properties": {
-          "crew_id": {
+          "agents_pending_restart": {
+            "type": "integer"
+          },
+          "cached_image": {
+            "nullable": true,
             "type": "string"
+          },
+          "completed_at": {
+            "type": "string"
+          },
+          "config_hash": {
+            "nullable": true,
+            "type": "string"
+          },
+          "devcontainer_config": {
+            "type": "string"
+          },
+          "devcontainer_config_defaulted": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "log_tail": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "message": {
             "type": "string"
           },
-          "phase": {
+          "resolved_features": {
+            "items": {
+              "properties": {
+                "digest": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "pinned": {
+                  "type": "boolean"
+                },
+                "ref": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ref",
+                "id",
+                "pinned"
+              ],
+              "type": "object"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "started_at": {
             "type": "string"
           },
           "status": {
             "type": "string"
+          },
+          "step": {
+            "type": "integer"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "toolchain": {
             "properties": {
@@ -10774,6 +10870,31 @@
                     "items": {
                       "properties": {
                         "binary": {
+                          "type": "string"
+                        },
+                        "launch_artifact": {
+                          "properties": {
+                            "format": {
+                              "type": "string"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "sha256": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "sha256",
+                            "format"
+                          ],
+                          "type": "object"
+                        },
+                        "managed_path": {
+                          "type": "string"
+                        },
+                        "managed_version": {
                           "type": "string"
                         },
                         "path": {
@@ -10839,10 +10960,19 @@
             ],
             "type": "object"
           },
-          "updated_at": {
-            "type": "string"
+          "total": {
+            "type": "integer"
           }
         },
+        "required": [
+          "devcontainer_config",
+          "devcontainer_config_defaulted",
+          "cached_image",
+          "config_hash",
+          "toolchain",
+          "agents_pending_restart",
+          "status"
+        ],
         "type": "object"
       },
       "RemainingCrewProvisionTriggeredV1": {
@@ -10852,11 +10982,12 @@
           },
           "status": {
             "type": "string"
-          },
-          "success": {
-            "type": "boolean"
           }
         },
+        "required": [
+          "status",
+          "message"
+        ],
         "type": "object"
       },
       "RemainingCrewRebuildTriggeredV1": {
@@ -10866,11 +10997,12 @@
           },
           "status": {
             "type": "string"
-          },
-          "success": {
-            "type": "boolean"
           }
         },
+        "required": [
+          "status",
+          "message"
+        ],
         "type": "object"
       },
       "RemainingCrewReplacedV1": {
@@ -13196,11 +13328,20 @@
             },
             "type": "array"
           },
+          "lifecycle_state": {
+            "type": "string"
+          },
           "maturity": {
             "type": "string"
           },
           "name": {
             "type": "string"
+          },
+          "needs_credentials": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "pricing_tier": {
             "type": "string"
@@ -13238,6 +13379,9 @@
           },
           "updated_at": {
             "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/SkillUsage"
           },
           "vendor": {
             "nullable": true,
@@ -13277,7 +13421,10 @@
           "vendor",
           "homepage",
           "spdx_license",
-          "description_quality"
+          "description_quality",
+          "lifecycle_state",
+          "needs_credentials",
+          "usage"
         ],
         "type": "object"
       },
@@ -13354,6 +13501,9 @@
             "nullable": true,
             "type": "string"
           },
+          "lifecycle_state": {
+            "type": "string"
+          },
           "maturity": {
             "type": "string"
           },
@@ -13371,6 +13521,12 @@
           },
           "name": {
             "type": "string"
+          },
+          "needs_credentials": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "pricing_tier": {
             "type": "string"
@@ -13413,6 +13569,9 @@
           "updated_at": {
             "type": "string"
           },
+          "usage": {
+            "$ref": "#/components/schemas/SkillUsage"
+          },
           "vendor": {
             "nullable": true,
             "type": "string"
@@ -13452,6 +13611,9 @@
           "homepage",
           "spdx_license",
           "description_quality",
+          "lifecycle_state",
+          "needs_credentials",
+          "usage",
           "content",
           "credential_requirements",
           "mcp_server_command",
@@ -13471,6 +13633,30 @@
           "$ref": "#/components/schemas/Skill"
         },
         "type": "array"
+      },
+      "SkillUsage": {
+        "properties": {
+          "errors_7d": {
+            "type": "integer"
+          },
+          "last_used_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "uses_7d": {
+            "type": "integer"
+          },
+          "uses_total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "uses_7d",
+          "errors_7d",
+          "uses_total",
+          "last_used_at"
+        ],
+        "type": "object"
       },
       "StateBucket": {
         "properties": {
@@ -15986,6 +16172,13 @@
       },
       "WorkspaceMemberResponseV1": {
         "properties": {
+          "access_mode": {
+            "enum": [
+              "trusted",
+              "restricted"
+            ],
+            "type": "string"
+          },
           "created_at": {
             "type": "string"
           },
@@ -83481,16 +83674,6 @@
           }
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewProvisionTriggeredV1"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "202": {
             "content": {
               "application/json": {
@@ -83505,27 +83688,48 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -83535,27 +83739,48 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -83565,27 +83790,48 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -83595,27 +83841,48 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -83625,27 +83892,48 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -83655,27 +83943,48 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -83685,27 +83994,48 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -83715,27 +84045,48 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -83927,7 +84278,7 @@
           }
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -83935,21 +84286,54 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "Accepted"
           },
           "400": {
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -83959,15 +84343,48 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -83977,37 +84394,307 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
             "description": "Forbidden"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "500": {
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "instance": {
+                          "type": "string"
+                        },
+                        "job_status": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -145169,6 +145856,24 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "500": {
             "content": {

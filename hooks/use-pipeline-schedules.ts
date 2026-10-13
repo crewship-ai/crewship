@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { toApiError } from "@/lib/api-error"
 import { fetchAllRoutinePages } from "@/lib/routine-list"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 
@@ -168,8 +169,7 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
         },
       )
       if (!res.ok) {
-        const txt = await res.text()
-        throw new Error(`create schedule failed: ${res.status} ${txt}`)
+        throw await toApiError(res, `create schedule failed: HTTP ${res.status}`)
       }
       const out: PipelineSchedule = await res.json()
       if (activeRefresh.current === refresh) await refresh()
@@ -190,8 +190,7 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
         },
       )
       if (!res.ok) {
-        const txt = await res.text()
-        throw new Error(`update schedule failed: ${res.status} ${txt}`)
+        throw await toApiError(res, `update schedule failed: HTTP ${res.status}`)
       }
       const out: PipelineSchedule = await res.json()
       if (activeRefresh.current === refresh) await refresh()
@@ -227,8 +226,7 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-schedules/preview?${params.toString()}`,
       )
       if (!res.ok) {
-        const txt = await res.text()
-        throw new Error(`preview failed: ${res.status} ${txt}`)
+        throw await toApiError(res, `preview failed: HTTP ${res.status}`)
       }
       return res.json()
     },

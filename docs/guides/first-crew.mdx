@@ -83,14 +83,30 @@ Every agent has one of two roles that determines their capabilities:
 `/crews` is the fleet: crews on the left, the selected crew or agent on the
 right.
 
-- **The explorer** groups crews by what needs a person first — *Needs
-  attention* (an agent in error, a failed or pending container build, a
-  credential whose CLI is missing from the image, an agent waiting on your
-  decision), then *Running*, then *Idle*. The idle majority folds after six
-  behind "N more crews · Show all". The line under the search is the
-  workspace's real size (`103 crews · 308 agents`, from the API's
-  `X-Total-Count`), or "N crews · M agents match" while you search; a search
-  that matches nothing says so and offers Clear.
+- **The explorer** works like the Routines and Skills sidebars. Under the
+  search, **Status** counts agents: *All*, *Needs you* (an agent in error or
+  waiting on your decision), *Working*, *Idle* and *Expired hires*; pick one to
+  list only those agents. **Filter** narrows by role (lead or member), model,
+  runtime, hire type, activity (active in the last 24 h, this week, quiet for
+  7+ days, never ran) and crew health (needs a rebuild, credential gaps); a
+  facet where every agent is alike is not offered. Each pick shows as a chip
+  you can remove, and Status, filters and view are kept in the URL, so a link
+  opens the same list. `/` jumps to the search.
+- **View** groups the list by crew (the default), by status, or not at all
+  (A–Z), and sorts by crew size, name or last active. By crew, the crews that
+  need a person come first (an agent in error, a failed or pending container
+  build, a credential whose CLI is missing from the image, an agent waiting
+  on a decision), then the running ones, then the idle majority, which folds
+  after six behind "N more crews · Show all". A crew's lead is listed first,
+  with a crown. Under each name is a line about the crew (missions running,
+  or when it last worked) and, under each agent, its role; **Show roles and
+  activity** in View turns both off for a denser list. Hover an agent for
+  **Chat**, a crew for **Add agent**. Collapsed, the sidebar keeps the crew
+  icons, with a dot on the ones that need a person.
+- The line under the search is the workspace's real size (`103 crews · 308
+  agents`, from the API's `X-Total-Count`), or "N crews · M agents match"
+  while a search or filter is on; when nothing matches it says so and offers
+  Clear.
 - **Needs you** sits above a crew's tabs and only when there is something to
   do. Each row carries its verb: *Build now* / *Retry build* (rebuild the
   container image), *Install gh* (adds the devcontainer feature the readiness

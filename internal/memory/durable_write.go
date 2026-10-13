@@ -54,7 +54,18 @@ func WriteFileDurable(path string, content []byte, perm os.FileMode) error {
 
 // WriteFileDurableRoot is WriteFileDurable anchored to an already-open root.
 // Renaming the directory after the root is opened cannot redirect the write.
-func WriteFileDurableRoot(root *os.Root, name string, content []byte, perm os.FileMode) (err error) {
+func WriteFileDurableRoot(root *os.Root, name string, content []byte, perm os.FileMode) error {
+	return writeFileDurableRoot(root, name, content, perm, false)
+}
+
+// WriteFileDurableRootExactMode publishes within root with the exact requested
+// permission bits, independent of umask. The tempfile starts private; chmod
+// is applied before fsync and rename. Root confines all path operations.
+func WriteFileDurableRootExactMode(root *os.Root, name string, content []byte, perm os.FileMode) error {
+	return writeFileDurableRoot(root, name, content, perm, true)
+}
+
+func writeFileDurableRoot(root *os.Root, name string, content []byte, perm os.FileMode, exactMode bool) (err error) {
 	if root == nil {
 		return fmt.Errorf("durable root is nil")
 	}
@@ -63,7 +74,11 @@ func WriteFileDurableRoot(root *os.Root, name string, content []byte, perm os.Fi
 		return fmt.Errorf("rand for tempname: %w", rerr)
 	}
 	tmpName := name + ".tmp." + hex.EncodeToString(randBuf[:])
-	f, err := root.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	createMode := perm
+	if exactMode {
+		createMode = 0600
+	}
+	f, err := root.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, createMode)
 	if err != nil {
 		return fmt.Errorf("open tempfile: %w", err)
 	}
@@ -72,6 +87,13 @@ func WriteFileDurableRoot(root *os.Root, name string, content []byte, perm os.Fi
 		_ = f.Close()
 		cleanup()
 		return fmt.Errorf("write tempfile: %w", err)
+	}
+	if exactMode {
+		if err = f.Chmod(perm); err != nil {
+			_ = f.Close()
+			cleanup()
+			return fmt.Errorf("chmod tempfile: %w", err)
+		}
 	}
 	if err = f.Sync(); err != nil {
 		_ = f.Close()

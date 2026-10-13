@@ -211,7 +211,8 @@ func TestNewWiredExecutor_WiresEveryDependency(t *testing.T) {
 		// when the window opens (#1597). Not a dependency — nothing in
 		// production reads or needs it, and wiring it in the factory
 		// would mean shipping a hook that fires on every busy resume.
-		"onResumeSlotBusy": "test-only resume-retry rendezvous; production never sets it",
+		"onResumeSlotBusy":           "test-only resume-retry rendezvous; production never sets it",
+		"afterResumeRegistryAcquire": "test-only cancel/resume rendezvous (#2910); production never sets it",
 	}
 	v := reflect.ValueOf(exec).Elem()
 	typ := v.Type()

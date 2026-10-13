@@ -402,6 +402,28 @@ start agent container". The full raw cause is in the run journal / server logs.
 
 </Accordion>
 
+<Accordion title='An agent's model call fails with "LLM admission unavailable" or "refused by host policy"'>
+
+Before a crew's sidecar forwards a metered model call, it asks the server
+whether the call may go out, through its internal admission endpoint. If the server
+does not say yes, the call is not sent. The error the agent sees says why:
+
+| Status | Message contains | Meaning | Fix |
+| --- | --- | --- | --- |
+| `403` | `hard-budget traffic requires the restricted broker` | A hard or tiered budget applies to this workspace, crew or agent. | Expected. Use the restricted runtime, or change the budget. |
+| `403` | `refused by host policy: …` | The server refused this agent, crew or credential scope (for example `credential scope unavailable`). | Check the agent's crew and credential bindings. |
+| `503` | `(transport)` | The sidecar cannot reach the server from inside the container (connection refused, timeout). | Usually a host firewall. Allow the Docker bridge subnet to reach the server's port, then retry. |
+| `503` | `(authentication)` | The server rejected the sidecar's internal credential or network origin. | Restart the agents so the sidecar gets a fresh token. Check `CREWSHIP_INTERNAL_ALLOW_ANY` and the trusted-proxy settings. |
+| `503` | `could not evaluate budgets` | The server answered, but its budget store was unavailable. | Check the server logs and database health. |
+| `503` | `(configuration)` | The sidecar was started without a server binding. | Restart the agents. If it persists, reprovision the crew. |
+| `502` | `(protocol)` | The server answered something the sidecar does not understand, for example an HTML page from a proxy. | Check that the sidecar's server URL points at Crewship itself, and that the sidecar matches the server build. |
+
+Only the two `403` rows are decisions the server made. The sidecar log records
+each refusal as `LLM admission refused` with its `kind` and the raw server
+answer.
+
+</Accordion>
+
 <Accordion title='Server logs "stale crewship-sidecar bind-mounted into crew containers" at startup'>
 
 The server compares the configured `CREWSHIP_SIDECAR_PATH` binary against its

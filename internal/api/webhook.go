@@ -1062,6 +1062,11 @@ func (h *WebhookHandler) runWebhookAgent(
 		status := "COMPLETED"
 		var errMsg *string
 		detached := errors.Is(err, orchestrator.ErrDetachedStillRunning)
+		if errors.Is(err, orchestrator.ErrHostCaptureUnconfirmed) {
+			// The observer has no terminal result to stage. Protected replay
+			// reconstructs the final metadata and actual exit independently.
+			return err
+		}
 
 		if err != nil {
 			status = "FAILED"

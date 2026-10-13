@@ -67,6 +67,7 @@ import type { RoutineDraftSummary } from "./routines-workspace"
 type RoutineDetailWithDraft = RoutineDetail & { draft?: RoutineDraftSummary | null }
 
 import { RoutineSavedInputs, readableFieldName } from "./routine-saved-inputs"
+import { REPORTED_USAGE_HINT, formatReportedUsage } from "./routine-cost-format"
 
 const EMPTY = new Map()
 
@@ -867,8 +868,8 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
             <dd className="break-all font-mono">{run.id}</dd>
             <dt>Recipe hash</dt>
             <dd className="break-all font-mono">{run.definition_hash || "unavailable"}</dd>
-            <dt>Cost</dt>
-            <dd className="font-mono">${run.cost_usd.toFixed(4)}</dd>
+            <dt>Reported usage</dt>
+            <dd className="font-mono" title={REPORTED_USAGE_HINT}>{formatReportedUsage(run.cost_usd)}</dd>
             <dt>Mode</dt>
             <dd>{run.mode}</dd>
             {run.failed_at_step && (

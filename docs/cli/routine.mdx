@@ -749,11 +749,16 @@ field cannot tell the two apart. When a run carries an `automation_name`, the
 column reads `automation` and `SOURCE` names the rule that started it:
 
 ```text
-RUN ID            STATUS     OUTCOME    MODE  TRIGGER     SOURCE            DURATION  COST     STARTED
-crun_9f2c…        completed  SUCCEEDED  live  automation  Triage new bugs   4.1s      $0.0031  2026-08-07 08:00
-crun_71ab…        completed  NEEDS_HUMAN live schedule    sch_nightly       12.4s     $0.0180  2026-08-07 07:00
-crun_2d40…        completed  FAILED     live  manual      —                 1.2s      $0.0004  2026-08-07 06:41
+RUN ID            STATUS     OUTCOME    MODE  TRIGGER     SOURCE            DURATION  REPORTED USAGE  STARTED
+crun_9f2c…        completed  SUCCEEDED  live  automation  Triage new bugs   4.1s      ~$0.0031        2026-08-07 08:00
+crun_71ab…        completed  NEEDS_HUMAN live schedule    sch_nightly       12.4s     ~$0.0180        2026-08-07 07:00
+crun_2d40…        completed  FAILED     live  manual      —                 1.2s      ~$0.0004        2026-08-07 06:41
 ```
+
+`REPORTED USAGE` is the run's `cost_usd`: the usage the agent CLIs reported, priced
+at list rates. It is not a billed amount. Calls under a subscription plan are not
+charged per call, and only metered calls reach the cost ledger (`crewship cost`).
+Machine formats keep the field name `cost_usd`.
 
 `OUTCOME` is the §9.6 routing decision (work package B6, #2349) — `-` when the run
 predates the `outcome` column. It is not the same question `STATUS` answers: a run whose
@@ -846,7 +851,7 @@ crewship routine runs-all --status active   # running+queued+paused+waiting
 
 Backed by `GET /api/v1/workspaces/{ws}/pipeline-runs`, sorted `started_at` DESC (newest first).
 
-**Output columns:** RUN_ID (truncated), SLUG, STATUS, MODE, STARTED, DURATION, COST, TRIGGER. Empty list prints `No runs.`
+**Output columns:** RUN_ID (truncated), SLUG, STATUS, MODE, STARTED, DURATION, REPORTED USAGE (`~$` reported by the agent CLIs, not billed spend; `—` when none), TRIGGER. Empty list prints `No runs.`
 
 <Note>
 Distinct from `routine runs <slug>` / `routine records <slug>` (one routine's history) and `routine active` (in-flight only, no filters): `runs-all` is the cross-pipeline, any-status feed, filterable server-side.
@@ -1355,6 +1360,8 @@ crewship routine cancel run_cmovn40h30001c57bb667
 ```
 
 Signals the run goroutine. Run terminates at the next safe point; the row is `cancelled` and the `pipeline.run.failed` journal payload has status `CANCELLED`. Completed effects are not undone. Exceeding the run’s own deadline remains `failed` / `FAILED` in both records. Already-terminal runs return 409.
+
+A run parked at a waitpoint (`waiting`) is cancelled in place: the row becomes `cancelled` and its pending approvals stop being actionable. If an approval, signal or event resumes the same run at that moment, exactly one side wins. Either the resume is refused and later resumes find the run cancelled, or the resumed run is cancelled before its next step and records `cancelled` itself. The response carries `"parked": true` when the cancel itself recorded the row; otherwise the run records `cancelled` when it stops.
 
 ---
 

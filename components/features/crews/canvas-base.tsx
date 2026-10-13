@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { fetchWithRetry } from "@/lib/fetch-with-retry"
 import { apiFetch } from "@/lib/api-fetch"
+import { toApiError } from "@/lib/api-error"
 import { cn } from "@/lib/utils"
 
 // =============================================================================
@@ -151,8 +152,7 @@ export function usePatchEntity<T>({
       body: JSON.stringify(body),
     })
     if (!res.ok) {
-      const text = await res.text()
-      throw new Error(text || `HTTP ${res.status}`)
+      throw await toApiError(res, `HTTP ${res.status}`)
     }
     const updated: T = await res.json()
     setEntity(updated)

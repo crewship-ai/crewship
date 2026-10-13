@@ -153,6 +153,14 @@ field **and** in the nested `user.email` the server sends. The flat field used
 to be present and always empty — a shape that silently broke every
 `jq 'select(.email == …)'` written against it.
 
+The `ACCESS` column (`access_mode` in machine formats) is the member's access
+mode, `trusted` or `restricted`, kept apart from `ROLE`: a restricted `MEMBER`
+and a trusted `MEMBER` share a role. The mode is part of the member access
+policy, so the server sends it only to a trusted `OWNER`/`ADMIN` whose token
+may administer the workspace; everyone else sees `-` and no `access_mode`
+field. Settings › Members marks the same members **Restricted** next to their
+role. Change the mode with [`workspace member access set`](#crewship-workspace-member-access).
+
 ### `workspace member role`
 
 ```bash

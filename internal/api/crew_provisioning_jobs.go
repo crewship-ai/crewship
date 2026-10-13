@@ -262,10 +262,9 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 	}
 	resp["toolchain"] = map[string]any{"requested": requested, "built": built}
 
-	// What the image is actually made of. Null (rather than []) when the crew
-	// was provisioned before provenance was recorded — "we do not know" and
-	// "it uses no features" are different answers and the UI shows them
-	// differently (#1779).
+	// What the image is actually made of. Omit unrecorded (SQL NULL) or
+	// invalid JSON provenance. Valid stored [] and null remain distinct
+	// responses: "no features" versus "unknown" (#1779).
 	if resolvedFeatures.Valid {
 		var recs []devcontainer.FeatureRecord
 		if err := json.Unmarshal([]byte(resolvedFeatures.String), &recs); err == nil {

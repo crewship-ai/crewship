@@ -389,6 +389,29 @@ func replyError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// Machine-readable refusal codes (#2862). A client branches on these instead
+// of matching the sentence, which stays the human and CLI contract and may be
+// reworded. Add a code only where a caller actually needs to branch.
+const (
+	errCodeAgentSlugTaken    = "agent_slug_taken"
+	errCodeAgentSlugReserved = "agent_slug_reserved"
+	errCodeCrewLeadExists    = "crew_lead_exists"
+)
+
+// replyErrorCode is replyError plus an optional machine code and the request
+// field the refusal concerns: {"error": msg, "code": code, "field": field}.
+// Additive: a client that reads only "error" sees exactly what it did before.
+func replyErrorCode(w http.ResponseWriter, status int, msg, code, field string) {
+	body := map[string]string{"error": msg}
+	if code != "" {
+		body["code"] = code
+	}
+	if field != "" {
+		body["field"] = field
+	}
+	writeJSON(w, status, body)
+}
+
 // internalError is the canonical "log the error, return a 500" tail that was
 // hand-written at hundreds of handler sites. It reproduces the dominant idiom
 // exactly:

@@ -23,7 +23,16 @@ import (
 )
 
 // A seam for exercising pre- and post-rename failures of durable publication.
-var aiWriteConnectionFile = memory.WriteFileDurable
+var aiWriteConnectionFile = writeAIConnectionFile
+
+func writeAIConnectionFile(path string, data []byte, perm os.FileMode) error {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("open AI connection directory: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	return memory.WriteFileDurableRootExactMode(root, filepath.Base(path), data, perm)
+}
 
 var aiConnectionDir = func() (string, error) {
 	path, err := cli.DefaultConfigPath()

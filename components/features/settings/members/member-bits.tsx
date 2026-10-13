@@ -2,7 +2,7 @@
 
 import type { CSSProperties, ElementType } from "react"
 
-import { Briefcase, Crown, Eye, FileText, LockOpen, MessageSquare, RotateCcw, Shield, User, type LucideIcon } from "lucide-react"
+import { Briefcase, Crown, Eye, FileText, Lock, LockOpen, MessageSquare, RotateCcw, Shield, User, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Capability, hasCapability } from "@/lib/capabilities"
@@ -38,6 +38,19 @@ export function RolePill({ role, className }: { role: string; className?: string
     <span data-slot="role-pill" className={cn("inline-flex h-[22px] shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface-subtle px-2 text-label text-foreground/90", className)}>
       {Icon && <Icon className="h-3 w-3 text-muted-foreground" aria-hidden />}
       {ROLE_LABEL[role] ?? role}
+    </span>
+  )
+}
+
+/** Access mode is a separate fact from the role (#2878): a restricted Member
+ *  and a trusted Member share the role pill. Only the exception is marked, so
+ *  a trusted roster stays quiet. */
+export function RestrictedPill({ mode, className }: { mode?: "trusted" | "restricted"; className?: string }) {
+  if (mode !== "restricted") return null
+  return (
+    <span data-slot="restricted-pill" title="Restricted access: only the resources granted in this member's access policy"
+      className={cn("inline-flex h-[22px] shrink-0 items-center gap-1 rounded-md border border-border bg-muted px-2 text-label text-foreground/90", className)}>
+      <Lock className="h-3 w-3 text-muted-foreground" aria-hidden />Restricted
     </span>
   )
 }

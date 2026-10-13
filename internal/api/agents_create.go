@@ -180,7 +180,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			"SELECT id FROM agents WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL",
 			*req.CrewID).Scan(&existingLeadID)
 		if err == nil {
-			replyError(w, http.StatusConflict, "Crew already has a lead agent")
+			replyErrorCode(w, http.StatusConflict, "Crew already has a lead agent", errCodeCrewLeadExists, "agent_role")
 			return
 		}
 		if err != sql.ErrNoRows {
@@ -223,7 +223,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL", workspaceID, req.Slug).Scan(&existingID)
 	if err == nil {
-		replyError(w, http.StatusConflict, "Agent slug already taken in this workspace")
+		replyErrorCode(w, http.StatusConflict, agentSlugTakenMessage, errCodeAgentSlugTaken, "slug")
 		return
 	}
 	if err != sql.ErrNoRows {
@@ -240,7 +240,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if reserved {
-			replyError(w, http.StatusConflict, slugReservedMessage(req.Slug))
+			replyErrorCode(w, http.StatusConflict, slugReservedMessage(req.Slug), errCodeAgentSlugReserved, "slug")
 			return
 		}
 	}
@@ -297,11 +297,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		// Both are caller-correctable conflicts, not server faults —
 		// surface 409 (matching workflow_templates_handler.go).
 		if isUniqueConstraintErr(err) {
-			msg := "Agent slug already taken in this workspace"
-			if req.AgentRole == "LEAD" && strings.Contains(err.Error(), "one_lead_per_crew") {
-				msg = "Crew already has a lead agent"
-			}
-			replyError(w, http.StatusConflict, msg)
+			replyAgentUniqueConflict(w, err)
 			return
 		}
 		replyInternalError(w, h.logger, "insert agent", err)
@@ -376,6 +372,25 @@ func slugReservedFor(ctx context.Context, db *sql.DB, crewID, slug, agentID stri
 		return false, err
 	}
 	return holder != agentID, nil
+}
+
+const agentSlugTakenMessage = "Agent slug already taken in this workspace"
+
+// replyAgentUniqueConflict answers a UNIQUE violation that slipped past the
+// check-then-act SELECTs on agent create or update with the same sentence and
+// code the SELECT path gives: a second LEAD in the crew
+// (idx_agents_one_lead_per_crew) or a slug taken in the workspace.
+//
+// SQLite names the columns of a violated UNIQUE index, not the index:
+// "UNIQUE constraint failed: agents.crew_id" for the one-lead index, and
+// "... agents.workspace_id, agents.slug" for the slug. The index name was
+// matched before and never appeared, so a LEAD race read as a taken slug.
+func replyAgentUniqueConflict(w http.ResponseWriter, err error) {
+	if msg := err.Error(); strings.Contains(msg, "agents.crew_id") || strings.Contains(msg, "one_lead_per_crew") {
+		replyErrorCode(w, http.StatusConflict, "Crew already has a lead agent", errCodeCrewLeadExists, "agent_role")
+		return
+	}
+	replyErrorCode(w, http.StatusConflict, agentSlugTakenMessage, errCodeAgentSlugTaken, "slug")
 }
 
 func slugReservedMessage(slug string) string {

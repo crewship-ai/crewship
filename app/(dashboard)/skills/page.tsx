@@ -1,11 +1,13 @@
-import { SkillsBrowser } from "@/components/features/skills/skills-browser"
+import { Suspense } from "react"
+import { SkillsLayout } from "@/components/features/skills/skills-layout"
 
-// Skills browser owns its own chrome (toolbar + 3-panel resizable
-// layout), mirroring OrchestrationLayout's `h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))]`
-// outer + 48px app toolbar offset. The browser already sets that
-// viewport height internally so this wrapper is intentionally thin —
-// changing it to padded would re-introduce the cropping bug visible
-// in the round-1 screenshot.
+// The Skills page owns its chrome (SubBar, explorer, content pane) and sets
+// the viewport height itself, like Routines and Issues. Suspense because the
+// open skill and filters live in the query string (useSearchParams).
 export default function SkillsPage() {
-  return <SkillsBrowser />
+  return (
+    <Suspense>
+      <SkillsLayout />
+    </Suspense>
+  )
 }

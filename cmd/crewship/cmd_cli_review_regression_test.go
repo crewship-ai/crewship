@@ -79,18 +79,15 @@ func TestWaitConsumersTerminalOutcomes(t *testing.T) {
 func TestAIReconnectFailurePreservesRegistration(t *testing.T) {
 	// Keep real client subprocesses without depending on a POSIX shell or its
 	// utilities. Build once, then install the fixture under each client's name.
-	fixturePath := filepath.Join(t.TempDir(), "ai-client.exe")
-	build := exec.Command("go", "build", "-o", fixturePath, "./testdata/ai-reconnect-client")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build reconnect client fixture: %v\n%s", err, output)
-	}
-	fixture, err := os.ReadFile(fixturePath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fixture := buildAIClientFixture(t)
 	for _, client := range []string{"claude", "codex"} {
-		for _, mode := range []string{"remove-fails", "add-fails", "verify-fails", "verify-error", "success", "race", "receipt-race", "symlink", "custom", "receipt-fails", "receipt-fails-after-rename", "config-fails-after-rename", "rollback-fails"} {
+		for _, mode := range []string{"remove-fails", "add-fails", "verify-fails", "verify-error", "success", "success-public-mode", "receipt-fails-public-mode", "race", "receipt-race", "symlink", "custom", "receipt-fails", "receipt-fails-after-rename", "config-fails-after-rename", "rollback-fails"} {
 			t.Run(client+"/"+mode, func(t *testing.T) {
+				base := strings.TrimSuffix(mode, "-public-mode")
+				fileMode := os.FileMode(0640)
+				if strings.HasSuffix(mode, "-public-mode") {
+					fileMode = 0644
+				}
 				dir := t.TempDir()
 				t.Setenv("CLAUDE_CONFIG_DIR", dir)
 				t.Setenv("CODEX_HOME", dir)
@@ -128,7 +125,7 @@ func TestAIReconnectFailurePreservesRegistration(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Setenv("FIXTURE_DIR", dir)
-				t.Setenv("FIXTURE_MODE", mode)
+				t.Setenv("FIXTURE_MODE", base)
 				t.Setenv("FIXTURE_ORIGINAL", path)
 				fixtureName := client
 				if runtime.GOOS == "windows" {
@@ -149,11 +146,14 @@ func TestAIReconnectFailurePreservesRegistration(t *testing.T) {
 				}
 				receiptPath, _ := aiReceiptPath(client)
 				receiptBefore, _ := os.ReadFile(receiptPath)
+				if info, err := os.Stat(receiptPath); err != nil || info.Mode().Perm() != 0600 {
+					t.Fatalf("new receipt must be private: info=%v err=%v", info, err)
+				}
 				t.Setenv("FIXTURE_RECEIPT", receiptPath)
-				if err := os.Chmod(path, 0640); err != nil {
+				if err := os.Chmod(path, fileMode); err != nil {
 					t.Fatal(err)
 				}
-				if mode == "symlink" {
+				if base == "symlink" {
 					backup := path + ".original"
 					if err := os.Rename(path, backup); err != nil {
 						t.Fatal(err)
@@ -162,7 +162,7 @@ func TestAIReconnectFailurePreservesRegistration(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if mode == "custom" {
+				if base == "custom" {
 					baseline = config(desired)
 					if err := os.WriteFile(path, baseline, 0600); err != nil {
 						t.Fatal(err)
@@ -177,19 +177,19 @@ func TestAIReconnectFailurePreservesRegistration(t *testing.T) {
 				writes := 0
 				aiWriteConnectionFile = func(target string, data []byte, perm os.FileMode) error {
 					writes++
-					if mode == "receipt-fails" && target == receiptPath {
+					if base == "receipt-fails" && target == receiptPath {
 						return errors.New("fixture receipt failure")
 					}
-					if mode == "rollback-fails" && writes >= 2 {
+					if base == "rollback-fails" && writes >= 2 {
 						return errors.New("fixture rollback failure")
 					}
 					if err := originalWriter(target, data, perm); err != nil {
 						return err
 					}
-					if mode == "receipt-fails-after-rename" && writes == 2 {
+					if base == "receipt-fails-after-rename" && writes == 2 {
 						return errors.New("fixture receipt fsync failure")
 					}
-					if mode == "config-fails-after-rename" && writes == 1 {
+					if base == "config-fails-after-rename" && writes == 1 {
 						return errors.New("fixture config fsync failure")
 					}
 					return nil
@@ -201,10 +201,10 @@ func TestAIReconnectFailurePreservesRegistration(t *testing.T) {
 					t.Fatal("failed to clean staged configuration", stageDirectories, globErr)
 				}
 				info, statErr := os.Stat(path)
-				if statErr != nil || info.Mode().Perm() != 0640 {
+				if statErr != nil || info.Mode().Perm() != fileMode {
 					t.Fatal("changed config file mode", statErr)
 				}
-				if mode == "success" {
+				if base == "success" {
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -221,7 +221,7 @@ func TestAIReconnectFailurePreservesRegistration(t *testing.T) {
 				if err == nil {
 					t.Fatal("failure or concurrent edit accepted")
 				}
-				if mode == "rollback-fails" {
+				if base == "rollback-fails" {
 					if !strings.Contains(err.Error(), "restoration of previous configuration could not be confirmed") || strings.Contains(err.Error(), "receipt restored") {
 						t.Fatal("claimed unconfirmed rollback succeeded", err)
 					}
@@ -229,14 +229,14 @@ func TestAIReconnectFailurePreservesRegistration(t *testing.T) {
 				}
 				current, _ := os.ReadFile(path)
 				receiptAfter, _ := os.ReadFile(receiptPath)
-				if mode == "race" {
+				if base == "race" {
 					if !strings.Contains(string(current), "concurrent-change") {
 						t.Fatal("overwrote concurrent edit")
 					}
 				} else if !bytes.Equal(current, baseline) {
 					t.Errorf("registration lost: %s", current)
 				}
-				if mode == "receipt-race" {
+				if base == "receipt-race" {
 					if !strings.Contains(string(receiptAfter), "concurrent-change") {
 						t.Fatal("overwrote concurrent receipt edit")
 					}

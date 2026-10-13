@@ -21,6 +21,7 @@ import { AppearanceSection } from "./sections/appearance-section"
 import { SessionsSection } from "./sections/sessions-section"
 import { PrivacySection } from "./sections/privacy-section"
 import { GeneralSection } from "./sections/general-section"
+import { useFocusSettingsCard } from "./use-focus-settings-card"
 import { AccessSecretsSection } from "./sections/access-secrets-section"
 import { SectionMoved } from "./sections/section-moved"
 import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
@@ -38,6 +39,7 @@ interface Member {
   id: string
   role: string
   created_at: string
+  access_mode?: "trusted" | "restricted"
   user: { id: string; email: string; full_name: string | null; avatar_url: string | null }
 }
 
@@ -124,6 +126,11 @@ export function movedSectionHref(tab: string, search: string): string | null {
   return member ? `${moved.href}?member=${encodeURIComponent(member)}` : moved.href
 }
 
+/** The card a `?card=<slug>` deep link names (see settingsCardSlug), or "". */
+export function initialFocusedCard(search: string): string {
+  return new URLSearchParams(search).get("card") ?? ""
+}
+
 export function SettingsLayout() {
   // A restricted session gets account security and nothing else (#2861): the
   // workspace, members and every other section are off its allowlist, so not
@@ -190,12 +197,14 @@ function SettingsPage() {
   const searchParams = useSearchParams()
   const search = searchParams.toString()
   const [requestedTab, _setActiveTab] = useState(() => initialSettingsTab(search))
+  const [focusedCard, setFocusedCard] = useState(() => initialFocusedCard(search))
   const appliedSearch = useRef(search)
 
   useEffect(() => {
     if (appliedSearch.current === search) return
     appliedSearch.current = search
     _setActiveTab(initialSettingsTab(search))
+    setFocusedCard(initialFocusedCard(search))
   }, [search])
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -207,6 +216,7 @@ function SettingsPage() {
   // pane for a frame. While the role is loading nothing is judged, so an
   // OWNER's deep link survives the round trip.
   const activeTab = wsLoading || isSettingsSectionVisible(requestedTab, role) ? requestedTab : "profile"
+  useFocusSettingsCard(focusedCard, activeTab)
 
   // A section that moved forwards immediately — before the workspace fetch,
   // before the role is known, before anything renders — so a stale link costs
@@ -224,11 +234,14 @@ function SettingsPage() {
   // state directly, so the store round-trip is gone along with the breadcrumb.
   const setActiveTab = useCallback((tab: string) => {
     _setActiveTab(tab)
+    // A card belongs to the tab the link opened; another tab has none.
+    setFocusedCard("")
     // Keep the URL in sync so the active tab is shareable/bookmarkable and
     // the back button works, without triggering a route navigation.
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href)
       url.searchParams.set("tab", tab)
+      url.searchParams.delete("card")
       window.history.replaceState(null, "", url.toString())
     }
   }, [])

@@ -98,3 +98,36 @@ func TestRunStore_DigestStats_DefaultsWindowHours(t *testing.T) {
 		t.Errorf("WindowHours = %d, want default 24", stats.WindowHours)
 	}
 }
+
+// #2193: pipeline_runs.cost_usd is usage the agent CLIs reported, priced at
+// list rates. Subscription-plan calls are not billed per call, so the digest
+// a notify step delivers must not present the sum as the workspace's spend.
+func TestRenderDigestSummaryMD_ReportsUsageNotSpend(t *testing.T) {
+	tests := []struct {
+		name    string
+		cost    float64
+		want    []string
+		mustNot []string
+	}{
+		{name: "usage reported", cost: 0.8305,
+			want:    []string{"~$0.8305", "usage reported by agent CLIs", "not billed spend"},
+			mustNot: []string{"total cost"}},
+		{name: "nothing reported", cost: 0,
+			mustNot: []string{"total cost", "$0.0000", "usage reported"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			md := renderDigestSummaryMD(&DigestStats{WindowHours: 24, TotalRuns: 3, Completed: 3, TotalCostUSD: tc.cost})
+			for _, w := range tc.want {
+				if !strings.Contains(md, w) {
+					t.Errorf("digest lacks %q:\n%s", w, md)
+				}
+			}
+			for _, w := range tc.mustNot {
+				if strings.Contains(md, w) {
+					t.Errorf("digest contains %q:\n%s", w, md)
+				}
+			}
+		})
+	}
+}

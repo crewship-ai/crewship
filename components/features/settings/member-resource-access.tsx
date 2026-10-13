@@ -19,8 +19,10 @@ type Right = z.infer<typeof rightSchema>
 const directorySchema = z.array(z.object({ id: z.string(), name: z.string() }))
 const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "write", "delete"] }
 
-export function MemberResourceAccess({ workspaceId, memberId, label, role }: {
+export function MemberResourceAccess({ workspaceId, memberId, label, role, onSaved }: {
   workspaceId: string; memberId: string; label: string; role: string
+  /** A saved mode changes the roster's Restricted marker; reload it. */
+  onSaved?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const url = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(memberId)}/access?workspace_id=${encodeURIComponent(workspaceId)}`
@@ -42,12 +44,13 @@ export function MemberResourceAccess({ workspaceId, memberId, label, role }: {
     {open && policy.isPending && <p className="text-xs">Loading resource access…</p>}
     {open && policy.isError && <p role="alert" className="text-xs">Resource policy unavailable. <button type="button" onClick={() => void policy.refetch()}>Reload policy</button></p>}
     {open && policy.data && <PolicyEditor key={`${workspaceId}:${memberId}:${policy.data.revision}`} policy={policy.data} url={url}
-      queryKey={queryKey} workspaceId={workspaceId} role={role} label={label} />}
+      queryKey={queryKey} workspaceId={workspaceId} role={role} label={label} onSaved={onSaved} />}
   </section>
 }
 
-function PolicyEditor({ policy, url, queryKey, workspaceId, role, label }: {
+function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved }: {
   policy: Policy; url: string; queryKey: string[]; workspaceId: string; role: string; label: string
+  onSaved?: () => void
 }) {
   const queryClient = useQueryClient()
   const [mode, setMode] = useState(policy.mode)
@@ -75,7 +78,10 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label }: {
     },
     // The saved revision remounts this editor (its key), so the draft goes
     // clean. A failure rejects into the page bar, which toasts it.
-    onSuccess: updated => { queryClient.setQueryData(queryKey, updated) },
+    onSuccess: updated => {
+      queryClient.setQueryData(queryKey, updated)
+      if (updated.mode !== policy.mode) onSaved?.()
+    },
   })
   // The page's floating Save commits this draft: one change for the mode, one
   // per grant added or removed. A conflict keeps the draft but blocks Save

@@ -36,7 +36,10 @@ func TestStopAgent_RealDirectProcess(t *testing.T) {
 	c := stopProcessContainer{dockerID: dockerID}
 	o := New(c, nil, slog.Default())
 	req := AgentRunRequest{AgentID: "stop-test", AgentSlug: "stop-test", RunID: NewRunID(), ContainerID: "test"}
-	ctx, finish := o.trackAgentRun(context.Background(), &req)
+	ctx, finish, trackErr := o.trackAgentRun(context.Background(), &req)
+	if trackErr != nil {
+		t.Fatal(trackErr)
+	}
 	if err := req.ExecGate(ctx); err != nil {
 		t.Fatal(err)
 	}
