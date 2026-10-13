@@ -5470,6 +5470,28 @@
         },
         "type": "object"
       },
+      "FinalAuthInvitationAcceptRequest": {
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
+      "FinalAuthInvitationAcceptResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
       "FinalAuthPeerConsentRequest": {
         "properties": {
           "opted_out": {
@@ -5533,6 +5555,9 @@
             "type": "string"
           },
           "full_name": {
+            "type": "string"
+          },
+          "invitation_token": {
             "type": "string"
           },
           "password": {
@@ -11358,6 +11383,9 @@
           "role": {
             "type": "string"
           },
+          "status": {
+            "type": "string"
+          },
           "token": {
             "type": "string"
           }
@@ -16108,6 +16136,14 @@
           "agents",
           "members"
         ],
+        "type": "object"
+      },
+      "WorkspaceInvitationRevokedV1": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "WorkspaceInvitationsResponseV1": {
@@ -52830,6 +52866,157 @@
           "auth"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/auth/invitation/accept": {
+      "post": {
+        "description": "Submit auth invitation accept (POST /api/v1/auth/invitation/accept).",
+        "operationId": "post_api_v1_auth_invitation_accept",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalAuthInvitationAcceptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FinalAuthInvitationAcceptResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit auth invitation accept",
+        "tags": [
+          "auth"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/auth/pair/poll": {
@@ -108442,6 +108629,9 @@
                           "has_artifact": {
                             "type": "boolean"
                           },
+                          "has_board": {
+                            "type": "boolean"
+                          },
                           "has_project": {
                             "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                             "type": "boolean"
@@ -109715,6 +109905,9 @@
                         "has_artifact": {
                           "type": "boolean"
                         },
+                        "has_board": {
+                          "type": "boolean"
+                        },
                         "has_project": {
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
@@ -110038,6 +110231,9 @@
                           "type": "boolean"
                         },
                         "has_artifact": {
+                          "type": "boolean"
+                        },
+                        "has_board": {
                           "type": "boolean"
                         },
                         "has_project": {
@@ -110375,6 +110571,9 @@
                             "type": "boolean"
                           },
                           "has_artifact": {
+                            "type": "boolean"
+                          },
+                          "has_board": {
                             "type": "boolean"
                           },
                           "has_project": {
@@ -110798,6 +110997,9 @@
                       "has_artifact": {
                         "type": "boolean"
                       },
+                      "has_board": {
+                        "type": "boolean"
+                      },
                       "has_project": {
                         "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                         "type": "boolean"
@@ -111171,6 +111373,9 @@
                     "has_artifact": {
                       "type": "boolean"
                     },
+                    "has_board": {
+                      "type": "boolean"
+                    },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
@@ -111388,6 +111593,9 @@
                       "type": "boolean"
                     },
                     "has_artifact": {
+                      "type": "boolean"
+                    },
+                    "has_board": {
                       "type": "boolean"
                     },
                     "has_project": {
@@ -112238,6 +112446,9 @@
                     "has_artifact": {
                       "type": "boolean"
                     },
+                    "has_board": {
+                      "type": "boolean"
+                    },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
@@ -112455,6 +112666,9 @@
                       "type": "boolean"
                     },
                     "has_artifact": {
+                      "type": "boolean"
+                    },
+                    "has_board": {
                       "type": "boolean"
                     },
                     "has_project": {
@@ -113159,6 +113373,9 @@
                     "has_artifact": {
                       "type": "boolean"
                     },
+                    "has_board": {
+                      "type": "boolean"
+                    },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
@@ -113638,6 +113855,9 @@
                       "type": "boolean"
                     },
                     "has_artifact": {
+                      "type": "boolean"
+                    },
+                    "has_board": {
                       "type": "boolean"
                     },
                     "has_project": {
@@ -118784,6 +119004,1521 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/board": {
+      "get": {
+        "description": "Get page board (GET /api/v1/pages/{slug}/board).",
+        "operationId": "get_api_v1_pages_slug_board",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "can_write": {
+                      "type": "boolean"
+                    },
+                    "format": {
+                      "enum": [
+                        "crewship-board-excalidraw-0.18.1-v1"
+                      ],
+                      "type": "string"
+                    },
+                    "placements": {
+                      "items": {
+                        "additionalProperties": false,
+                        "description": "Source is omitted unless the viewer can read both the Board and the artifact. Geometry remains as an unavailable placeholder.",
+                        "properties": {
+                          "height": {
+                            "type": "number"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "page_slug": {
+                                "type": "string"
+                              },
+                              "revision": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "page_slug",
+                              "revision",
+                              "title"
+                            ],
+                            "type": "object"
+                          },
+                          "width": {
+                            "type": "number"
+                          },
+                          "x": {
+                            "type": "number"
+                          },
+                          "y": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "x",
+                          "y",
+                          "width",
+                          "height"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "records": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "deleted": {
+                            "type": "boolean"
+                          },
+                          "element": {
+                            "oneOf": [
+                              {
+                                "additionalProperties": true,
+                                "description": "Validated Excalidraw 0.18.1 drawing element. Images, URLs, embeddables and customData are forbidden; see the versioned Board profile.",
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "element_id": {
+                            "type": "string"
+                          },
+                          "element_rev": {
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "element_id",
+                          "element_rev",
+                          "deleted",
+                          "element"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "format",
+                    "seq",
+                    "can_write",
+                    "placements",
+                    "records"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page board",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      },
+      "post": {
+        "description": "Submit page board (POST /api/v1/pages/{slug}/board).",
+        "operationId": "post_api_v1_pages_slug_board",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "mutation_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "mutation_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "can_write": {
+                      "type": "boolean"
+                    },
+                    "format": {
+                      "enum": [
+                        "crewship-board-excalidraw-0.18.1-v1"
+                      ],
+                      "type": "string"
+                    },
+                    "placements": {
+                      "items": {
+                        "additionalProperties": false,
+                        "description": "Source is omitted unless the viewer can read both the Board and the artifact. Geometry remains as an unavailable placeholder.",
+                        "properties": {
+                          "height": {
+                            "type": "number"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "page_slug": {
+                                "type": "string"
+                              },
+                              "revision": {
+                                "minimum": 0,
+                                "type": "integer"
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "page_slug",
+                              "revision",
+                              "title"
+                            ],
+                            "type": "object"
+                          },
+                          "width": {
+                            "type": "number"
+                          },
+                          "x": {
+                            "type": "number"
+                          },
+                          "y": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "x",
+                          "y",
+                          "width",
+                          "height"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "records": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "deleted": {
+                            "type": "boolean"
+                          },
+                          "element": {
+                            "oneOf": [
+                              {
+                                "additionalProperties": true,
+                                "description": "Validated Excalidraw 0.18.1 drawing element. Images, URLs, embeddables and customData are forbidden; see the versioned Board profile.",
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "element_id": {
+                            "type": "string"
+                          },
+                          "element_rev": {
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "element_id",
+                          "element_rev",
+                          "deleted",
+                          "element"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "format",
+                    "seq",
+                    "can_write",
+                    "placements",
+                    "records"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page board",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/board/batches": {
+      "post": {
+        "description": "Create page board batches (POST /api/v1/pages/{slug}/board/batches).",
+        "operationId": "post_api_v1_pages_slug_board_batches",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_seq": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "deletes": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "expected_rev": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "expected_rev"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "mutation_id": {
+                    "type": "string"
+                  },
+                  "placement_deletes": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "placement_updates": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "height": {
+                          "type": "number"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "width": {
+                          "type": "number"
+                        },
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "x",
+                        "y",
+                        "width",
+                        "height"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "upserts": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "element": {
+                          "additionalProperties": true,
+                          "description": "Validated Excalidraw 0.18.1 drawing element. Images, URLs, embeddables and customData are forbidden; see the versioned Board profile.",
+                          "type": "object"
+                        },
+                        "expected_rev": {
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "element",
+                        "expected_rev"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "mutation_id",
+                  "base_seq"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "placement_id": {
+                      "type": "string"
+                    },
+                    "result_seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "seq",
+                    "result_seq"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "placement_id": {
+                      "type": "string"
+                    },
+                    "result_seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "seq",
+                    "result_seq"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create page board batches",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/board/placements": {
+      "post": {
+        "description": "Create page board placements (POST /api/v1/pages/{slug}/board/placements).",
+        "operationId": "post_api_v1_pages_slug_board_placements",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_seq": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "height": {
+                    "type": "number"
+                  },
+                  "mutation_id": {
+                    "type": "string"
+                  },
+                  "source_page_slug": {
+                    "type": "string"
+                  },
+                  "source_revision": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "width": {
+                    "type": "number"
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "mutation_id",
+                  "base_seq",
+                  "source_page_slug",
+                  "source_revision",
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "placement_id": {
+                      "type": "string"
+                    },
+                    "result_seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "seq",
+                    "result_seq",
+                    "placement_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "placement_id": {
+                      "type": "string"
+                    },
+                    "result_seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "seq",
+                    "result_seq",
+                    "placement_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create page board placements",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/board/placements/{placementId}": {
+      "delete": {
+        "description": "Delete page board placement (DELETE /api/v1/pages/{slug}/board/placements/{placementId}).",
+        "operationId": "delete_api_v1_pages_slug_board_placements_placementId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "placementId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_seq": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "mutation_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "mutation_id",
+                  "base_seq"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "placement_id": {
+                      "type": "string"
+                    },
+                    "result_seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "seq": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "seq",
+                    "result_seq"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete page board placement",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/pages/{slug}/export": {
       "get": {
         "description": "Get page export (GET /api/v1/pages/{slug}/export).",
@@ -119308,6 +121043,7 @@
                           "level": {
                             "enum": [
                               "read",
+                              "comment",
                               "produce",
                               "write"
                             ],
@@ -119512,6 +121248,7 @@
                           "level": {
                             "enum": [
                               "read",
+                              "comment",
                               "produce",
                               "write"
                             ],
@@ -119649,6 +121386,7 @@
                   "level": {
                     "enum": [
                       "read",
+                      "comment",
                       "produce",
                       "write"
                     ],
@@ -119708,6 +121446,7 @@
                           "level": {
                             "enum": [
                               "read",
+                              "comment",
                               "produce",
                               "write"
                             ],
@@ -125182,6 +126921,9 @@
                           "type": "boolean"
                         },
                         "has_artifact": {
+                          "type": "boolean"
+                        },
+                        "has_board": {
                           "type": "boolean"
                         },
                         "has_project": {
@@ -141691,6 +143433,299 @@
           }
         ],
         "summary": "Create workspace invitations",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/invitations/{invitationId}": {
+      "delete": {
+        "description": "Delete workspace invitation (DELETE /api/v1/workspaces/{workspaceId}/invitations/{invitationId}).",
+        "operationId": "delete_api_v1_workspaces_workspaceId_invitations_invitationId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceInvitationRevokedV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete workspace invitation",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/invitations/{invitationId}/reissue": {
+      "post": {
+        "description": "Submit workspace invitation reissue (POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/reissue).",
+        "operationId": "post_api_v1_workspaces_workspaceId_invitations_invitationId_reissue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalAuthEmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemainingWorkspaceInvitationCreatedV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit workspace invitation reissue",
         "tags": [
           "workspaces"
         ],

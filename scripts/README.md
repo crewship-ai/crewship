@@ -36,6 +36,7 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 | [build-stamp.sh](build-stamp.sh) | Reads Git identity correctly in worktrees; supplies build metadata |
 | [embed-web-out.sh](embed-web-out.sh) | Stages/verifies the static export in `web/out/`; preserves the placeholder |
 | [prepare-pdf-assets.mjs](prepare-pdf-assets.mjs) | Prepares browser PDF assets; invoked by frontend dev/build commands |
+| [prepare-board-assets.mjs](prepare-board-assets.mjs) | Copies pinned Excalidraw fonts and license notices for Board fixtures; `--production` prepares local assets for dev/build |
 | [gen-avatar-fixtures.mjs](gen-avatar-fixtures.mjs) | Regenerates avatar validator test fixtures |
 | [generate-team-avatars.mjs](generate-team-avatars.mjs) | Generates demo team portraits; distinct from validator fixtures |
 | [gen-notices.sh](gen-notices.sh) | Regenerates third-party notices from Go dependencies; invoked by `make notices` |
@@ -134,6 +135,18 @@ looking names can have different contracts; do not consolidate on name alone.
 export. It exercises private routine and declared Page action forms; it must not
 be pointed at a shared development instance.
 
+`acceptance-invitation-browser.mjs` runs only through the owned
+`TestInvitationBrowser` fixture and a freshly built production static export.
+The fixture is Linux-only and excluded from ordinary tests. Existing CI
+`go vet -tags conformance ./...` compiles it; that is not browser execution.
+An explicit tagged run fails if its prerequisites are missing.
+Run `go test -tags invitation_browser ./internal/api -run ^TestInvitationBrowser$` with
+`CREWSHIP_INVITATION_BROWSER=1` and provide the installed
+Chromium path through `PLAYWRIGHT_BROWSERS_PATH` when required. The fixture
+passes a private temporary JSON file with synthetic accounts and invitation
+proofs; the script exercises new-account signup and existing-account acceptance
+through real browser sessions. It creates no containers or persistent server
+and must not target a shared instance. Output contains scenario statuses only.
 `acceptance-member-navigation-browser.mjs` is called only by the opt-in
 `TestMemberNavigationBrowser` test after `pnpm build`. It serves that static
 export through the production Router against a temporary synthetic database,

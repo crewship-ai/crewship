@@ -225,3 +225,8 @@ __pycache__/
 # Match the root entries themselves as well as ordinary directories.
 /.next
 /out
+
+# Locally generated Excalidraw font assets
+/e2e/board-editor/public/
+# Generated from pinned Excalidraw package; notices are tracked separately.
+/public/excalidraw-assets/

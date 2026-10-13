@@ -140,7 +140,7 @@ func TestCovWMListMembers_MultipleMembers_AllReturnedOrdered(t *testing.T) {
 // The sibling tests only ever read an empty invitations list, so the
 // rows.Next() scan + inviter JOIN was never executed. Seed two real
 // invitations and assert both surface with their inviter populated and
-// tokens present.
+// redemption tokens withheld.
 func TestCovWMListInvitations_Populated_ReturnsRowsWithInviter(t *testing.T) {
 	h, ownerID, wsID := membershipRig(t)
 	first := covWMCreateInvitation(t, h, ownerID, wsID, "cov-inv1@example.com", "MEMBER")
@@ -170,8 +170,8 @@ func TestCovWMListInvitations_Populated_ReturnsRowsWithInviter(t *testing.T) {
 		if inv.Inviter.ID != ownerID {
 			t.Errorf("inviter id = %q, want %q", inv.Inviter.ID, ownerID)
 		}
-		if inv.Token == "" {
-			t.Errorf("invitation %s has empty token", inv.ID)
+		if inv.Token != "" {
+			t.Errorf("invitation %s disclosed a redemption token", inv.ID)
 		}
 		seen[inv.Email] = inv
 	}

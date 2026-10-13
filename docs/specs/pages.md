@@ -9,11 +9,62 @@ that every feature shipped. The current custom-application contract is
 Internal research, work allocation and session evidence are maintained in
 [private context](../development/private-context.md).
 
+## Boards: persisted drawings and artifact placements
+
+Pages offers **New board**, a client-loaded Excalidraw 0.18.1 editor, explicit
+Save/Reload and pinning of an existing artifact's exact revision. A Board is a
+human-owned Page, mutually exclusive with panels, Apps and artifact source.
+The editor supports shapes, arrows, freehand, text and frames. Images, arbitrary
+embeds, external links and imported scenes are currently excluded.
+
+The authenticated Board API is `/api/v1/pages/{slug}/board`: GET reads the
+current snapshot; POST initializes an empty Page with `mutation_id`.
+`POST /batches` commits drawing upserts/deletes and placement geometry changes
+atomically. `POST /placements` pins `source_page_slug` and `source_revision`;
+`DELETE /placements/{placementId}` removes a pin. Mutations require Page write
+access, a mutation ID and (except initialization) `base_seq`. They recheck live
+workspace membership and Page grants under the database writer fence. Agent
+and public access are not enabled for this Board slice.
+
+A batch checks the Board sequence and every changed element's server revision,
+then validates the complete relationship graph. Excalidraw `version` and
+`versionNonce` never authorize overwriting newer content. Tombstones preserve
+server revisions; restoring an ID requires its current revision. Durable
+receipts bind retries to the same author and payload, and retries recheck
+current authority. Whole-board conflict returns 409 and retains the local
+draft. Saving or explicitly reloading resets local undo history. Unsaved
+changes are never replaced by a background refresh. This is explicit saving,
+not yet real-time collaborative editing.
+
+A pin does not grant access to its source. Both Board read and artifact read
+are required to receive its title, source slug and revision; otherwise only
+geometry and an unavailable placeholder are returned. Pin creation and retry
+require current source access. Board editors may still move or remove an
+unavailable placeholder. Source deletion preserves that placeholder. Stored
+pins protect exact source revisions against retention pruning. Workspace
+backup includes the Board and pins, remaps Page identities on fork and does
+not create source grants or restore live agent authority.
+
+Current bounds: 500 live drawing elements, 1,000 element IDs including
+tombstones, 100 pins, 500 batch operations, 2 MiB scene/request size, 200
+mutations per Board per rolling hour, two concurrent write decoders and
+10,000 durable mutation receipts. Reaching an ID or receipt cap refuses new
+writes; safe checkpoint/compaction is required before treating these limits
+as a sustainable long-running collaboration history.
+
+Fonts and their license notices are served locally. The editor retains fixed
+upstream CDN font fallbacks; host CSP blocks them. The
+[isolated browser suite](../../e2e/README.md) records attempted requests and
+checks they never route externally. Its SVG/PNG artifact export uses labelled
+placeholders, not screenshots of iframe content. Production selection export,
+live collaboration, agent Board editing and untrusted Mermaid conversion
+remain subsequent implementation work.
+
 ## HTML artifacts: current first slice
 
 A human-owned empty Page can hold an immutable history of HTML documents.
 Pages exposes **New artifact**, an upload/source editor, static preview, revision
-history and restore. The chat attachment tab is called **Files** to distinguish
+history, side-by-side static comparison and restore. Revision links use `?revision=N`. The chat attachment tab is called **Files** to distinguish
 those files from these Pages artifacts. Existing panel Pages and Apps cannot
 be converted by uploading an artifact over them. The create request explicitly
 sets `allow_empty: true` with no panels and the authenticated human as owner;
@@ -61,8 +112,10 @@ with an `.html.txt` filename. This static presentation boundary does not claim
 to safely execute arbitrary interactive HTML.
 
 Revision-bound discussion threads are stored separately from artifact source.
-Human Page editors can start a whole-document thread, reply, resolve and reopen;
-readers can view discussions. Thread writes require an expected version and an
+Human Page commenters can start a whole-document thread and reply; editors can
+also resolve and reopen. Readers can view discussions. The `comment` grant is
+available to users, crews and the workspace, and never grants edit, production
+or agent-dispatch authority. Agent comment grants are not enabled. Thread writes require an expected version and an
 author-bound mutation ID, and recheck live Page rights inside the writer
 transaction. New artifact revisions preserve older threads with their original
 revision. UI drafts remain in memory, comments are escaped text, and mentions
@@ -78,7 +131,7 @@ run stop. Restored request history cannot restart old work. A separate live-chat
 control permits one private artifact from that specific trusted run; creation
 is off by default. The agent's operational prompt documents the sidecar protocol.
 
-Point/element anchors, separate commenter grants, presence, collaborative Boards
+Point/element anchors, presence, live collaborative Board editing
 and interactive runtime are not part of this implemented slice. The runtime
 matrix measures known iframe unresponsiveness in Firefox/WebKit explicitly;
 a passing capability experiment is not authorization to enable scripts. The

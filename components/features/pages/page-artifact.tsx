@@ -1,20 +1,22 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Code2, Eye, History, MessageSquare, Upload } from "lucide-react"
+import { Code2, Eye, History, MessageSquare, Upload, Columns2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ArtifactAgentWorkProvider, ArtifactAgentRequests, ArtifactSendButton } from "./artifact-agent-work"
 import { ArtifactComments } from "./artifact-comments"
 import { ArtifactSource } from "./artifact-source"
+import { ArtifactCompare } from "./artifact-compare"
 import { ArtifactHistory } from "./artifact-history"
 import { PageArtifactError, usePageArtifact } from "@/hooks/use-page-artifact"
+import { useArtifactRevision } from "@/hooks/use-artifact-revision"
 import { staticArtifactDocument } from "@/lib/pages/artifact-static"
 
 const MAX_BYTES = 10 * 1024 * 1024
 export function PageArtifactView({ workspaceId, slug, onDirtyChange }: { workspaceId: string; slug: string; onDirtyChange?: (dirty: boolean) => void }) {
-  const [revision, setRevision] = useState<number>()
+  const [revision, setRevision] = useArtifactRevision()
   const { query, save } = usePageArtifact(workspaceId, slug, revision)
-  const [view, setView] = useState<"preview" | "source" | "history">("preview")
+  const [view, setView] = useState<"preview" | "source" | "history" | "compare">("preview")
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [commentsVisited, setCommentsVisited] = useState(false)
   const [commentsDirty, setCommentsDirty] = useState(false)
@@ -59,6 +61,7 @@ export function PageArtifactView({ workspaceId, slug, onDirtyChange }: { workspa
     <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
       <span className="mr-auto text-sm font-medium">HTML artifact {artifact.head_rev > 0 && <span className="ml-2 text-xs font-normal text-muted-foreground">Revision {artifact.revision}{artifact.revision !== artifact.head_rev ? ` · latest ${artifact.head_rev}` : " · latest"}</span>}</span>
       {([["preview", Eye, "Static preview"], ["source", Code2, "Source"], ["history", History, "History"]] as const).map(([id, Icon, label]) => <Button key={id} variant={view === id ? "secondary" : "ghost"} size="sm" className="coarse:h-12" onClick={() => setView(id)} aria-pressed={view === id}><Icon className="mr-1.5 h-4 w-4" />{label}</Button>)}
+      {artifact.revisions.length > 1 && <Button variant={view === "compare" ? "secondary" : "ghost"} size="sm" className="coarse:h-12" aria-pressed={view === "compare"} onClick={() => setView("compare")}><Columns2 className="mr-1.5 h-4 w-4" />Compare</Button>}
       {artifact.head_rev > 0 && <ArtifactSendButton />}
       {artifact.head_rev > 0 && <Button variant={commentsOpen ? "secondary" : "ghost"} size="sm" className="coarse:h-12" aria-pressed={commentsOpen} onClick={() => { setCommentsVisited(true); setCommentsOpen(open => !open) }}><MessageSquare className="mr-1.5 h-4 w-4" />Comments</Button>}
       {artifact.can_write && <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted coarse:min-h-12"><Upload className="h-4 w-4" />Upload HTML<input aria-label="Upload HTML" type="file" accept=".html,.htm,text/html" className="sr-only" disabled={save.isPending} onChange={event => { void upload(event.target.files?.[0]); event.target.value = "" }} /></label>}
@@ -76,6 +79,7 @@ export function PageArtifactView({ workspaceId, slug, onDirtyChange }: { workspa
       onEdit={() => { setDraftBaseRev(artifact.head_rev); setDraft(artifact.html) }}
       onDownload={downloadSource}
     />}
+    {view === "compare" && <ArtifactCompare workspaceId={workspaceId} slug={slug} revisions={artifact.revisions.map(item => item.revision)} selected={artifact.revision} />}
     {view === "history" && <ArtifactHistory
       artifact={artifact} pending={save.isPending}
       onView={selected => { setRevision(selected); setView("preview") }}

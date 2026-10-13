@@ -190,8 +190,8 @@ It does not claim to locate a point inside an opaque, scrollable HTML frame.
 | PATCH | `/api/v1/pages/{slug}/artifact/threads/{threadId}` | Resolve or reopen with an expected thread version |
 
 Readers can list threads. Creation, replies and resolution currently require a
-human identity with Page write access; a separate commenter grant is not yet
-implemented. List returns `{threads, can_comment, can_resolve}`. Each thread
+human identity with Page comment or write access for creating threads and replies;
+resolution/reopening requires write access. List returns `{threads, can_comment, can_resolve}`. Each thread
 contains `id`, original `revision`, `anchor`, `status` (`open` or `resolved`),
 `version`, server-author metadata/timestamps and `comments`. Comments contain
 `id`, `body`, `author_user_id`, `author_name` and `created_at`. Bodies are rendered
@@ -238,7 +238,7 @@ workspace backup and restore. These endpoints use `Cache-Control:no-store`.
 | DELETE | [`/api/v1/pages/{slug}`](#delete-a-page) | Delete a page |
 | PUT | [`/api/v1/pages/{slug}/panels/{panelId}/data`](#push-panel-data) | Push one panel's payload — the write path |
 | GET | [`/api/v1/pages/{slug}/grants`](#list-grants) | List a page's grants |
-| PUT | [`/api/v1/pages/{slug}/grants`](#issue-a-grant) | Grant read, produce, or write |
+| PUT | [`/api/v1/pages/{slug}/grants`](#issue-a-grant) | Grant read, comment, produce, or write |
 | DELETE | [`/api/v1/pages/{slug}/grants`](#revoke-a-grant) | Revoke a grant |
 | GET | [`/api/v1/pages/{slug}/access`](#who-reaches-a-page) | Who reaches a page, and by which paths |
 | GET | [`/api/v1/pages/access`](#what-a-subject-reaches) | Which pages one user, crew or agent reaches |
@@ -752,7 +752,7 @@ still cannot widen who reaches it, not even to another agent in its own crew.
 |---|---|---|
 | `subject_type` | string | `user`, `crew`, `agent`, or `workspace` (every current human member of the workspace, never an agent). |
 | `subject` | string | The subject's slug or id. Omitted for `workspace`. |
-| `level` | string | `read`, `produce`, or `write`. The `workspace` subject carries `read` or `write` only; `produce` names a producer, and everyone is not one. |
+| `level` | string | `read`, `comment`, `produce`, or `write`. The `agent` subject cannot hold `comment`. The `workspace` subject carries `read`, `comment` or `write` only; `produce` names a producer, and everyone is not one. |
 | `panels` | string[] | Optional. Restricts a `produce` grant to named panels; omitted means every panel on the page. |
 
 ### What each level decides
@@ -866,7 +866,7 @@ spelled out per level:
 | `crew:<slug>` | A member of the crew that owns the page. |
 | `panel_crew:<slug>` | A member of a crew that owns a panel — one entry per crew, in panel order. On a crew's row, that the crew owns a panel. |
 | `folder:<slug>` | The folder the page is in is shared with the subject (a user directly or through a crew, a crew by name, or everyone in the workspace). |
-| `grant:page:<level>` | A live `read`, `produce` or `write` grant names the subject, or (for a user) one of their crews. |
+| `grant:page:<level>` | A live `read`, `comment`, `produce` or `write` grant names the subject, or (for a user) one of their crews. |
 | `panel_crew:withheld` | A crew the caller cannot see owns a panel. See below. |
 
 Rows are ordered users by email, then crews by slug, then agents by slug,

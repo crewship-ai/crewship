@@ -6,6 +6,7 @@ import { NewArtifactDialog } from "../new-artifact-dialog"
 import { PageArtifactView } from "../page-artifact"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { apiFetch } from "@/lib/api-fetch"
+vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search) }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: vi.fn() }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
 vi.mock("@/hooks/use-pages", () => ({ pagesKeys: { all: (workspace: string) => ["pages", workspace] } }))
@@ -21,6 +22,7 @@ function mount(onDirtyChange?: (dirty: boolean) => void) {
 }
 const supported = DOMPurify.isSupported
 beforeEach(() => {
+  window.history.replaceState(null, "", "/pages/report")
   DOMPurify.isSupported = false
   vi.mocked(useRealtimeEventSafe).mockClear()
   head = 1; writable = true; fail = 0; readFail = 0; source = "<h1>Saved report</h1><script>alert(1)</script>"; calls.length = 0
@@ -40,6 +42,44 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); DOMPurify.isSupported = supported })
 describe("human page artifact", () => {
+  it("opens a revision URL and keeps the selected immutable revision", async () => {
+    window.history.replaceState(null, "", "/pages/report?revision=1")
+    head = 2; mount()
+    await screen.findByTitle("Artifact static preview")
+    expect(screen.getByText(/Revision 1.*latest 2/)).toBeTruthy()
+  })
+
+  it("compares two immutable revisions with sandboxed previews", async () => {
+    head = 2; mount()
+    fireEvent.click(await screen.findByRole("button", { name: "Compare" }))
+    const earlier = await screen.findByTitle("Compare revision 1")
+    const later = await screen.findByTitle("Compare revision 2")
+    expect(earlier).toHaveAttribute("sandbox", "")
+    expect(later).toHaveAttribute("sandbox", "")
+    expect(earlier.getAttribute("srcdoc")).not.toContain("<script>")
+    readFail = 403
+    const callback = vi.mocked(useRealtimeEventSafe).mock.calls.find(call => call[0] === "page.updated")?.[1]
+    await act(async () => { (callback as (() => void))() })
+    await waitFor(() => expect(screen.queryByTitle("Compare revision 1")).toBeNull())
+    expect(screen.queryByTitle("Compare revision 2")).toBeNull()
+  })
+
+  it("reuses a publication identity after an uncertain server failure", async () => {
+    mount(); await screen.findByTitle("Artifact static preview")
+    fireEvent.click(screen.getByRole("button", { name: "Source" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit as new revision" }))
+    fireEvent.change(screen.getByLabelText("HTML for the next revision"), { target: { value: "<h1>Retry safely</h1>" } })
+    fail = 503
+    fireEvent.click(screen.getByRole("button", { name: "Save revision" }))
+    await waitFor(() => expect(calls).toHaveLength(1))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save revision" })).not.toBeDisabled())
+    fail = 0
+    fireEvent.click(screen.getByRole("button", { name: "Save revision" }))
+    await waitFor(() => expect(calls).toHaveLength(2))
+    expect(calls[1].body.mutation_id).toBe(calls[0].body.mutation_id)
+    await screen.findByTitle("Artifact static preview")
+  })
+
   it("creates an empty human-owned page through the existing API", async () => {
     const onCreated = vi.fn()
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })

@@ -167,6 +167,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 
 	page := obj(map[string]any{
 		"has_artifact": boolean(),
+		"has_board":    boolean(),
 		"has_project":  map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": map[string]any{"type": "string",
@@ -181,6 +182,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 
 	pageRow := obj(map[string]any{
 		"has_artifact": boolean(),
+		"has_board":    boolean(),
 		"has_project":  map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": str(), "owner_crew_slug": str(),
@@ -269,7 +271,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"subject_type":       map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
 		"subject":            str(),
 		"subject_id":         str(),
-		"level":              map[string]any{"type": "string", "enum": []string{"read", "produce", "write"}},
+		"level":              map[string]any{"type": "string", "enum": []string{"read", "comment", "produce", "write"}},
 		"panels":             arr(str()),
 		"granted_by":         str(),
 		"granted_by_user_id": str(),
@@ -543,7 +545,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			Request: obj(map[string]any{
 				"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
 				"subject":      str(),
-				"level":        map[string]any{"type": "string", "enum": []string{"read", "produce", "write"}},
+				"level":        map[string]any{"type": "string", "enum": []string{"read", "comment", "produce", "write"}},
 				"panels": map[string]any{"type": "array", "items": str(),
 					"description": "Optional. Restricts a produce grant to named panels; omitted means every panel on the page."},
 			}),

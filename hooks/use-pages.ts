@@ -128,6 +128,7 @@ export interface WirePanel {
 }
 
 export interface WirePage {
+  has_board?: boolean
   has_artifact?: boolean
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
@@ -468,6 +469,7 @@ function emptyTally(): PanelTally {
 
 /** A page as every Pages surface consumes it. */
 export interface PageView {
+  hasBoard?: boolean
   hasArtifact?: boolean
   artifactEligible?: boolean
   id: string
@@ -616,8 +618,9 @@ export function toPageView(raw: WirePage): PageView {
     slug,
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),
+    hasBoard: raw.has_board === true,
     hasArtifact: raw.has_artifact === true,
-    artifactEligible: Boolean(raw.owner?.startsWith("user/") && tally.total === 0 && !raw.has_application && !raw.has_project),
+    artifactEligible: Boolean(raw.owner?.startsWith("user/") && tally.total === 0 && !raw.has_application && !raw.has_project && !raw.has_board),
     ownerRef: ownerRefOf(raw),
     ownerLabel: ownerLabelOf(raw),
     reach: reachOf(raw),

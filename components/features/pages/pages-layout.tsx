@@ -60,6 +60,7 @@ import type { PanelState } from "@/components/features/pages/panels/types"
 import { PagesRail } from "@/components/features/pages/pages-rail"
 import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
+import { NewBoardDialog } from "./new-board-dialog"
 import { NewArtifactDialog } from "./new-artifact-dialog"
 import { PageEditor } from "@/components/features/pages/page-editor"
 import { PageImportDialog } from "@/components/features/pages/page-import-dialog"
@@ -83,6 +84,7 @@ export interface PagesLayoutProps {
 
 export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const isMobile = useIsMobile()
+  const [creatingBoard, setCreatingBoard] = React.useState(false)
   const [creatingArtifact, setCreatingArtifact] = React.useState(false)
 
   // WHICH PAGE IS OPEN, WHETHER THE EDITOR IS OPEN, AND WHICH SECTION IT SHOWS
@@ -354,6 +356,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             <SubBarSecondary icon={Upload} onClick={() => setImporting(true)}>
               Import
             </SubBarSecondary>
+            <SubBarSecondary icon={FilePlus2} onClick={() => setCreatingBoard(true)}>
+              New board
+            </SubBarSecondary>
             <SubBarSecondary icon={FilePlus2} onClick={() => setCreatingArtifact(true)}>
               New artifact
             </SubBarSecondary>
@@ -580,6 +585,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           existing Page's document belongs to the editor's Content section,
           beside the panels it changes. */}
       {!editing && <UnsavedWorkDialog pending={nav.pending} onDiscard={() => {}} onReturnFocus={() => viewHeadingNode.current?.focus()} />}
+      {creatingBoard && <NewBoardDialog workspaceId={workspaceId} onClose={() => setCreatingBoard(false)} onCreated={openPage} />}
       {creatingArtifact && <NewArtifactDialog workspaceId={workspaceId} onClose={() => setCreatingArtifact(false)} onCreated={openPage} />}
       {creating && (
         <PageEditor

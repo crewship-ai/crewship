@@ -34,6 +34,11 @@ jobs:
       - name: Run independent HTTPS runtime characterization
         timeout-minutes: 8
         run: pnpm exec playwright test --config=playwright.artifact-runtime.config.ts --project=${{ matrix.browser }}
+      - name: Verify Excalidraw public API integration
+        timeout-minutes: 8
+        run: |
+          node scripts/prepare-board-assets.mjs
+          pnpm exec playwright test --config=playwright.board-editor.config.ts --project=${{ matrix.browser }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:

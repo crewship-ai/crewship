@@ -322,7 +322,7 @@ What lands, and what you have to do:
 
 | Capability | On the fork |
 |---|---|
-| Pending invitations | The row lands with a fresh token and stays **fully usable**: the invitation list re-displays the link (the token is not hashed for this table), so re-send it from the fork's member list. |
+| Pending invitations | The row lands with a fresh digest, invalidating the source link. Newly forked pending rows are expired because no recipient holds the discarded proof. Use `workspace invite reissue <id>` on the fork to obtain a new link; accepted historical timestamps and the source rows are unchanged. |
 | Port exposures | The row lands with a re-keyed secret nobody can present, carried as **REVOKED** (`revoked_at` + reason naming the fork) — the same state the exposure list and proxy path already understand, so nothing shows as live that cannot route. Re-request the exposure on the fork after its crews are started. |
 | Pipeline webhooks | The row lands (name, pipeline binding, rate limit) with a re-keyed secret, carried **disabled** (`enabled = 0` — the store's own dead-state). Re-create the webhook on the fork to hand senders the new URL. |
 | Page public links / page webhooks | The rows land with re-keyed digests and **`revoked_at` set**: both public paths resolve only unrevoked tokens, and the lists show them revoked. Mint new ones from the page. |

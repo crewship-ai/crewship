@@ -2,7 +2,7 @@
 
 /**
  * The Pages ACL and history data layer — PRD `docs/specs/pages.md` §7.1b
- * (three verbs, three subject kinds), §10b.1 (versions and rollback).
+ * (Page grants and subject kinds), §10b.1 (versions and rollback).
  *
  *   GET    /api/v1/pages/{slug}/grants     the whole ACL, live rows and inert
  *   PUT    /api/v1/pages/{slug}/grants     issue (or re-issue) one grant
@@ -55,10 +55,10 @@ import { PagesRequestError, pagesKeys, type WirePage } from "@/hooks/use-pages"
 // of them. Closed on purpose: a level the UI offers that the schema refuses is
 // a button that always 400s.
 
-export const PAGE_GRANT_LEVELS = ["read", "produce", "write"] as const
+export const PAGE_GRANT_LEVELS = ["read", "comment", "produce", "write"] as const
 export type PageGrantLevel = (typeof PAGE_GRANT_LEVELS)[number]
 
-/** `workspace` — everyone in this workspace, read or write only (#2533). */
+/** `workspace` — everyone in this workspace, read, comment or write. */
 export const PAGE_SUBJECT_TYPES = ["user", "crew", "agent", "workspace"] as const
 export type PageSubjectType = (typeof PAGE_SUBJECT_TYPES)[number]
 
@@ -73,13 +73,13 @@ export const PAGE_SUBJECT_TYPE_LABEL: Record<PageSubjectType, string> = {
 /** The levels a subject kind may hold. The workspace never produces: a
  *  payload has an author, and "everyone" is not one (spec §3/14). */
 export function pageGrantLevelsFor(subjectType: PageSubjectType): readonly PageGrantLevel[] {
-  return subjectType === "workspace" ? ["read", "write"] : PAGE_GRANT_LEVELS
+  return subjectType === "workspace" ? ["read", "comment", "write"] : subjectType === "agent" ? ["read", "produce", "write"] : PAGE_GRANT_LEVELS
 }
 
 /**
  * What each verb actually means (§7.1b's own table).
  *
- * All three OPEN the page — `read` is the floor the other two build on, since a
+ * All levels OPEN the page — `read` is the floor the other levels build on, since a
  * grantee who may rewrite a page has to be able to look at it. What none of
  * them do is unseal a panel: a grant widens reach to the page and never to a
  * crew's data (§7.1 rule 3), so the `read` line says so where somebody issuing
@@ -92,6 +92,7 @@ export function pageGrantLevelsFor(subjectType: PageSubjectType): readonly PageG
  */
 export const PAGE_GRANT_LEVEL_MEANING: Record<PageGrantLevel, string> = {
   read: "opens the page — panels stay sealed unless the grantee's own crew membership already opened them",
+  comment: "opens the page and may add artifact comments — cannot edit, resolve threads or send work to agents",
   produce: "opens the page, and may push payloads into named panels",
   write: "opens the page, and may edit its spec — add, remove and re-arrange panels",
 }

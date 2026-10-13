@@ -30,9 +30,10 @@ package backup
 // settings. What the re-mint costs the operator is re-learning the new
 // secret, which each surface already supports:
 //
-//   - workspace_invitations stores its token in the clear and the API
-//     returns it on every list, so the fork's invitation is fully
-//     functional — the admin reads the new link and sends it.
+//   - workspace_invitations stores only a versioned SHA256 digest. A fork
+//     cannot redisplay the discarded proof. Pending copies are expired so
+//     the operator sees that explicit reissue is required; source rows and
+//     accepted historical timestamps are unchanged.
 //   - pipeline_webhooks / port_exposures / page_* store only a digest
 //     (#1888 — the cleartext is gone by design, on the source and
 //     therefore in any bundle of it), so their re-minted digests match
@@ -48,6 +49,7 @@ package backup
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -64,8 +66,7 @@ import (
 // pipeline_webhooks.token embed the row's NEW id, matching what the
 // #1888 write path would have left there.
 //
-// Rows whose re-minted secret can never be presented (every table but
-// workspace_invitations — see the file comment) also get their
+// Rows whose re-minted secret can never be presented also get their
 // OPERATOR-VISIBLE state moved to revoked/disabled, because a row that
 // still claims an active capability while holding a dead secret is the
 // "silently non-functional access" #2274 forbids: the list views would
@@ -81,11 +82,8 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	const forkRevokedReason = "capability token re-keyed by forked restore (#2274): the source's token no longer works here; re-issue this capability from this workspace"
 
-	// workspace_invitations: the one table whose cleartext token is
-	// stored and re-displayed. Mint a fresh token of the exact shape
-	// internal/api's invitation creator mints (32 bytes, hex), so the
-	// fork's pending invitation is redeemable through the link the
-	// fork's admin re-reads from the invitation list.
+	// Invitation proofs use the API's sha256:v1: digest format. The raw
+	// proof is deliberately discarded; only newly forked pending rows expire.
 	for _, row := range dump.Tables["workspace_invitations"] {
 		if !hasNonEmptyString(row, "token") {
 			continue
@@ -94,7 +92,11 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 		if err != nil {
 			return nil, fmt.Errorf("backup: re-mint invitation token: %w", err)
 		}
-		row["token"] = tok
+		digest := sha256.Sum256([]byte("wi1_" + tok))
+		row["token"] = "sha256:v1:" + hex.EncodeToString(digest[:])
+		if row["accepted_at"] == nil || row["accepted_at"] == "" {
+			row["expires_at"] = "1970-01-01T00:00:00Z"
+		}
 		counts["workspace_invitations"]++
 	}
 
