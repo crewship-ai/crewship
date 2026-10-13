@@ -207,4 +207,8 @@
 #                     groups execute as UID65534 in the required managed lane;
 #                     its source-list check and verifier reject omissions/skips.
 #                     Track an ordinary/race isolated-UID runner in #3055.
-159
+# 2026-10-13 (#3077): +1 — invitation browser acceptance requires a current
+#                     production static export and Chromium; ordinary Go skips
+#                     are not acceptance evidence. Provision a required browser
+#                     lane in #3077; local opt-in execution is recorded separately.
+160

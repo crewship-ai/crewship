@@ -25,9 +25,11 @@ func finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog() (
 	components := map[string]any{
 		"FinalAuthEmptyRequest": object(map[string]any{}),
 		"FinalAuthSignupRequest": object(map[string]any{
-			"full_name": str(), "email": str(), "password": str(),
+			"full_name": str(), "email": str(), "password": str(), "invitation_token": str(),
 		}, "full_name", "email", "password"),
-		"FinalAuthForgotRequest": object(map[string]any{"email": str()}),
+		"FinalAuthInvitationAcceptRequest":  object(map[string]any{"token": str()}, "token"),
+		"FinalAuthInvitationAcceptResponse": object(map[string]any{"ok": boolean()}, "ok"),
+		"FinalAuthForgotRequest":            object(map[string]any{"email": str()}),
 		"FinalAuthResetRequest": object(map[string]any{
 			"token": str(), "new_password": str(),
 		}, "token", "new_password"),
@@ -62,6 +64,7 @@ func finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog() (
 
 	empty := ref("FinalAuthEmptyRequest")
 	routes := map[string]DomainSchema{
+		"POST /api/v1/auth/invitation/accept":                                    {Request: ref("FinalAuthInvitationAcceptRequest"), Response: ref("FinalAuthInvitationAcceptResponse")},
 		"POST /api/v1/auth/signup":                                               {Request: ref("FinalAuthSignupRequest")},
 		"POST /api/v1/auth/forgot":                                               {Request: ref("FinalAuthForgotRequest")},
 		"POST /api/v1/auth/reset":                                                {Request: ref("FinalAuthResetRequest")},

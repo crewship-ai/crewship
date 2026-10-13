@@ -5470,6 +5470,28 @@
         },
         "type": "object"
       },
+      "FinalAuthInvitationAcceptRequest": {
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
+      "FinalAuthInvitationAcceptResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
       "FinalAuthPeerConsentRequest": {
         "properties": {
           "opted_out": {
@@ -5533,6 +5555,9 @@
             "type": "string"
           },
           "full_name": {
+            "type": "string"
+          },
+          "invitation_token": {
             "type": "string"
           },
           "password": {
@@ -52445,7 +52470,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthInvitationAcceptRequest"
               }
             }
           }
@@ -52455,7 +52480,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAuthInvitationAcceptResponse"
                 }
               }
             },

@@ -4,8 +4,8 @@ import "testing"
 
 func TestFinalAuthSurfaceCatalogCoversAllBodies(t *testing.T) {
 	routes, components := finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog()
-	if len(routes) != 18 {
-		t.Fatalf("route count = %d, want 18", len(routes))
+	if len(routes) != 19 {
+		t.Fatalf("route count = %d, want 19", len(routes))
 	}
 	for route, contract := range routes {
 		if contract.Request == nil || contract.Request["$ref"] == nil {
@@ -73,5 +73,17 @@ func TestFinalAuthSurfaceCatalogMergesWithoutReplacingResponses(t *testing.T) {
 	payload := webhook["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
 	if payload["$ref"] != "#/components/schemas/FinalAuthWebhookPayload" {
 		t.Fatalf("webhook request = %#v", payload)
+	}
+}
+
+func TestInvitationHandoffSchemasAreExplicit(t *testing.T) {
+	routes, components := finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog()
+	accept, ok := routes["POST /api/v1/auth/invitation/accept"]
+	if !ok || accept.Request == nil || accept.Response == nil {
+		t.Fatal("accept needs explicit request and response")
+	}
+	signup := components["FinalAuthSignupRequest"].(map[string]any)
+	if signup["properties"].(map[string]any)["invitation_token"] == nil {
+		t.Fatal("signup omits invitation_token")
 	}
 }

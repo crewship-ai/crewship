@@ -17,6 +17,8 @@ import (
 // export. No shared instance, provider, containers or fake authentication.
 func TestInvitationBrowser(t *testing.T) {
 	if os.Getenv("CREWSHIP_INVITATION_BROWSER") != "1" {
+		// SKIP-WAIVER(#3077): ordinary Go matrix lacks the current static export
+		// and Chromium; retire this opt-in in a provisioned browser acceptance lane.
 		t.Skip("opt-in: production export and Chromium required")
 	}
 	repo, err := filepath.Abs("../..")
