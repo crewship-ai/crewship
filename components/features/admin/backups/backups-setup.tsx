@@ -26,8 +26,18 @@ import type { BackupPlan, BackupRecipient } from "./backups-model"
  */
 export function setupState(keys: BackupRecipient[] | null, plans: BackupPlan[] | null) {
   const hasKey = (keys?.length ?? 0) > 0
-  const hasPlan = (plans ?? []).some((p) => p.enabled)
+  const hasPlan = (plans ?? []).some(recoversInstance)
   return { known: keys !== null && plans !== null, hasKey, hasPlan, done: hasKey && hasPlan }
+}
+
+/**
+ * A plan that can bring the whole server back: enabled, the whole instance,
+ * everything in it. A plan for some workspaces, or for part of the data, is
+ * a fine plan but not this one — and a run with its plan_id takes the plan's
+ * scope, whatever the request says.
+ */
+export function recoversInstance(p: BackupPlan): boolean {
+  return p.enabled && p.scope === "instance" && p.preset === "complete"
 }
 
 /** The card at the top of the Overview while backups are not set up. */
@@ -50,7 +60,7 @@ export function SetupCard({ hasKey, hasPlan, onStart }: { hasKey: boolean; hasPl
       actions={<Button type="button" size="sm" className="h-7 px-3 text-xs" onClick={onStart}>Set up backups</Button>}>
       <ol data-slot="backups-setup-card">
         {step(hasKey, 1, "A backup key", "Every backup is encrypted to it. Made in your browser; you keep the private half.")}
-        {step(hasPlan, 2, "A plan", "The whole instance every night, kept for a year, on this server.")}
+        {step(hasPlan, 2, "A plan for the whole instance", "The whole instance every night, kept for a year, on this server.")}
         {step(false, 3, "The first backup", "Run it now and watch it in Runs.")}
       </ol>
     </SettingsCard>
@@ -116,7 +126,7 @@ export function BackupsSetup({ open, onOpenChange, keys, plans, demo, onChanged,
             onSaved={(id) => { setPlanId(id); onChanged(); setStep("run") }} />
         )}
         {step === "run" && (
-          <RunStep demo={demo} planId={planId ?? plans.find((p) => p.enabled)?.id ?? null}
+          <RunStep demo={demo} planId={planId ?? plans.find(recoversInstance)?.id ?? null}
             onStarted={() => setStep("done")} onSkip={() => onOpenChange(false)} />
         )}
         {step === "done" && (

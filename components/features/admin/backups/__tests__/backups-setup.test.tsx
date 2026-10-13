@@ -29,12 +29,21 @@ beforeEach(() => {
   })
 })
 
+const INSTANCE = { id: "p-all", enabled: true, scope: "instance", preset: "complete", workspace_ids: [] }
+
 describe("setupState", () => {
   it("knows nothing until both were read, and is done with a key and an enabled plan", () => {
     expect(setupState(null, []).known).toBe(false)
     expect(setupState([], [])).toMatchObject({ known: true, hasKey: false, hasPlan: false, done: false })
-    expect(setupState([{ id: "k" } as never], [{ enabled: false } as never])).toMatchObject({ hasKey: true, hasPlan: false, done: false })
-    expect(setupState([{ id: "k" } as never], [{ enabled: true } as never]).done).toBe(true)
+    expect(setupState([{ id: "k" } as never], [{ ...INSTANCE, enabled: false } as never])).toMatchObject({ hasKey: true, hasPlan: false, done: false })
+    expect(setupState([{ id: "k" } as never], [INSTANCE as never]).done).toBe(true)
+  })
+
+  it("counts only a plan that brings the whole instance back", () => {
+    // A run with a plan_id takes the plan's scope: a plan for one workspace,
+    // or for part of the data, does not back up the server.
+    expect(setupState([{ id: "k" } as never], [{ ...INSTANCE, scope: "workspaces", preset: "workspace", workspace_ids: ["ws1"] } as never]).hasPlan).toBe(false)
+    expect(setupState([{ id: "k" } as never], [{ ...INSTANCE, preset: "custom" } as never]).hasPlan).toBe(false)
   })
 })
 
@@ -79,12 +88,16 @@ describe("Set up backups", () => {
   })
 
   it("takes a pasted public key, and skips what is already there", async () => {
-    render(<BackupsSetup open onOpenChange={() => {}} keys={[]} plans={[{ id: "p", enabled: true } as never]} demo={false} onChanged={() => {}} onOpenRuns={() => {}} />)
+    const ws = { id: "p-ws", enabled: true, scope: "workspaces", preset: "workspace", workspace_ids: ["ws1"] }
+    render(<BackupsSetup open onOpenChange={() => {}} keys={[]} plans={[ws, INSTANCE] as never} demo={false} onChanged={() => {}} onOpenRuns={() => {}} />)
     const dialog = screen.getByRole("dialog")
     fireEvent.click(within(dialog).getByRole("radio", { name: /I have one/ }))
     fireEvent.change(within(dialog).getByRole("textbox", { name: "Public key" }), { target: { value: "age1zvkyg2lqzraa2lnjvqej32nkuu0ues2s82hzrye869xeexvn73equnujwj" } })
     fireEvent.click(within(dialog).getByRole("button", { name: /Save the key/ }))
-    // A plan exists: straight to the first backup.
-    expect(await within(dialog).findByRole("button", { name: "Back up now" })).toBeInTheDocument()
+    // A plan for the whole instance exists: straight to the first backup, run
+    // with that plan — not the workspace's plan listed before it.
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Back up now" }))
+    await waitFor(() => expect(posts("/run")).toHaveLength(1))
+    expect(posts("/run")[0]).toMatchObject({ plan_id: "p-all" })
   })
 })
