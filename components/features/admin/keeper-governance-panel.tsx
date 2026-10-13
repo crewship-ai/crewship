@@ -633,7 +633,7 @@ function WatchdogCard({
     >
       <SettingsRow
         label={<Hinted hint="Separate from credential access: it samples the tool calls agents make — files read, commands run, hosts contacted — and raises a finding when something looks wrong. It never blocks a credential; the judge does that.">Watch this workspace</Hinted>}
-        description={serverEnabled ? "Off by default" : "Off by default. The Keeper engine above is off too, so nothing is reviewed until both are on."}
+        description={!serverEnabled ? "Off by default. The Keeper engine above is off too, so nothing is reviewed until both are on." : form.draft.enabled ? undefined : "Off by default"}
       >
         <Switch
           checked={form.draft.enabled}
