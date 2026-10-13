@@ -33,6 +33,10 @@ import (
 type EntryType string
 
 const (
+	EntryInvitationCreated  EntryType = "invitation.created"
+	EntryInvitationReissued EntryType = "invitation.reissued"
+	EntryInvitationRevoked  EntryType = "invitation.revoked"
+	EntryInvitationAccepted EntryType = "invitation.accepted"
 	// Communication
 	EntryPeerConversation EntryType = "peer.conversation"
 	EntryPeerEscalation   EntryType = "peer.escalation"

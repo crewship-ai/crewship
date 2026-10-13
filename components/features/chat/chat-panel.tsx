@@ -18,6 +18,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
+import { encodeApiPathSegment } from "@/lib/api-path-segment"
 
 import {
   Conversation,
@@ -342,8 +343,10 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     setProfileProbeSettled(false)
     setSharedRestrictedChat(false)
     if (!sessionId || !workspaceId) return
+    const sessionSegment = encodeApiPathSegment(sessionId)
+    if (!sessionSegment) return
     const controller = new AbortController()
-    void apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId)}`,{signal:controller.signal}).then(async response => {
+    void apiFetch(`/api/v1/chats/${sessionSegment}/execution-profile?workspace_id=${encodeURIComponent(workspaceId)}`,{signal:controller.signal}).then(async response => {
       if (!response.ok) return
       const profile = await response.json() as {mode:string;audience?:string}
       if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
@@ -449,6 +452,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     // re-runs when workspaceId arrives) rather than firing a doomed request.
     historySignatureRef.current = null
     if (!sessionId || !workspaceId) return
+    const sessionSegment = encodeApiPathSegment(sessionId)
+    if (!sessionSegment) return
     let cancelled = false
 
     type HistoryMessage = {
@@ -484,7 +489,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     // is recorded below.
     const fetchOnce = async (): Promise<{ messages: HistoryMessage[] } | "retry"> => {
       try {
-        const r = await apiFetch(`/api/v1/chats/${sessionId}/messages?workspace_id=${encodeURIComponent(workspaceId)}`)
+        const r = await apiFetch(`/api/v1/chats/${sessionSegment}/messages?workspace_id=${encodeURIComponent(workspaceId)}`)
         if (r.status === 404) return { messages: [] }
         if (!r.ok) return "retry"
         const data = await r.json()
@@ -557,8 +562,10 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
   useEffect(() => {
     if (!sessionId || !workspaceId) return
+    const sessionSegment = encodeApiPathSegment(sessionId)
+    if (!sessionSegment) return
     let cancelled = false
-    apiFetch(`/api/v1/chats/${sessionId}/participants?workspace_id=${encodeURIComponent(workspaceId)}`)
+    apiFetch(`/api/v1/chats/${sessionSegment}/participants?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((r) => (r.ok ? r.json() : { participants: [] }))
       .then((data: { participants?: { user_id: string; email?: string; full_name?: string }[] }) => {
         if (cancelled) return

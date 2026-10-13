@@ -72,6 +72,10 @@ var AllEntryTypes = []EntryType{
 	EntryHookDispatchError,
 	EntryHookFired,
 	EntryImageStale,
+	EntryInvitationAccepted,
+	EntryInvitationCreated,
+	EntryInvitationReissued,
+	EntryInvitationRevoked,
 	EntryKeeperDecision,
 	EntryKeeperRequest,
 	EntryType("keeper.rule_auto_tuned"), // internal/harbormaster/reward.go:226:16
@@ -144,7 +148,7 @@ var AllEntryTypes = []EntryType{
 	EntryProvisioningFailed,
 	EntryProvisioningQueued,
 	EntryProvisioningStep,
-	EntryType("queue.sweeper_pumped"), // internal/api/assignments_stuck_sweeper.go:141:15
+	EntryType("queue.sweeper_pumped"), // internal/api/assignments_stuck_sweeper.go:142:15
 	EntryRunAgentSpan,
 	EntryRunCancelled,
 	EntryRunCompleted,

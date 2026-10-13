@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
+import { workspaceFetch, WorkspaceUnavailableError } from "@/lib/workspace-availability"
 import { registerNavigationGuard } from "@/hooks/use-navigation-guard"
 
 const mockFetch = vi.fn()
@@ -234,6 +235,22 @@ describe("useWorkspace", () => {
     expect(result.current.workspaceId).toBeNull()
     expect(result.current.role).toBeNull()
     expect(result.current.workspaces).toEqual([])
+  })
+
+  it("keeps a persisted selection fail closed when its directory returns 404", async () => {
+    storage.set("crewship.workspaceId", "ws-a")
+    mockFetch.mockResolvedValue({ ok: false, status: 404 })
+    const { result } = renderHook(() => useWorkspace())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.workspaceId).toBe("ws-a")
+    expect(result.current.workspaceUnavailable).toBe(true)
+    expect(result.current.role).toBeNull()
+    expect(result.current.capabilities).toBeNull()
+    expect(result.current.error).toBeTruthy()
+    mockFetch.mockClear()
+    await expect(workspaceFetch("/api/v1/pages?workspace_id=ws-a", { method: "POST" }))
+      .rejects.toBeInstanceOf(WorkspaceUnavailableError)
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it("handles API error response", async () => {

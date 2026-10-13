@@ -430,6 +430,8 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		replyError(w, http.StatusUnauthorized, "Authentication required")
 		return
 	}
+	ctx, publishAudit := withInvitationAudit(r.Context(), h.invitationJournal)
+	r = r.WithContext(ctx)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin invitation creation", err)
@@ -509,10 +511,15 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if err := appendInvitationAudit(r.Context(), tx, journal.EntryInvitationCreated, workspaceID, user.ID, invID, req.Role, ""); err != nil {
+		replyInternalError(w, h.logger, "audit invitation creation", err)
+		return
+	}
 	if err = tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit invitation creation", err)
 		return
 	}
+	publishAudit()
 	writeJSON(w, http.StatusCreated, invitationResponse{
 		Status:      "pending",
 		ID:          invID,

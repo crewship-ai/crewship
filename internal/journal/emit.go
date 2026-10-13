@@ -645,115 +645,120 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 	defer w.writeMu.Unlock()
 
 	return withTx(ctx, w.db, func(tx *sql.Tx) error {
-		stmt, err := tx.PrepareContext(ctx, insertSQL)
-		if err != nil {
-			return fmt.Errorf("journal: prepare: %w", err)
+		return w.persistBatchTx(ctx, tx, batch)
+	})
+}
+
+// persistBatchTx extends the chain inside the caller's write transaction.
+func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry) error {
+	stmt, err := tx.PrepareContext(ctx, insertSQL)
+	if err != nil {
+		return fmt.Errorf("journal: prepare: %w", err)
+	}
+	defer stmt.Close()
+
+	// Per-workspace chain heads, lazily loaded from the DB the first
+	// time a workspace appears in this batch.
+	heads := make(map[string]*chainHead, 4)
+
+	for _, e := range batch {
+		if err := checkRecoveredStopWrite(ctx, tx, e); err != nil {
+			return err
 		}
-		defer stmt.Close()
+		payload, err := e.payloadJSON()
+		if err != nil {
+			return fmt.Errorf("journal: marshal payload: %w", err)
+		}
+		refs, err := e.refsJSON()
+		if err != nil {
+			return fmt.Errorf("journal: marshal refs: %w", err)
+		}
+		tsStr := e.TS.UTC().Format("2006-01-02T15:04:05.000Z")
+		var expires sql.NullString
+		expiresStr := ""
+		if e.ExpiresAt != nil {
+			expiresStr = e.ExpiresAt.UTC().Format(time.RFC3339Nano) // tsformat:allow: pre-existing stored format; retention sweep compares against rows already written as RFC3339Nano
+			expires = sql.NullString{String: expiresStr, Valid: true}
+		}
 
-		// Per-workspace chain heads, lazily loaded from the DB the first
-		// time a workspace appears in this batch.
-		heads := make(map[string]*chainHead, 4)
-
-		for _, e := range batch {
-			if err := checkRecoveredStopWrite(ctx, tx, e); err != nil {
+		if e.replay {
+			fingerprint, err := w.replayFingerprint(e, payload, refs, expiresStr)
+			if err != nil {
 				return err
 			}
-			payload, err := e.payloadJSON()
+			exitCode, err := terminalReplayExitCode(e.Type, payload)
 			if err != nil {
-				return fmt.Errorf("journal: marshal payload: %w", err)
+				return err
 			}
-			refs, err := e.refsJSON()
-			if err != nil {
-				return fmt.Errorf("journal: marshal refs: %w", err)
+			if _, err := tx.ExecContext(ctx, `INSERT INTO journal_replay_receipts(id,fingerprint,workspace_id,agent_id,trace_id,entry_type,terminal_exit_code) VALUES(?,?,?,?,?,?,?)`, e.ID, fingerprint, e.WorkspaceID, e.AgentID, e.TraceID, string(e.Type), exitCode); err != nil {
+				return fmt.Errorf("journal: insert replay receipt: %w", err)
 			}
-			tsStr := e.TS.UTC().Format("2006-01-02T15:04:05.000Z")
-			var expires sql.NullString
-			expiresStr := ""
-			if e.ExpiresAt != nil {
-				expiresStr = e.ExpiresAt.UTC().Format(time.RFC3339Nano) // tsformat:allow: pre-existing stored format; retention sweep compares against rows already written as RFC3339Nano
-				expires = sql.NullString{String: expiresStr, Valid: true}
-			}
-
-			if e.replay {
-				fingerprint, err := w.replayFingerprint(e, payload, refs, expiresStr)
-				if err != nil {
-					return err
-				}
-				exitCode, err := terminalReplayExitCode(e.Type, payload)
-				if err != nil {
-					return err
-				}
-				if _, err := tx.ExecContext(ctx, `INSERT INTO journal_replay_receipts(id,fingerprint,workspace_id,agent_id,trace_id,entry_type,terminal_exit_code) VALUES(?,?,?,?,?,?,?)`, e.ID, fingerprint, e.WorkspaceID, e.AgentID, e.TraceID, string(e.Type), exitCode); err != nil {
-					return fmt.Errorf("journal: insert replay receipt: %w", err)
-				}
-			}
-
-			head, ok := heads[e.WorkspaceID]
-			if !ok {
-				head, err = loadChainHead(ctx, tx, e.WorkspaceID)
-				if err != nil {
-					return err
-				}
-				heads[e.WorkspaceID] = head
-			}
-
-			seq := head.seq + 1
-			prevHash := head.prevHash
-			entryHash := ChainHashKeyed(w.chainKey, prevHash, ChainFields{
-				Seq:       seq,
-				ID:        e.ID,
-				Workspace: e.WorkspaceID,
-				CrewID:    e.CrewID,
-				AgentID:   e.AgentID,
-				MissionID: e.MissionID,
-				TS:        tsStr,
-				EntryType: string(e.Type),
-				Severity:  string(e.Severity),
-				Priority:  priorityOrNormal(e.Priority),
-				ActorType: string(e.ActorType),
-				ActorID:   e.ActorID,
-				Summary:   e.Summary,
-				Payload:   payload,
-				Refs:      refs,
-				TraceID:   e.TraceID,
-				SpanID:    e.SpanID,
-				ExpiresAt: expiresStr,
-			})
-
-			_, err = stmt.ExecContext(ctx,
-				e.ID,
-				e.WorkspaceID,
-				nullable(e.CrewID),
-				nullable(e.AgentID),
-				nullable(e.MissionID),
-				tsStr,
-				string(e.Type),
-				string(e.Severity),
-				priorityOrNormal(e.Priority),
-				string(e.ActorType),
-				nullable(e.ActorID),
-				e.Summary,
-				payload,
-				refs,
-				nullable(e.TraceID),
-				nullable(e.SpanID),
-				expires,
-				seq,
-				prevHash,
-				entryHash,
-				// priority_at_emit — the same value the hash above committed to.
-				priorityOrNormal(e.Priority),
-			)
-			if err != nil {
-				return fmt.Errorf("journal: insert %s: %w", e.Type, err)
-			}
-
-			head.seq = seq
-			head.prevHash = entryHash
 		}
-		return nil
-	})
+
+		head, ok := heads[e.WorkspaceID]
+		if !ok {
+			head, err = loadChainHead(ctx, tx, e.WorkspaceID)
+			if err != nil {
+				return err
+			}
+			heads[e.WorkspaceID] = head
+		}
+
+		seq := head.seq + 1
+		prevHash := head.prevHash
+		entryHash := ChainHashKeyed(w.chainKey, prevHash, ChainFields{
+			Seq:       seq,
+			ID:        e.ID,
+			Workspace: e.WorkspaceID,
+			CrewID:    e.CrewID,
+			AgentID:   e.AgentID,
+			MissionID: e.MissionID,
+			TS:        tsStr,
+			EntryType: string(e.Type),
+			Severity:  string(e.Severity),
+			Priority:  priorityOrNormal(e.Priority),
+			ActorType: string(e.ActorType),
+			ActorID:   e.ActorID,
+			Summary:   e.Summary,
+			Payload:   payload,
+			Refs:      refs,
+			TraceID:   e.TraceID,
+			SpanID:    e.SpanID,
+			ExpiresAt: expiresStr,
+		})
+
+		_, err = stmt.ExecContext(ctx,
+			e.ID,
+			e.WorkspaceID,
+			nullable(e.CrewID),
+			nullable(e.AgentID),
+			nullable(e.MissionID),
+			tsStr,
+			string(e.Type),
+			string(e.Severity),
+			priorityOrNormal(e.Priority),
+			string(e.ActorType),
+			nullable(e.ActorID),
+			e.Summary,
+			payload,
+			refs,
+			nullable(e.TraceID),
+			nullable(e.SpanID),
+			expires,
+			seq,
+			prevHash,
+			entryHash,
+			// priority_at_emit — the same value the hash above committed to.
+			priorityOrNormal(e.Priority),
+		)
+		if err != nil {
+			return fmt.Errorf("journal: insert %s: %w", e.Type, err)
+		}
+
+		head.seq = seq
+		head.prevHash = entryHash
+	}
+	return nil
 }
 
 // loadChainHead reads the current tip of a workspace's chain inside the
