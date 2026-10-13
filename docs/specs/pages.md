@@ -28,8 +28,10 @@ The authenticated API lives under `/api/v1/pages/{slug}/artifact`:
   a new revision containing the selected older source.
 
 All routes require a human identity and the existing Page read/write checks.
-There is no public artifact-source endpoint or agent publication route in this
-slice. A publication takes the database writer fence and rechecks current
+There is no public artifact-source endpoint. A separate internal agent route
+accepts only a verified live chat run with a human Page owner delegation and an
+explicit agent write grant; see [delegated updates](../api-reference/pages.mdx#delegated-agent-updates).
+Its revision records retain the actual agent/run and human on-behalf-of identity. A publication takes the database writer fence and rechecks current
 membership and Page permissions within that transaction. The expected head
 must match: a stale save returns 409. Replaying the same mutation ID by the
 same author with the same payload returns its original revision; reusing it
@@ -53,9 +55,17 @@ sanitizer environment displays escaped source. Source download is plain text
 with an `.html.txt` filename. This static presentation boundary does not claim
 to safely execute arbitrary interactive HTML.
 
-This is the initial artifact storage/editor surface. Agent dispatch, anchored
-comments, presence, collaborative Boards and interactive runtime are not part
-of this implemented slice. Runtime experiments are separate from enabling
+Revision-bound discussion threads are stored separately from artifact source.
+Human Page editors can start a whole-document thread, reply, resolve and reopen;
+readers can view discussions. Thread writes require an expected version and an
+author-bound mutation ID, and recheck live Page rights inside the writer
+transaction. New artifact revisions preserve older threads with their original
+revision. UI drafts remain in memory, comments are escaped text, and mentions
+never start an agent or grant authority. See [the discussion API](../api-reference/pages.mdx#artifact-discussion-threads)
+for endpoint shapes and hard bounds.
+
+Agent dispatch, point/element anchors, presence, collaborative Boards and
+interactive runtime are not part of this implemented slice. Runtime experiments are separate from enabling
 those capabilities.
 
 ## 0. Verdict

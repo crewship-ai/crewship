@@ -6,11 +6,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
 import { pagesKeys } from "@/hooks/use-pages"
 
+export class PageArtifactError extends Error {
+  constructor(message: string, public status: number) { super(message) }
+}
+
 export interface PageArtifact {
   head_rev: number
   revision: number
   html: string
-  revisions: { revision: number; created_at: string; author_user_id: string }[]
+  revisions: { revision: number; created_at: string; author_user_id: string; author_agent_id?: string; author_run_id?: string }[]
   can_write: boolean
 }
 export function usePageArtifact(workspace: string, slug: string, revision?: number) {
@@ -22,17 +26,20 @@ export function usePageArtifact(workspace: string, slug: string, revision?: numb
   useRealtimeEventSafe("realtime.reconnected", invalidate)
   const endpoint = `/api/v1/pages/${encodeURIComponent(slug)}/artifact`
   const params = new URLSearchParams({ workspace_id: workspace })
-  const query = useQuery({
+  const query = useQuery<PageArtifact>({
     queryKey: [...key, revision ?? "head"],
     enabled: Boolean(workspace && slug), retry: false, gcTime: 0,
     refetchInterval: 60000, refetchIntervalInBackground: false,
+    // Preserve same-page content while selecting history so private comment
+    // drafts stay mounted. Never carry a document across workspace/page keys.
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === workspace && previousQuery?.queryKey[2] === slug ? previous : undefined,
     queryFn: async ({ signal }): Promise<PageArtifact> => {
       const selected = new URLSearchParams(params)
       if (revision !== undefined) selected.set("revision", String(revision))
       const response = await apiFetch(`${endpoint}?${selected}`, { signal })
       if (!response.ok) {
         const body = await response.json().catch(() => null)
-        throw new Error(body?.error ?? "Could not load this artifact. Your access may have changed.")
+        throw new PageArtifactError(body?.error ?? "Could not load this artifact. Your access may have changed.", response.status)
       }
       return response.json()
     },

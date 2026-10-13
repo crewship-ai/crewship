@@ -31,6 +31,7 @@ beforeEach(() => {
       head++; if (typeof body.html === "string") source = body.html
       return new Response(JSON.stringify({ head_rev: head, revision: head }))
     }
+    if (String(path).includes("/threads")) return new Response(JSON.stringify({ can_comment: true, can_resolve: true, threads: [{ id: "thread1", revision: 1, status: "open", version: 1, anchor: { schema_version: 1, type: "document" }, comments: [{ id: "comment1", body: "Discuss this revision", author_user_id: "user1", author_name: "Alice", created_at: "2026-10-13T00:00:00Z" }] }] }))
     if (readFail) return new Response(JSON.stringify({ error: "Access denied" }), { status: readFail })
     const selected = new URL(String(path), "https://studio.test").searchParams.get("revision")
     return new Response(JSON.stringify({ head_rev: head, revision: selected ? Number(selected) : head, html: source, can_write: writable, revisions: Array.from({ length: head }, (_, i) => ({ revision: i + 1, created_at: "2026-10-13T00:00:00Z", author_user_id: "user1" })) }))
@@ -109,6 +110,22 @@ describe("human page artifact", () => {
     await act(async () => { (callback as (() => void))() })
     expect(await screen.findByRole("alert")).toHaveTextContent("Access denied")
     expect(screen.queryByTitle("Artifact static preview")).toBeNull()
+  })
+  it("keeps comment reply drafts mounted when the artifact source temporarily fails to refresh", async () => {
+    const dirty = vi.fn(); mount(dirty); await screen.findByTitle("Artifact static preview")
+    fireEvent.click(screen.getByRole("button", { name: "Comments" }))
+    fireEvent.change(await screen.findByLabelText("Reply to thread on revision 1"), { target: { value: "Private reply remains here." } })
+    await waitFor(() => expect(dirty).toHaveBeenLastCalledWith(true))
+    readFail = 500
+    const callback = vi.mocked(useRealtimeEventSafe).mock.calls.find(call => call[0] === "page.updated")?.[1]
+    await act(async () => { (callback as (() => void))() })
+    expect(await screen.findByRole("alert")).toHaveTextContent("drafts are preserved")
+    expect(screen.getByLabelText("Reply to thread on revision 1")).toHaveValue("Private reply remains here.")
+    expect(dirty).toHaveBeenLastCalledWith(true)
+    readFail = 0
+    fireEvent.click(screen.getByRole("button", { name: "Retry artifact" }))
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
+    expect(screen.getByLabelText("Reply to thread on revision 1")).toHaveValue("Private reply remains here.")
   })
   it("registers and clears unsaved source with the existing Pages navigation guard", async () => {
     const dirty = vi.fn(); mount(dirty); await screen.findByTitle("Artifact static preview")

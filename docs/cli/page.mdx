@@ -96,6 +96,81 @@ Source is limited to 10 MiB UTF-8; each artifact retains up to 200 revisions and
 accepts up to 30 committed revisions per hour, including restores. Public
 links and agent credentials do not authorize these artifact routes.
 
+
+### crewship page artifact delegate
+
+```bash
+crewship page artifact delegate report --run RUN_ID
+```
+
+`POST /api/v1/pages/{slug}/artifact/delegations` accepts `run_id`. The Page owner
+may authorize their own verified, live human-initiated chat run to update this
+artifact. The agent must already have an explicit Page write grant. This does
+not grant access to other agents, create a new Page or start work automatically.
+Old runs without captured human authority and unproven dispatch paths are denied.
+
+### crewship page artifact revoke
+
+```bash
+crewship page artifact revoke report --run RUN_ID
+```
+
+`DELETE /api/v1/pages/{slug}/artifact/delegations/{runId}` revokes that run's
+artifact access. Revocation, run termination, the admission deadline or loss of
+the human/agent's access prevents further reads and publication through the
+run-scoped route. A revoked delegation cannot be reactivated for the same run.
+
+### crewship page artifact threads list
+
+```bash
+crewship page artifact threads list report --format json
+crewship page artifact threads list report --revision 2 --format json
+```
+
+Reads discussion threads through `GET /api/v1/pages/{slug}/artifact/threads`.
+A revision filter selects the original immutable revision of a thread; a newer
+artifact revision never silently moves a discussion to different content.
+
+### crewship page artifact threads create
+
+```bash
+crewship page artifact threads create report --revision 2 --body "Please explain this result" --mutation-id review-1
+```
+
+`POST /api/v1/pages/{slug}/artifact/threads` creates a whole-document comment
+bound to the required revision. The server supplies the author. A comment or
+`@mention` does not dispatch an agent or grant permission to change the source.
+
+### crewship page artifact threads reply
+
+```bash
+crewship page artifact threads reply report THREAD_ID --base-version 1 --body "Updated in revision 3" --mutation-id reply-1
+```
+
+`POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies` requires the
+current thread version from the list response. Conflicting changes return 409.
+
+### crewship page artifact threads resolve
+
+```bash
+crewship page artifact threads resolve report THREAD_ID --base-version 2 --mutation-id resolve-1
+```
+
+`PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}` resolves a discussion
+with `resolved: true` and the required `base_version`.
+
+### crewship page artifact threads reopen
+
+```bash
+crewship page artifact threads reopen report THREAD_ID --base-version 3 --mutation-id reopen-1
+```
+
+The same endpoint reopens it with `resolved: false`. These initial discussion
+mutations require Page write access; readers can list threads. All mutation
+commands generate an ID when `--mutation-id` is omitted. Supply your own stable
+ID when you need to retry after a network error, using the original payload and
+base version. Responses remain escaped JSON, including untrusted comment text.
+
 ## Subcommands
 
 | Command | Purpose |

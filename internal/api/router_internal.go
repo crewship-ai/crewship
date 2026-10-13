@@ -66,6 +66,10 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// (Router.DrainVerdicts). Otherwise `internal` is local to this func.
 	r.internalHandler = internal
 	internalAuth := internal.requireInternal
+	// Crew transport authentication is only the outer boundary: the handler
+	// also validates the per-run bearer and a live human artifact delegation.
+	r.mux.Handle("POST /api/v1/internal/artifacts/{slug}/revisions", internalAuth(http.HandlerFunc(r.pages.PublishArtifactAgent)))
+	r.mux.Handle("GET /api/v1/internal/artifacts/{slug}", internalAuth(http.HandlerFunc(r.pages.GetArtifactAgent)))
 	// Pipeline save — sidecar→main forward. Trust comes from
 	// X-Internal-Token (sidecar attaches it via proxyIPCJSON);
 	// regular JWT-authed users hit the public surface instead.

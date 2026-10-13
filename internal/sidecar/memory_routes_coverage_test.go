@@ -52,6 +52,8 @@ const (
 // The keys are derived mechanically from the source (see routeKeysFromSource),
 // so this table cannot drift from the router without the test failing.
 var sidecarRouteGuards = map[string]routeGuardKind{
+	"POST /artifacts/ /revisions": guardHandlerIdentity,
+	"GET /artifacts/":             guardHandlerIdentity,
 	// The upstream public webhook validates the one-panel capability; no internal/agent auth is attached.
 	"POST /page-webhooks/": guardNone,
 	// --- memory surface: guarded by the prefix chokepoint --------------
@@ -350,6 +352,7 @@ var identityHelpers = []string{
 	// otherwise read as resolving none, which is precisely the
 	// under-reporting this guard exists to prevent.
 	"actingRunIdentity(r)",
+	"identityForRunTokenCtx(r.Context(), token)",
 	"requestChatID(r)",
 	"tokenlessDowngrade(r)",
 	"refuseUnauthorizedMemory(w, r)",

@@ -310,7 +310,15 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		"workspace_id": workspaceID, "trigger_type": triggerType,
 	}
 	if metadata != nil {
-		payload["metadata"] = metadata
+		cleanMetadata := make(map[string]interface{}, len(metadata))
+		for k, v := range metadata {
+			if k != "artifact_human_receipt" && k != "artifact_human_message_id" {
+				cleanMetadata[k] = v
+			}
+		}
+		payload["metadata"] = cleanMetadata
+		payload["artifact_human_receipt"] = metadata["artifact_human_receipt"]
+		payload["artifact_human_message_id"] = metadata["artifact_human_message_id"]
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

@@ -59,6 +59,7 @@ import (
 type PageHandler struct {
 	restrictedWorkflow               func() *restrictedworkflow.Service
 	artifactStoragePath              string
+	artifactMasterToken              string
 	projectStore                     *pages.ProjectStore
 	builds                           *pageBuildCoordinator
 	pageArtifacts                    *pagebuild.Store

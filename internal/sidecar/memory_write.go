@@ -1199,8 +1199,9 @@ const memoryHostIPCTimeout = 10 * time.Second
 
 // memoryHostResponse is a raw host answer.
 type memoryHostResponse struct {
-	status int
-	body   []byte
+	retryAfter string
+	status     int
+	body       []byte
 }
 
 // memoryHostRequest is the IPC call, carrying BOTH credentials the host route
@@ -1214,6 +1215,9 @@ type memoryHostResponse struct {
 // only the internal token, and a mutation the host cannot attribute to an
 // agent is one it must refuse.
 func (s *Server) memoryHostRequest(r *http.Request, method, path string, body []byte) (*memoryHostResponse, error) {
+	return s.boundedHostRequest(r, method, path, body, 10*1024*1024)
+}
+func (s *Server) boundedHostRequest(r *http.Request, method, path string, body []byte, responseLimit int64) (*memoryHostResponse, error) {
 	// The three pre-send failures. Each is tagged sent:false because each
 	// happens before anything is dialled, let alone written.
 	if s.ipc == nil {
@@ -1271,14 +1275,17 @@ func (s *Server) memoryHostRequest(r *http.Request, method, path string, body []
 	defer resp.Body.Close()
 	// Bounded like every other IPC read here: these payloads are small
 	// structured JSON, and the cap stops a runaway peer.
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, responseLimit+1))
 	if err != nil {
 		// The request was certainly sent — the host was already answering.
 		// Truncating here says nothing about what it did before the body
 		// stopped arriving.
 		return nil, &memoryHostTransportError{err: fmt.Errorf("read response: %w", err), sent: true}
 	}
-	return &memoryHostResponse{status: resp.StatusCode, body: raw}, nil
+	if int64(len(raw)) > responseLimit {
+		return nil, &memoryHostTransportError{err: errors.New("host response exceeds limit"), sent: true}
+	}
+	return &memoryHostResponse{status: resp.StatusCode, body: raw, retryAfter: resp.Header.Get("Retry-After")}, nil
 }
 
 // memoryHostTransportError carries the one fact a caller cannot recover from
