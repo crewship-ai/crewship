@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { serverFetch } from "@/lib/server-base"
+import { captureInvitationProof } from "@/lib/invitation-proof"
 
 export default function SignupPage() {
   const [fullName, setFullName] = useState("")
@@ -17,8 +18,8 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false)
   const router = useRouter()
  const [invitationToken,setInvitationToken]=useState("")
- useEffect(()=>{setInvitationToken(new URLSearchParams(window.location.search).get("invitation_token") ?? "")},[])
- const joinPath = invitationToken ? `/join?invitation_token=${encodeURIComponent(invitationToken)}` : ""
+ useEffect(()=>{setInvitationToken(captureInvitationProof())},[])
+ const joinPath = invitationToken ? "/join" : ""
  const loginPath = joinPath ? `/login?redirect=${encodeURIComponent(joinPath)}` : "/login"
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {

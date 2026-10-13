@@ -733,7 +733,7 @@ func sendWorkspaceInvitation(cmd *cobra.Command, email, role string) error {
 		cli.PrintSuccess(fmt.Sprintf("Invitation recorded for %s (%s role).", inv.Email, inv.Role))
 		cli.PrintWarning("No email was sent. Share the invitation link only with the intended recipient.")
 		if inv.Token != "" {
-			cmd.Println("Invitation link: " + strings.TrimRight(client.BaseURL, "/") + "/join?invitation_token=" + url.QueryEscape(inv.Token))
+			cmd.Println("Invitation link: " + strings.TrimRight(client.BaseURL, "/") + "/join#invitation_token=" + url.QueryEscape(inv.Token))
 		}
 	})
 }
@@ -764,6 +764,7 @@ var workspaceInviteListCmd = &cobra.Command{
 			ID        string `json:"id" yaml:"id"`
 			Email     string `json:"email" yaml:"email"`
 			Role      string `json:"role" yaml:"role"`
+			Status    string `json:"status" yaml:"status"`
 			ExpiresAt string `json:"expires_at" yaml:"expires_at"`
 			CreatedAt string `json:"created_at" yaml:"created_at"`
 		}
@@ -772,10 +773,10 @@ var workspaceInviteListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"ID", "EMAIL", "ROLE", "EXPIRES", "CREATED"}
+		headers := []string{"ID", "EMAIL", "ROLE", "STATUS", "EXPIRES", "CREATED"}
 		var rows [][]string
 		for _, inv := range invitations {
-			rows = append(rows, []string{f.ShortID(inv.ID, truncateID(inv.ID, 12)), inv.Email, inv.Role, inv.ExpiresAt, inv.CreatedAt})
+			rows = append(rows, []string{f.ShortID(inv.ID, truncateID(inv.ID, 12)), inv.Email, inv.Role, inv.Status, inv.ExpiresAt, inv.CreatedAt})
 		}
 		return f.Auto(invitations, headers, rows)
 	},
@@ -858,15 +859,15 @@ func init() {
 	workspaceUpdateCmd.Flags().String("pages-theme", "",
 		"Shared Page colours as a JSON object of #RRGGBB values keyed accent, background, surface, text, muted, border; @file reads it from a file, {} resets to the SDK defaults")
 
-	workspaceMemberAddCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
+	workspaceMemberAddCmd.Flags().String("role", "MEMBER", "Role: ADMIN|MANAGER|MEMBER|VIEWER")
 	workspaceMemberRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	workspaceDeleteCmd.Flags().String("confirm", "", "Workspace slug, re-typed to confirm deletion (required)")
 	workspaceDeleteCmd.Flags().BoolP("yes", "y", false, "Skip the interactive confirmation prompt")
 
-	workspaceInviteCreateCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
+	workspaceInviteCreateCmd.Flags().String("role", "MEMBER", "Role: ADMIN|MANAGER|MEMBER|VIEWER")
 	// Mirror the role flag on the parent so `workspace invite <email> --role ADMIN` works.
-	workspaceInviteCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
+	workspaceInviteCmd.Flags().String("role", "MEMBER", "Role: ADMIN|MANAGER|MEMBER|VIEWER")
 
 	workspaceMemberCmd.AddCommand(workspaceMemberListCmd)
 	workspaceMemberCmd.AddCommand(workspaceMemberAddCmd)

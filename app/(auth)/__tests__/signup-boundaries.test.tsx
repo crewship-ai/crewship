@@ -6,7 +6,7 @@ import { serverFetch } from "@/lib/server-base"
 const router = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock("next/navigation", () => ({ useRouter: () => router }))
 vi.mock("@/lib/server-base", () => ({ serverFetch: vi.fn() }))
-beforeEach(() => { vi.mocked(serverFetch).mockReset(); router.push.mockReset() })
+beforeEach(() => { window.sessionStorage.clear(); vi.mocked(serverFetch).mockReset(); router.push.mockReset() })
 afterEach(() => { cleanup() })
 function fill(confirmation = "synthetic-passphrase") {
   fireEvent.change(screen.getByLabelText("Full Name"), { target: { value: "Test Reader" } })
@@ -72,6 +72,7 @@ it("carries an invitation token through signup and the sign-in handoff", async (
   fill()
   await submit()
   expect(serverFetch).toHaveBeenCalledWith("/api/v1/auth/signup", expect.objectContaining({ body: JSON.stringify({ full_name: "Test Reader", email: "reader@example.test", password: "synthetic-passphrase", invitation_token: "synthetic-invitation-proof" }) }))
-  expect(router.push).toHaveBeenCalledWith("/login?signup=submitted&redirect=%2Fjoin%3Finvitation_token%3Dsynthetic-invitation-proof")
+  expect(router.push).toHaveBeenCalledWith("/login?signup=submitted&redirect=%2Fjoin")
+  expect(window.location.href).not.toContain("synthetic-invitation-proof")
   window.history.replaceState({}, "", "/signup")
 })

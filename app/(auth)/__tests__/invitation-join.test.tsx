@@ -8,7 +8,7 @@ const router=vi.hoisted(()=>({replace:vi.fn()}))
 vi.mock("next/navigation",()=>({useRouter:()=>router}))
 vi.mock("@/hooks/use-workspace",()=>({refreshWorkspaceSettings:vi.fn().mockResolvedValue(undefined)}))
 vi.mock("@/lib/server-base",()=>({serverFetch:vi.fn()}))
-beforeEach(()=>{vi.mocked(refreshWorkspaceSettings).mockClear();vi.mocked(serverFetch).mockReset();router.replace.mockReset();window.history.replaceState({},"","/join?invitation_token=synthetic-proof")})
+beforeEach(()=>{vi.mocked(refreshWorkspaceSettings).mockClear();vi.mocked(serverFetch).mockReset();router.replace.mockReset();window.sessionStorage.clear();window.history.replaceState({},"","/join#invitation_token=synthetic-proof")})
 afterEach(()=>{cleanup();window.history.replaceState({},"","/")})
 it("requires an explicit acceptance and sends only the presented token",async()=>{
  vi.mocked(serverFetch).mockResolvedValue(new Response('{"ok":true}',{status:200}))
@@ -21,8 +21,8 @@ it("requires an explicit acceptance and sends only the presented token",async()=
 it("preserves the invitation through sign in and signup without retrying",async()=>{
  vi.mocked(serverFetch).mockResolvedValue(new Response('{}',{status:401}))
  render(<JoinPage/>);await act(async()=>{fireEvent.click(screen.getByRole("button",{name:"Accept invitation"}))})
- expect(screen.getByRole("link",{name:"Sign in"})).toHaveAttribute("href","/login?redirect=%2Fjoin%3Finvitation_token%3Dsynthetic-proof")
- expect(screen.getByRole("link",{name:"Create an account"})).toHaveAttribute("href","/signup?invitation_token=synthetic-proof")
+ expect(screen.getByRole("link",{name:"Sign in"})).toHaveAttribute("href","/login?redirect=%2Fjoin")
+ expect(screen.getByRole("link",{name:"Create an account"})).toHaveAttribute("href","/signup")
  expect(serverFetch).toHaveBeenCalledTimes(1);expect(router.replace).not.toHaveBeenCalled()
 })
 it("shows an unavailable invitation without claiming membership",async()=>{
@@ -34,4 +34,10 @@ it("shows an unavailable invitation without claiming membership",async()=>{
 it("does not send a request without a token",()=>{
  window.history.replaceState({},"","/join");render(<JoinPage/>)
  expect(screen.getByRole("button",{name:"Accept invitation"})).toBeDisabled();expect(serverFetch).not.toHaveBeenCalled()
+})
+
+it("scrubs proof from the address and link URLs before interaction",()=>{
+ render(<JoinPage/>);
+ expect(window.location.href).not.toContain("synthetic-proof")
+ for(const link of screen.getAllByRole("link")){expect(link.getAttribute("href")).not.toContain("synthetic-proof")}
 })

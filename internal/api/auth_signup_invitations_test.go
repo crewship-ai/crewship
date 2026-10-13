@@ -39,7 +39,7 @@ func seedInvitation(t *testing.T, db *sql.DB, id, wsID, inviter, email, role str
 	if _, err := db.Exec(`
 		INSERT INTO workspace_invitations (id, workspace_id, email, role, invited_by, token, expires_at, accepted_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, wsID, email, role, inviter, "tok-"+id, expires.UTC().Format(time.RFC3339), acceptedAt); err != nil {
+		id, wsID, email, role, inviter, invitationTokenHash("tok-"+id), expires.UTC().Format(time.RFC3339), acceptedAt); err != nil {
 		t.Fatalf("seed invitation %s: %v", id, err)
 	}
 }

@@ -666,7 +666,7 @@ Invitations issue a token-gated link that the recipient redeems via the auth flo
 GET /api/v1/workspaces/{workspaceId}/invitations
 ```
 
-Returns pending (un-accepted) invitations ordered by `created_at` DESC, joined to `users` for the inviter.
+Returns unaccepted invitations with `pending`, `expired` or `revoked` status and no redemption proof, ordered by `created_at` DESC, joined to `users` for the inviter.
 
 **Response:** `200 OK`
 
@@ -678,7 +678,8 @@ Returns pending (un-accepted) invitations ordered by `created_at` DESC, joined t
     "email": "newhire@acme.example",
     "role": "MEMBER",
     "invited_by": "user_jdoe42",
-    "token": "EXAMPLE-NOT-A-REAL-32-BYTE-HEX-TOKEN",
+    "status": "pending",
+    "token": "",
     "expires_at": "2026-05-26T09:18:22Z",
     "accepted_at": null,
     "created_at": "2026-05-19T09:18:22Z",
@@ -706,19 +707,25 @@ POST /api/v1/workspaces/{workspaceId}/invitations
 | `email` | string | yes | -- | Recipient email |
 | `role` | string | no | `MEMBER` | One of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER` |
 
-**Response:** `201 Created` -- invitation object with the freshly minted hex `token` (this is the only time the token is returned).
+**Response:** `201 Created` -- invitation object with the freshly minted `wi1_` plus 64 lowercase hex proof (returned only by creation or explicit reissue). New stored values are `sha256:v1:` plus the SHA256 hex digest of the entire proof.
 
-Invitations are redeemed at **signup**: when the invited address creates
-an account via [`POST /api/v1/auth/signup`](/api-reference/auth#post-/api/v1/auth/signup),
-every live invitation for that address is consumed inside the same
-transaction and the new user lands in each inviting workspace at the
-invited role. An invited person gets no default workspace of their own;
-only a signup with nothing to redeem (no live invitation to a workspace
-that still exists) gets one. An invitation for
-an address that *already* has an account is left pending -- signup is a
-no-op there, and redeeming it would place someone who never consented.
-This is also why `POST .../members` takes a `user_id` and not an email:
-resolving an arbitrary address would be an account-existence oracle.
+Signup redeems only the presented matching proof; ordinary signup gets its own workspace. Existing accounts explicitly accept through `/join` or the authenticated acceptance endpoint. Admission rechecks the inviter's live trusted OWNER/ADMIN authority (ADMIN invitations need OWNER), recipient identity, parsed expiry, workspace and pending state. Different existing membership roles conflict without consuming the invitation; no role is silently upgraded.
+
+### Reissue invitation
+
+```
+POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/reissue
+```
+
+No request body. A current trusted OWNER/ADMIN rotates an unaccepted proof and returns `200` with a fresh invitation object/link. ADMIN invitations require OWNER. Expired invitations may be reissued; current membership conflicts return `409`. Old proof is immediately invalid. Nothing is mailed.
+
+### Revoke invitation
+
+```
+DELETE /api/v1/workspaces/{workspaceId}/invitations/{invitationId}
+```
+
+Same issuer checks. Returns `200 {"ok":true}` for a pending invitation, `404` when unavailable, or `409` if changed concurrently. Existing memberships are untouched.
 
 | Status | Condition |
 |---|---|

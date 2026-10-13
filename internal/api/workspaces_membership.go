@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -302,6 +303,7 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 
 type invitationResponse struct {
 	ID          string       `json:"id"`
+	Status      string       `json:"status"`
 	WorkspaceID string       `json:"workspace_id"`
 	Email       string       `json:"email"`
 	Role        string       `json:"role"`
@@ -350,7 +352,13 @@ func (h *WorkspaceHandler) ListInvitations(w http.ResponseWriter, r *http.Reques
 			replyInternalError(w, h.logger, "scan invitation", err)
 			return
 		}
-		// Redemption proof is issued only by CreateInvitation, never by roster reads.
+		inv.Status = "pending"
+		if strings.HasPrefix(inv.Token, "revoked:") {
+			inv.Status = "revoked"
+		} else if expires, e := time.Parse(time.RFC3339, inv.ExpiresAt); e != nil || !expires.After(time.Now().UTC()) {
+			inv.Status = "expired"
+		}
+		// Redemption proof is issued only by creation/reissue, never roster reads.
 		inv.Token = ""
 		inv.Inviter = &inviter
 		result = append(result, inv)
@@ -393,17 +401,6 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if h.license != nil {
-		if err := h.license.CheckMemberLimit(r.Context(), h.db, workspaceID); err != nil {
-			if license.IsLimitError(err) {
-				replyError(w, http.StatusPaymentRequired, err.Error())
-				return
-			}
-			replyInternalError(w, h.logger, "check member limit for invitation", err)
-			return
-		}
-	}
-
 	var req createInvitationRequest
 	if err := readJSON(r, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -429,8 +426,42 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if user == nil {
+		replyError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin invitation creation", err)
+		return
+	}
+	defer tx.Rollback()
+	liveRole, err := invitationIssuerRole(r.Context(), tx, user.ID, workspaceID)
+	if err == sql.ErrNoRows {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "check live invitation issuer", err)
+		return
+	}
+	if req.Role == "ADMIN" && liveRole != "OWNER" {
+		replyError(w, http.StatusForbidden, "Only workspace owner can invite with ADMIN role")
+		return
+	}
+	if h.license != nil {
+		if err := h.license.CheckMemberLimit(r.Context(), tx, workspaceID); err != nil {
+			if license.IsLimitError(err) {
+				replyError(w, http.StatusPaymentRequired, err.Error())
+				return
+			}
+			replyInternalError(w, h.logger, "check member limit for invitation", err)
+			return
+		}
+	}
+
 	var existingMemberID string
-	err := h.db.QueryRowContext(r.Context(), `
+	err = tx.QueryRowContext(r.Context(), `
 		SELECT wm.id FROM workspace_members wm
 		JOIN users u ON u.id = wm.user_id
 		WHERE wm.workspace_id = ? AND u.email = ?
@@ -445,9 +476,9 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	}
 
 	var existingInviteID string
-	err = h.db.QueryRowContext(r.Context(), `
+	err = tx.QueryRowContext(r.Context(), `
 		SELECT id FROM workspace_invitations
-		WHERE workspace_id = ? AND email = ? AND accepted_at IS NULL AND expires_at > datetime('now')
+		WHERE workspace_id = ? AND email = ? AND accepted_at IS NULL AND julianday(expires_at) > julianday('now')
 	`, workspaceID, req.Email).Scan(&existingInviteID)
 	if err == nil {
 		replyError(w, http.StatusConflict, "An active invitation already exists for this email")
@@ -462,22 +493,28 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	expiresAt := now.Add(7 * 24 * time.Hour)
 	invID := generateCUID()
 	token, err := generateToken()
+	token = "wi1_" + token
 	if err != nil {
 		replyInternalError(w, h.logger, "generate invitation token", err)
 		return
 	}
 
-	_, err = h.db.ExecContext(r.Context(), `
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO workspace_invitations (id, workspace_id, email, role, invited_by, token, expires_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		invID, workspaceID, req.Email, req.Role, user.ID, token,
+		invID, workspaceID, req.Email, req.Role, user.ID, invitationTokenHash(token),
 		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339))
 	if err != nil {
 		replyInternalError(w, h.logger, "insert invitation", err)
 		return
 	}
 
+	if err = tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit invitation creation", err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, invitationResponse{
+		Status:      "pending",
 		ID:          invID,
 		WorkspaceID: workspaceID,
 		Email:       req.Email,

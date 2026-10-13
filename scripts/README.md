@@ -136,7 +136,11 @@ be pointed at a shared development instance.
 
 `acceptance-invitation-browser.mjs` runs only through the owned
 `TestInvitationBrowser` fixture and a freshly built production static export.
-Set `CREWSHIP_INVITATION_BROWSER=1` for the Go test and provide the installed
+The fixture is Linux-only and excluded from ordinary tests. Existing CI
+`go vet -tags conformance ./...` compiles it; that is not browser execution.
+An explicit tagged run fails if its prerequisites are missing.
+Run `go test -tags invitation_browser ./internal/api -run ^TestInvitationBrowser$` with
+`CREWSHIP_INVITATION_BROWSER=1` and provide the installed
 Chromium path through `PLAYWRIGHT_BROWSERS_PATH` when required. The fixture
 passes a private temporary JSON file with synthetic accounts and invitation
 proofs; the script exercises new-account signup and existing-account acceptance

@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- ⚠️ **Behaviour change:** Signup invitation handoff requires the matching invitation link; existing accounts can explicitly accept after signing in or through `workspace invite accept`. Invitation listings retain metadata without redemption tokens (#3071).
+- ⚠️ **Behaviour change:** Signup invitation handoff requires the matching invitation link; existing accounts can explicitly accept after signing in or through `workspace invite accept`. Invitation listings retain metadata without redemption tokens; pending links can be reissued or revoked. New proofs are stored hashed, and browser/CLI handoff avoids putting proof in redirect URLs or command arguments (#3071).
 
 - **Local Linux Docker runs retain output across controller loss (#2845).** A private host helper keeps the actual CLI execution and redacted output independent of its reader. Recovery projects output and terminal results with durable acknowledgements, preserves work-generation ownership, and refuses duplicate launches. Capture has per-run and aggregate bounds and acknowledgement-based retention. Unsupported providers keep the existing transport; uncertain forced stops retain reconciliation rather than report completion.
 

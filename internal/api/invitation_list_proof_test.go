@@ -35,7 +35,7 @@ func TestInvitationListingDoesNotDiscloseProof(t *testing.T) {
 		t.Fatal("listing disclosed invitation redemption proof")
 	}
 	var stored string
-	if err := db.QueryRow(`SELECT token FROM workspace_invitations WHERE id='list-proof'`).Scan(&stored); err != nil || stored != "tok-list-proof" {
+	if err := db.QueryRow(`SELECT token FROM workspace_invitations WHERE id='list-proof'`).Scan(&stored); err != nil || stored != invitationTokenHash("tok-list-proof") {
 		t.Fatal("listing mutated stored proof", err)
 	}
 }

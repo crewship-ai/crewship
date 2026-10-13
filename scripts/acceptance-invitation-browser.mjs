@@ -9,8 +9,10 @@ try {
     try {
       const page = await context.newPage()
       const token = fixture[`${kind}_token`]
-      await page.goto(`${fixture.server}/join?invitation_token=${encodeURIComponent(token)}`)
+      await page.goto(`${fixture.server}/join#invitation_token=${encodeURIComponent(token)}`)
       await expect(page.getByRole('heading', { name: 'Accept invitation' })).toBeVisible()
+      expect(page.url()).not.toContain(token)
+      for (const href of await page.locator('a[href]').evaluateAll(nodes => nodes.map(n => n.getAttribute('href')))) expect(href).not.toContain(token)
       if (kind === 'new') {
         await page.getByRole('link', { name: 'Create an account' }).click()
         await page.getByLabel('Full Name').fill('New invited reader')
