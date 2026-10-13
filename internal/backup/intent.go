@@ -185,6 +185,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"page_panels":                     IntentInclude,
 	"page_versions":                   IntentInclude,
 	"page_boards":                     IntentInclude,
+	"page_board_files":                IntentInclude,
+	"page_board_run_delegations":      IntentExcludeRuntime, // live run edit authority is never restored
 	"page_board_elements":             IntentInclude,
 	"page_board_mutations":            IntentInclude,
 	"page_board_artifact_placements":  IntentInclude,

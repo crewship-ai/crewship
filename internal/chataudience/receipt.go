@@ -40,10 +40,10 @@ func CaptureTrusted(ctx context.Context, db *sql.DB, chat, user string, expected
 		return nil, nil
 	}
 	r := Receipt{UserID: user, ChatID: chat}
-	args := []any{user, chat, user}
+	args := []any{user, user, chat, user}
 	args = append(args, Args(user)...)
 	err := db.QueryRowContext(ctx, `SELECT c.workspace_id,c.agent_id,wm.id,wm.access_revision,c.authority_generation,c.authority_revision
- FROM chats c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=?
+ FROM chats c JOIN users human ON human.id=? AND human.suspended_at IS NULL JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=?
  JOIN workspaces w ON w.id=c.workspace_id AND w.deleted_at IS NULL
  JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL
  WHERE c.id=? AND NOT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=? AND access_mode='restricted')

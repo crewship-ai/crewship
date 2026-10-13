@@ -91,13 +91,13 @@ func TestArtifactCreation_DefaultOffAtomicOwnershipAndRetry(t *testing.T) {
 	artifactExpect(t, artifactCreateAgent(t, h, ws, token, creationBody), 200)
 	artifactExpect(t, artifactCreateAgent(t, h, ws, token, strings.Replace(creationBody, "Agent report", "Changed report", 1)), 409)
 	artifactExpect(t, artifactCreateAgent(t, h, ws, token, strings.ReplaceAll(creationBody, "create-one", "create-two")), 409)
-	var owner, agent, run string
+	var owner, agent, run, sourceChat string
 	var crew string
-	if err := h.db.QueryRow(`SELECT p.owner_user_id,COALESCE(p.owner_crew_id,''),r.author_agent_id,r.author_run_id FROM pages p JOIN page_artifact_revisions r ON r.page_id=p.id WHERE p.id=?`, result.PageID).Scan(&owner, &crew, &agent, &run); err != nil {
+	if err := h.db.QueryRow(`SELECT p.owner_user_id,COALESCE(p.owner_crew_id,''),r.author_agent_id,r.author_run_id,r.source_chat_id FROM pages p JOIN page_artifact_revisions r ON r.page_id=p.id WHERE p.id=?`, result.PageID).Scan(&owner, &crew, &agent, &run, &sourceChat); err != nil {
 		t.Fatal(err)
 	}
-	if owner != user || crew != "" || agent != "artifact-agent" || run != "artifact-run" {
-		t.Fatalf("owner/attribution %s %s %s %s", owner, crew, agent, run)
+	if owner != user || crew != "" || agent != "artifact-agent" || run != "artifact-run" || sourceChat != "artifact-chat" {
+		t.Fatalf("owner/attribution %s %s %s %s %s", owner, crew, agent, run, sourceChat)
 	}
 	if err := h.db.QueryRow(`SELECT COUNT(*) FROM page_grants WHERE page_id=? AND subject_type='agent' AND subject_id='artifact-agent' AND level='write' AND granted_by_user_id=?`, result.PageID, user).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("bounded grant=%d %v", n, err)

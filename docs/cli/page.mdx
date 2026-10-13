@@ -2021,3 +2021,82 @@ for a retained version) or `crewship page project publish`.
 After a transport timeout the outcome can be unknown; inspect the current
 revision and build status before retrying. Data producers keep pushing through
 the existing panel API/`page.write` path independently of source edits.
+
+## Board commands
+
+These commands use your human CLI profile. Start with an empty human-owned Page
+(for example `crewship page artifact create plan --name Plan`, before publishing
+any artifact revision), then initialize it as a Board. The drawing and artifact
+kinds are mutually exclusive. All output is JSON-safe text.
+
+### crewship page board show
+
+`crewship page board show <slug>` reads the current snapshot, its `seq`, drawing
+records and independently authorized artifact placements.
+
+### crewship page board init
+
+`crewship page board init <slug> --mutation-id <id>` initializes the empty Page.
+`--mutation-id` is required; reuse it only for the same initialization retry.
+
+### crewship page board apply
+
+`crewship page board apply <slug> --file <json>` commits an atomic batch. `--file -`
+reads stdin. Include `mutation_id`, current `base_seq`, `upserts` and `deletes`;
+every changed drawing includes its expected server revision. Optional placement
+updates/deletions are part of the same transaction. Input is limited to 2 MiB.
+The CLI sends the exact JSON and never invents a newer base after conflict.
+
+### crewship page board pin
+
+`crewship page board pin <slug> --file <json>` pins an accessible artifact revision.
+`--file -` reads stdin. Example:
+
+```json
+{"mutation_id":"pin-report-1","base_seq":0,"source_page_slug":"report","source_revision":1,"x":0,"y":0,"width":640,"height":480}
+```
+
+Source read access remains independent of Board access after pinning.
+
+### crewship page board unpin
+
+`crewship page board unpin <slug> <placement-id> --file <json>` removes a placement.
+`--file -` reads stdin; body is `{"mutation_id":"unpin-1","base_seq":2}`.
+Removal preserves the source artifact. Re-read after every confirmed write;
+retain the same JSON on an uncertain retry.
+
+### crewship page artifact chat-results
+
+`crewship page artifact chat-results <chat-id>` lists up to 20 artifact Pages
+linked by the server to that accessible chat. Each result points to an immutable
+revision. The server independently checks current Page access and omits hidden
+results without exposing their names.
+
+### crewship page board delegate
+
+`crewship page board delegate <slug> --run <run-id>` allows that live chat run to
+edit its agent's own drawings. `--run` is required. You must own the Board and be
+the run's verified human initiator; the agent also needs a Page write grant.
+This does not start a run or authorize modifying human drawings.
+
+### crewship page board revoke
+
+`crewship page board revoke <slug> --run <run-id>` permanently revokes that
+run's Board delegation. `--run` is required; only the human Board owner can revoke.
+
+### crewship page board upload
+
+`crewship page board upload <slug> --file <png-or-jpeg> --base-seq <sequence> --mutation-id <id>`
+uploads an immutable Board-owned raster. All three flags are required; `--file -`
+reads stdin, up to 5 MiB. Repeat the exact bytes, sequence and identity after an
+uncertain response. The server validates pixels, re-encodes the image and returns
+an opaque `file_id`. Use it in a subsequent image element batch; upload alone does
+not place an image on the drawing. Unused uploads count toward storage quotas.
+
+### crewship page board download
+
+`crewship page board download <slug> <file-id> --output <new-file>` downloads a
+currently authorized Board image. `--output` is required and must be a new local
+path. Existing files are not overwritten; binary image bytes are never printed
+to the terminal. The canonical image may differ from the uploaded file because
+metadata and trailing bytes are stripped by the server.

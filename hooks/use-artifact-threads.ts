@@ -12,10 +12,12 @@ export interface ArtifactComment {
   author_name?: string
   created_at: string
 }
+export type ArtifactAnchor = { schema_version: 1; type: "document" } | { schema_version: 1; type: "point"; coordinate_space: "viewport"; x: number; y: number; viewport_width: number; viewport_height: number }
+
 export interface ArtifactThread {
   id: string
   revision: number
-  anchor: { schema_version: 1; type: "document" }
+  anchor: ArtifactAnchor
   status: "open" | "resolved"
   version: number
   created_at: string
@@ -33,7 +35,7 @@ export class ArtifactCommentError extends Error {
 }
 export type ArtifactReplyWrite = { action: "reply"; threadId: string; base_version: number; body: string }
 type ThreadWrite =
-  | { action: "create"; revision: number; body: string }
+  | { action: "create"; revision: number; body: string; anchor?: ArtifactAnchor }
   | ArtifactReplyWrite
   | { action: "resolve"; threadId: string; base_version: number; resolved: boolean }
 
@@ -99,7 +101,7 @@ export function useArtifactThreads(workspace: string, slug: string) {
       let body: Record<string, unknown>
       if (input.action === "create") {
         url = endpoint
-        body = { revision: input.revision, anchor: { schema_version: 1, type: "document" }, body: input.body, mutation_id }
+        body = { revision: input.revision, anchor: input.anchor ?? { schema_version: 1, type: "document" }, body: input.body, mutation_id }
       } else if (input.action === "reply") {
         url = `${endpoint}/${encodeURIComponent(input.threadId)}/replies`
         body = { body: input.body, base_version: input.base_version, mutation_id }

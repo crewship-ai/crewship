@@ -11,7 +11,7 @@ func boardSchemaCatalog() map[string]DomainSchema {
 		return map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
 	}
 	array := func(item map[string]any) map[string]any { return map[string]any{"type": "array", "items": item} }
-	element := map[string]any{"type": "object", "additionalProperties": true, "description": "Validated Excalidraw 0.18.1 drawing element. Images, URLs, embeddables and customData are forbidden; see the versioned Board profile."}
+	element := map[string]any{"type": "object", "additionalProperties": true, "description": "Validated Excalidraw 0.18.1 drawing element. Images reference Board-owned immutable files; URLs, arbitrary embeddables and customData are forbidden; see the versioned Board profile."}
 	geometry := map[string]any{"x": number, "y": number, "width": number, "height": number}
 	placement := obj(mergeProps(geometry, map[string]any{
 		"id": str, "source": obj(map[string]any{"page_slug": str, "revision": integer, "title": str}, "page_slug", "revision", "title"),
@@ -20,7 +20,7 @@ func boardSchemaCatalog() map[string]DomainSchema {
 	snapshot := obj(map[string]any{
 		"format": map[string]any{"type": "string", "enum": []string{"crewship-board-excalidraw-0.18.1-v1"}},
 		"seq":    integer, "can_write": boolean, "placements": array(placement),
-		"records": array(obj(map[string]any{"element_id": str, "element_rev": integer, "deleted": boolean, "element": map[string]any{"oneOf": []any{element, map[string]any{"type": "null"}}}}, "element_id", "element_rev", "deleted", "element")),
+		"records": array(obj(map[string]any{"element_id": str, "element_rev": integer, "deleted": boolean, "author_user_id": str, "author_agent_id": str, "author_run_id": str, "element": map[string]any{"oneOf": []any{element, map[string]any{"type": "null"}}}}, "element_id", "element_rev", "deleted", "element")),
 	}, "format", "seq", "can_write", "placements", "records")
 	receipt := obj(map[string]any{"seq": integer, "result_seq": integer, "placement_id": str}, "seq", "result_seq")
 	mutation := map[string]any{"mutation_id": str, "base_seq": integer}
@@ -32,6 +32,10 @@ func boardSchemaCatalog() map[string]DomainSchema {
 	}), "mutation_id", "base_seq")
 	createPlacement := obj(mergeProps(mergeProps(mutation, geometry), map[string]any{"source_page_slug": str, "source_revision": integer}), "mutation_id", "base_seq", "source_page_slug", "source_revision", "x", "y", "width", "height")
 	return map[string]DomainSchema{
+		"POST /api/v1/pages/{slug}/board/delegations":                {Request: obj(map[string]any{"run_id": str}, "run_id"), RequestRequired: true, Response: obj(map[string]any{"run_id": str, "agent_id": str, "expires_at": str, "scope": str}, "run_id", "agent_id", "expires_at", "scope"), SuccessStatuses: []string{"201"}},
+		"DELETE /api/v1/pages/{slug}/board/delegations/{runId}":      {Response: obj(map[string]any{}), SuccessStatuses: []string{"204"}},
+		"POST /api/v1/pages/{slug}/board/files":                      {Request: map[string]any{"type": "string", "format": "binary"}, RequestRequired: true, RequestMedia: []string{"image/png", "image/jpeg"}, Response: obj(map[string]any{"file_id": str, "content_type": str, "width": integer, "height": integer, "bytes": integer, "seq": integer, "result_seq": integer}, "file_id", "content_type", "width", "height", "bytes", "seq", "result_seq"), SuccessStatuses: []string{"200", "201"}},
+		"GET /api/v1/pages/{slug}/board/files/{fileId}":              {Response: map[string]any{"type": "string", "format": "binary"}, ResponseMedia: []string{"image/png", "image/jpeg"}},
 		"GET /api/v1/pages/{slug}/board":                             {Response: snapshot},
 		"POST /api/v1/pages/{slug}/board":                            {Request: obj(map[string]any{"mutation_id": str}, "mutation_id"), RequestRequired: true, Response: snapshot, SuccessStatuses: []string{"200"}},
 		"POST /api/v1/pages/{slug}/board/batches":                    {Request: batch, RequestRequired: true, Response: receipt, SuccessStatuses: []string{"200", "201"}},

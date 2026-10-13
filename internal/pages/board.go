@@ -86,6 +86,10 @@ type BoardFixedSegment struct {
 // Field names mirror the pinned public element schema. Type-specific fields
 // are checked separately; accepting one here does not permit it on every type.
 type BoardElement struct {
+	FileID             *string             `json:"fileId,omitempty"`
+	ImageStatus        string              `json:"status,omitempty"`
+	Scale              []float64           `json:"scale,omitempty"`
+	Crop               json.RawMessage     `json:"crop,omitempty"`
 	CustomData         json.RawMessage     `json:"customData,omitempty"`
 	ID                 string              `json:"id"`
 	Type               string              `json:"type"`
@@ -289,7 +293,7 @@ func ValidateBoardElement(raw json.RawMessage) (BoardElement, error) {
 	invalid := func(message string) (BoardElement, error) {
 		return e, fmt.Errorf("board element %q: %s", e.ID, message)
 	}
-	if !boardID.MatchString(e.ID) || !member(e.Type, "rectangle", "ellipse", "diamond", "line", "arrow", "freedraw", "text", "frame") {
+	if !boardID.MatchString(e.ID) || !member(e.Type, "rectangle", "ellipse", "diamond", "line", "arrow", "freedraw", "text", "frame", "image") {
 		return invalid("unsupported id or type")
 	}
 	for _, v := range []*float64{e.X, e.Y, e.Width, e.Height} {
@@ -384,7 +388,7 @@ func ValidateBoardElement(raw json.RawMessage) (BoardElement, error) {
 			}
 		}
 	}
-	families := map[string][]string{"text": {"fontSize", "fontFamily", "text", "originalText", "textAlign", "verticalAlign", "containerId", "autoResize", "lineHeight"}, "linear": {"points", "lastCommittedPoint", "startBinding", "endBinding", "startArrowhead", "endArrowhead"}, "freedraw": {"pressures", "simulatePressure"}, "arrow": {"elbowed", "fixedSegments", "startIsSpecial", "endIsSpecial"}, "frame": {"name"}}
+	families := map[string][]string{"image": {"fileId", "status", "scale", "crop"}, "text": {"fontSize", "fontFamily", "text", "originalText", "textAlign", "verticalAlign", "containerId", "autoResize", "lineHeight"}, "linear": {"points", "lastCommittedPoint", "startBinding", "endBinding", "startArrowhead", "endArrowhead"}, "freedraw": {"pressures", "simulatePressure"}, "arrow": {"elbowed", "fixedSegments", "startIsSpecial", "endIsSpecial"}, "frame": {"name"}}
 	for family, keys := range families {
 		allowed := family == e.Type || (family == "linear" && member(e.Type, "line", "arrow", "freedraw"))
 		for _, key := range keys {
@@ -402,6 +406,11 @@ func ValidateBoardElement(raw json.RawMessage) (BoardElement, error) {
 		}
 		if e.ContainerID != nil && (!boardID.MatchString(*e.ContainerID) || *e.ContainerID == e.ID) {
 			return invalid("invalid text container")
+		}
+	}
+	if e.Type == "image" {
+		if e.FileID == nil || !boardID.MatchString(*e.FileID) || e.ImageStatus != "saved" || len(e.Scale) != 2 || (e.Scale[0] != 1 && e.Scale[0] != -1) || (e.Scale[1] != 1 && e.Scale[1] != -1) || (len(e.Crop) > 0 && !bytes.Equal(bytes.TrimSpace(e.Crop), []byte("null"))) {
+			return invalid("invalid image profile")
 		}
 	}
 	if e.Name != nil && !boundedBoardText(*e.Name, 256) {

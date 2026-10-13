@@ -43,6 +43,11 @@ func (h *PageHandler) artifactPage(w http.ResponseWriter, r *http.Request, write
 		replyError(w, 401, "human authentication required")
 		return nil, false
 	}
+	var active int
+	if h.pageAuthReader(r.Context()).QueryRowContext(r.Context(), `SELECT 1 FROM users WHERE id=? AND suspended_at IS NULL`, user.ID).Scan(&active) != nil {
+		replyError(w, 403, "active human account required")
+		return nil, false
+	}
 	ws := WorkspaceIDFromContext(r.Context())
 	rec, err := h.loadPage(r.Context(), ws, r.PathValue("slug"))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -166,7 +171,9 @@ func (h *PageHandler) GetArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	writeJSON(w, 200, map[string]any{"head_rev": head, "revision": selected, "html": html, "revisions": revisions, "can_write": rec.OwnerUserID != "" && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)})
+	agentCaller, _ := pageGrantCallerIsAgent(r)
+	canComment := !agentCaller && projectAgentFrom(r.Context()) == nil && h.mayComment(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)
+	writeJSON(w, 200, map[string]any{"head_rev": head, "revision": selected, "html": html, "revisions": revisions, "can_comment": canComment, "can_write": rec.OwnerUserID != "" && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)})
 }
 
 type artifactMutation struct {
@@ -352,7 +359,7 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		return
 	}
 	revision := head + 1
-	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,restored_from,created_at,author_agent_id,author_run_id) VALUES (?,?,?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''))`, generateCUID(), rec.ID, revision, sha, user.ID, req.MutationID, fingerprint, restoredFrom, tsformat.Format(now), artifactAgentID(r), artifactRunID(r)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,restored_from,created_at,author_agent_id,author_run_id,source_chat_id) VALUES (?,?,?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''))`, generateCUID(), rec.ID, revision, sha, user.ID, req.MutationID, fingerprint, restoredFrom, tsformat.Format(now), artifactAgentID(r), artifactRunID(r), artifactSourceChatID(r)); err != nil {
 		replyInternalError(w, h.logger, "save artifact revision", err)
 		return
 	}

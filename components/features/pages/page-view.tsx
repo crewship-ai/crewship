@@ -530,7 +530,7 @@ function PageBody({
         )}
       </div>
 
-      {workspaceId && page.hasBoard ? <PageBoardView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} onDirtyChange={onArtifactDirtyChange} /> : workspaceId && (page.hasArtifact || page.artifactEligible) ? <PageArtifactView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} onDirtyChange={onArtifactDirtyChange} /> : panels.length === 0 ? (
+      {workspaceId && page.hasBoard ? <PageBoardView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} pageId={page.id} onDirtyChange={onArtifactDirtyChange} /> : workspaceId && (page.hasArtifact || page.artifactEligible) ? <PageArtifactView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} pageId={page.id} onDirtyChange={onArtifactDirtyChange} /> : panels.length === 0 ? (
         <EmptyState
           icon={CONCEPT_ICON.pages}
           title="This page declares no panels"

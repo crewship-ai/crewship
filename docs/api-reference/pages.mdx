@@ -171,16 +171,34 @@ Inside the agent container, the sidecar exposes `GET /artifacts/{slug}` (optiona
 `revision`) and `POST /artifacts/{slug}/revisions`, authenticated with the actual
 `CREWSHIP_AGENT_TOKEN` bearer. The publish JSON remains `html`, `base_rev` and
 `mutation_id`; identity is never chosen from JSON. Human REST credentials do not
-substitute for a run bearer on these routes. This initial integration updates an
-existing human-owned artifact shell; automatic creation and comment-to-agent
-work dispatch are not implemented.
+substitute for a run bearer on these routes. The same run-bound authorization also underlies explicit artifact creation
+and durable artifact requests described above.
+
+### Chat artifact results
+
+**Auth:** current human workspace membership, chat access and per-result Page read.
+**Request:** path `chatId`, no body. **Response:** bounded JSON results below.
+**Statuses:** 200 success, 401 unsupported identity, 404 missing membership or inaccessible chat, 500 database failure.
+
+`GET /api/v1/chats/{chatId}/artifact-results` returns `{results: [...]}` for an
+authenticated human who can currently read the chat. Each card contains
+`page_slug`, `title`, exact `revision`, `created_at`, `agent_id`, `agent_name`,
+`run_id` and `on_behalf_of_user_id`. Results come from server-linked retained
+publications, not agent message text. Current Page read access is independently
+required; inaccessible results are omitted without revealing hidden counts.
+The response has at most 20 Pages, selected from 100 recent candidate revisions.
+A card's URL can use `/pages/{slug}?revision=N`.
 
 ### Artifact discussion threads
 
 Threads refer to an immutable artifact revision. Publishing or restoring the
-source does not delete them or retarget their anchors. This initial surface
-accepts whole-document anchors only: `{"schema_version":1,"type":"document"}`.
-It does not claim to locate a point inside an opaque, scrollable HTML frame.
+source does not delete them or retarget their anchors. Whole-document anchors
+use `{"schema_version":1,"type":"document"}`. Static preview point anchors use
+`{"schema_version":1,"type":"point","coordinate_space":"viewport","x":120,"y":90,"viewport_width":800,"viewport_height":500}`.
+Coordinates must be finite and inside the captured viewport (dimensions 1–16384).
+The UI restarts the static preview at the top before capture and only overlays
+a saved point at the same revision and viewport dimensions. It does not infer
+DOM identity or scroll offset inside an opaque frame, or move points to new revisions.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -189,8 +207,8 @@ It does not claim to locate a point inside an opaque, scrollable HTML frame.
 | POST | `/api/v1/pages/{slug}/artifact/threads/{threadId}/replies` | Reply with an expected thread version |
 | PATCH | `/api/v1/pages/{slug}/artifact/threads/{threadId}` | Resolve or reopen with an expected thread version |
 
-Readers can list threads. Creation, replies and resolution currently require a
-human identity with Page comment or write access for creating threads and replies;
+Readers can list threads. Creating threads and replies requires a human
+identity with Page comment or write access;
 resolution/reopening requires write access. List returns `{threads, can_comment, can_resolve}`. Each thread
 contains `id`, original `revision`, `anchor`, `status` (`open` or `resolved`),
 `version`, server-author metadata/timestamps and `comments`. Comments contain
@@ -2521,3 +2539,98 @@ archived source digest, without the archived panel definition.
 authority, `404` Page or revision missing, `409` unsupported legacy revision,
 `500` archive/integrity error, `503` project storage unavailable.
 The response is `no-store`.
+
+## Boards
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/board` | Read the canonical drawing snapshot |
+| POST | `/api/v1/pages/{slug}/board` | Initialize an empty Page as a Board |
+| POST | `/api/v1/pages/{slug}/board/batches` | Commit one atomic drawing and placement update |
+| POST | `/api/v1/pages/{slug}/board/placements` | Pin an exact artifact revision |
+| DELETE | `/api/v1/pages/{slug}/board/placements/{placementId}` | Remove a placement |
+
+**Auth:** authenticated human workspace member; Page read for GET and Page write
+for every mutation. Initialization requires a human-owned empty Page. Agents do
+not inherit a crew grant. Pinning additionally requires current source artifact
+read access. A reader without source access receives placement geometry without
+source title, slug or revision. Public sharing is not available for Boards.
+
+**Request:** initialization takes `{"mutation_id":"init-1"}`. Every other mutation
+requires a stable `mutation_id` and the currently observed nonnegative `base_seq`.
+Batch bodies additionally contain `upserts:[{element,expected_rev}]` and
+`deletes:[{id,expected_rev}]`, optionally `placement_updates:[{id,x,y,width,height}]`
+and `placement_deletes:[{id}]`. New elements use `expected_rev:0`; updates,
+deletions and restorations use the server element revision. Excalidraw's own
+version metadata is not concurrency authority. A pin body supplies
+`source_page_slug`, positive `source_revision`, `x`, `y`, `width` and `height`.
+Removal sends only the mutation identity and Board sequence. Requests are limited
+to 2 MiB, 500 operations and the supported drawing profile; remote embeds, links
+and inline image data are rejected. A committed mutation is never silently retried
+against a different sequence.
+
+**Response:** GET and initialization return `{format,seq,records,placements,can_write}`.
+The format is `crewship-board-excalidraw-0.18.1-v1`. Records contain `element_id`,
+server `element_rev`, `deleted`, and `element` (null for tombstones). Placements
+contain `id,x,y,width,height` and optional authorized
+`source:{page_slug,revision,title}`. Other mutations return `{seq,result_seq}`,
+with `placement_id` for a pin; exact retries return the original result sequence
+and current canonical sequence. Re-read the snapshot after mutation.
+
+**Statuses:** 200 snapshot or exact retry; 201 new batch or pin; 400 malformed or
+unsupported drawing; 401 missing human authentication; 403 insufficient write
+permission; 404 inaccessible/missing Page or Board; 409 stale Board/element
+revision, conflicting mutation identity or incompatible Page kind;
+413 oversized request; 422 invalid scene; 429 quota; 408 cancelled while waiting for a decoding slot;
+500 storage failure.
+All writes recheck current authority inside the transaction. Whole-board CAS
+prevents partial commits; the client retains an unsaved draft after a conflict.
+
+### Board run authorization
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/v1/pages/{slug}/board/delegations` | Authorize an existing live human-initiated chat run |
+| DELETE | `/api/v1/pages/{slug}/board/delegations/{runId}` | Permanently revoke that run's Board authority |
+
+**Auth:** current human Board owner, who must also be the server-recorded human
+initiator of the chat run. An explicit Page write grant for the agent is required
+in addition to this run-bound delegation. The run must remain live, within its
+original admission deadline, and the issuing human must retain current rights.
+An agent cannot grant itself access. Backup restores never revive delegations.
+
+**Request:** POST takes `{"run_id":"RUN_ID"}`; DELETE has no body. **Response:**
+201 returns `{run_id,agent_id,expires_at,scope:"own-elements"}`; DELETE returns
+204 with no body. The scope permits the agent to add or change its own drawings,
+never human/other-agent elements or indirect relationships to protected elements.
+Human edits take ownership back. Pinned sources remain independently protected.
+**Statuses:** 400 invalid run ID, 401 unsupported identity, 403 insufficient
+current authority or revoked/expired run, 404 inaccessible Board, 413 oversized
+input, 500 database failure.
+
+### Board image files
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/v1/pages/{slug}/board/files` | Store a canonical immutable image |
+| GET | `/api/v1/pages/{slug}/board/files/{fileId}` | Read a file belonging to this Board |
+
+**Auth:** human Page write for upload, human Page read for download. A file ID
+from another Board does not authorize reading or using that file.
+**Request:** POST sends raw PNG/JPEG bytes (at most 5 MiB), with required query
+parameters `base_seq` and `mutation_id`. Dimensions are at most 2048 per axis and
+4,194,304 pixels total. The server decodes and re-encodes pixels, removing source
+metadata/trailing payload. Canonical output is at most 8 MiB. GET has no body.
+
+**Response:** upload returns `{file_id,content_type,width,height,bytes,seq,result_seq}`
+with 201 for creation or 200 for an exact retry. Download returns canonical
+`image/png` or `image/jpeg` bytes, `nosniff`, private no-store caching and same-origin
+CORP. Persisted drawing elements contain only the opaque `fileId`; transient
+Excalidraw data URLs never become the persisted scene.
+
+**Statuses:** 400 invalid query, 401 unsupported identity, 403 insufficient access,
+404 absent Board/file, 409 stale sequence, conflicting mutation identity or image storage quota,
+413 oversized upload, 422 invalid image, 429 quota, 500 storage failure,
+503 unavailable blob storage. Current limits are 100 files/50 MiB per Board and
+1,000 files/500 MiB per workspace. Unused uploads remain quota-counted for the
+Board's lifetime; deleting the Board releases references for ordinary blob GC.

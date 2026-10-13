@@ -67,10 +67,11 @@ func (h *PageHandler) loadBoardPlacements(r *http.Request, pageID string, q page
 		return nil, err
 	}
 	viewer.Role = role
+	_, delegated := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
 	for _, e := range entries {
 		item := map[string]any{"id": e.id, "x": e.x, "y": e.y, "width": e.width, "height": e.height}
 		var slug string
-		if e.source != "" && q.QueryRowContext(r.Context(), `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, e.source, WorkspaceIDFromContext(r.Context())).Scan(&slug) == nil {
+		if !delegated && e.source != "" && q.QueryRowContext(r.Context(), `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, e.source, WorkspaceIDFromContext(r.Context())).Scan(&slug) == nil {
 			source, err := h.loadPage(r.Context(), WorkspaceIDFromContext(r.Context()), slug)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return nil, err
@@ -90,6 +91,10 @@ func (h *PageHandler) loadBoardPlacements(r *http.Request, pageID string, q page
 	return result, nil
 }
 func (h *PageHandler) AddBoardPlacement(w http.ResponseWriter, r *http.Request) {
+	if artifactAgentID(r) != "" {
+		replyError(w, 403, "agent placement edits are not delegated")
+		return
+	}
 	release, ok := acquireBoardWrite(w, r)
 	if !ok {
 		return
@@ -185,6 +190,10 @@ func (h *PageHandler) AddBoardPlacement(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, 201, map[string]any{"seq": seq, "result_seq": seq, "placement_id": id})
 }
 func (h *PageHandler) DeleteBoardPlacement(w http.ResponseWriter, r *http.Request) {
+	if artifactAgentID(r) != "" {
+		replyError(w, 403, "agent placement edits are not delegated")
+		return
+	}
 	release, ok := acquireBoardWrite(w, r)
 	if !ok {
 		return

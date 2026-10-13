@@ -257,7 +257,7 @@ func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID s
 		       g.granted_by_user_id, g.granted_at,
 		       COALESCE(wm.role, ''),
 		       CASE
-		         WHEN wm.user_id IS NULL                                THEN 0
+		         WHEN wm.user_id IS NULL OR issuer.id IS NULL              THEN 0
 		         WHEN wm.role IN ('OWNER', 'ADMIN')                     THEN 1
 		         WHEN p.owner_user_id IS NOT NULL
 		              AND g.granted_by_user_id = p.owner_user_id        THEN 1
@@ -268,6 +268,7 @@ func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID s
 		       END
 		FROM page_grants g
 		JOIN pages p ON p.id = g.page_id
+ LEFT JOIN users issuer ON issuer.id=g.granted_by_user_id AND issuer.suspended_at IS NULL
 		LEFT JOIN workspace_members wm
 		       ON wm.user_id = g.granted_by_user_id AND wm.workspace_id = ?
 		WHERE p.workspace_id = ? AND (? = '' OR g.page_id = ?)

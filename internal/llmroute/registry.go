@@ -48,6 +48,7 @@ var reservedSegments = []string{
 	"agent",
 	"artifacts",
 	"assign",
+	"boards",
 	"connections",
 	"credentials",
 	"crew",
