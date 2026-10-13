@@ -260,6 +260,10 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "audit.entity_updated": FilePen,
   "audit.entity_deleted": FileX,
   "audit.entity_restored": RotateCcw,
+  "invitation.created": UserPlus,
+  "invitation.reissued": RotateCcw,
+  "invitation.revoked": UserMinus,
+  "invitation.accepted": UserCheck,
 
   // ── Memory ────────────────────────────────────────────────────────
   "memory.searched": Search,
