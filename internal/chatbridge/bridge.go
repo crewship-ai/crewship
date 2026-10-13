@@ -611,9 +611,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// The human turn is recorded and emitted regardless of whether the agent
 	// will respond. The sender also receives the event, which acknowledges
 	// persistence; its UI suppresses the duplicate optimistic turn.
+	humanMessageID := generateMsgID()
 	persistUserMsg := func() error {
 		return b.convStore.Append(ctx, chatID, conversation.Message{
-			ID:           generateMsgID(),
+			ID:           humanMessageID,
 			AgentID:      info.AgentID,
 			Role:         conversation.RoleUser,
 			Content:      content,
@@ -1153,11 +1154,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// concurrent routine/webhook run of the same agent no longer share them.
 	req.RunID = runID
 	runMeta := map[string]interface{}{
-		"cli_adapter": info.CLIAdapter,
-		"crew_id":     info.CrewID,
-		"crew_slug":   info.CrewSlug,
-		"agent_slug":  info.AgentSlug,
-		"tags":        []string{"chat", info.CLIAdapter},
+		"cli_adapter":               info.CLIAdapter,
+		"crew_id":                   info.CrewID,
+		"crew_slug":                 info.CrewSlug,
+		"agent_slug":                info.AgentSlug,
+		"tags":                      []string{"chat", info.CLIAdapter},
+		"artifact_human_receipt":    info.HumanAuthority,
+		"artifact_human_message_id": humanMessageID,
 	}
 	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER", runMeta); err != nil {
 		b.logger.Warn("failed to create run record", "error", err)

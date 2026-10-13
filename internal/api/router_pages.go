@@ -58,6 +58,7 @@ func (r *Router) registerPageRoutes() {
 	// sweeper has to run against the same clock and journal.
 	r.pages = p
 	p.artifactStoragePath = r.storagePath
+	p.artifactMasterToken = r.internalToken
 	if r.pageProjectsPath != "" {
 		p.SetProjectStore(&pages.ProjectStore{Directory: r.pageProjectsPath})
 	}
@@ -111,6 +112,18 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/revisions", roleSelf, p.PublishArtifact)
 	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/restore", roleSelf, p.RestoreArtifact)
+	// openapi: query revision:integer; responses 200,400,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/threads", authed(wsCtx(http.HandlerFunc(p.ListArtifactThreads))))
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/threads", roleSelf, p.CreateArtifactThread)
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/threads/{threadId}/replies", roleSelf, p.ReplyArtifactThread)
+	// openapi: responses 200,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("PATCH", "/api/v1/pages/{slug}/artifact/threads/{threadId}", roleSelf, p.ResolveArtifactThread)
+	// openapi: responses 201,400,401,403,404,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/delegations", roleSelf, p.GrantArtifactRun)
+	// openapi: responses 204,401,403,404,500,503
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/artifact/delegations/{runId}", roleSelf, p.RevokeArtifactRun)
 	r.authedMut("POST", "/api/v1/pages", roleInline, p.Create)
 	r.authedMut("PATCH", "/api/v1/pages/{slug}", roleSelf, p.Update)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}", roleSelf, p.Delete)

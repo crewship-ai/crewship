@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/runverdict"
@@ -26,12 +27,14 @@ const runVerdictFlagKey = "run_verdict_summaries"
 // POST /api/v1/internal/runs
 func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ID          string          `json:"id"`
-		AgentID     string          `json:"agent_id"`
-		ChatID      string          `json:"chat_id"`
-		WorkspaceID string          `json:"workspace_id"`
-		TriggerType string          `json:"trigger_type"`
-		Metadata    json.RawMessage `json:"metadata"`
+		ID                     string                `json:"id"`
+		AgentID                string                `json:"agent_id"`
+		ChatID                 string                `json:"chat_id"`
+		WorkspaceID            string                `json:"workspace_id"`
+		TriggerType            string                `json:"trigger_type"`
+		Metadata               json.RawMessage       `json:"metadata"`
+		ArtifactHumanReceipt   *chataudience.Receipt `json:"artifact_human_receipt"`
+		ArtifactHumanMessageID string                `json:"artifact_human_message_id"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
@@ -85,6 +88,12 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	if body.ArtifactHumanReceipt != nil {
+		if err := captureArtifactChatPrincipal(r, h.db, body.ID, body.WorkspaceID, body.AgentID, agentCrewID, body.ChatID, body.ArtifactHumanMessageID, body.ArtifactHumanReceipt); err != nil {
+			replyError(w, http.StatusForbidden, "artifact human admission refused")
+			return
+		}
+	}
 	// Persist run.started FIRST — this is the source of truth for runs
 	// (post-J migration). The IPC acknowledgement permits the caller to
 	// launch an agent, so an asynchronous journal enqueue is insufficient:
@@ -103,6 +112,8 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		if body.Metadata != nil {
 			var md map[string]any
 			if err := json.Unmarshal(body.Metadata, &md); err == nil && md != nil {
+				delete(md, "artifact_human_receipt")
+				delete(md, "artifact_human_message_id")
 				payload["metadata"] = md
 			}
 		}

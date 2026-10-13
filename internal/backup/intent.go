@@ -36,6 +36,8 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"artifact_run_principals":               IntentExcludeRuntime, // active chat/run admission must be freshly captured after restore
+	"page_artifact_run_delegations":         IntentExcludeRuntime, // restoring history must never resurrect a live run's publication authority
 	"restricted_workflow_recipe_bindings":   IntentExcludeRuntime, // frozen private recipe authority requires fresh admission after restore
 	"restricted_workflow_provider_policies": IntentExcludeRuntime, // immutable provider policies belong to private queued authority
 	"restricted_workflow_delegate_slots":    IntentExcludeRuntime, // active host delegation slots cannot survive restore
@@ -175,12 +177,15 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// page_folder_acl is the folder's sharing (#2533), inherited by every
 	// page in it: a restore that lost it would silently narrow who reaches
 	// those pages, the same audit-trail loss page_grants guards against.
-	"page_folder_acl":         IntentInclude,
-	"pages":                   IntentInclude,
-	"page_panels":             IntentInclude,
-	"page_versions":           IntentInclude,
-	"page_artifacts":          IntentInclude,
-	"page_artifact_revisions": IntentInclude,
+	"page_folder_acl":                 IntentInclude,
+	"pages":                           IntentInclude,
+	"page_panels":                     IntentInclude,
+	"page_versions":                   IntentInclude,
+	"page_artifacts":                  IntentInclude,
+	"page_artifact_revisions":         IntentInclude,
+	"page_artifact_threads":           IntentInclude,
+	"page_artifact_comments":          IntentInclude,
+	"page_artifact_comment_mutations": IntentInclude,
 	// Durable draft metadata and revision audit. Source files live outside
 	// SQLite; until file-phase integration, back up page_projects_path alongside
 	// the DB (docs/prd/pages-apps-v1.md). Never silently drop the metadata.

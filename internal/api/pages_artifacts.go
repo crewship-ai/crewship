@@ -40,7 +40,8 @@ func (h *PageHandler) pageAuthReader(ctx context.Context) pageAuthQueryer {
 func (h *PageHandler) artifactPage(w http.ResponseWriter, r *http.Request, write bool) (*pageRecord, bool) {
 	user := UserFromContext(r.Context())
 	agentCaller, _ := pageGrantCallerIsAgent(r)
-	if user == nil || agentCaller || projectAgentFrom(r.Context()) != nil {
+	authority, delegated := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
+	if user == nil || (!delegated && (agentCaller || projectAgentFrom(r.Context()) != nil)) {
 		replyError(w, 401, "human authentication required")
 		return nil, false
 	}
@@ -80,14 +81,26 @@ func (h *PageHandler) artifactPage(w http.ResponseWriter, r *http.Request, write
 		replyError(w, 503, "artifact storage is not configured")
 		return nil, false
 	}
+	if delegated {
+		if authority.HumanUserID != user.ID || authority.WorkspaceID != ws {
+			replyError(w, 403, "artifact principal mismatch")
+			return nil, false
+		}
+		if err := h.checkArtifactRun(r.Context(), rec.ID, authority); err != nil {
+			replyError(w, 403, err.Error())
+			return nil, false
+		}
+	}
 	return rec, true
 }
 
 type pageArtifactRevision struct {
-	Revision     int64  `json:"revision"`
-	CreatedAt    string `json:"created_at"`
-	AuthorUserID string `json:"author_user_id"`
-	RestoredFrom *int64 `json:"restored_from,omitempty"`
+	Revision      int64  `json:"revision"`
+	CreatedAt     string `json:"created_at"`
+	AuthorUserID  string `json:"author_user_id"`
+	AuthorAgentID string `json:"author_agent_id,omitempty"`
+	AuthorRunID   string `json:"author_run_id,omitempty"`
+	RestoredFrom  *int64 `json:"restored_from,omitempty"`
 }
 
 func (h *PageHandler) GetArtifact(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +141,7 @@ func (h *PageHandler) GetArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 		html = string(data)
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT revision,created_at,COALESCE(author_user_id,''),restored_from FROM page_artifact_revisions WHERE page_id=? ORDER BY revision DESC LIMIT 200`, rec.ID)
+	rows, err := h.db.QueryContext(r.Context(), `SELECT revision,created_at,COALESCE(author_user_id,''),restored_from,COALESCE(author_agent_id,''),COALESCE(author_run_id,'') FROM page_artifact_revisions WHERE page_id=? ORDER BY revision DESC LIMIT 200`, rec.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "read artifact history", err)
 		return
@@ -136,7 +149,7 @@ func (h *PageHandler) GetArtifact(w http.ResponseWriter, r *http.Request) {
 	revisions := make([]pageArtifactRevision, 0)
 	for rows.Next() {
 		var v pageArtifactRevision
-		if err := rows.Scan(&v.Revision, &v.CreatedAt, &v.AuthorUserID, &v.RestoredFrom); err != nil {
+		if err := rows.Scan(&v.Revision, &v.CreatedAt, &v.AuthorUserID, &v.RestoredFrom, &v.AuthorAgentID, &v.AuthorRunID); err != nil {
 			rows.Close()
 			replyInternalError(w, h.logger, "read artifact history", err)
 			return
@@ -269,10 +282,10 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		return
 	}
 	var previous int64
-	var oldDigest, oldAuthor string
-	err = tx.QueryRowContext(ctx, `SELECT revision,request_digest,COALESCE(author_user_id,'') FROM page_artifact_revisions WHERE page_id=? AND mutation_id=?`, rec.ID, req.MutationID).Scan(&previous, &oldDigest, &oldAuthor)
+	var oldDigest, oldAuthor, oldAgent, oldRun string
+	err = tx.QueryRowContext(ctx, `SELECT revision,request_digest,COALESCE(author_user_id,''),COALESCE(author_agent_id,''),COALESCE(author_run_id,'') FROM page_artifact_revisions WHERE page_id=? AND mutation_id=?`, rec.ID, req.MutationID).Scan(&previous, &oldDigest, &oldAuthor, &oldAgent, &oldRun)
 	if err == nil {
-		if oldDigest != fingerprint || oldAuthor != user.ID {
+		if oldDigest != fingerprint || oldAuthor != user.ID || oldAgent != artifactAgentID(r) || oldRun != artifactRunID(r) {
 			replyError(w, 409, "mutation_id was already used for a different request")
 			return
 		}
@@ -312,7 +325,7 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		return
 	}
 	revision := head + 1
-	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,restored_from,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, generateCUID(), rec.ID, revision, sha, user.ID, req.MutationID, fingerprint, restoredFrom, tsformat.Format(now)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,restored_from,created_at,author_agent_id,author_run_id) VALUES (?,?,?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''))`, generateCUID(), rec.ID, revision, sha, user.ID, req.MutationID, fingerprint, restoredFrom, tsformat.Format(now), artifactAgentID(r), artifactRunID(r)); err != nil {
 		replyInternalError(w, h.logger, "save artifact revision", err)
 		return
 	}
@@ -329,7 +342,7 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		return
 	}
 	if h.journal != nil {
-		_, err := h.journal.Emit(r.Context(), journal.Entry{WorkspaceID: ws, Type: journal.EntryPageSpecChanged, Severity: journal.SeverityInfo, ActorType: journal.ActorUser, ActorID: user.ID, Summary: fmt.Sprintf("Artifact %s revision %d saved", rec.Slug, revision), Payload: map[string]any{"page_id": rec.ID, "page": rec.Slug, "artifact_revision": revision, "sha256": sha, "restored_from": restoredFrom}})
+		_, err := h.journal.Emit(r.Context(), journal.Entry{WorkspaceID: ws, Type: journal.EntryPageSpecChanged, Severity: journal.SeverityInfo, ActorType: artifactActorType(r), ActorID: artifactActorID(r, user.ID), Summary: fmt.Sprintf("Artifact %s revision %d saved", rec.Slug, revision), Payload: map[string]any{"page_id": rec.ID, "page": rec.Slug, "artifact_revision": revision, "sha256": sha, "restored_from": restoredFrom, "on_behalf_of_user_id": user.ID, "agent_id": artifactAgentID(r), "run_id": artifactRunID(r)}})
 		if err != nil && h.logger != nil {
 			h.logger.Warn("artifact revision audit failed", "error", err)
 		}
