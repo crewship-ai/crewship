@@ -129,6 +129,9 @@ export function MembersPage() {
   const stage = (people: Member[], next: (current: string[]) => string[]) => serverCaps && setDrafts((d) => {
     const out = { ...d }
     for (const m of people) {
+      // A new member may precede their entry in the capability cache. A
+      // missing entry is unknown, so never build a replacement set from it.
+      if (!serverCaps[m.user.id]) continue
       const set = canonical(next(out[m.user.id] ?? serverCaps?.[m.user.id] ?? []))
       if (capabilityDiff(serverCaps?.[m.user.id], set) === 0) delete out[m.user.id]
       else out[m.user.id] = set
@@ -513,7 +516,7 @@ export function MembersPage() {
           <SheetDescription className="sr-only">Role, what they may do and where</SheetDescription>
           {opened && (
             <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin}
-              granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading || !serverCaps} busy={busy}
+              granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading || !serverCaps?.[opened.user.id]} busy={busy}
               onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} revealEnabled={revealEnabled} onAccessSaved={roster.refresh} />
           )}
           {/* The page's own save bar sits under the sheet's overlay; the same

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useMembers } from "../use-members"
+import { useMemberCapabilities } from "@/components/admin/member-capabilities"
 
 const api = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => api(...args) }))
@@ -22,6 +23,19 @@ beforeEach(() => {
 afterEach(() => { cleanup(); client.clear() })
 
 describe("workspace roster isolation", () => {
+  it("refreshes capabilities alongside a roster that gained a member", async () => {
+    let added = false
+    api.mockImplementation(async (url: string) => url.includes("/members/capabilities")
+      ? response({ members: added ? [{ user_id: "new-member", capabilities: ["chat", "issue.create"] }] : [] })
+      : response(added ? [member("new-member")] : []))
+    const { result } = renderHook(() => ({ roster: useMembers("first"), caps: useMemberCapabilities("first", true) }), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.caps.data).toEqual({}))
+    added = true
+    act(() => { result.current.roster.refresh() })
+    await waitFor(() => expect(result.current.roster.members[0]?.id).toBe("new-member"))
+    await waitFor(() => expect(result.current.caps.data?.["new-member"]).toEqual(["chat", "issue.create"]))
+  })
+
   it("hides the previous roster while the next workspace loads, including when its read fails", async () => {
     let finish!: (value: Response) => void
     api.mockResolvedValueOnce(response([member("first-member")]))

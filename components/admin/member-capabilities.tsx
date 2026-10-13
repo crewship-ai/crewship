@@ -96,9 +96,9 @@ export function memberCapabilitiesKey(workspaceId: string) {
 /**
  * One round-trip for the whole roster. Returns `user_id -> capabilities`.
  *
- * A 403 means the caller is no longer admin; the surfaces that render
- * capabilities are admin-gated, so the outcome is a brief flash rather than
- * a thrown error. Resolve empty instead of rejecting.
+ * A failed read rejects: the editor must distinguish unknown grants from an
+ * empty set before it can safely replace them. A 403 can mean the caller is
+ * no longer admin; the surface reports the failure instead of enabling edits.
  */
 export function useMemberCapabilities(workspaceId: string, enabled: boolean) {
   return useQuery({

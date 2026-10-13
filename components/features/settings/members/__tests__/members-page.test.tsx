@@ -416,6 +416,18 @@ describe("Members — access mode", () => {
 
 /** Review of #3056: what may a draft write, and where. */
 describe("Members — drafts stay where they were made", () => {
+  it("does not replace a member's grants when the capability cache has no entry for them", async () => {
+    // A newly added person can reach the refreshed roster before the bulk
+    // capability cache has been refreshed. Missing is not an empty set.
+    renderPage("/settings/members?member=u-mo")
+    const control = await within(await sheet()).findByRole("switch", { name: "Grant memory.write to Mo Manager" })
+    await waitFor(() => expect(api.mock.calls.some(([url]) => String(url).includes("/members/capabilities"))).toBe(true))
+    expect(control).toBeDisabled()
+    fireEvent.click(control)
+    expect(writes()).toHaveLength(0)
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
+  })
+
   it("does not save one workspace's drafts into another", async () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     window.history.replaceState(null, "", "/settings/members?member=u-mel")

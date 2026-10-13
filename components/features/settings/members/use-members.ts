@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { memberCapabilitiesKey } from "@/components/admin/member-capabilities"
 import type { Member } from "./members-model"
 
 /**
@@ -37,6 +38,7 @@ export function useMembers(workspaceId: string | null) {
   // into another workspace, even if that workspace's read fails.
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["workspace-members", workspaceId] })
+    if (workspaceId) void queryClient.invalidateQueries({ queryKey: memberCapabilitiesKey(workspaceId) })
   }, [queryClient, workspaceId])
 
   /** PATCH the membership's role. Resolves true when the server took it. */
