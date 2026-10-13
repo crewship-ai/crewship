@@ -142,6 +142,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Workspace invitations
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/invitations", authed(wsCtx(http.HandlerFunc(ws.ListInvitations))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/invitations", roleManage, ws.CreateInvitation)
+	// openapi: responses 200,401,403,404,409,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/invitations/{invitationId}/reissue", roleManage, ws.ReissueInvitation)
+	// openapi: responses 200,401,403,404,409,500
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/invitations/{invitationId}", roleManage, ws.RevokeInvitation)
 
 	// Crews (require workspace context)
 	// List pages through parsePagination and searches through
