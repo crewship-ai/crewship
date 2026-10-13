@@ -803,3 +803,46 @@ until expiry or revocation. A missing transcript file is an empty array.
 source transcript over 16 MiB or 1,000 physical JSONL rows (including hidden rows),
 or encoded IPC response over 32 MiB; 502 IPC/read/decode failure; 503 unavailable
 store/service. Oversized or unreadable history is never silently truncated.
+
+
+## Durable issue references
+
+`GET /api/v1/chats/{chatId}/entity-refs`
+
+Requires authentication, the selected workspace and current chat access. Only
+ordinary trusted sessions are supported. Each issue is checked against current
+workspace access; unreadable objects are omitted. The response is not a count
+of actions hidden from the viewer. Responses set `Cache-Control: no-store`.
+
+| Query | Meaning |
+| --- | --- |
+| `limit` | 1–100 references, default 100. |
+| `cursor` | Opaque cursor returned by the previous response; omit for a fresh snapshot. |
+
+```json
+{"reset":true,"next_cursor":"opaque","snapshot_id":"snapshot","snapshot_complete":true,"has_more":false,"refs":[]}
+```
+
+A reset replaces the displayed list. Continuation pages share a snapshot ID.
+A completed cursor starts another replacement snapshot. Discard invalid cursors
+and restart without one. `400` means invalid cursor or limit; inaccessible
+chats return `404`; unavailable synchronization returns `503`. Never label a
+failed synchronization as live. See the [full contract](../specs/chat-entity-references.md)
+for entity, provenance, anchor and deletion-reference fields.
+
+## Read a chat operation
+
+`GET /api/v1/operations/{operationId}`
+
+Requires authentication, the selected workspace, current issue access and at
+least one readable source chat. The response includes `id`, `status`, `kind`,
+`verb`, `entity`, `provenance` and `revision_at_action`. It excludes stored
+mutation results, retry keys, request hashes and human authority receipts.
+
+```json
+{"id":"operation","status":"completed","kind":"issue","verb":"created","entity":{"id":"issue","identifier":"ENG-1","workspace_id":"workspace"},"provenance":{"actor":{"type":"agent","id":"agent"},"at":"2026-10-13T12:00:00Z"},"revision_at_action":{"revision":1,"aggregate_revision":1}}
+```
+
+Missing and inaccessible operations both return `404`. Backend failures return
+`503`. This endpoint only reads metadata and never executes or retries work.
+Responses set `Cache-Control: no-store`.

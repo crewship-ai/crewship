@@ -63,6 +63,27 @@ func newChatIssueFixture(t *testing.T) chatIssueFixture {
 	seedChatIssueRun(t, h, workspace, agent, user, f.chat, f.run)
 	return f
 }
+
+func TestChatIssueOperationsKeyedAutonomousRetryHasNoChatCard(t *testing.T) {
+	h, workspace, crew, agent, _ := newInternalIssueHandler(t)
+	seedAutonomousIssueRun(t, h, workspace, agent, "autonomous-keyed-run")
+	body := map[string]any{"workspace_id": workspace, "crew_id": crew, "title": "Scheduled result", "author_agent_id": agent, "author_run_id": "autonomous-keyed-run", "operation_key": "autonomous-keyed-create"}
+	created := chatIssueJSON(t, chatIssueCall(t, h.Create, "POST", "", body), 201)
+	replay := chatIssueJSON(t, chatIssueCall(t, h.Create, "POST", "", body), 200)
+	if created["operation_id"] == nil || created["operation_id"] != replay["operation_id"] || created["id"] != replay["id"] || replay["replayed"] != true {
+		t.Fatalf("unstable autonomous retry: %v %v", created, replay)
+	}
+	f := chatIssueFixture{h: h}
+	chatIssueCount(t, f, "missions", 1)
+	chatIssueCount(t, f, "agent_operations", 1)
+	chatIssueCount(t, f, "chat_entity_refs", 0)
+	body["title"] = "Different operation"
+	chatIssueJSON(t, chatIssueCall(t, h.Create, "POST", "", body), 409)
+	delete(body, "operation_key")
+	chatIssueJSON(t, chatIssueCall(t, h.Create, "POST", "", body), 201)
+	chatIssueCount(t, f, "missions", 2)
+	chatIssueCount(t, f, "agent_operations", 1)
+}
 func (f chatIssueFixture) createBody(key, title string) map[string]any {
 	return map[string]any{"workspace_id": f.workspace, "crew_id": f.crew, "title": title, "author_agent_id": f.agent, "author_run_id": f.run, "author_chat_id": "forged-chat", "operation_key": key}
 }

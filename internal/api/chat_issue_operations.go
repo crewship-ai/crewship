@@ -92,9 +92,9 @@ func (h *InternalIssueHandler) authorizeChatIssue(ctx context.Context, q issueOp
 	if err != nil {
 		return nil, err
 	}
-	if a.HumanAuthority == nil {
+	if a.HumanAuthority == nil && key == "" {
 		return nil, nil
-	} // host-admitted autonomous work
+	} // keyless host-admitted autonomous compatibility
 	if entityID != "" {
 		if err := verifyChatIssueReplayEntity(ctx, q, agentID, workspaceID, entityID); err != nil {
 			return nil, err
@@ -106,12 +106,14 @@ func (h *InternalIssueHandler) authorizeChatIssue(ctx context.Context, q issueOp
 	if len(key) > 200 {
 		return nil, chatentities.ErrInvalid
 	}
-	allowed, err := issueRequesterAllowed(ctx, q, a.HumanAuthority.UserID, workspaceID, verb)
-	if err != nil {
-		return nil, err
-	}
-	if !allowed {
-		return nil, errChatIssueRequesterForbidden
+	if a.HumanAuthority != nil {
+		allowed, err := issueRequesterAllowed(ctx, q, a.HumanAuthority.UserID, workspaceID, verb)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, errChatIssueRequesterForbidden
+		}
 	}
 	hash, err := chatIssueRequestHash(verb, entityID, payload)
 	if err != nil {
@@ -216,6 +218,9 @@ func completeChatIssueOperation(ctx context.Context, tx *sql.Tx, op *chatIssueOp
 		EntityID: entityID, Revision: revision, AggregateRevision: aggregate, Result: body,
 	}); err != nil {
 		return err
+	}
+	if op.authority.HumanAuthority == nil {
+		return nil
 	}
 	_, err = chatentities.AppendRef(ctx, tx, chatentities.RefSpec{
 		EventID: generateCUID(), ChatID: op.authority.ChatID, OperationID: op.operation.ID,

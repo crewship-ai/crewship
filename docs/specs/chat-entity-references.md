@@ -29,7 +29,9 @@ host-admitted run and triggering message. Forged or unavailable run identity,
 ended runs and revoked requester authority fail closed. Mutation, operation
 result and reference commit or roll back together. Successful no-op updates
 also reserve their key. Genuine host-admitted autonomous work retains its
-existing mutation behavior without generating a human chat card.
+existing mutation behavior without generating a human chat card. Explicitly
+keyed autonomous operations also persist retry results; keyless autonomous
+HTTP calls retain legacy behavior. Explicit show requires a human chat origin.
 
 Once run tokens are enabled, old agent tokens cannot mutate issues. This
 delivery supports human-run create, update, comment and show. Work execution,

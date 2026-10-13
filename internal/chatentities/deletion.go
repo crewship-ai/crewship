@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"io"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // DeletionAccessSnapshot preserves the access boundary after hard deletion.
@@ -90,7 +92,7 @@ func AppendDeletionRefs(ctx context.Context, tx *sql.Tx, operationID, workspaceI
 			return nil, e
 		}
 		eventID := "c" + hex.EncodeToString(random[:])
-		_, e = tx.ExecContext(ctx, `INSERT INTO chat_entity_refs(event_id,chat_id,operation_id,run_id,trigger_message_id,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(chat_id,operation_id) DO NOTHING`, eventID, a.chat, o.ID, a.run, a.message, time.Now().UTC().Format(time.RFC3339Nano))
+		_, e = tx.ExecContext(ctx, `INSERT INTO chat_entity_refs(event_id,chat_id,operation_id,run_id,trigger_message_id,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(chat_id,operation_id) DO NOTHING`, eventID, a.chat, o.ID, a.run, a.message, tsformat.Format(time.Now()))
 		if e != nil {
 			return nil, e
 		}

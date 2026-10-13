@@ -295,6 +295,7 @@
               "cli/agent",
               "cli/ask",
               "cli/chat",
+              "cli/operation",
               "cli/context",
               "cli/conversation",
               "cli/feedback",

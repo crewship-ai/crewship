@@ -146,11 +146,38 @@ func (r *chainsListRig) dispatchAgent(t *testing.T, runID, targetSlug string) st
 	return createdAssignmentID(t, w)
 }
 
+// Admit the routine's acting agent through the real host run-start door.
+// Pipeline.RunStore records workflow history; that alone is not authenticated
+// authority for a step that mutates an issue on behalf of the lead agent.
+func (r *chainsListRig) admitRoutineIssueRun(t *testing.T, runID string) {
+	t.Helper()
+	var admitted bool
+	if err := r.db.QueryRowContext(t.Context(), `SELECT EXISTS(SELECT 1 FROM journal_entries WHERE trace_id=? AND entry_type='run.started')`, runID).Scan(&admitted); err != nil {
+		t.Fatal(err)
+	}
+	if admitted {
+		return
+	}
+	host := NewInternalHandler(r.db, "chains-internal-token", newTestLogger())
+	host.SetJournal(r.jw)
+	body, err := json.Marshal(map[string]any{"id": runID, "workspace_id": r.ws, "agent_id": r.lead, "chat_id": r.chat, "trigger_type": "SCHEDULED", "metadata": map[string]any{"pipeline_run_id": runID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/runs", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	host.CreateRun(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("admit routine agent run: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
 // issueFromRun runs the issue.create verb. insertIssueTx stores author_run_id
 // on the missions row, which is the only exact record that a run CREATED an
 // issue. Returns the identifier.
 func (r *chainsListRig) issueFromRun(t *testing.T, runID, title string) string {
 	t.Helper()
+	r.admitRoutineIssueRun(t, runID)
 	raw := r.crewshipCall(t, "issue.create", runID, map[string]any{"title": title})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/issues", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
@@ -174,6 +201,7 @@ func (r *chainsListRig) issueFromRun(t *testing.T, runID, title string) string {
 // run CHANGED an issue it did not create.
 func (r *chainsListRig) moveIssueFromRun(t *testing.T, runID, identifier, status string) {
 	t.Helper()
+	r.admitRoutineIssueRun(t, runID)
 	raw := r.crewshipCall(t, "issue.update", runID, map[string]any{"status": status})
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/internal/issues/"+identifier, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")

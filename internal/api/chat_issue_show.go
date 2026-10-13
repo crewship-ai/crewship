@@ -101,7 +101,7 @@ func (h *InternalIssueHandler) Show(w http.ResponseWriter, r *http.Request) {
 		writeChatIssueError(w, err)
 		return
 	}
-	if op == nil {
+	if op == nil || op.authority.HumanAuthority == nil {
 		writeChatIssueError(w, runauthority.ErrUnavailable)
 		return
 	}

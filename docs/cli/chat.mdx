@@ -24,6 +24,7 @@ Auth: commands require an authenticated session (`crewship login`) except `chat 
 | `chat <chat-id>` | Print the full message history of one chat as a rendered transcript. |
 | `chat create <agent-slug-or-id>` | Open an empty chat session on an agent without sending anything to it. Prints the new chat id on stdout. |
 | `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes `KIND` (what wrote the chat) and `UNREAD` (replies you haven't seen). `--kind` narrows to one; `--search`/`-q` matches titles, `--chat`/`--routine` pin one chat or one routine's chats, `--with-source` attaches the work source to each row; `--limit` and `--offset` page (the server's default and ceiling are 100), and a cut page ends with `showing 1–10 of 19 · next page: --offset 10`. |
+| `chat refs <chat-id>` | Read one authorized page of durable Issue cards, with an opaque continuation cursor. |
 | `chat read <chat-id>` | Mark a chat read for you: clears its unread count and the paired "agent replied" inbox notification. |
 | `chat rename <chat-id> <title>` | Give the session a name — what `chat list`, the sidebar and reply notifications call it. Alias: `title`. |
 | `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/<attachment-id>/` in the container). |
@@ -50,6 +51,36 @@ Auth: commands require an authenticated session (`crewship login`) except `chat 
 | `chat room agents list / add / remove` | The agents joined to a channel (creator-only mutations; channels only). |
 | `chat room activity <room-id>` | Show, or as the creator set, whether a channel receives issue and routine lifecycle events. |
 | `chat room continue <room-id>` | Start a fresh group or channel from a DM or private group; private history is never copied. |
+
+## `crewship chat refs`
+
+```bash
+crewship chat refs <chat-id>
+crewship chat refs <chat-id> --limit 25
+crewship chat refs <chat-id> --cursor '<next_cursor>' --limit 25 --format yaml
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--limit` | `100` | Maximum references per page; accepts 1–100. |
+| `--cursor` | empty | Opaque `next_cursor` from the preceding response. |
+
+Calls `GET /api/v1/chats/{chatId}/entity-refs`. The response retains `refs`,
+`reset`, `next_cursor`, `snapshot_id`, `has_more` and `snapshot_complete`.
+Default output is JSON; global `--format yaml` and `--format ndjson` are also
+supported. `--filter` applies a jq expression to the JSON response.
+
+A first page starts a replacement list (`reset: true`). Continue with its
+cursor while `has_more` is true; continuation pages share `snapshot_id`.
+Passing a completed cursor starts a new replacement snapshot. The command
+never fetches every page automatically. Discard an invalid or expired cursor
+and restart without `--cursor`; cursors also expire when the server restarts.
+
+Current chat and issue access are required. Restricted sessions are unsupported;
+unreadable references are omitted rather than replaced with metadata stubs.
+This is a read-only API projection, not a command that creates cards or work.
+See [Chat entity references](/specs/chat-entity-references) for synchronization
+rules and [Operation](/cli/operation) for operation metadata.
 
 ## Flags
 

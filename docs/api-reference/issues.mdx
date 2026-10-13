@@ -1969,3 +1969,33 @@ milestone is not in the workspace.
 | `medium` | Medium priority |
 | `high` | High priority |
 | `urgent` | Urgent priority |
+
+
+## Read issue revisions
+
+`GET /api/v1/issues/{identifier}/revision`
+
+`GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision`
+
+Request path parameters are `identifier` and, for the workspace alias,
+`workspaceId`. Neither route accepts a request body.
+
+Both routes require authentication and selected workspace membership. Only
+ordinary trusted sessions are supported. The identifier can also be the issue's
+internal ID. A workspace path must agree with the authorized selected workspace;
+it never overrides that workspace.
+
+Response (`200`):
+
+```json
+{"revision":1,"aggregate_revision":1}
+```
+
+`revision` changes when issue fields change; `aggregate_revision` also covers
+related comments, labels, links, attachments and sub-issues. They describe
+issue data, not unrelated execution or automation freshness. Existing issue
+GET responses include these counters and `allowed_actions` for the current
+viewer. Actual mutations reauthorize and validate state.
+
+Missing, foreign-workspace and inaccessible issues return `404`; backend
+failures return `503`. Responses set `Cache-Control: no-store`.

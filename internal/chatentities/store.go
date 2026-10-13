@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 const operationColumns = `id,workspace_id,operation_key,request_hash,actor_type,actor_id,run_id,human_authority,provenance,kind,verb,entity_id,entity_revision,entity_aggregate_revision,access_snapshot,status,result,source_proposal_id,source_proposal_version,created_at`
@@ -47,7 +49,7 @@ func BeginOperation(ctx context.Context, tx *sql.Tx, s OperationSpec) (*Operatio
 	if err != nil {
 		return nil, false, err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now())
 	res, err := tx.ExecContext(ctx, `INSERT INTO agent_operations (id,workspace_id,operation_key,request_hash,actor_type,actor_id,run_id,human_authority,provenance,kind,verb,source_proposal_id,source_proposal_version,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id,actor_type,actor_id,operation_key) DO NOTHING`, s.ID, s.WorkspaceID, s.Key, s.RequestHash, s.ActorType, s.ActorID, s.RunID, authority, s.Provenance, s.Kind, s.Verb, s.SourceProposalID, s.SourceProposalVersion, now)
 	if err != nil {
 		return nil, false, err
@@ -119,7 +121,7 @@ func AppendRef(ctx context.Context, tx *sql.Tx, s RefSpec) (Ref, error) {
 	if valid != 1 {
 		return Ref{}, ErrInvalid
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO chat_entity_refs(event_id,chat_id,operation_id,run_id,trigger_message_id,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(chat_id,operation_id) DO NOTHING`, s.EventID, s.ChatID, s.OperationID, s.RunID, s.TriggerMessageID, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err = tx.ExecContext(ctx, `INSERT INTO chat_entity_refs(event_id,chat_id,operation_id,run_id,trigger_message_id,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(chat_id,operation_id) DO NOTHING`, s.EventID, s.ChatID, s.OperationID, s.RunID, s.TriggerMessageID, tsformat.Format(time.Now()))
 	if err != nil {
 		return Ref{}, err
 	}

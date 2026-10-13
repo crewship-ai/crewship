@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -12,6 +13,9 @@ func newChatRefsCommand() *cobra.Command {
 		limit, _ := cmd.Flags().GetInt("limit")
 		if limit < 1 || limit > 100 {
 			return fmt.Errorf("--limit must be between 1 and 100")
+		}
+		if err := validateEntityCLIIdentifier(args[0]); err != nil {
+			return err
 		}
 		client, err := requireAuthAndWorkspace()
 		if err != nil {
@@ -26,7 +30,10 @@ func newChatRefsCommand() *cobra.Command {
 		if err = getJSON(client, "/api/v1/chats/"+url.PathEscape(args[0])+"/entity-refs?"+query.Encode(), &page); err != nil {
 			return err
 		}
-		return emitJSONFiltered(cmd, page)
+		if filter, _ := cmd.Flags().GetString("filter"); filter != "" {
+			return emitJSONFiltered(cmd, page)
+		}
+		return resolvedFormatter(cmd).Machine(page)
 	}}
 	cmd.Flags().Int("limit", 100, "Maximum number of cards (1–100)")
 	cmd.Flags().String("cursor", "", "Opaque next_cursor from the preceding page")
@@ -35,6 +42,9 @@ func newChatRefsCommand() *cobra.Command {
 func newOperationCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "operation", Short: "Inspect durable, authorized agent operations"}
 	cmd.AddCommand(&cobra.Command{Use: "get <operation-id>", Short: "Read an operation without exposing internal authority or stored payloads", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateEntityCLIIdentifier(args[0]); err != nil {
+			return err
+		}
 		client, err := requireAuthAndWorkspace()
 		if err != nil {
 			return err
@@ -43,8 +53,20 @@ func newOperationCommand() *cobra.Command {
 		if err = getJSON(client, "/api/v1/operations/"+url.PathEscape(args[0]), &result); err != nil {
 			return err
 		}
-		return emitJSONFiltered(cmd, result)
+		if filter, _ := cmd.Flags().GetString("filter"); filter != "" {
+			return emitJSONFiltered(cmd, result)
+		}
+		return resolvedFormatter(cmd).Machine(result)
 	}})
 	return cmd
 }
 func init() { chatCmd.AddCommand(newChatRefsCommand()); rootCmd.AddCommand(newOperationCommand()) }
+
+// Reject path segments with routing meaning before making any request. URL
+// escaping alone deliberately leaves dot segments unchanged.
+func validateEntityCLIIdentifier(id string) error {
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\?#\r\n\t ") {
+		return fmt.Errorf("invalid identifier %q", id)
+	}
+	return nil
+}

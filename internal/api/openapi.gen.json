@@ -1088,6 +1088,185 @@
         },
         "type": "object"
       },
+      "ChatEntityIdentity": {
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "identifier",
+          "workspace_id"
+        ],
+        "type": "object"
+      },
+      "ChatEntityOperation": {
+        "properties": {
+          "entity": {
+            "$ref": "#/components/schemas/ChatEntityIdentity"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ChatEntityProvenance"
+          },
+          "revision_at_action": {
+            "$ref": "#/components/schemas/IssueEntityRevision"
+          },
+          "status": {
+            "type": "string"
+          },
+          "verb": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "kind",
+          "verb",
+          "entity",
+          "provenance",
+          "revision_at_action"
+        ],
+        "type": "object"
+      },
+      "ChatEntityProvenance": {
+        "properties": {
+          "actor": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "id"
+            ],
+            "type": "object"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "at"
+        ],
+        "type": "object"
+      },
+      "ChatEntityReference": {
+        "properties": {
+          "anchor": {
+            "properties": {
+              "run_id": {
+                "type": "string"
+              },
+              "run_status": {
+                "enum": [
+                  "running",
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "timeout",
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              },
+              "trigger_message_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "trigger_message_id",
+              "run_id",
+              "run_status"
+            ],
+            "type": "object"
+          },
+          "entity": {
+            "$ref": "#/components/schemas/ChatEntityIdentity"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ChatEntityProvenance"
+          },
+          "revision_at_action": {
+            "$ref": "#/components/schemas/IssueEntityRevision"
+          },
+          "verb": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "kind",
+          "verb",
+          "entity",
+          "provenance",
+          "anchor",
+          "revision_at_action"
+        ],
+        "type": "object"
+      },
+      "ChatEntityReferencePage": {
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "type": "string"
+          },
+          "refs": {
+            "items": {
+              "$ref": "#/components/schemas/ChatEntityReference"
+            },
+            "type": "array"
+          },
+          "reset": {
+            "type": "boolean"
+          },
+          "snapshot_complete": {
+            "type": "boolean"
+          },
+          "snapshot_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reset",
+          "next_cursor",
+          "snapshot_id",
+          "snapshot_complete",
+          "has_more",
+          "refs"
+        ],
+        "type": "object"
+      },
       "ChatShareCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -7691,6 +7870,15 @@
       },
       "Issue": {
         "properties": {
+          "aggregate_revision": {
+            "type": "integer"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "assignee_id": {
             "nullable": true,
             "type": "string"
@@ -7877,6 +8065,9 @@
             "nullable": true,
             "type": "string"
           },
+          "revision": {
+            "type": "integer"
+          },
           "routine_id": {
             "nullable": true,
             "type": "string"
@@ -7995,6 +8186,23 @@
         },
         "required": [
           "id"
+        ],
+        "type": "object"
+      },
+      "IssueEntityRevision": {
+        "properties": {
+          "aggregate_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "aggregate_revision"
         ],
         "type": "object"
       },
@@ -55294,6 +55502,138 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/chats/{chatId}/entity-refs": {
+      "get": {
+        "description": "List chat entity refs (GET /api/v1/chats/{chatId}/entity-refs).",
+        "operationId": "get_api_v1_chats_chatId_entity-refs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatEntityReferencePage"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "Authorization-sensitive projection; never store in shared caches.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List chat entity refs",
+        "tags": [
+          "chats"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/chats/{chatId}/execution-profile": {
       "get": {
         "description": "Get chat execution profile (GET /api/v1/chats/{chatId}/execution-profile).",
@@ -72313,27 +72653,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -72343,27 +72698,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -72373,27 +72743,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -72403,27 +72788,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -72433,27 +72833,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -95927,6 +96342,121 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/issues/{identifier}/revision": {
+      "get": {
+        "description": "Get issue revision (GET /api/v1/issues/{identifier}/revision).",
+        "operationId": "get_api_v1_issues_identifier_revision",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueEntityRevision"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "Authorization-sensitive projection; never store in shared caches.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get issue revision",
+        "tags": [
+          "issues"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/journal": {
       "get": {
         "description": "Get journal (GET /api/v1/journal).",
@@ -107116,6 +107646,121 @@
         "summary": "Get onboarding status",
         "tags": [
           "onboarding"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/operations/{operationId}": {
+      "get": {
+        "description": "Get operation (GET /api/v1/operations/{operationId}).",
+        "operationId": "get_api_v1_operations_operationId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operationId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatEntityOperation"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "Authorization-sensitive projection; never store in shared caches.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get operation",
+        "tags": [
+          "operations"
         ],
         "x-crewship-read-only": true
       }
@@ -137585,6 +138230,129 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/workspaces/{workspaceId}/issues/{identifier}/revision": {
+      "get": {
+        "description": "Get workspace issue revision (GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision).",
+        "operationId": "get_api_v1_workspaces_workspaceId_issues_identifier_revision",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueEntityRevision"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "Authorization-sensitive projection; never store in shared caches.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace issue revision",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight": {
       "post": {
         "description": "Submit workspace issue private preflight (POST /api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight).",
@@ -155779,6 +156547,24 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "500": {
             "content": {

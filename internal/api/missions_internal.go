@@ -393,9 +393,9 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	crewID := effectiveCrewFilter(r)
 
 	selArgs := []any{missionID, wsID}
-	selQuery := `SELECT status FROM missions WHERE id = ? AND workspace_id = ?`
+	selQuery := `SELECT status FROM missions WHERE mission_type = 'orchestration' AND id = ? AND workspace_id = ?`
 	if crewID != "" {
-		selQuery = `SELECT status FROM missions WHERE id = ? AND workspace_id = ? AND crew_id = ?`
+		selQuery = `SELECT status FROM missions WHERE mission_type = 'orchestration' AND id = ? AND workspace_id = ? AND crew_id = ?`
 		selArgs = []any{missionID, wsID, crewID}
 	}
 
@@ -434,15 +434,26 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	updQuery := `UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND workspace_id = ?`
+	updQuery := `UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE mission_type = 'orchestration' AND status = 'PLANNING' AND id = ? AND workspace_id = ?`
 	updArgs := []any{now, missionID, wsID}
 	if crewID != "" {
-		updQuery = `UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND workspace_id = ? AND crew_id = ?`
+		updQuery = `UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE mission_type = 'orchestration' AND status = 'PLANNING' AND id = ? AND workspace_id = ? AND crew_id = ?`
 		updArgs = []any{now, missionID, wsID, crewID}
 	}
-	if _, err := h.db.ExecContext(r.Context(), updQuery, updArgs...); err != nil {
+	result, err := h.db.ExecContext(r.Context(), updQuery, updArgs...)
+	if err != nil {
 		h.logger.Error("update mission status", "error", err)
 		replyError(w, http.StatusInternalServerError, "failed to start mission")
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		h.logger.Error("count mission start update", "error", err)
+		replyError(w, http.StatusInternalServerError, "failed to start mission")
+		return
+	}
+	if affected != 1 {
+		replyError(w, http.StatusConflict, "mission changed before start")
 		return
 	}
 
