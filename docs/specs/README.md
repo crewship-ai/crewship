@@ -35,6 +35,9 @@ public contract here. Superseded a spec? Move it to
 
 ## Work and dispatch
 
+- [Chat entity references](chat-entity-references.md): authorized, bounded Issue
+  reference snapshots, operation projections, revision reads and API/CLI fixtures.
+
 - [Restricted workflows](restricted-workflows.md): private routine admission,
   filtered catalogs, receipts, Page polling and bounded delegated execution.
 - [Private issue preflight](private-issue-preflight.md): atomic claims,

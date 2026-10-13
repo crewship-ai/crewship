@@ -1,0 +1,160 @@
+# Chat entity references
+
+This contract covers the durable Issue reference read API and its CLI commands.
+It supplies data for chat cards; it does not provide a frontend card renderer,
+proposal confirmation, tombstone projection or dedicated entity WebSocket events.
+Mutation producers must persist operations and references through the host's
+verified authority checks; these read endpoints never create or execute work.
+
+## Authorization
+
+Every request requires authentication and a selected workspace, through the
+same workspace middleware as chat history. Supply the workspace in
+`X-Workspace-ID` or `workspace_id`.
+
+Only ordinary trusted sessions are supported. Restricted sessions receive an
+opaque `404`; these routes are absent from the restricted route allowlist.
+The list requires current chat access, a live workspace and a live chat agent.
+Each returned issue must belong to the selected workspace, matching the current
+ordinary issue GET read predicate. A readable chat alone does not make a
+foreign-workspace issue visible. Authorization is checked again after gathering
+a page; a changed chat audience invalidates the response.
+
+An operation is readable only when its issue is currently readable and at least
+one of its source chats is readable in the selected workspace. Missing and
+inaccessible operations both return `404`. Operations without an authorized
+source reference are unavailable through this endpoint.
+
+Deleted issues are omitted. The read API does not infer tombstone access from a
+workspace or project alone. A future tombstone projection requires an exact
+access-snapshot evaluator.
+
+All responses set `Cache-Control: no-store`.
+
+## List references
+
+`GET /api/v1/chats/{chatId}/entity-refs`
+
+| Query parameter | Contract |
+| --- | --- |
+| `limit` | Integer from 1 to 100; defaults to 100. Invalid values return `400 limit_invalid`. |
+| `cursor` | Opaque `next_cursor` from a preceding response. Omit for a new snapshot. |
+
+The response has these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `reset` | Start a replacement list; discard the preceding list rather than append to it. |
+| `refs` | At most `limit` authorized reference records. |
+| `next_cursor` | Opaque cursor for continuation or the next poll. |
+| `snapshot_id` | Identifies pages belonging to one replacement list. |
+| `has_more` | Another page remains in this snapshot. |
+| `snapshot_complete` | This page completes the replacement list. |
+
+The initial page has `reset: true`. Continuation pages have `reset: false` and
+the same `snapshot_id`. Passing a completed cursor starts a new bounded
+replacement snapshot, also with `reset: true`. This deliberately uses full
+replacement polling instead of claiming an incomplete permission fingerprint
+can safely support incremental visibility changes.
+
+A snapshot fixes the upper reference position for pagination. It is not a
+frozen historical copy of issue data: current authorization and object existence
+are checked on each request. New references after that position appear in the
+next replacement snapshot. Internal positions and counts of hidden records are
+never returned.
+
+Cursors are authenticated and encrypted with a process-local key, bind the
+viewer, workspace, chat and captured authority, and expire after 15 minutes.
+A cursor belonging to a different viewer/chat/workspace, a corrupted cursor,
+an expired cursor or a cursor from a previous server process returns
+`400 {"error":"cursor_invalid"}`. Discard local pagination state and retry
+without it. If the captured authority changes while the viewer retains access,
+a valid cursor starts a new replacement snapshot. If access is gone, the
+request returns `404` instead.
+
+### Client reconciliation
+
+1. Load the first page without a cursor.
+2. On `reset`, immediately remove the previous displayed list and stale
+   authorized detail data; append subsequent pages only to this `snapshot_id`.
+3. Follow `next_cursor` while `has_more` is true.
+4. Reconcile cached entities against the complete replacement list only when
+   `snapshot_complete` is true. Absence from the first page does not prove that
+   an entity is absent from the complete list.
+5. Poll again using the completed cursor. This starts another replacement list.
+
+Keep unsaved editor drafts separate from authorized display data. A reset must
+not silently destroy a draft, but a draft grants no permission to keep displaying
+old server data or submit an action. Independently reauthorize a selected detail
+before displaying it again. Failed synchronization must never be labelled live.
+
+No new entity-specific WebSocket event is emitted by this read surface. Polling
+and reconnect/focus reconciliation remain necessary; WebSocket connectivity
+alone is not evidence that a card is current.
+
+### Reference record
+
+A reference contains `event_id`, `kind`, `verb`, `entity`, `provenance`, `anchor`
+and `revision_at_action`. The supported kind is `issue`. The operation records
+its verb and actor identity; the list does not expose operation keys, request
+hashes, authority receipts, access snapshots or stored mutation payloads.
+
+`entity` contains `id`, current `identifier` and `workspace_id`.
+`provenance` contains `actor: {type, id}` and `at`. Actor display names are not
+part of this projection. `revision_at_action` contains the issue's `revision`
+and `aggregate_revision` as recorded after the operation, not current counters.
+
+`anchor` contains `trigger_message_id`, `run_id` and `run_status`. Status comes
+from the durable run journal and can be `running`, `completed`, `failed`,
+`cancelled`, `timeout`, or `null` when no matching run record exists. A failed
+run can have a persisted reference even without a final assistant message;
+clients can render it behind the triggering user message.
+
+## Read an operation
+
+`GET /api/v1/operations/{operationId}`
+
+Returns a sanitized projection with `id`, `status`, `kind`, `verb`, `entity`,
+`provenance` and `revision_at_action`. It intentionally does not return the raw
+stored `result`, operation key, hash, human authority or access snapshot.
+This is a human-viewer projection, not a mutation replay endpoint.
+
+## Read current revisions
+
+Both routes support an issue identifier or internal ID:
+
+- `GET /api/v1/issues/{identifier}/revision`
+- `GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision`
+
+The selected workspace and any workspace path parameter must agree. The
+response is `{ "revision": 1, "aggregate_revision": 1 }`, with current integer
+counters. Missing or inaccessible issues return `404`. Revision counters come
+from the issue and child-data database triggers; they are not timestamps or an
+assertion that unrelated run/automation data has been refreshed.
+
+## CLI
+
+```bash
+crewship chat refs <chat-id> --limit 100
+crewship chat refs <chat-id> --cursor '<next_cursor>' --limit 100
+crewship operation get <operation-id>
+```
+
+The commands use the authenticated API with the configured workspace and print
+JSON, retaining pagination metadata. `--cursor` is transmitted without parsing
+or rebuilding it. Neither command follows every page automatically or executes
+work. API authorization failures produce a failing CLI exit status.
+
+## Implementation and fixtures
+
+- [Handlers and cursor codec](../../internal/api/chat_entity_refs.go)
+- [Handler, authority and route tests](../../internal/api/chat_entity_refs_test.go)
+- [Handler-verified JSON fixtures](../../internal/api/testdata/chat-entity-refs/)
+- [CLI commands](../../cmd/crewship/cmd_chat_entity_refs.go)
+- [Built-binary CLI acceptance](../../cmd/crewship/acceptance_chat_entity_refs_test.go)
+- [Operation and reference storage](../../internal/chatentities/)
+
+Fixtures cover the initial bounded page, continuation, authority reset,
+a failed run, an invalid cursor and the sanitized operation response. Random
+cursor and snapshot values are normalized in the fixtures; they are not usable
+credentials. Tests compare these fixtures with the production handlers.
