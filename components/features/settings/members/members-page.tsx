@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
 import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
-import { SettingsCard, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsSummary, SummaryItem, selectionBar, selectionBarButton } from "@/components/features/settings/shared"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { HIGH_STAKES_CAPABILITIES, useMemberCapabilities } from "@/components/admin/member-capabilities"
 import { PageSaveBar, usePageSave } from "@/components/ui/page-save-bar"
@@ -551,7 +551,7 @@ function BulkBar({ count, busy, lifted, canChangeRole, callerRole, onProfile, on
   const menu = (label: string, items: { key: string; label: string; danger?: boolean; run: () => void }[], heading: string) => (
     <DropdownMenu>
       <DropdownMenuTrigger asChild disabled={busy}>
-        <Button variant="outline" size="sm" className="h-8 gap-1 px-3 text-xs">{label}<ChevronDown className="h-3 w-3" /></Button>
+        <Button variant="outline" size="sm" className={selectionBarButton}>{label}<ChevronDown className="h-3 w-3" /></Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-56">
         <DropdownMenuLabel className="font-mono text-micro uppercase tracking-[0.08em] text-primary-hover">{heading}</DropdownMenuLabel>
@@ -566,13 +566,13 @@ function BulkBar({ count, busy, lifted, canChangeRole, callerRole, onProfile, on
   return (
     <motion.div role="toolbar" aria-label="Change the selected people" data-slot="members-bulk"
       initial={reduce ? false : { y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={reduce ? undefined : { y: 24, opacity: 0 }} transition={{ duration: 0.18 }}
-      className={cn("fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-primary/30 bg-popover px-3 py-2 shadow-lg transition-[bottom]", lifted ? "bottom-20" : "bottom-6")}>
+      className={cn(selectionBar, "fixed left-1/2 -translate-x-1/2 transition-[bottom]", lifted ? "bottom-20" : "bottom-6")}>
       <span className="px-1 text-xs"><span className="font-mono font-semibold tabular-nums">{count}</span> selected</span>
       {menu("Set access", ACCESS_PROFILES.map((p) => ({ key: p.key, label: p.label, run: () => onProfile(p.key) })), "Preset")}
       {menu("Grant", caps.map((c) => ({ key: c, label: CAPABILITY_LABELS[c].en, danger: HIGH_STAKES_CAPABILITIES.has(c), run: () => onCap(c, true) })), "Grant to all selected")}
       {menu("Revoke", caps.map((c) => ({ key: c, label: CAPABILITY_LABELS[c].en, run: () => onCap(c, false) })), "Revoke from all selected")}
       {canChangeRole && roles.length > 0 && menu("Role", roles.map((r) => ({ key: r, label: ROLE_LABEL[r], run: () => onRole(r) })), "Change role")}
-      <Button variant="ghost" size="sm" className="h-8 px-2.5 text-xs text-muted-foreground" onClick={onClear}>Clear</Button>
+      <Button variant="ghost" size="sm" className={cn(selectionBarButton, "border-transparent px-2.5")} onClick={onClear}>Clear</Button>
     </motion.div>
   )
 }

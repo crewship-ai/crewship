@@ -273,6 +273,21 @@ export function SettingsSegmented<T extends string | number>({ label, options, v
 }
 
 /**
+ * The floating bar over ticked rows ("3 selected · Add to workspace …"), in
+ * the save bar's green (--save-bar-*): like unsaved edits, a selection is
+ * work in progress that must not be overlooked at the bottom of the page.
+ * A steady glow, not the save bar's pulse: nothing is lost if it is left.
+ */
+export const selectionBar = cn(
+  "z-40 flex items-center gap-2 rounded-xl border border-[var(--save-bar-border)] bg-[var(--save-bar-bg)] px-3 py-2 text-xs text-[var(--save-bar-fg)]",
+  "shadow-[0_0_0_1px_color-mix(in_oklab,var(--save-bar-fg)_45%,transparent),0_0_18px_color-mix(in_oklab,var(--save-bar-fg)_20%,transparent),0_16px_40px_rgb(0_0_0/0.45)]",
+)
+/** A secondary action on the selection bar: outlined in its green. */
+export const selectionBarButton = "h-8 gap-1 border-[var(--save-bar-border)] bg-transparent px-3 text-xs text-[var(--save-bar-fg)] hover:bg-[color-mix(in_oklab,var(--save-bar-fg)_10%,transparent)] hover:text-[var(--save-bar-fg)] dark:bg-transparent dark:hover:bg-[color-mix(in_oklab,var(--save-bar-fg)_10%,transparent)]"
+/** The selection bar's main action: filled, like the save bar's Save. */
+export const selectionBarAction = "h-8 gap-1 bg-[var(--save-bar-action)] px-3 text-xs font-semibold text-[var(--save-bar-action-fg)] hover:bg-[var(--save-bar-action)] hover:brightness-110"
+
+/**
  * One Save for a page of fields. Inside a page with a PageSaveProvider
  * (Settings, Admin, nested pages) it hands its edits to the page's floating
  * bar and draws nothing; on its own it draws the bar itself.

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
 import { SidebarSearch } from "@/components/layout/sidebar-kit"
-import { SettingsCard, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsSummary, SummaryItem, selectionBar, selectionBarAction, selectionBarButton } from "@/components/features/settings/shared"
 import { MembersAttention } from "@/components/features/settings/members/members-attention"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -362,11 +362,11 @@ function BulkPeopleBar({ people, workspaces, actions, busy, onClear }: {
   }
   return (
     <div role="toolbar" aria-label="Change the selected people" data-slot="people-bulk"
-      className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-border bg-popover px-3 py-2 shadow-lg">
+      className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)] max-sm:gap-1.5 max-sm:px-2")}>
       <span className="px-1 text-xs"><span className="font-mono font-semibold tabular-nums">{people.length}</span> selected</span>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" size="sm" className="h-8 gap-1 px-3 text-xs" disabled={workspaces.length === 0}><Building2 />Add to workspace<ChevronDown className="h-3 w-3" /></Button>
+          <Button size="sm" className={selectionBarAction} disabled={workspaces.length === 0}><Building2 />Add to workspace<ChevronDown className="h-3 w-3" /></Button>
         </PopoverTrigger>
         <PopoverContent side="top" align="start" className="w-auto space-y-3 p-3">
           <label className="grid gap-1 text-label text-muted-foreground">Workspace
@@ -378,8 +378,8 @@ function BulkPeopleBar({ people, workspaces, actions, busy, onClear }: {
           <div className="flex justify-end"><Button size="sm" className="h-7 text-xs" disabled={!target || !role || busy !== null} onClick={() => void addAll()}>Add {people.length}</Button></div>
         </PopoverContent>
       </Popover>
-      <Button variant="outline" size="sm" className="h-8 gap-1 px-3 text-xs" onClick={() => setSuspending(true)}><Ban />Suspend</Button>
-      <Button variant="ghost" size="icon-sm" className="h-8 w-8" aria-label="Clear selection" onClick={onClear}><X className="h-3.5 w-3.5" /></Button>
+      <Button variant="outline" size="sm" className={selectionBarButton} onClick={() => setSuspending(true)}><Ban />Suspend</Button>
+      <Button variant="ghost" size="icon-sm" className={cn(selectionBarButton, "w-8 px-0")} aria-label="Clear selection" onClick={onClear}><X className="h-3.5 w-3.5" /></Button>
       <AlertDialog open={suspending} onOpenChange={setSuspending}>
         <AlertDialogContent>
           <AlertDialogHeader>
