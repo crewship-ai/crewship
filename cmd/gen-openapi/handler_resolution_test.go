@@ -308,6 +308,7 @@ var requiredQueryParametersInSpec = []string{
 	// TestPageSubjectAccess_AnswersAdminsAboutAnyoneAndMembersAboutThemselves.
 
 	"GET /api/v1/pages/access ?subject",
+	"GET /api/v1/pages/{slug}/artifact/lease ?revision", // TestArtifactLeaseMetadataOnlyExactRevisionAndExpiry rejects absent/ambiguous revisions.
 	"GET /api/v1/admin/backups/download ?path",
 	"GET /api/v1/admin/backups/inspect ?path",
 	"GET /api/v1/admin/backups/verify ?path",

@@ -117245,9 +117245,19 @@
                       "type": "integer"
                     },
                     "runtime_profile": {
+                      "enum": [
+                        "static-html-v1"
+                      ],
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "page_id",
+                    "revision",
+                    "content_sha256",
+                    "runtime_profile",
+                    "expires_at"
+                  ],
                   "type": "object"
                 }
               }
@@ -117468,6 +117478,11 @@
                                 "type": "string"
                               }
                             },
+                            "required": [
+                              "phase",
+                              "message",
+                              "reported_at"
+                            ],
                             "type": "object"
                           },
                           "base_rev": {
@@ -117541,6 +117556,11 @@
                                 "type": "string"
                               }
                             },
+                            "required": [
+                              "body",
+                              "run_id",
+                              "created_at"
+                            ],
                             "type": "object"
                           },
                           "result_kind": {
@@ -117599,6 +117619,7 @@
                           "instruction",
                           "base_rev",
                           "status",
+                          "result_kind",
                           "created_at",
                           "updated_at"
                         ],

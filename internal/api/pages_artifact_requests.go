@@ -39,11 +39,19 @@ type artifactRequestWire struct {
 }
 
 func (h *PageHandler) ListArtifactRequests(w http.ResponseWriter, r *http.Request) {
+	original := r
+	tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		replyInternalError(w, h.logger, "begin artifact request list", err)
+		return
+	}
+	defer tx.Rollback()
+	r = r.WithContext(context.WithValue(r.Context(), pageAuthReaderKey{}, tx))
 	rec, ok := h.artifactCommentsPage(w, r, false)
 	if !ok {
 		return
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT id,chat_id,agent_id,COALESCE(thread_id,''),base_rev,status,COALESCE(run_id,''),result_revision,error,created_at,updated_at,instruction,deadline_at,COALESCE(retry_of_request_id,'') FROM page_artifact_requests WHERE page_id=? ORDER BY created_at DESC,id DESC LIMIT 100`, rec.ID)
+	rows, err := tx.QueryContext(r.Context(), `SELECT id,chat_id,agent_id,COALESCE(thread_id,''),base_rev,status,COALESCE(run_id,''),result_revision,error,created_at,updated_at,instruction,deadline_at,COALESCE(retry_of_request_id,'') FROM page_artifact_requests WHERE page_id=? ORDER BY created_at DESC,id DESC LIMIT 100`, rec.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "list artifact requests", err)
 		return
@@ -63,14 +71,14 @@ func (h *PageHandler) ListArtifactRequests(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	rows.Close()
-	outcomes, err := loadArtifactRequestOutcomes(r.Context(), h.db, rec.ID)
+	outcomes, err := loadArtifactRequestOutcomes(r.Context(), tx, rec.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "read request outcomes", err)
 		return
 	}
 	for i := range items {
 		job := pageRequestIdentity{Kind: "artifact", ID: items[i].ID, Workspace: WorkspaceIDFromContext(r.Context()), Agent: items[i].AgentID, Run: items[i].RunID, Status: items[i].Status, Deadline: items[i].deadline, Updated: items[i].UpdatedAt, Error: items[i].Error}
-		lifecycle, err := readPageRequestLifecycle(r.Context(), h.db, job, time.Now())
+		lifecycle, err := readPageRequestLifecycle(r.Context(), tx, job, time.Now())
 		if err != nil && !errors.Is(err, errPageRequestEvidenceInvalid) {
 			replyInternalError(w, h.logger, "read artifact request lifecycle", err)
 			return
@@ -78,9 +86,16 @@ func (h *PageHandler) ListArtifactRequests(w http.ResponseWriter, r *http.Reques
 		items[i].pageRequestLifecycle = lifecycle
 		items[i].artifactRequestOutcome = outcomes[items[i].ID]
 		if items[i].RetryOfRequestID != "" {
-			items[i].RetryWarning = h.pageRequestRetryWarning(r.Context(), h.db, "artifact", items[i].RetryOfRequestID)
+			items[i].RetryWarning = h.pageRequestRetryWarning(r.Context(), tx, "artifact", items[i].RetryOfRequestID)
 		}
 	}
+	// Chat admission helpers use the DB pool directly, so release this
+	// snapshot first (including when the pool has only one connection).
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "finish artifact request list", err)
+		return
+	}
+	r = original
 	canDispatch := h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)
 	targets := []artifactRequestTarget{}
 	if canDispatch {

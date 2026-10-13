@@ -537,9 +537,13 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	resultKind := map[string]any{"type": "string", "enum": []string{"revision", "reply"}}
 	artifactRequest["properties"].(map[string]any)["result_kind"] = resultKind
 	artifactRequest["properties"].(map[string]any)["reply"] = obj(map[string]any{"body": str(), "agent_id": str(), "run_id": str(), "on_behalf_of_user_id": str(), "created_at": timeString()})
+	artifactRequest["properties"].(map[string]any)["reply"].(map[string]any)["required"] = []string{"body", "run_id", "created_at"}
 	artifactRequest["properties"].(map[string]any)["agent_reported_phase"] = obj(map[string]any{"phase": map[string]any{"type": "string", "enum": []string{"preparing", "waiting_for_input", "uploading", "finalizing"}}, "message": str(), "reported_at": timeString()})
+	artifactRequest["properties"].(map[string]any)["agent_reported_phase"].(map[string]any)["required"] = []string{"phase", "message", "reported_at"}
 	artifactRequest["properties"] = mergeProps(artifactRequest["properties"].(map[string]any), requestExecutionProperties())
-	artifactRequest["required"] = []string{"id", "chat_id", "agent_id", "instruction", "base_rev", "status", "created_at", "updated_at"}
+	artifactRequest["required"] = []string{"id", "chat_id", "agent_id", "instruction", "base_rev", "status", "result_kind", "created_at", "updated_at"}
+	artifactLease := obj(map[string]any{"page_id": str(), "revision": positiveVersion, "content_sha256": str(), "runtime_profile": map[string]any{"type": "string", "enum": []string{"static-html-v1"}}, "expires_at": timeString()})
+	artifactLease["required"] = []string{"page_id", "revision", "content_sha256", "runtime_profile", "expires_at"}
 	artifactRequestTarget := obj(map[string]any{"chat_id": str(), "title": str(), "agent_id": str(), "agent_name": str(), "agent_slug": str()})
 	artifactRequestTarget["required"] = []string{"chat_id", "title", "agent_id", "agent_name", "agent_slug"}
 	artifactRequestList := obj(map[string]any{"requests": arr(artifactRequest), "can_dispatch": boolean(), "eligible_chats": arr(artifactRequestTarget)})
@@ -570,7 +574,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"POST /api/v1/artifact-creation-authorizations/{runId}":                                       {Request: emptyCreationAuthorization, RequestRequired: true, Response: creationAuthorization, SuccessStatuses: []string{"200", "201"}},
 		"DELETE /api/v1/artifact-creation-authorizations/{runId}":                                     {Response: obj(map[string]any{}), SuccessStatuses: []string{"204"}},
 		"GET /api/v1/chats/{chatId}/artifact-results":                                                 {Response: obj(map[string]any{"results": arr(obj(map[string]any{"page_slug": str(), "title": str(), "revision": integer(), "created_at": timeString(), "agent_id": str(), "agent_name": str(), "run_id": str(), "on_behalf_of_user_id": str()}))})},
-		"GET /api/v1/pages/{slug}/artifact/lease":                                                     {Response: obj(map[string]any{"page_id": str(), "revision": positiveVersion, "content_sha256": str(), "runtime_profile": str(), "expires_at": timeString()})},
+		"GET /api/v1/pages/{slug}/artifact/lease":                                                     {Response: artifactLease},
 		"GET /api/v1/pages/{slug}/artifact/requests":                                                  {Response: artifactRequestList},
 		"POST /api/v1/pages/{slug}/artifact/requests":                                                 {Request: artifactRequestCreate, RequestRequired: true, Response: artifactRequestAccepted, SuccessStatuses: []string{"202"}},
 		"POST /api/v1/pages/{slug}/artifact/requests/{requestId}/cancel":                              {Request: emptyCreationAuthorization, Response: artifactRequestCancelled, SuccessStatuses: []string{"200"}},
