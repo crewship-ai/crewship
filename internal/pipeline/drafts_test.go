@@ -20,6 +20,9 @@ func draftStore(t *testing.T) *Store {
 	if _, err = db.Exec(string(sql)); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = db.Exec(`ALTER TABLE pipeline_drafts ADD COLUMN chat_origin_id TEXT`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = db.Exec(scheduleSchemaSQL); err != nil {
 		t.Fatal(err)
 	}

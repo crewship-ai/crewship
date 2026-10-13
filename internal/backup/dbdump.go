@@ -102,6 +102,7 @@ var BackupTables = []string{
 	"environment_revisions",
 	"service_runtime_intents",
 	"chats",
+	"execution_origins",
 	"agent_operations",
 	"chat_entity_refs",
 	"workspace_files",
@@ -450,6 +451,13 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
 		// Scope through the owning page, never the nullable (or cross-workspace) editor.
 		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "pipeline_versions":
+		// Human/autonomous historical versions have no execution origin. Scope
+		// through the owning routine, never the optional admission fence.
+		return "pipeline_id IN (SELECT id FROM pipelines WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "mission_comments":
+		// An optional queued-mention origin must not exclude ordinary comments.
+		return "mission_id IN (SELECT id FROM missions WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "page_versions":
 		// Scoped through the page, not through the author. author_agent_id is
 		// NULL for every version a HUMAN saved — which is most of them — and
@@ -1101,6 +1109,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	if err != nil {
 		return stats, fmt.Errorf("backup: probe issue_work: %w", err)
 	}
+	legacyRestoreOrigins := map[string]string{}
 	conversationAssignments := map[string]bool{}
 	for _, job := range dump.Tables["workspace_conversation_agent_jobs"] {
 		if id, _ := job["assignment_id"].(string); id != "" {
@@ -1125,6 +1134,17 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		allowed, err := tableColumns(ctx, tx, table)
 		if err != nil {
 			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
+		}
+		// Dropping an admission fence is a security downgrade, not ordinary
+		// schema skew: an older target would classify this work as autonomous.
+		if !allowed["chat_origin_id"] {
+			for _, row := range rows {
+				if value, exists := row["chat_origin_id"]; exists && value != nil {
+					if text, ok := value.(string); !ok || text != "" {
+						return stats, fmt.Errorf("backup: unsupported authority schema: target %s cannot preserve chat_origin_id", table)
+					}
+				}
+			}
 		}
 		// #2034: a pre-#1797 bundle's issue_counters rows are keyed on
 		// crew_id, which a post-#1797 target does not have a column for.
@@ -1184,6 +1204,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 						row = copy
 					}
 				}
+			}
+			row, err = fenceLegacyRestoredWork(ctx, tx, table, row, allowed, legacyRestoreOrigins)
+			if err != nil {
+				return stats, err
 			}
 			// pendingClamp is only reported if the row actually lands:
 			// INSERT OR IGNORE silently drops a PK collision, and telling an

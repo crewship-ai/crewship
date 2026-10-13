@@ -79,6 +79,11 @@ func (s *Server) handleAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sourceRunID, _, sourceOK := s.issueOperationOrigin(w, r, "")
+	if !sourceOK {
+		return
+	}
+
 	// Which crew is the target in? Unnamed — or named as our own — means the
 	// local roster, which the sidecar can and must check itself: it holds the
 	// member list, and a typo should fail here rather than after a round trip.
@@ -127,6 +132,7 @@ func (s *Server) handleAssign(w http.ResponseWriter, r *http.Request) {
 		// cannot answer that: the crew shares one sidecar and its IPC chat is
 		// the boot agent's.
 		"actor_agent_id": actorAgentID,
+		"source_run_id":  sourceRunID,
 	}
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {

@@ -61,6 +61,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/mentions"
 	"github.com/crewship-ai/crewship/internal/notify"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/untrusted"
 )
 
@@ -1083,6 +1084,22 @@ type mentionDispatchRequest struct {
 func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDispatchRequest) (string, error) {
 	if req.WorkspaceID == "" || req.MissionID == "" || req.TargetAgentID == "" {
 		return "", fmt.Errorf("dispatch mention: workspace_id, mission_id and target agent are required")
+	}
+
+	// Delayed deliveries recover the authority frozen with the original comment,
+	// rather than interpreting the later dispatch as autonomous work.
+	if req.CommentID != "" {
+		var originID string
+		err := h.db.QueryRowContext(ctx, `SELECT COALESCE(mc.chat_origin_id,'') FROM mission_comments mc JOIN missions m ON m.id=mc.mission_id WHERE mc.id=? AND mc.mission_id=? AND m.workspace_id=?`, req.CommentID, req.MissionID, req.WorkspaceID).Scan(&originID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("dispatch mention: comment origin: %w", err)
+		}
+		if originID != "" {
+			if current := runauthority.OriginIDFromContext(ctx); current != "" && current != originID {
+				return "", runauthority.ErrIdentityMismatch
+			}
+			ctx = runauthority.WithOriginID(ctx, originID)
+		}
 	}
 
 	// The target, re-resolved in the comment's workspace. This repeats

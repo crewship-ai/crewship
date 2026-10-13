@@ -306,7 +306,18 @@ func (r *Router) chatEntityOperation(w http.ResponseWriter, req *http.Request) {
 		replyError(w, 404, "Operation not found")
 		return
 	}
-	rows, err := r.db.QueryContext(req.Context(), `SELECT DISTINCT chat_id FROM chat_entity_refs WHERE operation_id=? LIMIT 101`, op.ID)
+	// Filter the entire source-chat set before bounding the result. Sampling
+	// 101 raw chats can miss the viewer's only readable source on a large fan-out.
+	args := []any{user.ID, op.ID, workspace, user.ID}
+	args = append(args, chataudience.Args(user.ID)...)
+	rows, err := r.db.QueryContext(req.Context(), `SELECT DISTINCT c.id FROM chat_entity_refs cr
+ JOIN chats c ON c.id=cr.chat_id
+ JOIN workspaces w ON w.id=c.workspace_id AND w.deleted_at IS NULL
+ JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=?
+ JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL
+ WHERE cr.operation_id=? AND c.workspace_id=?
+ AND NOT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=? AND access_mode='restricted')
+ AND (`+chataudience.VisibleSQL+`) LIMIT 1`, args...)
 	if err != nil {
 		replyError(w, 503, "operation_unavailable")
 		return

@@ -100,7 +100,11 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
 		return
 	}
-	status, respBody := s.savePipeline(r.Context(), body, authorAgentID, s.requestChatID(r))
+	ctx, ok := s.routineOrigin(w, r)
+	if !ok {
+		return
+	}
+	status, respBody := s.savePipeline(ctx, body, authorAgentID, s.requestChatID(r))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(respBody)
@@ -208,6 +212,7 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 		"author_agent_id":  authorAgentID,
 		"author_chat_id":   authorChatID,
 		"save_token":       testRunResult.SaveToken,
+		"source_run_id":    routineSourceRun(ctx),
 		"target_crew_slug": body.Crew,
 		// B8 (#2359): forwarded verbatim. The main API's InternalSave does
 		// the validation and the atomic routine+version+trigger transaction
@@ -335,6 +340,7 @@ func (s *Server) runPipeline(ctx context.Context, body routineRunRequest, invoki
 		"inputs":            body.Inputs,
 		"invoking_crew_id":  s.ipc.CrewID,
 		"invoking_agent_id": invokingAgentID,
+		"source_run_id":     routineSourceRun(ctx),
 	})
 	if err != nil {
 		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal run body"})
@@ -420,10 +426,23 @@ func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug
 	// #812: a forged per-agent token is still refused here, even though this
 	// route has no channel to carry the acting agent upstream (see the doc
 	// comment) — the run_routine MCP tool is the attributed path.
-	if _, ok := s.actingAgentID(r); !ok {
-		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+	agentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, 403, map[string]string{"error": "unrecognized agent token"})
 		return
 	}
+	if !body.DryRun {
+		ctx, ok := s.routineOrigin(w, r)
+		if !ok {
+			return
+		}
+		status, result := s.runPipeline(ctx, routineRunRequest{Slug: slug, Inputs: body.Inputs}, agentID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write(result)
+		return
+	}
+
 	path := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines/" + slug + suffix
 	s.proxyIPCJSON(w, r, http.MethodPost, path, "pipeline-run", bodyJSON)
 }

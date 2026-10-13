@@ -13,7 +13,8 @@ import (
 // due rows (FireAt <= now), highest Priority first, and expires rows
 // past ExpiresAt.
 type PendingRun struct {
-	PinnedVersion    *int // nil is the legacy live-at-dispatch policy
+	ChatOriginID     string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
+	PinnedVersion    *int   // nil is the legacy live-at-dispatch policy
 	Status           string
 	FiredRunID       string
 	DispatchAttempts int
@@ -164,13 +165,13 @@ func (s *PendingRunStore) EnqueueChecked(ctx context.Context, pr PendingRun, adm
 INSERT INTO pending_runs (
     id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
     tier_override, priority, debounce_key, fire_at, expires_at, debounce_max_at,
-    invoking_user_id, invocation_authority, triggered_via, triggered_by_id, chain_depth, chain_origin, pinned_version, status, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
+    invoking_user_id, invocation_authority, chat_origin_id, triggered_via, triggered_by_id, chain_depth, chain_origin, pinned_version, status, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
 			pr.ID, pr.WorkspaceID, pr.PipelineID, pr.PipelineSlug,
 			orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 			nullableStr(pr.TierOverride), pr.Priority, nullableStr(pr.DebounceKey),
 			formatRFC3339(pr.FireAt), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt),
-			nullableStr(pr.InvokingUserID), pr.InvocationAuthority,
+			nullableStr(pr.InvokingUserID), pr.InvocationAuthority, nullableStr(pr.ChatOriginID),
 			nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), pr.ChainDepth,
 			nullableStr(pr.ChainOrigin), pr.PinnedVersion)
 		if err != nil {
@@ -264,7 +265,7 @@ WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending' AND dispatch_a
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pending_runs
 SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
-    priority = ?, fire_at = ?, expires_at = ?, invoking_user_id = ?, invocation_authority = ?,
+    priority = ?, fire_at = ?, expires_at = ?, invoking_user_id = ?, invocation_authority = ?, chat_origin_id = ?,
     triggered_via = ?, triggered_by_id = ?,
     pinned_version = ?,
     chain_origin = CASE WHEN ? > COALESCE(chain_depth,0) THEN ? ELSE chain_origin END,
@@ -273,7 +274,7 @@ SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
 WHERE id = ? AND status = 'pending' AND dispatch_attempts = 0 AND pinned_version IS ?`,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, formatRFC3339(fireAt),
-		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID), pr.InvocationAuthority,
+		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID), pr.InvocationAuthority, nullableStr(pr.ChatOriginID),
 		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), effectivePin,
 		pr.ChainDepth, nullableStr(pr.ChainOrigin), pr.ChainDepth,
 		existingID, existingPin)
@@ -302,12 +303,12 @@ WHERE id=? AND status='pending' AND fire_at<=?
   AND (next_attempt_at IS NULL OR next_attempt_at<=?)
   AND (expires_at IS NULL OR expires_at>?)
 RETURNING id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
-    COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''), invocation_authority,
+    COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''), invocation_authority, COALESCE(chat_origin_id,''),
     COALESCE(triggered_via,''), COALESCE(triggered_by_id,''), COALESCE(chain_depth,0),
     COALESCE(chain_origin,''), pinned_version, fire_at, expires_at, dispatch_attempts`, id, at, at, at).Scan(
 		&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
 		&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority,
-		&pr.InvokingUserID, &pr.InvocationAuthority, &pr.TriggeredVia, &pr.TriggeredByID, &pr.ChainDepth,
+		&pr.InvokingUserID, &pr.InvocationAuthority, &pr.ChatOriginID, &pr.TriggeredVia, &pr.TriggeredByID, &pr.ChainDepth,
 		&pr.ChainOrigin, &pr.PinnedVersion, &fireAt, &expiresAt, &pr.DispatchAttempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -353,7 +354,7 @@ func (s *PendingRunStore) DueRuns(ctx context.Context, now time.Time, limit int)
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
-       COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''), invocation_authority,
+       COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''), invocation_authority, COALESCE(chat_origin_id,''),
        COALESCE(triggered_via,''), COALESCE(triggered_by_id,''), COALESCE(chain_depth,0),
        COALESCE(chain_origin,''), pinned_version, fire_at
 FROM pending_runs
@@ -370,7 +371,7 @@ LIMIT ?`, formatRFC3339(now), formatRFC3339(now), limit)
 		var fireAt string
 		if err := rows.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
 			&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority,
-			&pr.InvokingUserID, &pr.InvocationAuthority, &pr.TriggeredVia, &pr.TriggeredByID, &pr.ChainDepth,
+			&pr.InvokingUserID, &pr.InvocationAuthority, &pr.ChatOriginID, &pr.TriggeredVia, &pr.TriggeredByID, &pr.ChainDepth,
 			&pr.ChainOrigin, &pr.PinnedVersion, &fireAt); err != nil {
 			return nil, err
 		}

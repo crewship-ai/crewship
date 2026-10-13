@@ -13,6 +13,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
+func chatIssueOriginID(op *chatIssueOperation) string {
+	if op == nil {
+		return ""
+	}
+	return op.authority.ChatOriginID
+}
+
 type issueOperationQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
@@ -83,14 +90,53 @@ func chatIssueRequestHash(verb, entityID string, payload any) (string, error) {
 // durable host authority, including on a replay and after sidecar restart.
 func (h *InternalIssueHandler) authorizeChatIssue(ctx context.Context, q issueOperationQueryer, workspaceID, agentID, runID, key, verb, entityID string, payload any) (*chatIssueOperation, error) {
 	if runID == "" {
-		if key != "" {
+		if key != "" || runauthority.OriginIDFromContext(ctx) != "" || hostPipelineRunID(ctx) != "" {
 			return nil, runauthority.ErrUnavailable
 		}
 		return nil, nil
 	}
-	a, err := runauthority.Resolve(ctx, q, runID, agentID, workspaceID)
-	if err != nil {
-		return nil, err
+	var a runauthority.Authority
+	var err error
+	if pipelineRun := hostPipelineRunID(ctx); pipelineRun != "" {
+		if pipelineRun != runID {
+			return nil, runauthority.ErrIdentityMismatch
+		}
+		originID := runauthority.OriginIDFromContext(ctx)
+		var storedOrigin string
+		err = q.QueryRowContext(ctx, `SELECT COALESCE(pr.chat_origin_id,'') FROM pipeline_runs pr JOIN pipelines p ON p.id=pr.pipeline_id AND p.workspace_id=pr.workspace_id JOIN agents a ON a.id=p.author_agent_id AND a.workspace_id=p.workspace_id AND a.crew_id=p.author_crew_id AND a.deleted_at IS NULL WHERE pr.id=? AND pr.workspace_id=? AND pr.status='running' AND a.id=? AND (pr.chat_origin_id IS NOT NULL OR (p.chat_origin_id IS NULL AND NOT EXISTS(SELECT 1 FROM pipeline_versions v WHERE v.pipeline_id=p.id AND v.version=pr.pipeline_version AND v.chat_origin_id IS NOT NULL)))`, runID, workspaceID, agentID).Scan(&storedOrigin)
+		if err != nil {
+			return nil, runauthority.ErrUnavailable
+		}
+		if storedOrigin != originID {
+			return nil, runauthority.ErrIdentityMismatch
+		}
+		if originID != "" {
+			a, err = runauthority.ValidateOrigin(ctx, q, originID, agentID, workspaceID)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			a = runauthority.Authority{WorkspaceID: workspaceID, AgentID: agentID}
+		}
+		a.RunID = runID
+	} else if originID := runauthority.OriginIDFromContext(ctx); originID != "" {
+		a, err = runauthority.ValidateOrigin(ctx, q, originID, agentID, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		var valid bool
+		if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pipeline_runs WHERE id=? AND workspace_id=? AND chat_origin_id=? AND status='running')`, runID, workspaceID, originID).Scan(&valid); err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, runauthority.ErrUnavailable
+		}
+		a.RunID = runID
+	} else {
+		a, err = runauthority.Resolve(ctx, q, runID, agentID, workspaceID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if a.HumanAuthority == nil && key == "" {
 		return nil, nil
@@ -177,6 +223,13 @@ func (h *InternalIssueHandler) beginChatIssueOperation(ctx context.Context, tx *
 	op, err := h.authorizeChatIssue(ctx, tx, workspaceID, agentID, runID, key, verb, entityID, payload)
 	if err != nil || op == nil {
 		return op, false, err
+	}
+	if op.authority.HumanAuthority != nil && op.authority.ChatOriginID == "" {
+		origin, err := runauthority.CaptureOrigin(ctx, tx, runID, agentID, workspaceID)
+		if err != nil {
+			return nil, false, err
+		}
+		op.authority.ChatOriginID = origin.ID
 	}
 	authorityJSON, err := json.Marshal(op.authority.HumanAuthority)
 	if err != nil {

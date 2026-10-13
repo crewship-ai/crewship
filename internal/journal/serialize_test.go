@@ -74,3 +74,25 @@ func TestSerializeEntryKeepsHostAuthorityOutOfPublicFeeds(t *testing.T) {
 		t.Fatal("empty public payload must be omitted")
 	}
 }
+
+func TestSerializeEntryKeepsDelegatedOriginPrivate(t *testing.T) {
+	payload := map[string]any{
+		"chat_origin_id": "private-origin", "chat_id": "private-root-chat",
+		"assigned_by_chat": "private-dispatch-chat", "trigger_type": "ASSIGNMENT",
+	}
+	wire, err := json.Marshal(SerializeEntry(Entry{Type: EntryRunStarted, Payload: payload}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(wire, &result); err != nil {
+		t.Fatal(err)
+	}
+	public := result["payload"].(map[string]any)
+	if len(public) != 1 || public["trigger_type"] != "ASSIGNMENT" {
+		t.Fatalf("delegated origin leaked: %s", wire)
+	}
+	if len(payload) != 4 || payload["chat_origin_id"] != "private-origin" {
+		t.Fatal("serialization altered durable delegated authority")
+	}
+}

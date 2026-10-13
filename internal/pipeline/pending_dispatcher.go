@@ -274,6 +274,7 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		// keeps the workspace-notice fallback.
 		InvokingUserID:      pr.InvokingUserID,
 		InvocationAuthority: pr.InvocationAuthority,
+		ChatOriginID:        pr.ChatOriginID,
 		Tags:                tags,
 		MetadataJSON:        pr.MetadataJSON,
 		// A one-time authoring row can be rearmed for a different date. The

@@ -310,7 +310,9 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		"id": runID, "agent_id": agentID, "chat_id": chatID,
 		"workspace_id": workspaceID, "trigger_type": triggerType,
 	}
-	if receipt := chataudience.ReceiptFromContext(ctx); receipt != nil {
+	if originID := runauthority.OriginIDFromContext(ctx); originID != "" {
+		payload["chat_origin_id"] = originID
+	} else if receipt := chataudience.ReceiptFromContext(ctx); receipt != nil {
 		payload["human_authority"] = receipt
 		payload["trigger_message_id"] = runauthority.TriggerMessageFromContext(ctx)
 	}

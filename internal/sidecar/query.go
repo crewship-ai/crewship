@@ -139,15 +139,20 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	sourceRunID, _, sourceOK := s.issueOperationOrigin(w, r, "")
+	if !sourceOK {
+		return
+	}
 	// Build IPC request body
 	body := map[string]interface{}{
-		"target_slug":  req.Target,
-		"question":     req.Question,
-		"from_slug":    req.From,
-		"crew_id":      s.ipc.CrewID,
-		"workspace_id": s.ipc.WorkspaceID,
-		"chat_id":      s.requestChatID(r),
-		"depth":        depth,
+		"source_run_id": sourceRunID,
+		"target_slug":   req.Target,
+		"question":      req.Question,
+		"from_slug":     req.From,
+		"crew_id":       s.ipc.CrewID,
+		"workspace_id":  s.ipc.WorkspaceID,
+		"chat_id":       s.requestChatID(r),
+		"depth":         depth,
 	}
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {

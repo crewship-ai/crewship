@@ -59,7 +59,7 @@ func TestInternalMissionStartDoesNotDispatchWhenCompareAndSetLoses(t *testing.T)
 	req.SetPathValue("missionId", mission)
 	rr := httptest.NewRecorder()
 	h.Start(rr, req)
-	if rr.Code != http.StatusConflict || missionStatus(t, h, mission) != "CANCELLED" {
+	if rr.Code != http.StatusConflict || missionStatus(t, h, mission) != "PLANNING" {
 		t.Fatalf("lost CAS reported successful start: %d %s", rr.Code, rr.Body.String())
 	}
 }

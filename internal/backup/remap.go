@@ -107,6 +107,8 @@ func newRemapCUID() string {
 // and add the real FK in a migration when one becomes possible — this map is a
 // bridge over a schema gap, not a substitute for the schema.
 var virtualForeignKeys = map[string][]foreignKeyEdge{
+	"execution_origins":                 {{column: "chat_id", refTable: "chats", refColumn: "id"}},           // historical TEXT; follow an extant chat on fork
+	"pending_runs":                      {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}}, // legacy bare TEXT; queued provenance must follow its fork
 	"workspace_conversation_messages":   {{column: "subject_agent_id", refTable: "agents", refColumn: "id"}},
 	"workspace_conversation_agent_jobs": {{column: "assignment_id", refTable: "assignments", refColumn: "id"}},
 	// journal_chain_checkpoints.workspace_id (v152,

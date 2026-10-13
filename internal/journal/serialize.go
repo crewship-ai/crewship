@@ -46,10 +46,14 @@ func SerializeEntry(e Entry) map[string]any {
 		// Never mutate the original payload: replay and the journal hash chain
 		// must continue to see the exact persisted admission receipt.
 		payload := maps.Clone(e.Payload)
-		if _, privateOrigin := payload["human_authority"]; privateOrigin {
+		_, receiptOrigin := payload["human_authority"]
+		_, delegatedOrigin := payload["chat_origin_id"]
+		if receiptOrigin || delegatedOrigin {
 			delete(payload, "chat_id")
+			delete(payload, "assigned_by_chat")
 		}
 		delete(payload, "human_authority")
+		delete(payload, "chat_origin_id")
 		delete(payload, "trigger_message_id")
 		delete(payload, "host_admitted")
 		if len(payload) > 0 {

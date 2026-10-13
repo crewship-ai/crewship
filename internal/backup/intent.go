@@ -80,6 +80,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"chats":                    IntentInclude,
 	"agent_operations":         IntentInclude, // durable mutation results and provenance; not a bearer authority
 	"chat_entity_refs":         IntentInclude, // durable chat cards, including human deletion receipts
+	"execution_origins":        IntentInclude, // durable provenance; a fork strips its admission receipt
 	"agent_mcp_bindings":       IntentInclude,
 	"journal_entries":          IntentInclude,
 	// Replay receipts authenticate execution against this installation's

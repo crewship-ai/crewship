@@ -11,6 +11,7 @@ import (
 )
 
 type internalDraftRequest struct {
+	SourceRunID    string         `json:"source_run_id"`
 	WorkspaceID    string         `json:"workspace_id"`
 	Slug           string         `json:"slug"`
 	AuthorCrewID   string         `json:"author_crew_id"`
@@ -75,6 +76,8 @@ func (h *PipelineHandler) internalDraft(w http.ResponseWriter, r *http.Request, 
 	}
 	if save {
 		d := in.Draft
+		d.SourceRunID = in.SourceRunID
+		d.SourceAgentID = callerAgent
 		// The ownership check above applies to this slug's current draft.
 		// Agent saves cannot use another draft's ID to rename it past that check.
 		if d.ID != "" && d.ID != current.ID {
@@ -112,6 +115,9 @@ func (h *PipelineHandler) internalDraft(w http.ResponseWriter, r *http.Request, 
 			d.UpdatedBy = "agent:" + callerAgent
 		}
 		current, err = h.store.SaveDraft(r.Context(), d)
+		if writeRoutineOriginError(w, err) {
+			return
+		}
 		if errors.Is(err, pipeline.ErrDraftConflict) {
 			replyError(w, http.StatusConflict, err.Error())
 			return

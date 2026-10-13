@@ -12,6 +12,13 @@ import (
 // Run and trigger message IDs retain their historical meaning; imported
 // operation authority is explicitly removed rather than admitted on this host.
 func remapChatEntityHistory(dump *DBDump, ids map[string]map[string]string) {
+	// Keep the typed origin and its already-remapped chat/workspace edges, but
+	// never transplant an admission receipt. A present invalid origin must fail
+	// closed in the execution resolver rather than become autonomous work.
+	for _, row := range dump.Tables["execution_origins"] {
+		row["human_authority"] = "{}"
+	}
+
 	for _, row := range dump.Tables["agent_operations"] {
 		if row["kind"] == "issue" {
 			if old, ok := row["entity_id"].(string); ok {

@@ -105,6 +105,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 const (
@@ -511,12 +512,13 @@ func enforceDelegationCaps(
 // this struct, so the row's owner and the id the fan-out was counted against
 // are one value and cannot drift apart.
 type cappedAssignment struct {
-	WorkspaceID string
-	ChatID      string
-	TargetID    string
-	Task        string
-	GroupID     string
-	CreatedAt   string
+	ChatOriginID string
+	WorkspaceID  string
+	ChatID       string
+	TargetID     string
+	Task         string
+	GroupID      string
+	CreatedAt    string
 	// MissionID, AuthorAgentID, CreatedByUserID persist what a lock-loss
 	// requeue needs to rebuild an identical dispatch door later (#2269
 	// follow-up): dispatchByID (assignments_dispatch_pump.go) used to
@@ -597,6 +599,31 @@ func insertCappedAssignment(
 	caller dispatchCaller,
 	a cappedAssignment,
 ) (string, error) {
+	// Human-origin admissions validate and insert under the same lock, including
+	// the session-less fallback. An origin is server context, never tool input.
+	if a.ChatOriginID == "" {
+		a.ChatOriginID = runauthority.OriginIDFromContext(ctx)
+	}
+	if a.ChatOriginID != "" {
+		if pooled, ok := db.(*sql.DB); ok {
+			tx, err := pooled.BeginTx(ctx, nil)
+			if err != nil {
+				return "", err
+			}
+			defer tx.Rollback()
+			id, err := insertCappedAssignment(ctx, tx, scope, lim, caller, a)
+			if err != nil {
+				return "", err
+			}
+			if err := tx.Commit(); err != nil {
+				return "", err
+			}
+			return id, nil
+		}
+		if _, err := runauthority.ValidateOrigin(ctx, db, a.ChatOriginID, a.TargetID, a.WorkspaceID); err != nil {
+			return "", fmt.Errorf("assignment requester authority: %w", err)
+		}
+	}
 	assignmentID := generateCUID()
 	var parentVal any
 	if scope.ParentID != "" {
@@ -641,11 +668,11 @@ func insertCappedAssignment(
 		assignmentID, a.WorkspaceID, a.ChatID, caller.FanoutSubjectID, a.TargetID,
 		a.Task, a.GroupID, scope.Depth, parentVal, originVal, parentRunVal, a.CreatedAt,
 		missionVal, authorAgentVal, createdByUserVal, sessionVal,
-		contextPackCompactionVal, contextPackTokensVal,
+		contextPackCompactionVal, contextPackTokensVal, a.ChatOriginID,
 	}, guardArgs...)
 	res, err := db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, chain_origin, parent_run_id, created_at, mission_id, author_agent_id, created_by_user_id, session_id, context_pack_compaction, context_pack_tokens)
-		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, chain_origin, parent_run_id, created_at, mission_id, author_agent_id, created_by_user_id, session_id, context_pack_compaction, context_pack_tokens, chat_origin_id)
+		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, '')
 		 WHERE `+guardSQL, insertArgs...)
 	if err != nil {
 		// The fan-out guard's WHERE clause fails CLOSED as zero rows

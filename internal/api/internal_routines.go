@@ -36,6 +36,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/policy"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // RoutineInternalAdapter wraps PipelineHandler.CreateSchedule so the
@@ -162,6 +163,38 @@ func (h *RoutineInternalAdapter) CreateSchedule(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	raw, e := io.ReadAll(http.MaxBytesReader(w, r.Body, maxExecBodyBytes))
+	if e != nil {
+		replyError(w, 400, "invalid schedule body")
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	var source struct {
+		Run   string `json:"source_run_id"`
+		Agent string `json:"source_agent_id"`
+	}
+	if json.Unmarshal(raw, &source) != nil {
+		replyError(w, 400, "invalid schedule body")
+		return
+	}
+	if source.Run != "" {
+		tx, e := h.pipes.db.BeginTx(r.Context(), nil)
+		if e != nil {
+			writeChatIssueError(w, e)
+			return
+		}
+		o, e := runauthority.CaptureOrigin(r.Context(), tx, source.Run, source.Agent, wsID)
+		if e != nil {
+			_ = tx.Rollback()
+			writeChatIssueError(w, e)
+			return
+		}
+		if e = tx.Commit(); e != nil {
+			writeChatIssueError(w, e)
+			return
+		}
+		r = r.WithContext(runauthority.WithOriginID(r.Context(), o.ID))
+	}
 	// Dual-path: user-attributed slash command vs autonomous-agent.
 	// CallerUserIDFromRequest returns non-empty when the chat-bridge /
 	// CLI repl propagated X-Caller-User-Id; empty for the agent

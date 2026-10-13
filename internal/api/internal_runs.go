@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/runverdict"
 	"github.com/crewship-ai/crewship/internal/work"
 )
@@ -35,6 +36,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		Metadata         json.RawMessage       `json:"metadata"`
 		HumanAuthority   *chataudience.Receipt `json:"human_authority"`
 		TriggerMessageID string                `json:"trigger_message_id"`
+		ChatOriginID     string                `json:"chat_origin_id"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
@@ -82,6 +84,16 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if body.ChatOriginID != "" {
+		if InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" || body.HumanAuthority != nil || body.TriggerMessageID != "" {
+			replyError(w, 403, "human_origin_requires_host")
+			return
+		}
+		if _, err := runauthority.ValidateOrigin(r.Context(), h.db, body.ChatOriginID, body.AgentID, body.WorkspaceID); err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+	}
 	if body.HumanAuthority != nil || body.TriggerMessageID != "" {
 		// Only host dispatch may assert a human. Container/crew tokens cannot
 		// forge a receipt, even if its IDs and epochs happen to be current.
@@ -123,6 +135,9 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		payload := map[string]any{"trigger_type": body.TriggerType, "host_admitted": InternalTokenWorkspaceFromContext(r.Context()) == "" && InternalTokenCrewFromContext(r.Context()) == ""}
+		if body.ChatOriginID != "" {
+			payload["chat_origin_id"] = body.ChatOriginID
+		}
 		if body.HumanAuthority != nil {
 			payload["human_authority"] = body.HumanAuthority
 			payload["trigger_message_id"] = body.TriggerMessageID

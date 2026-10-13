@@ -128,7 +128,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	// existing (unchanged) trust boundary, not something this table papers
 	// over. Note it explicitly so a future reader does not read guardNone as
 	// "checked and safe for per-agent isolation".
-	"POST /mission/ /start":       guardNone,
+	"POST /mission/ /start":       guardHandlerIdentity,
 	"POST /pipelines/ /dry_run":   guardNone,
 	"GET /connections/ /messages": guardNone,
 	"GET /connections/ /files":    guardNone,
@@ -149,7 +149,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"PATCH /manifest":                 guardNone,
 	"GET /pipelines":                  guardNone,
 	"GET /pipelines/":                 guardNone,
-	"POST /routines/schedules/create": guardNone,
+	"POST /routines/schedules/create": guardHandlerIdentity,
 	"POST /skills/generate":           guardNone,
 	"POST /skills/author":             guardNone,
 	"POST /credentials/create":        guardNone,

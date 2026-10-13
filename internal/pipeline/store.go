@@ -198,6 +198,9 @@ func (s *Store) save(ctx context.Context, in SaveInput, trigger *TriggerInput) (
 			return nil, nil, fmt.Errorf("pipeline: begin tx: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := bindSaveOrigin(ctx, tx, &in, existingID); err != nil {
+			return nil, nil, err
+		}
 		// Read inside the tx so the "did the recipe change" question and the
 		// write that answers it cannot straddle another writer.
 		var existingDefinition string
@@ -338,6 +341,9 @@ WHERE id = ?`,
 		return nil, nil, fmt.Errorf("pipeline: begin tx (insert): %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := bindSaveOrigin(ctx, tx, &in, ""); err != nil {
+		return nil, nil, err
+	}
 	if err := s.consumeDraftTx(ctx, tx, in); err != nil {
 		return nil, nil, err
 	}
@@ -385,6 +391,9 @@ INSERT INTO pipelines (
 		return nil, nil, fmt.Errorf("pipeline: insert: %w", err)
 	}
 
+	if _, err := tx.ExecContext(ctx, `UPDATE pipelines SET chat_origin_id=? WHERE id=?`, nullableStr(in.ChatOriginID), id); err != nil {
+		return nil, nil, err
+	}
 	// Append v1 to pipeline_versions in the same transaction so a
 	// new pipeline always has a version row from the start.
 	if err := s.saveVersionTx(ctx, tx, id, in, hash, now); err != nil {
@@ -467,10 +476,10 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		// recipe. A fired start can be scheduled again for a new future date;
 		// an explicitly cancelled start requires a new scheduling action.
 		result, err := tx.ExecContext(ctx, `INSERT INTO pending_runs
-          (id,workspace_id,pipeline_id,pipeline_slug,inputs_json,tags_json,metadata_json,priority,fire_at,invoking_user_id,triggered_via,triggered_by_id,pinned_version,status,created_at,updated_at)
-          VALUES (?,?,?,?,?,'[]','{}',0,?,?,'schedule',?,?,'pending',datetime('now','subsec'),datetime('now','subsec'))
-          ON CONFLICT(id) DO UPDATE SET fire_at=excluded.fire_at,inputs_json=excluded.inputs_json,pinned_version=excluded.pinned_version,status='pending',dispatch_attempts=0,last_error='',next_attempt_at=NULL,fired_run_id=NULL,updated_at=excluded.updated_at
-          WHERE (pending_runs.status='pending' AND pending_runs.dispatch_attempts=0) OR (pending_runs.status='fired' AND pending_runs.fire_at <> excluded.fire_at)`, id, in.WorkspaceID, pipelineID, in.Slug, string(inputs), tsformat.Format(trigger.FireAt), nullableStr(in.Author.UserID), id, pinnedVersion)
+          (id,workspace_id,pipeline_id,pipeline_slug,inputs_json,tags_json,metadata_json,priority,fire_at,invoking_user_id,triggered_via,triggered_by_id,pinned_version,chat_origin_id,status,created_at,updated_at)
+          VALUES (?,?,?,?,?,'[]','{}',0,?,?,'schedule',?,?,?,'pending',datetime('now','subsec'),datetime('now','subsec'))
+          ON CONFLICT(id) DO UPDATE SET fire_at=excluded.fire_at,inputs_json=excluded.inputs_json,pinned_version=excluded.pinned_version,chat_origin_id=COALESCE(excluded.chat_origin_id,pending_runs.chat_origin_id),status='pending',dispatch_attempts=0,last_error='',next_attempt_at=NULL,fired_run_id=NULL,updated_at=excluded.updated_at
+          WHERE (pending_runs.status='pending' AND pending_runs.dispatch_attempts=0) OR (pending_runs.status='fired' AND pending_runs.fire_at <> excluded.fire_at)`, id, in.WorkspaceID, pipelineID, in.Slug, string(inputs), tsformat.Format(trigger.FireAt), nullableStr(in.Author.UserID), id, pinnedVersion, nullableStr(in.ChatOriginID))
 		if err != nil {
 			return nil, err
 		}
@@ -488,6 +497,7 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		name = in.Name
 	}
 	schedIn := SaveScheduleInput{
+		ChatOriginID:           in.ChatOriginID,
 		WorkspaceID:            in.WorkspaceID,
 		Name:                   name,
 		TargetPipelineID:       pipelineID,
@@ -573,11 +583,11 @@ func (s *Store) saveVersionTx(ctx context.Context, tx *sql.Tx, pipelineID string
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO pipeline_versions (
     id, pipeline_id, version, definition_json, definition_hash,
-    author_type, author_id, parent_version, change_summary, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    author_type, author_id, parent_version, change_summary, created_at, chat_origin_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		generateVersionID(), pipelineID, newVersion, in.DefinitionJSON, hash,
 		authorType, authorID, parentVal, changeSummary,
-		tsformat.Format(now),
+		tsformat.Format(now), nullableStr(in.ChatOriginID),
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") {

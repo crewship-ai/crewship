@@ -857,9 +857,9 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			// exactly like CreateComment does, so it must parse too.
 			inlineCommentID = generateCUID()
 			if _, err := tx.ExecContext(r.Context(), `
-				INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
-				VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-				inlineCommentID, missionID, req.AgentID, *req.Comment, now, now); err != nil {
+				INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at, chat_origin_id)
+				VALUES (?, ?, 'agent', ?, ?, ?, ?, NULLIF(?,''))`,
+				inlineCommentID, missionID, req.AgentID, *req.Comment, now, now, chatIssueOriginID(op)); err != nil {
 				internalError(w, r, h.logger, "insert internal comment", err)
 				return
 			}
@@ -902,6 +902,9 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		if err := tx.Commit(); err != nil {
 			internalError(w, r, h.logger, "commit issue update", err)
 			return
+		}
+		if op != nil {
+			r = r.WithContext(runauthority.WithOriginID(r.Context(), op.authority.ChatOriginID))
 		}
 	}
 
@@ -1061,9 +1064,9 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 	authorID := req.AgentID
 
 	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		commentID, missionID, authorType, authorID, req.Body, now, now)
+		INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at, chat_origin_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?,''))`,
+		commentID, missionID, authorType, authorID, req.Body, now, now, chatIssueOriginID(op))
 	if err != nil {
 		internalError(w, r, h.logger, "insert comment", err)
 		return
@@ -1080,6 +1083,9 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 	if err := tx.Commit(); err != nil {
 		internalError(w, r, h.logger, "commit issue comment", err)
 		return
+	}
+	if op != nil {
+		r = r.WithContext(runauthority.WithOriginID(r.Context(), op.authority.ChatOriginID))
 	}
 
 	// @mentions (#1768 item 3) — the AGENT door. Same wire format, same

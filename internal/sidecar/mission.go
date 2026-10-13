@@ -127,9 +127,14 @@ func (s *Server) handleMissionCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
 		return
 	}
+	sourceRunID, _, sourceOK := s.issueOperationOrigin(w, r, "")
+	if !sourceOK {
+		return
+	}
 	body := map[string]interface{}{
 		"title":         req.Title,
 		"lead_agent_id": leadAgentID,
+		"source_run_id": sourceRunID,
 		"crew_id":       crewID,
 		"workspace_id":  s.ipc.WorkspaceID,
 		"tasks":         tasks,
@@ -165,7 +170,19 @@ func (s *Server) handleMissionStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.proxyIPCJSON(w, r, http.MethodPost, "/api/v1/internal/missions/"+url.PathEscape(missionID)+"/start"+s.missionScopeQuery(), "mission start", nil)
+	actorID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
+	sourceRunID, _, ok := s.issueOperationOrigin(w, r, "")
+	if !ok {
+		return
+	}
+	q, _ := url.ParseQuery(strings.TrimPrefix(s.missionScopeQuery(), "?"))
+	q.Set("source_run_id", sourceRunID)
+	q.Set("actor_agent_id", actorID)
+	s.proxyIPCJSON(w, r, http.MethodPost, "/api/v1/internal/missions/"+url.PathEscape(missionID)+"/start?"+q.Encode(), "mission start", nil)
 }
 
 // handleMissionStatus handles GET /mission/{missionId}

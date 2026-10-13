@@ -30,6 +30,7 @@ type Authority struct {
 	ChatID           string
 	TriggerMessageID string
 	HumanAuthority   *chataudience.Receipt
+	ChatOriginID     string
 }
 
 type triggerKey struct{}
@@ -52,7 +53,7 @@ func Resolve(ctx context.Context, q Queryer, runID, agentID, workspaceID string)
 	}
 	var recordedAgent, recordedWorkspace, raw, actor string
 	var starts, ended int
-	err := q.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MAX(agent_id),''), COALESCE(MAX(workspace_id),''), COALESCE(MAX(payload),''), COALESCE(MAX(actor_type),'') FROM journal_entries WHERE trace_id=? AND entry_type='run.started'`, runID).Scan(&starts, &recordedAgent, &recordedWorkspace, &raw, &actor)
+	err := q.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MAX(agent_id),''), COALESCE(MAX(workspace_id),''), COALESCE(MAX(payload),''), COALESCE(MAX(actor_type),'') FROM journal_entries WHERE trace_id=? AND workspace_id=? AND entry_type='run.started'`, runID, workspaceID).Scan(&starts, &recordedAgent, &recordedWorkspace, &raw, &actor)
 	if err != nil {
 		return a, fmt.Errorf("resolve run start: %w", err)
 	}
@@ -62,13 +63,14 @@ func Resolve(ctx context.Context, q Queryer, runID, agentID, workspaceID string)
 	if recordedAgent != agentID || recordedWorkspace != workspaceID {
 		return a, ErrIdentityMismatch
 	}
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop')`, runID).Scan(&ended); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND workspace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop')`, runID, workspaceID).Scan(&ended); err != nil {
 		return a, fmt.Errorf("resolve run terminal: %w", err)
 	}
 	if ended != 0 {
 		return a, ErrIdentityMismatch
 	}
 	var payload struct {
+		ChatOriginID     string                `json:"chat_origin_id"`
 		TriggerType      string                `json:"trigger_type"`
 		HostAdmitted     bool                  `json:"host_admitted"`
 		ChatID           string                `json:"chat_id"`
@@ -79,10 +81,21 @@ func Resolve(ctx context.Context, q Queryer, runID, agentID, workspaceID string)
 		return a, ErrUnavailable
 	}
 	a.TriggerType = payload.TriggerType
+	if payload.ChatOriginID != "" {
+		if (!payload.HostAdmitted && actor != "orchestrator") || payload.HumanAuthority != nil {
+			return a, ErrIdentityMismatch
+		}
+		inherited, err := ValidateOrigin(ctx, q, payload.ChatOriginID, agentID, workspaceID)
+		if err != nil {
+			return a, err
+		}
+		inherited.RunID, inherited.TriggerType = runID, payload.TriggerType
+		return inherited, nil
+	}
 	if payload.HumanAuthority == nil {
 		switch payload.TriggerType {
-		case "SCHEDULED", "ASSIGNMENT", "WEBHOOK", "ROUTINE", "CRON":
-			if payload.HostAdmitted || actor == "orchestrator" {
+		case "SCHEDULED", "ASSIGNMENT", "WEBHOOK", "ROUTINE", "CRON", "PEER_QUERY":
+			if payload.HostAdmitted {
 				a.ChatID = payload.ChatID
 				return a, nil
 			}

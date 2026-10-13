@@ -315,3 +315,39 @@ func assertEntityHandlerFixture(t *testing.T, name string, value any) {
 		t.Fatalf("fixture %s does not match handler: %s", name, data)
 	}
 }
+
+func TestChatEntityOperationFindsReadableChatAfterLargeFanout(t *testing.T) {
+	f := setupDeletionFixture(t)
+	execOrFatal(t, f.h.db, `INSERT INTO users(id,email) VALUES('fanout-reader','fanout-reader@example.test')`)
+	execOrFatal(t, f.h.db, `INSERT INTO workspace_members(id,user_id,workspace_id,role) VALUES('fanout-reader-member','fanout-reader',?,'MEMBER')`, f.workspace)
+	var agent string
+	if e := f.h.db.QueryRow(`SELECT agent_id FROM chats WHERE id='delete-chat-one'`).Scan(&agent); e != nil {
+		t.Fatal(e)
+	}
+	// Two existing private chats plus 100 new ones: only chat 102 belongs
+	// to this MEMBER. The old raw LIMIT 101 omitted their only readable chat.
+	for i := 0; i < 100; i++ {
+		chat := fmt.Sprintf("fanout-%03d", i)
+		creator := f.user
+		if i == 99 {
+			creator = "fanout-reader"
+		}
+		execOrFatal(t, f.h.db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES(?,?,?,?,'private')`, chat, f.workspace, agent, creator)
+		execOrFatal(t, f.h.db, `INSERT INTO chat_entity_refs(event_id,chat_id,operation_id,run_id,trigger_message_id,created_at) VALUES(?,?,'delete-origin','original-run','trigger','now')`, "fanout-event-"+chat, chat)
+	}
+	request := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/api/v1/operations/delete-origin", nil)
+		req.SetPathValue("operationId", "delete-origin")
+		req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: "fanout-reader"}), f.workspace, "MEMBER"))
+		rr := httptest.NewRecorder()
+		f.router.chatEntityOperation(rr, req)
+		return rr
+	}
+	if rr := request(); rr.Code != 200 || strings.Contains(rr.Body.String(), "MUST_NOT_LEAK") {
+		t.Fatalf("readable source missed: %d %s", rr.Code, rr.Body.String())
+	}
+	execOrFatal(t, f.h.db, `UPDATE chats SET created_by=? WHERE id='fanout-099'`, f.user)
+	if rr := request(); rr.Code != 404 {
+		t.Fatalf("unreadable sources revealed operation: %d %s", rr.Code, rr.Body.String())
+	}
+}

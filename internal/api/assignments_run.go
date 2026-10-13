@@ -19,16 +19,19 @@ import (
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 type createAssignmentBody struct {
-	TargetSlug  string `json:"target_slug"`
-	Task        string `json:"task"`
-	CrewID      string `json:"crew_id"`
-	WorkspaceID string `json:"workspace_id"`
-	ChatID      string `json:"chat_id"`
-	MissionID   string `json:"mission_id,omitempty"` // optional — mission this assignment belongs to; threaded into journal entries so Cartographer checkpoints can anchor on per-mission journal cursors.
+	SourceRunID  string `json:"source_run_id,omitempty"`
+	ChatOriginID string `json:"-"`
+	TargetSlug   string `json:"target_slug"`
+	Task         string `json:"task"`
+	CrewID       string `json:"crew_id"`
+	WorkspaceID  string `json:"workspace_id"`
+	ChatID       string `json:"chat_id"`
+	MissionID    string `json:"mission_id,omitempty"` // optional — mission this assignment belongs to; threaded into journal entries so Cartographer checkpoints can anchor on per-mission journal cursors.
 	// ActorAgentID is the agent that actually made the call, as resolved by the
 	// sidecar from its per-agent bearer token (#1754). It is NOT the agent's own
 	// claim about itself: the sidecar derives it from a token it minted, the
@@ -344,7 +347,50 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(journal.WithMission(r.Context(), missionID))
 	}
 
-	assignmentID, err := insertCappedAssignment(r.Context(), h.db, scope, delegationLim,
+	var missionExists int
+	var assignerName, commentID, commentBody string
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin assignment admission", err)
+		return
+	}
+	defer tx.Rollback()
+	originID := runauthority.OriginIDFromContext(r.Context())
+	if body.SourceRunID != "" {
+		origin, err := runauthority.CaptureOrigin(r.Context(), tx, body.SourceRunID, assignedByID, body.WorkspaceID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if origin.ID != "" {
+			originID = origin.ID
+		}
+	}
+	if originID != "" {
+		authority, err := runauthority.ValidateOrigin(r.Context(), tx, originID, assignedByID, body.WorkspaceID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		var isIssue bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM missions WHERE id=? AND workspace_id=?)`, body.ChatID, body.WorkspaceID).Scan(&isIssue); err != nil {
+			replyInternalError(w, h.logger, "assignment issue scope", err)
+			return
+		}
+		if isIssue {
+			allowed, err := issueRequesterAllowed(r.Context(), tx, authority.HumanAuthority.UserID, body.WorkspaceID, "updated")
+			if err != nil {
+				replyInternalError(w, h.logger, "assignment requester permission", err)
+				return
+			}
+			if !allowed {
+				writeChatIssueError(w, errChatIssueRequesterForbidden)
+				return
+			}
+		}
+	}
+	body.ChatOriginID = originID
+	assignmentID, err := insertCappedAssignment(r.Context(), tx, scope, delegationLim,
 		agentCaller(assignedByID), cappedAssignment{
 			WorkspaceID:     body.WorkspaceID,
 			ChatID:          body.ChatID,
@@ -365,6 +411,39 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		replyInternalError(w, h.logger, "create assignment", err)
+		return
+	}
+
+	if _, err := tx.ExecContext(r.Context(), `UPDATE assignments SET chat_origin_id=NULLIF(?, '') WHERE id=? AND workspace_id=?`, originID, assignmentID, body.WorkspaceID); err != nil {
+		replyInternalError(w, h.logger, "persist assignment origin", err)
+		return
+	}
+	if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM missions WHERE id=? AND workspace_id=?`, body.ChatID, body.WorkspaceID).Scan(&missionExists); err != nil {
+		replyInternalError(w, h.logger, "assignment issue scope", err)
+		return
+	}
+	if missionExists == 1 {
+		_ = tx.QueryRowContext(r.Context(), `SELECT name FROM agents WHERE id=?`, assignedByID).Scan(&assignerName)
+		if assignerName == "" {
+			assignerName = "Lead"
+		}
+		taskPreview := body.Task
+		if len(taskPreview) > 300 {
+			taskPreview = taskPreview[:300] + "..."
+		}
+		commentID = generateCUID()
+		commentBody = fmt.Sprintf("**%s assigned work to %s**\n\n%s", assignerName, target.Name, taskPreview)
+		if _, err := tx.ExecContext(r.Context(), `INSERT INTO mission_comments(id,mission_id,author_type,author_id,body,created_at,updated_at,chat_origin_id) VALUES(?,?,'agent',?,?,?,?,NULLIF(?,''))`, commentID, body.ChatID, assignedByID, commentBody, now, now, originID); err != nil {
+			replyInternalError(w, h.logger, "assignment issue comment", err)
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), `UPDATE missions SET assignee_id=?,assignee_type='agent',delegate_agent_id=?,updated_at=? WHERE id=? AND workspace_id=?`, target.ID, target.ID, now, body.ChatID, body.WorkspaceID); err != nil {
+			replyInternalError(w, h.logger, "assignment issue delegate", err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit assignment admission", err)
 		return
 	}
 
@@ -414,28 +493,8 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"crew_id", body.CrewID,
 	)
 
-	// Post comment, update assignee, and log activity on the linked issue
-	var missionExists int
-	_ = h.db.QueryRowContext(r.Context(), `SELECT 1 FROM missions WHERE id = ?`, body.ChatID).Scan(&missionExists)
+	// Durable comment and assignee updates committed with admission above.
 	if missionExists == 1 {
-		var assignerName string
-		_ = h.db.QueryRowContext(r.Context(), `SELECT name FROM agents WHERE id = ?`, assignedByID).Scan(&assignerName)
-		if assignerName == "" {
-			assignerName = "Lead"
-		}
-
-		taskPreview := body.Task
-		if len(taskPreview) > 300 {
-			taskPreview = taskPreview[:300] + "..."
-		}
-
-		// Comment
-		commentID := generateCUID()
-		commentBody := fmt.Sprintf("**%s assigned work to %s**\n\n%s", assignerName, target.Name, taskPreview)
-		_, _ = h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-			commentID, body.ChatID, assignedByID, commentBody, now, now)
-
 		// Mirror the comment into the journal so mission discussion
 		// shows up in the unified Timeline alongside operational
 		// events. Mission comments today are sparse (auto-generated
@@ -470,19 +529,6 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}); jerr != nil {
 			h.logger.Warn("mission comment journal emit failed", "error", jerr, "comment_id", commentID)
 		}
-
-		// Update assignee on the issue to the target agent. This is the
-		// delegation path invariant I5 exists for: delegating to an agent
-		// must set delegate_agent_id and must NEVER touch owner_user_id —
-		// pre-A10 this UPDATE overwrote the single polymorphic
-		// assignee_id/assignee_type slot, so delegating to an agent
-		// silently replaced whatever human owner was recorded there (rev-1
-		// dev1 observation 11, PRD-ISSUES-AND-ROUTINES-2026 §9.10). The
-		// legacy pair is still written alongside as the compatibility
-		// projection for the migration window.
-		_, _ = h.db.ExecContext(r.Context(),
-			`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', delegate_agent_id = ?, updated_at = ? WHERE id = ?`,
-			target.ID, target.ID, now, body.ChatID)
 
 		// Activity — through the shared emitter (issue_events.go), not a bare
 		// INSERT: this was one of the two writers §9.1 (PRD-ISSUES-AND-
@@ -535,6 +581,24 @@ func (h *AssignmentHandler) runAssignment(
 	body createAssignmentBody,
 	target targetAgentInfo,
 ) {
+	var originID string
+	originErr := h.db.QueryRowContext(ctx, `SELECT COALESCE(chat_origin_id,'') FROM assignments WHERE id=? AND workspace_id=?`, assignmentID, body.WorkspaceID).Scan(&originID)
+	if originErr != nil && !errors.Is(originErr, sql.ErrNoRows) {
+		h.logger.Error("load assignment origin", "error", originErr, "assignment_id", assignmentID)
+		return
+	}
+	if body.ChatOriginID != "" && body.ChatOriginID != originID {
+		h.logger.Error("assignment origin changed", "assignment_id", assignmentID)
+		return
+	}
+	body.ChatOriginID = originID
+	if originID != "" {
+		if _, err := runauthority.ValidateOrigin(ctx, h.db, originID, target.ID, body.WorkspaceID); err != nil {
+			h.finishAssignment(ctx, assignmentID, "", body.ChatID, body.TargetSlug, body.WorkspaceID, "", "requester authority is no longer available", nil)
+			return
+		}
+		ctx = runauthority.WithOriginID(ctx, originID)
+	}
 	// Channel work can wait in the general assignment queue. Revalidate its
 	// permission at the execution door as every queue pump can reach us.
 	if allowed, err := h.authorizeConversationAssignment(ctx, assignmentID); err != nil {
@@ -720,11 +784,15 @@ func (h *AssignmentHandler) runAssignment(
 	// executing target. Threaded from missions v129 columns → DispatchRequest
 	// → body. Omitted when empty (sidecar /assign chat run, legacy mission).
 	runStartedPayload := map[string]any{
+		"host_admitted":    true,
 		"trigger_type":     "ASSIGNMENT",
 		"chat_id":          body.ChatID,
 		"assignment_id":    assignmentID,
 		"assigned_by_chat": body.ChatID,
 		"target_slug":      body.TargetSlug,
+	}
+	if body.ChatOriginID != "" {
+		runStartedPayload["chat_origin_id"] = body.ChatOriginID
 	}
 	if body.CreatedByUserID != "" {
 		runStartedPayload["created_by_user_id"] = body.CreatedByUserID
@@ -732,7 +800,16 @@ func (h *AssignmentHandler) runAssignment(
 	if body.AuthorAgentID != "" {
 		runStartedPayload["author_agent_id"] = body.AuthorAgentID
 	}
-	if _, err := h.journal.Emit(ctx, journal.Entry{
+	emitStart := h.journal.Emit
+	if body.ChatOriginID != "" {
+		synchronous, ok := h.journal.(journal.SyncEmitter)
+		if !ok {
+			h.finishAssignment(ctx, assignmentID, "", body.ChatID, body.TargetSlug, body.WorkspaceID, "", "durable inherited run authority unavailable", nil)
+			return
+		}
+		emitStart = synchronous.EmitSync
+	}
+	if _, err := emitStart(ctx, journal.Entry{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID, // target was resolved within this crew
 		AgentID:     target.ID,
@@ -746,6 +823,10 @@ func (h *AssignmentHandler) runAssignment(
 		TraceID:     runID,
 	}); err != nil {
 		h.logger.Error("create run record for assignment", "error", err, "assignment_id", assignmentID)
+		if body.ChatOriginID != "" {
+			h.finishAssignment(ctx, assignmentID, "", body.ChatID, body.TargetSlug, body.WorkspaceID, "", "durable inherited run authority unavailable", nil)
+			return
+		}
 		runID = "" // prevent finishAssignment from emitting a terminal entry
 	}
 
@@ -1609,31 +1690,34 @@ func (h *AssignmentHandler) finishAssignment(
 				}
 				if commentBody != "" {
 					cid := generateCUID()
-					_, _ = h.db.ExecContext(ctx,
-						`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-						cid, groupID.String, agentID, commentBody, now, now)
-					action := actionTaskCompleted
-					switch {
-					case status == "CANCELLED":
-						action = actionTaskCancelled
-					case errMsg != "" || outcome == orchestrator.OutcomeFailed || outcome == orchestrator.OutcomePartial:
-						action = actionTaskFailed
-					case outcome == orchestrator.OutcomeNeedsHuman:
-						action = actionCommented
+					written, commentErr := orchestrator.WriteAssignmentResultComment(ctx, h.db, assignmentID, workspaceID, groupID.String, agentID, cid, commentBody, now)
+					if commentErr != nil {
+						h.logger.Warn("assignment result comment withheld", "assignment_id", assignmentID, "error", commentErr)
 					}
-					// Through the shared emitter, not a bare INSERT — the
-					// second of the two writers §9.1 (#2332/B1) named as
-					// bypassing seq allocation and the journal. groupID.String
-					// is a confirmed missions.id here (missionExists == 1,
-					// checked above), so this now also produces a journal
-					// entry for a completion that used to be audited only.
-					h.events().log(ctx, issueEvent{
-						MissionID: groupID.String,
-						ActorType: "agent",
-						ActorID:   agentID,
-						Action:    action,
-						Details:   fmt.Sprintf("%s finished work", agentName),
-					})
+					if written {
+						action := actionTaskCompleted
+						switch {
+						case status == "CANCELLED":
+							action = actionTaskCancelled
+						case errMsg != "" || outcome == orchestrator.OutcomeFailed || outcome == orchestrator.OutcomePartial:
+							action = actionTaskFailed
+						case outcome == orchestrator.OutcomeNeedsHuman:
+							action = actionCommented
+						}
+						// Through the shared emitter, not a bare INSERT — the
+						// second of the two writers §9.1 (#2332/B1) named as
+						// bypassing seq allocation and the journal. groupID.String
+						// is a confirmed missions.id here (missionExists == 1,
+						// checked above), so this now also produces a journal
+						// entry for a completion that used to be audited only.
+						h.events().log(ctx, issueEvent{
+							MissionID: groupID.String,
+							ActorType: "agent",
+							ActorID:   agentID,
+							Action:    action,
+							Details:   fmt.Sprintf("%s finished work", agentName),
+						})
+					}
 				}
 			}
 		}

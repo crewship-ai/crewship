@@ -217,7 +217,8 @@ var TableCategory = map[string]string{
 	"attachments": CategoryAtt,
 
 	// Routines, schedules and run history.
-	"pipelines": CategoryRoutines, "pipeline_versions": CategoryRoutines, "pipeline_drafts": CategoryRoutines,
+	"execution_origins": categoryAnchor, // required admission fences; never omit a referenced origin or imply autonomous work
+	"pipelines":         CategoryRoutines, "pipeline_versions": CategoryRoutines, "pipeline_drafts": CategoryRoutines,
 	"pipeline_schedules": CategoryRoutines, "pipeline_webhooks": CategoryRoutines, "pipeline_runs": CategoryRoutines,
 	"pipeline_step_executions": CategoryRoutines, "pipeline_run_artifacts": CategoryRoutines,
 	"pipeline_run_step_outputs": CategoryRoutines, "pipeline_routine_state": CategoryRoutines,

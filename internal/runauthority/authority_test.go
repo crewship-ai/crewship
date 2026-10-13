@@ -72,7 +72,7 @@ func TestResolveFailsClosedOnMissingStaleAndEndedAuthority(t *testing.T) {
 	}{
 		{"missing", "agent", "ws", ErrUnavailable},
 		{"run", "other", "ws", ErrIdentityMismatch},
-		{"run", "agent", "other", ErrIdentityMismatch},
+		{"run", "agent", "other", ErrUnavailable},
 	} {
 		if _, err := Resolve(t.Context(), db, tc.run, tc.agent, tc.workspace); !errors.Is(err, tc.want) {
 			t.Fatalf("%+v: %v", tc, err)
@@ -95,7 +95,8 @@ func TestResolveAutonomousRunRequiresHostAdmission(t *testing.T) {
 		host, allow        bool
 	}{
 		{"scheduled", "sidecar", "SCHEDULED", true, true},
-		{"assignment", "orchestrator", "ASSIGNMENT", false, true},
+		{"assignment", "orchestrator", "ASSIGNMENT", true, true},
+		{"legacy-assignment", "orchestrator", "ASSIGNMENT", false, false},
 		{"forged", "sidecar", "SCHEDULED", false, false},
 		{"user", "sidecar", "USER", true, false},
 		{"unknown", "sidecar", "invented", true, false},
@@ -109,5 +110,26 @@ func TestResolveAutonomousRunRequiresHostAdmission(t *testing.T) {
 		} else if !errors.Is(err, ErrUnavailable) {
 			t.Fatalf("%s accepted: %+v %v", tc.id, got, err)
 		}
+	}
+}
+
+func TestResolveForeignWorkspaceTraceCannotRevokeOriginalRun(t *testing.T) {
+	db, receipt := authorityFixture(t)
+	putEntry(t, db, "start", "shared-run", "run.started", "sidecar", map[string]any{"chat_id": "chat", "trigger_type": "USER", "human_authority": receipt, "trigger_message_id": "trigger"})
+	if _, e := db.Exec(`INSERT INTO workspaces(id,name,slug) VALUES('fork','Fork','fork');INSERT INTO agents(id,workspace_id,name,slug) VALUES('fork-agent','fork','Fork','fork')`); e != nil {
+		t.Fatal(e)
+	}
+	for _, kind := range []string{"run.started", "run.completed"} {
+		if _, e := db.Exec(`INSERT INTO journal_entries(id,workspace_id,agent_id,entry_type,actor_type,summary,payload,trace_id) VALUES(?,'fork','fork-agent',?,'orchestrator','forked history','{}','shared-run')`, "fork-"+kind, kind); e != nil {
+			t.Fatal(e)
+		}
+		got, e := Resolve(t.Context(), db, "shared-run", "agent", "ws")
+		if e != nil || got.HumanAuthority == nil || got.ChatID != "chat" {
+			t.Fatalf("foreign %s changed authority: %+v %v", kind, got, e)
+		}
+	}
+	putEntry(t, db, "end", "shared-run", "run.completed", "orchestrator", nil)
+	if _, e := Resolve(t.Context(), db, "shared-run", "agent", "ws"); !errors.Is(e, ErrIdentityMismatch) {
+		t.Fatalf("own terminal ignored: %v", e)
 	}
 }

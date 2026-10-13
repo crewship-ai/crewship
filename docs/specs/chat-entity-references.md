@@ -41,6 +41,51 @@ transactional authority contract; autonomous runs retain those existing verbs.
 This guard is intentional and is not a claim that every issue action has been
 migrated.
 
+## Delegated and deferred work
+
+The host stores an immutable execution origin separately from the executing
+agent. Assignments, missions, peer queries, mentions, routine drafts, published
+routine heads and versions, schedules, pending work and pipeline runs preserve
+that origin. Completing the parent run does not turn its children autonomous.
+Each subsequent issue mutation rechecks the original human's current authority
+and the executing agent's access inside the mutation transaction. Revocation
+also prevents publishing a delegated result comment, while allowing the run to
+settle. Deleting the source chat revokes the origin without deleting its record.
+
+Only the authenticated host dispatcher may supply a direct pipeline execution
+context. Agent or crew tokens cannot assert an execution origin, and routine
+arguments cannot override identity fields. A missing or invalid persisted
+origin fails closed; it never falls back to autonomous execution.
+
+A new chat invocation supplies its own origin even when invoking a previously
+published routine. Non-chat public routine invocation retains the existing
+routine-launch authorization policy and any stored authoring origin; this
+contract does not replace standing automation grants with a new launcher role
+policy. Immutable pinned versions retain their original authoring origin.
+
+Backup and fork include origins alongside their dependent records. Forks clear
+the human receipt rather than silently granting the copied work autonomous
+rights. Normal restore preserves provenance, but refreshed chat authority makes
+old receipts stale: restoring a backup does not authorize future work on behalf
+of a previously admitted human.
+
+## Upgrade boundary
+
+The migration preserves legacy records and terminal history. Existing
+`PENDING`, `QUEUED` and `RUNNING` assignments and resumable orchestration
+missions receive an immutable invalid origin when their admission provenance
+cannot be recovered. Recovery therefore cannot reinterpret them as autonomous.
+Submit a fresh authenticated request to authorize replacement work; old records
+remain auditable and may settle as failed. Legacy backup imports apply the same
+fence when the origin column is absent, while current explicit autonomous
+`NULL` origins remain autonomous.
+
+Standing routine grants remain unchanged. Pending and active pipeline chains
+are fenced only when durable journal evidence identifies a chat-human root.
+Old autonomous run admissions without an explicit host-admission marker also
+fail closed. This rollout boundary is intentional and requires checking queued
+work before deploying.
+
 ## Authorization
 
 Every request requires authentication and a selected workspace, through the

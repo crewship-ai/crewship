@@ -41,6 +41,9 @@ package sidecar
 // to claim enforcement elsewhere, name the function, not the layer.
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 )
@@ -54,6 +57,33 @@ func (s *Server) handleRoutineScheduleCreate(w http.ResponseWriter, r *http.Requ
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
 		return
 	}
+	ctx, ok := s.routineOrigin(w, r)
+	if !ok {
+		return
+	}
+	agent, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, 403, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
+	var payload map[string]any
+	if !decodeCappedJSONLimit(w, r, &payload, pipelineMaxBodyBytes) {
+		return
+	}
+	if payload == nil {
+		writeJSONResponse(w, 400, map[string]string{"error": "schedule object required"})
+		return
+	}
+	payload["source_run_id"] = routineSourceRun(ctx)
+	payload["source_agent_id"] = agent
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		writeJSONResponse(w, 400, map[string]string{"error": "invalid schedule"})
+		return
+	}
+	r = r.Clone(ctx)
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	r.ContentLength = int64(len(raw))
 	q := url.Values{}
 	q.Set("workspace_id", s.ipc.WorkspaceID)
 	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/routines/schedules?"+q.Encode())

@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // scheduleResponse is the wire shape for pipeline_schedules. We
@@ -351,6 +352,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		maxFailures = *body.MaxConsecutiveFailures
 	}
 	in := pipeline.SaveScheduleInput{
+		ChatOriginID:           runauthority.OriginIDFromContext(r.Context()),
 		WorkspaceID:            workspaceID,
 		Name:                   defaultIfBlank(body.Name, slug),
 		TargetPipelineID:       pipelineID,
@@ -680,6 +682,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		maxFailures = *body.MaxConsecutiveFailures
 	}
 	in := pipeline.SaveScheduleInput{
+		ChatOriginID:           runauthority.OriginIDFromContext(r.Context()),
 		ID:                     scheduleID,
 		WorkspaceID:            workspaceID,
 		Name:                   defaultIfBlank(body.Name, existing.Name),
