@@ -32,6 +32,15 @@ The Mermaid case exercises a trusted literal and explicit insertion; untrusted
 generation input, converter isolation and durable job idempotency require their
 own product tests before enabling that feature.
 
+The Chromium touch case uses real touch input against the production Board
+components with a simulated API. It covers drawing, moving a pin over its inert
+static preview, and inserting the local library. It does not exercise interactive
+iframe activation. The runtime component cases use the production React frame,
+channel and bootstrap over local HTTPS with a simulated host lease. They verify
+Stop/Restart, revision replacement and lease teardown in full Chromium, including
+a running infinite loop. They do not establish production domain admission or
+authorize enabling the interactive profile.
+
 ## What fails CI
 
 The authoritative nightly membership is `GATE_SPECS` and `DRIFT_SPECS` in the

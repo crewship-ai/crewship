@@ -108,3 +108,17 @@ it("retries a historical failed request with a fresh head and without its histor
   expect(writes[0]).toMatchObject({ base_rev: 2, retry_of_request_id: "old", submission_id: expect.any(String) })
   expect(writes[0]).not.toHaveProperty("thread_id")
 })
+
+it("sends an explicitly selected reply outcome and renders a plain reply without a fake published revision", async () => {
+  const view = mount(); await draft()
+  fireEvent.change(screen.getByLabelText("Expected result"), { target: { value: "reply" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send request" }))
+  await waitFor(() => expect(writes).toHaveLength(1))
+  expect(writes[0].result_kind).toBe("reply")
+  data.requests = [{ id: "reply", chat_id: "private", agent_id: "a", instruction: "Analyze", base_rev: 1, status: "succeeded", result_kind: "reply", reply: { body: "<script>not executable</script>", agent_id: "a", run_id: "run", on_behalf_of_user_id: "u", created_at: "2026-10-13T12:00:00Z" }, created_at: "2026-10-13T12:00:00Z", updated_at: "2026-10-13T12:00:00Z" }]
+  await act(async () => { await view.client.invalidateQueries({ queryKey: ["artifact-requests"] }) })
+  expect(await screen.findByText("Reply received")).toBeTruthy()
+  expect(screen.getByText("<script>not executable</script>")).toBeTruthy()
+  expect(screen.queryByRole("button", { name: /View result revision/ })).toBeNull()
+  expect(screen.queryByText("Revision published")).toBeNull()
+})

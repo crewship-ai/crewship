@@ -19,6 +19,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/retention"
@@ -26,12 +27,13 @@ import (
 
 // AuthHandler provides user authentication endpoints including signup, login, and WebSocket token exchange.
 type AuthHandler struct {
-	db          *sql.DB
-	logger      *slog.Logger
-	validator   *auth.JWTValidator
-	sessions    sessions.Store
-	allowSignup bool
-	license     *license.License
+	db                *sql.DB
+	logger            *slog.Logger
+	validator         *auth.JWTValidator
+	sessions          sessions.Store
+	allowSignup       bool
+	invitationJournal journal.Emitter
+	license           *license.License
 
 	// mail carries the out-of-band half of the de-enumerated signup:
 	// the "you already have an account" notice. Optional — nil (tests)
@@ -398,6 +400,8 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	workspaceID := generateCUID()
 	memberID := generateCUID()
 
+	ctx, publishAudit := withInvitationAudit(r.Context(), h.invitationJournal)
+	r = r.WithContext(ctx)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin tx", err)
@@ -467,6 +471,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	publishAudit()
 	h.logger.Info("signup: account created", "user_id", userID, "workspace", slug, "invitations_redeemed", joined)
 	writeSignupResponse(w)
 }
@@ -543,6 +548,10 @@ func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, to
 				return 0, err
 			}
 		}
+		if err := appendInvitationAudit(ctx, tx, journal.EntryInvitationAccepted, inv.workspaceID, userID, inv.id, inv.role, userID); err != nil {
+			return 0, err
+		}
+
 	}
 
 	return len(pending), nil

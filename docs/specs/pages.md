@@ -26,6 +26,13 @@ workspace membership, a stable mutation identity and `base_seq`. Per-element
 and per-placement server revisions are authoritative; Excalidraw client
 versions never authorize overwriting another writer.
 
+The reader accepts the persisted `crewship-board-excalidraw-0.18.1-v1` profile.
+An unknown profile fails without migration or writeback. If discovered during
+refresh, the last supported cached scene remains read-only and mutations are
+blocked. Compatibility tests cover the pinned browser scene, bindings, server
+revisions and serialized undo receipts; they do not substitute for testing an
+actual dependency upgrade and rollback.
+
 Saving is explicit. Disjoint remote changes merge when the editor is idle;
 overlapping graph changes preserve the draft for review. An uncertain save
 must be retried with its original identity before rebasing. Local native undo
@@ -224,6 +231,18 @@ manage grants. The discussion snapshot is fetched only after trusted run
 admission; it is not placed in the chat prompt beforehand. The agent's
 operational prompt and bundled `crewship-artifacts` skill document publication.
 
+The editor chooses an immutable expected result: a new revision (the default)
+or a text-only reply. A reply request cannot publish a revision; its verified
+run completes it with a bounded, plain-text reply and stored attribution.
+`artifact_request_update` also accepts bounded agent-reported phases. These
+are claims displayed separately from observed execution status: they do not
+renew the request deadline or count as runtime heartbeats. Each update has an
+immutable mutation receipt; an exact retry rechecks live authority and returns
+the originally accepted update, while the request read returns current state.
+Publication policy may disable publishing without disabling these reports.
+Backup preserves the discussion and attribution but never restores live run
+authority or pending completion notifications.
+
 A failed or cancelled request can be submitted again explicitly with
 `retry_of_request_id`. The server checks the same initiating human, workspace,
 source Page and job kind; it never resumes the original runtime. The new request
@@ -248,6 +267,14 @@ matrix measures known iframe unresponsiveness in Firefox/WebKit explicitly;
 a passing capability experiment is not authorization to enable scripts. The
 separate-tab experiment and sanitized production preview remain tested in all
 engines; an interactive separate-tab product flow still requires acceptance.
+
+`GET /api/v1/pages/{slug}/artifact/lease?revision=N` is a human-only metadata
+check for one retained revision. It rechecks the current database membership,
+role and Page ACL, returning the revision digest, supported profile and a
+15-second expiry. It is not a bearer capability and does not enable scripts.
+Interactive bootstrap, MessagePort and host teardown components remain
+disconnected from the product view until runtime acceptance. Agent credentials
+cannot use the lease endpoint.
 
 ## 0. Verdict
 

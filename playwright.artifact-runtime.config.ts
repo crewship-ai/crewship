@@ -9,7 +9,8 @@ export default defineConfig({
   projects: [
     // Full Chromium's site isolation differs from the default headless shell.
     { name: 'chromium', use: { browserName: 'chromium', channel: 'chromium' } },
-    { name: 'firefox', use: { browserName: 'firefox' } },
-    { name: 'webkit', use: { browserName: 'webkit' } },
+    // The production preparation component deliberately supports Chromium only.
+    { name: 'firefox', testIgnore: 'component.spec.ts', use: { browserName: 'firefox' } },
+    { name: 'webkit', testIgnore: 'component.spec.ts', use: { browserName: 'webkit' } },
   ],
 })

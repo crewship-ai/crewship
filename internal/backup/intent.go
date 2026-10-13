@@ -38,6 +38,7 @@ import "sort"
 var BackupTableIntent = map[string]ScopedTableIntent{
 	"artifact_workspace_writes":             IntentExcludeRuntime, // per-installation rolling write-rate receipts are initialized anew on restore
 	"artifact_creation_authorizations":      IntentExcludeRuntime, // explicit live-run creation opt-in must not survive restore
+	"page_artifact_request_updates":         IntentInclude,        // immutable typed progress/reply history, never live authority
 	"page_artifact_requests":                IntentInclude,        // history restored with live dispatch authority cleared
 	"artifact_run_principals":               IntentExcludeRuntime, // active chat/run admission must be freshly captured after restore
 	"page_artifact_run_delegations":         IntentExcludeRuntime, // restoring history must never resurrect a live run's publication authority

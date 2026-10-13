@@ -312,6 +312,7 @@ var BackupTables = []string{
 	"page_artifact_copies",
 	"page_artifact_mutation_receipts",
 	"page_artifact_requests",
+	"page_artifact_request_updates",
 	"page_board_threads",
 	"page_board_comments",
 	"page_board_comment_mutations",
@@ -479,6 +480,8 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "page_artifact_comment_history", "page_board_threads", "page_board_comment_mutations", "page_boards", "page_artifact_mutation_receipts", "page_artifact_requests", "page_artifact_creations", "page_artifact_threads", "page_artifact_comment_mutations", "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
 		// Scope through the owning page, never the nullable (or cross-workspace) editor.
 		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "page_artifact_request_updates":
+		return "request_id IN (SELECT q.id FROM page_artifact_requests q JOIN pages p ON p.id=q.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
 	case "page_board_request_previews", "page_board_request_files", "page_board_request_sources":
 		return "request_id IN (SELECT q.id FROM page_board_requests q WHERE q.workspace_id=?)", []any{workspaceID}, true
 	case "page_board_comments":
@@ -653,6 +656,15 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			}
 			if hasMembers {
 				where = "(" + where + `) OR id IN (SELECT user_id FROM workspace_members WHERE workspace_id = ?)`
+				args = append(args, workspaceID)
+			}
+			// Immutable update attribution may outlive workspace membership.
+			hasUpdates, err := tableExists(ctx, tx, "page_artifact_request_updates")
+			if err != nil {
+				return nil, fmt.Errorf("backup: probe artifact update attribution: %w", err)
+			}
+			if hasUpdates {
+				where = "(" + where + `) OR id IN (SELECT u.on_behalf_of_user_id FROM page_artifact_request_updates u JOIN page_artifact_requests q ON q.id=u.request_id JOIN pages p ON p.id=q.page_id WHERE p.workspace_id=? AND u.on_behalf_of_user_id IS NOT NULL)`
 				args = append(args, workspaceID)
 			}
 			where, args, err = includeConversationUsers(ctx, tx, workspaceID, where, args)

@@ -1,5 +1,6 @@
 /** Runtime evidence is distinct from the durable request/result state. */
 export interface RequestExecution {
+  agent_reported_phase?: { phase: "preparing" | "waiting_for_input" | "uploading" | "finalizing"; message: string; reported_at: string }
   retry_of_request_id?: string
   retry_warning?: string
   execution_state?: "observed" | "awaiting_confirmation" | "unknown" | "deadline_exceeded"

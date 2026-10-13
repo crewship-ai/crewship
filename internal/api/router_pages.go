@@ -115,6 +115,9 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/pages/{slug}/access", authed(wsCtx(http.HandlerFunc(p.PageAccess))))
 	// openapi: query subject:string! subject_type:string limit:integer cursor:string; responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages/access", authed(wsCtx(http.HandlerFunc(p.SubjectAccess))))
+	// Metadata-only human access check; no runtime profile is activated.
+	// openapi: query revision:integer!; responses 200,400,401,403,404,409,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/lease", authed(wsCtx(http.HandlerFunc(p.GetArtifactLease))))
 	// Request notices are opaque pointers; the resolver rechecks current human access.
 	// openapi: responses 200,401,403,404,500
 	r.mux.Handle("GET /api/v1/page-request-results/{kind}/{requestId}", authed(wsCtx(http.HandlerFunc(p.ResolvePageRequestResult))))

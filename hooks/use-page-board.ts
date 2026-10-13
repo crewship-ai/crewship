@@ -1,10 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { pagesKeys } from "@/hooks/use-pages"
+import { assertBoardCompatibility, BoardCompatibilityError } from "@/lib/boards/compatibility"
 import type { BoardElement, BoardBatch } from "@/lib/boards/revision-adapter"
 export interface PageBoardRecord { author_user_id?: string; author_agent_id?: string; author_run_id?: string; element_id: string; element_rev: number; element: BoardElement | null; deleted: boolean }
 export interface BoardPlacement { mode?: "fixed" | "follow_latest"; id: string; placement_rev?: number; x: number; y: number; width: number; height: number; source?: { page_slug: string; revision: number; pinned_revision?: number; title: string } }
@@ -17,10 +18,11 @@ export function usePageBoard(workspace: string, slug: string) {
   const endpoint = `/api/v1/pages/${encodeURIComponent(slug)}/board`
   const params = new URLSearchParams({ workspace_id: workspace })
   const [accessError, setAccessError] = useState<PageBoardError | null>(null)
+  const compatibilityError = useRef<BoardCompatibilityError | null>(null)
   const pending = useRef(new Map<string, string>())
   const receipt = useRef<import("@/lib/boards/command-history").BoardReceipt | null>(null)
   const [uncertain, setUncertain] = useState(false)
-  useEffect(() => { pending.current.clear(); receipt.current = null; setUncertain(false); setAccessError(null) }, [workspace, slug])
+  useEffect(() => { compatibilityError.current = null; pending.current.clear(); receipt.current = null; setUncertain(false); setAccessError(null) }, [workspace, slug])
   const invalidate = useCallback(() => { void client.invalidateQueries({ queryKey: ["page-board", workspace, slug] }) }, [client, workspace, slug])
   useRealtimeEventSafe("page.updated", invalidate)
   useRealtimeEventSafe("page.deleted", invalidate)
@@ -30,6 +32,8 @@ export function usePageBoard(workspace: string, slug: string) {
     const body = await response.json().catch(() => null)
     if (!response.ok) throw new PageBoardError(body?.error ?? "Could not load this board.", response.status)
     if (!Array.isArray(body?.records) || !Array.isArray(body?.placements)) throw new Error("Invalid board response.")
+    try { assertBoardCompatibility(body) } catch (error) { if (error instanceof BoardCompatibilityError) compatibilityError.current = error; throw error }
+    compatibilityError.current = null
     setAccessError(null)
     return body
   }
@@ -39,6 +43,7 @@ export function usePageBoard(workspace: string, slug: string) {
   const write = useMutation({
     retry: false,
     mutationFn: async (input: { base_seq: number; operation: BoardWrite }) => {
+      if (compatibilityError.current) throw compatibilityError.current
       const stamp = JSON.stringify({ workspace, slug, input })
       if (!pending.current.has(stamp)) {
         if (pending.current.size >= 32) throw new Error("Too many unconfirmed changes. Retry an earlier save before creating another.")
@@ -64,5 +69,6 @@ export function usePageBoard(workspace: string, slug: string) {
     },
     onError: error => { if (error instanceof PageBoardError && [401, 403, 404, 409].includes(error.status)) invalidate() },
   })
-  return { query: { ...query, data: denied || accessError ? undefined : query.data, error: accessError ?? query.error }, write, receipt, uncertain }
+  const readable = useMemo(() => query.data && query.error instanceof BoardCompatibilityError ? { ...query.data, can_write: false } : query.data, [query.data, query.error])
+  return { query: { ...query, data: denied || accessError ? undefined : readable, error: accessError ?? query.error }, write, receipt, uncertain }
 }

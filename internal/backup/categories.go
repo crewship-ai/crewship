@@ -251,6 +251,7 @@ var TableCategory = map[string]string{
 	"page_artifact_mutation_receipts": CategoryPages,
 	"page_artifact_creations":         CategoryPages,
 	"page_artifact_requests":          CategoryPages,
+	"page_artifact_request_updates":   CategoryPages,
 	"page_boards":                     CategoryPages,
 	"page_board_files":                CategoryPages,
 	"page_board_elements":             CategoryPages,

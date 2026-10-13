@@ -48,11 +48,18 @@ func newPageArtifactRequestsCommand() *cobra.Command {
 				if submission == "" {
 					submission = uuid.NewString()
 				}
+				resultKind, _ := cmd.Flags().GetString("result-kind")
+				if resultKind != "revision" && resultKind != "reply" {
+					return fmt.Errorf("--result-kind must be revision or reply")
+				}
 				retryOf, _ := cmd.Flags().GetString("retry-of")
 				if cmd.Flags().Changed("retry-of") && (strings.TrimSpace(retryOf) == "" || len(retryOf) > 128) {
 					return fmt.Errorf("--retry-of must identify a prior failed or cancelled request (at most 128 bytes)")
 				}
 				body = map[string]any{"chat_id": chat, "instruction": instruction, "base_rev": base, "submission_id": submission}
+				if resultKind == "reply" {
+					body["result_kind"] = resultKind
+				}
 				if retryOf != "" {
 					body["retry_of_request_id"] = retryOf
 				}
@@ -92,6 +99,7 @@ func newPageArtifactRequestsCommand() *cobra.Command {
 			cmd.Flags().String("chat", "", "Required existing human-accessible chat selecting the target agent")
 			cmd.Flags().String("instruction", "", "Explicit instruction; sending may incur agent usage costs")
 			cmd.Flags().Int64("base-rev", 0, "Required immutable source revision; stale publication is rejected")
+			cmd.Flags().String("result-kind", "revision", "Required result: revision publication or reply-only answer; fixed after submission")
 			cmd.Flags().String("retry-of", "", "Prior failed/cancelled request; starts new work with a fresh snapshot and may duplicate an unconfirmed run")
 			cmd.Flags().String("thread", "", "Optional discussion thread to snapshot with this request")
 			cmd.Flags().String("submission-id", "", "Stable ID for retrying this exact submission; generated when omitted")

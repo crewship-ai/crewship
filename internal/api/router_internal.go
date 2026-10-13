@@ -80,6 +80,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.mux.Handle("GET /api/v1/internal/board-requests/{requestId}/files/{fileId}", internalAuth(http.HandlerFunc(r.pages.GetBoardRequestAsset)))
 	r.mux.Handle("GET /api/v1/internal/board-requests/{requestId}/sources/{sourceId}", internalAuth(http.HandlerFunc(r.pages.GetBoardRequestAsset)))
 	r.mux.Handle("GET /api/v1/internal/artifact-requests/{requestId}", internalAuth(http.HandlerFunc(r.pages.GetArtifactRequestAgent)))
+	r.mux.Handle("POST /api/v1/internal/artifact-requests/{requestId}/updates", internalAuth(http.HandlerFunc(r.pages.UpdateArtifactRequestAgent)))
 	r.mux.Handle("GET /api/v1/internal/board-requests/{requestId}", internalAuth(http.HandlerFunc(r.pages.GetBoardRequestAgent)))
 	r.mux.Handle("POST /api/v1/internal/board-requests/{requestId}/mermaid", internalAuth(http.HandlerFunc(r.pages.PublishBoardRequestMermaid)))
 	r.mux.Handle("GET /api/v1/internal/boards/{slug}", internalAuth(http.HandlerFunc(r.pages.GetBoardAgent)))

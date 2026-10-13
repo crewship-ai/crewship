@@ -26,6 +26,7 @@ func remapArtifactCreationRuns(dump *DBDump) {
 		{"page_artifact_revisions", "author_run_id"},
 		{"page_artifact_mutation_receipts", "author_run_id"},
 		{"page_artifact_requests", "run_id"},
+		{"page_artifact_request_updates", "run_id"},
 		{"page_board_requests", "run_id"},
 		{"journal_entries", "trace_id"},
 		{"eval_runs", "trace_id"},

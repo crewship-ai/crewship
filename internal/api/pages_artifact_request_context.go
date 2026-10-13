@@ -23,9 +23,9 @@ func (h *PageHandler) GetArtifactRequestAgent(w http.ResponseWriter, r *http.Req
 	defer tx.Rollback()
 	r = r.WithContext(context.WithValue(r.Context(), pageAuthReaderKey{}, tx))
 	a := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
-	var page, snapshot, instruction string
+	var page, snapshot, instruction, status string
 	var base int64
-	if tx.QueryRowContext(r.Context(), `SELECT ar.page_id,ar.snapshot_json,ar.instruction,ar.base_rev FROM page_artifact_requests ar JOIN pages p ON p.id=ar.page_id AND p.workspace_id=? WHERE ar.id=? AND ar.run_id=? AND ar.agent_id=? AND ar.human_user_id=? AND ar.chat_id=? AND ar.status IN ('running','succeeded')`, a.WorkspaceID, r.PathValue("requestId"), a.RunID, a.AgentID, a.HumanUserID, a.ChatID).Scan(&page, &snapshot, &instruction, &base) != nil {
+	if tx.QueryRowContext(r.Context(), `SELECT ar.page_id,ar.snapshot_json,ar.instruction,ar.base_rev,ar.status FROM page_artifact_requests ar JOIN pages p ON p.id=ar.page_id AND p.workspace_id=? WHERE ar.id=? AND ar.run_id=? AND ar.agent_id=? AND ar.human_user_id=? AND ar.chat_id=? AND ar.status IN ('running','succeeded')`, a.WorkspaceID, r.PathValue("requestId"), a.RunID, a.AgentID, a.HumanUserID, a.ChatID).Scan(&page, &snapshot, &instruction, &base, &status) != nil {
 		replyError(w, 403, "artifact request authority required")
 		return
 	}
@@ -37,5 +37,17 @@ func (h *PageHandler) GetArtifactRequestAgent(w http.ResponseWriter, r *http.Req
 		replyError(w, 503, "request snapshot unavailable")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"id": r.PathValue("requestId"), "base_rev": base, "instruction": instruction, "snapshot": json.RawMessage(snapshot)})
+	outcome, err := loadArtifactRequestOutcome(r.Context(), tx, r.PathValue("requestId"))
+	if err != nil {
+		h.boardError(w, err)
+		return
+	}
+	response := map[string]any{"result_kind": outcome.ResultKind, "status": status, "id": r.PathValue("requestId"), "base_rev": base, "instruction": instruction, "snapshot": json.RawMessage(snapshot)}
+	if outcome.AgentReportedPhase != nil {
+		response["agent_reported_phase"] = outcome.AgentReportedPhase
+	}
+	if outcome.Reply != nil {
+		response["reply"] = outcome.Reply
+	}
+	writeJSON(w, 200, response)
 }

@@ -27,9 +27,9 @@ func (h *PageHandler) boardPage(w http.ResponseWriter, r *http.Request, write bo
 		return nil, false
 	}
 	ws := WorkspaceIDFromContext(r.Context())
-	var role string
-	if h.pageAuthReader(r.Context()).QueryRowContext(r.Context(), `SELECT wm.role FROM workspace_members wm JOIN users human ON human.id=wm.user_id AND human.suspended_at IS NULL WHERE wm.workspace_id=? AND wm.user_id=?`, ws, user.ID).Scan(&role) != nil {
-		replyError(w, 403, "workspace membership required")
+	role, err := h.liveContentHumanRole(r.Context(), ws, user.ID)
+	if err != nil {
+		replyError(w, 403, "active trusted workspace membership required")
 		return nil, false
 	}
 	r = r.WithContext(context.WithValue(r.Context(), ctxRole, role))

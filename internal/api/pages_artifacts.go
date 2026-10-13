@@ -43,11 +43,6 @@ func (h *PageHandler) artifactPage(w http.ResponseWriter, r *http.Request, write
 		replyError(w, 401, "human authentication required")
 		return nil, false
 	}
-	var active int
-	if h.pageAuthReader(r.Context()).QueryRowContext(r.Context(), `SELECT 1 FROM users WHERE id=? AND suspended_at IS NULL`, user.ID).Scan(&active) != nil {
-		replyError(w, 403, "active human account required")
-		return nil, false
-	}
 	ws := WorkspaceIDFromContext(r.Context())
 	rec, err := h.loadPage(r.Context(), ws, r.PathValue("slug"))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -58,6 +53,12 @@ func (h *PageHandler) artifactPage(w http.ResponseWriter, r *http.Request, write
 		replyInternalError(w, h.logger, "load artifact page", err)
 		return nil, false
 	}
+	role, err := h.liveContentHumanRole(r.Context(), ws, user.ID)
+	if err != nil {
+		replyError(w, 403, "active trusted workspace membership required")
+		return nil, false
+	}
+	r = r.WithContext(context.WithValue(r.Context(), ctxRole, role))
 	viewer, err := h.loadViewer(r.Context(), ws, user.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "authorize artifact page", err)
@@ -233,6 +234,13 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		replyError(w, 403, "artifact request binding mismatch")
 		return
 	}
+	if req.RequestID != "" {
+		var kind string
+		if h.pageAuthReader(r.Context()).QueryRowContext(r.Context(), `SELECT result_kind FROM page_artifact_requests WHERE id=?`, req.RequestID).Scan(&kind) != nil || kind != "revision" {
+			replyError(w, 403, "request does not authorize revision publication")
+			return
+		}
+	}
 	var restoredFrom *int64
 	if restore {
 		if req.Revision < 1 || req.HTML != "" {
@@ -349,7 +357,7 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 	if req.RequestID != "" {
 		var base int64
 		var state string
-		if tx.QueryRowContext(ctx, `SELECT base_rev,status FROM page_artifact_requests WHERE id=? AND page_id=? AND run_id=?`, req.RequestID, rec.ID, artifactRunID(r)).Scan(&base, &state) != nil || base != *req.BaseRev || state != "running" {
+		if tx.QueryRowContext(ctx, `SELECT base_rev,status FROM page_artifact_requests WHERE id=? AND page_id=? AND run_id=? AND result_kind='revision'`, req.RequestID, rec.ID, artifactRunID(r)).Scan(&base, &state) != nil || base != *req.BaseRev || state != "running" {
 			replyError(w, 409, "artifact request is no longer publishable")
 			return
 		}

@@ -62,7 +62,7 @@ func newPageArtifactCommand() *cobra.Command {
 	publish := newPageArtifactWriteCommand(false)
 	restore := newPageArtifactWriteCommand(true)
 	cmd.AddCommand(create, show, publish, restore, newPageArtifactCopyCommand(), newPageArtifactThreadsCommand(), newPageArtifactCommentsCommand(), newPageArtifactDelegationCommand(false), newPageArtifactDelegationCommand(true), newPageArtifactRequestsCommand(), newPageArtifactCreationAuthorizationCommand(false), newPageArtifactCreationAuthorizationCommand(true))
-	cmd.AddCommand(newPageArtifactCreationStatusCommand(), newPageArtifactChatResultsCommand())
+	cmd.AddCommand(newPageArtifactLeaseCommand(), newPageArtifactCreationStatusCommand(), newPageArtifactChatResultsCommand())
 	return cmd
 }
 
