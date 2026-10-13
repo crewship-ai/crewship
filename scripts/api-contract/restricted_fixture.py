@@ -13,7 +13,7 @@ product's own surfaces, never a global auth bypass:
   1. invites an address into the workspace as MANAGER (the catalog route
      also demands manualPolicy: OWNER/ADMIN/MANAGER or the routine-run
      capability — restricted mode narrows what that role may do, it does not
-     replace the role check), signs it up (the invitation is
+     replace the role check), signs it up with the issuer-returned proof (the invitation is
      redeemed inside the signup transaction) — needs CREWSHIP_ALLOW_SIGNUP;
   2. mints that user's own CLI token with the shipped `crewship login` +
      `crewship token create` (token minting is self-scoped, so the member
@@ -35,7 +35,7 @@ after an admitted restricted routine run, which executes inside the restricted
 runner image; this fixture does not start that image. The {runId} operation is
 therefore graded against the designed not-found answer for an absent run.
 
-Idempotent: a second invocation reuses the invitation (409), the account, lifts the
+Idempotent: a second invocation reuses an existing membership (409), the account, lifts the
 restriction only long enough to mint a fresh token, and restores it.
 """
 import json
@@ -62,8 +62,16 @@ def provision(api, workspace, email=EMAIL):
                             {"email": email, "role": "MANAGER"})
     if status not in (200, 201, 409):
         raise SystemExit(f"invite {email}: HTTP {status}: {body}")
-    status, body = api.send("POST", "/api/v1/auth/signup",
-                            {"email": email, "full_name": FULL_NAME, "password": PASSWORD})
+    token = body.get("token") if isinstance(body, dict) else None
+    if status != 409 and (not isinstance(token, str) or not token):
+        raise SystemExit("invitation creation returned no recipient proof")
+    signup = {"email": email, "full_name": FULL_NAME, "password": PASSWORD}
+    if isinstance(token, str) and token:
+        signup["invitation_token"] = token
+    # A conflict can reuse an existing membership, but never recover a pending
+    # invitation proof from its metadata listing. The membership check below
+    # fails closed if a pending invitation has not been redeemed.
+    status, body = api.send("POST", "/api/v1/auth/signup", signup)
     if status not in (200, 201, 202):
         raise SystemExit(
             f"signup {email}: HTTP {status}: {body} (is CREWSHIP_ALLOW_SIGNUP=true on the server?)")

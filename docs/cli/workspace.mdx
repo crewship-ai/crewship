@@ -212,7 +212,7 @@ crewship workspace invite create alice@acme.com --role ADMIN
 | --- | --- | --- |
 | `--role <ROLE>` | `MEMBER` | Role recorded on the invitation: `MEMBER` or `ADMIN`. |
 
-On success the CLI prints `Invitation recorded for <email> (<role> role).`
+On success the CLI prints `Invitation recorded for <email> (<role> role).` and the recipient's invitation link. Save and share that creation response privately; invitation lists expose metadata without the redemption token.
 followed by a warning that no email was sent.
 
 ### `workspace member invite`
@@ -433,3 +433,30 @@ silently refresh it. Revisions may advance by more than one. Missing/null rights
 unknown fields and a document for a different membership are rejected.
 This command does not enable restricted model execution or stop an already
 running shared process. See [the API contract](/api-reference/workspaces#replace-member-resource-access).
+
+## `crewship workspace invite accept --token-stdin`
+
+Accept the presented invitation with the signed-in account matching its email. Requires an unrestricted credential and no active workspace. Membership and invitation consumption commit together. An already accepted invitation can be retried by the same current member without restoring an old role or a removed membership.
+
+```bash
+crewship workspace invite accept --token-stdin < /path/to/private-invitation-proof
+```
+
+Proof is read from standard input, never a positional argument or secret-valued flag. Use a private file or a secret manager pipe; do not paste a literal proof into shell command history. New recipient links use a fragment. The join page removes the proof from the current URL and retains it only in that tab during sign-in/signup.
+
+## `crewship workspace invite reissue <invitation-id>`
+
+Rotate an unaccepted invitation and print a new recipient link. Requires a live trusted workspace OWNER/ADMIN; an ADMIN invitation requires OWNER. The previous link immediately stops working. No email is sent. Expired or lost links can be replaced; an existing membership is not changed.
+
+```bash
+crewship workspace invite list
+crewship workspace invite reissue INVITATION_ID
+```
+
+## `crewship workspace invite revoke <invitation-id>`
+
+Revoke an unaccepted invitation without removing or changing an existing member. Uses the same issuer authority checks as reissue.
+
+```bash
+crewship workspace invite revoke INVITATION_ID
+```

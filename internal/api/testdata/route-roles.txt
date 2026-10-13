@@ -85,6 +85,7 @@ DELETE /api/v1/users/me/user-model roleSelf
 DELETE /api/v1/users/me/user-model/facts/{key} roleSelf
 DELETE /api/v1/workflow-templates/{id} roleCreate
 DELETE /api/v1/workspaces/{workspaceId} roleManage
+DELETE /api/v1/workspaces/{workspaceId}/invitations/{invitationId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/logo roleManage
 DELETE /api/v1/workspaces/{workspaceId}/members/{memberId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId} roleManage
@@ -205,6 +206,7 @@ POST /api/v1/approvals/reset-auto-tuning roleManage
 POST /api/v1/approvals/{id}/cancel roleManage
 POST /api/v1/approvals/{id}/decide roleManage
 POST /api/v1/auth/cli-token roleSelf
+POST /api/v1/auth/invitation/accept roleSelf
 POST /api/v1/auth/pair/start roleSelf
 POST /api/v1/auth/sessions/{id}/revoke roleSelf
 POST /api/v1/automations roleManage
@@ -345,6 +347,7 @@ POST /api/v1/users/me/password roleSelf
 POST /api/v1/workflow-templates roleCreate
 POST /api/v1/workspaces roleSelf
 POST /api/v1/workspaces/{workspaceId}/invitations roleManage
+POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/reissue roleManage
 POST /api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight roleSelf
 POST /api/v1/workspaces/{workspaceId}/logo roleManage
 POST /api/v1/workspaces/{workspaceId}/members roleManage
