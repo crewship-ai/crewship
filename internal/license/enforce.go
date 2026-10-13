@@ -23,8 +23,13 @@ func (l *License) CheckAgentLimit(_ context.Context, _ *sql.DB, _ string) error 
 	return nil
 }
 
+// MemberQueryer lets admission use the same transaction that grants membership.
+type MemberQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 // CheckMemberLimit is a no-op in v0.1 — see file-level note.
-func (l *License) CheckMemberLimit(_ context.Context, _ *sql.DB, _ string) error {
+func (l *License) CheckMemberLimit(_ context.Context, _ MemberQueryer, _ string) error {
 	return nil
 }
 
