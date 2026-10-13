@@ -106,6 +106,21 @@ func TestAcceptance_AdminInstanceVerbs(t *testing.T) {
 	if opsOwner != "carol@lab.invalid" {
 		t.Fatalf("ops owner = %q", opsOwner)
 	}
+	// Rename and re-kind a workspace the admin is not a member of; the slug stays.
+	if out := must("admin", "instance", "update-workspace", "ops", "--name", "Operations", "--kind", "personal"); !strings.Contains(out, `personal workspace named "Operations"`) {
+		t.Fatalf("update-workspace:\n%s", out)
+	}
+	var opsName, opsKind string
+	_ = db.QueryRow(`SELECT name, kind FROM workspaces WHERE slug = 'ops'`).Scan(&opsName, &opsKind)
+	if opsName != "Operations" || opsKind != "personal" {
+		t.Fatalf("ops = %q/%q, want Operations/personal", opsName, opsKind)
+	}
+	if _, err := run("admin", "instance", "update-workspace", "ops", "--kind", "shared"); err == nil {
+		t.Fatal("update-workspace accepted an unknown kind")
+	}
+	if _, err := run("admin", "instance", "update-workspace", "ops"); err == nil {
+		t.Fatal("update-workspace with nothing to change succeeded")
+	}
 	if _, err := run("admin", "instance", "delete-workspace", "ops", "--confirm", "nope"); err == nil {
 		t.Fatal("delete-workspace accepted a wrong confirmation")
 	}

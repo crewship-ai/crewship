@@ -18,6 +18,7 @@ const ok = (body: unknown, status = 200) => ({ ok: status < 400, status, json: a
 let legacyPresent = false
 let logPutFails = false
 const LOG = { level: "info", baseline: "info" }
+let AUDIT: unknown[] = []
 
 function routes(url: string, init?: RequestInit) {
   const u = String(url)
@@ -31,6 +32,7 @@ function routes(url: string, init?: RequestInit) {
     }
     return ok(LOG)
   }
+  if (u.startsWith("/api/v1/admin/instance/audit?entity_id=log-level")) return ok(AUDIT)
   if (u.startsWith("/api/v1/admin/legacy-resources")) return ok({ present: legacyPresent })
   if (u.startsWith("/api/v1/admin/reap-orphan-containers")) {
     const apply = u.includes("apply=true")
@@ -48,6 +50,7 @@ beforeEach(() => {
   cleanup()
   legacyPresent = false
   logPutFails = false
+  AUDIT = []
   vi.mocked(toast.error).mockReset()
   h.apiFetch.mockReset()
   h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) => routes(u, init))
@@ -98,6 +101,24 @@ describe("Runtime — logging", () => {
     await waitFor(() => expect(calls((u, i) => u.startsWith("/api/v1/admin/log-level") && i?.method === "PUT")).toHaveLength(2))
     const [, back] = calls((u, i) => u.startsWith("/api/v1/admin/log-level") && i?.method === "PUT")[1]
     expect(JSON.parse(String(back!.body))).toEqual({ level: "info", ttl_seconds: 0 })
+  })
+
+  it("offers a duration only away from the baseline, and says who changed the level", async () => {
+    AUDIT = [
+      { id: "a2", user_email: null, action: "instance.log_level_reverted", metadata: JSON.stringify({ from: "error", to: "info" }), created_at: "2026-10-13T11:18:58Z" },
+      { id: "a1", user_email: "demo@crewship.ai", action: "instance.log_level_changed", metadata: JSON.stringify({ from: "info", to: "error", ttl_seconds: 3600 }), created_at: "2026-10-13T10:18:58Z" },
+    ]
+    renderTab()
+    await waitFor(() => expect(document.querySelector("[data-slot=log-current]")).not.toBeNull())
+    expect(document.querySelector("[data-slot=log-current]")).toHaveTextContent("CREWSHIP_LOG_LEVEL")
+    // At the baseline there is nothing to drop back from.
+    expect(screen.getByRole("button", { name: "1 hour" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "warn" }))
+    expect(screen.getByRole("button", { name: "1 hour" })).toBeEnabled()
+    const history = await waitFor(() => { const el = document.querySelector("[data-slot=log-history]"); if (!el) throw new Error("no history"); return el })
+    expect(history).toHaveTextContent("info → error for 1 hour")
+    expect(history).toHaveTextContent("demo@crewship.ai")
+    expect(history).toHaveTextContent("error → info · time ran out · the server")
   })
 
   it("shows nothing to save until a level is picked, and Discard drops the pick", async () => {

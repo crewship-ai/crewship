@@ -96,15 +96,20 @@ The default (table) output is an indented human-readable tree.`,
 	},
 }
 
+// manifestKeep marks a hidden command that stays in the manifest: hidden from
+// --help while its feature is paused, still documented (with the pause
+// stated) and still answering — `crewship hooks` prints the server's reason.
+const manifestKeep = "crewship.manifest.keep"
+
 // collectCommands walks the cobra tree depth-first, skipping hidden
-// commands and cobra's auto-generated `help` command. `completion` is
-// kept — it's a real user-facing command (docs/cli/completion.mdx), not
-// plumbing an agent should be blind to.
+// commands (unless marked manifestKeep) and cobra's auto-generated `help`
+// command. `completion` is kept — it's a real user-facing command
+// (docs/cli/completion.mdx), not plumbing an agent should be blind to.
 func collectCommands(parent *cobra.Command, prefix string) []commandManifest {
 	children := parent.Commands()
 	out := make([]commandManifest, 0, len(children))
 	for _, c := range children {
-		if c.Hidden || c.Name() == "help" {
+		if (c.Hidden && c.Annotations[manifestKeep] == "") || c.Name() == "help" {
 			continue
 		}
 		path := c.Name()

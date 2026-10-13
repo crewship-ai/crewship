@@ -15,6 +15,11 @@ export interface WorkspaceData {
   id: string
   name: string
   slug: string
+  /** "personal" for the one made at sign-up for its owner alone: shown as
+   *  their personal account, apart from the workspaces. Older backends omit it. */
+  kind?: "team" | "personal"
+  /** Whose personal account it is (kind "personal" only). */
+  personal_owner_id?: string | null
   /** The workspace's uploaded logo (#3005); null draws its initial. */
   logo_url?: string | null
   currentUserRole: string | null

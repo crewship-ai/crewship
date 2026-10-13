@@ -297,12 +297,34 @@ const DURATIONS = [
 
 const DEFAULT_TTL = 900
 
+/** One row of the instance audit, as GET /admin/instance/audit lists it. */
+interface LevelChange {
+  id: string
+  user_email?: string | null
+  action: string
+  metadata: string
+  created_at: string
+}
+
+/** "debug → error for 1 hour", or "back to debug, time ran out". */
+function describeChange(c: LevelChange): string {
+  let m: { from?: string; to?: string; ttl_seconds?: number } = {}
+  try { m = JSON.parse(c.metadata) } catch { /* shown without detail */ }
+  if (c.action === "instance.log_level_reverted") return `${m.from ?? "?"} → ${m.to ?? "?"} · time ran out`
+  const ttl = m.ttl_seconds ? DURATIONS.find((d) => d.seconds === m.ttl_seconds)?.label ?? `${Math.round(m.ttl_seconds / 60)} min` : null
+  return `${m.from ?? "?"} → ${m.to ?? "?"}${ttl ? ` for ${ttl}` : ""}`
+}
+
 function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string | null; state: LogLevelState | null; onChange: (s: LogLevelState) => void }) {
   // The picked level is a draft until the page's Save bar applies it; null
   // follows whatever the server reports.
   const [draftLevel, setDraftLevel] = React.useState<string | null>(null)
   const [ttl, setTtl] = React.useState<number>(DEFAULT_TTL)
   const [busy, setBusy] = React.useState(false)
+  // Who changed the level and when: the instance audit, re-read after each
+  // change. An instance admin reads it; for anyone else it stays hidden.
+  const [rev, setRev] = React.useState(0)
+  const history = useAdminRead<LevelChange[]>(`/api/v1/admin/instance/audit?entity_id=log-level&limit=3&rev=${rev}`)
   const level = draftLevel ?? state?.level ?? "debug"
   /** PUT the level; throws the server's reason so the caller decides how to show it. */
   const put = async (body: { level: string; ttl_seconds: number }) => {
@@ -313,6 +335,7 @@ function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string | n
       })
       if (!res.ok) throw new Error(await readApiError(res, "The log level was not changed"))
       onChange(await res.json())
+      setRev((n) => n + 1)
     } catch (e) {
       throw e instanceof Error ? e : new Error("The log level was not changed")
     } finally {
@@ -321,6 +344,8 @@ function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string | n
   }
   const overridden = !!state && (state.level !== state.baseline || !!state.expires_at)
   const changed = draftLevel !== null && (!state || draftLevel !== state.level)
+  // Dropping back only means something away from the baseline.
+  const atBaseline = !!state && level === state.baseline
   const apply = async () => {
     await put({ level, ttl_seconds: ttl })
     setDraftLevel(null)
@@ -336,13 +361,28 @@ function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string | n
             {overridden
               ? `Now ${state.level}${state.expires_at ? ` until ${clock(state.expires_at)}` : ""} · baseline ${state.baseline}`
               : `Baseline ${state.baseline}`}
+            <span className="text-muted-foreground-soft">· set on the server (CREWSHIP_LOG_LEVEL)</span>
           </span>
         ) : "Not reported"}>
         <SettingsSegmented label="Level" options={LEVELS.map((l) => ({ value: l, label: l }))} value={level} onChange={setDraftLevel} disabled={busy} />
       </SettingsRow>
-      <SettingsRow label="Drop back after" description="How long the new level holds">
-        <SettingsSegmented label="Duration" options={DURATIONS.map((d) => ({ value: d.seconds, label: d.label }))} value={ttl} onChange={setTtl} disabled={busy} />
+      <SettingsRow label="Drop back after"
+        description={atBaseline ? "Only for a level other than the baseline" : `Then back to ${state?.baseline ?? "the baseline"} by itself`}>
+        <SettingsSegmented label="Duration" options={DURATIONS.map((d) => ({ value: d.seconds, label: d.label }))} value={ttl} onChange={setTtl} disabled={busy || atBaseline} />
       </SettingsRow>
+      {history.data && history.data.length > 0 && (
+        <SettingsRow label="Recent changes" description="From the instance audit">
+          <ul className="grid gap-0.5 text-right text-label text-muted-foreground" data-slot="log-history">
+            {history.data.map((c) => (
+              <li key={c.id}>
+                <span className="font-mono tabular-nums">{clock(c.created_at)}</span>
+                {" · "}<span className="text-foreground">{describeChange(c)}</span>
+                {" · "}{c.action === "instance.log_level_reverted" ? "the server" : c.user_email ?? "someone"}
+              </li>
+            ))}
+          </ul>
+        </SettingsRow>
+      )}
       {/* The edit joins the page's Save bar. A level change is the edit; a
           duration only means something with one. */}
       <SettingsSaveBar label="Logging" count={changed ? (ttl !== DEFAULT_TTL ? 2 : 1) : 0} saving={busy}

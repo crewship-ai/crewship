@@ -496,6 +496,29 @@ func TestSeedBootstrapCov2_ForwardsSetupToken(t *testing.T) {
 	}
 }
 
+// A fresh bootstrap names the demo workspace after a company, not after its
+// owner, so it does not read as someone's personal account.
+func TestSeedBootstrapCov2_FreshNamesTheDemoWorkspace(t *testing.T) {
+	saveCLIState(t)
+	covSeedEnv(t)
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnPost("/api/v1/bootstrap", clitest.JSONResponse(201, map[string]string{
+		"user_id": covSeedUserID, "workspace_id": covSeedWSID, "cli_token": "tok-x",
+	}))
+	s.OnPatch("/api/v1/workspaces/"+covSeedWSID, clitest.JSONResponse(200, map[string]string{"id": covSeedWSID, "name": "Acme Company"}))
+	flagServer = s.URL()
+	cliCfg = &cli.CLIConfig{}
+
+	if _, _, err := seedBootstrap(context.Background(), "pw"); err != nil {
+		t.Fatalf("seedBootstrap: %v", err)
+	}
+	calls := s.CallsFor("PATCH", "/api/v1/workspaces/"+covSeedWSID)
+	if len(calls) != 1 || !strings.Contains(string(calls[0].Body), `"name":"Acme Company"`) {
+		t.Errorf("rename calls = %+v, want one naming Acme Company", calls)
+	}
+}
+
 func TestSeedBootstrapCov2_FreshButBadJSON(t *testing.T) {
 	saveCLIState(t)
 	covSeedEnv(t)

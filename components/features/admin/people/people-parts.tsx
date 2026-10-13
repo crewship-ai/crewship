@@ -12,6 +12,7 @@ import { daysUntil, displayName, personStatus, ROLES, STATUS_LABEL, type Person,
 import { inlineControl, nativeSelect } from "@/components/features/settings/shared"
 import { StatusPill } from "@/components/ui/status-pill"
 import type { StatusTone } from "@/lib/format-status"
+import { ROLE_ICON } from "@/components/features/settings/members/member-bits"
 
 export const roleLabel = (r: string) => r.charAt(0) + r.slice(1).toLowerCase()
 
@@ -36,6 +37,36 @@ export function RoleSelect({ value, onChange, disabled, label, allowNone, classN
       {allowNone && <option value="">No access</option>}
       {ROLES.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
     </select>
+  )
+}
+
+/**
+ * A role as a row of icon buttons — for the dialogs, where the choice is the
+ * point; tables keep the compact RoleSelect. Owner is never offered: a
+ * workspace gets its owner when it is created or handed over.
+ */
+export function RoleSegmented({ value, onChange, label, allowNone, disabled }: {
+  value: Role | null
+  onChange: (r: Role | null) => void
+  label: string
+  allowNone?: boolean
+  disabled?: boolean
+}) {
+  const options: (Role | null)[] = [...(allowNone ? [null] : []), "ADMIN", "MANAGER", "MEMBER", "VIEWER"]
+  return (
+    <div role="radiogroup" aria-label={label} className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5">
+      {options.map((r) => {
+        const Icon = r ? ROLE_ICON[r] : null
+        const on = value === r
+        return (
+          <button key={r ?? "none"} type="button" role="radio" aria-checked={on} disabled={disabled} onClick={() => onChange(r)}
+            className={cn("inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors disabled:opacity-50 coarse:h-9",
+              on ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]" : "text-muted-foreground hover:text-foreground")}>
+            {Icon && <Icon className="h-3 w-3" aria-hidden />}{r ? roleLabel(r) : "None"}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

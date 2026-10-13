@@ -1,12 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { AlertTriangle, CalendarDays, HardDrive, LayoutGrid, ShieldCheck } from "lucide-react"
+import { AlertTriangle, Building2, CalendarDays, ChevronRight, HardDrive, ShieldCheck } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
-import { SettingsCard, SettingsRow, SettingsSummary, SummaryItem, settingsTable, settingsTh, settingsTd } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsRow, SettingsSummary, SummaryItem, settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
+import { WorkspaceTile } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import { Dot, Gate, TONE_PILL, TONE_TEXT } from "./backups-kit"
 import {
   formatAgo, formatSize, proofLabel, stripCells, verdictHeadline,
@@ -24,11 +25,15 @@ import type { SectionCtx } from "./backups-console"
  * five questions a client asks, coverage per workspace, the last fourteen
  * nights, and the room on this disk.
  */
-export function BackupsOverview({ ctx }: { ctx: SectionCtx }) {
+export function BackupsOverview({ ctx, coverage, onOpenWorkspace }: {
+  ctx: SectionCtx
+  coverage?: WorkspaceCoverage[]
+  onOpenWorkspace?: (id: string) => void
+}) {
   const res = useBackupsOverview(ctx.scope, ctx.selected, ctx.workspaces)
   return (
     <Gate resource={res} what="The backup overview" skeleton="h-[320px]">
-      {(data) => <OverviewBody data={data} ctx={ctx} />}
+      {(data) => <OverviewBody data={data} ctx={ctx} coverage={coverage} onOpenWorkspace={onOpenWorkspace} />}
     </Gate>
   )
 }
@@ -49,10 +54,21 @@ export function attentionItems(data: OverviewResponse): AttentionItem[] {
   return [...extra, ...data.needs_attention]
 }
 
-export function OverviewBody({ data, ctx, now = new Date() }: { data: OverviewResponse; ctx: SectionCtx; now?: Date }) {
+export function OverviewBody({ data, ctx, now = new Date(), coverage, onOpenWorkspace, hideSpace }: {
+  data: OverviewResponse
+  ctx: SectionCtx
+  now?: Date
+  /** Each workspace's newest backup when the page covers the whole instance
+   *  (the server lists them for a workspaces scope only). */
+  coverage?: WorkspaceCoverage[]
+  /** A coverage row opens that workspace's backups. */
+  onOpenWorkspace?: (id: string) => void
+  /** The disk is the instance's; a workspace's page leaves it out. */
+  hideSpace?: boolean
+}) {
   const s = data.status
   const head = verdictHeadline(s.verdict)
-  const cov = data.workspaces
+  const cov = coverage ?? data.workspaces
   const covered = cov?.filter((w) => w.status === "ok").length ?? 0
   return (
     <>
@@ -78,27 +94,28 @@ export function OverviewBody({ data, ctx, now = new Date() }: { data: OverviewRe
         <ProtectionRow label="Really restored?" row={s.really_restored} />
       </SettingsCard>
 
-      {cov && <CoverageCard rows={cov} ctx={ctx} now={now} />}
+      {cov && cov.length > 0 && <CoverageCard rows={cov} ctx={ctx} now={now} onOpen={onOpenWorkspace} />}
 
       <SettingsCard icon={CalendarDays} tint="var(--success)" title="Last 14 nights" description="What each night’s run did; hover a night for the details">
         <NightStrip nights={data.nights} today={localDay(now)} />
       </SettingsCard>
 
-      <SpaceCard space={data.space} />
+      {!hideSpace && <SpaceCard space={data.space} />}
     </>
   )
 }
 
+/** One of the five questions as a line of a checklist: how it stands (the
+ *  dot), the question, the answer, and what the answer is missing. */
 function ProtectionRow({ label, row }: { label: string; row: StatusRow }) {
+  const tone = row.detail_tone ?? "ok"
   return (
-    <SettingsRow label={label}>
-      <div className="flex max-w-[28rem] flex-col items-end gap-1 text-right">
-        <span className="text-control">{row.value}</span>
-        {row.detail && (row.detail_tone && row.detail_tone !== "muted"
-          ? <StatusPill tone={TONE_PILL[row.detail_tone]} label={row.detail} />
-          : <span className="text-xs text-muted-foreground">{row.detail}</span>)}
-      </div>
-    </SettingsRow>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border px-4 py-2.5 last:border-b-0 sm:flex-nowrap" data-question={label}>
+      <span className={cn("h-2 w-2 shrink-0 rounded-full", tone === "bad" ? "bg-destructive" : tone === "warn" ? "bg-warn" : tone === "muted" ? "bg-muted-foreground/50" : "bg-success")} aria-hidden />
+      <span className="w-36 shrink-0 text-control">{label}</span>
+      <span className="min-w-0 flex-1 text-control">{row.value}</span>
+      {row.detail && <span className={cn("text-label max-sm:basis-full max-sm:pl-5 sm:text-right", TONE_TEXT[tone])}>{row.detail}</span>}
+    </div>
   )
 }
 
@@ -123,7 +140,8 @@ function NeedsAttention({ items, ctx }: { items: AttentionItem[]; ctx: SectionCt
         <p className="px-4 py-3 text-xs text-success">Nothing needs attention.</p>
       ) : items.map((it) => (
         <div key={it.id} data-attention={it.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
-          <StatusPill tone={it.severity === "bad" ? "danger" : "warn"} label={it.severity === "bad" ? "urgent" : "check"} className="shrink-0" />
+          {/* The severity words every Needs attention card uses (People, Security). */}
+          <StatusPill tone={it.severity === "bad" ? "danger" : "warn"} label={it.severity === "bad" ? "High" : "Medium"} className="shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="text-control">{it.title}</div>
             <div className="text-xs text-muted-foreground">{it.detail}</div>
@@ -183,30 +201,38 @@ export function NightStrip({ nights, today }: { nights: Night[]; today: string }
 
 const COVERAGE_LABEL: Record<WorkspaceCoverage["status"], string> = { ok: "covered", warn: "stale", bad: "not covered" }
 
-function CoverageCard({ rows, ctx, now }: { rows: WorkspaceCoverage[]; ctx: SectionCtx; now: Date }) {
+function CoverageCard({ rows, ctx, now, onOpen }: { rows: WorkspaceCoverage[]; ctx: SectionCtx; now: Date; onOpen?: (id: string) => void }) {
   const th = settingsTh
   const td = settingsTd
+  const logo = (id: string) => ctx.workspaces.find((w) => w.id === id)?.logoUrl
   return (
-    <SettingsCard icon={LayoutGrid} title="Coverage" description="The newest backup of each selected workspace">
+    <SettingsCard icon={Building2} title="Workspaces" description={onOpen ? "When each was last kept, by which plan, how far it is proven · open one for its backups" : "The newest backup of each selected workspace"}>
       <div className="overflow-x-auto">
-        <table className={settingsTable}>
+        <table className={settingsTable} aria-label="Workspaces">
           <thead><tr><th className={th}>Workspace</th><th className={th}>Last backup</th><th className={th}>Plan</th><th className={th}>Checked to</th><th className={th} /></tr></thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.workspace_id} data-coverage={r.status}>
+              <tr key={r.workspace_id} data-coverage={r.status} aria-label={r.name}
+                className={cn(onOpen && settingsTableRowLink)} tabIndex={onOpen ? 0 : undefined}
+                onClick={onOpen ? () => onOpen(r.workspace_id) : undefined}
+                onKeyDown={onOpen ? (e) => { if (e.key === "Enter") onOpen(r.workspace_id) } : undefined}>
                 <td className={td}>
-                  {r.name}
-                  {r.workspace_id === ctx.currentWorkspaceId && <span className="ml-1.5 text-xs text-muted-foreground">· here</span>}
+                  <span className="flex items-center gap-2.5 whitespace-nowrap">
+                    <WorkspaceTile id={r.workspace_id} name={r.name} logoUrl={logo(r.workspace_id)} />
+                    <span className="font-medium">{r.name}</span>
+                    {r.workspace_id === ctx.currentWorkspaceId && <span className="text-xs text-muted-foreground">· here</span>}
+                  </span>
                 </td>
-                <td className={cn(td, !r.last_backup_at && "text-muted-foreground")}>{formatAgo(r.last_backup_at, now)}</td>
-                <td className={cn(td, !r.plan && "text-muted-foreground")}>{r.plan ?? "no plan covers it"}</td>
+                <td className={cn(td, "whitespace-nowrap", !r.last_backup_at && "text-muted-foreground")}>{formatAgo(r.last_backup_at, now)}</td>
+                <td className={cn(td, "whitespace-nowrap", !r.plan && "text-muted-foreground")}>{r.plan ?? "no plan covers it"}</td>
                 <td className={cn(td, "text-muted-foreground")}>{proofLabel(r.proof)}</td>
                 <td className={cn(td, "text-right")}>
-                  <span className="inline-flex items-center gap-2">
+                  <span className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <StatusPill tone={TONE_PILL[r.status]} label={COVERAGE_LABEL[r.status]} />
                     {r.status !== "ok" && (
                       <Button type="button" size="sm" className="h-7 text-xs" onClick={() => ctx.backUpNow([r.workspace_id])}>Back up now</Button>
                     )}
+                    {onOpen && <ChevronRight className="h-3.5 w-3.5 text-muted-foreground-soft" aria-hidden />}
                   </span>
                 </td>
               </tr>

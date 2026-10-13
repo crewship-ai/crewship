@@ -125,3 +125,63 @@
   --brand-glow: rgb(0 0 0 / 0.6);
   --brand-tint: #1F2229;
 }
+
+/* Sky — lighter and airier than Blue, still clear of the info blue in chips */
+:root[data-accent="sky"] {
+  --brand: #0369A1;
+  --brand-foreground: #FFFFFF;
+  --brand-ink: #075985;
+  --brand-strong: #0369A1;
+  --brand-strong-hover: #075985;
+  --brand-glow: rgb(3 105 161 / 0.5);
+  --brand-tint: #E0F2FE;
+}
+:root.dark[data-accent="sky"] {
+  --brand: #38BDF8;
+  --brand-foreground: #0A0B0E;
+  --brand-ink: #7DD3FC;
+  --brand-strong: #0369A1;
+  --brand-strong-hover: #075985;
+  --brand-glow: rgb(56 189 248 / 0.4);
+  --brand-tint: #0C2A3A;
+}
+
+/* Fuchsia */
+:root[data-accent="fuchsia"] {
+  --brand: #A21CAF;
+  --brand-foreground: #FFFFFF;
+  --brand-ink: #86198F;
+  --brand-strong: #A21CAF;
+  --brand-strong-hover: #86198F;
+  --brand-glow: rgb(162 28 175 / 0.45);
+  --brand-tint: #FAE8FF;
+}
+:root.dark[data-accent="fuchsia"] {
+  --brand: #E879F9;
+  --brand-foreground: #0A0B0E;
+  --brand-ink: #F0ABFC;
+  --brand-strong: #A21CAF;
+  --brand-strong-hover: #86198F;
+  --brand-glow: rgb(232 121 249 / 0.4);
+  --brand-tint: #2E1033;
+}
+
+/* Pink — on the magenta side of rose, so it never reads as destructive red */
+:root[data-accent="pink"] {
+  --brand: #BE185D;
+  --brand-foreground: #FFFFFF;
+  --brand-ink: #9D174D;
+  --brand-strong: #BE185D;
+  --brand-strong-hover: #9D174D;
+  --brand-glow: rgb(190 24 93 / 0.45);
+  --brand-tint: #FCE7F3;
+}
+:root.dark[data-accent="pink"] {
+  --brand: #F472B6;
+  --brand-foreground: #0A0B0E;
+  --brand-ink: #F9A8D4;
+  --brand-strong: #BE185D;
+  --brand-strong-hover: #9D174D;
+  --brand-glow: rgb(244 114 182 / 0.4);
+  --brand-tint: #33101F;
+}

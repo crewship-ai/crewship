@@ -6,6 +6,7 @@ import { Bell } from "lucide-react"
 import {
   BarMenu,
   BarMenuBody,
+  BarMenuChips,
   BarMenuEmpty,
   BarMenuFooter,
   BarMenuFooterAction,
@@ -124,5 +125,55 @@ describe("BarMenuEmpty", () => {
   it("states the empty case rather than rendering a blank panel", () => {
     render(<BarMenuEmpty icon={Bell} message="All caught up" />)
     expect(screen.getByText("All caught up")).toBeInTheDocument()
+  })
+})
+
+describe("BarMenu active trigger", () => {
+  it.each([
+    { active: undefined, tinted: false },
+    { active: false, tinted: false },
+    { active: true, tinted: true },
+  ])("active=$active → tinted=$tinted", ({ active, tinted }) => {
+    render(
+      <BarMenu icon={Bell} ariaLabel="Probe" active={active} open={false} onOpenChange={vi.fn()} testId="probe">
+        <span />
+      </BarMenu>,
+    )
+    const trigger = screen.getByTestId("probe-trigger")
+    if (tinted) {
+      expect(trigger).toHaveAttribute("data-active", "true")
+      expect(trigger.className).toContain("bg-primary/10")
+    } else {
+      expect(trigger).not.toHaveAttribute("data-active")
+      expect(trigger.className).not.toContain("bg-primary/10")
+    }
+  })
+})
+
+describe("BarMenuChips", () => {
+  it("renders labels with optional counts and marks exactly the selected one", () => {
+    const onChange = vi.fn()
+    render(
+      <BarMenuChips
+        ariaLabel="Show"
+        testId="c"
+        value="b"
+        onChange={onChange}
+        chips={[
+          { id: "a", label: "Live", count: 2 },
+          { id: "b", label: "Recent" },
+          { id: "c", label: "Failed", count: 0, tone: "warn" },
+        ]}
+      />,
+    )
+    expect(screen.getByRole("group", { name: "Show" })).toBeInTheDocument()
+    expect(screen.getByTestId("c-a")).toHaveTextContent("Live (2)")
+    expect(screen.getByTestId("c-b")).toHaveTextContent(/^Recent$/)
+    expect(screen.getByTestId("c-c")).toHaveTextContent("Failed (0)")
+    expect(screen.getByTestId("c-b")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("c-a")).toHaveAttribute("aria-pressed", "false")
+
+    fireEvent.click(screen.getByTestId("c-a"))
+    expect(onChange).toHaveBeenCalledWith("a")
   })
 })

@@ -64,6 +64,43 @@ func TestAuthPasswd_RunE_PostsPasswordChange(t *testing.T) {
 	}
 }
 
+// --revoke-cli-tokens asks the server to revoke CLI tokens too, and says how
+// many went; without it the body says false so tokens are left alone.
+func TestAuthPasswd_RunE_RevokeCLITokensFlag(t *testing.T) {
+	for _, revoke := range []bool{false, true} {
+		stub := clitest.NewStubServer()
+		stub.OnPost("/api/v1/users/me/password",
+			clitest.JSONResponse(200, map[string]any{"success": true, "sessions_revoked": 1, "cli_tokens_revoked": 3}))
+		setStubCLI(t, stub.URL())
+		authPasswdRevokeTokens = revoke
+
+		out := captureStdoutCovCli2(t, func() {
+			withStdin(t, "oldpassword1\nbrandnew123\n", func() {
+				if err := authPasswdCmd.RunE(authPasswdCmd, nil); err != nil {
+					t.Errorf("RunE: %v", err)
+				}
+			})
+		})
+		authPasswdRevokeTokens = false
+
+		calls := stub.CallsFor("POST", "/api/v1/users/me/password")
+		if len(calls) != 1 {
+			t.Fatalf("revoke=%v: want 1 POST, got %d", revoke, len(calls))
+		}
+		var body struct {
+			RevokeCLITokens bool `json:"revoke_cli_tokens"`
+		}
+		clitest.MustDecodeJSONBody(calls[0].Body, &body)
+		if body.RevokeCLITokens != revoke {
+			t.Fatalf("revoke_cli_tokens = %v, want %v", body.RevokeCLITokens, revoke)
+		}
+		if got := strings.Contains(out, "3 CLI token(s) revoked"); got != revoke {
+			t.Errorf("revoke=%v: output %q", revoke, out)
+		}
+		stub.Close()
+	}
+}
+
 // A too-short new password is rejected locally, before any server call.
 func TestAuthPasswd_RunE_RejectsShortNew(t *testing.T) {
 	stub := clitest.NewStubServer()

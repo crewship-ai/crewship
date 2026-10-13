@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
 import { Shield, ChevronRight, ChevronLeft, RefreshCw, Download, ScrollText, Cpu } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -48,7 +48,8 @@ function normalizeLog(raw: Record<string, unknown>): AuditLog {
     const u = raw.user as Record<string, unknown>
     user = { id: String(u.id ?? ""), email: String(u.email ?? ""), full_name: (u.full_name as string | null) ?? null }
   } else if (raw.user_email) {
-    user = { id: "", email: String(raw.user_email), full_name: (raw.user_name as string | null) ?? null }
+    // The flat shape names the person beside the row's user_id.
+    user = { id: String(raw.user_id ?? ""), email: String(raw.user_email), full_name: (raw.user_name as string | null) ?? null }
   }
 
   let metadata: Record<string, unknown> | null = null
@@ -194,9 +195,15 @@ interface CrewAuditSectionProps {
   groupRepeats?: boolean
   /** Mark rows that change who can reach what. */
   highlightAccess?: boolean
+  /** Profile photos by user id: the audit API names a person but sends no
+   *  photo, and the page already holds the roster. */
+  avatars?: Record<string, string | null | undefined>
 }
 
-export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersChange, showSources = true, title = "Audit log", description = "Every state-changing action on this workspace, immutably recorded", showToolbar = true, groupRepeats = true, highlightAccess = true }: CrewAuditSectionProps) {
+/** The rows read the photos from here rather than through every prop list. */
+const AuditAvatars = createContext<Record<string, string | null | undefined>>({})
+
+export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersChange, showSources = true, title = "Audit log", description = "Every state-changing action on this workspace, immutably recorded", showToolbar = true, groupRepeats = true, highlightAccess = true, avatars = EMPTY_AVATARS }: CrewAuditSectionProps) {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -353,6 +360,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
   const filtered = activeFilterChips(filters, {}).length > 0
 
   return (
+    <AuditAvatars.Provider value={avatars}>
     <SettingsCard icon={ScrollText}
       title={title}
       description={description}
@@ -538,6 +546,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
         </>
       )}
     </SettingsCard>
+    </AuditAvatars.Provider>
   )
 }
 
@@ -557,7 +566,10 @@ function shortIdLabel(label: string): string {
   return label
 }
 
+const EMPTY_AVATARS: Record<string, string | null | undefined> = {}
+
 function Actor({ user }: { user: AuditLog["user"] }) {
+  const avatars = useContext(AuditAvatars)
   const label = personLabel(user?.full_name, user?.email ?? "")
   if (!label) {
     return (
@@ -569,7 +581,7 @@ function Actor({ user }: { user: AuditLog["user"] }) {
   }
   return (
     <span className="flex min-w-0 items-center gap-2 text-xs">
-      <UserAvatar name={user?.full_name} email={user?.email ?? ""} className="h-5 w-5 shrink-0" textClassName="text-micro" />
+      <UserAvatar name={user?.full_name} email={user?.email ?? ""} src={user ? avatars[user.id] ?? null : null} className="h-5 w-5 shrink-0" textClassName="text-micro" />
       <span className="truncate text-foreground">{label}</span>
     </span>
   )

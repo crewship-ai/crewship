@@ -52,7 +52,11 @@ func coreResourceSchemas() map[string]any {
 
 	workspace := object(map[string]any{
 		"id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
-		"logo_url": nullableString(), "preferred_language": nullableString(), "pages_theme": pagesThemeSchema(),
+		// "personal": made at sign-up for its owner alone (their personal account).
+		"kind": map[string]any{"type": "string", "enum": []string{"team", "personal"}},
+		// Whose personal account it is; absent on a team workspace.
+		"personal_owner_id": stringSchema(),
+		"logo_url":          nullableString(), "preferred_language": nullableString(), "pages_theme": pagesThemeSchema(),
 		"created_at": stringSchema(), "updated_at": stringSchema(),
 		"currentUserRole":              nullableString(),
 		"currentUserCapabilities":      arrayOf(stringSchema()),
@@ -67,7 +71,7 @@ func coreResourceSchemas() map[string]any {
 		"approvals_retention_days": nullableInt(),
 		"_count":                   ref("WorkspaceCounts"),
 		"_count_crews":             intSchema(), "_count_agents": intSchema(), "_count_members": intSchema(),
-	}, "id", "name", "slug", "created_at", "updated_at", "allow_privileged_credentials",
+	}, "id", "name", "slug", "kind", "created_at", "updated_at", "allow_privileged_credentials",
 		"logo_url", "preferred_language", "pages_theme", "run_retention_days", "credential_audit_retention_days", "audit_log_retention_days",
 		"approvals_retention_days")
 
