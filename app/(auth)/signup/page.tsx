@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { AuthSplitShell } from "@/components/branding/auth-split-shell"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,10 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+ const [invitationToken,setInvitationToken]=useState("")
+ useEffect(()=>{setInvitationToken(new URLSearchParams(window.location.search).get("invitation_token") ?? "")},[])
+ const joinPath = invitationToken ? `/join?invitation_token=${encodeURIComponent(invitationToken)}` : ""
+ const loginPath = joinPath ? `/login?redirect=${encodeURIComponent(joinPath)}` : "/login"
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -31,7 +35,7 @@ export default function SignupPage() {
       const res = await serverFetch("/api/v1/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ full_name: fullName, email, password }),
+        body: JSON.stringify({ full_name: fullName, email, password, ...(invitationToken ? { invitation_token:invitationToken } : {}) }),
       })
 
       if (!res.ok) {
@@ -50,7 +54,7 @@ export default function SignupPage() {
       // this form "already registered" (the old 409) or logging it straight
       // in would give away who has an account here. So: no auto-login, and
       // a banner on /login that promises no more than the API did.
-      router.push("/login?signup=submitted")
+      router.push(joinPath ? `/login?signup=submitted&redirect=${encodeURIComponent(joinPath)}` : "/login?signup=submitted")
     } catch {
       setError("Network error. Please try again.")
     } finally {
@@ -128,7 +132,7 @@ export default function SignupPage() {
             </Button>
             <p className="text-center text-xs text-muted-foreground">
               Already have an account?{" "}
-              <a href="/login" className="text-primary hover:underline">
+              <a href={loginPath} className="text-primary hover:underline">
                 Sign in
               </a>
             </p>

@@ -64,3 +64,14 @@ it.each(["network", "malformed body"])("recovers after %s and permits a delibera
   await submit()
   expect(router.push).toHaveBeenCalledWith("/login?signup=submitted")
 })
+
+it("carries an invitation token through signup and the sign-in handoff", async () => {
+  window.history.replaceState({}, "", "/signup?invitation_token=synthetic-invitation-proof")
+  vi.mocked(serverFetch).mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 202 }))
+  render(<SignupPage />)
+  fill()
+  await submit()
+  expect(serverFetch).toHaveBeenCalledWith("/api/v1/auth/signup", expect.objectContaining({ body: JSON.stringify({ full_name: "Test Reader", email: "reader@example.test", password: "synthetic-passphrase", invitation_token: "synthetic-invitation-proof" }) }))
+  expect(router.push).toHaveBeenCalledWith("/login?signup=submitted&redirect=%2Fjoin%3Finvitation_token%3Dsynthetic-invitation-proof")
+  window.history.replaceState({}, "", "/signup")
+})

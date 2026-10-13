@@ -350,6 +350,8 @@ func (h *WorkspaceHandler) ListInvitations(w http.ResponseWriter, r *http.Reques
 			replyInternalError(w, h.logger, "scan invitation", err)
 			return
 		}
+		// Redemption proof is issued only by CreateInvitation, never by roster reads.
+		inv.Token = ""
 		inv.Inviter = &inviter
 		result = append(result, inv)
 	}

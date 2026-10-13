@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -716,6 +717,7 @@ func sendWorkspaceInvitation(cmd *cobra.Command, email, role string) error {
 	}
 
 	var inv struct {
+		Token string `json:"token,omitempty" yaml:"token,omitempty"`
 		ID    string `json:"id" yaml:"id"`
 		Email string `json:"email" yaml:"email"`
 		Role  string `json:"role" yaml:"role"`
@@ -729,7 +731,10 @@ func sendWorkspaceInvitation(cmd *cobra.Command, email, role string) error {
 		// holds no mailer, so this writes a row and nothing reaches the invitee.
 		// `workspace member invite` is the command that actually gets someone in.
 		cli.PrintSuccess(fmt.Sprintf("Invitation recorded for %s (%s role).", inv.Email, inv.Role))
-		cli.PrintWarning("No email was sent — no mailer is wired. Use `crewship workspace member invite` to create the account and get a setup link.")
+		cli.PrintWarning("No email was sent. Share the invitation link only with the intended recipient.")
+		if inv.Token != "" {
+			cmd.Println("Invitation link: " + strings.TrimRight(client.BaseURL, "/") + "/join?invitation_token=" + url.QueryEscape(inv.Token))
+		}
 	})
 }
 

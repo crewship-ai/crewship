@@ -5,22 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
-// Signup is where a workspace invitation gets redeemed.
-//
-// POST /workspaces/{id}/invitations has always been able to name an
-// address that has no account yet, but nothing ever consumed the row —
-// the invitee signed up and landed in their own private workspace with
-// the invitation still pending. Signup is the moment the address proves
-// it controls itself (the invitee chose the password), so that is where
-// the pending rows are honoured. It is also what lets `crewship seed
-// --with-users` place its RBAC fixture without any endpoint that maps an
-// arbitrary email to a user id.
+// Signup redeems only a presented invitation token matching the new email.
 
 // seedInviter creates a workspace and its OWNER, and returns both ids.
 func seedInviter(t *testing.T, db *sql.DB) (userID, wsID string) {
@@ -60,7 +52,7 @@ func TestSignup_ConsumesPendingInvitation(t *testing.T) {
 	seedInvitation(t, db, "inv1", wsID, inviter, "invitee@example.com", "MANAGER",
 		time.Now().Add(24*time.Hour), nil)
 
-	rr := signupForEnumTest(t, h, "invitee@example.com")
+	rr := signupWithInvitationProof(t, h, "invitee@example.com", "tok-inv1")
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
 	}
@@ -220,7 +212,7 @@ func TestSignup_InvitedPersonLandsInTheInvitingWorkspace(t *testing.T) {
 	h := NewAuthHandler(db, newTestLogger(), newTestJWTValidator(t), sessions.NewDBStore(db), true)
 	inviter, wsID := seedInviter(t, db)
 	seedInvitation(t, db, "inv-land", wsID, inviter, "lands@example.com", "MEMBER", time.Now().Add(24*time.Hour), nil)
-	if rr := signupForEnumTest(t, h, "lands@example.com"); rr.Code != http.StatusAccepted {
+	if rr := signupWithInvitationProof(t, h, "lands@example.com", "tok-inv-land"); rr.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202", rr.Code)
 	}
 	var uid string
@@ -238,4 +230,13 @@ func TestSignup_InvitedPersonLandsInTheInvitingWorkspace(t *testing.T) {
 	if len(list) != 1 || list[0].ID != wsID {
 		t.Errorf("workspaces = %+v, want only the inviting workspace %s", list, wsID)
 	}
+}
+
+func signupWithInvitationProof(t *testing.T, h *AuthHandler, email, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"full_name": "Invitation reader", "email": email, "password": "longenough1", "invitation_token": token})
+	request := httptest.NewRequest("POST", "/api/v1/auth/signup", strings.NewReader(string(body)))
+	response := httptest.NewRecorder()
+	h.Signup(response, request)
+	return response
 }

@@ -133,3 +133,12 @@ looking names can have different contracts; do not consolidate on name alone.
 `TestLiveRestrictedWorkflowBrowser` synthetic fixture and a production static
 export. It exercises private routine and declared Page action forms; it must not
 be pointed at a shared development instance.
+
+`acceptance-invitation-browser.mjs` runs only through the owned
+`TestInvitationBrowser` fixture and a freshly built production static export.
+Set `CREWSHIP_INVITATION_BROWSER=1` for the Go test and provide the installed
+Chromium path through `PLAYWRIGHT_BROWSERS_PATH` when required. The fixture
+passes a private temporary JSON file with synthetic accounts and invitation
+proofs; the script exercises new-account signup and existing-account acceptance
+through real browser sessions. It creates no containers or persistent server
+and must not target a shared instance. Output contains scenario statuses only.

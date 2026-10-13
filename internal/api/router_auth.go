@@ -44,6 +44,7 @@ func (r *Router) registerAuthRoutes() {
 	r.authHandler = authH
 	r.mux.HandleFunc("POST /api/v1/bootstrap", authH.Bootstrap)
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
+	r.authedSelfMut("POST", "/api/v1/auth/invitation/accept", authH.AcceptInvitation)
 	r.mux.Handle("GET /api/v1/ws-token", authed(http.HandlerFunc(authH.WsToken)))
 
 	// Password recovery (no auth required — token IS the credential).

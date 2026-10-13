@@ -285,9 +285,10 @@ type stringError string
 func (e stringError) Error() string { return string(e) }
 
 type signupRequest struct {
-	FullName string `json:"full_name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	FullName        string `json:"full_name"`
+	Email           string `json:"email"`
+	Password        string `json:"password"`
+	InvitationToken string `json:"invitation_token,omitempty"`
 }
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
@@ -423,7 +424,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	// Invitations first: a person who signs up because they were invited
 	// joins those workspaces and gets no empty workspace of their own
 	// (#3006). Only a signup with nothing to redeem gets one to work in.
-	joined, err := redeemPendingInvitations(r.Context(), tx, userID, req.Email, now)
+	joined, err := redeemPendingInvitations(r.Context(), tx, userID, req.Email, req.InvitationToken, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "redeem invitations", err)
 		return
@@ -466,25 +467,13 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	writeSignupResponse(w)
 }
 
-// redeemPendingInvitations places a freshly created account into every
-// workspace that had invited its address, and marks those invitations
-// accepted. Runs inside the signup transaction so a user either lands
-// everywhere they were invited or nowhere.
-//
-// This is the redemption half of POST /workspaces/{id}/invitations,
-// which could always name an address with no account behind it but had
-// nothing to consume the row. Signup is the right moment: the address
-// only gets placed because whoever holds it turned up and chose a
-// password. That consent is what keeps "add a member by email" honest —
-// an OWNER can invite any address, but cannot pull an existing account
-// into their workspace, and gets no signal about whether the address
-// has one (the invitation POST answers the same either way).
-//
-// Only the created path calls this. The collision branch must stay a
-// no-op — see TestSignup_ExistingAccount_DoesNotRedeemInvitations.
-//
-// Returns how many invitations were redeemed, for the log line.
-func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, now string) (int, error) {
+// redeemPendingInvitations binds redemption to the presented invitation secret
+// and the account's email. It runs inside the caller's transaction so membership
+// and token consumption commit together. Existing-account signup never calls it.
+func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, token, now string) (int, error) {
+	if token == "" {
+		return 0, nil
+	}
 	// Only live workspaces: an invitation to a workspace deleted since is no
 	// place to land, and the signup then gets a workspace of its own.
 	// LOWER() on both sides because the inviter typed the address by
@@ -495,8 +484,8 @@ func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, no
 	rows, err := tx.QueryContext(ctx, `
 		SELECT i.id, i.workspace_id, i.role FROM workspace_invitations i
 		JOIN workspaces w ON w.id = i.workspace_id AND w.deleted_at IS NULL
-		WHERE LOWER(i.email) = LOWER(?) AND i.accepted_at IS NULL
-		  AND datetime(i.expires_at) > datetime('now')`, email)
+		WHERE LOWER(i.email) = LOWER(?) AND i.token=? AND i.accepted_at IS NULL
+		  AND datetime(i.expires_at) > datetime('now')`, email, token)
 	if err != nil {
 		return 0, err
 	}

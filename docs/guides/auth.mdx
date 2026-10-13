@@ -155,7 +155,9 @@ Once a mailer is configured, the same action can also email the link. The copyab
 </Note>
 
 <Warning>
-`crewship workspace invite` is a different, older command: it records an invitation row but sends nothing, because no mailer is wired to it. Use `workspace member invite` above to actually get someone in.
+`crewship workspace invite <email>` records a pending invitation and prints a link for the intended recipient; it sends no email. Save that creation response: invitation listing contains metadata only, without the redemption token. The recipient opens `/join?invitation_token=…`, signs in with the invited email, and explicitly accepts. A new user can choose Create an account; signup presents the same token and joins only its matching workspace. Ordinary signup without a token creates its own workspace.
+
+Existing accounts may also run `crewship workspace invite accept <token>` with an unrestricted credential. This does not require an active workspace. A successful same-account retry changes no membership or role. Wrong-account, expired, withdrawn or unavailable invitations do not create membership. Signup keeps its generic `202` response and never reveals whether an account exists. `workspace member invite` remains the separate direct provisioning/setup-link flow above.
 </Warning>
 
 ### 7. Mint a CLI token (for scripts / CI)

@@ -204,6 +204,7 @@ POST /api/v1/approvals/reset-auto-tuning roleManage
 POST /api/v1/approvals/{id}/cancel roleManage
 POST /api/v1/approvals/{id}/decide roleManage
 POST /api/v1/auth/cli-token roleSelf
+POST /api/v1/auth/invitation/accept roleSelf
 POST /api/v1/auth/pair/start roleSelf
 POST /api/v1/auth/sessions/{id}/revoke roleSelf
 POST /api/v1/automations roleManage

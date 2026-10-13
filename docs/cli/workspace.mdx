@@ -212,7 +212,7 @@ crewship workspace invite create alice@acme.com --role ADMIN
 | --- | --- | --- |
 | `--role <ROLE>` | `MEMBER` | Role recorded on the invitation: `MEMBER` or `ADMIN`. |
 
-On success the CLI prints `Invitation recorded for <email> (<role> role).`
+On success the CLI prints `Invitation recorded for <email> (<role> role).` and the recipient's invitation link. Save and share that creation response privately; invitation lists expose metadata without the redemption token.
 followed by a warning that no email was sent.
 
 ### `workspace member invite`
@@ -433,3 +433,11 @@ silently refresh it. Revisions may advance by more than one. Missing/null rights
 unknown fields and a document for a different membership are rejected.
 This command does not enable restricted model execution or stop an already
 running shared process. See [the API contract](/api-reference/workspaces#replace-member-resource-access).
+
+## `crewship workspace invite accept <token>`
+
+Accept the presented invitation with the signed-in account matching its email. Requires an unrestricted credential and no active workspace. Membership and invitation consumption commit together. An already accepted invitation can be retried by the same current member without restoring an old role or a removed membership.
+
+```bash
+crewship workspace invite accept <token>
+```
