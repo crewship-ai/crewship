@@ -140,7 +140,10 @@ func (h *WorkspaceHandler) SetHub(hub *wshub.Hub) { h.hub = hub }
 // SetJournal wires a journal emitter so RemoveMember's page-owner transfer
 // (§7.1 rule 1b) lands in the real Crew Journal once the router has resolved
 // one. A nil argument is fine — see the journal field comment.
-func (h *WorkspaceHandler) SetJournal(j journal.Emitter) { h.journal = j }
+func (h *WorkspaceHandler) SetJournal(j journal.Emitter) {
+	h.journal = j
+	h.invitationJournal = j
+}
 
 // workspaceCounts is the nested `_count` object the settings UI reads
 // (settings-layout.tsx: org._count.{crews,agents,members}). Always

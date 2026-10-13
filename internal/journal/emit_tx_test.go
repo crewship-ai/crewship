@@ -2,12 +2,16 @@ package journal
 
 import (
 	"bytes"
+	"context"
 	"testing"
 	"time"
 )
 
 func TestAppendTxConfiguredChainAndRollback(t *testing.T) {
 	db := openTestDB(t)
+	// A raw :memory: DSN creates a separate database per connection. Keep
+	// both goroutines on this database; the batch waits for the caller TX.
+	db.SetMaxOpenConns(1)
 	defer db.Close()
 	key := []byte("isolated-configured-journal-test-key")
 	w := NewWriter(db, quietLogger(), WriterOptions{ChainKey: key, FlushInterval: time.Hour})
@@ -76,21 +80,39 @@ func TestAppendTxConfiguredChainAndRollback(t *testing.T) {
 
 func TestAppendTxConcurrentBatchWriter(t *testing.T) {
 	db := openTestDB(t)
+	// A raw :memory: DSN creates a separate database per connection. Keep
+	// both goroutines on this database; the batch waits for the caller TX.
+	db.SetMaxOpenConns(1)
 	defer db.Close()
 	key := []byte("concurrent-configured-journal-test-key")
 	w := NewWriter(db, quietLogger(), WriterOptions{ChainKey: key, FlushInterval: time.Hour})
 	defer w.Close()
-	tx, err := db.BeginTx(t.Context(), nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	entry := Entry{WorkspaceID: "ws_test", Type: EntryInvitationCreated, ActorType: ActorUser, Summary: "invitation.created"}
+	waits := db.Stats().WaitCount
 	if _, err := w.Emit(t.Context(), entry); err != nil {
 		t.Fatal(err)
 	}
 	flushed := make(chan error, 1)
-	go func() { flushed <- w.Flush(t.Context()) }()
-	publish, err := w.AppendTx(t.Context(), tx, entry)
+	go func() { flushed <- w.Flush(ctx) }()
+	// The worker holds writeMu while waiting for the caller-owned connection.
+	// Establish actual contention before AppendTx, rather than scheduler luck.
+	poll := time.NewTicker(time.Millisecond)
+	defer poll.Stop()
+	for db.Stats().WaitCount == waits {
+		select {
+		case <-ctx.Done():
+			_ = tx.Rollback()
+			t.Fatal("batch worker never waited for caller transaction")
+		case <-poll.C:
+		}
+	}
+	publish, err := w.AppendTx(ctx, tx, entry)
 	if err != nil {
 		_ = tx.Rollback()
 		t.Fatal(err)
@@ -106,12 +128,6 @@ func TestAppendTxConcurrentBatchWriter(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("batch writer deadlocked with caller transaction")
-	}
-	// Existing asynchronous Flush acknowledges a drained attempt even when
-	// a SQLite write conflict retained the batch. Retry after the caller's
-	// transaction has released its lock; AppendTx itself never swallows errors.
-	if err := w.Flush(t.Context()); err != nil {
-		t.Fatal(err)
 	}
 	result, err := VerifyChainWithKey(t.Context(), db, "ws_test", key)
 	if err != nil || !result.OK {

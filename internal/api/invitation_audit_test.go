@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -189,5 +190,37 @@ func TestInvitationJournalConcurrentAcceptance(t *testing.T) {
 	_ = db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE entry_type='invitation.accepted' AND actor_id='audit-concurrent'`).Scan(&events)
 	if members != 1 || events != 1 {
 		t.Fatal("concurrent acceptance not exactly once", members, events)
+	}
+}
+
+// PR-only regression: main has no invitation journal writer yet. Existing
+// SetJournal callers must retain the configured chain key and commit observers.
+func TestInvitationJournalConfiguredSetter(t *testing.T) {
+	db := setupTestDB(t)
+	owner, ws := seedInviter(t, db)
+	key := []byte("invitation-setter-configured-test-key")
+	writer := journal.NewWriter(db, newTestLogger(), journal.WriterOptions{ChainKey: key, FlushInterval: time.Hour})
+	defer writer.Close()
+	observed := 0
+	writer.AddCommitObserver(func(entries []journal.Entry) {
+		observed += len(entries)
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE id=?`, entries[0].ID).Scan(&count); err != nil || count != 1 {
+			t.Errorf("observer before commit: count%d err%v", count, err)
+		}
+	})
+	h := NewWorkspaceHandler(db, newTestLogger())
+	h.SetJournal(writer)
+	rr := httptest.NewRecorder()
+	h.CreateInvitation(rr, withWorkspaceUser(httptest.NewRequest("POST", "/invitations", strings.NewReader(`{"email":"setter-audit@example.test","role":"VIEWER"}`)), owner, ws, "OWNER"))
+	if rr.Code != 201 {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	result, err := journal.VerifyChainWithKey(t.Context(), db, ws, key)
+	if err != nil || !result.OK {
+		t.Fatalf("configured setter chain invalid: %+v err%v", result, err)
+	}
+	if observed != 1 {
+		t.Fatal("configured commit observer bypassed", observed)
 	}
 }
