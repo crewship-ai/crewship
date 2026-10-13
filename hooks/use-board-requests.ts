@@ -5,8 +5,9 @@ import { apiFetch } from '@/lib/api-fetch'
 import { useRealtimeEventSafe } from '@/hooks/use-realtime'
 import type { ArtifactRequestTarget } from './use-artifact-requests'
 import type { BoardElement } from '@/lib/boards/revision-adapter'
+import type { RequestExecution } from '@/lib/pages/request-execution'
 export interface BoardRequestGeometry { x: number; y: number; width: number; height: number }
-export interface BoardAgentRequest {
+export interface BoardAgentRequest extends RequestExecution {
   id: string; kind: 'diagram' | 'artifact'; status: string; base_seq: number; instruction: string
   selected_element_ids: string[]; selected_placement_ids: string[]; target: BoardRequestGeometry
   agent_id: string; agent_name: string; run_id: string; human_user_id: string

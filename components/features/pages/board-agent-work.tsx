@@ -9,6 +9,8 @@ import { boardConversionSupported } from "@/lib/boards/diagram-frame"
 import { convertBoardDiagram } from '@/lib/boards/diagram'
 import { renderSelectionPreview } from '@/lib/boards/selection-preview'
 import type { BinaryFileData } from '@excalidraw/excalidraw/types'
+import { requestRunningLabel } from '@/lib/pages/request-execution'
+import { RequestExecutionDetails } from './request-execution-details'
 type FocusWorkArea = (target: BoardRequestGeometry, label: string) => void
 export function BoardAgentWork({ workspaceId, slug, board, selectedIds, disabled, onDirtyChange, files = [], onFocusWorkArea }: { workspaceId: string; slug: string; board: PageBoard; selectedIds: string[]; disabled: boolean; onDirtyChange?: (dirty: boolean) => void; files?: BinaryFileData[]; onFocusWorkArea?: FocusWorkArea }) {
   const requests = useBoardRequests(workspaceId, slug)
@@ -94,7 +96,8 @@ function BoardRequestCard({ item, board, disabled, requests, onNew, onFocusWorkA
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not insert diagram.'); setCanReview(failure instanceof BoardRequestError && failure.status === 409) }
     finally { setPreparing(false) }
   }
-  return <article className="space-y-2 rounded-lg border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium">{item.kind === 'diagram' ? 'Diagram' : 'Artifact'} · {item.agent_name || 'Agent'}</p><span className="text-xs text-muted-foreground">{item.status.replaceAll('_',' ')}</span></div><p className="whitespace-pre-wrap text-sm">{item.instruction}</p><p className="text-xs text-muted-foreground">Saved selection from sequence {item.base_seq}</p>
+  return <article className="space-y-2 rounded-lg border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium">{item.kind === 'diagram' ? 'Diagram' : 'Artifact'} · {item.agent_name || 'Agent'}</p><span className="text-xs text-muted-foreground">{item.status === 'running' ? requestRunningLabel(item) : item.status.replaceAll('_',' ')}</span></div><p className="whitespace-pre-wrap text-sm">{item.instruction}</p><p className="text-xs text-muted-foreground">Saved selection from sequence {item.base_seq}</p>
+    <RequestExecutionDetails request={item} />
     {item.can_insert && !boardConversionSupported(requests.query.data?.converter_url) && <p className="text-xs text-muted-foreground">Isolated insertion is unavailable. A separate runtime site and supported Chromium browser are required.</p>}
     {item.error && <p className="text-sm text-destructive">{item.error}</p>}
     {item.result && <a className="text-sm text-primary underline" href={`/pages/${encodeURIComponent(item.result.page_slug)}?revision=${item.result.revision}`} target="_blank" rel="noopener noreferrer">{item.result.title} · Revision {item.result.revision}</a>}

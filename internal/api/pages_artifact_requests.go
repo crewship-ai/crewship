@@ -19,6 +19,8 @@ import (
 )
 
 type artifactRequestWire struct {
+	pageRequestLifecycle
+	deadline       string
 	Instruction    string `json:"instruction"`
 	ID             string `json:"id"`
 	ChatID         string `json:"chat_id"`
@@ -38,7 +40,7 @@ func (h *PageHandler) ListArtifactRequests(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT id,chat_id,agent_id,COALESCE(thread_id,''),base_rev,status,COALESCE(run_id,''),result_revision,error,created_at,updated_at,instruction FROM page_artifact_requests WHERE page_id=? ORDER BY created_at DESC,id DESC LIMIT 100`, rec.ID)
+	rows, err := h.db.QueryContext(r.Context(), `SELECT id,chat_id,agent_id,COALESCE(thread_id,''),base_rev,status,COALESCE(run_id,''),result_revision,error,created_at,updated_at,instruction,deadline_at FROM page_artifact_requests WHERE page_id=? ORDER BY created_at DESC,id DESC LIMIT 100`, rec.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "list artifact requests", err)
 		return
@@ -47,7 +49,7 @@ func (h *PageHandler) ListArtifactRequests(w http.ResponseWriter, r *http.Reques
 	items := []artifactRequestWire{}
 	for rows.Next() {
 		var v artifactRequestWire
-		if err = rows.Scan(&v.ID, &v.ChatID, &v.AgentID, &v.ThreadID, &v.BaseRev, &v.Status, &v.RunID, &v.ResultRevision, &v.Error, &v.CreatedAt, &v.UpdatedAt, &v.Instruction); err != nil {
+		if err = rows.Scan(&v.ID, &v.ChatID, &v.AgentID, &v.ThreadID, &v.BaseRev, &v.Status, &v.RunID, &v.ResultRevision, &v.Error, &v.CreatedAt, &v.UpdatedAt, &v.Instruction, &v.deadline); err != nil {
 			replyInternalError(w, h.logger, "read artifact request", err)
 			return
 		}
@@ -56,6 +58,16 @@ func (h *PageHandler) ListArtifactRequests(w http.ResponseWriter, r *http.Reques
 	if rows.Err() != nil {
 		replyInternalError(w, h.logger, "read artifact requests", rows.Err())
 		return
+	}
+	rows.Close()
+	for i := range items {
+		job := pageRequestIdentity{Kind: "artifact", ID: items[i].ID, Workspace: WorkspaceIDFromContext(r.Context()), Agent: items[i].AgentID, Run: items[i].RunID, Status: items[i].Status, Deadline: items[i].deadline, Updated: items[i].UpdatedAt, Error: items[i].Error}
+		lifecycle, err := readPageRequestLifecycle(r.Context(), h.db, job, time.Now())
+		if err != nil && !errors.Is(err, errPageRequestEvidenceInvalid) {
+			replyInternalError(w, h.logger, "read artifact request lifecycle", err)
+			return
+		}
+		items[i].pageRequestLifecycle = lifecycle
 	}
 	canDispatch := h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)
 	targets := []artifactRequestTarget{}
@@ -138,6 +150,10 @@ func (h *PageHandler) CreateArtifactRequest(w http.ResponseWriter, r *http.Reque
 	}
 	if !h.agentMayEditSpec(ctx, wsID, rec, receipt.AgentID) {
 		replyError(w, 403, "agent page write grant required")
+		return
+	}
+	if !h.artifactAgentIDPolicyAllows(ctx, wsID, receipt.AgentID) {
+		artifactCommentError(w, 403, "artifact_policy_disabled", "Agent artifact publication is disabled for this crew")
 		return
 	}
 	fingerprintBytes, _ := json.Marshal(body)
@@ -280,7 +296,6 @@ func (h *PageHandler) RunArtifactRequests(ctx context.Context, gates ...artifact
 			defer workers.Done()
 			tick := time.NewTicker(time.Second)
 			defer tick.Stop()
-			nextCleanup := time.Time{}
 			for {
 				select {
 				case <-ctx.Done():
@@ -289,26 +304,48 @@ func (h *PageHandler) RunArtifactRequests(ctx context.Context, gates ...artifact
 					if gate != nil && !gate.IsLeader() {
 						continue
 					}
-					initialize.Do(func() {
-						_, _ = h.db.ExecContext(ctx, `UPDATE page_board_requests SET status='failed',error='Server restarted during dispatch; review and create a new request',updated_at=? WHERE status='running'`, tsformat.Format(time.Now()))
-						_, _ = h.db.ExecContext(ctx, `UPDATE page_artifact_requests SET status='failed',error='Server restarted during dispatch; create a new request after reviewing the artifact',updated_at=? WHERE status='running'`, tsformat.Format(time.Now()))
-					})
-					if index == 0 && time.Now().After(nextCleanup) {
-						h.cleanupArtifactRunPrincipals(ctx, time.Now())
-						nextCleanup = time.Now().Add(time.Minute)
-					}
+					initialize.Do(func() { h.initializePageRequestLifecycles(ctx) })
 					h.dispatchNextPageRequest(ctx)
 				}
 			}
 		}(i)
 	}
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		next := time.Time{}
+		cursor := ""
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-tick.C:
+				if gate != nil && !gate.IsLeader() {
+					continue
+				}
+				initialize.Do(func() { h.initializePageRequestLifecycles(ctx) })
+				if now.Before(next) {
+					continue
+				}
+				var err error
+				cursor, err = h.reconcilePageRequests(ctx, cursor, now)
+				if err != nil {
+					h.logger.Warn("reconcile page request lifecycles", "error", err)
+				}
+				h.cleanupArtifactRunPrincipals(ctx, now)
+				next = now.Add(time.Minute)
+			}
+		}
+	}()
 	workers.Wait()
 }
 
 func (h *PageHandler) dispatchNextArtifactRequest(ctx context.Context) {
-	var id, page, user, chat, agent, instruction, receiptJSON, slug string
+	var id, page, user, chat, agent, instruction, receiptJSON, slug, deadlineRaw string
 	var base int64
-	err := h.db.QueryRowContext(ctx, `SELECT ar.id,ar.page_id,ar.human_user_id,ar.chat_id,ar.agent_id,ar.instruction,ar.receipt_json,p.slug,ar.base_rev FROM page_artifact_requests ar JOIN pages p ON p.id=ar.page_id WHERE ar.status='queued' AND ar.next_attempt_at<=? ORDER BY ar.created_at,ar.id LIMIT 1`, tsformat.Format(time.Now())).Scan(&id, &page, &user, &chat, &agent, &instruction, &receiptJSON, &slug, &base)
+	err := h.db.QueryRowContext(ctx, `SELECT ar.id,ar.page_id,ar.human_user_id,ar.chat_id,ar.agent_id,ar.instruction,ar.receipt_json,p.slug,ar.base_rev,ar.deadline_at FROM page_artifact_requests ar JOIN pages p ON p.id=ar.page_id WHERE ar.status='queued' AND ar.next_attempt_at<=? ORDER BY ar.created_at,ar.id LIMIT 1`, tsformat.Format(time.Now())).Scan(&id, &page, &user, &chat, &agent, &instruction, &receiptJSON, &slug, &base, &deadlineRaw)
 	if err != nil {
 		return
 	}
@@ -325,6 +362,15 @@ func (h *PageHandler) dispatchNextArtifactRequest(ctx context.Context) {
 			defer done()
 		}
 		_, _ = h.db.ExecContext(recordCtx, `UPDATE page_artifact_requests SET status='failed',error=?,updated_at=? WHERE id=? AND status IN ('queued','running')`, message, tsformat.Format(time.Now()), id)
+	}
+	deadline := time.Now().Add(pageRequestDispatchTimeout)
+	if deadlineRaw != "" {
+		var e error
+		deadline, e = parsePageRequestTime(deadlineRaw)
+		if e != nil || !time.Now().Before(deadline) {
+			fail(pageRequestDeadlineError)
+			return
+		}
 	}
 	current, err := chataudience.CaptureTrusted(ctx, h.db, chat, user, &receipt)
 	if err != nil || current == nil || !h.artifactRequestChatPrivate(ctx, chat, user) {
@@ -343,12 +389,16 @@ func (h *PageHandler) dispatchNextArtifactRequest(ctx context.Context) {
 		fail("Artifact or agent write permission was revoked")
 		return
 	}
+	if !h.artifactAgentIDPolicyAllows(authctx, wsID, agent) {
+		fail("Agent artifact publication policy was revoked")
+		return
+	}
 	var currentHead int64
 	if h.db.QueryRowContext(ctx, `SELECT head_rev FROM page_artifacts WHERE page_id=?`, page).Scan(&currentHead) != nil || currentHead != base {
 		fail("Artifact revision changed before dispatch; create a new request after review")
 		return
 	}
-	result, err := h.db.ExecContext(ctx, `UPDATE page_artifact_requests SET status='running',updated_at=? WHERE id=? AND status='queued'`, tsformat.Format(time.Now()), id)
+	result, err := h.db.ExecContext(ctx, `UPDATE page_artifact_requests SET status='running',updated_at=?,deadline_at=? WHERE id=? AND status='queued'`, tsformat.Format(time.Now()), tsformat.Format(deadline), id)
 	if err != nil {
 		return
 	}
@@ -364,7 +414,7 @@ func (h *PageHandler) dispatchNextArtifactRequest(ctx context.Context) {
 		fail("Chat runtime unavailable")
 		return
 	}
-	dispatchCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	dispatchCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	h.artifactRequestCancels.Store(id, cancel)
 	defer h.artifactRequestCancels.Delete(id)
@@ -380,14 +430,14 @@ func (h *PageHandler) dispatchNextArtifactRequest(ctx context.Context) {
 				return
 			}
 		}
-		fail("Dispatch could not safely retry after run admission; inspect its chat before creating a new request")
+		h.finishPageRequestDispatch(ctx, "artifact", id, "Dispatch could not safely retry after run admission; inspect its chat before creating a new request")
 		return
 	}
 	message := "Agent finished without publishing a result revision"
 	if err != nil {
 		message = "Agent execution failed; inspect its chat before retrying"
 	}
-	fail(message)
+	h.finishPageRequestDispatch(ctx, "artifact", id, message)
 }
 
 func bindArtifactRequestRun(r *http.Request, db *sql.DB, id, run string, receipt *chataudience.Receipt) error {
@@ -414,6 +464,9 @@ func bindArtifactRequestRun(r *http.Request, db *sql.DB, id, run string, receipt
 	rec, e := ph.loadPage(ctx, workspace, slug)
 	if e != nil || !ph.mayEditSpec(ctx, workspace, receipt.UserID, role, rec) || !ph.agentMayEditSpec(ctx, workspace, rec, receipt.AgentID) || !ph.artifactRequestChatPrivate(ctx, receipt.ChatID, receipt.UserID) {
 		return errors.New("artifact request publication authority changed")
+	}
+	if !ph.artifactAgentIDPolicyAllows(ctx, workspace, receipt.AgentID) {
+		return errors.New("artifact publication policy revoked")
 	}
 	result, err := tx.ExecContext(r.Context(), `UPDATE page_artifact_requests SET run_id=?,updated_at=? WHERE id=? AND chat_id=? AND agent_id=? AND human_user_id=? AND receipt_json=? AND status='running' AND (run_id IS NULL OR run_id=?)`, run, tsformat.Format(time.Now()), id, receipt.ChatID, receipt.AgentID, receipt.UserID, mustArtifactReceiptJSON(receipt), run)
 	if err != nil {
@@ -462,7 +515,7 @@ func (h *PageHandler) artifactRequestTargets(ctx context.Context, rec *pageRecor
 	}
 	rows.Close()
 	for _, v := range candidates {
-		if !h.artifactRequestChatPrivate(ctx, v.ChatID, user) || !h.agentMayEditSpec(ctx, workspace, rec, v.AgentID) {
+		if !h.artifactRequestChatPrivate(ctx, v.ChatID, user) || !h.agentMayEditSpec(ctx, workspace, rec, v.AgentID) || !h.artifactAgentIDPolicyAllows(ctx, workspace, v.AgentID) {
 			continue
 		}
 		receipt, e := chataudience.CaptureTrusted(ctx, h.db, v.ChatID, user, nil)

@@ -146,7 +146,8 @@ func newR6Sidecar(t *testing.T, baseURL string) (*Server, string) {
 			AgentRunKey: internaltoken.DeriveAgentRunKey(r6Master, r6WS, r6Crew),
 			RunID:       r6RunA,
 		},
-		Memory: &MemoryConfig{Enabled: true, BasePath: memBase, AgentSlug: r6Slug},
+		Memory: &MemoryConfig{Enabled: true, BasePath: memBase,
+			TrustedStorageRoot: filepath.Dir(t.TempDir()), AgentSlug: r6Slug},
 		Logger: runTestLogger(),
 	})
 	return s, memBase

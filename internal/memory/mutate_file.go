@@ -120,7 +120,14 @@ func (f *mutationFile) read() ([]byte, error) {
 	if f.root == nil {
 		return readRegularNoFollow(f.path)
 	}
-	file, err := openRootNoFollow(f.root, f.name)
+	return readRegularRootNoFollow(f.root, f.name)
+}
+
+func readRegularRootNoFollow(root *os.Root, name string) ([]byte, error) {
+	if root == nil {
+		return nil, os.ErrPermission
+	}
+	file, err := openRootNoFollow(root, name)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +137,7 @@ func (f *mutationFile) read() ([]byte, error) {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("not a regular file: %s", f.name)
+		return nil, fmt.Errorf("not a regular file: %s", name)
 	}
 	return io.ReadAll(file)
 }

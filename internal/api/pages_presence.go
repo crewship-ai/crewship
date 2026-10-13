@@ -40,3 +40,11 @@ func (h *PageHandler) CanReadPageContent(ctx context.Context, userID, kind, page
 	}
 	return h.canSeePage(ctx, ws, rec, nil, viewer)
 }
+
+// PresenceDisplayName resolves a verified room participant, not an arbitrary
+// browser identity field or a workspace-wide directory.
+func (h *PageHandler) PresenceDisplayName(ctx context.Context, userID string) (string, error) {
+	var name string
+	err := h.db.QueryRowContext(ctx, `SELECT COALESCE(SUBSTR(full_name,1,128),'') FROM users WHERE id=? AND suspended_at IS NULL`, userID).Scan(&name)
+	return name, err
+}

@@ -26,7 +26,10 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/pages",
   useSearchParams: () => new URLSearchParams(),
 }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test" }) }))
+vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/hooks/use-workspace")>(),
+  useWorkspace: () => ({ workspaceId: "ws-test" }),
+}))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
 vi.mock("@/hooks/use-inbox", () => ({ useInboxUnreadCount: () => 0 }))
 vi.mock("@/components/layout/workspace-switcher", () => ({ WorkspaceSwitcher: () => null }))

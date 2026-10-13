@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
 
 interface CreationAuthority {
+  policy_allowed?: boolean
   run_id: string
   can_authorize: boolean
   authorized: boolean
@@ -35,20 +36,22 @@ export function ArtifactCreationControl({ workspaceId, sessionId, isStreaming }:
     const timer = isStreaming ? setInterval(() => void read(), 5000) : null
     return () => { controller.abort(); if (timer) clearInterval(timer) }
   }, [workspaceId, sessionId, isStreaming, scope, refresh])
-  if (!data?.run_id || !data.can_authorize) return null
+  if (!data?.run_id || (!data.can_authorize && data.policy_allowed !== false)) return null
+  const policyBlocked = data.policy_allowed === false
+  const granted = data.authorized && !data.revoked
   const allowed = data.authorized && !data.revoked && data.remaining > 0
   const consumed = data.authorized && !data.revoked && data.remaining === 0
   return <div className="space-y-1 border-b px-4 py-2 md:px-6" aria-label="Artifact creation permission">
     <div className="flex flex-wrap items-center gap-2">
-      <Button variant="outline" size="sm" className="coarse:h-12" disabled={pending || consumed} onClick={async () => {
+      <Button variant="outline" size="sm" className="coarse:h-12" disabled={pending || (policyBlocked && !granted)} onClick={async () => {
         setPending(true); setError(null)
         try {
-          const response = await apiFetch(`/api/v1/artifact-creation-authorizations/${encodeURIComponent(data.run_id)}?workspace_id=${encodeURIComponent(workspaceId!)}`, { method: allowed ? "DELETE" : "POST", headers: { "Content-Type": "application/json" }, ...(allowed ? {} : { body: "{}" }), signal: AbortSignal.timeout(20000) })
+          const response = await apiFetch(`/api/v1/artifact-creation-authorizations/${encodeURIComponent(data.run_id)}?workspace_id=${encodeURIComponent(workspaceId!)}`, { method: granted ? "DELETE" : "POST", headers: { "Content-Type": "application/json" }, ...(granted ? {} : { body: "{}" }), signal: AbortSignal.timeout(20000) })
           if (!response.ok) { const body = await response.json().catch(() => null); throw new Error(body?.error ?? "Could not update creation permission.") }
         } catch (failure) { setError(failure instanceof Error ? failure.message : "Could not confirm creation permission. Refresh before retrying.") }
         finally { setPending(false); setRefresh(value => value + 1) }
-      }}>{pending ? "Updating…" : consumed ? "Artifact creation used" : allowed ? "Revoke artifact creation" : "Allow artifact creation"}</Button>
-      <span className="text-xs text-muted-foreground">{allowed ? "This live run may create one private artifact." : consumed ? "This run’s one-artifact allowance has been used." : "Opt in to one private artifact from this live run. Existing pages are not included."}</span>
+      }}>{pending ? "Updating…" : granted ? "Revoke artifact creation" : "Allow artifact creation"}</Button>
+      <span className="text-xs text-muted-foreground">{policyBlocked ? "Workspace policy blocks agent artifact creation and publication for this crew." : allowed ? "This live run may create one private artifact." : consumed ? "This run’s one-artifact allowance has been used." : "Opt in to one private artifact from this live run. Existing pages are not included."}</span>
     </div>
     {allowed && data.expires_at && <p className="text-xs text-muted-foreground">Expires {new Date(data.expires_at).toLocaleString()}.</p>}
     {error && <p role="alert" className="text-xs text-destructive">{error}</p>}

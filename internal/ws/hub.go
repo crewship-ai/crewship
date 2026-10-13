@@ -97,16 +97,17 @@ type ChatEvent struct {
 // broadcasting. It authenticates clients via JWT and routes chat messages
 // to the configured ChatHandler.
 type Hub struct {
-	presenceMu       sync.Mutex
-	presenceRooms    map[string]*presenceRoom
-	presenceEmitRate presenceRate
-	contentRead      func(context.Context, string, string, string) (bool, error)
-	logger           *slog.Logger
-	chatHandler      ChatHandler
-	jwtValidator     *auth.JWTValidator
-	sessions         sessions.Store
-	clients          map[*Client]bool
-	channels         map[string]map[*Client]bool
+	presenceMu          sync.Mutex
+	presenceRooms       map[string]*presenceRoom
+	presenceEmitRate    presenceRate
+	contentRead         func(context.Context, string, string, string) (bool, error)
+	presenceDisplayName func(context.Context, string) (string, error)
+	logger              *slog.Logger
+	chatHandler         ChatHandler
+	jwtValidator        *auth.JWTValidator
+	sessions            sessions.Store
+	clients             map[*Client]bool
+	channels            map[string]map[*Client]bool
 	// observers are non-WebSocket subscribers (the HTTP NDJSON run stream,
 	// #1818). Guarded by the same mu as channels so dispatch fans out to
 	// sockets and observers under one lock acquisition. See observer.go.

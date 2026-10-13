@@ -21,12 +21,15 @@ func (h *PageHandler) checkBoardJobCreation(ctx context.Context, a *artifactRunA
 	if id == "" {
 		return nil
 	}
-	var status string
-	if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT status FROM page_board_requests WHERE id=? AND kind='artifact' AND workspace_id=? AND human_user_id=? AND agent_id=? AND chat_id=? AND run_id=?`, id, a.WorkspaceID, a.HumanUserID, a.AgentID, a.ChatID, a.RunID).Scan(&status); err != nil {
+	var status, deadline, updated string
+	if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT status,deadline_at,updated_at FROM page_board_requests WHERE id=? AND kind='artifact' AND workspace_id=? AND human_user_id=? AND agent_id=? AND chat_id=? AND run_id=?`, id, a.WorkspaceID, a.HumanUserID, a.AgentID, a.ChatID, a.RunID).Scan(&status, &deadline, &updated); err != nil {
 		return errors.New("artifact job authorization changed")
 	}
 	if status != "running" && !(allowSucceeded && status == "succeeded") {
 		return errors.New("artifact job cancelled or not running")
+	}
+	if status == "running" && !pageRequestWithinDeadline(deadline, updated, time.Now()) {
+		return errors.New("artifact job deadline elapsed")
 	}
 	return nil
 }

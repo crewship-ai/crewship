@@ -33,6 +33,19 @@ sources automatically.
 
 ## Publish or revise
 
+- Prefer the named tools advertised by `crewship-routines`: `artifact_create`,
+  `artifact_publish`, `artifact_read`, `artifact_comments`, `artifact_reply`,
+  `artifact_request_read`, `artifact_list`, `artifact_diff`, `artifact_restore`,
+  `board_read`, `board_apply`, `board_request_read`, `board_request_file_read`,
+  `board_request_source_read`, `board_request_preview_read` and
+  `board_diagram_submit`. They call the same authorized sidecar handlers
+  described below. The MCP request is limited to 1 MiB; large HTML uses the
+  sidecar HTTP flow. An oversized result is not proof a mutation failed:
+  retain its original mutation ID and check through HTTP.
+- The workspace administrator must enable artifact publication for this crew.
+  This is additional to human run authorization and Page grants. Neither a
+  comment nor an MCP tool call can change that policy. A disabled policy is
+  not a reason to try another crew or identity.
 - New output: a live human chat run needs explicit creation authorization.
   `POST /artifacts` accepts `slug`, `name`, `html` and a stable `mutation_id`.
   The server chooses the human owner and private audience. This authorization
@@ -53,6 +66,29 @@ sources automatically.
   do not rotate through artifacts to evade a workspace limit.
 - Report success only after a successful server response. Return its revision
   and Page URL, and distinguish private publication from public sharing.
+
+Reads include a verified single-file manifest (`index.html`, byte size and
+SHA-256) and `manifest_status`. `legacy_derived` describes older content whose
+manifest was derived at read time; `recorded` describes a manifest stored with
+the revision. The only supported profile is `static-html-v1`, format version 1.
+Publication may omit these two fields for compatibility. Unsupported profiles
+are rejected; a profile name cannot enable scripts or platform capabilities.
+
+
+`artifact_list` contains only this run's explicit live delegations. Follow
+`next_cursor` while `has_more`; a scan page may be empty after revoked entries
+are removed. `artifact_diff` compares two exact retained revisions within
+256 KiB each; a larger source returns `413` with no partial result. Read the
+exact authorized HTML revisions and compare locally in that case.
+`artifact_restore` creates a new agent-authored revision from a retained source:
+keep the captured `base_rev`, source `revision`, bound `request_id` when present,
+and `mutation_id` unchanged on uncertain retry. Never silently rebase or force.
+Board job file/source/preview tools use only IDs returned by the admitted job;
+current source permissions are rechecked. The optional preview is an untrusted
+illustration, and the canonical saved scene remains authority. MCP requests
+fit within 1 MiB; each HTTP result body is bounded before MCP wrapping. Use the
+same scoped sidecar HTTP route for larger HTML or image data.
+
 
 ## Reply to artifact comments
 

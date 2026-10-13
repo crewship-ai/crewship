@@ -18,6 +18,7 @@ func artifactRunFixture(t *testing.T) (*PageHandler, string, string, string, str
 	h, _, _, ws, user, page := artifactFixture(t)
 	execOrFatal(t, h.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('artifact-crew',?,'Crew','artifact-crew')`, ws)
 	seedAgentRow(t, h.db, "artifact-agent", ws, "artifact-crew", "Agent", "artifact-agent", "AGENT")
+	enableArtifactPolicyForTest(t, h, ws, user, "artifact-crew")
 	execOrFatal(t, h.db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('artifact-chat',?,'artifact-agent',?,'private')`, ws, user)
 	execOrFatal(t, h.db, `INSERT INTO conversation_messages(id,session_id,agent_id,role,content,ts,author_user_id) VALUES('artifact-message','artifact-chat','artifact-agent','user','make report',?,?)`, tsformat.Format(time.Now()), user)
 	receipt, err := chataudience.CaptureTrusted(context.Background(), h.db, "artifact-chat", user, nil)

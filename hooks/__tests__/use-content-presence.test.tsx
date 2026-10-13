@@ -54,3 +54,15 @@ it('does not join or send when content access is unavailable', () => {
   expect(view.result.current.available).toBe(false)
   expect(transport.sendPresence).not.toHaveBeenCalled()
 })
+it('retains all verified participants across revisions without changing current-revision cursor members', () => {
+  const view = renderHook(() => useContentPresence({kind:'artifact',pageId:'artifact1',revision:2}))
+  snapshot('artifact:artifact1', [
+    {connection_id:'one',user_id:'me',display_name:'Ada',revision:2,board_seq:null,cursor:null},
+    {connection_id:'two',user_id:'other',display_name:'Alice',revision:1,board_seq:null,cursor:null},
+    {connection_id:'three',user_id:'unknown',display_name:'x'.repeat(513),revision:3,board_seq:null,cursor:null},
+  ])
+  expect(view.result.current.members.map(member=>member.user_id)).toEqual(['me'])
+  expect(view.result.current.allMembers.map(member=>member.revision)).toEqual([2,1,3])
+  expect(view.result.current.allMembers[1].display_name).toBe('Alice')
+  expect(view.result.current.allMembers[2].display_name).toBeUndefined()
+})

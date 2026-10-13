@@ -63,6 +63,9 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"GET /boards/":                         guardHandlerIdentity,
 	"POST /artifacts":                      guardHandlerIdentity,
 	"POST /artifacts/ /revisions":          guardHandlerIdentity,
+	"POST /artifacts/ /restore":            guardHandlerIdentity,
+	"GET /artifacts":                       guardHandlerIdentity,
+	"GET /artifacts/ /diff":                guardHandlerIdentity,
 	"GET /artifacts/":                      guardHandlerIdentity,
 	// The upstream public webhook validates the one-panel capability; no internal/agent auth is attached.
 	"POST /page-webhooks/": guardNone,

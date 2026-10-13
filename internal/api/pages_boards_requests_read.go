@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -14,10 +15,11 @@ import (
 )
 
 func (h *PageHandler) boardRequestRecord(ctx context.Context, q pageAuthQueryer, id, board string, detail bool) (map[string]any, error) {
+	var deadlineRaw string
 	var kind, status, instruction, selected, placements, target, agent, name, run, human, created, updated, message, dialect, converter, hash, source, inserted, insertedBy string
 	var resultSeq sql.NullInt64
 	var base int64
-	err := q.QueryRowContext(ctx, `SELECT r.kind,r.status,r.base_seq,r.instruction,r.selected_element_ids_json,r.selected_placement_ids_json,r.target_json,COALESCE(r.agent_id,''),COALESCE(a.name,''),COALESCE(r.run_id,''),COALESCE(r.human_user_id,''),r.created_at,r.updated_at,r.error,r.dialect,r.converter_version,r.source_hash,r.mermaid_source,r.result_seq,r.inserted_element_ids_json,COALESCE(r.inserted_by_user_id,'') FROM page_board_requests r LEFT JOIN agents a ON a.id=r.agent_id WHERE r.id=? AND r.board_page_id=? AND r.workspace_id=?`, id, board, WorkspaceIDFromContext(ctx)).Scan(&kind, &status, &base, &instruction, &selected, &placements, &target, &agent, &name, &run, &human, &created, &updated, &message, &dialect, &converter, &hash, &source, &resultSeq, &inserted, &insertedBy)
+	err := q.QueryRowContext(ctx, `SELECT r.kind,r.status,r.base_seq,r.instruction,r.selected_element_ids_json,r.selected_placement_ids_json,r.target_json,COALESCE(r.agent_id,''),COALESCE(a.name,''),COALESCE(r.run_id,''),COALESCE(r.human_user_id,''),r.created_at,r.updated_at,r.error,r.dialect,r.converter_version,r.source_hash,r.mermaid_source,r.result_seq,r.inserted_element_ids_json,COALESCE(r.inserted_by_user_id,''),r.deadline_at FROM page_board_requests r LEFT JOIN agents a ON a.id=r.agent_id WHERE r.id=? AND r.board_page_id=? AND r.workspace_id=?`, id, board, WorkspaceIDFromContext(ctx)).Scan(&kind, &status, &base, &instruction, &selected, &placements, &target, &agent, &name, &run, &human, &created, &updated, &message, &dialect, &converter, &hash, &source, &resultSeq, &inserted, &insertedBy, &deadlineRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -42,6 +44,17 @@ func (h *PageHandler) boardRequestRecord(ctx context.Context, q pageAuthQueryer,
 	user := UserFromContext(ctx)
 	canWrite := user != nil && h.mayEditSpec(ctx, WorkspaceIDFromContext(ctx), user.ID, RoleFromContext(ctx), rec)
 	out := map[string]any{"converter_url": h.boardConverterURL(), "id": id, "kind": kind, "status": status, "base_seq": base, "instruction": instruction, "selected_element_ids": ids, "selected_placement_ids": pins, "target": geometry, "agent_id": agent, "agent_name": name, "run_id": run, "human_user_id": human, "created_at": created, "updated_at": updated, "error": message, "dialect": dialect, "converter_version": converter, "source_hash": hash, "result_seq": nil, "inserted_by_user_id": insertedBy, "can_insert": canWrite && status == "ready_to_insert", "can_cancel": canWrite && (status == "queued" || status == "running" || status == "ready_to_insert")}
+	lifecycle, err := readPageRequestLifecycle(ctx, q, pageRequestIdentity{Kind: "board", ID: id, Workspace: WorkspaceIDFromContext(ctx), Agent: agent, Run: run, Status: status, Deadline: deadlineRaw, Updated: updated, Error: message}, time.Now())
+	if err != nil && !errors.Is(err, errPageRequestEvidenceInvalid) {
+		return nil, err
+	}
+	out["execution_state"], out["heartbeat_at"], out["last_activity_at"], out["deadline_at"] = lifecycle.ExecutionState, lifecycle.HeartbeatAt, lifecycle.LastActivityAt, lifecycle.DeadlineAt
+	if lifecycle.DeadlineSource != "" {
+		out["deadline_source"] = lifecycle.DeadlineSource
+	}
+	if lifecycle.RunStatus != "" {
+		out["run_status"] = lifecycle.RunStatus
+	}
 	if resultSeq.Valid {
 		out["result_seq"] = resultSeq.Int64
 	}

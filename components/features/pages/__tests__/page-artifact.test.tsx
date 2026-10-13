@@ -13,6 +13,7 @@ vi.mock("@/hooks/use-pages", () => ({ pagesKeys: { all: (workspace: string) => [
 let head = 1
 let copyable = false
 let writable = true
+let commentable = false
 let fail = 0
 let readFail = 0
 let source = "<h1>Saved report</h1><script>alert(1)</script>"
@@ -26,7 +27,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/pages/report")
   DOMPurify.isSupported = false
   vi.mocked(useRealtimeEventSafe).mockClear()
-  head = 1; copyable = false; writable = true; fail = 0; readFail = 0; source = "<h1>Saved report</h1><script>alert(1)</script>"; calls.length = 0
+  head = 1; copyable = false; writable = true; commentable = false; fail = 0; readFail = 0; source = "<h1>Saved report</h1><script>alert(1)</script>"; calls.length = 0
   vi.mocked(apiFetch).mockImplementation(async (path, options) => {
     if (options?.method === "POST") {
       const body = JSON.parse(String(options.body)); calls.push({ path: String(path), body })
@@ -39,11 +40,41 @@ beforeEach(() => {
     if (String(path).includes("/threads")) return new Response(JSON.stringify({ can_comment: true, can_resolve: true, threads: [{ id: "thread1", revision: 1, status: "open", version: 1, anchor: { schema_version: 1, type: "document" }, comments: [{ id: "comment1", body: "Discuss this revision", author_user_id: "user1", author_name: "Alice", created_at: "2026-10-13T00:00:00Z" }] }] }))
     if (readFail) return new Response(JSON.stringify({ error: "Access denied" }), { status: readFail })
     const selected = new URL(String(path), "https://studio.test").searchParams.get("revision")
-    return new Response(JSON.stringify({ head_rev: head, revision: selected ? Number(selected) : head, html: source, can_copy: copyable, can_write: writable, revisions: Array.from({ length: head }, (_, i) => ({ revision: i + 1, created_at: "2026-10-13T00:00:00Z", author_user_id: "user1" })) }))
+    return new Response(JSON.stringify({ head_rev: head, revision: selected ? Number(selected) : head, html: source, can_copy: copyable, can_write: writable, can_comment: commentable, revisions: Array.from({ length: head }, (_, i) => ({ revision: i + 1, created_at: "2026-10-13T00:00:00Z", author_user_id: "user1" })) }))
   })
 })
 afterEach(() => { cleanup(); DOMPurify.isSupported = supported })
 describe("human page artifact", () => {
+  it("opens and closes point comments with shortcuts without intercepting text or modified keys", async () => {
+    commentable = true
+    mount()
+    await screen.findByTitle("Artifact static preview")
+    fireEvent.keyDown(window, { key: "c", ctrlKey: true })
+    expect(screen.queryByRole("button", { name: "Choose comment point in preview" })).toBeNull()
+    fireEvent.keyDown(window, { key: "c", isComposing: true })
+    expect(screen.queryByRole("button", { name: "Choose comment point in preview" })).toBeNull()
+    fireEvent.keyDown(window, { key: "c" })
+    expect(screen.getByRole("button", { name: "Choose comment point in preview" })).toBeTruthy()
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(screen.queryByRole("button", { name: "Choose comment point in preview" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Source" }))
+    fireEvent.keyDown(window, { key: "c" })
+    expect(screen.queryByRole("button", { name: "Choose comment point in preview" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Static preview" }))
+    const text = document.createElement("textarea")
+    document.body.append(text)
+    fireEvent.keyDown(text, { key: "c" })
+    text.remove()
+    expect(screen.queryByRole("button", { name: "Choose comment point in preview" })).toBeNull()
+  })
+
+  it("does not enable point comments for a reader through a shortcut", async () => {
+    mount()
+    await screen.findByTitle("Artifact static preview")
+    fireEvent.keyDown(window, { key: "c" })
+    expect(screen.queryByRole("button", { name: "Choose comment point in preview" })).toBeNull()
+  })
+
   it("copies the selected published revision with exact uncertain retry and clears private copy UI on access loss", async () => {
     copyable = true; head = 2; window.history.replaceState(null, "", "/pages/report?revision=1")
     const dirty = vi.fn(); mount(dirty)

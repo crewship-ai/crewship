@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -16,8 +17,11 @@ func (h *PageHandler) checkBoardRequestRun(ctx context.Context, id string, a *ar
 	if err := h.checkArtifactRunPrincipal(ctx, a); err != nil {
 		return "", err
 	}
-	var board string
-	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT COALESCE(board_page_id,'') FROM page_board_requests WHERE id=? AND workspace_id=? AND human_user_id=? AND agent_id=? AND chat_id=? AND run_id=? AND kind=? AND status IN ('running','ready_to_insert')`, id, a.WorkspaceID, a.HumanUserID, a.AgentID, a.ChatID, a.RunID, kind).Scan(&board)
+	var board, status, deadline, updated string
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT COALESCE(board_page_id,''),status,deadline_at,updated_at FROM page_board_requests WHERE id=? AND workspace_id=? AND human_user_id=? AND agent_id=? AND chat_id=? AND run_id=? AND kind=? AND status IN ('running','ready_to_insert')`, id, a.WorkspaceID, a.HumanUserID, a.AgentID, a.ChatID, a.RunID, kind).Scan(&board, &status, &deadline, &updated)
+	if err == nil && status == "running" && !pageRequestWithinDeadline(deadline, updated, time.Now()) {
+		return "", errors.New("board request deadline elapsed")
+	}
 	return board, err
 }
 func (h *PageHandler) GetBoardRequestAgent(w http.ResponseWriter, r *http.Request) {

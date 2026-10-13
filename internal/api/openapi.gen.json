@@ -56115,6 +56115,9 @@
                     "expires_at": {
                       "type": "string"
                     },
+                    "policy_allowed": {
+                      "type": "boolean"
+                    },
                     "remaining": {
                       "type": "integer"
                     },
@@ -116151,6 +116154,92 @@
                     "html": {
                       "type": "string"
                     },
+                    "manifest": {
+                      "additionalProperties": false,
+                      "nullable": true,
+                      "properties": {
+                        "entrypoint": {
+                          "enum": [
+                            "index.html"
+                          ],
+                          "type": "string"
+                        },
+                        "files": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "mime": {
+                                "enum": [
+                                  "text/html; charset=utf-8"
+                                ],
+                                "type": "string"
+                              },
+                              "path": {
+                                "enum": [
+                                  "index.html"
+                                ],
+                                "type": "string"
+                              },
+                              "sha256": {
+                                "pattern": "^[a-f0-9]{64}$",
+                                "type": "string"
+                              },
+                              "size_bytes": {
+                                "maximum": 10485760,
+                                "minimum": 1,
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "mime",
+                              "size_bytes",
+                              "sha256"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 1,
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "format_version": {
+                          "enum": [
+                            1
+                          ],
+                          "type": "integer"
+                        },
+                        "runtime_profile": {
+                          "enum": [
+                            "static-html-v1"
+                          ],
+                          "type": "string"
+                        },
+                        "source": {
+                          "description": "Original project sources are not attached by the single-file publication contract.",
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "format_version",
+                        "runtime_profile",
+                        "entrypoint",
+                        "files",
+                        "source"
+                      ],
+                      "type": "object"
+                    },
+                    "manifest_status": {
+                      "enum": [
+                        "unpublished",
+                        "legacy_derived",
+                        "recorded"
+                      ],
+                      "type": "string"
+                    },
                     "revision": {
                       "type": "integer"
                     },
@@ -116195,7 +116284,9 @@
                     "can_write",
                     "can_comment",
                     "can_copy",
-                    "copy_provenance"
+                    "copy_provenance",
+                    "manifest",
+                    "manifest_status"
                   ],
                   "type": "object"
                 }
@@ -117017,7 +117108,34 @@
                             "format": "date-time",
                             "type": "string"
                           },
+                          "deadline_at": {
+                            "format": "date-time",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "deadline_source": {
+                            "enum": [
+                              "recorded",
+                              "legacy_derived"
+                            ],
+                            "type": "string"
+                          },
                           "error": {
+                            "type": "string"
+                          },
+                          "execution_state": {
+                            "enum": [
+                              "observed",
+                              "awaiting_confirmation",
+                              "unknown",
+                              "deadline_exceeded"
+                            ],
+                            "type": "string"
+                          },
+                          "heartbeat_at": {
+                            "description": "Actual work attempt heartbeat only; null when no such evidence exists.",
+                            "format": "date-time",
+                            "nullable": true,
                             "type": "string"
                           },
                           "id": {
@@ -117026,11 +117144,26 @@
                           "instruction": {
                             "type": "string"
                           },
+                          "last_activity_at": {
+                            "format": "date-time",
+                            "nullable": true,
+                            "type": "string"
+                          },
                           "result_revision": {
                             "minimum": 1,
                             "type": "integer"
                           },
                           "run_id": {
+                            "type": "string"
+                          },
+                          "run_status": {
+                            "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result.",
+                            "enum": [
+                              "COMPLETED",
+                              "FAILED",
+                              "CANCELLED",
+                              "TIMEOUT"
+                            ],
                             "type": "string"
                           },
                           "status": {
@@ -117683,6 +117816,12 @@
                     "minimum": 0,
                     "type": "integer"
                   },
+                  "format_version": {
+                    "enum": [
+                      1
+                    ],
+                    "type": "integer"
+                  },
                   "mutation_id": {
                     "maxLength": 128,
                     "minLength": 1,
@@ -117691,6 +117830,12 @@
                   "revision": {
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "runtime_profile": {
+                    "enum": [
+                      "static-html-v1"
+                    ],
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -117972,6 +118117,12 @@
                     "minimum": 0,
                     "type": "integer"
                   },
+                  "format_version": {
+                    "enum": [
+                      1
+                    ],
+                    "type": "integer"
+                  },
                   "html": {
                     "description": "Original UTF-8 HTML, at most 10 MiB in bytes. Returned only as JSON source; interactive execution is disabled.",
                     "minLength": 1,
@@ -117980,6 +118131,12 @@
                   "mutation_id": {
                     "maxLength": 128,
                     "minLength": 1,
+                    "type": "string"
+                  },
+                  "runtime_profile": {
+                    "enum": [
+                      "static-html-v1"
+                    ],
                     "type": "string"
                   }
                 },
@@ -125716,14 +125873,41 @@
                           "created_at": {
                             "type": "string"
                           },
+                          "deadline_at": {
+                            "format": "date-time",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "deadline_source": {
+                            "enum": [
+                              "recorded",
+                              "legacy_derived"
+                            ],
+                            "type": "string"
+                          },
                           "dialect": {
                             "type": "string"
                           },
                           "error": {
                             "type": "string"
                           },
+                          "execution_state": {
+                            "enum": [
+                              "observed",
+                              "awaiting_confirmation",
+                              "unknown",
+                              "deadline_exceeded"
+                            ],
+                            "type": "string"
+                          },
                           "has_preview": {
                             "type": "boolean"
+                          },
+                          "heartbeat_at": {
+                            "description": "Actual work attempt heartbeat only; null when no such evidence exists.",
+                            "format": "date-time",
+                            "nullable": true,
+                            "type": "string"
                           },
                           "human_user_id": {
                             "type": "string"
@@ -125742,6 +125926,11 @@
                               "diagram",
                               "artifact"
                             ],
+                            "type": "string"
+                          },
+                          "last_activity_at": {
+                            "format": "date-time",
+                            "nullable": true,
                             "type": "string"
                           },
                           "pin_reason": {
@@ -125779,6 +125968,16 @@
                             "type": "integer"
                           },
                           "run_id": {
+                            "type": "string"
+                          },
+                          "run_status": {
+                            "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result.",
+                            "enum": [
+                              "COMPLETED",
+                              "FAILED",
+                              "CANCELLED",
+                              "TIMEOUT"
+                            ],
                             "type": "string"
                           },
                           "selected_element_ids": {
@@ -125940,14 +126139,41 @@
                           "created_at": {
                             "type": "string"
                           },
+                          "deadline_at": {
+                            "format": "date-time",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "deadline_source": {
+                            "enum": [
+                              "recorded",
+                              "legacy_derived"
+                            ],
+                            "type": "string"
+                          },
                           "dialect": {
                             "type": "string"
                           },
                           "error": {
                             "type": "string"
                           },
+                          "execution_state": {
+                            "enum": [
+                              "observed",
+                              "awaiting_confirmation",
+                              "unknown",
+                              "deadline_exceeded"
+                            ],
+                            "type": "string"
+                          },
                           "has_preview": {
                             "type": "boolean"
+                          },
+                          "heartbeat_at": {
+                            "description": "Actual work attempt heartbeat only; null when no such evidence exists.",
+                            "format": "date-time",
+                            "nullable": true,
+                            "type": "string"
                           },
                           "human_user_id": {
                             "type": "string"
@@ -125966,6 +126192,11 @@
                               "diagram",
                               "artifact"
                             ],
+                            "type": "string"
+                          },
+                          "last_activity_at": {
+                            "format": "date-time",
+                            "nullable": true,
                             "type": "string"
                           },
                           "pin_reason": {
@@ -126003,6 +126234,16 @@
                             "type": "integer"
                           },
                           "run_id": {
+                            "type": "string"
+                          },
+                          "run_status": {
+                            "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result.",
+                            "enum": [
+                              "COMPLETED",
+                              "FAILED",
+                              "CANCELLED",
+                              "TIMEOUT"
+                            ],
                             "type": "string"
                           },
                           "selected_element_ids": {
@@ -126164,14 +126405,41 @@
                           "created_at": {
                             "type": "string"
                           },
+                          "deadline_at": {
+                            "format": "date-time",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "deadline_source": {
+                            "enum": [
+                              "recorded",
+                              "legacy_derived"
+                            ],
+                            "type": "string"
+                          },
                           "dialect": {
                             "type": "string"
                           },
                           "error": {
                             "type": "string"
                           },
+                          "execution_state": {
+                            "enum": [
+                              "observed",
+                              "awaiting_confirmation",
+                              "unknown",
+                              "deadline_exceeded"
+                            ],
+                            "type": "string"
+                          },
                           "has_preview": {
                             "type": "boolean"
+                          },
+                          "heartbeat_at": {
+                            "description": "Actual work attempt heartbeat only; null when no such evidence exists.",
+                            "format": "date-time",
+                            "nullable": true,
+                            "type": "string"
                           },
                           "human_user_id": {
                             "type": "string"
@@ -126190,6 +126458,11 @@
                               "diagram",
                               "artifact"
                             ],
+                            "type": "string"
+                          },
+                          "last_activity_at": {
+                            "format": "date-time",
+                            "nullable": true,
                             "type": "string"
                           },
                           "pin_reason": {
@@ -126227,6 +126500,16 @@
                             "type": "integer"
                           },
                           "run_id": {
+                            "type": "string"
+                          },
+                          "run_status": {
+                            "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result.",
+                            "enum": [
+                              "COMPLETED",
+                              "FAILED",
+                              "CANCELLED",
+                              "TIMEOUT"
+                            ],
                             "type": "string"
                           },
                           "selected_element_ids": {
@@ -126880,6 +127163,18 @@
                     "created_at": {
                       "type": "string"
                     },
+                    "deadline_at": {
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "deadline_source": {
+                      "enum": [
+                        "recorded",
+                        "legacy_derived"
+                      ],
+                      "type": "string"
+                    },
                     "dialect": {
                       "type": "string"
                     },
@@ -126889,8 +127184,23 @@
                     "error": {
                       "type": "string"
                     },
+                    "execution_state": {
+                      "enum": [
+                        "observed",
+                        "awaiting_confirmation",
+                        "unknown",
+                        "deadline_exceeded"
+                      ],
+                      "type": "string"
+                    },
                     "has_preview": {
                       "type": "boolean"
+                    },
+                    "heartbeat_at": {
+                      "description": "Actual work attempt heartbeat only; null when no such evidence exists.",
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
                     },
                     "human_user_id": {
                       "type": "string"
@@ -126915,6 +127225,11 @@
                         "diagram",
                         "artifact"
                       ],
+                      "type": "string"
+                    },
+                    "last_activity_at": {
+                      "format": "date-time",
+                      "nullable": true,
                       "type": "string"
                     },
                     "mermaid_source": {
@@ -126955,6 +127270,16 @@
                       "type": "integer"
                     },
                     "run_id": {
+                      "type": "string"
+                    },
+                    "run_status": {
+                      "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result.",
+                      "enum": [
+                        "COMPLETED",
+                        "FAILED",
+                        "CANCELLED",
+                        "TIMEOUT"
+                      ],
                       "type": "string"
                     },
                     "selected_element_ids": {
@@ -127060,6 +127385,18 @@
                     "created_at": {
                       "type": "string"
                     },
+                    "deadline_at": {
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "deadline_source": {
+                      "enum": [
+                        "recorded",
+                        "legacy_derived"
+                      ],
+                      "type": "string"
+                    },
                     "dialect": {
                       "type": "string"
                     },
@@ -127069,8 +127406,23 @@
                     "error": {
                       "type": "string"
                     },
+                    "execution_state": {
+                      "enum": [
+                        "observed",
+                        "awaiting_confirmation",
+                        "unknown",
+                        "deadline_exceeded"
+                      ],
+                      "type": "string"
+                    },
                     "has_preview": {
                       "type": "boolean"
+                    },
+                    "heartbeat_at": {
+                      "description": "Actual work attempt heartbeat only; null when no such evidence exists.",
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
                     },
                     "human_user_id": {
                       "type": "string"
@@ -127095,6 +127447,11 @@
                         "diagram",
                         "artifact"
                       ],
+                      "type": "string"
+                    },
+                    "last_activity_at": {
+                      "format": "date-time",
+                      "nullable": true,
                       "type": "string"
                     },
                     "mermaid_source": {
@@ -127135,6 +127492,16 @@
                       "type": "integer"
                     },
                     "run_id": {
+                      "type": "string"
+                    },
+                    "run_status": {
+                      "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result.",
+                      "enum": [
+                        "COMPLETED",
+                        "FAILED",
+                        "CANCELLED",
+                        "TIMEOUT"
+                      ],
                       "type": "string"
                     },
                     "selected_element_ids": {
@@ -127240,6 +127607,18 @@
                     "created_at": {
                       "type": "string"
                     },
+                    "deadline_at": {
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "deadline_source": {
+                      "enum": [
+                        "recorded",
+                        "legacy_derived"
+                      ],
+                      "type": "string"
+                    },
                     "dialect": {
                       "type": "string"
                     },
@@ -127249,8 +127628,23 @@
                     "error": {
                       "type": "string"
                     },
+                    "execution_state": {
+                      "enum": [
+                        "observed",
+                        "awaiting_confirmation",
+                        "unknown",
+                        "deadline_exceeded"
+                      ],
+                      "type": "string"
+                    },
                     "has_preview": {
                       "type": "boolean"
+                    },
+                    "heartbeat_at": {
+                      "description": "Actual work attempt heartbeat only; null when no such evidence exists.",
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
                     },
                     "human_user_id": {
                       "type": "string"
@@ -127275,6 +127669,11 @@
                         "diagram",
                         "artifact"
                       ],
+                      "type": "string"
+                    },
+                    "last_activity_at": {
+                      "format": "date-time",
+                      "nullable": true,
                       "type": "string"
                     },
                     "mermaid_source": {
@@ -127315,6 +127714,16 @@
                       "type": "integer"
                     },
                     "run_id": {
+                      "type": "string"
+                    },
+                    "run_status": {
+                      "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result.",
+                      "enum": [
+                        "COMPLETED",
+                        "FAILED",
+                        "CANCELLED",
+                        "TIMEOUT"
+                      ],
                       "type": "string"
                     },
                     "selected_element_ids": {
@@ -127636,6 +128045,18 @@
                     "created_at": {
                       "type": "string"
                     },
+                    "deadline_at": {
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "deadline_source": {
+                      "enum": [
+                        "recorded",
+                        "legacy_derived"
+                      ],
+                      "type": "string"
+                    },
                     "dialect": {
                       "type": "string"
                     },
@@ -127645,8 +128066,23 @@
                     "error": {
                       "type": "string"
                     },
+                    "execution_state": {
+                      "enum": [
+                        "observed",
+                        "awaiting_confirmation",
+                        "unknown",
+                        "deadline_exceeded"
+                      ],
+                      "type": "string"
+                    },
                     "has_preview": {
                       "type": "boolean"
+                    },
+                    "heartbeat_at": {
+                      "description": "Actual work attempt heartbeat only; null when no such evidence exists.",
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
                     },
                     "human_user_id": {
                       "type": "string"
@@ -127671,6 +128107,11 @@
                         "diagram",
                         "artifact"
                       ],
+                      "type": "string"
+                    },
+                    "last_activity_at": {
+                      "format": "date-time",
+                      "nullable": true,
                       "type": "string"
                     },
                     "mermaid_source": {
@@ -127711,6 +128152,16 @@
                       "type": "integer"
                     },
                     "run_id": {
+                      "type": "string"
+                    },
+                    "run_status": {
+                      "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result.",
+                      "enum": [
+                        "COMPLETED",
+                        "FAILED",
+                        "CANCELLED",
+                        "TIMEOUT"
+                      ],
                       "type": "string"
                     },
                     "selected_element_ids": {
@@ -127816,6 +128267,18 @@
                     "created_at": {
                       "type": "string"
                     },
+                    "deadline_at": {
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "deadline_source": {
+                      "enum": [
+                        "recorded",
+                        "legacy_derived"
+                      ],
+                      "type": "string"
+                    },
                     "dialect": {
                       "type": "string"
                     },
@@ -127825,8 +128288,23 @@
                     "error": {
                       "type": "string"
                     },
+                    "execution_state": {
+                      "enum": [
+                        "observed",
+                        "awaiting_confirmation",
+                        "unknown",
+                        "deadline_exceeded"
+                      ],
+                      "type": "string"
+                    },
                     "has_preview": {
                       "type": "boolean"
+                    },
+                    "heartbeat_at": {
+                      "description": "Actual work attempt heartbeat only; null when no such evidence exists.",
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
                     },
                     "human_user_id": {
                       "type": "string"
@@ -127851,6 +128329,11 @@
                         "diagram",
                         "artifact"
                       ],
+                      "type": "string"
+                    },
+                    "last_activity_at": {
+                      "format": "date-time",
+                      "nullable": true,
                       "type": "string"
                     },
                     "mermaid_source": {
@@ -127891,6 +128374,16 @@
                       "type": "integer"
                     },
                     "run_id": {
+                      "type": "string"
+                    },
+                    "run_status": {
+                      "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result.",
+                      "enum": [
+                        "COMPLETED",
+                        "FAILED",
+                        "CANCELLED",
+                        "TIMEOUT"
+                      ],
                       "type": "string"
                     },
                     "selected_element_ids": {
@@ -127996,6 +128489,18 @@
                     "created_at": {
                       "type": "string"
                     },
+                    "deadline_at": {
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "deadline_source": {
+                      "enum": [
+                        "recorded",
+                        "legacy_derived"
+                      ],
+                      "type": "string"
+                    },
                     "dialect": {
                       "type": "string"
                     },
@@ -128005,8 +128510,23 @@
                     "error": {
                       "type": "string"
                     },
+                    "execution_state": {
+                      "enum": [
+                        "observed",
+                        "awaiting_confirmation",
+                        "unknown",
+                        "deadline_exceeded"
+                      ],
+                      "type": "string"
+                    },
                     "has_preview": {
                       "type": "boolean"
+                    },
+                    "heartbeat_at": {
+                      "description": "Actual work attempt heartbeat only; null when no such evidence exists.",
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
                     },
                     "human_user_id": {
                       "type": "string"
@@ -128031,6 +128551,11 @@
                         "diagram",
                         "artifact"
                       ],
+                      "type": "string"
+                    },
+                    "last_activity_at": {
+                      "format": "date-time",
+                      "nullable": true,
                       "type": "string"
                     },
                     "mermaid_source": {
@@ -128071,6 +128596,16 @@
                       "type": "integer"
                     },
                     "run_id": {
+                      "type": "string"
+                    },
+                    "run_status": {
+                      "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result.",
+                      "enum": [
+                        "COMPLETED",
+                        "FAILED",
+                        "CANCELLED",
+                        "TIMEOUT"
+                      ],
                       "type": "string"
                     },
                     "selected_element_ids": {
@@ -153330,6 +153865,387 @@
           }
         ],
         "summary": "Update workspace",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/artifact-creation-policy": {
+      "get": {
+        "description": "Get workspace artifact creation policy (GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy).",
+        "operationId": "get_api_v1_workspaces_workspaceId_artifact-creation-policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "crew_ids": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "version": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "crew_ids",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace artifact creation policy",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      },
+      "put": {
+        "description": "Update workspace artifact creation policy (PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy).",
+        "operationId": "put_api_v1_workspaces_workspaceId_artifact-creation-policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_version": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "crew_ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "crew_ids",
+                  "base_version"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "crew_ids": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "version": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "crew_ids",
+                    "version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update workspace artifact creation policy",
         "tags": [
           "workspaces"
         ],

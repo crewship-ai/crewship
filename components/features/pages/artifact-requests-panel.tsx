@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button"
 import { StatusIconBadge } from "@/components/ui/status-icon-badge"
 import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
 import type { ArtifactAgentRequest, ArtifactRequestsResult } from "@/hooks/use-artifact-requests"
+import { requestRunningLabel } from "@/lib/pages/request-execution"
+import { RequestExecutionDetails } from "./request-execution-details"
 
 const STATUS: Record<ArtifactAgentRequest["status"], StatusConfigEntryWithIcon> = {
   queued: { label: "Queued", icon: Clock, className: STATUS_STYLES.amber },
@@ -17,7 +19,9 @@ const STATUS: Record<ArtifactAgentRequest["status"], StatusConfigEntryWithIcon> 
 export function ArtifactRequestStatus({ request }: { request: ArtifactAgentRequest }) {
   const entry = request.status === "succeeded" && !request.result_revision
     ? { label: "Result unavailable", icon: CircleAlert, className: STATUS_STYLES.amber }
-    : STATUS[request.status] ?? { label: "Unknown state", icon: CircleAlert, className: STATUS_STYLES.gray }
+    : request.status === "running"
+      ? { ...STATUS.running, label: requestRunningLabel(request), ...(request.execution_state && request.execution_state !== "observed" ? { icon: CircleAlert, className: STATUS_STYLES.amber } : {}) }
+      : STATUS[request.status] ?? { label: "Unknown state", icon: CircleAlert, className: STATUS_STYLES.gray }
   return <StatusIconBadge entry={entry} />
 }
 export function ArtifactRequestsPanel({ data, error, writeError, loading, pending, head, acceptedId, onRefresh, onCancel, onRetry, onViewRevision }: {
@@ -55,6 +59,7 @@ export function ArtifactRequestsPanel({ data, error, writeError, loading, pendin
       return <li key={request.id} className="space-y-3 rounded-lg border bg-background p-4">
         <div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium" title={request.agent_id}>{name}</span><ArtifactRequestStatus request={request} /><span className="type-page-meta text-muted-foreground">Source revision {request.base_rev}{request.thread_id ? " · Thread snapshot" : " · Whole document"}</span></div>
         <time className="block text-xs text-muted-foreground" dateTime={request.updated_at}>Updated {new Date(request.updated_at).toLocaleString()}</time>
+        <RequestExecutionDetails request={request} />
         {request.instruction && <details className="text-sm"><summary className="cursor-pointer text-muted-foreground">Instructions sent</summary><p className="mt-2 whitespace-pre-wrap break-words">{request.instruction}</p></details>}
         {request.error && <p className="whitespace-pre-wrap text-sm text-destructive">{request.error}</p>}
         <div className="flex flex-wrap gap-2">

@@ -105,6 +105,10 @@ func (h *PageHandler) AuthorizeArtifactCreation(w http.ResponseWriter, r *http.R
 		replyError(w, 403, err.Error())
 		return
 	}
+	if !h.artifactAgentPolicyAllows(r.Context(), a.WorkspaceID, a.CrewID) {
+		artifactCommentError(w, 403, "artifact_policy_disabled", "Agent artifact creation is disabled for this crew")
+		return
+	}
 	if !h.artifactPrincipalMayCreate(r.Context(), a.WorkspaceID, a.HumanUserID) {
 		replyError(w, 403, "page.create authority required")
 		return
@@ -167,6 +171,10 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 	}
 	r = checked
 	a := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
+	if !h.artifactAgentPolicyAllows(r.Context(), a.WorkspaceID, a.CrewID) {
+		artifactCommentError(w, 403, "artifact_policy_disabled", "Agent artifact creation is disabled for this crew")
+		return
+	}
 	if h.artifactStoragePath == "" {
 		replyError(w, 503, "artifact storage is not configured")
 		return
@@ -177,12 +185,17 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 	}
 	defer release()
 	var req struct {
+		artifactFormatRequest
 		Slug       string `json:"slug"`
 		Name       string `json:"name"`
 		HTML       string `json:"html"`
 		MutationID string `json:"mutation_id"`
 	}
 	if !decodeArtifactJSON(w, r, &req) {
+		return
+	}
+	if err := normalizeArtifactFormat(req.artifactFormatRequest); err != nil {
+		replyError(w, 422, err.Error())
 		return
 	}
 	if len(req.MutationID) < 1 || len(req.MutationID) > 128 || strings.TrimSpace(req.MutationID) != req.MutationID {
@@ -207,7 +220,17 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 		replyInternalError(w, h.logger, "encode created artifact", err)
 		return
 	}
-	sha := attachmentDigest([]byte(req.HTML))
+	manifest, err := newArtifactManifest([]byte(req.HTML))
+	if err != nil {
+		replyError(w, 422, err.Error())
+		return
+	}
+	manifestJSON, err := artifactManifestJSON(manifest)
+	if err != nil {
+		replyInternalError(w, h.logger, "encode created artifact manifest", err)
+		return
+	}
+	sha := manifest.Files[0].SHA256
 	fingerprint := attachmentDigest([]byte(req.Slug + "\x00" + req.Name + "\x00" + sha))
 	// Refuse default-off or already consumed admission before writing bytes.
 	if err := h.checkArtifactRunPrincipal(r.Context(), a); err != nil {
@@ -260,6 +283,10 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
 	if err := h.checkArtifactRunPrincipal(ctx, a); err != nil {
 		replyError(w, 403, err.Error())
+		return
+	}
+	if !h.artifactAgentPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
+		artifactCommentError(w, 403, "artifact_policy_disabled", "Agent artifact creation is disabled for this crew")
 		return
 	}
 	if !h.artifactPrincipalMayCreate(ctx, a.WorkspaceID, a.HumanUserID) {
@@ -340,7 +367,7 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 		replyInternalError(w, h.logger, "delegate created artifact run", err)
 		return
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,created_at,author_agent_id,author_run_id,source_chat_id) VALUES (?,?,1,?,?,?,?,?,?,?,?)`, generateCUID(), pageID, sha, a.HumanUserID, req.MutationID, attachmentDigest([]byte(fmt.Sprintf("%d/%t/%d/%s", 0, false, 0, sha))), stamp, a.AgentID, a.RunID, a.ChatID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,created_at,author_agent_id,author_run_id,source_chat_id,manifest_json) VALUES (?,?,1,?,?,?,?,?,?,?,?,?)`, generateCUID(), pageID, sha, a.HumanUserID, req.MutationID, attachmentDigest([]byte(fmt.Sprintf("%d/%t/%d/%s", 0, false, 0, sha))), stamp, a.AgentID, a.RunID, a.ChatID, manifestJSON); err != nil {
 		replyInternalError(w, h.logger, "save created artifact revision", err)
 		return
 	}

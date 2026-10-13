@@ -462,9 +462,13 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	artifactRevision["required"] = []string{"revision", "created_at", "author_user_id"}
 	artifactMutation := obj(map[string]any{"html": map[string]any{"type": "string", "minLength": 1, "description": "Original UTF-8 HTML, at most 10 MiB in bytes. Returned only as JSON source; interactive execution is disabled."}, "base_rev": map[string]any{"type": "integer", "minimum": 0}, "mutation_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}})
 	artifactMutation["required"] = []string{"html", "base_rev", "mutation_id"}
+	artifactMutation["properties"].(map[string]any)["runtime_profile"] = map[string]any{"type": "string", "enum": []string{"static-html-v1"}}
+	artifactMutation["properties"].(map[string]any)["format_version"] = map[string]any{"type": "integer", "enum": []int{1}}
 	artifactMutation["additionalProperties"] = false
 	artifactRestore := obj(map[string]any{"revision": map[string]any{"type": "integer", "minimum": 1}, "base_rev": map[string]any{"type": "integer", "minimum": 0}, "mutation_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}})
 	artifactRestore["required"] = []string{"revision", "base_rev", "mutation_id"}
+	artifactRestore["properties"].(map[string]any)["runtime_profile"] = map[string]any{"type": "string", "enum": []string{"static-html-v1"}}
+	artifactRestore["properties"].(map[string]any)["format_version"] = map[string]any{"type": "integer", "enum": []int{1}}
 	artifactRestore["additionalProperties"] = false
 	artifactResult := obj(map[string]any{"revision": integer(), "head_rev": integer()})
 	artifactResult["required"] = []string{"revision", "head_rev"}
@@ -472,6 +476,14 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	artifactDocument["properties"].(map[string]any)["can_copy"] = boolean()
 	artifactDocument["properties"].(map[string]any)["copy_provenance"] = map[string]any{"type": "object", "nullable": true, "properties": map[string]any{"source_revision": integer(), "source": obj(map[string]any{"page_slug": str()})}, "required": []string{"source_revision"}}
 	artifactDocument["required"] = []string{"head_rev", "revision", "html", "revisions", "can_write", "can_comment", "can_copy", "copy_provenance"}
+	manifestFile := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"path", "mime", "size_bytes", "sha256"}, "properties": map[string]any{
+		"path": map[string]any{"type": "string", "enum": []string{"index.html"}}, "mime": map[string]any{"type": "string", "enum": []string{"text/html; charset=utf-8"}}, "size_bytes": map[string]any{"type": "integer", "minimum": 1, "maximum": 10 << 20}, "sha256": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"},
+	}}
+	artifactDocument["properties"].(map[string]any)["manifest"] = map[string]any{"type": "object", "nullable": true, "additionalProperties": false, "required": []string{"format_version", "runtime_profile", "entrypoint", "files", "source"}, "properties": map[string]any{
+		"format_version": map[string]any{"type": "integer", "enum": []int{1}}, "runtime_profile": map[string]any{"type": "string", "enum": []string{"static-html-v1"}}, "entrypoint": map[string]any{"type": "string", "enum": []string{"index.html"}}, "files": map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": manifestFile}, "source": map[string]any{"type": "object", "nullable": true, "enum": []any{nil}, "description": "Original project sources are not attached by the single-file publication contract."},
+	}}
+	artifactDocument["properties"].(map[string]any)["manifest_status"] = map[string]any{"type": "string", "enum": []string{"unpublished", "legacy_derived", "recorded"}}
+	artifactDocument["required"] = append(artifactDocument["required"].([]string), "manifest", "manifest_status")
 	documentAnchor := obj(map[string]any{"schema_version": map[string]any{"type": "integer", "enum": []int{1}}, "type": map[string]any{"type": "string", "enum": []string{"document"}}})
 	documentAnchor["required"] = []string{"schema_version", "type"}
 	documentAnchor["additionalProperties"] = false
@@ -519,8 +531,10 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	emptyCreationAuthorization["additionalProperties"] = false
 	creationStatus := obj(map[string]any{"run_id": str(), "can_authorize": boolean(), "authorized": boolean(), "remaining": integer(), "expires_at": str(), "revoked": boolean()})
 	creationStatus["required"] = []string{"run_id", "can_authorize", "authorized", "remaining", "expires_at", "revoked"}
+	creationStatus["properties"].(map[string]any)["policy_allowed"] = boolean()
 	artifactRequest := obj(map[string]any{"id": str(), "chat_id": str(), "agent_id": str(), "thread_id": str(), "base_rev": positiveVersion, "status": map[string]any{"type": "string", "enum": []string{"queued", "running", "succeeded", "failed", "cancelled"}}, "run_id": str(), "result_revision": positiveVersion, "error": str(), "created_at": timeString(), "updated_at": timeString()})
 	artifactRequest["properties"].(map[string]any)["instruction"] = str()
+	artifactRequest["properties"] = mergeProps(artifactRequest["properties"].(map[string]any), requestExecutionProperties())
 	artifactRequest["required"] = []string{"id", "chat_id", "agent_id", "instruction", "base_rev", "status", "created_at", "updated_at"}
 	artifactRequestTarget := obj(map[string]any{"chat_id": str(), "title": str(), "agent_id": str(), "agent_name": str(), "agent_slug": str()})
 	artifactRequestTarget["required"] = []string{"chat_id", "title", "agent_id", "agent_name", "agent_slug"}
@@ -540,6 +554,13 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	artifactCopyResult := obj(map[string]any{"page_slug": str(), "revision": integer()})
 	artifactCopyResult["required"] = []string{"page_slug", "revision"}
 	return map[string]DomainSchema{
+		"GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy": {
+			Response: map[string]any{"type": "object", "required": []string{"enabled", "crew_ids", "version"}, "properties": map[string]any{"enabled": boolean(), "crew_ids": arr(str()), "version": map[string]any{"type": "integer", "minimum": 0}}},
+		},
+		"PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy": {
+			Request:  map[string]any{"type": "object", "additionalProperties": false, "required": []string{"enabled", "crew_ids", "base_version"}, "properties": map[string]any{"enabled": boolean(), "crew_ids": arr(str()), "base_version": map[string]any{"type": "integer", "minimum": 0}}},
+			Response: map[string]any{"type": "object", "required": []string{"enabled", "crew_ids", "version"}, "properties": map[string]any{"enabled": boolean(), "crew_ids": arr(str()), "version": map[string]any{"type": "integer", "minimum": 0}}},
+		},
 		"GET /api/v1/chats/{chatId}/artifact-creation-authorization":                                  {Response: creationStatus},
 		"POST /api/v1/artifact-creation-authorizations/{runId}":                                       {Request: emptyCreationAuthorization, RequestRequired: true, Response: creationAuthorization, SuccessStatuses: []string{"200", "201"}},
 		"DELETE /api/v1/artifact-creation-authorizations/{runId}":                                     {Response: obj(map[string]any{}), SuccessStatuses: []string{"204"}},

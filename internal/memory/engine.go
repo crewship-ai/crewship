@@ -16,7 +16,9 @@ import (
 
 // Config controls memory engine behavior.
 type Config struct {
-	MaxSizeMB int // max total memory size in MB (default: 10)
+	// StorageRoot is an optional trusted ancestor; externally configured sidecars set it explicitly.
+	StorageRoot string
+	MaxSizeMB   int // max total memory size in MB (default: 10)
 	// DailyMaxKB is informational only — the engine never enforces it. The
 	// effective daily-log cap is capDailyBytes in tools.go (30 KB, PR-A F1),
 	// mirrored by the legacy sidecar path's dailyCap (memory_write.go). Kept

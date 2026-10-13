@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
+import type { RequestExecution } from "@/lib/pages/request-execution"
 
 export interface ArtifactRequestTarget {
   chat_id: string
@@ -12,7 +13,7 @@ export interface ArtifactRequestTarget {
   agent_name: string
   agent_slug: string
 }
-export interface ArtifactAgentRequest {
+export interface ArtifactAgentRequest extends RequestExecution {
   id: string
   chat_id: string
   agent_id: string

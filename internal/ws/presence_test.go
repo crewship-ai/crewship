@@ -15,7 +15,7 @@ func TestPresenceValidationAndIdentityCannotBeSpoofed(t *testing.T) {
 	if _, err := decodePresence([]byte(valid), "artifact:page"); err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{strings.Replace(valid, `"revision":2`, `"revision":null`, 1), strings.Replace(valid, `"revision":2`, `"Revision":2`, 1), strings.Replace(valid, `"revision":2`, `"revision":2,"revision":3`, 1), strings.Replace(valid, `"revision":2`, `"revision":2,"user_id":"victim"`, 1), strings.Replace(valid, `"x":10`, `"x":null`, 1), strings.Replace(valid, `"x":10`, `"x":301`, 1), strings.Repeat("x", 2049)} {
+	for _, raw := range []string{strings.Replace(valid, `"revision":2`, `"revision":null`, 1), strings.Replace(valid, `"revision":2`, `"Revision":2`, 1), strings.Replace(valid, `"revision":2`, `"revision":2,"revision":3`, 1), strings.Replace(valid, `"revision":2`, `"revision":2,"user_id":"victim"`, 1), strings.Replace(valid, `"revision":2`, `"revision":2,"display_name":"Administrator"`, 1), strings.Replace(valid, `"x":10`, `"x":null`, 1), strings.Replace(valid, `"x":10`, `"x":301`, 1), strings.Repeat("x", 2049)} {
 		if _, err := decodePresence([]byte(raw), "artifact:page"); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
@@ -200,5 +200,60 @@ func TestPresenceSnapshotFanoutHasRoomAndGlobalCeilings(t *testing.T) {
 	h.emitPresence("board:other")
 	if got := len(h.broadcast); got != 20 {
 		t.Fatalf("global fanout ceiling %d", got)
+	}
+}
+
+func TestPresenceDisplayNamesUseVerifiedIdentityOnceOutsideRoomLock(t *testing.T) {
+	h := &Hub{broadcast: make(chan ChannelMessage, 8)}
+	var calls int
+	h.SetPresenceDisplayNameResolver(func(ctx context.Context, user string) (string, error) {
+		calls++
+		if user != "actual-user" {
+			t.Errorf("unverified identity %q", user)
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("resolver has no deadline")
+		}
+		if !h.presenceMu.TryLock() {
+			t.Error("identity lookup holds room lock")
+		} else {
+			h.presenceMu.Unlock()
+		}
+		return "\x00Alice\u202e", nil
+	})
+	client := &Client{userID: "actual-user", ctx: context.Background()}
+	for range 10 {
+		if !h.joinPresence(client, "artifact:page", time.Now()) {
+			t.Fatal("join denied")
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("cursor/heartbeat repeated identity lookup %d", calls)
+	}
+	h.emitPresence("artifact:page")
+	var event struct {
+		Payload struct {
+			Members []struct {
+				User string `json:"user_id"`
+				Name string `json:"display_name"`
+			} `json:"members"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal((<-h.broadcast).Data, &event); err != nil {
+		t.Fatal(err)
+	}
+	if len(event.Payload.Members) != 1 || event.Payload.Members[0].User != "actual-user" || event.Payload.Members[0].Name != "Alice" {
+		t.Fatalf("wrong identity %+v", event)
+	}
+	if len([]rune(boundedPresenceName(strings.Repeat("ž", 200)))) != 128 {
+		t.Fatal("display name exceeds bound")
+	}
+	h.SetPresenceDisplayNameResolver(func(context.Context, string) (string, error) { return "forged", fmt.Errorf("unavailable") })
+	other := &Client{userID: "other", ctx: context.Background()}
+	if !h.joinPresence(other, "artifact:page", time.Now()) {
+		t.Fatal("lookup failure should not deny presence")
+	}
+	if h.presenceRooms["artifact:page"].Members[other].Name != "" {
+		t.Fatal("failed lookup retained a name")
 	}
 }

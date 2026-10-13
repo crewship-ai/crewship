@@ -460,3 +460,34 @@ Revoke an unaccepted invitation without removing or changing an existing member.
 ```bash
 crewship workspace invite revoke INVITATION_ID
 ```
+
+## `crewship workspace artifact-policy show`
+
+Read the selected workspace's agent artifact policy as a human workspace
+OWNER/ADMIN. The response contains `enabled`, the explicit `crew_ids` allowlist
+and its `version`. An unsaved policy is disabled at version 0.
+
+```bash
+crewship --workspace WORKSPACE workspace artifact-policy show
+```
+
+## `crewship workspace artifact-policy set`
+
+Replace the switch and complete crew allowlist using the version you reviewed.
+This does not grant Page access or authorize a run: an agent still needs the
+human's explicit authorization, a live run and the required Page grant.
+
+| Flag | Required | Description |
+| --- | --- | --- |
+| `--base-version` | Yes | Version returned by `show`; 0 for an unsaved policy. |
+| `--enabled` | Yes | Explicit `--enabled=true` or `--enabled=false`. |
+| `--crew-id` | One of these | Complete allowlist of crew IDs, comma-separated or repeated. |
+| `--clear-crews` | One of these | Explicitly empty the allowlist; excludes `--crew-id`. |
+
+```bash
+crewship --workspace WORKSPACE workspace artifact-policy set --base-version 0 --enabled=true --crew-id CREW_ID
+crewship --workspace WORKSPACE workspace artifact-policy set --base-version 1 --enabled=false --clear-crews
+```
+
+A concurrent policy edit returns a conflict. Read and review the current policy
+before submitting a new version; the CLI never overwrites it automatically.

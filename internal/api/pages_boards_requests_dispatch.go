@@ -63,6 +63,9 @@ func bindBoardRequestRun(r *http.Request, db *sql.DB, id, run string, receipt *c
 	if err = ph.checkArtifactRunPrincipal(ctx, &a); err != nil {
 		return err
 	}
+	if kind == "artifact" && !ph.artifactAgentPolicyAllows(ctx, workspace, a.CrewID) {
+		return errors.New("artifact creation policy revoked")
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE page_board_requests SET run_id=?,updated_at=? WHERE id=? AND status='running' AND (run_id IS NULL OR run_id=?)`, run, tsformat.Format(time.Now()), id, run)
 	if err != nil {
 		return err
@@ -114,8 +117,8 @@ func (h *PageHandler) dispatchNextPageRequest(ctx context.Context) {
 	}
 }
 func (h *PageHandler) dispatchNextBoardRequest(ctx context.Context) {
-	var id, kind, user, chat, workspace, board, instruction, receiptJSON string
-	err := h.db.QueryRowContext(ctx, `SELECT id,kind,COALESCE(human_user_id,''),COALESCE(chat_id,''),workspace_id,COALESCE(board_page_id,''),instruction,receipt_json FROM page_board_requests WHERE status='queued' AND next_attempt_at<=? ORDER BY created_at,id LIMIT 1`, tsformat.Format(time.Now())).Scan(&id, &kind, &user, &chat, &workspace, &board, &instruction, &receiptJSON)
+	var id, kind, user, chat, workspace, board, instruction, receiptJSON, deadlineRaw string
+	err := h.db.QueryRowContext(ctx, `SELECT id,kind,COALESCE(human_user_id,''),COALESCE(chat_id,''),workspace_id,COALESCE(board_page_id,''),instruction,receipt_json,deadline_at FROM page_board_requests WHERE status='queued' AND next_attempt_at<=? ORDER BY created_at,id LIMIT 1`, tsformat.Format(time.Now())).Scan(&id, &kind, &user, &chat, &workspace, &board, &instruction, &receiptJSON, &deadlineRaw)
 	if err != nil {
 		return
 	}
@@ -128,6 +131,15 @@ func (h *PageHandler) dispatchNextBoardRequest(ctx context.Context) {
 		}
 		_, _ = h.db.ExecContext(recordCtx, `UPDATE page_board_requests SET status='failed',error=?,updated_at=? WHERE id=? AND status IN ('queued','running')`, message, tsformat.Format(time.Now()), id)
 	}
+	deadline := time.Now().Add(pageRequestDispatchTimeout)
+	if deadlineRaw != "" {
+		var e error
+		deadline, e = parsePageRequestTime(deadlineRaw)
+		if e != nil || !time.Now().Before(deadline) {
+			fail(pageRequestDeadlineError)
+			return
+		}
+	}
 	var receipt chataudience.Receipt
 	if json.Unmarshal([]byte(receiptJSON), &receipt) != nil {
 		fail("Stored request receipt is invalid")
@@ -136,6 +148,10 @@ func (h *PageHandler) dispatchNextBoardRequest(ctx context.Context) {
 	actual, err := chataudience.CaptureTrusted(ctx, h.db, chat, user, &receipt)
 	if err != nil || actual == nil || actual.WorkspaceID != workspace || !h.artifactRequestChatPrivate(ctx, chat, user) {
 		fail("Chat authority changed before dispatch")
+		return
+	}
+	if kind == "artifact" && !h.artifactAgentIDPolicyAllows(ctx, workspace, actual.AgentID) {
+		fail("Agent artifact creation policy was revoked")
 		return
 	}
 	var role string
@@ -150,7 +166,7 @@ func (h *PageHandler) dispatchNextBoardRequest(ctx context.Context) {
 		fail("Current request authority was revoked")
 		return
 	}
-	result, err := h.db.ExecContext(ctx, `UPDATE page_board_requests SET status='running',updated_at=? WHERE id=? AND status='queued'`, tsformat.Format(time.Now()), id)
+	result, err := h.db.ExecContext(ctx, `UPDATE page_board_requests SET status='running',updated_at=?,deadline_at=? WHERE id=? AND status='queued'`, tsformat.Format(time.Now()), tsformat.Format(deadline), id)
 	if err != nil {
 		return
 	}
@@ -171,7 +187,7 @@ func (h *PageHandler) dispatchNextBoardRequest(ctx context.Context) {
 		fail("Chat runtime unavailable")
 		return
 	}
-	dispatchCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	dispatchCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	h.artifactRequestCancels.Store("board:"+id, cancel)
 	defer h.artifactRequestCancels.Delete("board:" + id)
@@ -187,12 +203,12 @@ func (h *PageHandler) dispatchNextBoardRequest(ctx context.Context) {
 				return
 			}
 		}
-		fail("Unknown dispatch admission; inspect its chat before requesting again")
+		h.finishPageRequestDispatch(ctx, "board", id, "Unknown dispatch admission; inspect its chat before requesting again")
 		return
 	}
 	if err != nil {
-		fail("Agent execution failed; inspect its chat before retrying")
+		h.finishPageRequestDispatch(ctx, "board", id, "Agent execution failed; inspect its chat before retrying")
 	} else {
-		fail("Agent finished without publishing a request result")
+		h.finishPageRequestDispatch(ctx, "board", id, "Agent finished without publishing a request result")
 	}
 }

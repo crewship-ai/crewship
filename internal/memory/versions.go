@@ -281,6 +281,7 @@ func Restore(
 	canonicalPath string,
 	workspaceID, auditPath, sha, restoredBy, blobRoot string,
 	tier Tier,
+	storageRoots ...string,
 ) (*RecordResult, error) {
 	if canonicalPath == "" || workspaceID == "" || auditPath == "" || sha == "" || blobRoot == "" {
 		return nil, fmt.Errorf("restore: missing required field")
@@ -319,7 +320,15 @@ func Restore(
 	if err != nil {
 		return nil, fmt.Errorf("restore write: %w", err)
 	}
+	var storageRoot string
+	if len(storageRoots) > 0 {
+		storageRoot = storageRoots[0]
+		if storageRoot == "" {
+			return nil, fmt.Errorf("restore: storage root required")
+		}
+	}
 	res, err := Mutate(ctx, db, MutateRequest{
+		StorageRoot: storageRoot,
 		// An operator restoring a named past version is an explicitly
 		// authorized human action against a whole file, not an agent write
 		// racing other agent writes. It has a ledger handle, but no meaningful

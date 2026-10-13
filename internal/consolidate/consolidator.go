@@ -728,7 +728,17 @@ func (c *Consolidator) recordCanonicalVersion(ctx context.Context, cfg Config, c
 	if c.DB == nil || cfg.BlobRoot == "" {
 		return
 	}
-	content, err := memory.ReadFileNoFollow(canonicalPath)
+	// HTTP/scheduler callers provide the trusted installation storage root.
+	// Older in-process callers retain their output-directory contract, but
+	// still read through a pinned root rather than an unconfined pathname.
+	root := cfg.OutputRoot
+	if root == "" {
+		root = cfg.OutputDir
+	}
+	if root == "" {
+		root = filepath.Dir(canonicalPath)
+	}
+	content, err := memory.ReadFileNoFollowRoot(root, canonicalPath)
 	if err != nil {
 		c.logger().Warn("version record: read canonical failed",
 			"err", err, "path", canonicalPath)

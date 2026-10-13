@@ -89,6 +89,10 @@ func (h *PageHandler) artifactPage(w http.ResponseWriter, r *http.Request, write
 		return nil, false
 	}
 	if delegated {
+		if write && !h.artifactAgentPolicyAllows(r.Context(), ws, authority.CrewID) {
+			artifactCommentError(w, 403, "artifact_policy_disabled", "Agent artifact publication is disabled for this crew")
+			return nil, false
+		}
 		if authority.HumanUserID != user.ID || authority.WorkspaceID != ws {
 			replyError(w, 403, "artifact principal mismatch")
 			return nil, false
@@ -130,9 +134,12 @@ func (h *PageHandler) GetArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	html := ""
+	var manifest *artifactManifest
+	manifestStatus := "unpublished"
 	if selected > 0 {
 		var sha string
-		err := h.db.QueryRowContext(r.Context(), `SELECT sha256 FROM page_artifact_revisions WHERE page_id=? AND revision=?`, rec.ID, selected).Scan(&sha)
+		var recorded sql.NullString
+		err := h.db.QueryRowContext(r.Context(), `SELECT sha256,manifest_json FROM page_artifact_revisions WHERE page_id=? AND revision=?`, rec.ID, selected).Scan(&sha, &recorded)
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, 404, "artifact revision not found")
 			return
@@ -146,6 +153,12 @@ func (h *PageHandler) GetArtifact(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 503, "artifact content is missing or failed integrity verification")
 			return
 		}
+		resolved, status, err := resolveArtifactManifest(recorded, data, sha)
+		if err != nil {
+			replyError(w, 503, "artifact manifest is unsupported or failed integrity verification")
+			return
+		}
+		manifest, manifestStatus = &resolved, status
 		html = string(data)
 	}
 	rows, err := h.db.QueryContext(r.Context(), `SELECT revision,created_at,COALESCE(author_user_id,''),restored_from,COALESCE(author_agent_id,''),COALESCE(author_run_id,'') FROM page_artifact_revisions WHERE page_id=? ORDER BY revision DESC LIMIT 200`, rec.ID)
@@ -173,10 +186,11 @@ func (h *PageHandler) GetArtifact(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	agentCaller, _ := pageGrantCallerIsAgent(r)
 	canComment := !agentCaller && projectAgentFrom(r.Context()) == nil && h.mayComment(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)
-	writeJSON(w, 200, map[string]any{"head_rev": head, "revision": selected, "html": html, "revisions": revisions, "can_copy": head > 0 && h.canCopyArtifact(r), "copy_provenance": h.artifactCopyProvenance(r.Context(), WorkspaceIDFromContext(r.Context()), rec.ID, UserFromContext(r.Context()).ID), "can_comment": canComment, "can_write": rec.OwnerUserID != "" && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)})
+	writeJSON(w, 200, map[string]any{"head_rev": head, "revision": selected, "html": html, "manifest": manifest, "manifest_status": manifestStatus, "revisions": revisions, "can_copy": head > 0 && h.canCopyArtifact(r), "copy_provenance": h.artifactCopyProvenance(r.Context(), WorkspaceIDFromContext(r.Context()), rec.ID, UserFromContext(r.Context()).ID), "can_comment": canComment, "can_write": rec.OwnerUserID != "" && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)})
 }
 
 type artifactMutation struct {
+	artifactFormatRequest
 	RequestID  string `json:"request_id,omitempty"`
 	HTML       string `json:"html"`
 	BaseRev    *int64 `json:"base_rev"`
@@ -206,6 +220,10 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 	if !decodeArtifactJSON(w, r, &req) {
 		return
 	}
+	if err := normalizeArtifactFormat(req.artifactFormatRequest); err != nil {
+		replyError(w, 422, err.Error())
+		return
+	}
 	if req.BaseRev == nil || *req.BaseRev < 0 || len(req.MutationID) < 1 || len(req.MutationID) > 128 || strings.TrimSpace(req.MutationID) != req.MutationID {
 		replyError(w, 400, "base_rev and mutation_id are required")
 		return
@@ -222,7 +240,8 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 			return
 		}
 		var sha string
-		err := h.db.QueryRowContext(r.Context(), `SELECT sha256 FROM page_artifact_revisions WHERE page_id=? AND revision=?`, rec.ID, req.Revision).Scan(&sha)
+		var recorded sql.NullString
+		err := h.db.QueryRowContext(r.Context(), `SELECT sha256,manifest_json FROM page_artifact_revisions WHERE page_id=? AND revision=?`, rec.ID, req.Revision).Scan(&sha, &recorded)
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, 404, "artifact revision not found")
 			return
@@ -234,6 +253,10 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		data, err := readAttachmentBlob(h.artifactStoragePath, WorkspaceIDFromContext(r.Context()), sha)
 		if err != nil || attachmentDigest(data) != sha {
 			replyError(w, 503, "artifact content is missing or failed integrity verification")
+			return
+		}
+		if _, _, err := resolveArtifactManifest(recorded, data, sha); err != nil {
+			replyError(w, 503, "artifact manifest is unsupported or failed integrity verification")
 			return
 		}
 		req.HTML = string(data)
@@ -252,7 +275,17 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 	}
 	ws := WorkspaceIDFromContext(r.Context())
 	user := UserFromContext(r.Context())
-	sha := attachmentDigest([]byte(req.HTML))
+	manifest, err := newArtifactManifest([]byte(req.HTML))
+	if err != nil {
+		replyError(w, 422, err.Error())
+		return
+	}
+	manifestJSON, err := artifactManifestJSON(manifest)
+	if err != nil {
+		replyInternalError(w, h.logger, "encode artifact manifest", err)
+		return
+	}
+	sha := manifest.Files[0].SHA256
 	fingerprintInput := fmt.Sprintf("%d/%t/%d/%s", *req.BaseRev, restore, req.Revision, sha)
 	if req.RequestID != "" {
 		fingerprintInput += "/" + req.RequestID
@@ -359,7 +392,7 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		return
 	}
 	revision := head + 1
-	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,restored_from,created_at,author_agent_id,author_run_id,source_chat_id) VALUES (?,?,?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''))`, generateCUID(), rec.ID, revision, sha, user.ID, req.MutationID, fingerprint, restoredFrom, tsformat.Format(now), artifactAgentID(r), artifactRunID(r), artifactSourceChatID(r)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,restored_from,created_at,author_agent_id,author_run_id,source_chat_id,manifest_json) VALUES (?,?,?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?)`, generateCUID(), rec.ID, revision, sha, user.ID, req.MutationID, fingerprint, restoredFrom, tsformat.Format(now), artifactAgentID(r), artifactRunID(r), artifactSourceChatID(r), manifestJSON); err != nil {
 		replyInternalError(w, h.logger, "save artifact revision", err)
 		return
 	}

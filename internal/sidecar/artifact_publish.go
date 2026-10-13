@@ -25,7 +25,11 @@ func (s *Server) handleArtifactPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	slug := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/artifacts/"), "/revisions")
+	action := "revisions"
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/restore") {
+		action = "restore"
+	}
+	slug := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/artifacts/"), "/"+action)
 	if slug == "" || strings.ContainsAny(slug, "/\\") {
 		http.Error(w, "invalid artifact slug", 400)
 		return
@@ -35,7 +39,7 @@ func (s *Server) handleArtifactPublish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "artifact request too large", 413)
 		return
 	}
-	path := "/api/v1/internal/artifacts/" + url.PathEscape(slug) + "/revisions"
+	path := "/api/v1/internal/artifacts/" + url.PathEscape(slug) + "/" + action
 	if r.Method == http.MethodGet {
 		path = "/api/v1/internal/artifacts/" + url.PathEscape(slug)
 		if rev := r.URL.Query().Get("revision"); rev != "" {

@@ -187,6 +187,7 @@ var TableCategory = map[string]string{
 	"users":                 categoryAnchor, "workspaces": categoryAnchor, "skills": categoryAnchor,
 
 	// Crews, agents and their settings.
+	"workspace_artifact_creation_policy": CategoryAgents, "workspace_artifact_creation_crews": CategoryAgents,
 	"crews": CategoryAgents, "service_runtime_intents": CategoryAgents, "crew_members": CategoryAgents,
 	"agents": CategoryAgents, "crew_connections": CategoryAgents, "crew_mcp_servers": CategoryAgents,
 	"agent_skills": CategoryAgents, "agent_mcp_bindings": CategoryAgents, "agent_config_history": CategoryAgents, "agent_slug_reservations": CategoryAgents,

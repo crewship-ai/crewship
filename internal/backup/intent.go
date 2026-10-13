@@ -73,18 +73,20 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"workspace_conversation_outbox":        IntentInclude,
 
 	// === Core entities (round-trip) =========================
-	"crews":                    IntentInclude,
-	"environment_revisions":    IntentInclude,        // provenance only; does not restore images or grant execution authority
-	"service_operation_leases": IntentExcludeRuntime, // host provider admissions cannot be restored
-	"service_backup_fences":    IntentExcludeRuntime, // host maintenance fences cannot be transplanted
-	"service_runtime_intents":  IntentInclude,        // Durable user-requested service state.
-	"agents":                   IntentInclude,
-	"agent_skills":             IntentInclude,
-	"agent_slug_reservations":  IntentInclude, // restored crew data under a slug stays out of reach of a new agent
-	"crew_members":             IntentInclude,
-	"chats":                    IntentInclude,
-	"agent_mcp_bindings":       IntentInclude,
-	"journal_entries":          IntentInclude,
+	"workspace_artifact_creation_policy": IntentInclude,
+	"workspace_artifact_creation_crews":  IntentInclude,
+	"crews":                              IntentInclude,
+	"environment_revisions":              IntentInclude,        // provenance only; does not restore images or grant execution authority
+	"service_operation_leases":           IntentExcludeRuntime, // host provider admissions cannot be restored
+	"service_backup_fences":              IntentExcludeRuntime, // host maintenance fences cannot be transplanted
+	"service_runtime_intents":            IntentInclude,        // Durable user-requested service state.
+	"agents":                             IntentInclude,
+	"agent_skills":                       IntentInclude,
+	"agent_slug_reservations":            IntentInclude, // restored crew data under a slug stays out of reach of a new agent
+	"crew_members":                       IntentInclude,
+	"chats":                              IntentInclude,
+	"agent_mcp_bindings":                 IntentInclude,
+	"journal_entries":                    IntentInclude,
 	// Replay receipts authenticate execution against this installation's
 	// protected spool and run identities, which workspace bundles do not carry.
 	// Their opaque fingerprints cannot be re-keyed for a forked workspace.

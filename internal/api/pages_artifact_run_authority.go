@@ -98,9 +98,12 @@ func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *ar
 		return errors.New("artifact run delegation expired or revoked")
 	}
 	if a.RequestID != "" {
-		var state string
-		if err := q.QueryRowContext(ctx, `SELECT status FROM page_artifact_requests WHERE id=? AND page_id=? AND run_id=? AND human_user_id=?`, a.RequestID, pageID, a.RunID, a.HumanUserID).Scan(&state); err != nil || (state != "running" && state != "succeeded") {
+		var state, deadline, updated string
+		if err := q.QueryRowContext(ctx, `SELECT status,deadline_at,updated_at FROM page_artifact_requests WHERE id=? AND page_id=? AND run_id=? AND human_user_id=?`, a.RequestID, pageID, a.RunID, a.HumanUserID).Scan(&state, &deadline, &updated); err != nil || (state != "running" && state != "succeeded") {
 			return errors.New("artifact request is not active")
+		}
+		if state == "running" && !pageRequestWithinDeadline(deadline, updated, time.Now()) {
+			return errors.New("artifact request deadline elapsed")
 		}
 	}
 	// A delegation is explicit but it does not bypass Pages' agent grant.

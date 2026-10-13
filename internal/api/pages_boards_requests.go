@@ -149,6 +149,10 @@ func (h *PageHandler) CreateBoardRequest(w http.ResponseWriter, r *http.Request)
 		replyError(w, 403, "page.create authority required")
 		return
 	}
+	if req.Kind == "artifact" && !h.artifactAgentIDPolicyAllows(r.Context(), receipt.WorkspaceID, receipt.AgentID) {
+		artifactCommentError(w, 403, "artifact_policy_disabled", "Agent artifact creation is disabled for this crew")
+		return
+	}
 	if h.artifactDispatch == nil && h.hub == nil {
 		replyError(w, 503, "chat runtime unavailable")
 		return
