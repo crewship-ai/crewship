@@ -2762,6 +2762,18 @@ server caps TTL at 24 hours.
 `level` must be a supported logging level (`debug`, `info`, `warn`, or
 `error`).
 
+The baseline is the server's configured level (`CREWSHIP_LOG_LEVEL`, `info`
+when unset); this endpoint never changes it. Levels include everything above
+them: `debug` writes the most, `error` only errors.
+
+Every change is recorded in the instance audit as `instance.log_level_changed`
+(`from`, `to`, `baseline`, `ttl_seconds`, `expires_at`), and the server's
+own return to the baseline when a TTL runs out as `instance.log_level_reverted`
+with no user. Both carry `entity_id` `log-level`, so
+`GET /api/v1/admin/instance/audit?entity_id=log-level` lists them. The server
+log gets a line for each as well, written whatever the new level is (a change
+to `error` is not silenced by itself).
+
 ### Response
 
 `200 OK` returns the same `{level, baseline, expires_at}` object as the GET
