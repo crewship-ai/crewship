@@ -41,6 +41,7 @@ func (r *Router) registerAuthRoutes() {
 	mail := mailer.NewFromEnv()
 	authH := NewAuthHandler(r.db, r.logger, r.authMw.validator, r.sessionsStore, r.allowSignup)
 	authH.mail = mail
+	authH.invitationJournal = r.journal
 	authH.license = r.license
 	r.authHandler = authH
 	r.mux.HandleFunc("POST /api/v1/bootstrap", authH.Bootstrap)
