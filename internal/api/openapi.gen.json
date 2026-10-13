@@ -116312,6 +116312,28 @@
                       ],
                       "type": "object"
                     },
+                    "execution": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": {
+                          "enum": [
+                            false
+                          ],
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "enum": [
+                            "feature_disabled"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "reason"
+                      ],
+                      "type": "object"
+                    },
                     "head_rev": {
                       "type": "integer"
                     },
@@ -116449,6 +116471,7 @@
                     "can_comment",
                     "can_copy",
                     "copy_provenance",
+                    "execution",
                     "manifest",
                     "manifest_status"
                   ],
@@ -117233,6 +117256,28 @@
                     "content_sha256": {
                       "type": "string"
                     },
+                    "execution": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": {
+                          "enum": [
+                            false
+                          ],
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "enum": [
+                            "feature_disabled"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "reason"
+                      ],
+                      "type": "object"
+                    },
                     "expires_at": {
                       "format": "date-time",
                       "type": "string"
@@ -117256,7 +117301,8 @@
                     "revision",
                     "content_sha256",
                     "runtime_profile",
-                    "expires_at"
+                    "expires_at",
+                    "execution"
                   ],
                   "type": "object"
                 }

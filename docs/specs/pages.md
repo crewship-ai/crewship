@@ -292,7 +292,14 @@ role and Page ACL, returning the revision digest, supported profile and a
 15-second expiry. It is not a bearer capability and does not enable scripts.
 Interactive bootstrap, MessagePort and host teardown components remain
 disconnected from the product view until runtime acceptance. Agent credentials
-cannot use the lease endpoint.
+cannot use the lease endpoint. Both the artifact document and lease report
+`execution: {enabled: false, reason: "feature_disabled"}`. The product bootstrap
+handler remains unregistered and returns a no-store 404 under its single closed server feature gate. It cannot be activated by
+client input, a creation policy, or runtime domain configuration. The canonical
+bootstrap behind that gate still requires HTTPS on a separate registrable site.
+The separate-tab experiment does not establish a product handoff: Studio's
+`COOP: same-origin` can sever the opener, and the current bootstrap is iframe-only.
+Unsupported browsers retain static previews, comments and revision history.
 
 ## 0. Verdict
 

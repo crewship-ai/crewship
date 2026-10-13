@@ -14,11 +14,12 @@ import (
 )
 
 type artifactLeaseMetadata struct {
-	PageID         string `json:"page_id"`
-	Revision       int64  `json:"revision"`
-	ContentSHA256  string `json:"content_sha256"`
-	RuntimeProfile string `json:"runtime_profile"`
-	ExpiresAt      string `json:"expires_at"`
+	Execution      artifactExecutionDescriptor `json:"execution"`
+	PageID         string                      `json:"page_id"`
+	Revision       int64                       `json:"revision"`
+	ContentSHA256  string                      `json:"content_sha256"`
+	RuntimeProfile string                      `json:"runtime_profile"`
+	ExpiresAt      string                      `json:"expires_at"`
 }
 
 // GetArtifactLease checks current human authority over one retained revision.
@@ -87,7 +88,7 @@ func (h *PageHandler) GetArtifactLease(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 404, "page not found")
 		return
 	}
-	result := artifactLeaseMetadata{PageID: rec.ID, Revision: revision, RuntimeProfile: artifactStaticProfile}
+	result := artifactLeaseMetadata{PageID: rec.ID, Revision: revision, RuntimeProfile: artifactStaticProfile, Execution: artifactExecution()}
 	var manifest sql.NullString
 	err = tx.QueryRowContext(ctx, `SELECT sha256,manifest_json FROM page_artifact_revisions WHERE page_id=? AND revision=?`, rec.ID, revision).Scan(&result.ContentSHA256, &manifest)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -472,10 +472,14 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	artifactRestore["additionalProperties"] = false
 	artifactResult := obj(map[string]any{"revision": integer(), "head_rev": integer()})
 	artifactResult["required"] = []string{"revision", "head_rev"}
+	artifactExecution := obj(map[string]any{"enabled": map[string]any{"type": "boolean", "enum": []bool{false}}, "reason": map[string]any{"type": "string", "enum": []string{"feature_disabled"}}})
+	artifactExecution["required"] = []string{"enabled", "reason"}
+	artifactExecution["additionalProperties"] = false
 	artifactDocument := obj(map[string]any{"head_rev": integer(), "revision": integer(), "html": str(), "revisions": arr(artifactRevision), "can_write": boolean(), "can_comment": boolean()})
+	artifactDocument["properties"].(map[string]any)["execution"] = artifactExecution
 	artifactDocument["properties"].(map[string]any)["can_copy"] = boolean()
 	artifactDocument["properties"].(map[string]any)["copy_provenance"] = map[string]any{"type": "object", "nullable": true, "properties": map[string]any{"source_revision": integer(), "source": obj(map[string]any{"page_slug": str()})}, "required": []string{"source_revision"}}
-	artifactDocument["required"] = []string{"head_rev", "revision", "html", "revisions", "can_write", "can_comment", "can_copy", "copy_provenance"}
+	artifactDocument["required"] = []string{"head_rev", "revision", "html", "revisions", "can_write", "can_comment", "can_copy", "copy_provenance", "execution"}
 	manifestFile := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"path", "mime", "size_bytes", "sha256"}, "properties": map[string]any{
 		"path": map[string]any{"type": "string", "enum": []string{"index.html"}}, "mime": map[string]any{"type": "string", "enum": []string{"text/html; charset=utf-8"}}, "size_bytes": map[string]any{"type": "integer", "minimum": 1, "maximum": 10 << 20}, "sha256": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"},
 	}}
@@ -543,7 +547,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	artifactRequest["properties"] = mergeProps(artifactRequest["properties"].(map[string]any), requestExecutionProperties())
 	artifactRequest["required"] = []string{"id", "chat_id", "agent_id", "instruction", "base_rev", "status", "result_kind", "created_at", "updated_at"}
 	artifactLease := obj(map[string]any{"page_id": str(), "revision": positiveVersion, "content_sha256": str(), "runtime_profile": map[string]any{"type": "string", "enum": []string{"static-html-v1"}}, "expires_at": timeString()})
-	artifactLease["required"] = []string{"page_id", "revision", "content_sha256", "runtime_profile", "expires_at"}
+	artifactLease["properties"].(map[string]any)["execution"] = artifactExecution
+	artifactLease["required"] = []string{"page_id", "revision", "content_sha256", "runtime_profile", "expires_at", "execution"}
 	artifactRequestTarget := obj(map[string]any{"chat_id": str(), "title": str(), "agent_id": str(), "agent_name": str(), "agent_slug": str()})
 	artifactRequestTarget["required"] = []string{"chat_id", "title", "agent_id", "agent_name", "agent_slug"}
 	artifactRequestList := obj(map[string]any{"requests": arr(artifactRequest), "can_dispatch": boolean(), "eligible_chats": arr(artifactRequestTarget)})

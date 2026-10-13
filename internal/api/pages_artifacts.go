@@ -187,7 +187,7 @@ func (h *PageHandler) GetArtifact(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	agentCaller, _ := pageGrantCallerIsAgent(r)
 	canComment := !agentCaller && projectAgentFrom(r.Context()) == nil && h.mayComment(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)
-	writeJSON(w, 200, map[string]any{"head_rev": head, "revision": selected, "html": html, "manifest": manifest, "manifest_status": manifestStatus, "revisions": revisions, "can_copy": head > 0 && h.canCopyArtifact(r), "copy_provenance": h.artifactCopyProvenance(r.Context(), WorkspaceIDFromContext(r.Context()), rec.ID, UserFromContext(r.Context()).ID), "can_comment": canComment, "can_write": rec.OwnerUserID != "" && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)})
+	writeJSON(w, 200, map[string]any{"execution": artifactExecution(), "head_rev": head, "revision": selected, "html": html, "manifest": manifest, "manifest_status": manifestStatus, "revisions": revisions, "can_copy": head > 0 && h.canCopyArtifact(r), "copy_provenance": h.artifactCopyProvenance(r.Context(), WorkspaceIDFromContext(r.Context()), rec.ID, UserFromContext(r.Context()).ID), "can_comment": canComment, "can_write": rec.OwnerUserID != "" && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)})
 }
 
 type artifactMutation struct {
