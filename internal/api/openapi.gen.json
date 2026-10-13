@@ -111324,6 +111324,170 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/page-request-results/{kind}/{requestId}": {
+      "get": {
+        "description": "Get page request result (GET /api/v1/page-request-results/{kind}/{requestId}).",
+        "operationId": "get_api_v1_page-request-results_kind_requestId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "page_slug": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "page_slug"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page request result",
+        "tags": [
+          "page-request-results"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/page-webhooks/{token}": {
       "post": {
         "description": "Submit page webhook (POST /api/v1/page-webhooks/{token}).",
@@ -117153,6 +117317,13 @@
                             "minimum": 1,
                             "type": "integer"
                           },
+                          "retry_of_request_id": {
+                            "maxLength": 128,
+                            "type": "string"
+                          },
+                          "retry_warning": {
+                            "type": "string"
+                          },
                           "run_id": {
                             "type": "string"
                           },
@@ -117367,6 +117538,10 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "retry_of_request_id": {
+                    "maxLength": 128,
+                    "type": "string"
+                  },
                   "submission_id": {
                     "maxLength": 128,
                     "minLength": 1,
@@ -117395,6 +117570,12 @@
                 "schema": {
                   "properties": {
                     "id": {
+                      "type": "string"
+                    },
+                    "retry_of_request_id": {
+                      "type": "string"
+                    },
+                    "retry_warning": {
                       "type": "string"
                     }
                   },
@@ -125967,6 +126148,13 @@
                             "nullable": true,
                             "type": "integer"
                           },
+                          "retry_of_request_id": {
+                            "maxLength": 128,
+                            "type": "string"
+                          },
+                          "retry_warning": {
+                            "type": "string"
+                          },
                           "run_id": {
                             "type": "string"
                           },
@@ -126233,6 +126421,13 @@
                             "nullable": true,
                             "type": "integer"
                           },
+                          "retry_of_request_id": {
+                            "maxLength": 128,
+                            "type": "string"
+                          },
+                          "retry_warning": {
+                            "type": "string"
+                          },
                           "run_id": {
                             "type": "string"
                           },
@@ -126498,6 +126693,13 @@
                           "result_seq": {
                             "nullable": true,
                             "type": "integer"
+                          },
+                          "retry_of_request_id": {
+                            "maxLength": 128,
+                            "type": "string"
+                          },
+                          "retry_warning": {
+                            "type": "string"
                           },
                           "run_id": {
                             "type": "string"
@@ -126827,6 +127029,10 @@
                     "format": "byte",
                     "type": "string"
                   },
+                  "retry_of_request_id": {
+                    "maxLength": 128,
+                    "type": "string"
+                  },
                   "selected_element_ids": {
                     "items": {
                       "type": "string"
@@ -126889,6 +127095,12 @@
                   "additionalProperties": false,
                   "properties": {
                     "id": {
+                      "type": "string"
+                    },
+                    "retry_of_request_id": {
+                      "type": "string"
+                    },
+                    "retry_warning": {
                       "type": "string"
                     }
                   },
@@ -127269,6 +127481,13 @@
                       "nullable": true,
                       "type": "integer"
                     },
+                    "retry_of_request_id": {
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "retry_warning": {
+                      "type": "string"
+                    },
                     "run_id": {
                       "type": "string"
                     },
@@ -127491,6 +127710,13 @@
                       "nullable": true,
                       "type": "integer"
                     },
+                    "retry_of_request_id": {
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "retry_warning": {
+                      "type": "string"
+                    },
                     "run_id": {
                       "type": "string"
                     },
@@ -127712,6 +127938,13 @@
                     "result_seq": {
                       "nullable": true,
                       "type": "integer"
+                    },
+                    "retry_of_request_id": {
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "retry_warning": {
+                      "type": "string"
                     },
                     "run_id": {
                       "type": "string"
@@ -128151,6 +128384,13 @@
                       "nullable": true,
                       "type": "integer"
                     },
+                    "retry_of_request_id": {
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "retry_warning": {
+                      "type": "string"
+                    },
                     "run_id": {
                       "type": "string"
                     },
@@ -128373,6 +128613,13 @@
                       "nullable": true,
                       "type": "integer"
                     },
+                    "retry_of_request_id": {
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "retry_warning": {
+                      "type": "string"
+                    },
                     "run_id": {
                       "type": "string"
                     },
@@ -128594,6 +128841,13 @@
                     "result_seq": {
                       "nullable": true,
                       "type": "integer"
+                    },
+                    "retry_of_request_id": {
+                      "maxLength": 128,
+                      "type": "string"
+                    },
+                    "retry_warning": {
+                      "type": "string"
                     },
                     "run_id": {
                       "type": "string"

@@ -2,12 +2,14 @@ package main
 
 func requestExecutionProperties() map[string]any {
 	return map[string]any{
-		"execution_state":  map[string]any{"type": "string", "enum": []string{"observed", "awaiting_confirmation", "unknown", "deadline_exceeded"}},
-		"heartbeat_at":     map[string]any{"type": "string", "format": "date-time", "nullable": true, "description": "Actual work attempt heartbeat only; null when no such evidence exists."},
-		"last_activity_at": map[string]any{"type": "string", "format": "date-time", "nullable": true},
-		"deadline_at":      map[string]any{"type": "string", "format": "date-time", "nullable": true},
-		"deadline_source":  map[string]any{"type": "string", "enum": []string{"recorded", "legacy_derived"}},
-		"run_status":       map[string]any{"type": "string", "enum": []string{"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"}, "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result."},
+		"retry_of_request_id": map[string]any{"type": "string", "maxLength": 128},
+		"retry_warning":       map[string]any{"type": "string"},
+		"execution_state":     map[string]any{"type": "string", "enum": []string{"observed", "awaiting_confirmation", "unknown", "deadline_exceeded"}},
+		"heartbeat_at":        map[string]any{"type": "string", "format": "date-time", "nullable": true, "description": "Actual work attempt heartbeat only; null when no such evidence exists."},
+		"last_activity_at":    map[string]any{"type": "string", "format": "date-time", "nullable": true},
+		"deadline_at":         map[string]any{"type": "string", "format": "date-time", "nullable": true},
+		"deadline_source":     map[string]any{"type": "string", "enum": []string{"recorded", "legacy_derived"}},
+		"run_status":          map[string]any{"type": "string", "enum": []string{"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"}, "description": "Confirmed terminal run outcome. Omitted when unconfirmed; independent of the request result."},
 	}
 }
 
@@ -26,12 +28,13 @@ func boardRequestSchemaCatalog() map[string]DomainSchema {
 	record := obj(props, "id", "kind", "status", "base_seq", "instruction", "selected_element_ids", "selected_placement_ids", "target", "created_at", "updated_at", "can_insert", "can_cancel", "result_seq", "converter_url")
 	detail := obj(mergeProps(props, map[string]any{"mermaid_source": str, "inserted_element_ids": array(str), "edited_since_insert": boolean}), "id", "kind", "status", "mermaid_source", "source_hash", "converter_version", "converter_url", "inserted_element_ids", "edited_since_insert")
 	target := obj(map[string]any{"chat_id": str, "title": str, "agent_id": str, "agent_name": str, "agent_slug": str}, "chat_id", "agent_id", "agent_name", "agent_slug")
-	create := obj(map[string]any{"kind": props["kind"], "chat_id": str, "instruction": str, "base_seq": integer, "submission_id": str, "selected_element_ids": array(str), "selected_placement_ids": array(str), "target": geometry, "dialect": str, "converter_version": str, "preview_png": map[string]any{"type": "string", "format": "byte", "description": "Optional untrusted PNG illustration, <=1MiB decoded, <=1024x1024. Canonical snapshot alone provides authority."}}, "kind", "chat_id", "instruction", "base_seq", "submission_id", "target")
+	create := obj(map[string]any{"kind": props["kind"], "chat_id": str, "instruction": str, "base_seq": integer, "submission_id": str, "retry_of_request_id": map[string]any{"type": "string", "maxLength": 128}, "selected_element_ids": array(str), "selected_placement_ids": array(str), "target": geometry, "dialect": str, "converter_version": str, "preview_png": map[string]any{"type": "string", "format": "byte", "description": "Optional untrusted PNG illustration, <=1MiB decoded, <=1024x1024. Canonical snapshot alone provides authority."}}, "kind", "chat_id", "instruction", "base_seq", "submission_id", "target")
 	insert := obj(map[string]any{"mutation_id": str, "base_seq": integer, "source_hash": str, "converter_version": str, "upserts": array(obj(map[string]any{"element": map[string]any{"type": "object", "additionalProperties": true}, "expected_rev": map[string]any{"type": "integer", "enum": []int{0}}}, "element", "expected_rev"))}, "mutation_id", "base_seq", "source_hash", "converter_version", "upserts")
 	receipt := obj(map[string]any{"id": str, "status": str, "result_seq": integer, "already_inserted": boolean, "inserted_element_ids": array(str), "element_revs": map[string]any{"type": "object", "additionalProperties": integer}, "undo_expires_at": str}, "id", "status", "result_seq", "already_inserted")
 	return map[string]DomainSchema{
+		"GET /api/v1/page-request-results/{kind}/{requestId}":         {Response: obj(map[string]any{"page_slug": str, "revision": map[string]any{"type": "integer", "minimum": 1}}, "page_slug")},
 		"GET /api/v1/pages/{slug}/board/requests":                     {Response: obj(map[string]any{"can_dispatch": boolean, "eligible_chats": array(target), "converter_url": str, "requests": array(record)}, "can_dispatch", "eligible_chats", "converter_url", "requests")},
-		"POST /api/v1/pages/{slug}/board/requests":                    {Request: create, RequestRequired: true, Response: obj(map[string]any{"id": str}, "id"), SuccessStatuses: []string{"202"}},
+		"POST /api/v1/pages/{slug}/board/requests":                    {Request: create, RequestRequired: true, Response: obj(map[string]any{"id": str, "retry_of_request_id": str, "retry_warning": str}, "id"), SuccessStatuses: []string{"202"}},
 		"GET /api/v1/pages/{slug}/board/requests/{requestId}":         {Response: detail},
 		"POST /api/v1/pages/{slug}/board/requests/{requestId}/cancel": {Request: obj(map[string]any{}), Response: detail},
 		"POST /api/v1/pages/{slug}/board/requests/{requestId}/insert": {Request: insert, RequestRequired: true, Response: receipt, SuccessStatuses: []string{"200", "201"}},

@@ -10,6 +10,8 @@ function EvidenceTime({ label, value }: { label: string; value?: string | null }
 export function RequestExecutionDetails({ request }: { request: RequestExecution & { status: string } }) {
   const unconfirmed = !request.run_status && ["awaiting_confirmation", "unknown", "deadline_exceeded"].includes(request.execution_state ?? "")
   return <div className="space-y-1 text-xs text-muted-foreground">
+    {request.retry_of_request_id && <p>New submission linked to an earlier request.</p>}
+    {request.retry_warning && <p className="text-warn">{request.retry_warning}</p>}
     {unconfirmed && <p>Run status could not be confirmed. The agent may still be running; starting another request can duplicate work.</p>}
     {request.status === "cancelled" && !request.run_status && <p>This request no longer accepts a result. The agent run has not been confirmed stopped.</p>}
     {request.execution_state === "deadline_exceeded" && <p>The request deadline elapsed. Late results are no longer accepted for this request.</p>}

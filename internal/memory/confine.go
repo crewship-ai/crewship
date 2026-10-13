@@ -216,3 +216,47 @@ func ReadFileNoFollowRoot(storageRoot, path string) ([]byte, error) {
 	}
 	return readRegularRootNoFollow(file.root, file.name)
 }
+
+// OpenFileNoFollowRoot returns a regular file opened beneath an explicitly
+// trusted root, with every parent pinned and symlink components rejected.
+func OpenFileNoFollowRoot(storageRoot, path string) (*os.File, error) {
+	parent, err := openRootedMutationFile(storageRoot, path, false)
+	if err != nil {
+		return nil, err
+	}
+	defer parent.close()
+	if parent.missing {
+		return nil, os.ErrNotExist
+	}
+	file, err := openRootNoFollow(parent.root, parent.name)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = file.Close()
+		if err != nil {
+			return nil, err
+		}
+		return nil, os.ErrPermission
+	}
+	return file, nil
+}
+
+// ReadDirNoFollowRoot enumerates a pinned directory under a trusted ancestor.
+func ReadDirNoFollowRoot(storageRoot, dir string) ([]os.DirEntry, error) {
+	parent, err := openRootedMutationFile(storageRoot, filepath.Join(dir, ".memory-directory-scan"), false)
+	if err != nil {
+		return nil, err
+	}
+	defer parent.close()
+	if parent.missing {
+		return nil, os.ErrNotExist
+	}
+	directory, err := parent.root.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	defer directory.Close()
+	return directory.ReadDir(-1)
+}

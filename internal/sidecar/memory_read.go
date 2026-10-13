@@ -157,7 +157,7 @@ func (s *Server) handleMemoryRead(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "trusted memory storage root unavailable"})
 		return
 	}
-	res, err := memory.ReadCanonical(r.Context(), nil, memory.ReadRequest{
+	res, err := memory.ReadCanonicalRooted(r.Context(), nil, memory.ReadRequest{
 		Path:        target,
 		StorageRoot: s.memoryStorageRoot,
 		AuditPath:   scope + ":" + file,

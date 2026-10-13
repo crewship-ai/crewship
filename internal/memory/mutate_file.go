@@ -9,8 +9,9 @@ import (
 	"strings"
 )
 
-// mutationFile pins the canonical file's parent for the whole operation. The
-// absolute path remains the ledger identity, never a fallback for rooted I/O.
+// mutationFile pins the canonical file's parent for the whole operation.
+// Only the trusted legacy constructor populates path. Rooted constructors
+// carry root/name exclusively; ledger identity stays in the request.
 type mutationFile struct {
 	path    string
 	root    *os.Root
@@ -38,7 +39,7 @@ func openRootedMutationFile(storageRoot, path string, create bool) (*mutationFil
 	if storageRoot == "" {
 		return nil, fmt.Errorf("memory mutation requires a storage root")
 	}
-	file := &mutationFile{path: path}
+	file := &mutationFile{}
 	base, err := filepath.Abs(storageRoot)
 	if err != nil {
 		return nil, err

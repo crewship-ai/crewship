@@ -193,7 +193,7 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 	// re-propose the same pattern across consecutive 6h ticks while
 	// the underlying entries are still in the window; the dedup
 	// guards the on-disk corpus against re-appending those.
-	rules = dedupAgainstPrior(rules, cfg.OutputDir, now, 7*24*time.Hour)
+	rules = dedupAgainstPriorRooted(rules, cfg.OutputRoot, cfg.OutputDir, now, 7*24*time.Hour)
 	if len(rules) == 0 {
 		// Still emit the journal marker so operators can see the worker
 		// ran. Nothing written to disk because there is nothing to write.

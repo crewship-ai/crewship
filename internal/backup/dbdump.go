@@ -1190,6 +1190,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				return stats, err
 			}
 		}
+		rows, err = orderPageRequestRetryRows(table, rows)
+		if err != nil {
+			return stats, err
+		}
 		tableInserted := 0
 		for _, originalRow := range rows {
 			// main's conversation sanitiser runs FIRST: it rebuilds the row

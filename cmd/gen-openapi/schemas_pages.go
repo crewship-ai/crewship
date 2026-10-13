@@ -540,10 +540,10 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	artifactRequestTarget["required"] = []string{"chat_id", "title", "agent_id", "agent_name", "agent_slug"}
 	artifactRequestList := obj(map[string]any{"requests": arr(artifactRequest), "can_dispatch": boolean(), "eligible_chats": arr(artifactRequestTarget)})
 	artifactRequestList["required"] = []string{"requests", "can_dispatch", "eligible_chats"}
-	artifactRequestCreate := obj(map[string]any{"chat_id": str(), "thread_id": str(), "instruction": map[string]any{"type": "string", "minLength": 1, "description": "Explicit human instruction, at most 4096 UTF-8 bytes. Dispatch can incur agent usage costs."}, "base_rev": positiveVersion, "submission_id": mutationID})
+	artifactRequestCreate := obj(map[string]any{"chat_id": str(), "thread_id": str(), "instruction": map[string]any{"type": "string", "minLength": 1, "description": "Explicit human instruction, at most 4096 UTF-8 bytes. Dispatch can incur agent usage costs."}, "base_rev": positiveVersion, "submission_id": mutationID, "retry_of_request_id": map[string]any{"type": "string", "maxLength": 128}})
 	artifactRequestCreate["required"] = []string{"chat_id", "instruction", "base_rev", "submission_id"}
 	artifactRequestCreate["additionalProperties"] = false
-	artifactRequestAccepted := obj(map[string]any{"id": str()})
+	artifactRequestAccepted := obj(map[string]any{"id": str(), "retry_of_request_id": str(), "retry_warning": str()})
 	artifactRequestAccepted["required"] = []string{"id"}
 	artifactRequestCancelled := obj(map[string]any{"id": str(), "status": map[string]any{"type": "string", "enum": []string{"cancelled"}}})
 	artifactRequestCancelled["required"] = []string{"id", "status"}

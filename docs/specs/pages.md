@@ -224,6 +224,22 @@ manage grants. The discussion snapshot is fetched only after trusted run
 admission; it is not placed in the chat prompt beforehand. The agent's
 operational prompt and bundled `crewship-artifacts` skill document publication.
 
+A failed or cancelled request can be submitted again explicitly with
+`retry_of_request_id`. The server checks the same initiating human, workspace,
+source Page and job kind; it never resumes the original runtime. The new request
+captures the current revision or Board selection and gets a new submission ID.
+An unconfirmed previous run remains eligible but carries a duplicate-work
+warning. Transport retries still reuse the same submission ID and snapshot.
+
+Completion generates a generic private Inbox notice for the initiating human
+when they retain current access. Source completion and notice insertion share a
+transaction; a bounded recovery pass handles pending notices. Notices contain
+opaque pointers, no artifact content, titles or instructions, and do not fan out
+to external channels. Restores suppress pending notices. The authenticated
+`GET /api/v1/page-request-results/{kind}/{requestId}` resolves a current Page slug
+and an optional retained result revision only after checking the initiating
+human's live membership and Page access. Inbox pointers never grant access.
+
 DOM element anchors and interactive runtime
 are not part of this implemented slice. Static point capture reloads the preview
 to the top, records CSS viewport dimensions, and never silently repositions a

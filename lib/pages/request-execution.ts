@@ -1,5 +1,7 @@
 /** Runtime evidence is distinct from the durable request/result state. */
 export interface RequestExecution {
+  retry_of_request_id?: string
+  retry_warning?: string
   execution_state?: "observed" | "awaiting_confirmation" | "unknown" | "deadline_exceeded"
   heartbeat_at?: string | null
   last_activity_at?: string | null

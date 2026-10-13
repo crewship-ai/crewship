@@ -92,3 +92,24 @@ func TestArtifactPolicyBlocksNewOptInAndCreationAfterRevocation(t *testing.T) {
 		t.Fatal("revoked policy created a Page")
 	}
 }
+
+func TestArtifactPolicyRejectsForgedPathAndQuery(t *testing.T) {
+	h, _, _, ws, user := newPagesFixture(t)
+	for _, method := range []string{"GET", "PUT"} {
+		t.Run(method, func(t *testing.T) {
+			r := pagesGrantRequest(t, method, "/?workspace_id=foreign-workspace", ws, user, "OWNER", `{"enabled":true,"crew_ids":["crew-lookout"],"base_version":0}`)
+			r.SetPathValue("workspaceId", "foreign-workspace")
+			w := httptest.NewRecorder()
+			if method == "GET" {
+				h.GetArtifactCreationPolicy(w, r)
+			} else {
+				h.UpdateArtifactCreationPolicy(w, r)
+			}
+			artifactExpect(t, w, 404)
+		})
+	}
+	var count int
+	if err := h.db.QueryRow(`SELECT count(*) FROM workspace_artifact_creation_policy`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("forged scope changed policy: count=%d err=%v", count, err)
+	}
+}

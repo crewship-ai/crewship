@@ -27,7 +27,7 @@ export function BoardAgentWork({ workspaceId, slug, board, selectedIds, disabled
   useEffect(() => { onDirtyChange?.(dirty); return () => onDirtyChange?.(false) }, [dirty, onDirtyChange])
   const denied = requests.query.error instanceof BoardRequestError && [401,403,404].includes(requests.query.error.status)
   useEffect(() => { if (denied || requests.query.data?.can_dispatch === false) { preview.current?.abort(); setPreparingPreview(false); setDraft(null); setPreviewError(null) } }, [denied, requests.query.data?.can_dispatch])
-  const open = (kind: 'diagram' | 'artifact', instruction = '') => {
+  const open = (kind: 'diagram' | 'artifact', instruction = '', retryOf?: string) => {
     preview.current?.abort(); setPreviewError(null); setPreparingPreview(false)
     requests.send.reset()
     const elements = board.records.filter(item => !item.deleted && item.element && selectedIds.includes(item.element_id))
@@ -36,7 +36,7 @@ export function BoardAgentWork({ workspaceId, slug, board, selectedIds, disabled
     const x = geometry.length ? Math.min(...geometry.map(item => Number(item.x))) : 80
     const y = geometry.length ? Math.min(...geometry.map(item => Number(item.y))) : 80
     const intent = crypto.randomUUID()
-    setDraft({ intent_id: intent, kind, instruction, chat_id: '', base_seq: board.seq, selected_element_ids: elements.map(item => item.element_id), selected_placement_ids: placements.map(item => item.id), target: { x, y, width: 640, height: 420 } })
+    setDraft({ ...(retryOf ? { retry_of_request_id: retryOf } : {}), intent_id: intent, kind, instruction, chat_id: '', base_seq: board.seq, selected_element_ids: elements.map(item => item.element_id), selected_placement_ids: placements.map(item => item.id), target: { x, y, width: 640, height: 420 } })
     if (kind === 'artifact') {
       const controller = new AbortController(); preview.current = controller; setPreparingPreview(true)
       void renderSelectionPreview(board, selectedIds, files, controller.signal).then(preview_png => {
@@ -51,7 +51,7 @@ export function BoardAgentWork({ workspaceId, slug, board, selectedIds, disabled
     <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-sm font-medium">Agent work</h3><p className="text-xs text-muted-foreground">Send an explicit request. Generated diagrams need your approval before insertion.</p></div>{data?.can_dispatch && <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={disabled} onClick={() => open('diagram')}>Generate diagram</Button><Button variant="outline" size="sm" disabled={disabled || !hasSavedSelection} onClick={() => open('artifact')}>Create artifact from selection</Button></div>}</div>
     {requests.query.error && <p role="alert" className="text-sm text-warn">Could not refresh agent work. {requests.query.error.message}</p>}
     {requests.cancel.error && <p role="alert" className="text-sm text-destructive">{requests.cancel.error.message}</p>}
-    {data?.requests.map(item => <BoardRequestCard onFocusWorkArea={onFocusWorkArea} key={item.id} item={item} board={board} disabled={disabled} requests={requests} onNew={() => open(item.kind, item.instruction)} />)}
+    {data?.requests.map(item => <BoardRequestCard onFocusWorkArea={onFocusWorkArea} key={item.id} item={item} board={board} disabled={disabled} requests={requests} onNew={() => open(item.kind, item.instruction, item.id)} />)}
     {data && !data.requests.length && <p className="text-xs text-muted-foreground">No agent requests for this board.</p>}
     {draft && data?.can_dispatch && <Dialog open onOpenChange={value => { if (!value && !uncertain && !requests.send.isPending) closeDraft() }}><DialogContent><DialogHeader><DialogTitle>{draft.kind === 'diagram' ? 'Generate a diagram' : 'Create an artifact from selection'}</DialogTitle><DialogDescription>The selected private chat and its agent receive your instructions and the saved selection from board sequence {draft.base_seq}. Later edits are excluded. Sending authorizes this request only.</DialogDescription></DialogHeader>
       <p className="text-xs text-muted-foreground">{draft.selected_element_ids.length} drawing elements · {draft.selected_placement_ids.length} artifact pins. {draft.kind === 'artifact' ? 'The result is a private artifact. The server pins it only if your board access and original sequence still allow it.' : 'Only plain flowchart nodes and edges are supported. No HTML, links or styling.'}</p>
@@ -62,6 +62,7 @@ export function BoardAgentWork({ workspaceId, slug, board, selectedIds, disabled
         <p className="text-xs text-muted-foreground">The preview is an illustration of selected drawings. Artifact pins are empty placeholders; their contents are supplied separately only when authorized.</p>
         {(preparingPreview || draft.preview_png) && <Button size="sm" variant="ghost" disabled={uncertain || requests.send.isPending} onClick={() => { preview.current?.abort(); setPreparingPreview(false); setDraft(current => current ? { ...current, preview_png: undefined } : null) }}>Continue without preview</Button>}
       </div>}
+      {draft.retry_of_request_id && <p role="alert" className="text-sm text-warn">This is a new request using the current board and current selection. The previous runtime may still be running; sending can duplicate work. Review this fresh selection and instructions before sending.</p>}
       <label className="space-y-1 text-sm">Private chat<select aria-label="Private chat for board request" className="w-full rounded-md border bg-background p-2" value={draft.chat_id} disabled={uncertain || requests.send.isPending} onChange={event => setDraft({ ...draft, chat_id: event.target.value })}><option value="">Choose a private chat</option>{data.eligible_chats.map(chat => <option key={chat.chat_id} value={chat.chat_id}>{chat.title} · {chat.agent_name || chat.agent_slug || 'Agent'}</option>)}</select></label>
       {!data.eligible_chats.length && <p className="text-sm text-muted-foreground">No eligible private chats are available. Use a private chat you own with an available agent.</p>}
       <label className="space-y-1 text-sm">Instructions<textarea aria-label="Board request instructions" className="min-h-28 w-full rounded-md border bg-background p-2" value={draft.instruction} disabled={uncertain || requests.send.isPending} onChange={event => setDraft({ ...draft, instruction: event.target.value })} /></label>

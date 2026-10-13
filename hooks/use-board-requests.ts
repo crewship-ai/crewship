@@ -17,7 +17,7 @@ export interface BoardAgentRequest extends RequestExecution {
   pin_status?: 'pinned' | 'created_not_pinned' | ''; pin_reason?: string; result_placement_id?: string
 }
 export interface BoardRequestDetail extends BoardAgentRequest { converter_url?: string; mermaid_source: string; inserted_element_ids: string[]; edited_since_insert: boolean }
-export interface BoardRequestDraft { intent_id: string; kind: 'diagram' | 'artifact'; chat_id: string; instruction: string; base_seq: number; selected_element_ids: string[]; selected_placement_ids: string[]; target: BoardRequestGeometry; preview_png?: string }
+export interface BoardRequestDraft { intent_id: string; kind: 'diagram' | 'artifact'; chat_id: string; instruction: string; base_seq: number; selected_element_ids: string[]; selected_placement_ids: string[]; target: BoardRequestGeometry; preview_png?: string; retry_of_request_id?: string }
 interface BoardRequests { converter_url?: string; can_dispatch: boolean; eligible_chats: ArtifactRequestTarget[]; requests: BoardAgentRequest[] }
 export class BoardRequestError extends Error { constructor(message: string, public status: number) { super(message) } }
 export function useBoardRequests(workspace: string, slug: string) {
