@@ -10,6 +10,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/chatentities"
 	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
@@ -130,6 +131,72 @@ func TestExecutionOriginsBackupForkRetainsInvalidOriginRatherThanAutonomy(t *tes
 		t.Fatalf("fork revived human authority: %v", e)
 	}
 
+}
+
+func TestExecutionOriginsForkRemapsPipelineOperationActor(t *testing.T) {
+	source := openMigratedDB(t)
+	workspace := seedExecutionOriginHistory(t, source)
+	if _, err := source.Exec(`UPDATE pipelines SET author_crew_id='c_alpha' WHERE id='origin-pipeline'`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := source.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	actors := []string{"pipeline:origin-pipeline:crew:c_alpha", "historical-system", "pipeline:origin-pipeline:crew:c_alpha:extra", "pipeline:unknown:crew:c_alpha"}
+	for _, actor := range actors {
+		op, _, err := chatentities.BeginOperation(t.Context(), tx, chatentities.OperationSpec{
+			ID: "system-op-" + actor, WorkspaceID: workspace, Key: "system-key-" + actor,
+			RequestHash: "request-hash", ActorType: "system", ActorID: actor,
+			Provenance: "legacy", Kind: "issue", Verb: "created",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = chatentities.CompleteOperation(t.Context(), tx, op.ID, chatentities.ResultSpec{
+			EntityID: "history-live", Revision: 1, AggregateRevision: 1, Result: json.RawMessage(`{"created":true}`),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	dump, err := backup.DumpWorkspace(t.Context(), source, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = backup.RemapIDs(t.Context(), source, dump); err != nil {
+		t.Fatal(err)
+	}
+	dump.Tables["workspaces"][0]["slug"] = "system-operation-fork"
+	if err = backup.RestoreDump(t.Context(), source, dump); err != nil {
+		t.Fatal(err)
+	}
+	forkWorkspace := dump.Tables["workspaces"][0]["id"].(string)
+	var pipeline string
+	if err = source.QueryRow(`SELECT id FROM pipelines WHERE workspace_id=? AND slug='origin-pipeline'`, forkWorkspace).Scan(&pipeline); err != nil || pipeline == "origin-pipeline" {
+		t.Fatalf("pipeline not forked: %s %v", pipeline, err)
+	}
+	var crew string
+	if err = source.QueryRow(`SELECT id FROM crews WHERE workspace_id=? AND slug='alpha'`, forkWorkspace).Scan(&crew); err != nil || crew == "c_alpha" {
+		t.Fatalf("crew not forked: %s %v", crew, err)
+	}
+	for _, actor := range actors {
+		expected := actor
+		if actor == actors[0] {
+			expected = "pipeline:" + pipeline + ":crew:" + crew
+		}
+		op, err := chatentities.FindOperation(t.Context(), source, forkWorkspace, "system", expected, "system-key-"+actor)
+		if err != nil || op.ActorID != expected || op.EntityID == "history-live" || op.RunID != "" {
+			t.Fatalf("forked system actor %s: %+v %v", actor, op, err)
+		}
+		var refs int
+		if err = source.QueryRow(`SELECT COUNT(*) FROM chat_entity_refs WHERE operation_id=?`, op.ID).Scan(&refs); err != nil || refs != 0 {
+			t.Fatalf("autonomous operation gained chat refs: %d %v", refs, err)
+		}
+	}
 }
 
 func TestExecutionOriginsCustomRoutineBundleRestoresWithoutChatCategory(t *testing.T) {

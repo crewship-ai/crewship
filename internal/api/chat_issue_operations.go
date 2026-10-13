@@ -28,6 +28,9 @@ type chatIssueOperation struct {
 	authority   runauthority.Authority
 	operation   *chatentities.Operation
 	requestHash string
+	actorType   string
+	actorID     string
+	crewID      string
 }
 
 // issueRequesterAllowed uses the same role/capability decision as the public
@@ -96,14 +99,23 @@ func (h *InternalIssueHandler) authorizeChatIssue(ctx context.Context, q issueOp
 		return nil, nil
 	}
 	var a runauthority.Authority
+	actorType, actorID, crewID := "agent", agentID, ""
 	var err error
 	if pipelineRun := hostPipelineRunID(ctx); pipelineRun != "" {
 		if pipelineRun != runID {
 			return nil, runauthority.ErrIdentityMismatch
 		}
 		originID := runauthority.OriginIDFromContext(ctx)
-		var storedOrigin string
-		err = q.QueryRowContext(ctx, `SELECT COALESCE(pr.chat_origin_id,'') FROM pipeline_runs pr JOIN pipelines p ON p.id=pr.pipeline_id AND p.workspace_id=pr.workspace_id JOIN agents a ON a.id=p.author_agent_id AND a.workspace_id=p.workspace_id AND a.crew_id=p.author_crew_id AND a.deleted_at IS NULL WHERE pr.id=? AND pr.workspace_id=? AND pr.status='running' AND a.id=? AND (pr.chat_origin_id IS NOT NULL OR (p.chat_origin_id IS NULL AND NOT EXISTS(SELECT 1 FROM pipeline_versions v WHERE v.pipeline_id=p.id AND v.version=pr.pipeline_version AND v.chat_origin_id IS NOT NULL)))`, runID, workspaceID, agentID).Scan(&storedOrigin)
+		var storedOrigin, pipelineID string
+		err = q.QueryRowContext(ctx, `SELECT COALESCE(pr.chat_origin_id,''),p.id,p.author_crew_id
+			FROM pipeline_runs pr JOIN pipelines p ON p.id=pr.pipeline_id AND p.workspace_id=pr.workspace_id
+			JOIN crews c ON c.id=p.author_crew_id AND c.workspace_id=p.workspace_id AND c.deleted_at IS NULL
+			LEFT JOIN agents a ON a.id=p.author_agent_id AND a.workspace_id=p.workspace_id AND a.crew_id=p.author_crew_id AND a.deleted_at IS NULL
+			WHERE pr.id=? AND pr.workspace_id=? AND pr.status='running'
+			AND (a.id=? OR (COALESCE(p.author_agent_id,'')='' AND ?='' AND pr.chat_origin_id IS NULL))
+			AND (pr.chat_origin_id IS NOT NULL OR (p.chat_origin_id IS NULL AND NOT EXISTS(
+			SELECT 1 FROM pipeline_versions v WHERE v.pipeline_id=p.id AND v.version=pr.pipeline_version AND v.chat_origin_id IS NOT NULL)))`,
+			runID, workspaceID, agentID, agentID).Scan(&storedOrigin, &pipelineID, &crewID)
 		if err != nil {
 			return nil, runauthority.ErrUnavailable
 		}
@@ -117,6 +129,22 @@ func (h *InternalIssueHandler) authorizeChatIssue(ctx context.Context, q issueOp
 			}
 		} else {
 			a = runauthority.Authority{WorkspaceID: workspaceID, AgentID: agentID}
+		}
+		if agentID == "" {
+			// Only a master-authenticated, persisted, origin-free pipeline can
+			// act without an agent. Its actor identity is never taken from JSON.
+			actorType, actorID = "system", "pipeline:"+pipelineID+":crew:"+crewID
+		}
+		// Creation has no existing entity to scope. Fence its requested crew
+		// against the persisted recipe just as updates fence their target.
+		if verb == "created" {
+			body, marshalErr := json.Marshal(payload)
+			var target struct {
+				CrewID string `json:"crew_id"`
+			}
+			if marshalErr != nil || json.Unmarshal(body, &target) != nil || target.CrewID != crewID {
+				return nil, runauthority.ErrIdentityMismatch
+			}
 		}
 		a.RunID = runID
 	} else if originID := runauthority.OriginIDFromContext(ctx); originID != "" {
@@ -138,14 +166,15 @@ func (h *InternalIssueHandler) authorizeChatIssue(ctx context.Context, q issueOp
 			return nil, err
 		}
 	}
-	if a.HumanAuthority == nil && key == "" {
-		return nil, nil
-	} // keyless host-admitted autonomous compatibility
+	op := &chatIssueOperation{authority: a, actorType: actorType, actorID: actorID, crewID: crewID}
 	if entityID != "" {
-		if err := verifyChatIssueReplayEntity(ctx, q, agentID, workspaceID, entityID); err != nil {
+		if err := verifyChatIssueOperationEntity(ctx, q, op, workspaceID, entityID); err != nil {
 			return nil, err
 		}
 	}
+	if a.HumanAuthority == nil && key == "" {
+		return nil, nil
+	} // keyless host-admitted autonomous compatibility
 	if key == "" {
 		return nil, chatentities.ErrKeyRequired
 	}
@@ -165,7 +194,8 @@ func (h *InternalIssueHandler) authorizeChatIssue(ctx context.Context, q issueOp
 	if err != nil {
 		return nil, err
 	}
-	return &chatIssueOperation{authority: a, requestHash: hash}, nil
+	op.requestHash = hash
+	return op, nil
 }
 
 var errChatIssueRequesterForbidden = errors.New("requester_forbidden")
@@ -174,6 +204,22 @@ var errChatIssueEntityUnavailable = errors.New("operation_entity_unavailable")
 func verifyChatIssueReplayEntity(ctx context.Context, q issueOperationQueryer, agentID, workspaceID, entityID string) error {
 	var readable bool
 	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM missions m JOIN agents a ON a.id=? AND a.workspace_id=m.workspace_id AND a.crew_id=m.crew_id AND a.deleted_at IS NULL WHERE m.id=? AND m.workspace_id=? AND m.mission_type='issue')`, agentID, entityID, workspaceID).Scan(&readable); err != nil {
+		return err
+	}
+	if !readable {
+		return errChatIssueEntityUnavailable
+	}
+	return nil
+}
+
+// Agentless pipeline replays use the persisted recipe crew, never a supplied
+// actor identifier. All other paths retain the live-agent entity check.
+func verifyChatIssueOperationEntity(ctx context.Context, q issueOperationQueryer, op *chatIssueOperation, workspaceID, entityID string) error {
+	if op.actorType != "system" {
+		return verifyChatIssueReplayEntity(ctx, q, op.authority.AgentID, workspaceID, entityID)
+	}
+	var readable bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM missions WHERE id=? AND workspace_id=? AND crew_id=? AND mission_type='issue')`, entityID, workspaceID, op.crewID).Scan(&readable); err != nil {
 		return err
 	}
 	if !readable {
@@ -199,7 +245,7 @@ func (h *InternalIssueHandler) checkChatIssueReplay(w http.ResponseWriter, r *ht
 	if op == nil {
 		return false
 	}
-	stored, err := chatentities.FindOperation(r.Context(), tx, workspaceID, "agent", agentID, key)
+	stored, err := chatentities.FindOperation(r.Context(), tx, workspaceID, op.actorType, op.actorID, key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false
 	}
@@ -211,7 +257,7 @@ func (h *InternalIssueHandler) checkChatIssueReplay(w http.ResponseWriter, r *ht
 		writeChatIssueError(w, chatentities.ErrKeyConflict)
 		return true
 	}
-	if err := verifyChatIssueReplayEntity(r.Context(), tx, agentID, workspaceID, stored.EntityID); err != nil {
+	if err := verifyChatIssueOperationEntity(r.Context(), tx, op, workspaceID, stored.EntityID); err != nil {
 		writeChatIssueError(w, err)
 		return true
 	}
@@ -237,7 +283,7 @@ func (h *InternalIssueHandler) beginChatIssueOperation(ctx context.Context, tx *
 	}
 	stored, replay, err := chatentities.BeginOperation(ctx, tx, chatentities.OperationSpec{
 		ID: generateCUID(), WorkspaceID: workspaceID, Key: key, RequestHash: op.requestHash,
-		ActorType: "agent", ActorID: agentID, RunID: runID, HumanAuthority: authorityJSON,
+		ActorType: op.actorType, ActorID: op.actorID, RunID: runID, HumanAuthority: authorityJSON,
 		Provenance: "verified", Kind: "issue", Verb: verb,
 	})
 	if err != nil {
@@ -247,7 +293,7 @@ func (h *InternalIssueHandler) beginChatIssueOperation(ctx context.Context, tx *
 		return nil, false, chatentities.ErrKeyConflict
 	}
 	if replay {
-		if err := verifyChatIssueReplayEntity(ctx, tx, agentID, workspaceID, stored.EntityID); err != nil {
+		if err := verifyChatIssueOperationEntity(ctx, tx, op, workspaceID, stored.EntityID); err != nil {
 			return nil, false, err
 		}
 	}

@@ -18,7 +18,9 @@ Every human-requested mutation requires an explicit operation key, at most
 200 bytes. HTTP accepts `operation_key` or `Idempotency-Key`; conflicting
 values return `409`. MCP mutation tools require `request_key`. Reuse that key
 when retrying the same operation; never generate another key for a retry.
-The scope is workspace plus agent. The same key with a different request or run
+The scope is workspace plus actor. Agent calls use the agent ID; explicitly
+keyed autonomous routines without an author agent use the persisted routine and
+crew IDs as a system actor. The same key with a different request or run
 returns `409 operation_key_conflict`. A successful retry returns the original
 result and operation ID with `replayed: true`, after fresh authorization. An
 issue that is no longer readable is not returned through replay.
@@ -31,7 +33,12 @@ result and reference commit or roll back together. Successful no-op updates
 also reserve their key. Genuine host-admitted autonomous work retains its
 existing mutation behavior without generating a human chat card. Explicitly
 keyed autonomous operations also persist retry results; keyless autonomous
-HTTP calls retain legacy behavior. Explicit show requires a human chat origin.
+HTTP calls retain legacy behavior. Agentless autonomous routine actions must
+come from authenticated host dispatch, match a persisted running routine in
+its live workspace and crew, and remain within that crew for both mutations
+and replay. A missing agent never removes a stored human origin. Human-origin
+routine mutations still require an identified agent. Explicit show requires a
+human chat origin.
 
 Once run tokens are enabled, old agent tokens cannot mutate issues. This
 delivery supports human-run create, update, comment and show. Work execution,

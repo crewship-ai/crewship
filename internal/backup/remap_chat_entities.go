@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"sort"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/chatentities"
 )
@@ -31,6 +32,20 @@ func remapChatEntityHistory(dump *DBDump, ids map[string]map[string]string) {
 			if old, ok := row["actor_id"].(string); ok {
 				if newID := ids["agents"][old]; newID != "" {
 					row["actor_id"] = newID
+				}
+			}
+		}
+		// Agentless DSL operations scope system actors to a pipeline and crew.
+		// Only the exact typed format with both resources present in this fork
+		// can be rewritten; preserve other historical system identities.
+		if row["actor_type"] == "system" {
+			if old, ok := row["actor_id"].(string); ok {
+				parts := strings.Split(old, ":")
+				if len(parts) == 4 && parts[0] == "pipeline" && parts[2] == "crew" {
+					pipeline, crew := ids["pipelines"][parts[1]], ids["crews"][parts[3]]
+					if pipeline != "" && crew != "" {
+						row["actor_id"] = "pipeline:" + pipeline + ":crew:" + crew
+					}
 				}
 			}
 		}
