@@ -26,6 +26,8 @@ import { BackupsStorage } from "./backups-storage"
 import { BackupsRecovery } from "./backups-recovery"
 import { BackupsKeys } from "./backups-keys"
 import { WorkspaceBackups } from "./backups-workspace"
+import { BackupsSetup, SetupCard, setupState } from "./backups-setup"
+import { useRecipients } from "./use-backup-settings"
 
 /**
  * Admin › Backups, built like People & workspaces and Security: "← Admin", a
@@ -174,6 +176,12 @@ export function BackupsPage() {
 
   const runs = useBackupRuns(scope, selected, workspaces)
   const plans = useBackupPlans()
+  // A first backup needs a key and a plan: until both exist the Overview
+  // leads with the setup, and Back up now opens it instead of failing.
+  const recipients = useRecipients()
+  // Only what was read counts: a failed read says nothing about the setup.
+  const setup = setupState(recipients.data, plans.data)
+  const [setupOpen, setSetupOpen] = React.useState(false)
   // The panel's Overview badge counts the whole instance.
   const overview = useBackupsOverview("instance", selected, workspaces)
   // Each workspace's newest backup, for the panel and the Overview's table:
@@ -366,7 +374,12 @@ export function BackupsPage() {
       </>
     )
   } else if (view.section === "overview") {
-    body = <BackupsOverview ctx={ctx} coverage={scope === "instance" ? coverage : undefined} onOpenWorkspace={openWorkspace} />
+    body = (
+      <>
+        {setup.known && !setup.done && <SetupCard hasKey={setup.hasKey} hasPlan={setup.hasPlan} onStart={() => setSetupOpen(true)} />}
+        <BackupsOverview ctx={ctx} coverage={scope === "instance" ? coverage : undefined} onOpenWorkspace={openWorkspace} />
+      </>
+    )
   } else if (view.section === "history") {
     const chips = [
       slice && { key: "slice", label: `${new Date(slice.fromMs).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} – ${new Date(slice.toMs).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`, clear: () => setSlice(null) },
@@ -441,10 +454,12 @@ export function BackupsPage() {
           <Button size="sm" variant="outline" className="h-7 text-xs max-md:w-8 max-md:px-0" aria-label="New plan" onClick={newPlan}><Plus /><span className="max-md:hidden">New plan</span></Button>
           <Button size="sm" className="h-7 text-xs max-md:w-8 max-md:px-0" aria-label="Back up now"
             title={scope === "instance" ? "Back up the whole instance now" : `Back up ${selected.size === 1 ? workspaces.find((w) => selected.has(w.id))?.name ?? "1 workspace" : `${selected.size} workspaces`} now`}
-            onClick={() => backUpNow()}><History /><span className="max-md:hidden">Back up now</span></Button>
+            onClick={() => (setup.known && !setup.hasKey ? setSetupOpen(true) : backUpNow())}><History /><span className="max-md:hidden">Back up now</span></Button>
         </>
       }
     >
+      <BackupsSetup open={setupOpen} onOpenChange={setSetupOpen} keys={recipients.data ?? []} plans={plans.data ?? []} demo={demo}
+        onChanged={() => { recipients.reload?.(); plans.reload?.() }} onOpenRuns={() => go("history")} />
       <div data-slot="backups-page" data-section={ws ? "workspace" : view.section} className={cn("mx-auto space-y-4 p-4 md:p-6", wide ? "max-w-5xl" : "max-w-3xl")}>
         {demo && <p className="text-xs text-muted-foreground">Demo data · nothing is sent</p>}
         {onHistory && (

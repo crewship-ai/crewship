@@ -1507,6 +1507,16 @@ deep-linkable as `/admin/backups?section=<page>` (an old
 | Restore (`?section=recovery`) | A guided restore: backup, target, keys, checks, dry run, restore, then resume what stayed held. History and Drills sit beside New restore. A whole-instance restore runs from the CLI; see [Recovery in the console](#recovery-in-the-console). |
 | Keys & alerts | The AGE public keys backups are encrypted to, the vault key versions restored secrets need, and who hears when a backup goes wrong. |
 
+Until a backup key and an enabled plan exist, the Overview opens with **Set
+up backups**, and **Back up now** opens it too instead of failing. Three
+steps: a backup key — made in the browser with Web Crypto's X25519 (the
+private key is shown once, to download or copy, and is never sent; the
+server keeps the public `age1…` half), or a public key pasted from
+`age-keygen`; the **Complete recovery** plan (every night at the time chosen,
+7 daily, 4 weekly and 12 monthly copies, on this server); and the first
+backup, run at once. The downloaded key file is age-keygen's format, so
+`age -d -i` and `crewship recover --identity` read it.
+
 The **ticks** beside the workspaces in the panel pick what Overview, Runs, a
 new restore and **Back up now** cover: none ticked is the whole instance, or
 any number of workspaces (*All workspaces* ticks every one). The **Scope**
