@@ -31,14 +31,18 @@ var unregisteredSpawnSites = map[string]string{
 	"credential_rotation.go:StartCredentialRotationExpiryWorker": "boot daemon: stop channel + caller's WaitGroup",
 	"escalation_lifecycle.go:StartEscalationExpirySweeper":       "boot daemon: ticker loop, stopped via ctx",
 	"assignments_lease.go:StartLeaseSweeper":                     "boot daemon: ticker loop, stopped via ctx (B4, #2343)",
-	"pages_project_retention.go:StartProjectRetention":           "boot daemon: bounded hourly retention, stopped via ctx",
-	"pages_on_failure.go:StartPanelFreshnessSweeper":             "boot daemon: ticker loop, stopped via ctx",
-	"mcp_registry.go:StartRegistrySyncWorker":                    "boot daemon: stop channel + caller's WaitGroup",
-	"oauth_token.go:StartOAuthRefreshWorker":                     "boot daemon: stop channel + caller's WaitGroup",
-	"port_expose_registry.go:StartPurger":                        "daemon: purge loop, stopped by the registry",
-	"ratelimit.go:NewRateLimiter":                                "daemon: bucket cleanup loop, lives with the limiter",
-	"recurring_issue_dispatcher.go:Start":                        "daemon: dispatcher loop, stopped via ctx",
-	"crew_provisioning.go:NewProvisioningHandler":                "daemons: job-cleanup + startup/periodic GC loops, stopped via the handler's ctx",
+	"pages_artifact_requests.go:RunArtifactRequests": "boot dispatcher: two context-owned workers are joined by workers.Wait() before RunArtifactRequests returns. " +
+		"cmd_start cancels artifactCtx and waits for artifactsDone before its deferred shutdown continues. " +
+		"A global fixture drain must not wait for this long-lived daemon or unrelated live agent turns; " +
+		"TestArtifactRequestWorkersDrainOnShutdown proves cancellation stops an active dispatch and joins the workers before return.",
+	"pages_project_retention.go:StartProjectRetention": "boot daemon: bounded hourly retention, stopped via ctx",
+	"pages_on_failure.go:StartPanelFreshnessSweeper":   "boot daemon: ticker loop, stopped via ctx",
+	"mcp_registry.go:StartRegistrySyncWorker":          "boot daemon: stop channel + caller's WaitGroup",
+	"oauth_token.go:StartOAuthRefreshWorker":           "boot daemon: stop channel + caller's WaitGroup",
+	"port_expose_registry.go:StartPurger":              "daemon: purge loop, stopped by the registry",
+	"ratelimit.go:NewRateLimiter":                      "daemon: bucket cleanup loop, lives with the limiter",
+	"recurring_issue_dispatcher.go:Start":              "daemon: dispatcher loop, stopped via ctx",
+	"crew_provisioning.go:NewProvisioningHandler":      "daemons: job-cleanup + startup/periodic GC loops, stopped via the handler's ctx",
 	"webhook_dispatcher_wiring.go:startAgentWorkDispatcher": "boot daemon for webhook and scheduled agent work, and one that must not be drained by a " +
 		"test fixture: it owns live agent runs. Its stop function cancels the loop's context and then " +
 		"BLOCKS until Run returns, and Run's last act is drain() — every live attempt is stopped or " +

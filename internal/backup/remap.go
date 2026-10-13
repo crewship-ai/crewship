@@ -402,6 +402,7 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	remapArtifactCreationRuns(dump)
 	if err := remapConversationMetadata(dump, idMap); err != nil {
 		return err
 	}

@@ -272,7 +272,7 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 		artifactCommentError(w, 403, "creation_authorization_required", "a human must authorize this run to create one artifact")
 		return
 	}
-	limit, err := time.Parse(time.RFC3339Nano, expires)
+	limit, err := time.Parse(time.RFC3339Nano, expires) // tsformat:allow: parsing a stored expiry for time comparison; no timestamp is written
 	if err != nil || !time.Now().Before(limit) || revoked.Valid {
 		artifactCommentError(w, 403, "creation_authorization_required", "artifact creation authorization expired or revoked")
 		return
