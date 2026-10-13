@@ -18,7 +18,7 @@ import (
 // importing the full database package — keeps pipeline_test.go
 // dependency-free and fast.
 const schemaSQL = `
-CREATE TABLE users (id TEXT PRIMARY KEY);
+CREATE TABLE users (id TEXT PRIMARY KEY, suspended_at TEXT);
 INSERT INTO users (id) VALUES ('user_test');
 
 CREATE TABLE workspaces (
