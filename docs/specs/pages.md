@@ -35,6 +35,16 @@ Remote edits never become local undo commands. Retained pin tombstones allow
 conditional restore without reusing a stale pin identity; restored sources
 still require independent access.
 
+Pins default to an exact revision. An explicit `placement_modes` batch switches
+between `fixed` and `follow_latest` with the observed placement revision, Board
+sequence, stable mutation ID and retained `source_revision` baseline. In follow
+mode, an authorized read resolves the current artifact head without pretending
+the Board geometry changed. The response distinguishes effective `revision` from
+`pinned_revision`. Jobs freeze the effective revision at admission; changes made
+later do not silently update their input. Switching back to fixed pins the
+explicitly selected retained revision. Saved undo restores the prior mode and
+baseline under the same conditional-write rules.
+
 A pin grants no access to its source: its title, slug, revision and bytes
 require both Board and artifact read access. Otherwise it remains an anonymous
 geometry placeholder that editors may move or remove. Exact pinned revisions
@@ -1475,3 +1485,18 @@ Public implementation references: `internal/pages/`, `internal/api/pages_*.go`,
 `cmd/crewship/cmd_page.go` and `components/features/pages/`.
 Market research and its bibliography are retained in private context; they
 are not required to build, test or use the product.
+
+### Agent replies in artifact threads
+
+The sidecar exposes `GET /artifacts/{slug}/threads` and
+`POST /artifacts/{slug}/threads/{threadId}/comments`. These require the current
+run credential, a live verified human principal, that human's current comment
+permission and the agent's own live `comment` or `write` Page grant. A crew grant
+never substitutes for it. Reads paginate with `limit` (default 5, maximum 10),
+optional positive `revision`, and the returned `next_cursor` as `cursor`.
+
+Replies use the observed `base_version` and a stable `mutation_id`. The server
+records the human, agent and run; retries cannot transfer identity across runs.
+The UI distinguishes agent replies from the human who authorized the run.
+Comment authority does not create threads, resolve them, dispatch jobs, publish
+artifact revisions or grant additional rights.

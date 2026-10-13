@@ -385,6 +385,7 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 		PlacementUpdates  []boardPlacementUpdate  `json:"placement_updates"`
 		PlacementDeletes  []boardPlacementDelete  `json:"placement_deletes"`
 		PlacementRestores []boardPlacementRestore `json:"placement_restores,omitempty"`
+		PlacementModes    []boardPlacementMode    `json:"placement_modes,omitempty"`
 	}
 	raw, ok := boardDecode(w, r, &req)
 	if !ok {
@@ -402,6 +403,7 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 	delete(fields, "placement_updates")
 	delete(fields, "placement_deletes")
 	delete(fields, "placement_restores")
+	delete(fields, "placement_modes")
 	batchRaw, _ := json.Marshal(fields)
 	batch := req.BoardBatch
 	batch.BaseSeq = *base
@@ -410,7 +412,7 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 	if drawingCount > 0 {
 		batch, err = pages.DecodeBoardBatch(batchRaw)
 	}
-	count := drawingCount + len(req.PlacementUpdates) + len(req.PlacementDeletes) + len(req.PlacementRestores)
+	count := drawingCount + len(req.PlacementUpdates) + len(req.PlacementDeletes) + len(req.PlacementRestores) + len(req.PlacementModes)
 	if err != nil || !boardMutationValid(req.MutationID) || count < 1 || count > pages.MaxBoardBatchOperations {
 		replyError(w, 400, "invalid board batch")
 		return
@@ -437,7 +439,14 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		seen[placement.ID] = true
 	}
-	if artifactAgentID(r) != "" && (len(req.PlacementUpdates) > 0 || len(req.PlacementDeletes) > 0 || len(req.PlacementRestores) > 0) {
+	for _, placement := range req.PlacementModes {
+		if !validBoardPlacementMode(placement) || seen[placement.ID] {
+			replyError(w, 400, "invalid placement mode operation")
+			return
+		}
+		seen[placement.ID] = true
+	}
+	if artifactAgentID(r) != "" && (len(req.PlacementUpdates) > 0 || len(req.PlacementDeletes) > 0 || len(req.PlacementRestores) > 0 || len(req.PlacementModes) > 0) {
 		replyError(w, 403, "agent placement edits are not delegated")
 		return
 	}
@@ -559,6 +568,18 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 		rev, err := h.restoreBoardPlacement(r.Context(), tx, rec.ID, placement.ID, placement.ExpectedRev, next.Seq)
 		if err != nil {
 			h.boardPlacementError(w, err)
+			return
+		}
+		revisions[placement.ID] = rev
+	}
+	for _, placement := range req.PlacementModes {
+		rev, err := h.updateBoardPlacementMode(r.Context(), tx, rec.ID, placement, next.Seq, req.MutationID)
+		if err != nil {
+			if errors.Is(err, errBoardSourceHistoryCapacity) {
+				h.boardHistoryCapacity(w, r, tx, rec.ID, true)
+			} else {
+				h.boardPlacementError(w, err)
+			}
 			return
 		}
 		revisions[placement.ID] = rev

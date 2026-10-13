@@ -23,6 +23,7 @@ const boardMermaidDialect = "flowchart-v1"
 const boardMermaidConverter = "2.2.2"
 
 type boardRequestCreate struct {
+	PreviewPNG           []byte                 `json:"preview_png,omitempty"`
 	Kind                 string                 `json:"kind"`
 	ChatID               string                 `json:"chat_id"`
 	Instruction          string                 `json:"instruction"`
@@ -86,8 +87,16 @@ func (h *PageHandler) CreateBoardRequest(w http.ResponseWriter, r *http.Request)
 		replyError(w, 401, "human authentication required")
 		return
 	}
+	preflight, allowed := h.boardPage(w, r, true)
+	if !allowed {
+		return
+	}
+	if !preflight.HasBoard {
+		replyError(w, 404, "board not found")
+		return
+	}
 	var req boardRequestCreate
-	if !decodeBoardRequest(w, r, &req, 65536) {
+	if !decodeBoardRequest(w, r, &req, boardRequestBodyLimit) {
 		return
 	}
 	if (req.Kind != "diagram" && req.Kind != "artifact") || req.ChatID == "" || req.BaseSeq == nil || *req.BaseSeq < 0 || *req.BaseSeq >= 9007199254740991 || !boardMutationValid(req.SubmissionID) || !utf8.ValidString(req.Instruction) || strings.TrimSpace(req.Instruction) == "" || len(req.Instruction) > 4096 || !req.Target.valid() || !boardRequestSelectionValid(req.SelectedElementIDs, req.SelectedPlacementIDs) {
@@ -120,6 +129,12 @@ func (h *PageHandler) CreateBoardRequest(w http.ResponseWriter, r *http.Request)
 		replyError(w, 403, "use your eligible private chat without read shares")
 		return
 	}
+	digest := boardFingerprint("board-request", req)
+	preview, unlock, prepared := h.prepareBoardRequestPreview(w, r, req.PreviewPNG)
+	if !prepared {
+		return
+	}
+	defer unlock()
 	tx, r, rec, ok := h.boardTransaction(w, r)
 	if !ok {
 		return
@@ -142,7 +157,6 @@ func (h *PageHandler) CreateBoardRequest(w http.ResponseWriter, r *http.Request)
 		replyError(w, 403, "chat authority changed")
 		return
 	}
-	digest := boardFingerprint("board-request", req)
 	var prior, old string
 	err = tx.QueryRowContext(r.Context(), `SELECT id,fingerprint FROM page_board_requests WHERE board_page_id=? AND human_user_id=? AND submission_id=?`, rec.ID, user.ID, req.SubmissionID).Scan(&prior, &old)
 	if err == nil {
@@ -197,6 +211,14 @@ func (h *PageHandler) CreateBoardRequest(w http.ResponseWriter, r *http.Request)
 	now := tsformat.Format(time.Now())
 	if _, err = tx.ExecContext(r.Context(), `INSERT INTO page_board_requests(id,workspace_id,board_page_id,original_board_id,human_user_id,agent_id,chat_id,kind,base_seq,submission_id,fingerprint,instruction,selected_element_ids_json,selected_placement_ids_json,snapshot_json,target_json,dialect,converter_version,receipt_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'queued',?,?)`, id, receipt.WorkspaceID, rec.ID, rec.ID, user.ID, receipt.AgentID, req.ChatID, req.Kind, *req.BaseSeq, req.SubmissionID, digest, req.Instruction, string(idsJSON), string(pinsJSON), string(snapshotJSON), string(targetJSON), req.Dialect, req.ConverterVersion, string(receiptJSON), now, now); err != nil {
 		h.boardError(w, err)
+		return
+	}
+	if err = h.saveBoardRequestPreview(r.Context(), tx, id, receipt.WorkspaceID, preview); err != nil {
+		if errors.Is(err, errBoardPreviewQuota) {
+			replyError(w, 409, err.Error())
+		} else {
+			h.boardError(w, err)
+		}
 		return
 	}
 	for _, file := range files {
@@ -289,7 +311,7 @@ func (h *PageHandler) snapshotBoardRequest(ctx context.Context, tx *sql.Tx, rec 
 		var source string
 		var revision int64
 		var x, y, width, height float64
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(source_page_id,''),COALESCE(source_revision,0),x,y,width,height FROM page_board_artifact_placements WHERE board_page_id=? AND id=? AND deleted_at IS NULL`, rec.ID, id).Scan(&source, &revision, &x, &y, &width, &height); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(source_page_id,''),CASE mode WHEN 'follow_latest' THEN COALESCE((SELECT head_rev FROM page_artifacts WHERE page_id=source_page_id),0) ELSE COALESCE(source_revision,0) END,x,y,width,height FROM page_board_artifact_placements WHERE board_page_id=? AND id=? AND deleted_at IS NULL`, rec.ID, id).Scan(&source, &revision, &x, &y, &width, &height); err != nil {
 			return snapshot, nil, nil, err
 		}
 		snapshot.Placements = append(snapshot.Placements, map[string]any{"id": id, "x": x, "y": y, "width": width, "height": height})

@@ -69,7 +69,7 @@ export function draftBatch(base: BoardHead, draft: BoardDraft): CollaborativeBat
   return batch
 }
 export function batchEntities(batch: CollaborativeBatch): Set<string> {
-  return new Set([...batch.upserts.map(item => elementKey(item.element.id)), ...batch.deletes.map(item => elementKey(item.id)), ...(batch.placement_updates ?? []).map(item => placementKey(item.id)), ...(batch.placement_deletes ?? []).map(item => placementKey(item.id)), ...(batch.placement_restores ?? []).map(item => placementKey(item.id))])
+  return new Set([...batch.upserts.map(item => elementKey(item.element.id)), ...batch.deletes.map(item => elementKey(item.id)), ...(batch.placement_updates ?? []).map(item => placementKey(item.id)), ...(batch.placement_deletes ?? []).map(item => placementKey(item.id)), ...(batch.placement_restores ?? []).map(item => placementKey(item.id)), ...(batch.placement_modes ?? []).map(item => placementKey(item.id))])
 }
 export interface BoardMergePlan { kind: 'merged' | 'conflict' | 'stale'; canonical: BoardHead; draft: BoardDraft; latest: BoardHead; conflicts: BoardEntity[] }
 export function planBoardMerge(base: BoardHead, draft: BoardDraft, latest: BoardHead): BoardMergePlan {

@@ -68,9 +68,12 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	internalAuth := internal.requireInternal
 	// Crew transport authentication is only the outer boundary: the handler
 	// also validates the per-run bearer and a live human artifact delegation.
+	r.mux.Handle("GET /api/v1/internal/artifacts/{slug}/threads", internalAuth(http.HandlerFunc(r.pages.ListArtifactThreadsAgent)))
+	r.mux.Handle("POST /api/v1/internal/artifacts/{slug}/threads/{threadId}/comments", internalAuth(http.HandlerFunc(r.pages.ReplyArtifactThreadAgent)))
 	r.mux.Handle("POST /api/v1/internal/artifacts/{slug}/revisions", internalAuth(http.HandlerFunc(r.pages.PublishArtifactAgent)))
 	r.mux.Handle("GET /api/v1/internal/artifacts/{slug}", internalAuth(http.HandlerFunc(r.pages.GetArtifactAgent)))
 	r.mux.Handle("POST /api/v1/internal/artifacts", internalAuth(http.HandlerFunc(r.pages.CreateArtifactAgent)))
+	r.mux.Handle("GET /api/v1/internal/board-requests/{requestId}/preview", internalAuth(http.HandlerFunc(r.pages.GetBoardRequestPreviewAgent)))
 	r.mux.Handle("GET /api/v1/internal/board-requests/{requestId}/files/{fileId}", internalAuth(http.HandlerFunc(r.pages.GetBoardRequestAsset)))
 	r.mux.Handle("GET /api/v1/internal/board-requests/{requestId}/sources/{sourceId}", internalAuth(http.HandlerFunc(r.pages.GetBoardRequestAsset)))
 	r.mux.Handle("GET /api/v1/internal/artifact-requests/{requestId}", internalAuth(http.HandlerFunc(r.pages.GetArtifactRequestAgent)))

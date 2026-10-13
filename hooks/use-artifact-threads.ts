@@ -10,6 +10,8 @@ export interface ArtifactComment {
   body: string
   author_user_id: string
   author_name?: string
+  author_agent_id?: string
+  author_run_id?: string
   created_at: string
 }
 export type ArtifactAnchor = { schema_version: 1; type: "document" } | { schema_version: 1; type: "point"; coordinate_space: "viewport"; x: number; y: number; viewport_width: number; viewport_height: number }

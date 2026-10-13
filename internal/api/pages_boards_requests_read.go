@@ -45,6 +45,11 @@ func (h *PageHandler) boardRequestRecord(ctx context.Context, q pageAuthQueryer,
 	if resultSeq.Valid {
 		out["result_seq"] = resultSeq.Int64
 	}
+	var previewCount int
+	if q.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_board_request_previews WHERE request_id=?`, id).Scan(&previewCount) != nil {
+		return nil, sql.ErrNoRows
+	}
+	out["has_preview"] = previewCount > 0
 	var pinStatus, pinReason string
 	var pinID sql.NullString
 	if q.QueryRowContext(ctx, `SELECT pin_status,pin_reason,result_placement_id FROM page_board_requests WHERE id=?`, id).Scan(&pinStatus, &pinReason, &pinID) == nil {

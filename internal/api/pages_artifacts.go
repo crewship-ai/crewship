@@ -325,7 +325,7 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		replyError(w, 409, "artifact revision changed; reload before saving")
 		return
 	}
-	if err := reserveArtifactRevision(ctx, tx, rec.ID, req.Revision); err != nil {
+	if err := reserveArtifactRevisionAt(ctx, tx, rec.ID, h.clock.Now(), req.Revision); err != nil {
 		if errors.Is(err, errArtifactRetentionPinned) {
 			writeJSON(w, 409, map[string]any{"error": err.Error(), "code": "retention_pinned"})
 		} else if errors.Is(err, errArtifactReceiptLimit) {

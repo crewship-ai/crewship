@@ -26,7 +26,10 @@ func (s *Server) handleBoardRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	path := "/api/v1/internal/board-requests/" + url.PathEscape(parts[0])
 	limit := int64(2 << 20)
-	if len(parts) == 2 && parts[1] == "mermaid" && r.Method == http.MethodPost {
+	if len(parts) == 2 && parts[1] == "preview" && r.Method == http.MethodGet {
+		path += "/preview"
+		limit = 4 << 20
+	} else if len(parts) == 2 && parts[1] == "mermaid" && r.Method == http.MethodPost {
 		path += "/mermaid"
 	} else if len(parts) == 3 && (parts[1] == "files" || parts[1] == "sources") && r.Method == http.MethodGet && parts[2] != "" {
 		path += "/" + parts[1] + "/" + url.PathEscape(parts[2])

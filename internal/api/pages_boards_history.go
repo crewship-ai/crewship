@@ -49,10 +49,15 @@ func boardHistoryExpired(ctx context.Context, q pageAuthQueryer, page, mutation 
 	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_board_write_audit WHERE board_page_id=? AND mutation_id=?`, page, mutation).Scan(&n)
 	return n > 0, err
 }
-func (h *PageHandler) boardHistoryCapacity(w http.ResponseWriter, r *http.Request, tx *sql.Tx, page string) {
+func (h *PageHandler) boardHistoryCapacity(w http.ResponseWriter, r *http.Request, tx *sql.Tx, page string, sourceOnly ...bool) {
 	var expiry sql.NullString
-	_ = tx.QueryRowContext(r.Context(), `SELECT MIN(stamp) FROM (SELECT deleted_at stamp FROM page_board_elements WHERE board_page_id=? AND deleted_at IS NOT NULL UNION ALL SELECT deleted_at stamp FROM page_board_artifact_placements WHERE board_page_id=? AND deleted_at IS NOT NULL)`, page, page).Scan(&expiry)
-	writeJSON(w, 409, map[string]any{"error": "recent deletion history is full; retry after history expires or reduce the active scene", "code": "history_capacity", "history_window_seconds": 86400, "earliest_history_expiry": boardUndoExpiry(expiry.String)})
+	if len(sourceOnly) > 0 && sourceOnly[0] {
+		_ = tx.QueryRowContext(r.Context(), `SELECT MIN(m.created_at) FROM page_board_source_history h JOIN page_board_mutations m ON m.board_page_id=h.board_page_id AND m.mutation_id=h.mutation_id WHERE h.board_page_id=?`, page).Scan(&expiry)
+	} else {
+		_ = tx.QueryRowContext(r.Context(), `SELECT MIN(stamp) FROM (SELECT deleted_at stamp FROM page_board_elements WHERE board_page_id=? AND deleted_at IS NOT NULL UNION ALL SELECT deleted_at stamp FROM page_board_artifact_placements WHERE board_page_id=? AND deleted_at IS NOT NULL)`, page, page).Scan(&expiry)
+	}
+
+	writeJSON(w, 409, map[string]any{"error": "recent Board history is full; retry after history expires or reduce the active scene", "code": "history_capacity", "history_window_seconds": 86400, "earliest_history_expiry": boardUndoExpiry(expiry.String)})
 }
 
 func boardReceiptUndoExpiry(ctx context.Context, q pageAuthQueryer, page, mutation string) (string, error) {

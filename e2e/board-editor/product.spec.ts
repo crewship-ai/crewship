@@ -4,12 +4,16 @@ import { startBoardFixture } from './fixture'
 import type { PageBoard } from '../../hooks/use-page-board'
 
 test('production Board manually saves real drawing, preserves uncertain identity and conflicts, and removes denied content', async ({ page, browserName }) => {
-  const fixture = await startBoardFixture({ product: true })
   let board: PageBoard = { format: 'crewship-board-excalidraw-0.18.1-v1', seq: 0, can_write: true, records: [], placements: [] }
   let denied = false
   let lost = false
   let pinnedDenied = false
   let imageBytes: Buffer | null = null
+  const fixture = await startBoardFixture({ product: true, imageUpload: bytes => {
+    expect(bytes.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    imageBytes = bytes; board = { ...board, seq: board.seq + 1 }
+    return { file_id: 'fixture_image', content_type: 'image/png', width: 40, height: 30, bytes: bytes.length, seq: board.seq, result_seq: board.seq }
+  } })
   const jobs: Record<string, unknown>[] = []
   const batches: Record<string, unknown>[] = []
   const committed = new Set<string>()
@@ -31,11 +35,7 @@ test('production Board manually saves real drawing, preserves uncertain identity
       const request = route.request()
       const path = new URL(request.url()).pathname
       if (path.endsWith('/board/threads')) return route.fulfill({ json: { threads: [], can_comment: true, can_resolve: true } })
-      if (path.endsWith('/board/files') && request.method() === 'POST') {
-        imageBytes = request.postDataBuffer()
-        board = { ...board, seq: board.seq + 1 }
-        return route.fulfill({ json: { file_id: 'fixture_image', content_type: 'image/png', width: 40, height: 30, bytes: imageBytes!.length, seq: board.seq, result_seq: board.seq } })
-      }
+      if (path.endsWith('/board/files') && request.method() === 'POST') return route.continue()
       if (path.endsWith('/board/files/fixture_image')) return route.fulfill({ contentType: 'image/png', body: imageBytes! })
       if (path.endsWith('/board/requests')) {
         if (request.method() === 'POST') {

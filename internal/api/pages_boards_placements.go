@@ -32,19 +32,19 @@ func (g boardPlacementGeometry) valid() bool {
 	return *g.Width > 0 && *g.Height > 0
 }
 func (h *PageHandler) loadBoardPlacements(r *http.Request, pageID string, q pageAuthQueryer) ([]map[string]any, error) {
-	rows, err := q.QueryContext(r.Context(), `SELECT id,COALESCE(source_page_id,''),COALESCE(source_revision,0),x,y,width,height,placement_rev FROM page_board_artifact_placements WHERE board_page_id=? AND deleted_at IS NULL ORDER BY id LIMIT 101`, pageID)
+	rows, err := q.QueryContext(r.Context(), `SELECT id,COALESCE(source_page_id,''),COALESCE(source_revision,0),x,y,width,height,placement_rev,mode FROM page_board_artifact_placements WHERE board_page_id=? AND deleted_at IS NULL ORDER BY id LIMIT 101`, pageID)
 	if err != nil {
 		return nil, err
 	}
 	type entry struct {
-		id, source             string
+		id, source, mode       string
 		revision, placementRev int64
 		x, y, width, height    float64
 	}
 	entries := []entry{}
 	for rows.Next() {
 		var e entry
-		if err = rows.Scan(&e.id, &e.source, &e.revision, &e.x, &e.y, &e.width, &e.height, &e.placementRev); err != nil {
+		if err = rows.Scan(&e.id, &e.source, &e.revision, &e.x, &e.y, &e.width, &e.height, &e.placementRev, &e.mode); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -75,7 +75,7 @@ func (h *PageHandler) loadBoardPlacements(r *http.Request, pageID string, q page
 	viewer.Role = role
 	_, delegated := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
 	for _, e := range entries {
-		item := map[string]any{"id": e.id, "x": e.x, "y": e.y, "width": e.width, "height": e.height, "placement_rev": e.placementRev}
+		item := map[string]any{"id": e.id, "x": e.x, "y": e.y, "width": e.width, "height": e.height, "placement_rev": e.placementRev, "mode": e.mode}
 		var slug string
 		if !delegated && e.source != "" && q.QueryRowContext(r.Context(), `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, e.source, WorkspaceIDFromContext(r.Context())).Scan(&slug) == nil {
 			source, err := h.loadPage(r.Context(), WorkspaceIDFromContext(r.Context()), slug)
@@ -88,7 +88,15 @@ func (h *PageHandler) loadBoardPlacements(r *http.Request, pageID string, q page
 					return nil, err
 				}
 				if visible {
-					item["source"] = map[string]any{"page_slug": source.Slug, "revision": e.revision, "title": source.Name}
+					revision, err := boardPlacementEffectiveRevision(r.Context(), q, e.source, e.revision, e.mode)
+					if err != nil {
+						if errors.Is(err, sql.ErrNoRows) {
+							result = append(result, item)
+							continue
+						}
+						return nil, err
+					}
+					item["source"] = map[string]any{"page_slug": source.Slug, "revision": revision, "pinned_revision": e.revision, "title": source.Name}
 				}
 			}
 		}

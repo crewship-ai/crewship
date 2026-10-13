@@ -16,7 +16,7 @@ export interface BoardAgentRequest {
   pin_status?: 'pinned' | 'created_not_pinned' | ''; pin_reason?: string; result_placement_id?: string
 }
 export interface BoardRequestDetail extends BoardAgentRequest { converter_url?: string; mermaid_source: string; inserted_element_ids: string[]; edited_since_insert: boolean }
-export interface BoardRequestDraft { intent_id: string; kind: 'diagram' | 'artifact'; chat_id: string; instruction: string; base_seq: number; selected_element_ids: string[]; selected_placement_ids: string[]; target: BoardRequestGeometry }
+export interface BoardRequestDraft { intent_id: string; kind: 'diagram' | 'artifact'; chat_id: string; instruction: string; base_seq: number; selected_element_ids: string[]; selected_placement_ids: string[]; target: BoardRequestGeometry; preview_png?: string }
 interface BoardRequests { converter_url?: string; can_dispatch: boolean; eligible_chats: ArtifactRequestTarget[]; requests: BoardAgentRequest[] }
 export class BoardRequestError extends Error { constructor(message: string, public status: number) { super(message) } }
 export function useBoardRequests(workspace: string, slug: string) {
@@ -50,16 +50,25 @@ export function useBoardRequests(workspace: string, slug: string) {
   const mutate = async <T,>(kind: string, payload: object, path: string, identity?: string): Promise<T> => {
     const stamp = JSON.stringify({ workspace, slug, kind, payload, identity })
     if (!identities.current.has(stamp)) {
-      if (identities.current.size >= 32) throw new Error('Retry an unconfirmed operation before starting another.')
+      if (identities.current.size >= 32) throw new BoardRequestError('Retry an unconfirmed operation before starting another.', 400)
       identities.current.set(stamp, crypto.randomUUID())
     }
-    const result = await request<T>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, [kind === 'send' ? 'submission_id' : 'mutation_id']: identities.current.get(stamp) }), signal: AbortSignal.timeout(20000) })
+    let result: T
+    try {
+      result = await request<T>(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, [kind === 'send' ? 'submission_id' : 'mutation_id']: identities.current.get(stamp) }), signal: AbortSignal.timeout(20000) })
+    } catch (error) {
+      // A definite rejection has no pending receipt; transport failures retain it.
+      if (error instanceof BoardRequestError && error.status >= 400 && error.status < 500 && error.status !== 408) identities.current.delete(stamp)
+      throw error
+    }
+    const resultId = (result as { id?: unknown } | null)?.id
+    if (kind === 'send' && (typeof resultId !== 'string' || !resultId)) throw new Error('The submission result was not confirmed. Retry the unchanged request.')
     identities.current.delete(stamp)
     await client.invalidateQueries({ queryKey: key })
     return result
   }
   const send = useMutation({ retry: false, mutationFn: (draft: BoardRequestDraft) => {
-    if (!draft.chat_id || !draft.instruction.trim() || new TextEncoder().encode(draft.instruction).length > 4096) throw new Error('Choose a private chat and instructions within 4 KiB.')
+    if (!draft.chat_id || !draft.instruction.trim() || new TextEncoder().encode(draft.instruction).length > 4096) throw new BoardRequestError('Choose a private chat and instructions within 4 KiB.', 400)
     const { intent_id: _intent, ...payload } = draft
     // Include local intent in idempotency identity without sending it as authority.
     return mutate<{id:string}>('send', { ...payload, dialect: 'flowchart-v1', converter_version: '2.2.2' }, endpoint, _intent)

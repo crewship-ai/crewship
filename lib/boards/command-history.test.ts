@@ -48,3 +48,18 @@ it('expires at the original server deadline and refuses compacted targets before
   const compacted = { ...command.applied, seq: 3, records: command.applied.records.filter(item => item.element_id !== 'a') }
   expect(planSavedUndo(command, compacted, Date.parse(expiry) - 1)).toEqual({ kind: 'conflict', conflicts: [{ kind: 'element', id: 'a' }] })
 })
+it('undoes pin mode using its prior stored baseline and ignores dynamic head advances', () => {
+  const before = base(); before.placements = [{ id: 'pin', mode: 'fixed', placement_rev: 8, x: 0, y: 0, width: 100, height: 100, source: { page_slug: 'report', title: 'Report', revision: 3, pinned_revision: 3 } }]
+  const forward: CollaborativeBatch = { base_seq: 1, upserts: [], deletes: [], placement_modes: [{ id: 'pin', expected_rev: 8, mode: 'follow_latest', source_revision: 3 }] }
+  const command = savedBoardCommand(before, forward, { seq: 2, result_seq: 2, placement_revs: { pin: 9 }, undo_expires_at: expiry }, before)
+  const latest = structuredClone(command.applied); latest.placements[0].source = { page_slug: 'report', title: 'Report', revision: 10, pinned_revision: 3 }
+  expect(planSavedUndo(command, latest)).toMatchObject({ kind: 'ready', batch: { placement_modes: [{ id: 'pin', expected_rev: 9, mode: 'fixed', source_revision: 3 }] } })
+})
+it('restores the prior follow baseline rather than inferring it from the last displayed head', () => {
+  const before = base(); before.placements = [{ id: 'pin', mode: 'follow_latest', placement_rev: 8, x: 0, y: 0, width: 100, height: 100, source: { page_slug: 'report', title: 'Report', revision: 7, pinned_revision: 1 } }]
+  const forward: CollaborativeBatch = { base_seq: 1, upserts: [], deletes: [], placement_modes: [{ id: 'pin', expected_rev: 8, mode: 'fixed', source_revision: 7 }] }
+  const receipt = { seq: 2, result_seq: 2, placement_revs: { pin: 9 }, undo_expires_at: expiry }
+  expect(savedBoardCommand(before, forward, receipt, before).inverse.placement_modes).toEqual([{ id: 'pin', expected_rev: 9, mode: 'follow_latest', source_revision: 1 }])
+  delete before.placements[0].source!.pinned_revision
+  expect(() => savedBoardCommand(before, forward, receipt, before)).toThrow('original pin mode baseline')
+})

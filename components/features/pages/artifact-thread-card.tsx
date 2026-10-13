@@ -41,7 +41,13 @@ export function ArtifactThreadCard({ thread, currentRevision, canComment, canRes
     <ArtifactSendButton thread={thread} />
     <ol className="space-y-3">
       {thread.comments.map(comment => <li key={comment.id} className="space-y-1">
-        <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground"><span title={comment.author_user_id}>{comment.author_name || "Workspace member"}</span><time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString()}</time></div>
+        <div className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+          {comment.author_agent_id || comment.author_run_id ? <>
+            <span className="rounded-full bg-muted px-2 py-0.5" title={`${comment.author_agent_id ? `Agent ${comment.author_agent_id}` : "Removed agent"}${comment.author_run_id ? ` · Run ${comment.author_run_id}` : ""}`}>Agent reply</span>
+            <span title={comment.author_user_id}>On behalf of {comment.author_name || "workspace member"}</span>
+          </> : <span title={comment.author_user_id}>{comment.author_name || "Workspace member"}</span>}
+          <time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString()}</time>
+        </div>
         <p className="whitespace-pre-wrap break-words text-sm">{comment.body}</p>
       </li>)}
     </ol>

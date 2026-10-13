@@ -4,6 +4,7 @@ export interface BoardRecord { element: BoardElement; revision: number }
 export interface BoardSnapshot { seq: number; records: BoardRecord[] }
 export interface BoardBatch {
   base_seq: number
+  placement_modes?: { id: string; expected_rev: number; mode: "fixed" | "follow_latest"; source_revision: number }[]
   placement_updates?: { id: string; x: number; y: number; width: number; height: number }[]
   placement_deletes?: { id: string }[]
   upserts: { element: BoardElement; expected_rev: number }[]

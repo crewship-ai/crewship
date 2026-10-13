@@ -15,12 +15,19 @@ func seedStorageBoardPin(t *testing.T, h *PageHandler, ws, user, source string, 
 }
 
 func TestBoardArtifactPinProtectsRevisionUntilBoardDeleted(t *testing.T) {
+	testBoardStoredPinRetention(t, "fixed")
+}
+func TestBoardFollowLatestBaselineProtectsRevisionUntilBoardDeleted(t *testing.T) {
+	testBoardStoredPinRetention(t, "follow_latest")
+}
+func testBoardStoredPinRetention(t *testing.T, mode string) {
 	h, _, _, ws, user, page := artifactFixture(t)
 	execOrFatal(t, h.db, `INSERT INTO page_artifacts(page_id,head_rev) VALUES(?,200)`, page)
 	for i := 1; i <= 200; i++ {
 		execOrFatal(t, h.db, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,mutation_id,request_digest,created_at) VALUES(?,?,?,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',?,'digest','2020-01-01T00:00:00.000Z')`, fmt.Sprint("board-pin-", i), page, i, fmt.Sprint("board-pin-", i))
 	}
 	seedStorageBoardPin(t, h, ws, user, page, 1)
+	execOrFatal(t, h.db, `UPDATE page_board_artifact_placements SET mode=? WHERE id='storage-placement'`, mode)
 	tx, err := h.db.BeginTx(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
