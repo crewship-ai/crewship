@@ -68,7 +68,7 @@ export function peopleFindings({ people, workspaces, actions, onOpen, onFacet, o
 
 /** A person's place in one workspace, as a chip: the workspace's tile and
  *  name, or — for their own personal account — a quiet "Personal account". */
-export function MembershipChip({ m, personal }: { m: Person["memberships"][number]; personal: boolean }) {
+export function MembershipChip({ m, personal, logoUrl }: { m: Person["memberships"][number]; personal: boolean; logoUrl?: string | null }) {
   if (personal) {
     return (
       <span className="inline-flex items-center gap-1 rounded-md border border-dashed border-border px-1.5 py-0.5 text-label text-muted-foreground" title={`${m.name} · personal account`}>
@@ -78,7 +78,7 @@ export function MembershipChip({ m, personal }: { m: Person["memberships"][numbe
   }
   return (
     <span className="inline-flex items-center gap-1 rounded-md border border-border py-0.5 pl-0.5 pr-1.5 text-label">
-      <WorkspaceTile id={m.workspace_id} name={m.name} size="xs" />{m.name}<span className="text-muted-foreground">{roleLabel(m.role)}</span>
+      <WorkspaceTile id={m.workspace_id} name={m.name} size="xs" logoUrl={logoUrl} />{m.name}<span className="text-muted-foreground">{roleLabel(m.role)}</span>
     </span>
   )
 }
@@ -93,6 +93,7 @@ export function PeopleTable({ people, workspaces, onOpen, selected, onSelect, se
   selectable?: (p: Person) => boolean
 }) {
   const personal = new Set(workspaces.filter(isPersonal).map((w) => w.id))
+  const logos = new Map(workspaces.map((w) => [w.id, w.logo_url]))
   const canTick = Boolean(selected && onSelect)
   const tickable = people.filter((p) => selectable?.(p) ?? true)
   const allOn = tickable.length > 0 && tickable.every((p) => selected?.has(p.id))
@@ -126,7 +127,7 @@ export function PeopleTable({ people, workspaces, onOpen, selected, onSelect, se
                   <span className="flex flex-wrap gap-1">
                     {p.memberships.length === 0 && <span className="text-muted-foreground">No workspace</span>}
                     {[...p.memberships].sort((a, b) => Number(personal.has(a.workspace_id)) - Number(personal.has(b.workspace_id))).map((m) => (
-                      <MembershipChip key={m.workspace_id} m={m} personal={personal.has(m.workspace_id)} />
+                      <MembershipChip key={m.workspace_id} m={m} personal={personal.has(m.workspace_id)} logoUrl={logos.get(m.workspace_id)} />
                     ))}
                   </span>
                 </td>
@@ -147,12 +148,14 @@ export function PeopleTable({ people, workspaces, onOpen, selected, onSelect, se
  * The personal accounts: one row per person who has one, what is in it,
  * and where else they work. Only empty ones can be ticked for removal.
  */
-export function PersonalWorkspacesTable({ workspaces, people, onOpen, selected, onSelect }: {
+export function PersonalWorkspacesTable({ workspaces, people, onOpen, selected, onSelect, logos }: {
   workspaces: Workspace[]
   people: Person[]
   onOpen: (id: string) => void
   selected: Set<string>
   onSelect: (ids: string[], on: boolean) => void
+  /** Every workspace's logo, for the chips of where else they work. */
+  logos?: Map<string, string | null | undefined>
 }) {
   const empty = workspaces.filter(isEmptyWorkspace)
   const allOn = empty.length > 0 && empty.every((w) => selected.has(w.id))
@@ -187,7 +190,7 @@ export function PersonalWorkspacesTable({ workspaces, people, onOpen, selected, 
                 <td className={td}>
                   <span className="flex flex-wrap gap-1">
                     {elsewhere.length === 0 ? <span className="text-muted-foreground">Nowhere else</span>
-                      : elsewhere.map((m) => <MembershipChip key={m.workspace_id} m={m} personal={false} />)}
+                      : elsewhere.map((m) => <MembershipChip key={m.workspace_id} m={m} personal={false} logoUrl={logos?.get(m.workspace_id)} />)}
                   </span>
                 </td>
               </tr>
@@ -253,7 +256,7 @@ export function AccessMatrix({ people, allPeople, workspaces, actions, busy }: {
               <th className={th}>Person</th>
               {workspaces.map((w) => (
                 <th key={w.id} className={cn(th, "text-center")}>
-                  <span className="inline-flex items-center gap-1.5"><WorkspaceTile id={w.id} name={w.name} size="xs" />{w.name}</span>
+                  <span className="inline-flex items-center gap-1.5"><WorkspaceTile id={w.id} name={w.name} size="xs" logoUrl={w.logo_url} />{w.name}</span>
                 </th>
               ))}
             </tr>

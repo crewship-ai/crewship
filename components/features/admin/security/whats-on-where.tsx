@@ -82,7 +82,7 @@ export function WhatsOnWhere({ rows, onOpen, defaults, onOpenDefaults, selected,
         className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
         {isDefaults
           ? <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground"><Sparkles className="h-3.5 w-3.5" /></span>
-          : <WorkspaceTile id={r.workspace_id} name={r.workspace_name} />}
+          : <WorkspaceTile id={r.workspace_id} name={r.workspace_name} logoUrl={r.workspace_logo_url} />}
         <span className="min-w-0 flex-1">
           <span className={cn("flex items-center gap-1.5 text-control", isDefaults ? "text-muted-foreground" : "font-medium")}>
             <span className="truncate">{r.workspace_name}</span>
@@ -134,7 +134,7 @@ export function WhatsOnWhere({ rows, onOpen, defaults, onOpenDefaults, selected,
               )}
               <td className={settingsTd}>
                 <span className="flex min-w-0 items-center gap-2.5">
-                  <WorkspaceTile id={r.workspace_id} name={r.workspace_name} />
+                  <WorkspaceTile id={r.workspace_id} name={r.workspace_name} logoUrl={r.workspace_logo_url} />
                   <span className="min-w-0">
                     <span className="flex items-center gap-1.5 font-medium">
                       <span className="truncate">{r.workspace_name}</span>

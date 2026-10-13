@@ -228,7 +228,8 @@ export function PeoplePage() {
               <Trash2 />Remove {pickedWs.size} empty
             </Button>
           ) : undefined}>
-          <PersonalWorkspacesTable workspaces={personalShown} people={people} onOpen={openWorkspace} selected={pickedWs} onSelect={toggle(setPickedWs)} />
+          <PersonalWorkspacesTable workspaces={personalShown} people={people} onOpen={openWorkspace} selected={pickedWs} onSelect={toggle(setPickedWs)}
+            logos={new Map(workspaces.map((w) => [w.id, w.logo_url]))} />
           <p className="border-t border-border px-4 py-2.5 text-label text-muted-foreground">
             Only empty ones can be removed — no crews, no agents, no runs. The person keeps signing in and keeps every workspace they belong to. Open one to turn it into a workspace instead.
           </p>

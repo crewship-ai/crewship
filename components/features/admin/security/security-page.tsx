@@ -222,7 +222,7 @@ export function SecurityPage() {
         {shown.map((r, i) => (
           <DrillNavItem key={r.workspace_id} index={i} selected={ws?.workspace_id === r.workspace_id} onSelect={() => openWs(r.workspace_id)}
             title={`${r.workspace_name} · ${r.workspace_slug}`}
-            icon={<WorkspaceTile id={r.workspace_id} name={r.workspace_name} />} label={r.workspace_name}
+            icon={<WorkspaceTile id={r.workspace_id} name={r.workspace_name} logoUrl={r.workspace_logo_url} />} label={r.workspace_name}
             sub={watchSummary(r)}
             meta={<span className={cn("inline-block h-1.5 w-1.5 rounded-full", r.enabled ? "bg-success" : "bg-warn")} aria-label={r.enabled ? "Watchdog on" : "Watchdog off"} />} />
         ))}
@@ -401,7 +401,7 @@ function WorkspaceSecurityProfile({ row, requests, serverEnabled, onSaved }: {
   return (
     <>
       <section className="flex items-start gap-3 rounded-card border border-border bg-card p-4" data-slot="workspace-security-header">
-        <WorkspaceTile id={row.workspace_id} name={row.workspace_name} size="lg" />
+        <WorkspaceTile id={row.workspace_id} name={row.workspace_name} size="lg" logoUrl={row.workspace_logo_url} />
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-semibold tracking-[-0.01em]">{row.workspace_name}</h2>
           <p className="font-mono text-micro text-muted-foreground">{row.workspace_slug}{row.configured ? "" : " · built-in settings, never changed"}</p>

@@ -241,7 +241,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		}, "id", "name", "scope", "state", "bytes")),
 	}, "source", "peer_generation", "scopes", "documents")
 	// Admin › Security across workspaces (admin_instance_keeper.go).
-	instanceWsRef := map[string]any{"workspace_id": str(), "workspace_name": str(), "workspace_slug": str()}
+	instanceWsRef := map[string]any{"workspace_id": str(), "workspace_name": str(), "workspace_slug": str(), "workspace_logo_url": str()}
 	instanceWsRequired := []string{"workspace_id", "workspace_name", "workspace_slug"}
 	// Admin › Data retention (admin_instance_retention.go). Every window is a
 	// number of days, or null for forever.

@@ -28488,6 +28488,9 @@
                           "workspace_id": {
                             "type": "string"
                           },
+                          "workspace_logo_url": {
+                            "type": "string"
+                          },
                           "workspace_name": {
                             "type": "string"
                           },
@@ -28705,6 +28708,9 @@
                             "type": "array"
                           },
                           "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_logo_url": {
                             "type": "string"
                           },
                           "workspace_name": {
@@ -29541,6 +29547,9 @@
                             "type": "integer"
                           },
                           "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_logo_url": {
                             "type": "string"
                           },
                           "workspace_name": {
@@ -30802,6 +30811,9 @@
                           "workspace_id": {
                             "type": "string"
                           },
+                          "workspace_logo_url": {
+                            "type": "string"
+                          },
                           "workspace_name": {
                             "type": "string"
                           },
@@ -31048,6 +31060,9 @@
                             "type": "array"
                           },
                           "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_logo_url": {
                             "type": "string"
                           },
                           "workspace_name": {
