@@ -11,6 +11,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Agent Issue actions produce durable chat references (#3068).** Typed MCP tools create, update, comment on and show issues with host-verified requester authority and stable retry keys. `crewship chat refs` reads authorized replacement snapshots; `crewship operation get` exposes sanitized metadata. Issue responses include revisions and viewer actions, and human deletion retains minimal authorized receipts. Interactive frontend cards, proposals and dedicated entity WebSocket events remain follow-ups. Limited CLI tokens cannot acquire unrestricted chat authority; existing WebSocket tickets must be refreshed after this update.
 
+- ⚠️ **Behaviour change:** Chat-requested issue writes keep the original requester’s authority through delegation and deferred routines (#3068). Unattributed legacy queued assignments and resumable missions require a fresh authorized request after upgrade; their records are preserved. Restoring or forking data does not grant copied human work autonomous rights.
+
+- **Restricted navigation follows each member’s grants (#3072).** Chat, Routines and Pages appear only when the selected workspace membership can access their catalog; account security remains available. Switching workspaces no longer borrows another membership’s screens. A missing execution runtime does not hide otherwise authorized navigation. Open screens recheck changed access through the existing foreground polling interval.
+
+- ⚠️ **Behaviour change:** Manual schedule runs record the requesting operator and follow their current workspace execution authority (#3070).
+
 - **Local Linux Docker runs retain output across controller loss (#2845).** A private host helper keeps the actual CLI execution and redacted output independent of its reader. Recovery projects output and terminal results with durable acknowledgements, preserves work-generation ownership, and refuses duplicate launches. Capture has per-run and aggregate bounds and acknowledgement-based retention. Unsupported providers keep the existing transport; uncertain forced stops retain reconciliation rather than report completion.
 
 - **⌘K finds every place in the app (#3045).** As you type, the search box finds:

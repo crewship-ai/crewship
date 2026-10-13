@@ -48,8 +48,8 @@ export function useAccessMode(): AccessMode {
  * it derives from the route allowlist itself.
  */
 export function useRestrictedSurfaces(): RestrictedSurface[] | null {
-  const { workspaces } = useWorkspace()
-  return useAccessMode() === "restricted" ? restrictedSurfacesOf(workspaces) ?? [] : null
+  const { workspaces, workspaceId } = useWorkspace()
+  return useAccessMode() === "restricted" ? restrictedSurfacesOf(workspaces, workspaceId) ?? [] : null
 }
 
 /**
