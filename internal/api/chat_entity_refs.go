@@ -30,6 +30,18 @@ type EntityRefPage struct {
 	HasMore          bool                `json:"has_more"`
 	Refs             []EntityRefResponse `json:"refs"`
 }
+
+// EntityOperationResponse is the sanitized, viewer-authorized operation wire
+// shape. Stored operation keys, authority and arbitrary result JSON stay private.
+type EntityOperationResponse struct {
+	ID               string              `json:"id"`
+	Status           string              `json:"status"`
+	Kind             string              `json:"kind"`
+	Verb             string              `json:"verb"`
+	Entity           EntityRefEntity     `json:"entity"`
+	Provenance       EntityRefProvenance `json:"provenance"`
+	RevisionAtAction EntityRefRevision   `json:"revision_at_action"`
+}
 type EntityRefResponse struct {
 	EventID          string              `json:"event_id"`
 	Kind             string              `json:"kind"`
@@ -340,7 +352,7 @@ func (r *Router) chatEntityOperation(w http.ResponseWriter, req *http.Request) {
 	}
 	for _, chat := range chats {
 		if _, e := r.entityRefAudience(req, chat); e == nil {
-			writeJSON(w, 200, map[string]any{"id": op.ID, "status": op.Status, "kind": op.Kind, "verb": op.Verb, "entity": EntityRefEntity{ID: op.EntityID, Identifier: identifier, WorkspaceID: workspace, Deleted: deleted}, "provenance": EntityRefProvenance{Actor: EntityRefActor{Type: op.ActorType, ID: op.ActorID}, At: op.CreatedAt}, "revision_at_action": EntityRefRevision{Revision: op.Revision, AggregateRevision: op.AggregateRevision}})
+			writeJSON(w, 200, EntityOperationResponse{ID: op.ID, Status: op.Status, Kind: op.Kind, Verb: op.Verb, Entity: EntityRefEntity{ID: op.EntityID, Identifier: identifier, WorkspaceID: workspace, Deleted: deleted}, Provenance: EntityRefProvenance{Actor: EntityRefActor{Type: op.ActorType, ID: op.ActorID}, At: op.CreatedAt}, RevisionAtAction: EntityRefRevision{Revision: op.Revision, AggregateRevision: op.AggregateRevision}})
 			return
 		}
 	}
