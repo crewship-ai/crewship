@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Pages creation and import controls follow current workspace permissions (#3081).** Readers keep access to existing content; authorized roles and explicit `page.create` grants retain authoring. An open draft survives permission loss while submission is disabled.
+
 - **Members never shows another workspace's roster while loading.** Switching workspaces clears the previous roster immediately, including when the new request fails; refreshing the same workspace keeps an open invitation's setup link visible and refreshes capability grants too. A member whose grants have not loaded cannot have them overwritten by an edit. Reopening backup setup also selects the current instance plan instead of retaining a plan from an earlier opening.
 
 - **A password change can revoke CLI tokens too.** `POST /api/v1/users/me/password` accepts `revoke_cli_tokens: true` and reports `cli_tokens_revoked`; `crewship auth passwd --revoke-cli-tokens` and an "Also revoke all CLI tokens" checkbox in the web dialog send it. Without it nothing changes: browser sessions are signed out, CLI tokens keep working.

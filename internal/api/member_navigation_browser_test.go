@@ -44,17 +44,23 @@ func TestMemberNavigationBrowser(t *testing.T) {
 	}
 	tokens := map[string]string{}
 	members := map[string]string{}
-	for _, user := range []string{owner, "nav-client-a", "nav-client-b"} {
+	for _, user := range []string{owner, "nav-client-a", "nav-client-b", "nav-page-reader"} {
 		if user != owner {
 			execOrFatal(t, db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, user, user+"@example.test", user)
-			execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'VIEWER')`, user, ws, user)
+			membershipID := user
+			if user == "nav-page-reader" {
+				membershipID = "page-reader-membership"
+			}
+			execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'VIEWER')`, membershipID, ws, user)
 			execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'VIEWER')`, user+"-empty", "nav-empty", user)
 			member, e := store.Membership(t.Context(), user, ws)
 			if e != nil {
 				t.Fatal(e)
 			}
-			if _, e = store.Replace(t.Context(), owner, user, ws, "restricted", member, nil); e != nil {
-				t.Fatal(e)
+			if user != "nav-page-reader" {
+				if _, e = store.Replace(t.Context(), owner, user, ws, "restricted", member, nil); e != nil {
+					t.Fatal(e)
+				}
 			}
 			members[user] = member.ID
 		}
