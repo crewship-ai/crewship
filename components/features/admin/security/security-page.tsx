@@ -292,12 +292,14 @@ export function SecurityPage() {
         </SettingsCard>
         {pickedRows.length > 0 && (
           <div role="toolbar" aria-label="Change the selected workspaces" data-slot="security-bulk"
-            className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)] max-sm:gap-1.5 max-sm:px-2")}>
-            <span className="px-1"><span className="font-mono font-semibold tabular-nums">{pickedRows.length}</span> selected</span>
+            className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap",
+              // A phone: edge to edge above the tab bar, the count without its word.
+              "max-sm:inset-x-3 max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)] max-sm:translate-x-0 max-sm:justify-between max-sm:gap-1 max-sm:px-2")}>
+            <span className="px-1"><span className="font-mono font-semibold tabular-nums">{pickedRows.length}</span><span className="max-sm:hidden"> selected</span></span>
             {BULK.map((b, i) => (
               <Button key={b.key} type="button" size="sm" variant={i === 0 ? "default" : "outline"} className={cn(i === 0 ? selectionBarAction : selectionBarButton, "max-sm:px-2")}
                 onClick={() => setBulk(b.key)}>
-                {b.label}<ChevronDown className="h-3 w-3" />
+                {b.label}<ChevronDown className="h-3 w-3 max-sm:hidden" />
               </Button>
             ))}
             <Button type="button" variant="ghost" size="icon-sm" className={cn(selectionBarButton, "w-8 px-0")} aria-label="Clear selection" onClick={() => setPicked(new Set())}>
