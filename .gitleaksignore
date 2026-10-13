@@ -92,3 +92,5 @@ f8bbfe66789c1d410434fd40ae7e0d2d2f0e477a:internal/orchestrator/exec_sidecar_toke
 # identity of the all-0x42 scalar, used to check that keys made in the browser
 # are encoded exactly as age encodes them. Public, protects nothing.
 78e372927060b2d14a06f4092c2bb36a57619f44:components/features/admin/backups/__tests__/age-key.test.ts:age-secret-key:8
+# Same unchanged public age test vector after settings PR #3056 moved its line.
+a41d725e0d02a7a806308f7fdb01af116b99d509:components/features/admin/backups/__tests__/age-key.test.ts:age-secret-key:9
