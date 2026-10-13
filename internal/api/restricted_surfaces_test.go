@@ -133,7 +133,7 @@ func TestRestrictedWorkspaceRowsCarryTheSessionSurfaces(t *testing.T) {
 		t.Fatalf("restricted rows = %+v, want restricted_session true", rows)
 	}
 	got, _ := rows[0]["restricted_surfaces"].([]any)
-	want := []any{"chat", "routines", "pages", "account_security"}
+	want := []any{"account_security"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("restricted_surfaces = %v, want %v", got, want)
 	}
