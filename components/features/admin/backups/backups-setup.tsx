@@ -86,9 +86,14 @@ export function BackupsSetup({ open, onOpenChange, keys, plans, demo, onChanged,
   const state = setupState(keys, plans)
   const first: Step = !state.hasKey ? "key" : !state.hasPlan ? "plan" : "run"
   const [step, setStep] = React.useState<Step>(first)
-  React.useEffect(() => { if (open) setStep(first) }, [open]) // eslint-disable-line react-hooks/exhaustive-deps -- where to start, once per opening
   const [keyIds, setKeyIds] = React.useState<string[]>([])
   const [planId, setPlanId] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    if (!open) return
+    setStep(first)
+    setKeyIds([])
+    setPlanId(null)
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps -- start from current server state once per opening
   const steps: { key: Step; label: string }[] = [{ key: "key", label: "1. Key" }, { key: "plan", label: "2. Plan" }, { key: "run", label: "3. First backup" }]
   const order: Step[] = ["key", "plan", "run", "done"]
 

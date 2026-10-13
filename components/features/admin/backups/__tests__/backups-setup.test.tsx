@@ -48,6 +48,20 @@ describe("setupState", () => {
 })
 
 describe("Set up backups", () => {
+  it("uses the current instance plan when reopened after replacing a plan", async () => {
+    const props = { onOpenChange: vi.fn(), keys: [{ id: "key" }] as never, demo: false, onChanged: vi.fn(), onOpenRuns: vi.fn() }
+    const view = render(<BackupsSetup {...props} open plans={[]} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Create the plan" }))
+    await screen.findByRole("button", { name: "Back up now" })
+    view.rerender(<BackupsSetup {...props} open={false} plans={[]} />)
+    // The plan made in the previous opening was removed or changed outside
+    // the wizard; its local id must not override today's selected plan.
+    view.rerender(<BackupsSetup {...props} open plans={[{ ...INSTANCE, id: "replacement-plan" }] as never} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Back up now" }))
+    await waitFor(() => expect(posts("/run")).toHaveLength(1))
+    expect(posts("/run")[0].plan_id).toBe("replacement-plan")
+  })
+
   it("lists the three steps on the Overview and starts from there", () => {
     const start = vi.fn()
     render(<SetupCard hasKey={false} hasPlan={false} onStart={start} />)

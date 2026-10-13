@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Members never shows another workspace's roster while loading.** Switching workspaces clears the previous roster immediately, including when the new request fails; refreshing the same workspace keeps an open invitation's setup link visible. Reopening backup setup also selects the current instance plan instead of retaining a plan from an earlier opening.
+
 - **A password change can revoke CLI tokens too.** `POST /api/v1/users/me/password` accepts `revoke_cli_tokens: true` and reports `cli_tokens_revoked`; `crewship auth passwd --revoke-cli-tokens` and an "Also revoke all CLI tokens" checkbox in the web dialog send it. Without it nothing changes: browser sessions are signed out, CLI tokens keep working.
 
 - **A workspace's security page reads at a glance.** Admin › Security › a workspace opens with five tiles — Watchdog, Findings, Four-eyes, Leases, Judge — each with its icon, whether it is on and how, and a click to its card. The cards say less: the long explanations are behind an ⓘ beside each setting (and read out to a screen reader), what to flag is a row of toggles with an icon each, own rules are folded until there are some, and the review rate, the DENY alert threshold and the lease length offer the usual values one click away beside the field that still takes any other.

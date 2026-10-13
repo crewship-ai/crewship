@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
 import { apiFetch } from "@/lib/api-fetch"
@@ -18,32 +19,25 @@ import type { Member } from "./members-model"
  * a dialog the admin is reading cannot.
  */
 export function useMembers(workspaceId: string | null) {
-  const [members, setMembers] = useState<Member[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [refreshKey, setRefreshKey] = useState(0)
+  const queryClient = useQueryClient()
+  const query = useQuery({
+    queryKey: ["workspace-members", workspaceId],
+    enabled: Boolean(workspaceId),
+    queryFn: async ({ signal }): Promise<Member[]> => {
+      const ws = encodeURIComponent(workspaceId ?? "")
+      const res = await apiFetch(`/api/v1/workspaces/${ws}/members?workspace_id=${ws}`, { signal })
+      if (!res.ok) throw new Error("Failed to load members")
+      const data = await res.json()
+      return Array.isArray(data) ? data : []
+    },
+  })
 
-  useEffect(() => {
-    if (!workspaceId) return
-    let cancelled = false
-    void (async () => {
-      setError(null)
-      try {
-        const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/members?workspace_id=${workspaceId}`)
-        if (cancelled) return
-        if (!res.ok) { setError("Failed to load members"); return }
-        const data = (await res.json()) as Member[]
-        if (!cancelled) setMembers(Array.isArray(data) ? data : [])
-      } catch {
-        if (!cancelled) setError("Failed to load members")
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [workspaceId, refreshKey])
-
-  const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
+  // A refresh keeps this workspace's list mounted (and an invite's one-time
+  // setup link visible). A different query key never carries the old list
+  // into another workspace, even if that workspace's read fails.
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["workspace-members", workspaceId] })
+  }, [queryClient, workspaceId])
 
   /** PATCH the membership's role. Resolves true when the server took it. */
   const changeRole = useCallback(async (member: Member, role: string): Promise<boolean> => {
@@ -99,5 +93,10 @@ export function useMembers(workspaceId: string | null) {
     }
   }, [workspaceId, refresh])
 
-  return { members, loading, error, refresh, changeRole, remove }
+  return {
+    members: query.data ?? [],
+    loading: query.isLoading,
+    error: query.isError ? "Failed to load members" : null,
+    refresh, changeRole, remove,
+  }
 }
