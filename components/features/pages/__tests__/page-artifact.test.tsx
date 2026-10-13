@@ -62,7 +62,7 @@ describe("human page artifact", () => {
     const frame = await screen.findByTitle("Artifact static preview")
     expect(frame.getAttribute("sandbox")).toBe("")
     expect(frame.getAttribute("srcdoc")).not.toContain("<script>")
-    fireEvent.click(screen.getByRole("button", { name: "Source", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Source" }))
     expect(screen.getByText(source)).toBeTruthy()
     expect(document.querySelector("script")).toBeNull()
   })
@@ -81,7 +81,7 @@ describe("human page artifact", () => {
   })
   it("preserves unsaved source after a conflict and refreshes only when requested", async () => {
     mount(); await screen.findByTitle("Artifact static preview")
-    fireEvent.click(screen.getByRole("button", { name: "Source", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Source" }))
     fireEvent.click(screen.getByRole("button", { name: "Edit as new revision" }))
     fireEvent.change(screen.getByLabelText("HTML for the next revision"), { target: { value: "<h1>My unsaved work</h1>" } })
     fail = 409; head = 2
@@ -95,7 +95,7 @@ describe("human page artifact", () => {
   })
   it("offers revision history and restores through compare-and-swap", async () => {
     head = 2; mount(); await screen.findByTitle("Artifact static preview")
-    fireEvent.click(screen.getByRole("button", { name: "History", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "History" }))
     fireEvent.click(screen.getByRole("button", { name: "Restore as new revision" }))
     await waitFor(() => expect(calls).toHaveLength(1))
     expect(calls[0].path).toContain("/artifact/restore?")
@@ -112,16 +112,16 @@ describe("human page artifact", () => {
   })
   it("registers and clears unsaved source with the existing Pages navigation guard", async () => {
     const dirty = vi.fn(); mount(dirty); await screen.findByTitle("Artifact static preview")
-    fireEvent.click(screen.getByRole("button", { name: "Source", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Source" }))
     fireEvent.click(screen.getByRole("button", { name: "Edit as new revision" }))
     await waitFor(() => expect(dirty).toHaveBeenLastCalledWith(true))
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     await waitFor(() => expect(dirty).toHaveBeenLastCalledWith(false))
   })
   it("omits write controls for readers", async () => {
     writable = false; mount(); await screen.findByTitle("Artifact static preview")
     expect(screen.queryByLabelText("Upload HTML")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "Source", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Source" }))
     expect(screen.queryByRole("button", { name: "Edit as new revision" })).toBeNull()
   })
 })

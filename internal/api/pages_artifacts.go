@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 const maxArtifactHTMLBytes = 10 << 20
@@ -301,7 +302,7 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 	}
 	now := h.clock.Now().UTC()
 	var recent int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_artifact_revisions WHERE page_id=? AND created_at>?`, rec.ID, now.Add(-time.Hour).Format(time.RFC3339Nano)).Scan(&recent); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_artifact_revisions WHERE page_id=? AND created_at>?`, rec.ID, tsformat.Format(now.Add(-time.Hour))).Scan(&recent); err != nil {
 		replyInternalError(w, h.logger, "check artifact revision rate", err)
 		return
 	}
@@ -311,7 +312,7 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		return
 	}
 	revision := head + 1
-	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,restored_from,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, generateCUID(), rec.ID, revision, sha, user.ID, req.MutationID, fingerprint, restoredFrom, now.Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,restored_from,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, generateCUID(), rec.ID, revision, sha, user.ID, req.MutationID, fingerprint, restoredFrom, tsformat.Format(now)); err != nil {
 		replyInternalError(w, h.logger, "save artifact revision", err)
 		return
 	}
@@ -319,7 +320,7 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		replyInternalError(w, h.logger, "save artifact head", err)
 		return
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE pages SET updated_at=? WHERE id=?`, now.Format(time.RFC3339), rec.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE pages SET updated_at=? WHERE id=?`, tsformat.Format(now), rec.ID); err != nil {
 		replyInternalError(w, h.logger, "update artifact page", err)
 		return
 	}
