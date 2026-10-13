@@ -9,7 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- ⚠️ **Behaviour change:** Signup invitation handoff requires the matching invitation link; existing accounts can explicitly accept after signing in or through `workspace invite accept`. Invitation listings retain metadata without redemption tokens; pending links can be reissued or revoked. New proofs are stored hashed, and browser/CLI handoff avoids putting proof in redirect URLs or command arguments (#3071).
+- ⚠️ **Behaviour change:** Signup invitation handoff requires the matching invitation link; existing accounts can explicitly accept after signing in or through `workspace invite accept`. Invitation listings retain metadata without redemption tokens; pending links can be reissued or revoked. Legacy unaccepted invitation links stored as raw tokens are invalidated on upgrade; an authorized inviter must create a new invitation or reissue the pending invitation. Accepted invitation history is preserved. New proofs are stored hashed, and browser/CLI handoff avoids putting proof in redirect URLs or command arguments (#3071).
+- **Restricted navigation follows each member’s grants (#3072).** Chat, Routines and Pages appear only when the selected workspace membership can access their catalog; account security remains available. Switching workspaces no longer borrows another membership’s screens. A missing execution runtime does not hide otherwise authorized navigation. Open screens recheck changed access through the existing foreground polling interval.
+
+- ⚠️ **Behaviour change:** Manual schedule runs record the requesting operator and follow their current workspace execution authority (#3070).
 
 - **Local Linux Docker runs retain output across controller loss (#2845).** A private host helper keeps the actual CLI execution and redacted output independent of its reader. Recovery projects output and terminal results with durable acknowledgements, preserves work-generation ownership, and refuses duplicate launches. Capture has per-run and aggregate bounds and acknowledgement-based retention. Unsupported providers keep the existing transport; uncertain forced stops retain reconciliation rather than report completion.
 

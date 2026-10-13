@@ -11,7 +11,9 @@ try {
       const token = fixture[`${kind}_token`]
       await page.goto(`${fixture.server}/join#invitation_token=${encodeURIComponent(token)}`)
       await expect(page.getByRole('heading', { name: 'Accept invitation' })).toBeVisible()
-      expect(page.url()).not.toContain(token)
+      // The heading can be server-rendered before the capture effect hydrates.
+      await expect(page).toHaveURL(url => !url.href.includes(token))
+      await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible()
       for (const href of await page.locator('a[href]').evaluateAll(nodes => nodes.map(n => n.getAttribute('href')))) expect(href).not.toContain(token)
       if (kind === 'new') {
         await page.getByRole('link', { name: 'Create an account' }).click()

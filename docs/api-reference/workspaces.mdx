@@ -709,6 +709,8 @@ POST /api/v1/workspaces/{workspaceId}/invitations
 
 **Response:** `201 Created` -- invitation object with the freshly minted `wi1_` plus 64 lowercase hex proof (returned only by creation or explicit reissue). New stored values are `sha256:v1:` plus the SHA256 hex digest of the entire proof.
 
+On upgrade, legacy unaccepted links stored as raw tokens are invalidated. An authorized inviter must create a new invitation for the same email or explicitly reissue the pending row; the newly returned link can then be accepted. Accepted historical invitations and new versioned hash proofs are preserved.
+
 Signup redeems only the presented matching proof; ordinary signup gets its own workspace. Existing accounts explicitly accept through `/join` or the authenticated acceptance endpoint. Admission rechecks the inviter's live trusted OWNER/ADMIN authority (ADMIN invitations need OWNER), recipient identity, parsed expiry, workspace and pending state. Different existing membership roles conflict without consuming the invitation; no role is silently upgraded.
 
 ### Reissue invitation

@@ -20,9 +20,6 @@ func init() {
 			}
 			client := newAPIClient()
 			path := "/api/v1/workspaces/" + url.PathEscape(client.GetWorkspaceID()) + "/invitations/" + url.PathEscape(args[0])
-			if action == "reissue" {
-				path += "/reissue"
-			}
 			var result struct {
 				ID    string `json:"id,omitempty" yaml:"id,omitempty"`
 				Token string `json:"token,omitempty" yaml:"token,omitempty"`
@@ -33,7 +30,7 @@ func init() {
 			var response *http.Response
 			var err error
 			if action == "reissue" {
-				response, err = client.Post(path, nil)
+				response, err = client.Post(path+"/reissue", nil)
 			} else {
 				response, err = client.Delete(path)
 			}

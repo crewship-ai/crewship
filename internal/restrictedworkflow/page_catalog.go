@@ -2,6 +2,7 @@ package restrictedworkflow
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 
 	"github.com/crewship-ai/crewship/internal/access"
@@ -17,14 +18,28 @@ func (s *Service) PageActionAvailable(ctx context.Context, user, workspace strin
 
 // PageActionFingerprint binds the exact visible action and its complete current execution graph.
 func (s *Service) PageActionFingerprint(ctx context.Context, user, workspace string, action pipeline.PageActionInvocation) (string, error) {
+	if _, ok := s.executor.(proofExecutor); !ok {
+		return "", ErrDenied
+	}
+	return s.authorizedPageActionFingerprint(ctx, user, workspace, action)
+}
+
+// AuthorizedPageActionFingerprint checks authority independent of runtime installation.
+func AuthorizedPageActionFingerprint(ctx context.Context, db *sql.DB, user, workspace string, action pipeline.PageActionInvocation, profiles ...func(string) bool) (string, error) {
+	s := &Service{db: db, providers: workflowProviderAuthority(db), authorityOnly: true}
+	if len(profiles) > 0 {
+		s.declaredProfiles = profiles[0]
+	}
+	return s.authorizedPageActionFingerprint(ctx, user, workspace, action)
+}
+
+func (s *Service) authorizedPageActionFingerprint(ctx context.Context, user, workspace string, action pipeline.PageActionInvocation) (string, error) {
 	store := access.Store{DB: s.db}
 	membership, err := store.Membership(ctx, user, workspace)
 	if err != nil || membership.Mode != "restricted" || pipeline.CheckDeclaredPageAction(ctx, s.db, user, workspace, action) != nil {
 		return "", ErrDenied
 	}
-	if _, ok := s.executor.(proofExecutor); !ok {
-		return "", ErrDenied
-	}
+
 	graph, err := s.compileGraph(ctx, user, workspace, action.PipelineID)
 	if err != nil {
 		return "", err
