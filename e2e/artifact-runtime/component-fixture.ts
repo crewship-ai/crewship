@@ -1,3 +1,4 @@
+import { FixtureResources } from './resources'
 import { build } from 'vite'
 import path from 'node:path'
 import type { Browser } from '@playwright/test'
@@ -16,13 +17,18 @@ async function componentBundle(): Promise<string> {
   return bundle
 }
 
-export async function startComponentFixture(browser: Browser) {
+export async function startComponentFixture(browser: Browser, factories = { bootstrap: startGoArtifactBootstrap, fixture: startFixture }) {
   const source = await componentBundle()
-  const bootstrap = await startGoArtifactBootstrap()
-  const fixture = await startFixture()
-  const context = await browser.newContext({ proxy: { server: fixture.proxy }, ignoreHTTPSErrors: true })
-  const unexpected: string[] = []
-  await context.route('**/*', async route => {
+  const resources = new FixtureResources()
+  try {
+    const bootstrap = await factories.bootstrap()
+    resources.own(bootstrap.close)
+    const fixture = await factories.fixture()
+    resources.own(fixture.close)
+    const context = await browser.newContext({ proxy: { server: fixture.proxy }, ignoreHTTPSErrors: true })
+    resources.own(() => context.close())
+    const unexpected: string[] = []
+    await context.route('**/*', async route => {
     const url = new URL(route.request().url())
     if (url.origin === studio) {
       if (url.pathname !== '/') { await route.fulfill({ status: 404 }); return }
@@ -34,8 +40,12 @@ export async function startComponentFixture(browser: Browser) {
       return
     }
     unexpected.push(route.request().url()); await route.abort()
-  })
-  const page = await context.newPage()
-  await page.goto(studio)
-  return { page, unexpected, fixture, close: async () => { await context.close(); await fixture.close(); await bootstrap.close() } }
+    })
+    const page = await context.newPage()
+    await page.goto(studio)
+    return { page, unexpected, fixture, close: () => resources.close() }
+  } catch (error) {
+    try { await resources.close() } catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Runtime fixture setup and cleanup failed') }
+    throw error
+  }
 }

@@ -1,12 +1,17 @@
+import { FixtureResources } from './resources'
 import { test, expect } from '@playwright/test'
 import { startGoArtifactBootstrap, artifactPreparationPath } from './go-bootstrap'
 import { startFixture, studio, runtime, sink } from './fixture'
 
 test('prepared bootstrap retains response CSP after one HTML transfer', async ({ browser }) => {
-  const fixture = await startFixture()
-  const bootstrap = await startGoArtifactBootstrap()
-  const context = await browser.newContext({ proxy: { server: fixture.proxy }, ignoreHTTPSErrors: true })
+  const resources = new FixtureResources()
   try {
+    const fixture = await startFixture()
+    resources.own(fixture.close)
+    const bootstrap = await startGoArtifactBootstrap()
+    resources.own(bootstrap.close)
+    const context = await browser.newContext({ proxy: { server: fixture.proxy }, ignoreHTTPSErrors: true })
+    resources.own(() => context.close())
     await context.route(`${runtime}${artifactPreparationPath}*`, async route => {
       await route.fulfill(await bootstrap.response())
     })
@@ -39,5 +44,5 @@ test('prepared bootstrap retains response CSP after one HTML transfer', async ({
     expect(fixture.hits).toEqual([])
     expect(await page.locator('body').getAttribute('data-compromised')).toBeNull()
     expect(page.url()).toBe(`${studio}/`)
-  } finally { await context.close(); await fixture.close(); await bootstrap.close() }
+  } finally { await resources.close() }
 })
