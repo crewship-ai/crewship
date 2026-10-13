@@ -589,6 +589,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			}
 			switch {
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/artifact-requests/"):
+				s.handleArtifactRequestContext(w, r)
+				return
+			case (r.Method == http.MethodGet || r.Method == http.MethodPost) && strings.HasPrefix(r.URL.Path, "/board-requests/"):
+				s.handleBoardRequest(w, r)
+				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/boards/") && strings.HasSuffix(r.URL.Path, "/batches"):
 				s.handleBoardPublish(w, r)
 				return

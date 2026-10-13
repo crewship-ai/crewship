@@ -136,11 +136,19 @@ func (h *PageHandler) boardTransaction(w http.ResponseWriter, r *http.Request) (
 	return tx, r, rec, true
 }
 func (h *PageHandler) boardRetry(w http.ResponseWriter, r *http.Request, tx *sql.Tx, pageID, id, fingerprint string) (bool, error) {
-	var author, digest, placement, authorAgent, authorRun string
+	var author, digest, placement, authorAgent, authorRun, placementRevs string
 	var result, seq int64
-	err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(author_user_id,''),fingerprint,result_seq,placement_id,COALESCE(author_agent_id,''),COALESCE(author_run_id,'') FROM page_board_mutations WHERE board_page_id=? AND mutation_id=?`, pageID, id).Scan(&author, &digest, &result, &placement, &authorAgent, &authorRun)
+	var elements, created string
+	err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(author_user_id,''),fingerprint,result_seq,placement_id,COALESCE(author_agent_id,''),COALESCE(author_run_id,''),placement_revs_json,element_revs_json,created_at FROM page_board_mutations WHERE board_page_id=? AND mutation_id=?`, pageID, id).Scan(&author, &digest, &result, &placement, &authorAgent, &authorRun, &placementRevs, &elements, &created)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		expired, e := boardHistoryExpired(r.Context(), tx, pageID, id)
+		if e != nil {
+			return false, e
+		}
+		if expired {
+			return false, errBoardHistoryExpired
+		}
+		return false, h.compactBoardHistory(r.Context(), tx, pageID)
 	}
 	if err != nil {
 		return false, err
@@ -152,10 +160,26 @@ func (h *PageHandler) boardRetry(w http.ResponseWriter, r *http.Request, tx *sql
 	if err = tx.QueryRowContext(r.Context(), `SELECT seq FROM page_boards WHERE page_id=?`, pageID).Scan(&seq); err != nil {
 		return false, err
 	}
-	writeJSON(w, 200, map[string]any{"seq": seq, "result_seq": result, "placement_id": placement})
+	var revisions map[string]int64
+	if err := json.Unmarshal([]byte(placementRevs), &revisions); err != nil {
+		return false, err
+	}
+	var elementRevs map[string]int64
+	if err = json.Unmarshal([]byte(elements), &elementRevs); err != nil {
+		return false, err
+	}
+	writeJSON(w, 200, map[string]any{"seq": seq, "result_seq": result, "placement_id": placement, "placement_revs": revisions, "element_revs": elementRevs, "undo_expires_at": boardUndoExpiry(created)})
 	return true, nil
 }
 func (h *PageHandler) boardReceipt(r *http.Request, tx *sql.Tx, pageID, id, fingerprint string, seq int64, placement string) error {
+	if expired, err := boardHistoryExpired(r.Context(), tx, pageID, id); err != nil {
+		return err
+	} else if expired {
+		return errBoardHistoryExpired
+	}
+	if err := h.compactBoardHistory(r.Context(), tx, pageID); err != nil {
+		return err
+	}
 	var count, hour int
 	if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*),COALESCE(SUM(created_at>=?),0) FROM page_board_mutations WHERE board_page_id=?`, tsformat.Format(h.evaluator().Now().Add(-time.Hour)), pageID).Scan(&count, &hour); err != nil {
 		return err
@@ -166,6 +190,9 @@ func (h *PageHandler) boardReceipt(r *http.Request, tx *sql.Tx, pageID, id, fing
 	if _, err := tx.ExecContext(r.Context(), `UPDATE pages SET updated_at=? WHERE id=?`, tsformat.Format(h.evaluator().Now()), pageID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO page_board_write_audit(board_page_id,mutation_id,actor_user_id,actor_agent_id,actor_run_id,result_seq,request_digest,created_at) VALUES(?,?,?,NULLIF(?,''),NULLIF(?,''),?,?,?)`, pageID, id, UserFromContext(r.Context()).ID, artifactAgentID(r), artifactRunID(r), seq, fingerprint, tsformat.Format(h.evaluator().Now())); err != nil {
+		return err
+	}
 	_, err := tx.ExecContext(r.Context(), `INSERT INTO page_board_mutations(board_page_id,mutation_id,author_user_id,fingerprint,result_seq,placement_id,created_at,author_agent_id,author_run_id) VALUES(?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''))`, pageID, id, UserFromContext(r.Context()).ID, fingerprint, seq, placement, tsformat.Format(h.evaluator().Now()), artifactAgentID(r), artifactRunID(r))
 	return err
 }
@@ -173,6 +200,10 @@ func (h *PageHandler) boardReceipt(r *http.Request, tx *sql.Tx, pageID, id, fing
 var errBoardQuota = errors.New("board mutation quota reached")
 
 func (h *PageHandler) boardError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errBoardHistoryExpired) {
+		artifactCommentError(w, 409, "history_expired", err.Error())
+		return
+	}
 	if errors.Is(err, errBoardQuota) {
 		replyError(w, 429, err.Error())
 	} else {
@@ -323,9 +354,23 @@ func (h *PageHandler) writeBoard(w http.ResponseWriter, r *http.Request, rec *pa
 		replyError(w, 403, "workspace membership required")
 		return
 	}
+	tombstones, err := loadBoardPlacementTombstones(r.Context(), q, rec.ID)
+	if err != nil {
+		h.boardError(w, err)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	writeJSON(w, 200, map[string]any{"format": pages.BoardFormat, "seq": s.Seq, "records": records, "placements": placements, "write_scope": boardWriteScope(r), "can_write": h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, liveRole, rec)})
+	response := map[string]any{"format": pages.BoardFormat, "seq": s.Seq, "records": records, "placements": placements, "placement_tombstones": tombstones, "write_scope": boardWriteScope(r), "can_write": h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, liveRole, rec)}
+	if authority, ok := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority); ok && artifactAgentID(r) != "" {
+		permissions, err := h.boardAgentElementPermissions(r.Context(), rec, authority)
+		if err != nil {
+			h.boardError(w, err)
+			return
+		}
+		response["element_permissions"] = permissions
+	}
+	writeJSON(w, 200, response)
 }
 func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 	release, ok := acquireBoardWrite(w, r)
@@ -334,10 +379,12 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 	var req struct {
-		MutationID string `json:"mutation_id"`
+		MutationID          string `json:"mutation_id"`
+		ElementPermissionID string `json:"element_permission_id,omitempty"`
 		pages.BoardBatch
-		PlacementUpdates []boardPlacementUpdate `json:"placement_updates"`
-		PlacementDeletes []boardPlacementDelete `json:"placement_deletes"`
+		PlacementUpdates  []boardPlacementUpdate  `json:"placement_updates"`
+		PlacementDeletes  []boardPlacementDelete  `json:"placement_deletes"`
+		PlacementRestores []boardPlacementRestore `json:"placement_restores,omitempty"`
 	}
 	raw, ok := boardDecode(w, r, &req)
 	if !ok {
@@ -346,6 +393,7 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(raw, &fields)
 	delete(fields, "mutation_id")
+	delete(fields, "element_permission_id")
 	var base *int64
 	if err := json.Unmarshal(fields["base_seq"], &base); err != nil || base == nil || *base < 0 || *base >= 9007199254740991 {
 		replyError(w, 400, "explicit board sequence required")
@@ -353,6 +401,7 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	delete(fields, "placement_updates")
 	delete(fields, "placement_deletes")
+	delete(fields, "placement_restores")
 	batchRaw, _ := json.Marshal(fields)
 	batch := req.BoardBatch
 	batch.BaseSeq = *base
@@ -361,27 +410,34 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 	if drawingCount > 0 {
 		batch, err = pages.DecodeBoardBatch(batchRaw)
 	}
-	count := drawingCount + len(req.PlacementUpdates) + len(req.PlacementDeletes)
+	count := drawingCount + len(req.PlacementUpdates) + len(req.PlacementDeletes) + len(req.PlacementRestores)
 	if err != nil || !boardMutationValid(req.MutationID) || count < 1 || count > pages.MaxBoardBatchOperations {
 		replyError(w, 400, "invalid board batch")
 		return
 	}
 	seen := map[string]bool{}
 	for _, placement := range req.PlacementUpdates {
-		if !boardMutationValid(placement.ID) || !placement.boardPlacementGeometry.valid() || seen[placement.ID] {
+		if !boardMutationValid(placement.ID) || !placement.boardPlacementGeometry.valid() || !validBoardPlacementRevision(placement.ExpectedRev) || seen[placement.ID] {
 			replyError(w, 400, "invalid placement update")
 			return
 		}
 		seen[placement.ID] = true
 	}
 	for _, placement := range req.PlacementDeletes {
-		if !boardMutationValid(placement.ID) || seen[placement.ID] {
+		if !boardMutationValid(placement.ID) || !validBoardPlacementRevision(placement.ExpectedRev) || seen[placement.ID] {
 			replyError(w, 400, "invalid placement deletion")
 			return
 		}
 		seen[placement.ID] = true
 	}
-	if artifactAgentID(r) != "" && (len(req.PlacementUpdates) > 0 || len(req.PlacementDeletes) > 0) {
+	for _, placement := range req.PlacementRestores {
+		if !boardMutationValid(placement.ID) || placement.ExpectedRev == nil || !validBoardPlacementRevision(placement.ExpectedRev) || seen[placement.ID] {
+			replyError(w, 400, "invalid placement restore")
+			return
+		}
+		seen[placement.ID] = true
+	}
+	if artifactAgentID(r) != "" && (len(req.PlacementUpdates) > 0 || len(req.PlacementDeletes) > 0 || len(req.PlacementRestores) > 0) {
 		replyError(w, 403, "agent placement edits are not delegated")
 		return
 	}
@@ -393,6 +449,10 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	if !rec.HasBoard {
 		replyError(w, 404, "board not found")
+		return
+	}
+	if req.ElementPermissionID != "" && artifactAgentID(r) == "" {
+		replyError(w, 400, "element permission is only valid for the delegated agent batch")
 		return
 	}
 	digest := boardFingerprint("batch", req)
@@ -421,18 +481,27 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, pages.ErrBoardConflict) {
 			replyError(w, 409, err.Error())
+		} else if strings.Contains(err.Error(), "record limit") {
+			h.boardHistoryCapacity(w, r, tx, rec.ID)
 		} else {
 			replyError(w, 400, err.Error())
 		}
 		return
 	}
+	preservedHumanAuthors := map[string]boardElementAuthor{}
 	if agentID := artifactAgentID(r); agentID != "" {
 		authors, err := loadBoardAuthors(r.Context(), tx, rec.ID)
 		if err != nil {
 			h.boardError(w, err)
 			return
 		}
-		if err := protectBoardHumanElements(current, next, batch, authors, agentID); err != nil {
+		authority, _ := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
+		if authority == nil {
+			replyError(w, 403, "verified board run required")
+			return
+		}
+		preservedHumanAuthors, err = h.useBoardElementPermission(r.Context(), tx, rec, req.ElementPermissionID, req.MutationID, current, next, batch, authors, authority)
+		if err != nil {
 			replyError(w, 403, err.Error())
 			return
 		}
@@ -450,32 +519,49 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 		if !record.Deleted {
 			raw = string(record.Element)
 		}
-		if _, err = tx.ExecContext(r.Context(), `INSERT INTO page_board_elements(board_page_id,element_id,element_rev,element_json,author_user_id,updated_seq,author_agent_id,author_run_id) VALUES(?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,'')) ON CONFLICT(board_page_id,element_id) DO UPDATE SET element_rev=excluded.element_rev,element_json=excluded.element_json,author_user_id=excluded.author_user_id,updated_seq=excluded.updated_seq,author_agent_id=excluded.author_agent_id,author_run_id=excluded.author_run_id`, rec.ID, id, record.ElementRev, raw, UserFromContext(r.Context()).ID, next.Seq, artifactAgentID(r), artifactRunID(r)); err != nil {
+		var deletedAt any
+		if record.Deleted {
+			deletedAt = tsformat.Format(h.evaluator().Now())
+		}
+		var authorUser any = UserFromContext(r.Context()).ID
+		authorAgent, authorRun := artifactAgentID(r), artifactRunID(r)
+		if original, ok := preservedHumanAuthors[id]; ok {
+			authorUser = original.UserID
+			if original.UserID == "" {
+				authorUser = nil
+			}
+			authorAgent = original.AgentID
+			authorRun = original.RunID
+		}
+		if _, err = tx.ExecContext(r.Context(), `INSERT INTO page_board_elements(board_page_id,element_id,element_rev,element_json,author_user_id,updated_seq,author_agent_id,author_run_id,deleted_at) VALUES(?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),?) ON CONFLICT(board_page_id,element_id) DO UPDATE SET element_rev=excluded.element_rev,element_json=excluded.element_json,author_user_id=excluded.author_user_id,updated_seq=excluded.updated_seq,author_agent_id=excluded.author_agent_id,author_run_id=excluded.author_run_id,deleted_at=excluded.deleted_at`, rec.ID, id, record.ElementRev, raw, authorUser, next.Seq, authorAgent, authorRun, deletedAt); err != nil {
 			h.boardError(w, err)
 			return
 		}
 	}
+	revisions := map[string]int64{}
 	for _, placement := range req.PlacementUpdates {
-		result, err := tx.ExecContext(r.Context(), `UPDATE page_board_artifact_placements SET x=?,y=?,width=?,height=?,updated_seq=?,author_user_id=? WHERE board_page_id=? AND id=?`, *placement.X, *placement.Y, *placement.Width, *placement.Height, next.Seq, UserFromContext(r.Context()).ID, rec.ID, placement.ID)
+		rev, err := h.updateBoardPlacement(r.Context(), tx, rec.ID, placement.ID, placement.ExpectedRev, placement.boardPlacementGeometry, next.Seq)
 		if err != nil {
-			h.boardError(w, err)
+			h.boardPlacementError(w, err)
 			return
 		}
-		if n, _ := result.RowsAffected(); n != 1 {
-			replyError(w, 409, "placement changed or no longer exists")
-			return
-		}
+		revisions[placement.ID] = rev
 	}
 	for _, placement := range req.PlacementDeletes {
-		result, err := tx.ExecContext(r.Context(), `DELETE FROM page_board_artifact_placements WHERE board_page_id=? AND id=?`, rec.ID, placement.ID)
+		rev, err := h.deleteBoardPlacement(r.Context(), tx, rec.ID, placement.ID, placement.ExpectedRev, next.Seq)
 		if err != nil {
-			h.boardError(w, err)
+			h.boardPlacementError(w, err)
 			return
 		}
-		if n, _ := result.RowsAffected(); n != 1 {
-			replyError(w, 409, "placement changed or no longer exists")
+		revisions[placement.ID] = rev
+	}
+	for _, placement := range req.PlacementRestores {
+		rev, err := h.restoreBoardPlacement(r.Context(), tx, rec.ID, placement.ID, placement.ExpectedRev, next.Seq)
+		if err != nil {
+			h.boardPlacementError(w, err)
 			return
 		}
+		revisions[placement.ID] = rev
 	}
 	if _, err = tx.ExecContext(r.Context(), `UPDATE page_boards SET seq=? WHERE page_id=?`, next.Seq, rec.ID); err != nil {
 		h.boardError(w, err)
@@ -485,12 +571,32 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 		h.boardError(w, err)
 		return
 	}
+	if err := recordBoardPlacementRevisions(r.Context(), tx, rec.ID, req.MutationID, revisions); err != nil {
+		h.boardError(w, err)
+		return
+	}
+	elementRevs := map[string]int64{}
+	for id, record := range next.Records {
+		old, present := current.Records[id]
+		if !present || old.ElementRev != record.ElementRev {
+			elementRevs[id] = record.ElementRev
+		}
+	}
+	if err = h.recordBoardElementRevisions(r.Context(), tx, rec.ID, req.MutationID, elementRevs); err != nil {
+		h.boardError(w, err)
+		return
+	}
+	undoExpiry, err := boardReceiptUndoExpiry(r.Context(), tx, rec.ID, req.MutationID)
+	if err != nil {
+		h.boardError(w, err)
+		return
+	}
 	if err = tx.Commit(); err != nil {
 		h.boardError(w, err)
 		return
 	}
 	broadcastWorkspaceEvent(h.hub, WorkspaceIDFromContext(r.Context()), "page.updated", map[string]any{"page_id": rec.ID})
-	writeJSON(w, 201, map[string]any{"seq": next.Seq, "result_seq": next.Seq})
+	writeJSON(w, 201, map[string]any{"seq": next.Seq, "result_seq": next.Seq, "placement_revs": revisions, "element_revs": elementRevs, "undo_expires_at": undoExpiry})
 }
 
 func boardWriteScope(r *http.Request) string {

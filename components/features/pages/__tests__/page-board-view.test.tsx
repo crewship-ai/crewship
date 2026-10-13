@@ -5,6 +5,7 @@ import { PageBoardView } from "../page-board-view"
 import { NewBoardDialog } from "../new-board-dialog"
 import { apiFetch } from "@/lib/api-fetch"
 import type { PageBoard } from "@/hooks/use-page-board"
+vi.mock("../board-agent-work", () => ({ BoardAgentWork: () => null }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: vi.fn(), useRealtimeChannelSafe: vi.fn(), usePresenceTransportSafe: () => ({ status: null }) }))
 vi.mock("@/hooks/use-pages", async original => ({ ...await original<typeof import("@/hooks/use-pages")>(), usePages: () => ({ pages: [{ slug: "report", name: "Report", hasArtifact: true }], loading: false, error: null, refresh: vi.fn() }) }))
@@ -15,11 +16,13 @@ let canonical: PageBoard
 let readStatus: number
 let lost: boolean
 let initFail: boolean
+let missingUndoProof: boolean
+let expiredUndo: boolean
 const writes: { path: string; body: Record<string, unknown> }[] = []
 const clients: QueryClient[] = []
 beforeEach(() => {
   canonical = { format: "board/v1", seq: 1, records: [{ element_id: "shape", element_rev: 1, deleted: false, element: { id: "shape", type: "rectangle", x: 0, y: 0, width: 100, height: 100, boundElements: null } }], placements: [], can_write: true }
-  readStatus = 200; lost = false; initFail = false; writes.length = 0
+  readStatus = 200; lost = false; initFail = false; missingUndoProof = false; expiredUndo = false; writes.length = 0
   vi.mocked(apiFetch).mockImplementation(async (url, options) => {
     const path = new URL(String(url), "https://studio.test").pathname
     if (options?.method) {
@@ -35,9 +38,13 @@ beforeEach(() => {
       }
       if (lost) { lost = false; throw new Error("Lost response") }
       if (body.base_seq !== canonical.seq) return new Response(JSON.stringify({ error: "board changed; reload before saving" }), { status: 409 })
-      canonical = { ...canonical, seq: canonical.seq + 1 }
-      return new Response(JSON.stringify({ seq: canonical.seq, result_seq: canonical.seq }))
+      const records = new Map(canonical.records.map(record => [record.element_id, record]))
+      for (const item of (body.upserts ?? []) as { element: { id: string }; expected_rev: number }[]) records.set(item.element.id, { element_id: item.element.id, element_rev: item.expected_rev + 1, element: item.element, deleted: false })
+      for (const item of (body.deletes ?? []) as { id: string; expected_rev: number }[]) records.set(item.id, { element_id: item.id, element_rev: item.expected_rev + 1, element: null, deleted: true })
+      canonical = { ...canonical, seq: canonical.seq + 1, records: [...records.values()] }
+      return new Response(JSON.stringify({ seq: canonical.seq, result_seq: canonical.seq, ...(missingUndoProof ? {} : { element_revs: Object.fromEntries(canonical.records.map(item => [item.element_id, item.element_rev])), undo_expires_at: new Date(Date.now() + (expiredUndo ? -1 : 86400000)).toISOString() }) }))
     }
+    if (path.endsWith("/board/threads")) return new Response(JSON.stringify({ threads: [], can_comment: true, can_resolve: true }))
     if (path.endsWith("/artifact")) return new Response(JSON.stringify({ head_rev: 3, revision: 3, html: "<h1>Report</h1>", revisions: [{ revision: 3 }], can_write: true }))
     return new Response(JSON.stringify(readStatus === 200 ? canonical : { error: "Access denied" }), { status: readStatus })
   })
@@ -125,4 +132,58 @@ it("shows a read-only canvas without mutation controls", async () => {
   expect(screen.queryByRole("button", { name: "Save board" })).toBeNull()
   expect(screen.getByRole("button", { name: "Draw rectangle" })).toBeDisabled()
   expect(writes).toHaveLength(0)
+})
+it("rebases only disjoint remote geometry and saves original local element revision", async () => {
+  canonical.records.push({ element_id: "other", element_rev: 1, deleted: false, element: { id: "other", type: "rectangle", x: 0 } })
+  const view = mount()
+  fireEvent.click(await screen.findByRole("button", { name: "Draw rectangle" }))
+  // The shallow editor's draw command replaces its scene, so preserve the other
+  // record as a tombstone in this test: local deletion and remote new ID disjoint.
+  canonical = { ...canonical, seq: 2, records: [...canonical.records, { element_id: "remote", element_rev: 1, deleted: false, element: { id: "remote", type: "rectangle", x: 500 } }] }
+  await act(async () => { await view.client.invalidateQueries({ queryKey: ["page-board"] }) })
+  await screen.findByText("Canvas sequence 2")
+  expect(view.dirty).toHaveBeenLastCalledWith(true)
+  expect(writes).toHaveLength(0)
+  fireEvent.click(screen.getByRole("button", { name: "Save board" }))
+  await waitFor(() => expect(writes).toHaveLength(1))
+  expect(writes[0].body).toMatchObject({ base_seq: 2, upserts: [{ expected_rev: 1, element: { id: "shape", x: 150 } }], deletes: [{ id: "other", expected_rev: 1 }] })
+})
+
+it("undoes an accepted saved command with exact applied element revision", async () => {
+  mount(); fireEvent.click(await screen.findByRole("button", { name: "Draw rectangle" }))
+  fireEvent.click(screen.getByRole("button", { name: "Save board" }))
+  await screen.findByText("Canvas sequence 2")
+  const undo = screen.getByRole("button", { name: "Undo last saved change" })
+  await waitFor(() => expect(undo).not.toBeDisabled())
+  fireEvent.click(undo)
+  await screen.findByText("Canvas sequence 3")
+  expect(writes[1].body).toMatchObject({ base_seq: 2, upserts: [{ expected_rev: 2, element: { id: "shape", x: 0 } }] })
+})
+it("refuses saved undo after the same element changes remotely", async () => {
+  const view = mount(); fireEvent.click(await screen.findByRole("button", { name: "Draw rectangle" }))
+  fireEvent.click(screen.getByRole("button", { name: "Save board" }))
+  await screen.findByText("Canvas sequence 2")
+  canonical = { ...canonical, seq: 3, records: [{ ...canonical.records[0], element_rev: 3, element: { ...canonical.records[0].element!, x: 800, y: 900 } }] }
+  await act(async () => { await view.client.invalidateQueries({ queryKey: ["page-board"] }) })
+  await screen.findByText("Canvas sequence 3")
+  fireEvent.click(screen.getByRole("button", { name: "Undo last saved change" }))
+  await screen.findByText(/can no longer be undone/)
+  expect(writes).toHaveLength(1)
+})
+
+it('keeps a successful save but withholds undo when legacy receipt proof is missing', async () => {
+  missingUndoProof = true
+  mount(); fireEvent.click(await screen.findByRole('button', { name: 'Draw rectangle' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save board' }))
+  await screen.findByText('Canvas sequence 2')
+  await screen.findByText(/server did not provide complete revision or expiration proof/)
+  expect(screen.getByRole('button', { name: 'Undo last saved change' })).toBeDisabled()
+})
+it('disables saved undo at the original expired server deadline', async () => {
+  expiredUndo = true
+  mount(); fireEvent.click(await screen.findByRole('button', { name: 'Draw rectangle' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save board' }))
+  await screen.findByText('Canvas sequence 2')
+  expect(screen.getByRole('button', { name: 'Undo last saved change' })).toBeDisabled()
+  expect(screen.getByText(/Saved undo expires after 24 hours/)).toBeTruthy()
 })

@@ -99,11 +99,17 @@ func newPageBoardDownloadCommand() *cobra.Command {
 			return err
 		}
 		_, writeErr := file.Write(content)
-		closeErr := file.Close()
-		if writeErr != nil {
-			return writeErr
+		if writeErr == nil {
+			writeErr = file.Sync()
 		}
-		if closeErr != nil {
+		closeErr := file.Close()
+		if writeErr != nil || closeErr != nil {
+			// This path was created exclusively by this invocation. Never leave
+			// a partial download looking like a successfully exported image.
+			_ = os.Remove(output)
+			if writeErr != nil {
+				return writeErr
+			}
 			return closeErr
 		}
 		return resolvedFormatter(cmd).AutoHuman(map[string]any{"file_id": args[1], "bytes": len(content), "output": output}, func() { fmt.Fprintf(cmd.OutOrStdout(), "Saved %d bytes\n", len(content)) })

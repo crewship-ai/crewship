@@ -150,7 +150,7 @@ func TestBoardFilesSceneReferenceAndBackupFork(t *testing.T) {
 	artifactExpect(t, boardCall(t, h, ws, user, "OWNER", "report", "batch", body), 201)
 	element["fileId"] = "foreign-file"
 	drawing, _ = json.Marshal(element)
-	artifactExpect(t, boardCall(t, h, ws, user, "OWNER", "report", "batch", fmt.Sprintf(`{"mutation_id":"foreign","base_seq":2,"upserts":[{"expected_rev":1,"element":%s}]}`, drawing)), 400)
+	artifactExpect(t, boardCall(t, h, ws, user, "OWNER", "report", "batch", fmt.Sprintf(`{"mutation_id":"foreign","base_seq":2,"upserts":[{"expected_rev":2,"element":%s}]}`, drawing)), 400)
 	const pass = "board-raster-backup-password"
 	created, err := backup.CreateBackup(t.Context(), h.db, backup.CreateOptions{Scope: backup.ScopeWorkspace, WorkspaceID: ws, OutputDir: t.TempDir(), Passphrase: pass, Actor: backup.Actor{UserID: user, Role: "ADMIN"}, AttachmentRoot: h.artifactStoragePath})
 	if err != nil {
@@ -184,7 +184,7 @@ func TestBoardFilesSceneReferenceAndBackupFork(t *testing.T) {
 		})
 	}
 	// Deleting an element keeps the file for explicit undo/restore.
-	artifactExpect(t, boardCall(t, h, ws, user, "OWNER", "report", "batch", `{"mutation_id":"delete-image","base_seq":2,"deletes":[{"id":"board-image","expected_rev":1}]}`), 201)
+	artifactExpect(t, boardCall(t, h, ws, user, "OWNER", "report", "batch", `{"mutation_id":"delete-image","base_seq":2,"deletes":[{"id":"board-image","expected_rev":2}]}`), 201)
 	if n, err := reclaimAttachmentBlobs(t.Context(), h.db, h.artifactStoragePath, ws); err != nil || n != 0 {
 		t.Fatalf("image tombstone lost undo bytes: %d %v", n, err)
 	}
@@ -233,4 +233,32 @@ func uploadedImageSize(t *testing.T, h *PageHandler, file string) int {
 		t.Fatal(err)
 	}
 	return size
+}
+
+func TestBoardFilesRestoredBytesAreValidatedOnRead(t *testing.T) {
+	h, ws, user, page := boardFileFixture(t)
+	huge := append([]byte(nil), boardRaster(t, false)...)
+	binary.BigEndian.PutUint32(huge[16:20], 2049)
+	binary.BigEndian.PutUint32(huge[29:33], crc32.ChecksumIEEE(huge[12:29]))
+	for i, data := range [][]byte{[]byte("<svg onload='unsafe-restored-file'/>"), huge, boardRaster(t, true), bytes.Repeat([]byte("x"), maxBoardFileOutput+1)} {
+		sha, _, err := storeAttachmentBlob(h.artifactStoragePath, ws, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file := fmt.Sprint("restored-malformed-", i)
+		// Model a restored metadata/blob pair that did not pass the upload decoder.
+		execOrFatal(t, h.db, `INSERT INTO page_board_files(id,board_page_id,sha256,content_type,width,height,byte_size,created_at) VALUES(?,?,?,'image/png',4,3,1,'2020-01-01T00:00:00.000Z')`, file, page, sha)
+		rr := boardFileRead(t, h, ws, user, "report", file)
+		artifactExpect(t, rr, 503)
+		if rr.Header().Get("Content-Type") == "image/png" || bytes.Contains(rr.Body.Bytes(), []byte("unsafe-restored-file")) {
+			t.Fatal("restored unsafe image bytes escaped validation")
+		}
+	}
+	r := pagesGrantRequest(t, "GET", "/", ws, user, "OWNER", "")
+	r.Header.Set(actingAgentSlugHeader, "agent")
+	r.SetPathValue("slug", "report")
+	r.SetPathValue("fileId", "restored-malformed-0")
+	rr := httptest.NewRecorder()
+	h.GetBoardFile(rr, r)
+	artifactExpect(t, rr, 401)
 }

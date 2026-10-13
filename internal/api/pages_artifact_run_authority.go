@@ -112,6 +112,12 @@ func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *ar
 	if err != nil {
 		return err
 	}
+	if a.RequestID != "" {
+		var role string
+		if q.QueryRowContext(ctx, `SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, a.WorkspaceID, a.HumanUserID).Scan(&role) != nil || !h.mayEditSpec(ctx, a.WorkspaceID, a.HumanUserID, role, rec) {
+			return errors.New("artifact request editor authority revoked")
+		}
+	}
 	if !h.agentMayEditSpec(ctx, a.WorkspaceID, rec, a.AgentID) {
 		return errors.New("agent page write grant required")
 	}

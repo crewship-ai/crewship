@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/pages"
@@ -129,6 +130,17 @@ func (h *PageHandler) UploadBoardFile(w http.ResponseWriter, r *http.Request) {
 		h.boardError(w, err)
 		return
 	}
+	if expired, e := boardHistoryExpired(r.Context(), tx, rec.ID, mutation); e != nil {
+		h.boardError(w, e)
+		return
+	} else if expired {
+		h.boardError(w, errBoardHistoryExpired)
+		return
+	}
+	if err = h.compactBoardHistory(r.Context(), tx, rec.ID); err != nil {
+		h.boardError(w, err)
+		return
+	}
 	if err = tx.QueryRowContext(r.Context(), `SELECT seq FROM page_boards WHERE page_id=?`, rec.ID).Scan(&head); err != nil {
 		h.boardError(w, err)
 		return
@@ -184,6 +196,33 @@ func (h *PageHandler) writeBoardFileResult(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, status, map[string]any{"file_id": file, "content_type": mime, "width": width, "height": height, "bytes": size, "seq": seq, "result_seq": result})
 }
+
+var boardFileReadSlots = make(chan struct{}, 4)
+
+func readBoardRaster(root, workspace, sha, mime string) ([]byte, int, int, error) {
+	if root == "" {
+		return nil, 0, 0, errors.New("storage unavailable")
+	}
+	path, err := attachmentBlobPath(root, workspace, sha)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxBoardFileOutput+1))
+	if err != nil || len(data) > maxBoardFileOutput || attachmentDigest(data) != sha {
+		return nil, 0, 0, errors.New("invalid image bytes")
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 2048 || config.Height > 2048 || (format != "png" && format != "jpeg") || mime != "image/"+format {
+		return nil, 0, 0, errors.New("invalid stored raster")
+	}
+	return data, config.Width, config.Height, nil
+}
+
 func (h *PageHandler) GetBoardFile(w http.ResponseWriter, r *http.Request) {
 	if agent, _ := pageGrantCallerIsAgent(r); agent || projectAgentFrom(r.Context()) != nil {
 		replyError(w, 401, "human authentication required")
@@ -195,6 +234,13 @@ func (h *PageHandler) GetBoardFile(w http.ResponseWriter, r *http.Request) {
 	}
 	if !rec.HasBoard {
 		replyError(w, 404, "board not found")
+		return
+	}
+	select {
+	case boardFileReadSlots <- struct{}{}:
+		defer func() { <-boardFileReadSlots }()
+	case <-r.Context().Done():
+		replyError(w, 408, "board image read cancelled")
 		return
 	}
 	tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
@@ -217,11 +263,13 @@ func (h *PageHandler) GetBoardFile(w http.ResponseWriter, r *http.Request) {
 		h.boardError(w, err)
 		return
 	}
-	data, err := readAttachmentBlob(h.artifactStoragePath, WorkspaceIDFromContext(ctx), sha)
-	if err != nil || attachmentDigest(data) != sha {
+	data, width, height, err := readBoardRaster(h.artifactStoragePath, WorkspaceIDFromContext(ctx), sha, mime)
+	if err != nil {
 		replyError(w, 503, "board file unavailable")
 		return
 	}
+	w.Header().Set("X-Crewship-Image-Width", strconv.Itoa(width))
+	w.Header().Set("X-Crewship-Image-Height", strconv.Itoa(height))
 	w.Header().Set("Content-Type", mime)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")

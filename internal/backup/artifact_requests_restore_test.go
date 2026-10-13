@@ -23,3 +23,20 @@ func TestArtifactRequestRestoreSuspendsAuthorityPreservesHistory(t *testing.T) {
 		})
 	}
 }
+
+func TestBoardRequestRestoreSuspendsExecutionPreservesHistory(t *testing.T) {
+	for _, state := range []string{"queued", "running", "ready_to_insert", "inserted", "succeeded", "failed", "cancelled"} {
+		original := map[string]any{"status": state, "receipt_json": "live authority", "run_id": "historical-run", "snapshot_json": "immutable scene", "result_revision": 4}
+		got := safeArtifactRequestRestoreRow("page_board_requests", original)
+		if got["receipt_json"] != "" || got["run_id"] != "historical-run" || got["snapshot_json"] != "immutable scene" || got["result_revision"] != 4 {
+			t.Fatalf("lost history or retained authority: %+v", got)
+		}
+		expected := state
+		if state == "queued" || state == "running" {
+			expected = "failed"
+		}
+		if got["status"] != expected || original["receipt_json"] != "live authority" {
+			t.Fatalf("state/input changed: %+v", got)
+		}
+	}
+}

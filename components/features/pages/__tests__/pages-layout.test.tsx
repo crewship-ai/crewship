@@ -13,6 +13,8 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
+const access = vi.hoisted(() => ({role: "MANAGER" as string | null, capabilities: [] as string[], loading: false, error: false}))
+vi.mock("@/hooks/use-workspace", () => ({useWorkspace: () => ({...access, workspaceId: "ws-1", workspaces: [{id:"ws-1",currentUserRole:access.role}], workspace:{id:"ws-1"}})}))
 const push = vi.fn()
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn() }),
@@ -120,6 +122,7 @@ function renderLayout(list: WirePage[], slug?: string) {
 describe("PagesLayout", () => {
   beforeEach(() => {
     cleanup()
+    Object.assign(access, {role:"MANAGER",capabilities:[],loading:false,error:false})
     push.mockReset()
     // The editor's mode and section live in the address now, so a test that
     // left `?mode=edit` there would hand it to the next one. (resets the
@@ -127,6 +130,42 @@ describe("PagesLayout", () => {
     window.history.replaceState(null, "", "/pages")
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it("keeps readable Pages while hiding creation and import for VIEWER without page.create", async () => {
+    access.role = "VIEWER"
+    renderLayout([FLEET])
+    await waitFor(() => expect(screen.getByText("Flotila .201")).toBeTruthy())
+    expect(screen.queryByRole("button", {name:/^New page$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New board$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New artifact$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^Import$/})).toBeNull()
+  })
+
+  it("offers no creation shortcut in an empty VIEWER catalog", () => {
+    access.role="VIEWER"
+    renderLayout([])
+    expect(screen.queryByRole("button", {name:/^New page$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New board$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New artifact$/})).toBeNull()
+    expect(screen.queryByText(/Or author one as YAML/)).toBeNull()
+  })
+
+  it.each(["OWNER", "ADMIN", "MANAGER"])("preserves %s creation and import", (role) => {
+    access.role=role
+    renderLayout([])
+    expect(screen.getAllByRole("button", {name:/^New page$/}).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole("button", {name:/^Import$/}).length).toBeGreaterThan(0)
+    expect(screen.getByRole("button", {name:/^New board$/})).toBeTruthy()
+    expect(screen.getByRole("button", {name:/^New artifact$/})).toBeTruthy()
+  })
+  it("preserves an explicit VIEWER page.create grant", () => {
+    access.role="VIEWER";access.capabilities=["page.create"]
+    renderLayout([])
+    expect(screen.getAllByRole("button", {name:/^New page$/}).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole("button", {name:/^Import$/}).length).toBeGreaterThan(0)
+    expect(screen.getByRole("button", {name:/^New board$/})).toBeTruthy()
+    expect(screen.getByRole("button", {name:/^New artifact$/})).toBeTruthy()
+  })
 
   it("writes the header line as '<n> pages · <n> stale'", async () => {
     renderLayout([FLEET, CLOSE])

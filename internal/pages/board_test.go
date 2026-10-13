@@ -24,7 +24,7 @@ func boardFixture(t *testing.T, id string, changes map[string]any) json.RawMessa
 }
 func boardScene(t *testing.T, elements ...json.RawMessage) BoardScene {
 	t.Helper()
-	s := BoardScene{Records: map[string]BoardRecord{}}
+	s := BoardScene{Seq: 1, Records: map[string]BoardRecord{}}
 	for _, raw := range elements {
 		e, err := ValidateBoardElement(raw)
 		if err != nil {
@@ -74,7 +74,7 @@ func TestBoardLinearAndTextBounds(t *testing.T) {
 func TestBoardBatchCASAndAtomicity(t *testing.T) {
 	current := boardScene(t, boardFixture(t, "a", nil), boardFixture(t, "b", nil))
 	before, _ := json.Marshal(current)
-	batch := BoardBatch{BaseSeq: 0, Upserts: []BoardUpsert{{Element: boardFixture(t, "a", map[string]any{"x": 30, "version": 999999, "versionNonce": 999999}), ExpectedRev: 1}, {Element: boardFixture(t, "b", nil), ExpectedRev: 2}}}
+	batch := BoardBatch{BaseSeq: 1, Upserts: []BoardUpsert{{Element: boardFixture(t, "a", map[string]any{"x": 30, "version": 999999, "versionNonce": 999999}), ExpectedRev: 1}, {Element: boardFixture(t, "b", nil), ExpectedRev: 2}}}
 	if _, err := ApplyBoardBatch(current, batch); !errors.Is(err, ErrBoardConflict) {
 		t.Fatalf("want conflict: %v", err)
 	}
@@ -87,13 +87,13 @@ func TestBoardBatchCASAndAtomicity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.Seq != 1 || next.Records["a"].ElementRev != 2 {
+	if next.Seq != 2 || next.Records["a"].ElementRev != 2 {
 		t.Fatal("server revisions not advanced")
 	}
 	if _, err := ApplyBoardBatch(next, batch); !errors.Is(err, ErrBoardConflict) {
 		t.Fatalf("stale sequence accepted: %v", err)
 	}
-	batch.BaseSeq = 1
+	batch.BaseSeq = 2
 	batch.Upserts[0].ExpectedRev = 1
 	if _, err := ApplyBoardBatch(next, batch); !errors.Is(err, ErrBoardConflict) {
 		t.Fatalf("rendering metadata overrode server revision: %v", err)
@@ -106,14 +106,14 @@ func TestBoardBatchCASAndAtomicity(t *testing.T) {
 }
 func TestBoardDeletionAndExplicitRestore(t *testing.T) {
 	current := boardScene(t, boardFixture(t, "a", nil))
-	deleted, err := ApplyBoardBatch(current, BoardBatch{Deletes: []BoardDelete{{ID: "a", ExpectedRev: 1}}})
+	deleted, err := ApplyBoardBatch(current, BoardBatch{BaseSeq: current.Seq, Deletes: []BoardDelete{{ID: "a", ExpectedRev: 1}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !deleted.Records["a"].Deleted || deleted.Records["a"].ElementRev != 2 {
 		t.Fatal("missing tombstone")
 	}
-	restore := BoardBatch{BaseSeq: 1, Upserts: []BoardUpsert{{Element: boardFixture(t, "a", nil), ExpectedRev: 0}}}
+	restore := BoardBatch{BaseSeq: 2, Upserts: []BoardUpsert{{Element: boardFixture(t, "a", nil), ExpectedRev: 0}}}
 	if _, err := ApplyBoardBatch(deleted, restore); !errors.Is(err, ErrBoardConflict) {
 		t.Fatal("tombstone reused without expected revision")
 	}
@@ -133,10 +133,10 @@ func TestBoardGraphValidation(t *testing.T) {
 	if err := ValidateBoardScene(current); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ApplyBoardBatch(current, BoardBatch{Deletes: []BoardDelete{{ID: "frame", ExpectedRev: 1}}}); err == nil {
+	if _, err := ApplyBoardBatch(current, BoardBatch{BaseSeq: current.Seq, Deletes: []BoardDelete{{ID: "frame", ExpectedRev: 1}}}); err == nil {
 		t.Fatal("dangling frame accepted")
 	}
-	next, err := ApplyBoardBatch(current, BoardBatch{Deletes: []BoardDelete{{ID: "frame", ExpectedRev: 1}}, Upserts: []BoardUpsert{{Element: boardFixture(t, "child", nil), ExpectedRev: 1}}})
+	next, err := ApplyBoardBatch(current, BoardBatch{BaseSeq: current.Seq, Deletes: []BoardDelete{{ID: "frame", ExpectedRev: 1}}, Upserts: []BoardUpsert{{Element: boardFixture(t, "child", nil), ExpectedRev: 1}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestBoardRelationshipReciprocity(t *testing.T) {
 }
 
 func TestBoardSceneAndBatchLimits(t *testing.T) {
-	s := BoardScene{Records: map[string]BoardRecord{}}
+	s := BoardScene{Seq: 1, Records: map[string]BoardRecord{}}
 	for i := 0; i < MaxBoardElements; i++ {
 		id := fmt.Sprintf("e%d", i)
 		s.Records[id] = BoardRecord{Element: boardFixture(t, id, nil), ElementRev: 1}
@@ -259,7 +259,7 @@ func TestBoardSceneAndBatchLimits(t *testing.T) {
 	for i := range ops {
 		ops[i] = BoardDelete{ID: fmt.Sprintf("e%d", i), ExpectedRev: 1}
 	}
-	if _, err := ApplyBoardBatch(s, BoardBatch{Deletes: ops}); err == nil {
+	if _, err := ApplyBoardBatch(s, BoardBatch{BaseSeq: s.Seq, Deletes: ops}); err == nil {
 		t.Fatal("operation limit not enforced")
 	}
 }
@@ -271,5 +271,24 @@ func TestBoardExactFieldNamesAndPressureNumbers(t *testing.T) {
 	}
 	if _, err := ValidateBoardElement(boardFixture(t, "a", map[string]any{"type": "freedraw", "points": [][]int{{0, 0}, {1, 1}}, "pressures": []any{nil, 0.5}})); err == nil {
 		t.Fatal("null pressure accepted")
+	}
+}
+
+// Captured from the real pinned React editor by library.spec.ts. This proves
+// the public converter's grouped library output satisfies our server profile.
+func TestBoardLocalLibraryBrowserFixture(t *testing.T) {
+	raw, err := os.ReadFile("testdata/board-library-0.18.1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var elements []json.RawMessage
+	if err = json.Unmarshal(raw, &elements); err != nil {
+		t.Fatal(err)
+	}
+	if len(elements) != 32 {
+		t.Fatalf("unexpected library fixture size: %d", len(elements))
+	}
+	if err := ValidateBoardScene(boardScene(t, elements...)); err != nil {
+		t.Fatal(err)
 	}
 }

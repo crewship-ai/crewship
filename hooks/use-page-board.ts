@@ -6,9 +6,9 @@ import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { pagesKeys } from "@/hooks/use-pages"
 import type { BoardElement, BoardBatch } from "@/lib/boards/revision-adapter"
-export interface PageBoardRecord { element_id: string; element_rev: number; element: BoardElement | null; deleted: boolean }
-export interface BoardPlacement { id: string; x: number; y: number; width: number; height: number; source?: { page_slug: string; revision: number; title: string } }
-export interface PageBoard { format: string; seq: number; records: PageBoardRecord[]; placements: BoardPlacement[]; can_write: boolean }
+export interface PageBoardRecord { author_user_id?: string; author_agent_id?: string; author_run_id?: string; element_id: string; element_rev: number; element: BoardElement | null; deleted: boolean }
+export interface BoardPlacement { id: string; placement_rev?: number; x: number; y: number; width: number; height: number; source?: { page_slug: string; revision: number; title: string } }
+export interface PageBoard { format: string; seq: number; records: PageBoardRecord[]; placements: BoardPlacement[]; placement_tombstones?: { id: string; placement_rev: number; deleted: true }[]; can_write: boolean }
 export class PageBoardError extends Error { constructor(message: string, public status: number) { super(message) } }
 export type BoardWrite = { kind: "batch"; batch: BoardBatch } | { kind: "pin"; source_page_slug: string; source_revision: number; x: number; y: number; width: number; height: number } | { kind: "unpin"; id: string }
 export function usePageBoard(workspace: string, slug: string) {
@@ -18,7 +18,9 @@ export function usePageBoard(workspace: string, slug: string) {
   const params = new URLSearchParams({ workspace_id: workspace })
   const [accessError, setAccessError] = useState<PageBoardError | null>(null)
   const pending = useRef(new Map<string, string>())
-  useEffect(() => { pending.current.clear(); setAccessError(null) }, [workspace, slug])
+  const receipt = useRef<import("@/lib/boards/command-history").BoardReceipt | null>(null)
+  const [uncertain, setUncertain] = useState(false)
+  useEffect(() => { pending.current.clear(); receipt.current = null; setUncertain(false); setAccessError(null) }, [workspace, slug])
   const invalidate = useCallback(() => { void client.invalidateQueries({ queryKey: ["page-board", workspace, slug] }) }, [client, workspace, slug])
   useRealtimeEventSafe("page.updated", invalidate)
   useRealtimeEventSafe("page.deleted", invalidate)
@@ -42,15 +44,19 @@ export function usePageBoard(workspace: string, slug: string) {
         if (pending.current.size >= 32) throw new Error("Too many unconfirmed changes. Retry an earlier save before creating another.")
         pending.current.set(stamp, crypto.randomUUID())
       }
+      receipt.current = null
+      setUncertain(true)
       const { operation } = input
       const path = operation.kind === "batch" ? `${endpoint}/batches` : operation.kind === "pin" ? `${endpoint}/placements` : `${endpoint}/placements/${encodeURIComponent(operation.id)}`
       const payload = operation.kind === "batch" ? operation.batch : operation.kind === "pin" ? { source_page_slug: operation.source_page_slug, source_revision: operation.source_revision, x: operation.x, y: operation.y, width: operation.width, height: operation.height, base_seq: input.base_seq } : { base_seq: input.base_seq }
       const response = await apiFetch(`${path}?${params}`, { method: operation.kind === "unpin" ? "DELETE" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, mutation_id: pending.current.get(stamp) }), signal: AbortSignal.timeout(20000) })
       const body = await response.json().catch(() => null)
-      if (!response.ok) throw new PageBoardError(body?.error ?? "Could not save the board. Retry the same save to check its outcome.", response.status)
+      if (!response.ok) { if (response.status < 500) setUncertain(false); throw new PageBoardError(body?.error ?? "Could not save the board. Retry the same save to check its outcome.", response.status) }
       // Retain identity until the authoritative read also succeeds. A lost GET
       // must not turn a committed but uncertain save into a second mutation.
       const canonical = await read()
+      receipt.current = body
+      setUncertain(false)
       pending.current.delete(stamp)
       client.setQueryData(key, canonical)
       await client.invalidateQueries({ queryKey: pagesKeys.all(workspace) })
@@ -58,5 +64,5 @@ export function usePageBoard(workspace: string, slug: string) {
     },
     onError: error => { if (error instanceof PageBoardError && [401, 403, 404, 409].includes(error.status)) invalidate() },
   })
-  return { query: { ...query, data: denied || accessError ? undefined : query.data, error: accessError ?? query.error }, write }
+  return { query: { ...query, data: denied || accessError ? undefined : query.data, error: accessError ?? query.error }, write, receipt, uncertain }
 }

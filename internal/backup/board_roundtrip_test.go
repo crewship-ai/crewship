@@ -55,6 +55,7 @@ func TestBoardBackupForkPinsAndDeletedSourcePlaceholder(t *testing.T) {
 	exec(`INSERT INTO page_board_elements(board_page_id,element_id,element_rev,element_json,author_user_id,updated_seq) VALUES('board-page','deleted-shape',2,NULL,'u_admin',3)`)
 	exec(`INSERT INTO page_board_artifact_placements(id,board_page_id,source_page_id,source_revision,x,y,width,height,updated_seq,author_user_id) VALUES('placement','board-page','source-page',1,10,20,300,200,2,'u_admin')`)
 	exec(`INSERT INTO page_board_mutations(board_page_id,mutation_id,author_user_id,fingerprint,result_seq,placement_id,created_at) VALUES('board-page','mutation','u_admin','fingerprint',2,'placement','2020-01-01T00:00:00.000Z')`)
+	exec(`INSERT INTO page_board_write_audit(board_page_id,mutation_id,actor_user_id,result_seq,request_digest,created_at) VALUES('board-page','mutation','u_admin',2,'fingerprint','2020-01-01T00:00:00.000Z')`)
 	exec(`INSERT INTO users(id,email) VALUES('board-reader','board-reader@example.test')`)
 	exec(`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('board-reader-member',?,'board-reader','MEMBER')`, workspace)
 	exec(`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES('board-page','user','board-reader','read','u_admin','2020-01-01T00:00:00.000Z')`)
@@ -93,6 +94,10 @@ func TestBoardBackupForkPinsAndDeletedSourcePlaceholder(t *testing.T) {
 			var tombstones int
 			if err = target.QueryRow(`SELECT COUNT(*) FROM page_board_elements WHERE board_page_id=? AND element_id='deleted-shape' AND element_json IS NULL AND element_rev=2`, boardID).Scan(&tombstones); err != nil || tombstones != 1 {
 				t.Fatalf("board tombstone lost: %d %v", tombstones, err)
+			}
+			var audits int
+			if err = target.QueryRow(`SELECT COUNT(*) FROM page_board_write_audit a JOIN users u ON u.id=a.actor_user_id WHERE a.board_page_id=? AND a.result_seq=2 AND a.request_digest='fingerprint'`, boardID).Scan(&audits); err != nil || audits != 1 {
+				t.Fatalf("durable audit lost on restore/fork: %d %v", audits, err)
 			}
 			var grants int
 			if err = target.QueryRow(`SELECT COUNT(*) FROM page_grants WHERE page_id=?`, sourceID).Scan(&grants); err != nil || grants != 0 {

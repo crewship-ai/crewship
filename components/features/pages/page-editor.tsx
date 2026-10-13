@@ -1,5 +1,7 @@
 "use client"
 
+import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
+
 /**
  * The in-app page editor — PRD `docs/specs/pages.md` §10b.1.
  *
@@ -792,6 +794,8 @@ export function PageEditor({
   onClose,
   onSaved,
 }: PageEditorProps) {
+  const canCreatePage = usePageCreationAccess(workspaceId)
+  const creationDenied = mode === "create" && !canCreatePage
   const sealed = sealedPanelCount(page)
 
   const initial = React.useMemo(() => {
@@ -925,7 +929,7 @@ export function PageEditor({
     // editor, so the two conditions that disable the button have to hold here
     // too. The shell's contract: "No-op when the form is not submittable —
     // guard inside the handler."
-    if (save.isPending || sealed > 0) return
+    if (save.isPending || sealed > 0 || creationDenied) return
     // Pull the latest doc out of CodeMirror first: FileEditor only hands its
     // buffer back through onSave, and reading React state here would send the
     // value from before the last keystroke.
@@ -1104,6 +1108,7 @@ export function PageEditor({
           the editor, and the only thing that changed is which side of the
           buffer it is on. No `onDismiss`, because it already clears itself the
           moment the buffer changes. */}
+      {creationDenied && <CreateSurfaceRefusal message="You do not currently have permission to create Pages in this workspace. Your draft is preserved." />}
       {refusal && (
         <div data-testid="page-editor-refusal">
           <CreateSurfaceRefusal message={<span className="font-mono">{refusal}</span>} />
@@ -1128,7 +1133,7 @@ export function PageEditor({
         // clickable during a save is the whole reason `guardedDirty` includes
         // `save.isPending`. So the spinner rides in the label instead.
         primaryIcon={save.isPending ? undefined : Save}
-        primaryDisabled={save.isPending || sealed > 0}
+        primaryDisabled={save.isPending || sealed > 0 || creationDenied}
         onPrimary={handleSave}
       />
     </CreateSurface>

@@ -171,6 +171,13 @@ func TestInstall_Idempotent(t *testing.T) {
 	if first != second {
 		t.Errorf("idempotency broken: %d -> %d", first, second)
 	}
+	var artifactCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM skills WHERE vendor='crewship' AND slug='crewship-artifacts' AND category='CODING' AND spdx_license='Apache-2.0'`).Scan(&artifactCount); err != nil {
+		t.Fatal(err)
+	}
+	if artifactCount != 1 {
+		t.Fatalf("artifact authoring skill must install once with its first-party metadata, got %d", artifactCount)
+	}
 }
 
 type discardWriter struct{}

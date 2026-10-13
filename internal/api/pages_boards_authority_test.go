@@ -168,7 +168,7 @@ func TestBoardAgentProtectionGraph(t *testing.T) {
 	}
 	for name, elements := range cases {
 		t.Run(name, func(t *testing.T) {
-			current := pages.BoardScene{Records: map[string]pages.BoardRecord{}}
+			current := pages.BoardScene{Seq: 1, Records: map[string]pages.BoardRecord{}}
 			authors := map[string]boardElementAuthor{}
 			for _, raw := range elements {
 				e, err := pages.ValidateBoardElement(raw)
@@ -186,7 +186,7 @@ func TestBoardAgentProtectionGraph(t *testing.T) {
 			_ = json.Unmarshal(current.Records["own"].Element, &fields)
 			fields["x"] = 100
 			changed, _ := json.Marshal(fields)
-			batch := pages.BoardBatch{Upserts: []pages.BoardUpsert{{Element: changed, ExpectedRev: 1}}}
+			batch := pages.BoardBatch{BaseSeq: 1, Upserts: []pages.BoardUpsert{{Element: changed, ExpectedRev: 1}}}
 			next, err := pages.ApplyBoardBatch(current, batch)
 			if err != nil {
 				t.Fatal(err)

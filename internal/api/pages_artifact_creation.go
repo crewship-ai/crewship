@@ -48,7 +48,7 @@ func (h *PageHandler) checkArtifactCreationPublication(ctx context.Context, page
 	if err != nil || !time.Now().Before(deadline) || revoked.Valid {
 		return errors.New("creation authorization expired or revoked")
 	}
-	return nil
+	return h.checkBoardJobCreation(ctx, a, true)
 }
 
 func (h *PageHandler) humanCreationAuthorizationTx(w http.ResponseWriter, r *http.Request) (*sql.Tx, *http.Request, *artifactRunAuthority, string, bool) {
@@ -277,6 +277,10 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 		artifactCommentError(w, 403, "creation_authorization_required", "artifact creation authorization expired or revoked")
 		return
 	}
+	if err := h.checkBoardJobCreation(ctx, a, true); err != nil {
+		replyError(w, 403, err.Error())
+		return
+	}
 	var pageID, oldDigest, oldHuman, oldAgent, slug string
 	var head int64
 	err = tx.QueryRowContext(ctx, `SELECT c.page_id,c.request_digest,COALESCE(c.human_user_id,''),COALESCE(c.agent_id,''),p.slug,s.head_rev FROM page_artifact_creations c JOIN pages p ON p.id=c.page_id JOIN page_artifacts s ON s.page_id=p.id WHERE c.run_id=? AND c.mutation_id=? AND p.workspace_id=?`, a.RunID, req.MutationID, a.WorkspaceID).Scan(&pageID, &oldDigest, &oldHuman, &oldAgent, &slug, &head)
@@ -356,10 +360,18 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 		replyInternalError(w, h.logger, "consume artifact creation authorization", err)
 		return
 	}
+	if err := h.completeBoardJobCreation(r.WithContext(ctx), tx, a, pageID); err != nil {
+		replyInternalError(w, h.logger, "complete board artifact job", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit agent artifact creation", err)
 		return
 	}
 	broadcastWorkspaceEvent(h.hub, a.WorkspaceID, "page.updated", map[string]any{"page_id": pageID})
+	var updatedBoard string
+	if h.db.QueryRowContext(r.Context(), `SELECT board_page_id FROM page_board_requests WHERE run_id=? AND result_page_id=? AND pin_status='pinned'`, a.RunID, pageID).Scan(&updatedBoard) == nil {
+		broadcastWorkspaceEvent(h.hub, a.WorkspaceID, "page.updated", map[string]any{"page_id": updatedBoard})
+	}
 	writeJSON(w, 201, map[string]any{"page_id": pageID, "slug": req.Slug, "revision": 1, "head_rev": 1, "url": "/pages/" + req.Slug})
 }

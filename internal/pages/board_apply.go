@@ -54,7 +54,7 @@ func ApplyBoardBatch(current BoardScene, batch BoardBatch) (BoardScene, error) {
 	}
 	next := BoardScene{Seq: current.Seq + 1, Records: make(map[string]BoardRecord, len(current.Records)+len(batch.Upserts))}
 	for id, record := range current.Records {
-		if record.ElementRev < 1 || record.ElementRev >= 9007199254740991 || !boardID.MatchString(id) {
+		if record.ElementRev < 1 || record.ElementRev > current.Seq || record.ElementRev >= 9007199254740991 || !boardID.MatchString(id) {
 			return BoardScene{}, errors.New("invalid canonical board record")
 		}
 		record.Element = append(json.RawMessage(nil), record.Element...)
@@ -71,7 +71,11 @@ func ApplyBoardBatch(current BoardScene, batch BoardBatch) (BoardScene, error) {
 		}
 		// Tombstoned IDs cannot be silently reused. An explicit matching revision
 		// permits a deliberate restore/undo, still under the whole-board CAS.
-		next.Records[element.ID] = BoardRecord{Element: append(json.RawMessage(nil), upsert.Element...), ElementRev: upsert.ExpectedRev + 1}
+		revision := upsert.ExpectedRev + 1
+		if !present {
+			revision = next.Seq
+		}
+		next.Records[element.ID] = BoardRecord{Element: append(json.RawMessage(nil), upsert.Element...), ElementRev: revision}
 	}
 	for _, deleted := range batch.Deletes {
 		record, present := current.Records[deleted.ID]
@@ -98,7 +102,7 @@ func ValidateBoardScene(scene BoardScene) error {
 	elements := map[string]BoardElement{}
 	totalBytes := 0
 	for id, record := range scene.Records {
-		if !boardID.MatchString(id) || record.ElementRev < 1 || record.ElementRev >= 9007199254740991 {
+		if !boardID.MatchString(id) || record.ElementRev < 1 || record.ElementRev > scene.Seq || record.ElementRev >= 9007199254740991 {
 			return errors.New("invalid canonical board identity")
 		}
 		if record.Deleted {
