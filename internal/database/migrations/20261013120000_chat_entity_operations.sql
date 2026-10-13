@@ -35,3 +35,5 @@ CREATE TABLE chat_entity_refs (
  UNIQUE(chat_id, operation_id)
 );
 CREATE INDEX chat_entity_refs_scan ON chat_entity_refs(chat_id, chat_seq);
+-- Deletion receipts fan out from an operation/entity to its original chats.
+CREATE INDEX chat_entity_refs_operation ON chat_entity_refs(operation_id);
