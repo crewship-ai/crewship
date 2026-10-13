@@ -124,6 +124,18 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/delegations", roleSelf, p.GrantArtifactRun)
 	// openapi: responses 204,401,403,404,500,503
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/artifact/delegations/{runId}", roleSelf, p.RevokeArtifactRun)
+	// openapi: responses 200,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/requests", authed(wsCtx(http.HandlerFunc(p.ListArtifactRequests))))
+	// openapi: responses 202,400,401,403,404,409,413,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/requests", roleSelf, p.CreateArtifactRequest)
+	// openapi: responses 200,400,401,403,404,409,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/requests/{requestId}/cancel", roleSelf, p.CancelArtifactRequest)
+	// openapi: responses 200,201,400,401,403,404,409,413,500,503
+	r.authedMut("POST", "/api/v1/artifact-creation-authorizations/{runId}", roleSelf, p.AuthorizeArtifactCreation)
+	// openapi: responses 204,401,403,404,500,503
+	r.authedMut("DELETE", "/api/v1/artifact-creation-authorizations/{runId}", roleSelf, p.RevokeArtifactCreation)
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/chats/{chatId}/artifact-creation-authorization", authed(wsCtx(http.HandlerFunc(p.ArtifactCreationStatus))))
 	r.authedMut("POST", "/api/v1/pages", roleInline, p.Create)
 	r.authedMut("PATCH", "/api/v1/pages/{slug}", roleSelf, p.Update)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}", roleSelf, p.Delete)

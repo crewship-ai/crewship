@@ -589,6 +589,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			}
 			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/artifacts":
+				s.handleArtifactCreate(w, r)
+				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/artifacts/") && strings.HasSuffix(r.URL.Path, "/revisions"):
 				s.handleArtifactPublish(w, r)
 				return

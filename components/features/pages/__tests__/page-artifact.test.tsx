@@ -31,6 +31,7 @@ beforeEach(() => {
       head++; if (typeof body.html === "string") source = body.html
       return new Response(JSON.stringify({ head_rev: head, revision: head }))
     }
+    if (String(path).includes("/requests")) return new Response(JSON.stringify({ requests: [], eligible_chats: [], can_dispatch: false }))
     if (String(path).includes("/threads")) return new Response(JSON.stringify({ can_comment: true, can_resolve: true, threads: [{ id: "thread1", revision: 1, status: "open", version: 1, anchor: { schema_version: 1, type: "document" }, comments: [{ id: "comment1", body: "Discuss this revision", author_user_id: "user1", author_name: "Alice", created_at: "2026-10-13T00:00:00Z" }] }] }))
     if (readFail) return new Response(JSON.stringify({ error: "Access denied" }), { status: readFail })
     const selected = new URL(String(path), "https://studio.test").searchParams.get("revision")

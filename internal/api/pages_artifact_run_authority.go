@@ -39,36 +39,28 @@ func captureArtifactChatPrincipal(r *http.Request, db *sql.DB, run, ws, agent, c
 	return err
 }
 
-type artifactRunAuthority struct{ WorkspaceID, AgentID, CrewID, RunID, HumanUserID, ChatID, MessageID string }
+type artifactRunAuthority struct{ WorkspaceID, AgentID, CrewID, RunID, HumanUserID, ChatID, MessageID, RequestID string }
 type artifactRunKey struct{}
 
 // Checked again through pageAuthReader after the publication's SQLite write
 // fence. Journal terminal commits and ledger generation changes serialize with it.
-func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *artifactRunAuthority) error {
+func (h *PageHandler) checkArtifactRunPrincipal(ctx context.Context, a *artifactRunAuthority) error {
 	q := h.pageAuthReader(ctx)
 	var liveHuman int
 	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifact_run_principals p JOIN workspace_members wm ON wm.workspace_id=p.workspace_id AND wm.user_id=p.human_user_id AND wm.id=p.member_id AND wm.access_revision=p.member_revision JOIN chats c ON c.id=p.chat_id AND c.workspace_id=p.workspace_id AND c.agent_id=p.agent_id AND c.authority_generation=p.chat_generation AND c.authority_revision=p.chat_revision WHERE p.run_id=? AND NOT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=p.human_user_id AND access_mode='restricted')`, a.RunID).Scan(&liveHuman); err != nil || liveHuman != 1 {
 		return errors.New("human chat authority changed")
 	}
 
-	var expires, delegationExpires string
-	var revoked sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT p.expires_at,d.expires_at,d.revoked_at FROM artifact_run_principals p JOIN page_artifact_run_delegations d ON d.run_id=p.run_id AND d.page_id=? AND d.granted_by_user_id=p.human_user_id JOIN agents ag ON ag.id=p.agent_id AND ag.workspace_id=p.workspace_id AND ag.crew_id=p.crew_id AND ag.deleted_at IS NULL WHERE p.run_id=? AND p.workspace_id=? AND p.agent_id=? AND p.crew_id=? AND p.human_user_id=?`, pageID, a.RunID, a.WorkspaceID, a.AgentID, a.CrewID, a.HumanUserID).Scan(&expires, &delegationExpires, &revoked)
-	if err != nil {
-		return errors.New("artifact run delegation missing")
+	var expiry string
+	if err := q.QueryRowContext(ctx, `SELECT p.expires_at FROM artifact_run_principals p JOIN workspaces w ON w.id=p.workspace_id AND w.deleted_at IS NULL JOIN crews cr ON cr.id=p.crew_id AND cr.workspace_id=p.workspace_id AND cr.deleted_at IS NULL JOIN agents ag ON ag.id=p.agent_id AND ag.workspace_id=p.workspace_id AND ag.crew_id=p.crew_id AND ag.deleted_at IS NULL AND ag.expired_at IS NULL WHERE p.run_id=? AND p.workspace_id=? AND p.agent_id=? AND p.crew_id=? AND p.human_user_id=?`, a.RunID, a.WorkspaceID, a.AgentID, a.CrewID, a.HumanUserID).Scan(&expiry); err != nil {
+		return errors.New("artifact principal missing")
 	}
-	now := time.Now()
-	for _, v := range []string{expires, delegationExpires} {
-		t, e := time.Parse(time.RFC3339Nano, v)
-		if e != nil || !now.Before(t) {
-			return errors.New("artifact run delegation expired")
-		}
-	}
-	if revoked.Valid {
-		return errors.New("artifact run delegation revoked")
+	limit, e := time.Parse(time.RFC3339Nano, expiry)
+	if e != nil || !time.Now().Before(limit) {
+		return errors.New("artifact principal expired")
 	}
 	var started, ended int
-	err = q.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN entry_type='run.started' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') THEN 1 ELSE 0 END),0) FROM journal_entries WHERE workspace_id=? AND agent_id=? AND trace_id=?`, a.WorkspaceID, a.AgentID, a.RunID).Scan(&started, &ended)
+	err := q.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN entry_type='run.started' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') THEN 1 ELSE 0 END),0) FROM journal_entries WHERE workspace_id=? AND agent_id=? AND trace_id=?`, a.WorkspaceID, a.AgentID, a.RunID).Scan(&started, &ended)
 	if err != nil || started == 0 || ended != 0 {
 		return errors.New("artifact run is not live")
 	}
@@ -89,9 +81,31 @@ func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *ar
 	if err == nil && ((source != "chat" && source != "assignment") || (ledgerHuman != "" && ledgerHuman != a.HumanUserID) || itemWS != a.WorkspaceID || itemAgent != a.AgentID || itemCrew != a.CrewID || !memoryRunStateIsLive(state) || generation != attemptGeneration || endedAt.Valid) {
 		return errors.New("artifact work attempt is not current")
 	}
+	return nil
+}
+func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *artifactRunAuthority) error {
+	if err := h.checkArtifactRunPrincipal(ctx, a); err != nil {
+		return err
+	}
+	q := h.pageAuthReader(ctx)
+	var expiry string
+	var revoked sql.NullString
+	if err := q.QueryRowContext(ctx, `SELECT expires_at,revoked_at,COALESCE(request_id,'') FROM page_artifact_run_delegations WHERE page_id=? AND run_id=? AND granted_by_user_id=?`, pageID, a.RunID, a.HumanUserID).Scan(&expiry, &revoked, &a.RequestID); err != nil {
+		return errors.New("artifact run delegation missing")
+	}
+	limit, e := time.Parse(time.RFC3339Nano, expiry)
+	if e != nil || !time.Now().Before(limit) || revoked.Valid {
+		return errors.New("artifact run delegation expired or revoked")
+	}
+	if a.RequestID != "" {
+		var state string
+		if err := q.QueryRowContext(ctx, `SELECT status FROM page_artifact_requests WHERE id=? AND page_id=? AND run_id=? AND human_user_id=?`, a.RequestID, pageID, a.RunID, a.HumanUserID).Scan(&state); err != nil || (state != "running" && state != "succeeded") {
+			return errors.New("artifact request is not active")
+		}
+	}
 	// A delegation is explicit but it does not bypass Pages' agent grant.
 	var slug string
-	if err = q.QueryRowContext(ctx, `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, pageID, a.WorkspaceID).Scan(&slug); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, pageID, a.WorkspaceID).Scan(&slug); err != nil {
 		return err
 	}
 	rec, err := h.loadPage(ctx, a.WorkspaceID, slug)
@@ -101,7 +115,7 @@ func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *ar
 	if !h.agentMayEditSpec(ctx, a.WorkspaceID, rec, a.AgentID) {
 		return errors.New("agent page write grant required")
 	}
-	return nil
+	return h.checkArtifactCreationPublication(ctx, pageID, a)
 }
 
 // The same writer fence used by publication orders grants/revocation and live ACL changes.

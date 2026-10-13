@@ -3,10 +3,8 @@ package api
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -168,6 +166,7 @@ func (h *PageHandler) GetArtifact(w http.ResponseWriter, r *http.Request) {
 }
 
 type artifactMutation struct {
+	RequestID  string `json:"request_id,omitempty"`
 	HTML       string `json:"html"`
 	BaseRev    *int64 `json:"base_rev"`
 	MutationID string `json:"mutation_id"`
@@ -187,19 +186,22 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 	}
 	// JSON escaping can expand a 10 MiB document up to sixfold. Bound both the
 	// transport and the decoded UTF-8 source; the source limit is authoritative.
-	body, ok := readCapped(w, r, 6*maxArtifactHTMLBytes+4096, "artifact")
+	release, ok := acquireArtifactUpload(w, r)
 	if !ok {
 		return
 	}
+	defer release()
 	var req artifactMutation
-	dec := json.NewDecoder(strings.NewReader(string(body)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil || req.BaseRev == nil || *req.BaseRev < 0 || len(req.MutationID) < 1 || len(req.MutationID) > 128 || strings.TrimSpace(req.MutationID) != req.MutationID {
+	if !decodeArtifactJSON(w, r, &req) {
+		return
+	}
+	if req.BaseRev == nil || *req.BaseRev < 0 || len(req.MutationID) < 1 || len(req.MutationID) > 128 || strings.TrimSpace(req.MutationID) != req.MutationID {
 		replyError(w, 400, "base_rev and mutation_id are required")
 		return
 	}
-	if err := dec.Decode(new(any)); err != io.EOF {
-		replyError(w, 400, "artifact request must contain one JSON object")
+	authority, _ := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
+	if (authority == nil && req.RequestID != "") || (authority != nil && authority.RequestID != req.RequestID) {
+		replyError(w, 403, "artifact request binding mismatch")
 		return
 	}
 	var restoredFrom *int64
@@ -240,7 +242,11 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 	ws := WorkspaceIDFromContext(r.Context())
 	user := UserFromContext(r.Context())
 	sha := attachmentDigest([]byte(req.HTML))
-	fingerprint := attachmentDigest([]byte(fmt.Sprintf("%d/%t/%d/%s", *req.BaseRev, restore, req.Revision, sha)))
+	fingerprintInput := fmt.Sprintf("%d/%t/%d/%s", *req.BaseRev, restore, req.Revision, sha)
+	if req.RequestID != "" {
+		fingerprintInput += "/" + req.RequestID
+	}
+	fingerprint := attachmentDigest([]byte(fingerprintInput))
 	unlock := lockAttachmentBlob(ws, sha)
 	defer unlock()
 	if _, _, err := storeAttachmentBlob(h.artifactStoragePath, ws, []byte(req.HTML)); err != nil {
@@ -283,7 +289,7 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 	}
 	var previous int64
 	var oldDigest, oldAuthor, oldAgent, oldRun string
-	err = tx.QueryRowContext(ctx, `SELECT revision,request_digest,COALESCE(author_user_id,''),COALESCE(author_agent_id,''),COALESCE(author_run_id,'') FROM page_artifact_revisions WHERE page_id=? AND mutation_id=?`, rec.ID, req.MutationID).Scan(&previous, &oldDigest, &oldAuthor, &oldAgent, &oldRun)
+	err = tx.QueryRowContext(ctx, `SELECT revision,request_digest,COALESCE(author_user_id,''),COALESCE(author_agent_id,''),COALESCE(author_run_id,'') FROM page_artifact_mutation_receipts WHERE page_id=? AND mutation_id=?`, rec.ID, req.MutationID).Scan(&previous, &oldDigest, &oldAuthor, &oldAgent, &oldRun)
 	if err == nil {
 		if oldDigest != fingerprint || oldAuthor != user.ID || oldAgent != artifactAgentID(r) || oldRun != artifactRunID(r) {
 			replyError(w, 409, "mutation_id was already used for a different request")
@@ -296,12 +302,26 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		replyInternalError(w, h.logger, "read artifact retry", err)
 		return
 	}
+	if req.RequestID != "" {
+		var base int64
+		var state string
+		if tx.QueryRowContext(ctx, `SELECT base_rev,status FROM page_artifact_requests WHERE id=? AND page_id=? AND run_id=?`, req.RequestID, rec.ID, artifactRunID(r)).Scan(&base, &state) != nil || base != *req.BaseRev || state != "running" {
+			replyError(w, 409, "artifact request is no longer publishable")
+			return
+		}
+	}
 	if head != *req.BaseRev {
 		replyError(w, 409, "artifact revision changed; reload before saving")
 		return
 	}
-	if head >= maxArtifactRevisions {
-		writeJSON(w, 409, map[string]any{"error": "artifact revision limit reached", "code": "revision_limit"})
+	if err := reserveArtifactRevision(ctx, tx, rec.ID, req.Revision); err != nil {
+		if errors.Is(err, errArtifactRetentionPinned) {
+			writeJSON(w, 409, map[string]any{"error": err.Error(), "code": "retention_pinned"})
+		} else if errors.Is(err, errArtifactReceiptLimit) {
+			writeJSON(w, 409, map[string]any{"error": err.Error(), "code": "mutation_limit"})
+		} else {
+			replyInternalError(w, h.logger, "reserve artifact retention", err)
+		}
 		return
 	}
 	var incompatible int
@@ -315,7 +335,7 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 	}
 	now := h.clock.Now().UTC()
 	var recent int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_artifact_revisions WHERE page_id=? AND created_at>?`, rec.ID, tsformat.Format(now.Add(-time.Hour))).Scan(&recent); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_artifact_mutation_receipts WHERE page_id=? AND created_at>?`, rec.ID, tsformat.Format(now.Add(-time.Hour))).Scan(&recent); err != nil {
 		replyInternalError(w, h.logger, "check artifact revision rate", err)
 		return
 	}
@@ -324,9 +344,16 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		writeJSON(w, 429, map[string]any{"error": "artifact revision rate limit reached", "code": "rate_limited"})
 		return
 	}
+	if !h.enforceArtifactWorkspaceRate(w, r, tx, ws, now) {
+		return
+	}
 	revision := head + 1
 	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,author_user_id,mutation_id,request_digest,restored_from,created_at,author_agent_id,author_run_id) VALUES (?,?,?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''))`, generateCUID(), rec.ID, revision, sha, user.ID, req.MutationID, fingerprint, restoredFrom, tsformat.Format(now), artifactAgentID(r), artifactRunID(r)); err != nil {
 		replyInternalError(w, h.logger, "save artifact revision", err)
+		return
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_mutation_receipts(page_id,mutation_id,revision,request_digest,author_user_id,author_agent_id,author_run_id,created_at,restored_from) VALUES(?,?,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?,?)`, rec.ID, req.MutationID, revision, fingerprint, user.ID, artifactAgentID(r), artifactRunID(r), tsformat.Format(now), restoredFrom); err != nil {
+		replyInternalError(w, h.logger, "save artifact retry receipt", err)
 		return
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO page_artifacts(page_id,head_rev) VALUES (?,?) ON CONFLICT(page_id) DO UPDATE SET head_rev=excluded.head_rev`, rec.ID, revision); err != nil {
@@ -337,12 +364,23 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		replyInternalError(w, h.logger, "update artifact page", err)
 		return
 	}
+	if req.RequestID != "" {
+		result, e := tx.ExecContext(ctx, `UPDATE page_artifact_requests SET status='succeeded',result_revision=?,updated_at=? WHERE id=? AND page_id=? AND run_id=? AND status='running'`, revision, tsformat.Format(now), req.RequestID, rec.ID, artifactRunID(r))
+		if e != nil {
+			replyInternalError(w, h.logger, "complete artifact request", e)
+			return
+		}
+		if n, _ := result.RowsAffected(); n != 1 {
+			replyError(w, 409, "artifact request changed")
+			return
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit artifact revision", err)
 		return
 	}
 	if h.journal != nil {
-		_, err := h.journal.Emit(r.Context(), journal.Entry{WorkspaceID: ws, Type: journal.EntryPageSpecChanged, Severity: journal.SeverityInfo, ActorType: artifactActorType(r), ActorID: artifactActorID(r, user.ID), Summary: fmt.Sprintf("Artifact %s revision %d saved", rec.Slug, revision), Payload: map[string]any{"page_id": rec.ID, "page": rec.Slug, "artifact_revision": revision, "sha256": sha, "restored_from": restoredFrom, "on_behalf_of_user_id": user.ID, "agent_id": artifactAgentID(r), "run_id": artifactRunID(r)}})
+		_, err := h.journal.Emit(r.Context(), journal.Entry{WorkspaceID: ws, Type: journal.EntryPageSpecChanged, Severity: journal.SeverityInfo, ActorType: artifactActorType(r), ActorID: artifactActorID(r, user.ID), Summary: fmt.Sprintf("Artifact %s revision %d saved", rec.Slug, revision), Payload: map[string]any{"page_id": rec.ID, "page": rec.Slug, "artifact_revision": revision, "sha256": sha, "restored_from": restoredFrom, "on_behalf_of_user_id": user.ID, "agent_id": artifactAgentID(r), "run_id": artifactRunID(r), "request_id": req.RequestID}})
 		if err != nil && h.logger != nil {
 			h.logger.Warn("artifact revision audit failed", "error", err)
 		}

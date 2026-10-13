@@ -71,6 +71,8 @@ func TestArtifactRunPublicationRefusesStaleAuthority(t *testing.T) {
 		{"membership epoch", `UPDATE workspace_members SET access_revision=access_revision+1`},
 		{"chat epoch", `UPDATE chats SET authority_revision=authority_revision+1`},
 		{"removed human", `DELETE FROM workspace_members`},
+		{"deleted workspace", `UPDATE workspaces SET deleted_at='2026-01-01T00:00:00Z'`},
+		{"deleted crew", `UPDATE crews SET deleted_at='2026-01-01T00:00:00Z' WHERE id='artifact-crew'`},
 		{"deleted agent", `UPDATE agents SET deleted_at='2026-01-01T00:00:00Z' WHERE id='artifact-agent'`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -100,7 +102,7 @@ func TestArtifactRunRetryCannotCrossActorOrRun(t *testing.T) {
 	artifactExpect(t, artifactAgentSave(t, h, ws, token, body), 201)
 	artifactExpect(t, artifactSave(t, h, ws, user, "x", "same", 0), 409)
 	execOrFatal(t, h.db, `INSERT INTO artifact_run_principals SELECT 'second-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
-	execOrFatal(t, h.db, `INSERT INTO page_artifact_run_delegations SELECT page_id,'second-run',granted_by_user_id,expires_at,granted_at,NULL,NULL FROM page_artifact_run_delegations WHERE page_id=?`, page)
+	execOrFatal(t, h.db, `INSERT INTO page_artifact_run_delegations SELECT page_id,'second-run',granted_by_user_id,expires_at,granted_at,NULL,NULL,NULL FROM page_artifact_run_delegations WHERE page_id=?`, page)
 	execOrFatal(t, h.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('second-start',?,'artifact-crew','artifact-agent','run.started','system','test','second-run')`, ws)
 	second := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, ws, "artifact-crew"), ws, "artifact-agent", "second-run")
 	artifactExpect(t, artifactAgentSave(t, h, ws, second, body), 409)

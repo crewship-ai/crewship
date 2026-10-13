@@ -120,6 +120,75 @@ artifact access. Revocation, run termination, the admission deadline or loss of
 the human/agent's access prevents further reads and publication through the
 run-scoped route. A revoked delegation cannot be reactivated for the same run.
 
+### crewship page artifact requests list
+
+```bash
+crewship page artifact requests list report --format json
+```
+
+Reads `GET /api/v1/pages/{slug}/artifact/requests`: durable status, original
+revision and confirmed result revision. Eligible targets are the owner's private,
+unshared chats whose agents already have an explicit Page write grant.
+
+### crewship page artifact requests send
+
+```bash
+crewship page artifact requests send report --chat CHAT_ID --base-rev 2 --instruction "Clarify the totals" --thread THREAD_ID --submission-id review-2
+```
+
+Calls `POST /api/v1/pages/{slug}/artifact/requests`. The Page owner explicitly
+starts work that can incur agent usage costs. `--chat`, `--base-rev` and
+`--instruction` are required; `--thread` is optional. The source must be the
+current head, and a selected thread must belong to that revision. Instruction
+text is limited to 4 KiB. Saved comments are snapshotted when the request is
+accepted; later replies do not change that task. A mention alone starts nothing.
+
+Use the same `--submission-id` and payload after an uncertain response. If the
+flag is omitted, the CLI generates an ID and includes it in an error so it can
+be reused. A new intentional request uses a new ID. Completion is confirmed by
+an actual published result revision, not by an agent saying it finished.
+
+### crewship page artifact requests cancel
+
+```bash
+crewship page artifact requests cancel report REQUEST_ID
+```
+
+Calls `POST /api/v1/pages/{slug}/artifact/requests/{requestId}/cancel`. Cancellation
+blocks further publication for this request and asks an active local run to stop.
+It does not retract already delivered source or undo a committed revision.
+
+### crewship page artifact creation-status
+
+```bash
+crewship page artifact creation-status CHAT_ID --format json
+```
+
+Reads `GET /api/v1/chats/{chatId}/artifact-creation-authorization`, resolving your
+own live chat run and its one-artifact permission on the server. Studio exposes
+the same control in a running chat, so no manual run ID lookup is needed there.
+
+### crewship page artifact authorize-creation
+
+```bash
+crewship page artifact authorize-creation RUN_ID
+```
+
+Calls `POST /api/v1/artifact-creation-authorizations/{runId}` with `{}`. Only the
+server-recorded human initiator of a live chat run, with current Page creation
+rights, can permit that run to create one private artifact. Permission is off by
+default, expires with the run admission and cannot select another owner or audience.
+
+### crewship page artifact revoke-creation
+
+```bash
+crewship page artifact revoke-creation RUN_ID
+```
+
+Calls `DELETE /api/v1/artifact-creation-authorizations/{runId}`. Revokes creation
+and the same run's delegated publication on its created artifact. It preserves
+source history and does not silently re-enable permission when retried.
+
 ### crewship page artifact threads list
 
 ```bash

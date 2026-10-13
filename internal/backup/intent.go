@@ -36,6 +36,9 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"artifact_workspace_writes":             IntentExcludeRuntime, // per-installation rolling write-rate receipts are initialized anew on restore
+	"artifact_creation_authorizations":      IntentExcludeRuntime, // explicit live-run creation opt-in must not survive restore
+	"page_artifact_requests":                IntentInclude,        // history restored with live dispatch authority cleared
 	"artifact_run_principals":               IntentExcludeRuntime, // active chat/run admission must be freshly captured after restore
 	"page_artifact_run_delegations":         IntentExcludeRuntime, // restoring history must never resurrect a live run's publication authority
 	"restricted_workflow_recipe_bindings":   IntentExcludeRuntime, // frozen private recipe authority requires fresh admission after restore
@@ -182,6 +185,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"page_panels":                     IntentInclude,
 	"page_versions":                   IntentInclude,
 	"page_artifacts":                  IntentInclude,
+	"page_artifact_mutation_receipts": IntentInclude,
+	"page_artifact_creations":         IntentInclude,
 	"page_artifact_revisions":         IntentInclude,
 	"page_artifact_threads":           IntentInclude,
 	"page_artifact_comments":          IntentInclude,

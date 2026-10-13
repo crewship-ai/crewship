@@ -20,6 +20,11 @@ func (s *Server) handleArtifactPublish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "run capability refused", 403)
 		return
 	}
+	release, ok := acquireArtifactForward(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	slug := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/artifacts/"), "/revisions")
 	if slug == "" || strings.ContainsAny(slug, "/\\") {
 		http.Error(w, "invalid artifact slug", 400)

@@ -1400,6 +1400,13 @@ var startCmd = &cobra.Command{
 					if ph := apiRouter.Pages(); ph != nil {
 						ph.StartPanelFreshnessSweeper(ctx, 0)
 						ph.StartProjectRetention(ctx)
+						artifactCtx, stopArtifacts := context.WithCancel(ctx)
+						artifactsDone := make(chan struct{})
+						go func() {
+							defer close(artifactsDone)
+							ph.RunArtifactRequests(artifactCtx, quiesce.SchedulerGate(schedulerLease))
+						}()
+						defer func() { stopArtifacts(); <-artifactsDone }()
 						logger.Info("pages freshness sweeper wired (on_failure → issue; 1m tick)")
 					}
 				}

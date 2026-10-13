@@ -216,7 +216,11 @@ func TestPageArtifacts_QuotasAndInputValidation(t *testing.T) {
 		clock.advance(2 * time.Minute)
 		artifactExpect(t, artifactSave(t, h, ws, user, "<p>ok</p>", fmt.Sprint(i), int64(i)), 201)
 	}
-	artifactExpect(t, artifactSave(t, h, ws, user, "<p>limited</p>", "cap", 200), 409)
+	clock.advance(2 * time.Hour)
+	artifactExpect(t, artifactSave(t, h, ws, user, "<p>limited</p>", "cap", 200), 201)
+	// Expired source retains its identity: retry succeeds without recreating it.
+	artifactExpect(t, artifactSave(t, h, ws, user, "<p>ok</p>", "0", 0), 200)
+	artifactExpect(t, artifactCall(t, h, ws, user, "OWNER", "GET", "?revision=1", ""), 404)
 }
 
 func TestPageArtifacts_BackupRestoreHistoricalContent(t *testing.T) {

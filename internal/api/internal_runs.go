@@ -34,6 +34,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		TriggerType            string                `json:"trigger_type"`
 		Metadata               json.RawMessage       `json:"metadata"`
 		ArtifactHumanReceipt   *chataudience.Receipt `json:"artifact_human_receipt"`
+		ArtifactRequestID      string                `json:"artifact_request_id"`
 		ArtifactHumanMessageID string                `json:"artifact_human_message_id"`
 	}
 	if err := readJSON(r, &body); err != nil {
@@ -88,12 +89,6 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	if body.ArtifactHumanReceipt != nil {
-		if err := captureArtifactChatPrincipal(r, h.db, body.ID, body.WorkspaceID, body.AgentID, agentCrewID, body.ChatID, body.ArtifactHumanMessageID, body.ArtifactHumanReceipt); err != nil {
-			replyError(w, http.StatusForbidden, "artifact human admission refused")
-			return
-		}
-	}
 	// Persist run.started FIRST — this is the source of truth for runs
 	// (post-J migration). The IPC acknowledgement permits the caller to
 	// launch an agent, so an asynchronous journal enqueue is insufficient:
@@ -114,6 +109,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(body.Metadata, &md); err == nil && md != nil {
 				delete(md, "artifact_human_receipt")
 				delete(md, "artifact_human_message_id")
+				delete(md, "artifact_request_id")
 				payload["metadata"] = md
 			}
 		}
@@ -135,6 +131,22 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			replyInternalError(w, h.logger, "create run: emit run.started", err)
+			return
+		}
+	}
+
+	if body.ArtifactHumanReceipt != nil {
+		if err := captureArtifactChatPrincipal(r, h.db, body.ID, body.WorkspaceID, body.AgentID, agentCrewID, body.ChatID, body.ArtifactHumanMessageID, body.ArtifactHumanReceipt); err != nil {
+			if body.ArtifactRequestID != "" {
+				replyError(w, 403, "artifact human admission refused")
+				return
+			}
+			h.logger.Warn("run has no artifact publication authority", "run_id", body.ID, "error", err)
+		}
+	}
+	if body.ArtifactRequestID != "" {
+		if body.ArtifactHumanReceipt == nil || bindArtifactRequestRun(r, h.db, body.ArtifactRequestID, body.ID, body.ArtifactHumanReceipt) != nil {
+			replyError(w, 403, "artifact request admission refused")
 			return
 		}
 	}
