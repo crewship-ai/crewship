@@ -69,11 +69,11 @@ export function isOwnPersonal(ws: Pick<WorkspaceData, "kind" | "currentUserRole"
 }
 
 /** What the switcher calls a workspace: the person's name for their personal account. */
-function useSwitcherLabel(ws: WorkspaceData | null, role: string | null): { label: string | null; sub: string } {
+function useSwitcherLabel(ws: WorkspaceData | null, role: string | null): { label: string | null; sub: string; logo: string | null } {
   const { data } = useSessionSafe()
-  if (!ws) return { label: null, sub: "" }
-  if (isOwnPersonal(ws)) return { label: data?.user.name || ws.name, sub: "Personal account" }
-  return { label: ws.name, sub: ROLE_LABEL[role ?? ""] ?? role ?? "" }
+  if (!ws) return { label: null, sub: "", logo: null }
+  if (isOwnPersonal(ws)) return { label: data?.user.name || ws.name, sub: "Personal account", logo: ws.logo_url || data?.user.avatar_url || null }
+  return { label: ws.name, sub: ROLE_LABEL[role ?? ""] ?? role ?? "", logo: ws.logo_url ?? null }
 }
 
 function slugify(name: string): string {
@@ -106,7 +106,7 @@ export function WorkspaceSwitcher() {
                 className={RAIL_ROW}
               >
                 {workspace ? (
-                  <WorkspaceMark name={triggerLabel} logoUrl={workspace.logo_url}
+                  <WorkspaceMark name={triggerLabel} logoUrl={shown.logo}
                     className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" />
                 ) : (
                   <span className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>·</span>
@@ -166,7 +166,7 @@ function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; on
           <DropdownMenuLabel className={sectionLabel}>Personal account</DropdownMenuLabel>
           {own.map((ws) => (
             <WorkspaceRow key={ws.id} ws={ws} active={ws.id === workspace?.id} onSelect={() => setWorkspaceId(ws.id)}
-              label={data?.user.name || ws.name} sub="Personal account" />
+              label={data?.user.name || ws.name} sub="Personal account" logoUrl={ws.logo_url || data?.user.avatar_url || null} />
           ))}
         </>
       )}
@@ -238,7 +238,7 @@ export function MobileWorkspaceSwitcher({ onNavigate }: { onNavigate?: () => voi
             className="flex min-h-12 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left hover:bg-accent"
           >
             {workspace ? (
-              <WorkspaceMark name={label} logoUrl={workspace.logo_url}
+              <WorkspaceMark name={label} logoUrl={shown.logo}
                 className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground" />
             ) : (
               <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground" aria-hidden>·</span>
@@ -272,12 +272,15 @@ function WorkspaceRow({
   onSelect,
   label = ws.name,
   sub,
+  logoUrl = ws.logo_url,
 }: {
   ws: WorkspaceData
   active: boolean
   onSelect: () => void
   label?: string
   sub?: string
+  /** The person's photo stands in for a personal account without a logo. */
+  logoUrl?: string | null
 }) {
   return (
     <DropdownMenuItem
@@ -287,7 +290,7 @@ function WorkspaceRow({
       }}
       className={cn("flex items-center gap-3 py-2", active && "bg-primary/5")}
     >
-      <WorkspaceMark name={label} logoUrl={ws.logo_url}
+      <WorkspaceMark name={label} logoUrl={logoUrl}
         className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-micro font-bold text-primary-foreground shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="text-xs font-medium truncate">{label}</div>
