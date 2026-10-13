@@ -89,7 +89,7 @@ describe("Hooks page — the lifecycle map", () => {
     render(<HooksPage />)
     await map()
     await waitFor(() => expect(within(slot("pre_llm_call")).getByTitle(/gate\.sh/)).toBeInTheDocument())
-    expect(within(slot("on_approval_requested")).getByTitle(/hooks\.slack\.com/)).toBeInTheDocument()
+    expect(within(slot("on_approval_requested")).getByTitle("hooks.slack.com", { exact: false })).toBeInTheDocument()
     expect(within(slot("pre_llm_call")).getByText("STOPS")).toBeInTheDocument()
     expect(screen.getByRole("row", { name: "Tool call" })).toHaveTextContent("Not possible — the tool already ran inside the agent.")
     const summary = document.querySelector("[data-slot=hooks-summary]")!
@@ -261,7 +261,7 @@ describe("On a phone", () => {
     await waitFor(() => expect(within(m).getAllByRole("region").map((r) => r.getAttribute("aria-label"))).toEqual(["Model call", "Policy alerts"]))
     fireEvent.click(within(m).getByRole("button", { name: /Show the 6 steps with no hooks/ }))
     expect(within(m).getAllByRole("region")).toHaveLength(8)
-    fireEvent.click(within(m).getByTitle(/hooks\.slack\.com/))
+    fireEvent.click(within(m).getByTitle("hooks.slack.com", { exact: false }))
     expect(await detail()).toHaveAccessibleName("An agent waits for approval hook")
   })
 })
