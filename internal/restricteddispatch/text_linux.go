@@ -286,3 +286,8 @@ func (r *TextRunner) ExecuteDelegatedRun(ctx context.Context, request DelegatedR
 func (r *TextRunner) SupportsWorkflowProfile(profile string) bool {
 	return r != nil && profile == "responses_text" && (r.Manager != nil || r.StartSession != nil)
 }
+
+// DeclaresWorkflowProfile describes the adapter independently of runtime health.
+func (r *TextRunner) DeclaresWorkflowProfile(profile string) bool {
+	return r != nil && profile == "responses_text"
+}
