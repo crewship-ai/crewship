@@ -9,16 +9,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- Fix Settings reloads while account access loads, Guest chat regeneration controls and restricted resource path segments. Add CLI Guest invitation policy/consent flags and binary acceptance coverage.
-- ⚠️ **Behaviour change:** Guest invitations and provisioning refuse accounts that own or administer any workspace. Stale Guest invitation signup returns a typed conflict. Automation rules recheck the active routine author's membership in that workspace, and any non-NULL suspension blocks instance administration.
+- **Audit chart selections clear when the same bar is selected again (#3094).** The chart and table retain the chosen time-window anchor while activity loads or filters change, so incoming samples no longer shift a relative bucket beneath the selection.
 
+- Fix Settings reloads while account access loads, Guest chat regeneration controls and restricted resource path segments. Add CLI Guest invitation policy/consent flags and binary acceptance coverage.
+- ⚠️ **Behaviour change:** Guest invitations, provisioning and resource policy changes refuse accounts that own or administer any workspace. Stale Guest invitation signup returns a typed conflict. Automation rules recheck the active routine author's membership in that workspace, and any non-NULL suspension blocks instance administration.
 
 - ⚠️ **Behaviour change: guests run only routines explicitly shared with them.** Routine run grants now combine with every required agent grant, without a workspace-wide routine capability. Existing restricted members need routine grants added; pending private work is invalidated on upgrade. Settings › Members can select individual routines.
 - **Guests can be added with initial shares and inspect project Issues.** Guest invitations install initial shares atomically with acceptance, including signup redemption. Existing accounts explicitly accept the account-wide restriction; direct provisioning cannot silently restrict a claimed account. Project list/read grants expose a filtered, read-only Issues catalog and detail without shared activity or related-resource data. Settings and `workspace member access explain` describe saved grants and blocked execution prerequisites.
-- **Suspending a human routine author stops unattended triggers.** Schedule, webhook and wake-check execution rechecks the author’s live account; promoting a Guest to administrator requires explicitly restoring trusted access.
+- **Suspending a human routine author stops unattended triggers.** Schedule, webhook, wake-check, nested calls and automation rules recheck the author’s live account; promoting a Guest to administrator requires explicitly restoring trusted access.
 - **Access refusals explain what remains available.** Restricted screens show Crewship branding, administrator guidance and links to the member’s available sections. Discover-only agents no longer offer sending messages, and the Pages rail hides folder creation when creation is unavailable.
 - **Workspace recovery keeps account and administration usable.** Workspace selections are stored separately per account; a stale preference recovers on login. Directory outages preserve active drafts while account and instance API requests remain available. Remaining chat and output-file path identifiers reject dot segments before dispatch. Private workflow suspension matches login’s NULL-only active-account rule.
-
 
 - **A temporarily missing workspace no longer silently switches context or discards a draft (#3083).** Retry preserves the selected workspace and local draft while content and workspace requests remain unavailable; choosing another workspace uses the existing unsaved-change confirmation.
 
