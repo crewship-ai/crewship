@@ -164,7 +164,7 @@ func (h *PageHandler) UploadBoardFile(w http.ResponseWriter, r *http.Request) {
 	}
 	file = generateCUID()
 	head++
-	if _, err = tx.ExecContext(r.Context(), `INSERT INTO page_board_files(id,board_page_id,sha256,content_type,width,height,byte_size,author_user_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, file, rec.ID, sha, mime, width, height, len(data), UserFromContext(r.Context()).ID, tsformat.Format(h.evaluator().Now())); err != nil {
+	if _, err = tx.ExecContext(r.Context(), `INSERT INTO page_board_files(id,board_page_id,sha256,content_type,width,height,byte_size,author_user_id,created_at,last_used_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, file, rec.ID, sha, mime, width, height, len(data), UserFromContext(r.Context()).ID, tsformat.Format(h.evaluator().Now()), tsformat.Format(h.evaluator().Now())); err != nil {
 		h.boardError(w, err)
 		return
 	}

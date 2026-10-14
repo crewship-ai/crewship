@@ -34,7 +34,7 @@ func (h *PageHandler) compactBoardHistory(ctx context.Context, tx *sql.Tx, page 
 			return err
 		}
 	}
-	return nil
+	return compactBoardFiles(ctx, tx, page, h.evaluator().Now())
 }
 func (h *PageHandler) recordBoardElementRevisions(ctx context.Context, tx *sql.Tx, page, mutation string, revs map[string]int64) error {
 	raw, err := json.Marshal(revs)

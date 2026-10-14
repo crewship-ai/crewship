@@ -283,9 +283,11 @@ returns 409 `mutation_conflict`. An exact retry checks current access first and
 returns the original `applied_version` alongside the current thread. Mutation
 responses are confirmed by the server before the UI treats a draft as saved.
 
-Limits are 4 KiB UTF-8 per body, 100 threads per artifact, 50 comments per thread
+Limits are 4 KiB UTF-8 per body, 100 open threads per artifact, 50 comments per thread
 (including its first comment), 60 committed discussion mutations per hour and
-10,000 mutation audit receipts per artifact. Bounds return explicit limit errors;
+10,000 non-creation mutation receipts per artifact. Resolving a thread releases
+open-thread capacity; reopening checks the same cap. Creation receipts retain
+exact-retry identity and do not consume the transient receipt cap. Bounds return explicit limit errors;
 existing comments are not silently removed. Discussion records are included in
 workspace backup and restore. These endpoints use `Cache-Control:no-store`.
 

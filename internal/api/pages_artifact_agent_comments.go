@@ -21,7 +21,7 @@ func (h *PageHandler) agentMayComment(ctx context.Context, workspace string, rec
 	}
 	return false
 }
-func (h *PageHandler) artifactAgentCommentsPage(w http.ResponseWriter, r *http.Request, a *artifactRunAuthority) (*pageRecord, bool) {
+func (h *PageHandler) artifactAgentCommentsPage(w http.ResponseWriter, r *http.Request, a *artifactRunAuthority, write bool) (*pageRecord, bool) {
 	if err := h.checkArtifactRunPrincipal(r.Context(), a); err != nil {
 		replyError(w, 403, err.Error())
 		return nil, false
@@ -33,6 +33,14 @@ func (h *PageHandler) artifactAgentCommentsPage(w http.ResponseWriter, r *http.R
 	}
 	if !rec.HasArtifact || rec.HasBoard {
 		replyError(w, 404, "artifact not found")
+		return nil, false
+	}
+	if err := h.checkArtifactRunDelegation(r.Context(), rec.ID, a); err != nil {
+		replyError(w, 403, err.Error())
+		return nil, false
+	}
+	if write && !h.artifactAgentPolicyAllows(r.Context(), a.WorkspaceID, a.CrewID) {
+		artifactCommentError(w, 403, "artifact_policy_disabled", "Agent artifact discussion is disabled for this crew")
 		return nil, false
 	}
 	var role string

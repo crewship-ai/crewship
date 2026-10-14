@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 	"image"
 	"image/color"
 	"image/png"
 	"strings"
 	"testing"
+	"time"
 )
 
 func boardPreviewPNG(t *testing.T, width, height int) []byte {
@@ -107,5 +109,31 @@ func TestBoardRequestPreviewQuotaDoesNotCreatePartialJob(t *testing.T) {
 	var count int
 	if h.db.QueryRow(`SELECT COUNT(*) FROM page_board_requests WHERE submission_id='over-preview-quota'`).Scan(&count) != nil || count != 0 {
 		t.Fatal("quota left partial queued job")
+	}
+}
+
+func TestBoardPreviewQuotaReclaimsOnlyAgedTerminalIllustrations(t *testing.T) {
+	h, workspace, user, _, _, id := boardJobFixture(t)
+	old := tsformat.Format(time.Now().Add(-48 * time.Hour))
+	for i := 0; i < 64; i++ {
+		clone := fmt.Sprint("aged-quota-preview-", i)
+		state := "failed"
+		if i == 0 {
+			state = "running"
+		}
+		execOrFatal(t, h.db, `INSERT INTO page_board_requests(id,workspace_id,board_page_id,original_board_id,human_user_id,agent_id,chat_id,kind,base_seq,submission_id,fingerprint,instruction,selected_element_ids_json,selected_placement_ids_json,snapshot_json,target_json,dialect,converter_version,receipt_json,status,created_at,updated_at) SELECT ?,workspace_id,board_page_id,original_board_id,human_user_id,agent_id,chat_id,kind,base_seq,?,fingerprint,instruction,selected_element_ids_json,selected_placement_ids_json,snapshot_json,target_json,dialect,converter_version,receipt_json,?,?,? FROM page_board_requests WHERE id=?`, clone, clone, state, old, old, id)
+		execOrFatal(t, h.db, `INSERT INTO page_board_request_previews(request_id,sha256,width,height,byte_size,created_at) VALUES(?,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',1,1,2097152,?)`, clone, old)
+	}
+	body := boardRequestWithPreview(t, strings.Replace(boardDiagramRequest, "diagram-request", "after-aged-preview-quota", 1), boardPreviewPNG(t, 20, 20))
+	artifactExpect(t, boardJobCall(t, h, workspace, user, "", body, h.CreateBoardRequest), 202)
+	var previews, history, active int
+	if err := h.db.QueryRow(`SELECT COUNT(*),COALESCE(SUM(request_id='aged-quota-preview-0'),0) FROM page_board_request_previews`).Scan(&previews, &active); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM page_board_requests WHERE id LIKE 'aged-quota-preview-%'`).Scan(&history); err != nil {
+		t.Fatal(err)
+	}
+	if previews != 64 || active != 1 || history != 64 {
+		t.Fatalf("previews=%d active=%d terminal history=%d", previews, active, history)
 	}
 }

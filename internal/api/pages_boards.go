@@ -519,6 +519,34 @@ func (h *PageHandler) ApplyBoardBatch(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, err.Error())
 		return
 	}
+	// Record both previous and next image references before replacing records.
+	// An image removed in this transaction must remain available to conditional
+	// undo even when it was uploaded long before this edit.
+	for _, scene := range []pages.BoardScene{current, next} {
+		for id, record := range scene.Records {
+			other, exists := next.Records[id]
+			previous, wasPresent := current.Records[id]
+			if exists && wasPresent && other.ElementRev == previous.ElementRev {
+				continue
+			}
+			if record.Deleted || len(record.Element) == 0 {
+				continue
+			}
+			var ref struct {
+				FileID string `json:"fileId"`
+			}
+			if json.Unmarshal(record.Element, &ref) != nil {
+				h.boardError(w, errors.New("invalid stored image reference"))
+				return
+			}
+			if ref.FileID != "" {
+				if _, err = tx.ExecContext(r.Context(), `UPDATE page_board_files SET last_used_at=? WHERE board_page_id=? AND id=?`, tsformat.Format(h.evaluator().Now()), rec.ID, ref.FileID); err != nil {
+					h.boardError(w, err)
+					return
+				}
+			}
+		}
+	}
 	for id, record := range next.Records {
 		old, exists := current.Records[id]
 		if exists && old.ElementRev == record.ElementRev {

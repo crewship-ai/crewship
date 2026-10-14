@@ -20,7 +20,6 @@ func agentCommentFixture(t *testing.T) (*PageHandler, string, string, string, st
 	artifactExpect(t, response, 201)
 	thread := discussionThread(t, response)
 	execOrFatal(t, h.db, `DELETE FROM page_grants WHERE page_id=? AND subject_type='agent'`, page)
-	execOrFatal(t, h.db, `DELETE FROM page_artifact_run_delegations WHERE page_id=?`, page)
 	pagesGrant(t, h, workspace, user, "report", `{"subject_type":"agent","subject":"artifact-agent","level":"comment"}`)
 	return h, workspace, user, page, token, thread.ID
 }
@@ -64,7 +63,7 @@ func TestArtifactAgentCommentsExplicitGrantProvenanceAndRetryIdentity(t *testing
 	execOrFatal(t, h.db, `INSERT INTO artifact_run_principals SELECT 'other-comment-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
 	execOrFatal(t, h.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('other-comment-start',?,'artifact-crew','artifact-agent','run.started','system','test','other-comment-run')`, workspace)
 	other := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, "artifact-crew"), workspace, "artifact-agent", "other-comment-run")
-	artifactExpect(t, agentCommentCall(t, h, workspace, other, thread, body, false), 409)
+	artifactExpect(t, agentCommentCall(t, h, workspace, other, thread, body, false), 403)
 	artifactExpect(t, artifactAgentSave(t, h, workspace, token, `{"html":"escape","base_rev":1,"mutation_id":"escape"}`), 403)
 	var version int
 	if h.db.QueryRow(`SELECT version FROM page_artifact_threads WHERE id=?`, thread).Scan(&version) != nil || version != 2 {
@@ -184,6 +183,7 @@ func TestArtifactAgentCommentRequiresCurrentHumanAndSeparateIssuerRights(t *test
 				t.Fatal(err)
 			}
 			execOrFatal(t, h.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('comment-only-start',?,'artifact-crew','artifact-agent','run.started','system','test','comment-only-run')`, workspace)
+			execOrFatal(t, h.db, `INSERT INTO page_artifact_run_delegations(page_id,run_id,granted_by_user_id,expires_at,granted_at) SELECT ?,run_id,human_user_id,expires_at,'2026-10-13T00:00:00Z' FROM artifact_run_principals WHERE run_id='comment-only-run'`, page)
 			token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, "artifact-crew"), workspace, "artifact-agent", "comment-only-run")
 			artifactExpect(t, agentCommentCall(t, h, workspace, token, thread.ID, `{"body":"comment only agent reply","base_version":1,"mutation_id":"comment-only-agent"}`, false), 201)
 			if revocation == "human comment" {
@@ -199,4 +199,33 @@ func TestArtifactAgentCommentRequiresCurrentHumanAndSeparateIssuerRights(t *test
 			artifactExpect(t, agentCommentCall(t, h, workspace, token, thread.ID, `{"body":"denied","base_version":2,"mutation_id":"revoked"}`, false), 403)
 		})
 	}
+}
+
+func TestArtifactAgentCommentsRequireDelegationBeforeReplyAndRetry(t *testing.T) {
+	for _, change := range []string{
+		`DELETE FROM page_artifact_run_delegations`,
+		`UPDATE page_artifact_run_delegations SET revoked_at='2026-10-13T00:00:00Z'`,
+		`UPDATE page_artifact_run_delegations SET expires_at='2000-01-01T00:00:00Z'`,
+	} {
+		t.Run(change, func(t *testing.T) {
+			h, workspace, _, _, token, thread := agentCommentFixture(t)
+			body := `{"body":"explicitly delegated reply","base_version":1,"mutation_id":"delegated-reply"}`
+			artifactExpect(t, agentCommentCall(t, h, workspace, token, thread, body, false), 201)
+			execOrFatal(t, h.db, change)
+			artifactExpect(t, agentCommentCall(t, h, workspace, token, thread, body, false), 403)
+			artifactExpect(t, agentCommentCall(t, h, workspace, token, thread, "", true), 403)
+		})
+	}
+}
+
+func TestArtifactAgentCommentPolicyRevocationBlocksReplyAndExactRetry(t *testing.T) {
+	h, workspace, user, _, token, thread := agentCommentFixture(t)
+	body := `{"body":"delegated reply","base_version":1,"mutation_id":"policy-reply"}`
+	artifactExpect(t, agentCommentCall(t, h, workspace, token, thread, body, false), 201)
+	artifactExpect(t, artifactPolicyCall(t, h, workspace, user, "OWNER", "PUT", `{"enabled":false,"crew_ids":[],"base_version":1}`), 200)
+	artifactExpect(t, agentCommentCall(t, h, workspace, token, thread, body, false), 403)
+	artifactExpect(t, agentCommentCall(t, h, workspace, token, thread, `{"body":"new reply","base_version":2,"mutation_id":"new-policy-reply"}`, false), 403)
+	// The administrative publication ceiling does not withdraw a separate read
+	// grant: authorized source/discussion reads follow the existing read contract.
+	artifactExpect(t, agentCommentCall(t, h, workspace, token, thread, "", true), 200)
 }

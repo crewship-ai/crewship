@@ -12,12 +12,16 @@ import (
 var errArtifactRetentionPinned = errors.New("artifact retained revisions are pinned")
 var errArtifactReceiptLimit = errors.New("artifact mutation receipt limit reached")
 
-// Reserve one retained source slot. Discussion, request and restore provenance
-// pin their exact source; mutation receipts alone do not retain source bytes.
+// Reserve one source slot. Discussion, active jobs and Board pins retain exact
+// source bytes. Historical restore provenance remains a revision number; the
+// restored revision contains its own immutable source and needs no extra pin.
 func reserveArtifactRevision(ctx context.Context, tx *sql.Tx, pageID string, restoring ...int64) error {
 	return reserveArtifactRevisionAt(ctx, tx, pageID, time.Now(), restoring...)
 }
 func reserveArtifactRevisionAt(ctx context.Context, tx *sql.Tx, pageID string, now time.Time, restoring ...int64) error {
+	if err := compactArtifactReceipts(ctx, tx, pageID, now); err != nil {
+		return err
+	}
 	var receipts, retained int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_artifact_mutation_receipts WHERE page_id=?`, pageID).Scan(&receipts); err != nil {
 		return err
@@ -42,13 +46,10 @@ func reserveArtifactRevisionAt(ctx context.Context, tx *sql.Tx, pageID string, n
  AND r.revision != (SELECT head_rev FROM page_artifacts WHERE page_id=r.page_id)
  AND NOT EXISTS(SELECT 1 FROM page_board_source_history h JOIN page_board_mutations m ON m.board_page_id=h.board_page_id AND m.mutation_id=h.mutation_id WHERE h.source_page_id=r.page_id AND h.source_revision=r.revision AND m.created_at>=?)
  AND NOT EXISTS(SELECT 1 FROM page_board_artifact_placements b WHERE b.source_page_id=r.page_id AND b.source_revision=r.revision AND (b.deleted_at IS NULL OR b.deleted_at>=?))
- AND NOT EXISTS(SELECT 1 FROM page_board_request_sources q WHERE q.source_page_id=r.page_id AND q.source_revision=r.revision)
- AND NOT EXISTS(SELECT 1 FROM page_board_requests q WHERE q.result_page_id=r.page_id AND q.result_revision=r.revision)
+ AND NOT EXISTS(SELECT 1 FROM page_board_request_sources q JOIN page_board_requests job ON job.id=q.request_id WHERE q.source_page_id=r.page_id AND q.source_revision=r.revision AND job.status IN ('queued','running','ready_to_insert'))
+ AND NOT EXISTS(SELECT 1 FROM page_board_requests q WHERE q.result_page_id=r.page_id AND q.result_revision=r.revision AND q.status IN ('queued','running','ready_to_insert'))
  AND NOT EXISTS(SELECT 1 FROM page_artifact_threads t WHERE t.page_id=r.page_id AND t.revision=r.revision)
- AND NOT EXISTS(SELECT 1 FROM page_artifact_requests q WHERE q.page_id=r.page_id AND (q.base_rev=r.revision OR q.result_revision=r.revision))
- AND NOT EXISTS(SELECT 1 FROM page_artifact_revisions s WHERE s.page_id=r.page_id AND s.restored_from=r.revision)
- AND NOT EXISTS(SELECT 1 FROM page_artifact_mutation_receipts m WHERE m.page_id=r.page_id AND m.restored_from=r.revision)
- AND NOT EXISTS(SELECT 1 FROM page_artifact_creations c WHERE c.page_id=r.page_id AND r.revision=1)
+ AND NOT EXISTS(SELECT 1 FROM page_artifact_requests q WHERE q.page_id=r.page_id AND q.status IN ('queued','running') AND (q.base_rev=r.revision OR q.result_revision=r.revision))
  ORDER BY r.revision LIMIT ?)`, pageID, pageID, restoreTarget, tsformat.Format(now.Add(-boardHistoryWindow)), tsformat.Format(now.Add(-boardHistoryWindow)), needed)
 	if err != nil {
 		return err

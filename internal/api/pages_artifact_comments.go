@@ -56,7 +56,7 @@ type artifactThreadWire struct {
 
 func (h *PageHandler) artifactCommentsPage(w http.ResponseWriter, r *http.Request, write bool) (*pageRecord, bool) {
 	if a, ok := r.Context().Value(artifactCommentAuthorityKey{}).(*artifactRunAuthority); ok {
-		return h.artifactAgentCommentsPage(w, r, a)
+		return h.artifactAgentCommentsPage(w, r, a, write)
 	}
 	if agent, _ := pageGrantCallerIsAgent(r); agent {
 		replyError(w, 401, "human authentication required")
@@ -165,7 +165,7 @@ func (h *PageHandler) listArtifactThreadsSnapshot(w http.ResponseWriter, r *http
 			return
 		}
 	}
-	rows, err := h.pageAuthReader(r.Context()).QueryContext(r.Context(), `SELECT id FROM page_artifact_threads WHERE page_id=? AND (?=0 OR revision=?) ORDER BY created_at DESC,id DESC LIMIT 100`, rec.ID, revision, revision)
+	rows, err := h.pageAuthReader(r.Context()).QueryContext(r.Context(), `SELECT id FROM page_artifact_threads WHERE page_id=? AND (?=0 OR revision=?) ORDER BY (status='open') DESC,created_at DESC,id DESC LIMIT 100`, rec.ID, revision, revision)
 	if err != nil {
 		replyInternalError(w, h.logger, "list artifact threads", err)
 		return
@@ -354,8 +354,12 @@ func (h *PageHandler) mutateArtifactThread(w http.ResponseWriter, r *http.Reques
 	}
 	now := h.clock.Now().UTC()
 	stamp := tsformat.Format(now)
+	if err := compactDiscussionReceipts(r.Context(), tx, rec.ID, false, now); err != nil {
+		h.boardError(w, err)
+		return
+	}
 	var total, recent int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN created_at>? THEN 1 ELSE 0 END),0) FROM page_artifact_comment_mutations WHERE page_id=?`, tsformat.Format(now.Add(-time.Hour)), rec.ID).Scan(&total, &recent); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN operation!='create' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN created_at>? THEN 1 ELSE 0 END),0) FROM page_artifact_comment_mutations WHERE page_id=?`, tsformat.Format(now.Add(-time.Hour)), rec.ID).Scan(&total, &recent); err != nil {
 		replyInternalError(w, h.logger, "check comment quota", err)
 		return
 	}
@@ -379,7 +383,7 @@ func (h *PageHandler) mutateArtifactThread(w http.ResponseWriter, r *http.Reques
 			replyError(w, 404, "artifact revision not found")
 			return
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_artifact_threads WHERE page_id=?`, rec.ID).Scan(&threads); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_artifact_threads WHERE page_id=? AND status='open'`, rec.ID).Scan(&threads); err != nil {
 			replyInternalError(w, h.logger, "count artifact threads", err)
 			return
 		}
@@ -423,6 +427,17 @@ func (h *PageHandler) mutateArtifactThread(w http.ResponseWriter, r *http.Reques
 				return
 			}
 		} else {
+			if !*req.Resolved {
+				var others int
+				if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_artifact_threads WHERE page_id=? AND status='open' AND id!=?`, rec.ID, threadID).Scan(&others); err != nil {
+					replyInternalError(w, h.logger, "count open discussion threads", err)
+					return
+				}
+				if others >= maxArtifactThreads {
+					artifactCommentError(w, 409, "thread_limit", "open discussion thread limit reached")
+					return
+				}
+			}
 			status, resolver, resolvedAt := "open", "", ""
 			operation = "reopen"
 			if *req.Resolved {

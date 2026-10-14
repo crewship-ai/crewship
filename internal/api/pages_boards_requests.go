@@ -194,6 +194,10 @@ func (h *PageHandler) CreateBoardRequest(w http.ResponseWriter, r *http.Request)
 		replyError(w, 409, err.Error())
 		return
 	}
+	if err = compactPageRequestHistory(r.Context(), tx, receipt.WorkspaceID, time.Now()); err != nil {
+		h.boardError(w, err)
+		return
+	}
 	var active, hour, total, workspaceTotal int
 	if err = tx.QueryRowContext(r.Context(), `SELECT COALESCE(SUM(status IN ('queued','running')),0),COALESCE(SUM(created_at>=?),0),COUNT(*) FROM page_board_requests WHERE board_page_id=?`, tsformat.Format(time.Now().Add(-time.Hour)), rec.ID).Scan(&active, &hour, &total); err != nil {
 		h.boardError(w, err)
