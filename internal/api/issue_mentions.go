@@ -59,7 +59,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/inbox"
-	"github.com/crewship-ai/crewship/internal/mentions"
 	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/untrusted"
@@ -217,101 +216,7 @@ type mentionRecorder struct {
 	dispatcher mentionDispatcher
 }
 
-// record resolves, persists, audits and dispatches the mentions in one
-// comment.
-//
-// Every step is best-effort in the same sense issueEvents.log is: the comment
-// itself has already been committed and answered, and a mention that could not
-// be recorded must not retroactively fail a comment the author has already
-// seen posted. Failures are logged with the comment id, which is what makes
-// "why did nothing happen?" answerable.
-//
-// Per-mention order is deliberately event-then-delivery-then-dispatch, not
-// the reverse — this is B2's "the ack event before any model call"
-// (PRD-ISSUES-AND-ROUTINES-2026 §9.3/§15, #2337). Before this PR, dispatchOne
-// (which starts the run) ran FIRST and the activity/delivery bookkeeping ran
-// after; a human watching the issue learned nothing until the run itself
-// produced a comment. Now: the `mentioned` event lands, the pending delivery
-// row lands, issue.delivery.acked broadcasts — all before dispatchOne is
-// ever called.
-func (m mentionRecorder) record(ctx context.Context, mc mentionContext) {
-	ids := mentions.ExtractAgentIDs(mc.CommentBody)
-	if len(ids) == 0 {
-		return
-	}
-
-	// The per-comment bound, applied to the IDS rather than to the resolved set:
-	// the unbounded IN list is the sharpest edge (see mentionMaxPerComment), and
-	// it is built before anything is resolved. First-seen order, so which
-	// mentions survive is the order the author wrote them in, not the order
-	// SQLite would have returned.
-	if over := len(ids) - mentionMaxPerComment; over > 0 {
-		ids = ids[:mentionMaxPerComment]
-		// Reported BEFORE the resolve, deliberately: the author is owed this
-		// whether or not the surviving ids resolve, and an early return below
-		// must not swallow it.
-		m.notifyMentionOverflow(ctx, mc, over)
-	}
-
-	resolved, err := m.resolveMentionedAgents(ctx, mc.WorkspaceID, ids)
-	if err != nil {
-		m.logf("resolve comment mentions", mc, err)
-		return
-	}
-	if len(resolved) == 0 {
-		// Every id was a claim about an agent this workspace does not have.
-		// Nothing is written and nothing is logged at info level: the
-		// interesting event is a mention, and this was not one.
-		return
-	}
-
-	deliveriesEnabled, ffErr := featureflags.IsEnabled(ctx, m.db, mc.WorkspaceID, issueDeliveriesFlagKey)
-	if ffErr != nil {
-		m.logf("check issue_deliveries flag", mc, ffErr)
-	}
-
-	// One delivery per agent per comment. mentions.ExtractAgentIDs already
-	// dedupes ids, and UNIQUE(comment_id, agent_id) used to be the backstop
-	// below it; since B2 the unique key is (event_id, agent_id) and every
-	// iteration mints its own event, so the backstop moved here.
-	seenAgents := make(map[string]struct{}, len(resolved))
-	for _, mention := range resolved {
-		if _, dup := seenAgents[mention.AgentID]; dup {
-			continue
-		}
-		seenAgents[mention.AgentID] = struct{}{}
-		// The audit row FIRST — details is the BARE agent id:
-		// lib/mentions.ts's mentionTargetFromActivityDetails accepts that
-		// shape, and it is the only one of the three it accepts that cannot
-		// smuggle a label into the timeline. The frontend was written before
-		// the producer; this is the producer meeting it rather than the
-		// reverse. logEvent (not log) because the delivery row below needs
-		// the id it allocates.
-		eventID, written := m.events.logEvent(ctx, issueEvent{
-			MissionID: mc.MissionID,
-			ActorType: mc.AuthorType,
-			ActorID:   mc.AuthorID,
-			Action:    actionMentioned,
-			Details:   mention.AgentID,
-		})
-
-		state, assignmentID, detail := m.deliverAndDispatch(ctx, mc, mention, eventID, written.Seq, deliveriesEnabled)
-
-		// The row lands regardless of the dispatch outcome — "R was mentioned
-		// and the cap refused the run" is precisely the fact an operator needs,
-		// and it is unrecoverable if only successful dispatches are recorded.
-		if err := m.persist(ctx, mc, mention, eventID, state, assignmentID, detail); err != nil {
-			m.logf("persist comment mention", mc, err)
-		}
-
-		// A mention that did not wake anybody is told to somebody. See
-		// notifyMentionUndelivered — a 201 with a rendered mention and no run
-		// is the failure mode this closes.
-		m.notifyMentionUndelivered(ctx, mc, mention, state, detail)
-	}
-}
-
-// deliverAndDispatch is the delivery half of record: create the pending
+// deliverAndDispatch handles a session follow-up: create the pending
 // delivery, ack it, claim it, and — only if this call wins the claim —
 // dispatch.
 //

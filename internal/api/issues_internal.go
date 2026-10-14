@@ -63,12 +63,6 @@ func (h *InternalIssueHandler) SetMentionDispatcher(d mentionDispatcher) {
 	h.mentionDispatch = d
 }
 
-// mentionRecorder builds the shared mention write path. Per call, so a
-// dispatcher wired after construction is picked up.
-func (h *InternalIssueHandler) mentionRecorder() mentionRecorder {
-	return mentionRecorder{db: h.db, logger: h.logger, events: h.events(), dispatcher: h.mentionDispatch}
-}
-
 // logActivity is the compatibility shim for the call sites that still pass
 // a bare action string (issues_internal_relations.go). It records the audit
 // row and the journal entry but does not broadcast — those call sites own
@@ -114,29 +108,6 @@ func (h *InternalIssueHandler) assertAuthorAgentInWorkspace(w http.ResponseWrite
 		return false
 	}
 	return true
-}
-
-// resolveCommentAuthorName reads an agent's display name for the mention
-// brief, scoped to the workspace.
-//
-// The scope is not belt-and-braces even though the callers now prove the
-// binding first. A display name is chosen by whoever created the agent, so an
-// unscoped read here is a way to pull a string out of another tenant through a
-// field nobody thinks of as a read — and it lands inside the task brief handed
-// to the woken agent, which is the one place attacker-chosen text is most
-// worth having. Keeping the predicate on the query means the guard cannot be
-// removed from a caller without this failing too.
-//
-// Best-effort by design: an unreadable name yields "", and the brief renders
-// without it rather than failing a comment that already landed.
-func (h *InternalIssueHandler) resolveCommentAuthorName(ctx context.Context, workspaceID, agentID string) string {
-	if agentID == "" {
-		return ""
-	}
-	var name string
-	_ = h.db.QueryRowContext(ctx,
-		`SELECT name FROM agents WHERE id = ? AND workspace_id = ?`, agentID, workspaceID).Scan(&name)
-	return name
 }
 
 // List handles GET /api/v1/internal/issues

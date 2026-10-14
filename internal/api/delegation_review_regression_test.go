@@ -227,6 +227,10 @@ func TestAssignmentCompletionWithoutHumanAuthorityDoesNotPublish(t *testing.T) {
 				wantComments = 0
 			}
 			execOrFatal(t, f.h.db, `INSERT INTO assignments(id,workspace_id,chat_id,group_id,assigned_by_id,assigned_to_id,task,status,created_at,created_by_user_id) VALUES('result-missing-authority',?,?,?,?,'agent-worker','work','RUNNING',datetime('now'),NULLIF(?,''))`, f.workspace, f.chat, issue, f.agent, requester)
+			// Both cases target the real issue. The human case must be denied
+			// for missing authority, independently of target-attribution checks.
+			execOrFatal(t, f.h.db, `UPDATE assignments SET mission_id=? WHERE id='result-missing-authority' AND workspace_id=?`, issue, f.workspace)
+
 			h := NewAssignmentHandler(f.h.db, nil, nil, "host", newTestLogger())
 			if !h.finishAssignment(t.Context(), "result-missing-authority", "", f.chat, "worker", f.workspace, "Unapproved result", "", nil) {
 				t.Fatal("assignment did not settle")

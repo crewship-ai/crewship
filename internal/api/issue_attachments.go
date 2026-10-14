@@ -487,11 +487,6 @@ func (h *AttachmentHandler) resolveIssue(w http.ResponseWriter, r *http.Request)
 	return missionID, wsID, true
 }
 
-func (h *AttachmentHandler) loadOne(r *http.Request, id, wsID string) (attachmentResponse, error) {
-	return scanAttachment(h.db.QueryRowContext(r.Context(),
-		attachmentSelect+` WHERE a.id = ? AND a.workspace_id = ?`, id, wsID))
-}
-
 // loadScoped reads one attachment by id, scoped to BOTH the issue and the
 // workspace.
 //
