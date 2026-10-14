@@ -1,8 +1,8 @@
 # Pages Apps — zapnutí jedním příkazem
 
 Stav: veřejný návrh z 2026-10-14, revize `main` @ `612908edc`. Řeší
-[#3108](https://github.com/crewship-ai/crewship/issues/3108). Implementace
-probíhá na větvi `docs/pages-builder-install-prd`; kontrakt je
+[#3108](https://github.com/crewship-ai/crewship/issues/3108). Implementováno
+kromě §4.3 (výchozí úložiště projektů) a §8 (odloženo); kontrakt je
 [docs/specs/pages-apps.md](../specs/pages-apps.md), provozní postup
 [docs/guides/pages-apps-operations.mdx](../guides/pages-apps-operations.mdx).
 Změna pravidla „digest image v konfiguraci“ (§4.1) je zapsaná jako navržené
