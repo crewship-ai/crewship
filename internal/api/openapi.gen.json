@@ -109120,6 +109120,22 @@
                             "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
                             "type": "integer"
                           },
+                          "can_accept_pages": {
+                            "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                            "type": "boolean"
+                          },
+                          "can_delete": {
+                            "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                            "type": "boolean"
+                          },
+                          "can_rename": {
+                            "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                            "type": "boolean"
+                          },
+                          "can_share": {
+                            "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                            "type": "boolean"
+                          },
                           "color": {
                             "description": "A crew palette key, or empty.",
                             "type": "string"
@@ -109180,7 +109196,11 @@
                           "shared",
                           "acl_version",
                           "created_at",
-                          "updated_at"
+                          "updated_at",
+                          "can_rename",
+                          "can_share",
+                          "can_delete",
+                          "can_accept_pages"
                         ],
                         "type": "object"
                       },
@@ -109330,6 +109350,22 @@
                       "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
                       "type": "integer"
                     },
+                    "can_accept_pages": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_delete": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_rename": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_share": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "A crew palette key, or empty.",
                       "type": "string"
@@ -109390,7 +109426,11 @@
                     "shared",
                     "acl_version",
                     "created_at",
-                    "updated_at"
+                    "updated_at",
+                    "can_rename",
+                    "can_share",
+                    "can_delete",
+                    "can_accept_pages"
                   ],
                   "type": "object"
                 }
@@ -109407,6 +109447,22 @@
                       "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
                       "type": "integer"
                     },
+                    "can_accept_pages": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_delete": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_rename": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_share": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "A crew palette key, or empty.",
                       "type": "string"
@@ -109467,7 +109523,11 @@
                     "shared",
                     "acl_version",
                     "created_at",
-                    "updated_at"
+                    "updated_at",
+                    "can_rename",
+                    "can_share",
+                    "can_delete",
+                    "can_accept_pages"
                   ],
                   "type": "object"
                 }
@@ -109771,6 +109831,22 @@
                       "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
                       "type": "integer"
                     },
+                    "can_accept_pages": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_delete": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_rename": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_share": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "A crew palette key, or empty.",
                       "type": "string"
@@ -109804,6 +109880,14 @@
                       "description": "The pages in this folder the caller reaches, as index rows.",
                       "items": {
                         "properties": {
+                          "can_move": {
+                            "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
+                            "type": "boolean"
+                          },
+                          "can_remove_from_folder": {
+                            "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer.",
+                            "type": "boolean"
+                          },
                           "color": {
                             "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                             "type": "string"
@@ -109959,6 +110043,10 @@
                     "acl_version",
                     "created_at",
                     "updated_at",
+                    "can_rename",
+                    "can_share",
+                    "can_delete",
+                    "can_accept_pages",
                     "pages"
                   ],
                   "type": "object"
@@ -110121,6 +110209,22 @@
                       "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
                       "type": "integer"
                     },
+                    "can_accept_pages": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_delete": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_rename": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_share": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "A crew palette key, or empty.",
                       "type": "string"
@@ -110181,7 +110285,11 @@
                     "shared",
                     "acl_version",
                     "created_at",
-                    "updated_at"
+                    "updated_at",
+                    "can_rename",
+                    "can_share",
+                    "can_delete",
+                    "can_accept_pages"
                   ],
                   "type": "object"
                 }
@@ -111074,6 +111182,14 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "can_move": {
+                          "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
+                          "type": "boolean"
+                        },
+                        "can_remove_from_folder": {
+                          "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer.",
+                          "type": "boolean"
+                        },
                         "color": {
                           "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                           "type": "string"
@@ -111396,6 +111512,14 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "can_move": {
+                          "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
+                          "type": "boolean"
+                        },
+                        "can_remove_from_folder": {
+                          "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer.",
+                          "type": "boolean"
+                        },
                         "color": {
                           "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                           "type": "string"
@@ -111730,6 +111854,14 @@
                     "pages": {
                       "items": {
                         "properties": {
+                          "can_move": {
+                            "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
+                            "type": "boolean"
+                          },
+                          "can_remove_from_folder": {
+                            "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer.",
+                            "type": "boolean"
+                          },
                           "color": {
                             "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                             "type": "string"
@@ -112148,6 +112280,14 @@
                 "schema": {
                   "items": {
                     "properties": {
+                      "can_move": {
+                        "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
+                        "type": "boolean"
+                      },
+                      "can_remove_from_folder": {
+                        "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer.",
+                        "type": "boolean"
+                      },
                       "color": {
                         "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                         "type": "string"
