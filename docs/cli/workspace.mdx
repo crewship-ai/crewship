@@ -492,3 +492,9 @@ crewship workspace invite create client@example.test --role VIEWER --access-mode
 `grants.json` is an array, for example
 `[{"kind":"routine","id":"routine-id","operation":"run"},{"kind":"agent","id":"agent-id","operation":"run"}]`.
 Grant every dependency's agent run/delegate rights separately.
+
+Resource policy JSON includes read-only `grant_details` with each grant’s
+`issuer_id`, `created_at` and `live` status. Saving unchanged rights preserves
+their provenance. To deliberately reissue a share as the authenticated admin,
+include its exact `{kind,id,operation}` in both `rights` and optional `reissue`.
+Unrelated edits do not reactivate shares from an inactive issuer.

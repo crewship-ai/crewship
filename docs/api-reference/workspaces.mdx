@@ -2223,3 +2223,9 @@ and run history are excluded. No mutation endpoint is enabled by this read.
 | `403` | Workspace authentication gate denied |
 | `404` | Foreign, missing or revoked issue/project |
 | `500` | Database error |
+
+Member policy responses also include read-only `grant_details` (`kind`, `id`,
+`operation`, `issuer_id`, `created_at`, `live`). Policy replacements preserve
+unchanged grants, including inactive ones. Optional `reissue` contains exact
+rights also present in `rights`, deliberately issued by the authenticated admin.
+Client-supplied grant metadata is ignored and recalculated in the response.

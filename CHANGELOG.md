@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Editing one Guest share preserves other administrators’ grants.** Unchanged rights retain their issuer and creation time, and inactive grants require an explicit reissue. Administrative policy shows issuer and active status; changes to already inactive issuers no longer stop newly authorized work.
+
 - ⚠️ **Behaviour change: resource shares follow current administrator authority.** Guest discovery, Issues, chat and routine execution stop using a grant when its issuer leaves, is demoted or suspended, or becomes a Guest. Stored shares are preserved; restoring the issuer does not revive previously admitted runs.
 
 - **Audit chart selections clear when the same bar is selected again (#3094).** The chart and table retain the chosen time-window anchor while activity loads or filters change, so incoming samples no longer shift a relative bucket beneath the selection.

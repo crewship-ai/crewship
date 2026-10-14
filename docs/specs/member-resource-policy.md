@@ -104,7 +104,8 @@ active, trusted OWNER/ADMIN in the resource's workspace and must not have an
 account-wide Guest ceiling. This applies to discovery, Issues projections,
 project inputs, chat audiences, private preflight, routine catalogs, admission,
 recovery and dispatch. Stored grants remain visible in the saved policy but are
-inert while the issuer lacks authority, following the existing Pages model.
+inert while the issuer lacks authority. This retains stored shares like Pages;
+Pages currently has a narrower issuer check and is not yet unified with this model.
 Role loss, removal, suspension or a Guest ceiling advances affected recipient
 revisions transactionally. Restoring the issuer can authorize a new use of the
 preserved grant; previously admitted work remains fenced and requires a fresh
@@ -194,3 +195,16 @@ it does not grant directory discovery. Assign discover and chat for navigable ch
 Installed adapters' static profile declarations constrain navigation. Missing
 runtime installation preserves known declaration authority; unknown profiles
 remain denied. Operational readiness checks stay at execution time.
+
+Complete policy saves preserve the id, issuer and creation time of unchanged
+rights, including inactive shares. `grant_details` is read-only administrative
+metadata with `issuer_id`, `created_at` and `live`; submitted metadata never
+confers authority. To deliberately issue an inactive share under the current
+administrator, include that exact right in both `rights` and `reissue`.
+The Settings editor labels inactive shares and offers “Reissue as me”; an
+unrelated edit never silently reissues them. A reissue uses the authenticated
+actor and fresh metadata and participates in the same revision check.
+Issuer triggers fence only live-to-inactive transitions, not later changes to
+an already inactive issuer. Role, suspension and membership changes preserve
+stored provenance. Hard deletion of an issuer account is an exception: its
+grants are deleted to satisfy the user foreign key.

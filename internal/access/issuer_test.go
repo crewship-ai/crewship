@@ -2,6 +2,7 @@ package access
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -97,5 +98,125 @@ func TestGrantIssuerRoleInOtherWorkspaceDoesNotRevokeLocalShare(t *testing.T) {
 		if after, err := s.Membership(t.Context(), "h1", "w"); err != nil || after != before {
 			t.Fatalf("unrelated workspace change invalidated local attempts: %+v %v", after, err)
 		}
+	}
+}
+
+func TestPolicySavePreservesGrantProvenanceAndInertness(t *testing.T) {
+	for _, inert := range []bool{false, true} {
+		t.Run(fmt.Sprint(inert), func(t *testing.T) {
+			s := fixture(t)
+			if _, err := s.DB.Exec(`UPDATE workspace_members SET role='ADMIN' WHERE id='m2'`); err != nil {
+				t.Fatal(err)
+			}
+			right := Right{"agent", "a", "chat"}
+			m := policy(t, s, "h1", right)
+			var originalID, originalTime string
+			if err := s.DB.QueryRow(`SELECT id,created_at FROM access_grants WHERE member_id='m1'`).Scan(&originalID, &originalTime); err != nil {
+				t.Fatal(err)
+			}
+			if inert {
+				if _, err := s.DB.Exec(`UPDATE workspace_members SET role='MEMBER' WHERE id='mo'`); err != nil {
+					t.Fatal(err)
+				}
+				m, _ = s.Membership(t.Context(), "h1", "w")
+			}
+			if _, err := s.Replace(t.Context(), "h2", "h1", "w", "restricted", m, []Right{right, {"project", "p1", "read"}}); err != nil {
+				t.Fatal(err)
+			}
+			var id, issuer, stamp string
+			if err := s.DB.QueryRow(`SELECT id,created_by,created_at FROM access_grants WHERE member_id='m1' AND agent_id='a'`).Scan(&id, &issuer, &stamp); err != nil {
+				t.Fatal(err)
+			}
+			if id != originalID || issuer != "owner" || stamp != originalTime {
+				t.Fatalf("save replaced original provenance: %s %s %s", id, issuer, stamp)
+			}
+			err := s.Check(t.Context(), "h1", "w", right)
+			if inert && !errors.Is(err, ErrIssuerDenied) {
+				t.Fatalf("inert share revived: %v", err)
+			}
+			if !inert {
+				if _, err := s.DB.Exec(`UPDATE workspace_members SET role='MEMBER' WHERE id='m2'`); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.Check(t.Context(), "h1", "w", right); err != nil {
+					t.Fatalf("other admin's demotion revoked owner's share: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestAlreadyInertIssuerChangesDoNotFenceFreshWork(t *testing.T) {
+	s := fixture(t)
+	if _, err := s.DB.Exec(`UPDATE workspace_members SET role='ADMIN' WHERE id='m2'`); err != nil {
+		t.Fatal(err)
+	}
+	right := Right{"agent", "a", "run"}
+	m := policy(t, s, "h1", right)
+	_, err := s.Replace(t.Context(), "h2", "h1", "w", "restricted", m, []Right{right, {"project", "p1", "read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec(`UPDATE workspace_members SET role='MEMBER' WHERE id='m2'`); err != nil {
+		t.Fatal(err)
+	}
+	// Start fresh work using the still-authoritative OWNER grant.
+	handle, _, err := s.Admit(t.Context(), "h1", "w", "a", "c1", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.Membership(t.Context(), "h1", "w")
+	for _, q := range []string{
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('admin-other','other','h2','ADMIN')`,
+		`UPDATE workspace_members SET role='VIEWER' WHERE id='admin-other'`,
+		`DELETE FROM workspace_members WHERE id='admin-other'`,
+		`UPDATE users SET suspended_at='suspended' WHERE id='h2'`,
+		`UPDATE users SET suspended_at='again' WHERE id='h2'`,
+	} {
+		if _, err = s.DB.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+		after, _ := s.Membership(t.Context(), "h1", "w")
+		if after != before {
+			t.Fatalf("already inert issuer fenced fresh work: before=%+v after=%+v query=%s", before, after, q)
+		}
+		if _, err = s.Resolve(t.Context(), handle); err != nil {
+			t.Fatalf("fresh owner-authorized work revoked: %v", err)
+		}
+	}
+}
+
+func TestInactiveGrantRequiresExplicitReissue(t *testing.T) {
+	s := fixture(t)
+	if _, err := s.DB.Exec(`UPDATE workspace_members SET role='ADMIN' WHERE id='m2'`); err != nil {
+		t.Fatal(err)
+	}
+	right := Right{"agent", "a", "chat"}
+	policy(t, s, "h1", right)
+	if _, err := s.DB.Exec(`UPDATE workspace_members SET role='MEMBER' WHERE id='mo'`); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.Policy(t.Context(), "h2", "h1", "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.GrantDetails) != 1 || p.GrantDetails[0].IssuerID != "owner" || p.GrantDetails[0].Live {
+		t.Fatalf("missing inactive provenance: %+v", p)
+	}
+	if _, err = s.Replace(t.Context(), "h2", "h1", "w", "restricted", p.Membership, p.Rights, right); err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.Policy(t.Context(), "h2", "h1", "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.GrantDetails) != 1 || p.GrantDetails[0].IssuerID != "h2" || !p.GrantDetails[0].Live {
+		t.Fatalf("explicit reissue missing: %+v", p)
+	}
+	if err = s.Check(t.Context(), "h1", "w", right); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Replace(t.Context(), "h2", "h1", "w", "restricted", p.Membership, p.Rights, Right{"project", "p1", "read"}); !errors.Is(err, ErrDenied) {
+		t.Fatalf("reissued absent right: %v", err)
 	}
 }

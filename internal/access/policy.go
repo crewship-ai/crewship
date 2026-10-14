@@ -7,6 +7,17 @@ import "context"
 type Policy struct {
 	Membership
 	Rights []Right `json:"rights"`
+	// Read-only provenance, recomputed by the server; never trusted on writes.
+	GrantDetails []GrantDetail `json:"grant_details,omitempty"`
+	// Only these rights are deliberately reissued by the authenticated actor.
+	Reissue []Right `json:"reissue,omitempty"`
+}
+
+type GrantDetail struct {
+	Right
+	IssuerID  string `json:"issuer_id"`
+	CreatedAt string `json:"created_at"`
+	Live      bool   `json:"live"`
 }
 
 // Policy reads membership and grants in one snapshot, only for a current trusted
@@ -28,17 +39,18 @@ func (s Store) Policy(ctx context.Context, actor, user, workspace string) (Polic
 		return Policy{}, err
 	}
 	p := Policy{Membership: m, Rights: []Right{}}
-	rows, err := tx.QueryContext(ctx, `SELECT resource_kind,COALESCE(agent_id,project_id,routine_id),operation FROM access_grants WHERE member_id=? ORDER BY resource_kind,COALESCE(agent_id,project_id,routine_id),operation`, m.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT g.resource_kind,COALESCE(g.agent_id,g.project_id,g.routine_id),g.operation,g.created_by,g.created_at,EXISTS(SELECT 1 FROM live_access_grants live WHERE live.id=g.id) FROM access_grants g WHERE g.member_id=? ORDER BY g.resource_kind,COALESCE(g.agent_id,g.project_id,g.routine_id),g.operation`, m.ID)
 	if err != nil {
 		return Policy{}, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var right Right
-		if err = rows.Scan(&right.Kind, &right.ID, &right.Operation); err != nil {
+		var detail GrantDetail
+		if err = rows.Scan(&detail.Kind, &detail.ID, &detail.Operation, &detail.IssuerID, &detail.CreatedAt, &detail.Live); err != nil {
 			return Policy{}, err
 		}
-		p.Rights = append(p.Rights, right)
+		p.Rights = append(p.Rights, detail.Right)
+		p.GrantDetails = append(p.GrantDetails, detail)
 	}
 	if err = rows.Err(); err != nil {
 		return Policy{}, err
