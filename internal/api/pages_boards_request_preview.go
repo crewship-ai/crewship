@@ -79,8 +79,16 @@ func (h *PageHandler) saveBoardRequestPreview(ctx context.Context, tx *sql.Tx, i
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(p.byte_size),0) FROM page_board_request_previews p JOIN page_board_requests r ON r.id=p.request_id WHERE r.workspace_id=?`, workspace).Scan(&size); err != nil {
 		return err
 	}
-	if size+int64(preview.Size) > 128<<20 {
-		return errBoardPreviewQuota
+	if excess := size + int64(preview.Size) - (128 << 20); excess > 0 {
+		if err := compactTerminalBoardPreviews(ctx, tx, workspace, excess, time.Now()); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(p.byte_size),0) FROM page_board_request_previews p JOIN page_board_requests r ON r.id=p.request_id WHERE r.workspace_id=?`, workspace).Scan(&size); err != nil {
+			return err
+		}
+		if size+int64(preview.Size) > 128<<20 {
+			return errBoardPreviewQuota
+		}
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO page_board_request_previews(request_id,sha256,width,height,byte_size,created_at) VALUES(?,?,?,?,?,?)`, id, preview.SHA, preview.Width, preview.Height, preview.Size, tsformat.Format(time.Now()))
 	return err

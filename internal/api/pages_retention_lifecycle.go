@@ -10,6 +10,8 @@ import (
 
 const pageMutationReplayWindow = 24 * time.Hour
 const pageRequestHistoryWindow = 90 * 24 * time.Hour
+const pageTerminalRequestHistory = 100
+const workspaceTerminalBoardHistory = 1000
 
 // Publication receipts for retained revisions remain useful for exact retries.
 // Receipts alone never pin source bytes. Removed source has a 24-hour replay
@@ -33,18 +35,37 @@ func compactDiscussionReceipts(ctx context.Context, tx *sql.Tx, page string, boa
 }
 
 // Terminal jobs have a documented history lifetime. Pending/running jobs and
-// diagrams waiting for human insertion are never aged out. Cascades release
-// their snapshots, previews and source/file pins; GC owns physical blob removal.
+// diagrams waiting for human insertion are never aged out. Current/recent-undo
+// drawing provenance also retains its Mermaid source. Cascades release retired
+// snapshots, previews and source/file pins; GC owns physical blob removal.
 func compactPageRequestHistory(ctx context.Context, tx *sql.Tx, workspace string, now time.Time) error {
 	cutoff := tsformat.Format(now.Add(-pageRequestHistoryWindow))
-	for _, q := range []string{
-		`DELETE FROM page_artifact_requests WHERE id IN (SELECT r.id FROM page_artifact_requests r JOIN pages p ON p.id=r.page_id WHERE p.workspace_id=? AND r.status IN('succeeded','failed','cancelled') AND r.updated_at<? ORDER BY r.updated_at,r.id LIMIT 100)`,
-		`DELETE FROM page_board_requests WHERE id IN (SELECT id FROM page_board_requests WHERE workspace_id=? AND status IN('inserted','succeeded','failed','cancelled') AND updated_at<? ORDER BY updated_at,id LIMIT 100)`,
-	} {
-		if _, err := tx.ExecContext(ctx, q, workspace, cutoff); err != nil {
+	// Keep at least the replay window, and otherwise the most recent terminal
+	// jobs within resource/workspace bounds. A 90-day age limit alone could fill
+	// the hard request quota in a busy day and block dispatch for months.
+	replayCutoff := tsformat.Format(now.Add(-pageMutationReplayWindow))
+	queries := []struct {
+		sql  string
+		args []any
+	}{
+		{`DELETE FROM page_artifact_requests WHERE id IN (
+   SELECT id FROM (SELECT r.id,r.updated_at,ROW_NUMBER() OVER(PARTITION BY r.page_id ORDER BY r.updated_at DESC,r.id DESC) history_rank
+    FROM page_artifact_requests r JOIN pages p ON p.id=r.page_id WHERE p.workspace_id=? AND r.status IN('succeeded','failed','cancelled'))
+   WHERE updated_at<? OR(history_rank>? AND updated_at<?) ORDER BY updated_at,id LIMIT 100)`, []any{workspace, cutoff, pageTerminalRequestHistory, replayCutoff}},
+		{`DELETE FROM page_board_requests WHERE id IN (
+   SELECT id FROM (SELECT r.id,r.updated_at,
+    ROW_NUMBER() OVER(PARTITION BY COALESCE(r.board_page_id,r.original_board_id) ORDER BY r.updated_at DESC,r.id DESC) history_rank,
+    ROW_NUMBER() OVER(ORDER BY r.updated_at DESC,r.id DESC) workspace_rank
+    FROM page_board_requests r WHERE r.workspace_id=? AND r.status IN('inserted','succeeded','failed','cancelled')
+    AND NOT EXISTS(SELECT 1 FROM page_board_elements e WHERE e.origin_request_id=r.id AND (e.element_json IS NOT NULL OR e.deleted_at>=?)))
+   WHERE updated_at<? OR((history_rank>? OR workspace_rank>?) AND updated_at<?) ORDER BY updated_at,id LIMIT 100)`, []any{workspace, replayCutoff, cutoff, pageTerminalRequestHistory, workspaceTerminalBoardHistory, replayCutoff}},
+	}
+	for _, query := range queries {
+		if _, err := tx.ExecContext(ctx, query.sql, query.args...); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -133,4 +154,19 @@ func (h *PageHandler) cleanupPageRetention(ctx context.Context, pageCursor, work
 		workspaceCursor = workspace
 	}
 	return pageCursor, workspaceCursor, nil
+}
+
+// Optional illustrations can release quota without deleting the canonical job
+// snapshot or its result. Never remove an active/awaiting-insertion input, and
+// preserve terminal inputs for at least the supported replay window.
+func compactTerminalBoardPreviews(ctx context.Context, tx *sql.Tx, workspace string, bytesNeeded int64, now time.Time) error {
+	if bytesNeeded <= 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `DELETE FROM page_board_request_previews WHERE request_id IN (
+ SELECT request_id FROM (SELECT p.request_id,COALESCE(SUM(p.byte_size) OVER(ORDER BY r.updated_at,p.request_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) prior_bytes
+ FROM page_board_request_previews p JOIN page_board_requests r ON r.id=p.request_id
+ WHERE r.workspace_id=? AND r.status IN('inserted','succeeded','failed','cancelled') AND r.updated_at<?)
+ WHERE prior_bytes<?)`, workspace, tsformat.Format(now.Add(-pageMutationReplayWindow)), bytesNeeded)
+	return err
 }

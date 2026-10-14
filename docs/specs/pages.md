@@ -1596,11 +1596,19 @@ precondition; the thread count bounds them. Other expired mutation retries fail
 monotonic thread version preconditions. Comments, original revision anchors and
 private body history are preserved separately from replay receipts.
 
-Terminal artifact/Board jobs, their snapshots, source/file references and optional
-previews expire after 90 days since their final update. Queued/running jobs and
-diagrams awaiting human insertion remain available. Retry submission IDs are
-supported while the corresponding job remains in history. Expired job IDs cannot
-be used as explicit retry sources. This cleanup does not restart or authorize runs.
+Disposable terminal job history retains the newest 100 jobs per Page and 1,000
+Board jobs per workspace, with a minimum 24-hour replay window and maximum age
+of 90 days. Recent retry protection can temporarily retain more than those history
+counts within the existing quotas. Queued/running jobs and diagrams awaiting
+human insertion remain available. Inserted Mermaid source also remains while
+current drawings or their recent undo tombstones refer to the job. Expired job
+IDs cannot be used as explicit retry sources; this cleanup never authorizes runs.
+
+Completed jobs do not permanently pin HTML revisions: their historical result
+metadata can outlive the retained source. Head, discussion and active Board pins
+still retain their exact content. Under preview quota pressure, aged terminal
+illustrations may expire after the replay window without deleting the canonical
+job snapshot or result; active inputs and awaiting-insertion jobs are protected.
 
 Unused Board images expire after the 24-hour replay/undo window, measured from
 upload or the last confirmed scene change that used or removed the image. Current

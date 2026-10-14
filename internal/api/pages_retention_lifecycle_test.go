@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 	"strings"
 	"testing"
 	"time"
@@ -182,4 +183,95 @@ func TestPageRetentionWorkerReleasesDetachedTerminalPreviewForGC(t *testing.T) {
 	if n, err := reclaimAttachmentBlobs(t.Context(), h.db, h.artifactStoragePath, ws); err != nil || n != 1 {
 		t.Fatalf("expired preview not released to GC: %d %v", n, err)
 	}
+}
+
+func TestCompletedArtifactRequestsCannotSaturateRevisionRetention(t *testing.T) {
+	h, ws, user, page := requestFixture(t)
+	var sha string
+	if err := h.db.QueryRow(`SELECT sha256 FROM page_artifact_revisions WHERE page_id=? AND revision=1`, page).Scan(&sha); err != nil {
+		t.Fatal(err)
+	}
+	for rev := 2; rev <= 200; rev++ {
+		execOrFatal(t, h.db, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,mutation_id,request_digest,created_at) VALUES(?,?,?,?,?,'digest','2000-01-01T00:00:00Z')`, fmt.Sprint("completed-rev-", rev), page, rev, sha, fmt.Sprint("completed-rev-", rev))
+	}
+	execOrFatal(t, h.db, `UPDATE page_artifacts SET head_rev=200 WHERE page_id=?`, page)
+	execOrFatal(t, h.db, `WITH RECURSIVE n(v) AS(SELECT 1 UNION ALL SELECT v+1 FROM n WHERE v<200) INSERT INTO page_artifact_requests(id,page_id,human_user_id,chat_id,agent_id,base_rev,submission_id,fingerprint,instruction,snapshot_json,receipt_json,status,result_revision,created_at,updated_at) SELECT 'completed-'||v,?,?,'artifact-chat','artifact-agent',v,'completed-'||v,'digest','done','{}','{}','succeeded',v,?,? FROM n`, page, user, tsformat.Format(time.Now()), tsformat.Format(time.Now()))
+	artifactExpect(t, artifactSave(t, h, ws, user, "<h1>Next ordinary update</h1>", "after-completed-history", 200), 201)
+	var count int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM page_artifact_requests WHERE page_id=?`, page).Scan(&count); err != nil || count != 200 {
+		t.Fatalf("publication discarded request history: %d %v", count, err)
+	}
+}
+
+func TestTerminalRequestHistoryCapacityKeepsRecentRetriesAndActiveJobs(t *testing.T) {
+	h, ws, _, _, _, id := boardJobFixture(t)
+	old := tsformat.Format(time.Now().Add(-48 * time.Hour))
+	recent := tsformat.Format(time.Now())
+	for i := 0; i < 210; i++ {
+		stamp := old
+		if i >= 205 {
+			stamp = recent
+		}
+		clone := fmt.Sprint("capacity-history-", i)
+		execOrFatal(t, h.db, `INSERT INTO page_board_requests(id,workspace_id,board_page_id,original_board_id,human_user_id,agent_id,chat_id,kind,base_seq,submission_id,fingerprint,instruction,selected_element_ids_json,selected_placement_ids_json,snapshot_json,target_json,dialect,converter_version,receipt_json,status,created_at,updated_at) SELECT ?,workspace_id,board_page_id,original_board_id,human_user_id,agent_id,chat_id,kind,base_seq,?,fingerprint,instruction,selected_element_ids_json,selected_placement_ids_json,snapshot_json,target_json,dialect,converter_version,receipt_json,'cancelled',?,? FROM page_board_requests WHERE id=?`, clone, clone, stamp, stamp, id)
+	}
+	for i := 0; i < 3; i++ {
+		tx, err := h.db.BeginTx(t.Context(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = compactPageRequestHistory(t.Context(), tx, ws, time.Now()); err != nil {
+			tx.Rollback()
+			t.Fatal(err)
+		}
+		if err = tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var total, fresh, active int
+	if err := h.db.QueryRow(`SELECT COUNT(*),COALESCE(SUM(updated_at=?),0),COALESCE(SUM(status='queued'),0) FROM page_board_requests`, recent).Scan(&total, &fresh, &active); err != nil {
+		t.Fatal(err)
+	}
+	if total != 101 || fresh != 5 || active != 1 {
+		t.Fatalf("history count=%d fresh=%d active=%d", total, fresh, active)
+	}
+}
+
+func TestRequestRetentionPreservesCurrentDiagramSourceAndRecentUndo(t *testing.T) {
+	h, workspace, user, page, token, id := boardJobFixture(t)
+	execOrFatal(t, h.db, `UPDATE page_board_requests SET status='running',run_id='artifact-run' WHERE id=?`, id)
+	artifactExpect(t, boardJobAgentCall(t, h, workspace, token, id, `{"mutation_id":"source","source":"flowchart TD\nA[Hello] --> B[World]","dialect":"flowchart-v1","converter_version":"2.2.2"}`, h.PublishBoardRequestMermaid), 201)
+	var hash string
+	if err := h.db.QueryRow(`SELECT source_hash FROM page_board_requests WHERE id=?`, id).Scan(&hash); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"mutation_id": "insert", "base_seq": 0, "source_hash": hash, "converter_version": "2.2.2", "upserts": []map[string]any{{"element": boardAgentElement(t, "converted", nil), "expected_rev": 0}}})
+	artifactExpect(t, boardJobCall(t, h, workspace, user, id, string(raw), h.InsertBoardRequest), 201)
+	now := h.clock.Now()
+	execOrFatal(t, h.db, `UPDATE page_board_requests SET updated_at=? WHERE id=?`, tsformat.Format(now.Add(-100*24*time.Hour)), id)
+	compact := func(at time.Time, want int) {
+		tx, err := h.db.BeginTx(t.Context(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		if err = compactPageRequestHistory(t.Context(), tx, workspace, at); err != nil {
+			t.Fatal(err)
+		}
+		var n int
+		if err = tx.QueryRow(`SELECT COUNT(*) FROM page_board_requests WHERE id=? AND mermaid_source!=''`, id).Scan(&n); err != nil || n != want {
+			t.Fatalf("diagram source count=%d want=%d err=%v", n, want, err)
+		}
+		if err = tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	compact(now, 1)
+	var revision int64
+	if err := h.db.QueryRow(`SELECT element_rev FROM page_board_elements WHERE board_page_id=? AND element_id='converted'`, page).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	artifactExpect(t, boardCall(t, h, workspace, user, "OWNER", "report", "batch", fmt.Sprintf(`{"mutation_id":"remove-diagram","base_seq":1,"deletes":[{"id":"converted","expected_rev":%d}]}`, revision)), 201)
+	compact(now.Add(time.Hour), 1)
+	compact(now.Add(25*time.Hour), 0)
 }

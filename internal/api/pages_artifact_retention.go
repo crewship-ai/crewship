@@ -46,11 +46,11 @@ func reserveArtifactRevisionAt(ctx context.Context, tx *sql.Tx, pageID string, n
  AND r.revision != (SELECT head_rev FROM page_artifacts WHERE page_id=r.page_id)
  AND NOT EXISTS(SELECT 1 FROM page_board_source_history h JOIN page_board_mutations m ON m.board_page_id=h.board_page_id AND m.mutation_id=h.mutation_id WHERE h.source_page_id=r.page_id AND h.source_revision=r.revision AND m.created_at>=?)
  AND NOT EXISTS(SELECT 1 FROM page_board_artifact_placements b WHERE b.source_page_id=r.page_id AND b.source_revision=r.revision AND (b.deleted_at IS NULL OR b.deleted_at>=?))
- AND NOT EXISTS(SELECT 1 FROM page_board_request_sources q JOIN page_board_requests job ON job.id=q.request_id WHERE q.source_page_id=r.page_id AND q.source_revision=r.revision AND (job.status IN ('queued','running','ready_to_insert') OR job.updated_at>=?))
- AND NOT EXISTS(SELECT 1 FROM page_board_requests q WHERE q.result_page_id=r.page_id AND q.result_revision=r.revision AND (q.status IN ('queued','running','ready_to_insert') OR q.updated_at>=?))
+ AND NOT EXISTS(SELECT 1 FROM page_board_request_sources q JOIN page_board_requests job ON job.id=q.request_id WHERE q.source_page_id=r.page_id AND q.source_revision=r.revision AND job.status IN ('queued','running','ready_to_insert'))
+ AND NOT EXISTS(SELECT 1 FROM page_board_requests q WHERE q.result_page_id=r.page_id AND q.result_revision=r.revision AND q.status IN ('queued','running','ready_to_insert'))
  AND NOT EXISTS(SELECT 1 FROM page_artifact_threads t WHERE t.page_id=r.page_id AND t.revision=r.revision)
- AND NOT EXISTS(SELECT 1 FROM page_artifact_requests q WHERE q.page_id=r.page_id AND (q.status IN ('queued','running') OR q.updated_at>=?) AND (q.base_rev=r.revision OR q.result_revision=r.revision))
- ORDER BY r.revision LIMIT ?)`, pageID, pageID, restoreTarget, tsformat.Format(now.Add(-boardHistoryWindow)), tsformat.Format(now.Add(-boardHistoryWindow)), tsformat.Format(now.Add(-pageRequestHistoryWindow)), tsformat.Format(now.Add(-pageRequestHistoryWindow)), tsformat.Format(now.Add(-pageRequestHistoryWindow)), needed)
+ AND NOT EXISTS(SELECT 1 FROM page_artifact_requests q WHERE q.page_id=r.page_id AND q.status IN ('queued','running') AND (q.base_rev=r.revision OR q.result_revision=r.revision))
+ ORDER BY r.revision LIMIT ?)`, pageID, pageID, restoreTarget, tsformat.Format(now.Add(-boardHistoryWindow)), tsformat.Format(now.Add(-boardHistoryWindow)), needed)
 	if err != nil {
 		return err
 	}
