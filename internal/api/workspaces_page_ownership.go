@@ -332,6 +332,22 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 	writeJSON(w, 200, response)
 }
 
+const pageOwnershipHelp = "Ask a workspace administrator to resolve ownership. For Artifacts and Boards, select a human successor in Settings > General > Artifact and Board ownership, then retry."
+
 func replyPageOwnershipConflict(w http.ResponseWriter, prefix string, e *ErrPagesNeedManualTransfer) {
-	writeJSON(w, http.StatusConflict, map[string]any{"error": prefix + e.Error(), "code": "page_ownership_transfer_required", "pages": e.OutputPages})
+	writeJSON(w, http.StatusConflict, map[string]any{"error": prefix + strings.TrimPrefix(e.Error(), "cannot erase this user: "), "code": "page_ownership_transfer_required", "pages": e.OutputPages})
+}
+
+// Instance administration does not grant workspace Page visibility. Even an
+// instance administrator who belongs to the workspace gets the same minimal
+// contract; names and contacts belong in the workspace-authorized custody API.
+func replyInstancePageOwnershipConflict(w http.ResponseWriter, e *ErrPagesNeedManualTransfer) {
+	pages := make([]map[string]string, 0, len(e.PageIDs))
+	for _, id := range e.PageIDs {
+		pages = append(pages, map[string]string{"id": id})
+	}
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error": "cannot remove this member: page ownership must be resolved first. " + pageOwnershipHelp,
+		"code":  "page_ownership_transfer_required", "pages": pages,
+	})
 }

@@ -86,13 +86,14 @@ type pageOwnerTransferResult struct {
 // first (e.g. `crewship page grant` / a manual owner change).
 type ErrPagesNeedManualTransfer struct {
 	OutputPages []pageOwnershipSummary
+	PageIDs     []string // Opaque IDs of all unresolved Pages, including ordinary Pages.
 	Pages       []string // "slug (name)" for every page that could not be resolved
 }
 
 func (e *ErrPagesNeedManualTransfer) Error() string {
 	return fmt.Sprintf(
-		"cannot erase this user: page(s) %s have no eligible successor — regular Pages require a panel-owning or member crew; Artifacts and Boards require an explicit human successor selection. Transfer ownership, then retry",
-		strings.Join(e.Pages, ", "))
+		"cannot erase this user: page(s) %s require ownership resolution — regular Pages require a panel-owning or member crew; Artifacts and Boards require an explicit human successor selection. %s",
+		strings.Join(e.Pages, ", "), pageOwnershipHelp)
 }
 
 // transferDepartingUserPages hands every page `userID` owns in `wsID` to a
@@ -194,10 +195,12 @@ func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID 
 	}
 	var toTransfer []resolvedTransfer
 	var unresolved []string
+	var unresolvedIDs []string
 
 	for _, p := range pages {
 		if p.humanOnly {
 			unresolved = append(unresolved, fmt.Sprintf("%s (%s; requires explicit human transfer)", p.slug, p.name))
+			unresolvedIDs = append(unresolvedIDs, p.id)
 			continue
 		}
 		crewID, reason, err := resolveTransferTargetCrew(ctx, tx, wsID, p.id, userID)
@@ -206,6 +209,7 @@ func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID 
 		}
 		if crewID == "" {
 			unresolved = append(unresolved, fmt.Sprintf("%s (%s)", p.slug, p.name))
+			unresolvedIDs = append(unresolvedIDs, p.id)
 			continue
 		}
 		var crewName string
@@ -224,7 +228,7 @@ func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID 
 		if err != nil {
 			return nil, err
 		}
-		return nil, &ErrPagesNeedManualTransfer{Pages: unresolved, OutputPages: outputs}
+		return nil, &ErrPagesNeedManualTransfer{Pages: unresolved, PageIDs: unresolvedIDs, OutputPages: outputs}
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)

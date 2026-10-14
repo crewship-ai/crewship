@@ -1468,6 +1468,13 @@ empty `eligible_successors` array). Ownership, source, scene, history, grants,
 membership and notices remain unchanged, including regular Pages that otherwise
 could transfer to a crew. GDPR preserves its existing failed-attempt audit row.
 Regular panel Pages otherwise continue to use their existing crew transfer rule.
+The instance-admin membership-removal route instead returns `pages: [{id}]` for
+all unresolved Pages and a generic administrator-guidance message: instance
+administration alone does not authorize private Page names, slugs, ownership or
+contacts. The workspace-admin removal/GDPR routes retain their authorized output
+metadata. Conflict messages direct administrators to Settings > General >
+Artifact and Board ownership; a regular member cannot use the admin-only removal
+endpoint as a self-service leave operation.
 
 Only a currently active, unrestricted human workspace OWNER or ADMIN can manage
 output custody through these workspace-scoped endpoints:
@@ -1480,7 +1487,10 @@ output custody through these workspace-scoped endpoints:
   When more outputs remain, follow `next_cursor` as `cursor` with the same
   workspace and owner filter. Invalid parameters return 400. Each request
   evaluates current successor eligibility for at most 100 returned outputs;
-  it still scans current workspace members for each returned output.
+  it still scans current workspace members for each returned output. Eligibility
+  work therefore scales with returned outputs × workspace members. Batching these
+  canonical ACL checks is a performance follow-up; pagination and the default 25
+  limit bound each request without weakening live authorization.
 - `POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID}` accepts
   `{expected_owner_user_id, successor_user_id}` and immediately transfers that
   one Artifact or Board. Success returns 200 with the refreshed page summary
@@ -1495,7 +1505,8 @@ are rechecked under the same database writer fence. The ownership change and
 administrator Inbox notice commit together, followed by the existing journal
 audit emission. Repeated transfers refresh the existing administrator Inbox card
 for that output as unread, clearing global read/resolved markers and all per-user
-read markers. Each committed transfer retains a separate opaque journal event.
+read markers. Opaque post-commit journal events retain individual transfer history
+under the existing best-effort contract, rather than a transactional outbox.
 Private content, revisions
 and stored grant rows are preserved.
 Effective access
