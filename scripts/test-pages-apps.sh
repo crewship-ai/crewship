@@ -5,9 +5,20 @@ cd "$(dirname "$0")/.."
 evidence_dir="${PAGES_TEST_EVIDENCE_DIR:-/tmp/crewship-pages-ci}"
 mkdir -p "$evidence_dir"
 docker version >/dev/null
-docker build --iidfile "$evidence_dir/image-id" tools/pages-build
+# Install the compiler the way an operator does (#3108): the binary builds the
+# image from its embedded context and labels it with its profile fingerprint.
+# stdout is only the immutable image ID. The binary stays out of the evidence
+# directory, which CI uploads.
+bin_dir="$(mktemp -d)"
+trap 'rm -rf "$bin_dir"' EXIT
+go build -o "$bin_dir/crewship" ./cmd/crewship
+"$bin_dir/crewship" page enable > "$evidence_dir/image-id"
 export CREWSHIP_TEST_PAGE_BUILD_IMAGE
 CREWSHIP_TEST_PAGE_BUILD_IMAGE="$(cat "$evidence_dir/image-id")"
+case "$CREWSHIP_TEST_PAGE_BUILD_IMAGE" in
+  sha256:*) ;;
+  *) echo "crewship page enable printed '$CREWSHIP_TEST_PAGE_BUILD_IMAGE', want a sha256 image ID" >&2; exit 1 ;;
+esac
 export PAGES_TEST_BUILD_IMAGE="$CREWSHIP_TEST_PAGE_BUILD_IMAGE"
 export CREWSHIP_TEST_PAGE_ARTIFACT_OUT="$evidence_dir/artifact.json"
 go test -p 1 -json -count=1 -timeout=10m \
