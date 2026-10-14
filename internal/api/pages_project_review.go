@@ -907,8 +907,13 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if h.pageArtifacts == nil || h.pageRuntimeOrigin == "" {
-		blocked(reviewBlockerStorageUnavailable, "Page build storage and a separate runtime origin must be configured before an application can be published.")
+	// One blocker code (the review contract's enum), but a message that names
+	// the one missing setting rather than both.
+	switch {
+	case h.pageArtifacts == nil:
+		blocked(reviewBlockerStorageUnavailable, pageArtifactsMissingMessage)
+	case h.pageRuntimeOrigin == "":
+		blocked(reviewBlockerStorageUnavailable, pageRuntimeOriginMissingText)
 	}
 	if !snapshot.Capabilities.MayPublish {
 		blocked(reviewBlockerNotPermitted, "Publishing an application requires Page ownership or workspace administration.")

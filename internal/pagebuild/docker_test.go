@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -143,8 +144,103 @@ fi
 	}
 	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
 	builder := &DockerBuilder{Image: "sha256:" + strings.Repeat("a", 64)}
-	if _, err := builder.Build(context.Background(), pageprofile.Source()); err == nil || !strings.Contains(err.Error(), "does not match this server release") {
+	if _, err := builder.Build(context.Background(), pageprofile.Source()); err == nil || !strings.Contains(err.Error(), "does not match this server release") || !strings.Contains(err.Error(), EnableCommand) {
 		t.Fatalf("stale compiler not rejected: %v", err)
+	}
+}
+
+// fakeDocker puts a `docker` on PATH that records every invocation and, for
+// `run`, prints stderr and exits 1. It never reaches a daemon.
+func fakeDocker(t *testing.T, runStderr string) (calls func() string) {
+	t.Helper()
+	directory := t.TempDir()
+	log := filepath.Join(directory, "calls")
+	script := `#!/bin/sh
+echo "$@" >>'` + log + `'
+if [ "$1" = run ]; then
+ cat >/dev/null
+ echo '` + runStderr + `' >&2
+ exit 1
+fi
+`
+	if err := os.WriteFile(filepath.Join(directory, "docker"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func() string {
+		b, _ := os.ReadFile(log)
+		return string(b)
+	}
+}
+
+func TestDockerBuilderImageSelection(t *testing.T) {
+	explicit := "sha256:" + strings.Repeat("c", 64)
+	labelled := "sha256:" + strings.Repeat("d", 64)
+	for _, tc := range []struct {
+		name       string
+		builder    func(lookups *int) *DockerBuilder
+		notEnabled bool
+		lookups    int
+		image      string
+	}{
+		{name: "no image and no resolver", builder: func(*int) *DockerBuilder { return &DockerBuilder{} }, notEnabled: true},
+		{name: "explicit image wins over label", lookups: 0, image: explicit, builder: func(n *int) *DockerBuilder {
+			return &DockerBuilder{Image: explicit, Resolver: &ImageResolver{Lookup: func(context.Context) ([]string, error) { *n++; return []string{labelled}, nil }}}
+		}},
+		{name: "resolver explicit", image: explicit, builder: func(n *int) *DockerBuilder {
+			return &DockerBuilder{Resolver: &ImageResolver{Explicit: explicit, Lookup: func(context.Context) ([]string, error) { *n++; return nil, nil }}}
+		}},
+		{name: "labelled image enables", lookups: 1, image: labelled, builder: func(n *int) *DockerBuilder {
+			return &DockerBuilder{Resolver: &ImageResolver{Lookup: func(context.Context) ([]string, error) { *n++; return []string{labelled}, nil }}}
+		}},
+		// The refusal is looked up again uncached so enable needs no restart.
+		{name: "no labelled image", notEnabled: true, lookups: 2, builder: func(n *int) *DockerBuilder {
+			return &DockerBuilder{Resolver: &ImageResolver{Lookup: func(context.Context) ([]string, error) { *n++; return nil, nil }}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := fakeDocker(t, "compile error")
+			lookups := 0
+			b := tc.builder(&lookups)
+			err := b.Available(t.Context())
+			if errors.Is(err, ErrNotEnabled) != tc.notEnabled || (!tc.notEnabled && err != nil) {
+				t.Fatalf("Available: %v", err)
+			}
+			if lookups != tc.lookups {
+				t.Fatalf("lookups = %d, want %d", lookups, tc.lookups)
+			}
+			_, err = b.Build(t.Context(), pageprofile.Source())
+			if tc.notEnabled {
+				if !errors.Is(err, ErrNotEnabled) {
+					t.Fatalf("Build: %v", err)
+				}
+				// Not enabled means no container is ever started.
+				if strings.Contains(calls(), "run") {
+					t.Fatalf("docker run invoked while not enabled: %s", calls())
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "compile error") {
+				t.Fatalf("Build: %v", err)
+			}
+			if !strings.Contains(calls(), "run ") || !strings.Contains(calls(), " "+tc.image+" ") {
+				t.Fatalf("docker run did not use %s: %s", tc.image, calls())
+			}
+		})
+	}
+}
+
+func TestDockerBuilderForgetsRemovedImage(t *testing.T) {
+	labelled := "sha256:" + strings.Repeat("d", 64)
+	fakeDocker(t, "docker: Error response from daemon: No such image: "+labelled+".")
+	lookups := 0
+	resolver := &ImageResolver{Lookup: func(context.Context) ([]string, error) { lookups++; return []string{labelled}, nil }}
+	_, err := (&DockerBuilder{Resolver: resolver}).Build(t.Context(), pageprofile.Source())
+	if !errors.Is(err, ErrNotEnabled) {
+		t.Fatalf("removed image not reported as not enabled: %v", err)
+	}
+	if _, err := resolver.Image(t.Context()); err != nil || lookups != 2 {
+		t.Fatalf("resolver not invalidated: %v, %d lookups", err, lookups)
 	}
 }
 
