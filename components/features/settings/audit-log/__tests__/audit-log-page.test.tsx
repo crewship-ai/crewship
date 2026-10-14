@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react"
 
 const api = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => api(...a) }))
@@ -85,6 +85,13 @@ describe("Audit log page", () => {
   // that slice of the range, the range itself stays, and the same bar again
   // clears it.
   it("narrows the table to a bar picked on the Journal's chart", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date("2026-10-14T12:00:00Z"))
+    let finishActivity!: (response: ReturnType<typeof ok>) => void
+    const activity = new Promise<ReturnType<typeof ok>>(resolve => { finishActivity = resolve })
+    api.mockImplementation(async (url: string) => url.includes("/members") ? ok([])
+      : url.includes("limit=100") ? activity
+      : ok({ data: [], pagination: { page: 1, limit: 50, total: 0, total_pages: 1 } }))
     render(<AuditLogPage />)
     const chart = await screen.findByRole("application", { name: /Event volume histogram/ })
     await waitFor(() => expect(auditCalls().length).toBeGreaterThan(0))
@@ -95,6 +102,10 @@ describe("Audit log page", () => {
     expect(q.get("audit_range")).toBeNull()
     expect(auditCalls().at(-1)).toContain(`date_from=${encodeURIComponent(q.get("audit_at")!)}`)
     expect(screen.getByRole("button", { name: /^Remove filter .* – / })).toBeInTheDocument()
+    // The activity sample arrives after selection, at a later wall-clock time.
+    // New entries must not move the selected relative-window bucket.
+    vi.setSystemTime(new Date("2026-10-14T12:00:01Z"))
+    await act(async () => { finishActivity(ok({ data: [], pagination: { page: 1, limit: 100, total: 0, total_pages: 1 } })) })
     fireEvent.keyDown(chart, { key: "Enter" })
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("audit_at")).toBeNull())
   })
