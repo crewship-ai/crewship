@@ -106,7 +106,7 @@ describe('receipt-backed multi-step saved undo', () => {
     expect(planSavedUndo(remaining, latest)).toEqual({ kind: 'conflict', conflicts: [{ kind: 'element', id: 'a' }] })
   })
   it('rebases connected snapshots for owned inverse changes but still detects foreign graph edits', () => {
-    const before = base(); before.records.forEach(item => { item.element!.groupIds = ['group'] })
+    const before = base(); before.records = before.records.map(item => ({ ...item, element: { ...item.element!, groupIds: ['group'] } }))
     const first = savedBoardCommand(before, { ...move, upserts: [{ element: { ...before.records[0].element!, x: 20 }, expected_rev: 1 }] }, { seq: 2, result_seq: 2, element_revs: { a: 2 }, undo_expires_at: expiry }, before)
     const second = savedBoardCommand(first.applied, { base_seq: 2, upserts: [{ element: { ...first.applied.records[1].element!, x: 50 }, expected_rev: 1 }], deletes: [] }, { seq: 3, result_seq: 3, element_revs: { b: 2 }, undo_expires_at: expiry }, first.applied)
     const [remaining] = recordSavedUndo([first, second], ready(second, second.applied), { seq: 4, result_seq: 4, element_revs: { b: 3 } })
