@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { z } from "zod"
+import { resourceRightSchema, resourcePolicySchema } from "@/lib/resource-sharing"
 
 import { Button } from "@/components/ui/button"
 import { usePageSave } from "@/components/ui/page-save-bar"
@@ -10,11 +11,8 @@ import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { apiFetch } from "@/lib/api-fetch"
 import { nativeSelect } from "@/components/features/settings/shared"
 
-const rightSchema = z.object({ kind: z.enum(["agent", "project", "routine"]), id: z.string().min(1), operation: z.string() })
-const policySchema = z.object({
-  membership_id: z.string(), revision: z.number().int().positive(),
-  mode: z.enum(["trusted", "restricted"]), rights: z.array(rightSchema),
-})
+const rightSchema = resourceRightSchema
+const policySchema = resourcePolicySchema
 type Policy = z.infer<typeof policySchema>
 type Right = z.infer<typeof rightSchema>
 const directorySchema = z.array(z.object({ id: z.string(), name: z.string() }))
@@ -56,6 +54,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   const queryClient = useQueryClient()
   const [mode, setMode] = useState(policy.mode)
   const [rights, setRights] = useState<Right[]>(policy.rights)
+  const [reissue, setReissue] = useState<Right[]>([])
   const [kind, setKind] = useState<Right["kind"]>("agent")
   const [resourceId, setResourceId] = useState("")
   const [operation, setOperation] = useState("chat")
@@ -71,7 +70,8 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   const save = useMutation({
     mutationFn: async () => {
       const response = await apiFetch(url, { method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...policy, mode, rights: mode === "trusted" ? [] : rights }) })
+        body: JSON.stringify({ membership_id: policy.membership_id, revision: policy.revision, mode, rights: mode === "trusted" ? [] : rights,
+          ...(mode === "restricted" && reissue.length ? {reissue: reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r)))} : {}) }) })
       if (response.status === 409) { setConflict(true); throw new Error("Policy changed. Reload the current policy before saving.") }
       if (!response.ok) throw new Error("Resource access was not saved")
       const updated = policySchema.parse(await response.json())
@@ -88,11 +88,11 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   // The page's floating Save commits this draft: one change for the mode, one
   // per grant added or removed. A conflict keeps the draft but blocks Save
   // until the current policy is reloaded.
-  const pending = changeCount(policy, mode, rights)
+  const pending = changeCount(policy, mode, rights) + (mode === "restricted" ? reissue.filter(r => rights.some(right => rightKey(right) === rightKey(r))).length : 0)
   usePageSave({
     label: `Resource access for ${label}`, count: pending, canSave: !conflict, saving: save.isPending,
     save: () => save.mutateAsync(),
-    discard: () => { setMode(policy.mode); setRights(policy.rights) },
+    discard: () => { setMode(policy.mode); setRights(policy.rights); setReissue([]) },
   })
   function addRight() {
     if (!directory.data?.some(resource => resource.id === resourceId)) return
@@ -114,6 +114,12 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
       : "Guest restrictions apply to the entire account, across all workspaces. Only listed operations are allowed; conversation privacy checks still apply. Running a routine also requires run access to every agent it uses, and uses its configured credentials."}</p>
     {mode === "restricted" && <>
       <ul className="space-y-1" aria-label="Resource grants">{rights.map((right, index) => <li key={`${right.kind}:${right.id}:${right.operation}`} className="flex flex-wrap items-center gap-2">
+        {policy.grant_details?.filter(detail => rightKey(detail) === rightKey(right)).map(detail => <span key={rightKey(detail)} className="text-muted-foreground">
+          Issuer: {detail.issuer_name || detail.issuer_id} · {detail.live ? "Active" : "Inactive — issuer no longer has authority"}
+          {!detail.live && <Button size="sm" variant="outline" disabled={save.isPending || conflict} onClick={() => setReissue(current => current.some(r => rightKey(r) === rightKey(right)) ? current.filter(r => rightKey(r) !== rightKey(right)) : [...current,right])}>
+            {reissue.some(r => rightKey(r) === rightKey(right)) ? "Cancel reissue" : "Reissue as me"}
+          </Button>}
+        </span>)}
         <span>{right.kind}: {directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {right.operation}</span>
         <Button size="sm" variant="ghost" className="coarse:h-12" disabled={save.isPending || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
           aria-label={`Remove ${right.kind} ${right.id} ${right.operation}`}>Remove</Button>
@@ -165,7 +171,7 @@ function useResourceDirectory(workspaceId: string, kind: Right["kind"], enabled:
   })
 }
 
-const effectiveSchema = z.object({membership_id:z.string(), revision:z.number(), explanation:z.string(), account_restricted:z.boolean(), decisions:z.array(rightSchema.extend({state:z.string(),reason:z.string()}))})
+const effectiveSchema = z.object({membership_id:z.string(), revision:z.number(), explanation:z.string(), account_restricted:z.boolean(), decisions:z.array(rightSchema.extend({name:z.string().optional(),state:z.string(),reason:z.string()}))})
 function EffectiveAccess({url,revision,memberId}:{url:string;revision:number;memberId:string}) {
   const query=useQuery({
     queryKey:["member-effective-access",url,revision],retry:false,
@@ -181,6 +187,6 @@ function EffectiveAccess({url,revision,memberId}:{url:string;revision:number;mem
     <summary className="cursor-pointer">Effective access — saved policy</summary>
     {query.isPending && <p>Checking current access…</p>}
     {query.isError && <p role="status">Effective access unavailable. <button type="button" onClick={()=>void query.refetch()}>Retry access check</button></p>}
-    {query.data && <><p className="mt-2 text-muted-foreground">{query.data.explanation}</p><ul className="mt-2 space-y-2">{query.data.decisions.map(row=><li key={rightKey(row)}><span className="font-medium">{row.kind} · {row.id} · {row.operation}: {row.state}</span><p className="text-muted-foreground">{row.reason}</p></li>)}</ul></>}
+    {query.data && <><p className="mt-2 text-muted-foreground">{query.data.explanation}</p><ul className="mt-2 space-y-2">{query.data.decisions.map(row=><li key={rightKey(row)}><span className="font-medium">{row.kind} · {row.name || row.id} · {row.operation}: {row.state}</span><p className="text-muted-foreground">{row.reason}</p></li>)}</ul></>}
   </details>
 }

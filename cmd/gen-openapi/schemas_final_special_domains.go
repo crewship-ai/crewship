@@ -106,6 +106,7 @@ func finalSpecialDomainSchemaCatalog() map[string]DomainSchema {
 
 	return map[string]DomainSchema{
 		"GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access/effective": {Response: memberEffectiveAccessSchema(), SuccessStatuses: []string{"200"}},
+		"GET /api/v1/workspaces/{workspaceId}/access/me":                           {Response: memberEffectiveAccessSchema(), SuccessStatuses: []string{"200"}},
 		"GET /api/v1/workspaces/{workspaceId}/restricted-issues":                   {Response: array(restrictedIssueSchema()), SuccessStatuses: []string{"200"}},
 		"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}":         {Response: restrictedIssueSchema(), SuccessStatuses: []string{"200"}},
 		"GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access":           {Response: memberAccessPolicySchema()},

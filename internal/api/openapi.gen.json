@@ -137954,6 +137954,252 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/workspaces/{workspaceId}/access/me": {
+      "get": {
+        "description": "Get workspace access me (GET /api/v1/workspaces/{workspaceId}/access/me).",
+        "operationId": "get_api_v1_workspaces_workspaceId_access_me",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "account_restricted": {
+                      "type": "boolean"
+                    },
+                    "decisions": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "agent",
+                              "project",
+                              "routine"
+                            ],
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "operation": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "enum": [
+                              "allowed",
+                              "denied",
+                              "conditional",
+                              "unavailable"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "id",
+                          "operation",
+                          "state",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "explanation": {
+                      "type": "string"
+                    },
+                    "membership_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "mode": {
+                      "enum": [
+                        "trusted",
+                        "restricted"
+                      ],
+                      "type": "string"
+                    },
+                    "restriction_scope": {
+                      "enum": [
+                        "account"
+                      ],
+                      "type": "string"
+                    },
+                    "revision": {
+                      "format": "int64",
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "membership_id",
+                    "mode",
+                    "revision",
+                    "account_restricted",
+                    "restriction_scope",
+                    "explanation",
+                    "decisions"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace access me",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/invitations": {
       "get": {
         "description": "List workspace invitations (GET /api/v1/workspaces/{workspaceId}/invitations).",
@@ -139978,6 +140224,45 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "grant_details": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "issuer_id": {
+                            "type": "string"
+                          },
+                          "issuer_name": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "live": {
+                            "type": "boolean"
+                          },
+                          "operation": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "id",
+                          "operation",
+                          "issuer_id",
+                          "created_at",
+                          "live"
+                        ],
+                        "type": "object"
+                      },
+                      "readOnly": true,
+                      "type": "array"
+                    },
                     "membership_id": {
                       "minLength": 1,
                       "type": "string"
@@ -139988,6 +140273,102 @@
                         "restricted"
                       ],
                       "type": "string"
+                    },
+                    "reissue": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "agent"
+                                ],
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "discover",
+                                  "chat",
+                                  "run",
+                                  "delegate"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "operation"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "project"
+                                ],
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "list",
+                                  "read",
+                                  "write",
+                                  "delete"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "operation"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "run"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "operation"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "maxItems": 256,
+                      "type": "array",
+                      "uniqueItems": true
                     },
                     "revision": {
                       "format": "int64",
@@ -140238,6 +140619,45 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "grant_details": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "issuer_id": {
+                          "type": "string"
+                        },
+                        "issuer_name": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "live": {
+                          "type": "boolean"
+                        },
+                        "operation": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "id",
+                        "operation",
+                        "issuer_id",
+                        "created_at",
+                        "live"
+                      ],
+                      "type": "object"
+                    },
+                    "readOnly": true,
+                    "type": "array"
+                  },
                   "membership_id": {
                     "minLength": 1,
                     "type": "string"
@@ -140248,6 +140668,102 @@
                       "restricted"
                     ],
                     "type": "string"
+                  },
+                  "reissue": {
+                    "items": {
+                      "oneOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "agent"
+                              ],
+                              "type": "string"
+                            },
+                            "operation": {
+                              "enum": [
+                                "discover",
+                                "chat",
+                                "run",
+                                "delegate"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id",
+                            "operation"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "project"
+                              ],
+                              "type": "string"
+                            },
+                            "operation": {
+                              "enum": [
+                                "list",
+                                "read",
+                                "write",
+                                "delete"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id",
+                            "operation"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "routine"
+                              ],
+                              "type": "string"
+                            },
+                            "operation": {
+                              "enum": [
+                                "run"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id",
+                            "operation"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "maxItems": 256,
+                    "type": "array",
+                    "uniqueItems": true
                   },
                   "revision": {
                     "format": "int64",
@@ -140370,6 +140886,45 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "grant_details": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "issuer_id": {
+                            "type": "string"
+                          },
+                          "issuer_name": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "live": {
+                            "type": "boolean"
+                          },
+                          "operation": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "id",
+                          "operation",
+                          "issuer_id",
+                          "created_at",
+                          "live"
+                        ],
+                        "type": "object"
+                      },
+                      "readOnly": true,
+                      "type": "array"
+                    },
                     "membership_id": {
                       "minLength": 1,
                       "type": "string"
@@ -140380,6 +140935,102 @@
                         "restricted"
                       ],
                       "type": "string"
+                    },
+                    "reissue": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "agent"
+                                ],
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "discover",
+                                  "chat",
+                                  "run",
+                                  "delegate"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "operation"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "project"
+                                ],
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "list",
+                                  "read",
+                                  "write",
+                                  "delete"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "operation"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "run"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "operation"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "maxItems": 256,
+                      "type": "array",
+                      "uniqueItems": true
                     },
                     "revision": {
                       "format": "int64",
@@ -140678,6 +141329,9 @@
                             ],
                             "type": "string"
                           },
+                          "name": {
+                            "type": "string"
+                          },
                           "operation": {
                             "type": "string"
                           },
@@ -140799,6 +141453,60 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "security": [

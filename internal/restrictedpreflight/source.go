@@ -49,8 +49,8 @@ func readSource(ctx context.Context, q pipeline.PageActionQuery, user, workspace
  WHERE m.id=? AND m.workspace_id=? AND m.delegate_agent_id=? AND m.mission_type='issue'
  AND length(m.title)+length(COALESCE(m.description,''))<=12000
  AND m.status='TODO' AND iw.mode='agent' AND p.status IN ('backlog','planned','in_progress')
- AND EXISTS(SELECT 1 FROM access_grants g WHERE g.member_id=wm.id AND g.resource_kind='project' AND g.project_id=p.id AND g.operation='read')
- AND EXISTS(SELECT 1 FROM access_grants g WHERE g.member_id=wm.id AND g.resource_kind='agent' AND g.agent_id=a.id AND g.operation='run')
+ AND EXISTS(SELECT 1 FROM live_access_grants g WHERE g.member_id=wm.id AND g.resource_kind='project' AND g.project_id=p.id AND g.operation='read')
+ AND EXISTS(SELECT 1 FROM live_access_grants g WHERE g.member_id=wm.id AND g.resource_kind='agent' AND g.agent_id=a.id AND g.operation='run')
  AND NOT EXISTS(SELECT 1 FROM mission_relations rel JOIN missions blocker
  ON blocker.id=CASE WHEN rel.relation_type='blocks' THEN rel.source_id ELSE rel.target_id END
  WHERE ((rel.relation_type='blocks' AND rel.target_id=m.id) OR (rel.relation_type='blocked_by' AND rel.source_id=m.id))

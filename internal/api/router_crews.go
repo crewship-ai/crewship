@@ -33,6 +33,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	}
 	ws.SetJournal(r.Journal())
 	ws.invitationJournal = r.journal
+	ws.policyJournal = r.journal
 	ws.SetStorageRoot(r.storagePath)
 	crews := NewCrewHandler(r.db, r.logger)
 	crewSocket := r.socketPath
@@ -133,7 +134,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities", roleManage, ws.PatchMemberCapabilities)
 	// openapi: responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access", authed(wsCtx(http.HandlerFunc(ws.GetMemberAccess))))
+	// openapi: responses 200,400,401,403,404,409,500
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access/effective", authed(wsCtx(http.HandlerFunc(ws.GetMemberEffectiveAccess))))
+	// openapi: responses 200,400,401,403,404,409,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/access/me", authed(wsCtx(http.HandlerFunc(ws.GetOwnEffectiveAccess))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues", authed(wsCtx(http.HandlerFunc(r.restrictedIssues))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}", authed(wsCtx(http.HandlerFunc(r.restrictedIssues))))
 	// openapi: responses 200,400,401,403,404,409,500
