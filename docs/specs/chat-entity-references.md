@@ -444,6 +444,7 @@ before promoting this E0 delivery.
 | --- | --- | --- |
 | UI issue -> agent mutation/comment/result | `TestWebIssueStartSidecarMutationsDelegationResultAndRevocation` | Real router and sidecar; synthetic executor |
 | UI comment mention | `TestHumanCommentDisconnectAndReplayKeepOneDurableMention` and `TestIssueOutbox` tests | Handler/outbox admission, not a live model |
+| Comment-triggered automation comments again | `TestCommentingAutomationStopsAtChainDepth` | Human and agent handlers, durable outbox/journal, pending-run store and database chain reader; routine execution simulated; stops at the eight-hop composition cap |
 | Legacy and new recurring templates | `TestLegacyRecurring`, `TestRecurringPermanentAuthorityFailureLeavesGlobalDueQueue` | Dispatcher and real migrated database |
 | Cron/webhook/manual routine authority | `TestRoutineChatOrigin`, `TestResolveAutonomousRunRequiresHostAdmission` | Handler/authority tests; complete trigger-to-sidecar integration pending |
 | Nested routine | `TestAssignmentChainOrigin_RoutineDispatchInheritsTheCausingRunsChain` | Chain attribution; complete nested execution pending |
