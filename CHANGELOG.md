@@ -9,8 +9,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- Guest accounts cannot acquire ADMIN or OWNER in any workspace; a database invariant protects both directions of the account-wide restriction. Guest Page actions retain Pages ACL checks and also require explicit routine Run and agent grants; existing capabilities are not backfilled.
+- **Agent chat transcripts survive workspace and crew backups (#3109).** Encrypted bundles include scoped structured history, remapped fork identities and stable message/run anchors. Damaged lines produce per-chat completeness warnings instead of blocking all backups. Collection only fences file pinning; restore fences publication and commit, preserving existing histories unless replacement is explicit. Cross-workspace chat collisions are refused. The search/feedback mirror and atomic hard-crash recovery across filesystem/DB publication remain separate limitations.
+
+
+- **Share routines and projects from their detail cards.** Workspace administrators can inspect Guest shares, preserve unrelated rights and issuer provenance, revoke individual operations or explicitly reissue inactive shares. Conflicting saves require a fresh review. Routine sharing offers Run; project sharing offers independent List and Read.
+- **Share individual routines and projects from the CLI.** `share`, `share list` and `unshare` preserve unrelated rights and issuer provenance, expose inactive shares and require explicit `--reissue` to move authority. Stale policy saves fail without retry.
+
 - **Guests can understand their own access.** Settings shows named resources and execution prerequisites; `workspace access me` and the workspace `access/me` API expose the same self-scoped explanation. Temporary refresh errors preserve the last good result, while access loss clears it. Concurrent resource deletion becomes an unavailable row.
+- Policy saves and explicit grant reissues record previous and new issuers and rights atomically. Member access CLI supports `--reissue` and shows inactive shares; Settings displays issuer names when available.
+
+- **Editing one Guest share preserves other administrators’ grants.** Unchanged rights retain their issuer and creation time, and inactive grants require an explicit reissue. Administrative policy shows issuer and active status; changes to already inactive issuers no longer stop newly authorized work.
+
+- ⚠️ **Behaviour change: resource shares follow current administrator authority.** Guest discovery, Issues, chat and routine execution stop using a grant when its issuer leaves, is demoted or suspended, or becomes a Guest. Stored shares are preserved; restoring the issuer does not revive previously admitted runs.
+- Guest accounts cannot acquire ADMIN or OWNER in any workspace; a database invariant protects both directions of the account-wide restriction. Guest Page actions retain Pages ACL checks and also require explicit routine Run and agent grants; existing capabilities are not backfilled.
+- Native Guest runtime candidates use a patched Debian 13 userspace while preserving the exact pinned bubblewrap 0.8 and Codex sandbox contract. Candidate publication still requires a passing vulnerability scan, signature verification and live acceptance before installation.
 
 - **Audit chart selections clear when the same bar is selected again (#3094).** The chart and table retain the chosen time-window anchor while activity loads or filters change, so incoming samples no longer shift a relative bucket beneath the selection.
 

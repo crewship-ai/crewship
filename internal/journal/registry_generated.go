@@ -81,6 +81,7 @@ var AllEntryTypes = []EntryType{
 	EntryType("keeper.rule_auto_tuned"), // internal/harbormaster/reward.go:226:16
 	EntryLLMCacheHit,
 	EntryLLMCall,
+	EntryMemberAccessChanged,
 	EntryMemoryConfigUpdated,
 	EntryMemoryConsolidated,
 	EntryMemoryConsolidationProposed,

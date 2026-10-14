@@ -264,6 +264,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "invitation.reissued": RotateCcw,
   "invitation.revoked": UserMinus,
   "invitation.accepted": UserCheck,
+  "member.access_changed": ShieldCheck,
 
   // ── Memory ────────────────────────────────────────────────────────
   "memory.searched": Search,

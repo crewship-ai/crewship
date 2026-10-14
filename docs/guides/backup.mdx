@@ -280,6 +280,44 @@ crewship backup restore ~/.crewship/backups/crewship-workspace-acme-…tar.zst
 
 The server rejects the restore if a workspace (or crew) with the same slug already exists. Override with `--as-workspace <new-slug>` or `--as-crew <new-slug>` to land the payload under a fresh identity.
 
+### Agent chat transcripts
+
+Workspace and crew bundles include the complete structured JSONL transcripts
+for their included agent chats inside the encrypted payload. A fork remaps the
+chat and agent identities while retaining message IDs, additive fields and run
+IDs used by durable card anchors. Host transcripts are restored in the first
+step; they do not require a crew container or `--files-only`.
+
+The database dump is completed first. Collection then briefly fences transcript
+writers to pin the included files and their byte lengths. Validation and
+compression read those pinned lengths after releasing the fence; concurrent
+appends are not included in that file snapshot. Malformed, truncated or
+foreign-session lines are skipped without aborting the workspace backup. The
+completeness report lists `agent_chat_transcript_invalid_lines`, the chat ID and
+the number of skipped lines. Valid fields, including unknown fields, are retained.
+
+Restore validates and stages private files without pausing chat writers.
+Decryption, dry-run, image/container restoration and transcript-free restores do
+not acquire the conversation fence. The fence is taken only for comparison and
+publication of staged transcripts through the database commit or rollback,
+closing cached append handles before replacement. Normal partial restores keep
+existing chats' live history; only `--replace` deliberately replaces that history.
+The actual inserted chat rows must belong to the restored workspace before any
+transcript is published. JSON key order alone is not a history conflict.
+Returned transaction failures remove newly published transcripts and recover
+replaced originals. This does not guarantee atomic recovery from a hard process
+or power failure between filesystem publication and the database commit;
+interrupted replacements may leave private `.restore-original-*` recovery links
+in the conversations directory.
+
+Older bundles remain readable. If their chat metadata records messages without
+transcript files, the completeness report includes
+`agent_chat_transcript_missing`; the missing messages cannot be reconstructed
+from card references. The separate conversation search/feedback index is not
+rebuilt by this restore. An already pending best-effort search-mirror write may
+complete after replacement and require reconciliation; JSONL remains the source
+of truth.
+
 ### Restoring under a new identity takes three steps
 
 A rewritten restore forks the bundle's rows under a new workspace id and slug. It cannot land container state in the same call, because the crews it just created have no containers yet. So the flow is:

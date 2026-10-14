@@ -67,6 +67,7 @@ type WorkspaceExecutor struct {
 	CrewContainerName func(id, slug string) string
 	BlobRoot          string
 	AttachmentRoot    string
+	LockTranscripts   func(context.Context) (func(), error)
 	PageProjectsPath  string
 	CrewshipVersion   string
 	// OutputDir overrides the default backups directory (tests).
@@ -159,6 +160,8 @@ func (e *WorkspaceExecutor) Run(ctx context.Context, spec RunSpec, progress func
 		BlobRoot:           e.BlobRoot,
 		PageProjectsPath:   e.PageProjectsPath,
 		AttachmentRoot:     e.AttachmentRoot,
+		ConversationRoot:   e.AttachmentRoot,
+		LockTranscripts:    e.LockTranscripts,
 		Categories:         spec.Categories,
 		Progress:           progress,
 		EncoderConcurrency: spec.EncoderConcurrency,

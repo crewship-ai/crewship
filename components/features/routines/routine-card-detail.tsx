@@ -44,6 +44,7 @@ import { readableOriginSource } from "@/lib/routine-run-provenance"
 import { AutomationList } from "@/components/features/automations/automation-list"
 import { integrationLabel } from "@/lib/integration-labels"
 import { credentialTypeLabel } from "@/lib/credential-labels"
+import { ResourceShareDialog } from "@/components/features/settings/resource-share-dialog"
 import { RoutineIdentityHeader } from "./routine-identity-header"
 import { RoutineNavigation, ROUTINE_VIEWS } from "./routine-navigation"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
@@ -218,7 +219,7 @@ export function RoutineCardDetail({
         onPublish={canEdit ? openPublish : undefined}
         editButtonRef={editButtonRef}
         primary={primary}
-        actions={menu}
+        actions={<><ResourceShareDialog workspaceId={workspaceId} resource={{ kind: "routine", id: routine.id, name: routine.name || routine.slug }} />{menu}</>}
         runUses
       >
         {routine.ephemeral && <Pill tone="warn">ephemeral</Pill>}

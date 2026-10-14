@@ -70,7 +70,7 @@ access first. A role change cannot silently remove or bypass the restriction.
 | --- | --- | --- |
 | New GUEST workspace role | Changed: restricted access mode, Guest in UI, account-wide | The current global route fence has no mixed-mode bypass. Keeping one account ceiling avoids granting trusted routes through another workspace while per-resource integration is incomplete. Separate workspace-scoped guest accounts remain a future migration. |
 | New resource_grants registry | Changed: extend versioned access_grants | Reuse the shipped membership revision, resource foreign keys and execution revocation fences rather than introduce two authorities. Pages moves last as originally planned. |
-| Per-object sharing and meaningful type levels | Kept as target; only agent operations, routine run and project projection delivered | View/Edit, crew/credential subjects and Share dialogs need separate enforcement and UI work. |
+| Per-object sharing and meaningful type levels | Kept as target; only agent operations, routine run and project projection delivered | View/Edit and crew/credential subjects need separate enforcement and UI work. Routine/project Share dialogs reuse the versioned member policy. |
 | Pages model migration | Deferred, as in original phases | Preserve current Pages ACL, issuer checks and data during the first routine/project slice. |
 
 Guest invitation acceptance, restricted provisioning and direct member policy
@@ -108,6 +108,20 @@ against membership revision changes. Guest Settings includes **Your access** wit
 current decisions and execution prerequisites. This explains saved grants rather
 than enumerating unshared resources. Trusted members receive their role-based
 explanation; the endpoint does not grant new authority.
+
+Resource grants recheck their issuer at use time. The issuer must remain an
+active, trusted OWNER/ADMIN in the resource's workspace and must not have an
+account-wide Guest ceiling. This applies to discovery, Issues projections,
+project inputs, chat audiences, private preflight, routine catalogs, admission,
+recovery and dispatch. Stored grants remain visible in the saved policy but are
+inert while the issuer lacks authority. This retains stored shares like Pages;
+Pages currently has a narrower issuer check and is not yet unified with this model.
+Role loss, removal, suspension or a Guest ceiling advances affected recipient
+revisions transactionally. Restoring the issuer can authorize a new use of the
+preserved grant; previously admitted work remains fenced and requires a fresh
+admission. Changes in an unrelated workspace do not revoke valid local shares.
+The upgrade preserves valid and inert grant metadata and fences work whose
+issuer was already unavailable. Effective access explains an unavailable issuer.
 
 Supported operations:
 
@@ -192,4 +206,39 @@ Installed adapters' static profile declarations constrain navigation. Missing
 runtime installation preserves known declaration authority; unknown profiles
 remain denied. Operational readiness checks stay at execution time.
 
+Complete policy saves preserve the id, issuer and creation time of unchanged
+rights, including inactive shares. `grant_details` is read-only administrative
+metadata with `issuer_id`, `created_at` and `live`; submitted metadata never
+confers authority. To deliberately issue an inactive share under the current
+administrator, include that exact right in both `rights` and `reissue`.
+The Settings editor labels inactive shares and offers “Reissue as me”; an
+unrelated edit never silently reissues them. A reissue uses the authenticated
+actor and fresh metadata and participates in the same revision check.
+Issuer triggers fence only live-to-inactive transitions, not later changes to
+an already inactive issuer. Role, suspension and membership changes preserve
+stored provenance. Hard deletion of an issuer account is an exception: its
+grants are deleted to satisfy the user foreign key.
+
+Policy replacement and deliberate reissue append `member.access_changed` atomically with the policy, recording previous/current rights, issuers, revisions and mode. API and CLI may explicitly reissue live shares; Settings offers reissue for inactive shares.
 Guest Page actions retain the Pages ACL checks and additionally require an explicit `routine:run` grant and the routine’s agent grants. Existing `routine.run` capabilities are not backfilled into routine grants.
+
+## Sharing from a routine or project
+
+Trusted workspace OWNER/ADMIN members can open **Share** on the routine or project
+identity card. The dialog lists trusted role-based members and each Guest's
+explicit shares on that object, including inactive issuer state. Routine sharing
+currently offers Run; project sharing offers independent List and Read. It does
+not introduce routine View/Edit or project Contribute/Manage.
+
+Each Guest save retains their membership ID, access mode and revision, preserves
+all other resources and unsupported future operations, and sends only writable
+policy fields. The backend preserves unchanged issuer provenance. An inactive
+share remains inactive unless explicitly selected for **Reissue as me**. A 409
+blocks further saves until the administrator reloads and reviews current shares;
+there is no automatic retry or account conversion. The existing versioned member-policy API remains the transport.
+The object-oriented CLI offers `share`, `share list` and `unshare` for routine
+Run and project List/Read. It uses the same member-policy endpoint, preserves
+unrelated rights, never converts account mode and never retries a conflict.
+`share --reissue` deliberately changes selected share authority. The member
+may be identified by membership ID, user ID or exact email; resource arguments
+are IDs. See [the CLI contract](../cli/share.mdx).
