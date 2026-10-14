@@ -61,6 +61,7 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	transcriptLock     func(context.Context) (func(), error)
 	restrictedWorkflow *restrictedworkflow.Service
 	restrictedText     RestrictedTextExecutor
 	// mux is a recording wrapper around http.ServeMux (router_mux.go).

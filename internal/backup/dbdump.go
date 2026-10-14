@@ -326,6 +326,11 @@ var BackupTables = []string{
 // of sql.NullString and similar types works out of the box because the
 // underlying exporter resolves everything to Go scalar / []byte types.
 type DBDump struct {
+	// AgentChatTranscripts maps bundle file identities to restored chat IDs.
+	// Full structured JSONL lives in the encrypted agent-chats section.
+	AgentChatTranscripts map[string]string `json:"agent_chat_transcripts,omitempty"`
+	chatTranscriptRemap  map[string]map[string]string
+
 	// WorkspaceID is the scope anchor. All rows in Tables either belong
 	// to this workspace directly (workspace_id column) or transitively
 	// through a parent row.

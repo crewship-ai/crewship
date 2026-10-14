@@ -499,3 +499,29 @@ func validateID(s string) error {
 	}
 	return nil
 }
+
+// LockTranscripts fences append writers before backup snapshot/restore DB
+// transactions. Closing cached append descriptors prevents restored files from
+// leaving subsequent messages on an unlinked inode. Call release exactly once.
+func (s *Store) LockTranscripts(ctx context.Context) (func(), error) {
+	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	var first error
+	for id, f := range s.files {
+		if err := f.Sync(); err != nil && first == nil {
+			first = err
+		}
+		if err := f.Close(); err != nil && first == nil {
+			first = err
+		}
+		delete(s.files, id)
+	}
+	if first != nil {
+		s.mu.Unlock()
+		return nil, first
+	}
+	return s.mu.Unlock, nil
+}

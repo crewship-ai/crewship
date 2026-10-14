@@ -62,6 +62,7 @@ type BackupHandler struct {
 	// and RestoreBackup can land them back + rewrite payload_ref.
 	// Empty disables both (matches the rest of the memory subsystem's
 	// "empty BlobRoot disables versioning" convention).
+	lockTranscripts  func(context.Context) (func(), error)
 	memoryBlobRoot   string
 	pageProjectsPath string
 	// attachmentRoot is the storage root attachment blobs live under
@@ -311,6 +312,8 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		BlobRoot:                  h.memoryBlobRoot,
 		PageProjectsPath:          h.pageProjectsPath,
 		AttachmentRoot:            h.attachmentRoot,
+		ConversationRoot:          h.attachmentRoot,
+		LockTranscripts:           h.lockTranscripts,
 		ServiceSnapshots:          h.serviceSnapshots,
 		RecoverServiceMaintenance: req.RecoverServices,
 	})
@@ -496,6 +499,8 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		BlobRoot:                  h.memoryBlobRoot,
 		PageProjectsPath:          h.pageProjectsPath,
 		AttachmentRoot:            h.attachmentRoot,
+		ConversationRoot:          h.attachmentRoot,
+		LockTranscripts:           h.lockTranscripts,
 		ServiceSnapshots:          h.serviceSnapshots,
 		RecoverServiceMaintenance: req.RecoverServices,
 		Logger: func(msg string) {
@@ -1064,3 +1069,8 @@ func (h *BackupHandler) resolveCrewContainerName() func(id, slug string) string 
 }
 
 // selfTestRequest is the JSON body of POST /api/v1/admin/backups/self-test.
+
+// SetTranscriptLock coordinates host conversation files with snapshot/restore.
+func (h *BackupHandler) SetTranscriptLock(lock func(context.Context) (func(), error)) {
+	h.lockTranscripts = lock
+}

@@ -278,6 +278,31 @@ crewship backup restore ~/.crewship/backups/crewship-workspace-acme-…tar.zst
 
 The server rejects the restore if a workspace (or crew) with the same slug already exists. Override with `--as-workspace <new-slug>` or `--as-crew <new-slug>` to land the payload under a fresh identity.
 
+### Agent chat transcripts
+
+Workspace and crew bundles include the complete structured JSONL transcripts
+for their included agent chats inside the encrypted payload. A fork remaps the
+chat and agent identities while retaining message IDs, additive fields and run
+IDs used by durable card anchors. Host transcripts are restored in the first
+step; they do not require a crew container or `--files-only`.
+
+Snapshot collection coordinates the database snapshot with the live conversation
+store. Restore temporarily pauses writes to all agent transcripts, closes cached
+append handles and stages files before publishing them at the database commit
+boundary. A normal restore refuses to overwrite different live history; use
+`--replace` only when deliberately restoring the backed-up workspace state.
+Dry-run checks this conflict without writing files. Returned transaction failures
+remove newly published transcripts and recover replaced originals. This does not
+guarantee atomic recovery from a hard process or power failure between filesystem
+publication and the database commit; interrupted replacements may leave private
+`.restore-original-*` recovery links in the conversations directory.
+
+Older bundles remain readable. If their chat metadata records messages without
+transcript files, the completeness report includes
+`agent_chat_transcript_missing`; the missing messages cannot be reconstructed
+from card references. The separate conversation search/feedback index is not
+rebuilt by this restore.
+
 ### Restoring under a new identity takes three steps
 
 A rewritten restore forks the bundle's rows under a new workspace id and slug. It cannot land container state in the same call, because the crews it just created have no containers yet. So the flow is:
