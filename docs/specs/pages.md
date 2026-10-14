@@ -1630,8 +1630,13 @@ Regular panel Pages otherwise continue to use their existing crew transfer rule.
 The instance-admin membership-removal route instead returns `pages: [{id}]` for
 all unresolved Pages and a generic administrator-guidance message: instance
 administration alone does not authorize private Page names, slugs, ownership or
-contacts. The workspace-admin removal/GDPR routes retain their authorized output
-metadata. Conflict messages direct administrators to Settings > General >
+contacts. The workspace-admin removal route retains its authorized output metadata.
+GDPR conflicts disclose those details only to a currently active, unrestricted
+workspace OWNER/ADMIN, rechecked after custody refusal; instance-only administrators
+and instance administrators with only MEMBER standing receive ID-only Pages and
+generic guidance. GDPR retains `action_id`, `data_subject` and `workspace_id`, and its
+failed custody audit records the reason and opaque Page IDs without private Page
+names. Conflict messages direct administrators to Settings > General >
 Artifact and Board ownership; a regular member cannot use the admin-only removal
 endpoint as a self-service leave operation.
 
