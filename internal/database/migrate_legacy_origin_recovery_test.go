@@ -36,9 +36,14 @@ func TestExecutionOriginsUpgradeRecoversPositiveHistoricalEvidence(t *testing.T)
 	exec(`INSERT INTO crews(id,workspace_id,name,slug) VALUES('recover-c','recover-w','Crew','crew')`)
 	exec(`INSERT INTO agents(id,workspace_id,crew_id,name,slug) VALUES('recover-a','recover-w','recover-c','Agent','agent')`)
 	exec(`INSERT INTO chats(id,workspace_id,agent_id,created_by) VALUES('recover-chat','recover-w','recover-a','recover-u')`)
-	receipt, e := chataudience.CaptureTrusted(t.Context(), db, "recover-chat", "recover-u", nil)
-	if e != nil || receipt == nil {
-		t.Fatalf("capture: %+v %v", receipt, e)
+	// Seed the receipt the historical host admitted against this old schema.
+	// Today's admission query may depend on later access-grant migrations;
+	// calling it here would stop testing an actual pre-upgrade database.
+	receipt := &chataudience.Receipt{UserID: "recover-u", ChatID: "recover-chat"}
+	if err := db.QueryRow(`SELECT c.workspace_id,c.agent_id,wm.id,wm.access_revision,c.authority_generation,c.authority_revision
+ FROM chats c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=c.created_by
+ WHERE c.id=? AND c.created_by=? AND c.visibility='private' AND wm.access_mode='trusted' AND wm.role='OWNER'`, receipt.ChatID, receipt.UserID).Scan(&receipt.WorkspaceID, &receipt.AgentID, &receipt.MemberID, &receipt.MemberRevision, &receipt.ChatGeneration, &receipt.ChatRevision); err != nil {
+		t.Fatalf("historical admission fixture: %v", err)
 	}
 	payload, _ := json.Marshal(map[string]any{"chat_id": "recover-chat", "trigger_message_id": "recover-message", "human_authority": receipt, "trigger_type": "USER"})
 	exec(`INSERT INTO journal_entries(id,workspace_id,agent_id,entry_type,actor_type,summary,trace_id,payload) VALUES('recover-human-start','recover-w','recover-a','run.started','orchestrator','Historical human request','recover-human',?)`, string(payload))
