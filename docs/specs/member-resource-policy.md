@@ -242,3 +242,13 @@ unrelated rights, never converts account mode and never retries a conflict.
 `share --reissue` deliberately changes selected share authority. The member
 may be identified by membership ID, user ID or exact email; resource arguments
 are IDs. See [the CLI contract](../cli/share.mdx).
+
+
+## Guest CLI authentication bootstrap
+
+A verified interactive session may create its own standard CLI token through
+the self-scoped token endpoint. The middleware supplies verified identity and
+authentication kind to the restricted classifier before evaluating this rule.
+CLI bearer credentials cannot use this new Guest minting entrypoint, preserving
+their scope ceiling. Minted tokens retain account restriction, object grants,
+existing tier/scope checks and ordinary self-revocation behavior.

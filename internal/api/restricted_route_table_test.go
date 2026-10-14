@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -59,6 +60,7 @@ var restrictedAllowedPatterns = []string{
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routines",
 	"POST /api/v1/agents/{agentId}/chats",
 	"POST /api/v1/agents/{agentId}/restricted-cli-chats",
+	"POST /api/v1/auth/cli-token",
 	"POST /api/v1/auth/invitation/accept",
 	"POST /api/v1/auth/sessions/{id}/revoke",
 	"POST /api/v1/chats/{chatId}/restricted-cli-run",
@@ -152,6 +154,12 @@ func (f restrictedRouteFixture) restrictedDecision(t *testing.T, user, pattern, 
 	}
 	req := httptest.NewRequest(method, "/restricted-route-table-probe", nil)
 	req.Pattern = pattern
+	if pattern == "POST /api/v1/auth/cli-token" {
+		// The snapshot models an interactive Guest session. The real
+		// signature/session and bearer-denial paths have separate tests.
+		ctx := withUser(req.Context(), &AuthUser{ID: user, SessionID: "synthetic-verified-session"})
+		req = req.WithContext(context.WithValue(ctx, ctxAuthKind, AuthKindSession))
+	}
 	req.SetPathValue("agentId", agentID)
 	rr := httptest.NewRecorder()
 	ok := f.router.authMw.restrictedRequest(rr, req, user)
@@ -221,7 +229,7 @@ func TestRestrictedAllowlistPatternsAreRegistered(t *testing.T) {
 		registered[p] = true
 	}
 	// The declared table must be exactly the golden list, and only the
-	// grant-checked entries may carry a check.
+	// explicitly declared agent/session entries may carry a check.
 	golden := map[string]bool{}
 	for _, p := range restrictedAllowedPatterns {
 		golden[p] = true
@@ -230,6 +238,7 @@ func TestRestrictedAllowlistPatternsAreRegistered(t *testing.T) {
 	for _, p := range restrictedAgentCheckedPatterns {
 		checked[p] = true
 	}
+	checked["POST /api/v1/auth/cli-token"] = true
 	for p, rule := range restrictedRoutes {
 		if !golden[p] {
 			t.Errorf("restrictedRoutes entry %q is missing from the golden list", p)

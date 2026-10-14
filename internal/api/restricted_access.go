@@ -21,6 +21,16 @@ type restrictedRule struct {
 // restrictedPass is the rule for patterns whose handlers enforce their own authority.
 var restrictedPass = restrictedRule{}
 
+// Only a verified interactive session can bootstrap a Guest CLI token. A
+// bearer token must not mint an unscoped successor that widens its scopes.
+var restrictedSessionTokenCreation = restrictedRule{check: func(m *AuthMiddleware, store access.Store, r *http.Request, userID string) error {
+	user := UserFromContext(r.Context())
+	if AuthKindFromContext(r.Context()) != AuthKindSession || user == nil || user.ID != userID || user.SessionID == "" {
+		return access.ErrDenied
+	}
+	return nil
+}}
+
 // restrictedAgentChatGrant requires a current agent/chat grant on {agentId}, checked
 // in the (live) agent's own workspace.
 var restrictedAgentChatGrant = restrictedRule{check: func(m *AuthMiddleware, store access.Store, r *http.Request, userID string) error {
@@ -43,6 +53,7 @@ var restrictedRoutes = map[string]restrictedRule{
 	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}": restrictedPass,
 
 	"POST /api/v1/auth/invitation/accept": restrictedPass,
+	"POST /api/v1/auth/cli-token":         restrictedSessionTokenCreation,
 	// Native private-chat source projection enforces its own exact resource rights.
 	"GET /api/v1/chats/{chatId}/project-input-options": restrictedPass,
 
