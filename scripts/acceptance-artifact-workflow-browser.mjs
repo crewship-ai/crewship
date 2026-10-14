@@ -23,10 +23,15 @@ async function transferOutputThroughSettings(slug, name, type) {
   const before = (await beforeResponse.json()).pages?.find(page => page.slug === slug)
   await check(`real custody metadata selects the existing ${type} reader`, beforeResponse.status() === 200 && before?.type === type && before.owner_user_id === fixture.owner && before.eligible_successors.some(candidate => candidate.user_id === fixture.commenter))
   const owner = pages.owner
+  const uiListing = owner.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/page-ownership'))
   await owner.goto(`${fixture.server}/settings?tab=general`)
+  const uiResponse = await uiListing
+  await writeFile(join(output, 'owner-custody-response.json'), JSON.stringify({ status: uiResponse.status(), body: await uiResponse.json() }, null, 2))
   const card = owner.locator('#settings-card-artifact-and-board-ownership')
   await expect(card).toBeVisible()
   await expect(card.locator('iframe')).toHaveCount(0)
+  await expect(card.getByRole('combobox', { name: `New owner for ${name}`, exact: true })).toBeVisible()
+  await writeFile(join(output, 'owner-custody-controls.json'), JSON.stringify({ expected_label: `New owner for ${name}`, exact_label_matches: await card.getByLabel(`New owner for ${name}`, { exact: true }).count(), controls: await card.locator('select').evaluateAll(selects => selects.map(select => ({ id: select.id, labels: [...select.labels].map(label => label.textContent) }))) }, null, 2))
   await card.getByLabel(`New owner for ${name}`, { exact: true }).selectOption(fixture.commenter)
   const start = card.getByRole('button', { name: `Transfer ownership of ${name}`, exact: true })
   const posts = []
@@ -205,6 +210,7 @@ try {
   console.log(`Artifact workflow browser passed ${results.length} checks; evidence: ${output}`)
 } catch (error) {
   await writeFile(join(output, 'failure.txt'), String(error))
+  if (pages.owner) await pages.owner.locator('#settings-card-artifact-and-board-ownership').ariaSnapshot({ timeout: 1000 }).then(snapshot => writeFile(join(output, 'owner-custody-card.yml'), snapshot)).catch(() => {})
   for (const [actor, page] of Object.entries(pages)) await page.screenshot({ path: join(output, `${actor}-failure.png`) }).catch(() => {})
   throw error
 } finally { await browser.close() }

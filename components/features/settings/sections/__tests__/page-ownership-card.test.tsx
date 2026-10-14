@@ -46,6 +46,14 @@ it("requires an explicit privacy confirmation and sends only the reviewed owner 
   render(view())
   await screen.findByText("Artifact · Owner: Departing owner")
   expect(document.querySelector("iframe")).toBeNull()
+  // Exact visible labels must be independent of the select's option text.
+  const successor = screen.getByLabelText("New owner for Private report") as HTMLSelectElement
+  const ownerFilter = screen.getByLabelText("Filter by owner") as HTMLSelectElement
+  expect(successor.labels?.[0].textContent).toBe("New owner for Private report")
+  expect(ownerFilter.labels?.[0].textContent).toBe("Filter by owner")
+  expect(successor.labels?.[0]).toHaveAttribute("for", successor.id)
+  expect(ownerFilter.labels?.[0]).toHaveAttribute("for", ownerFilter.id)
+  expect(successor.id).not.toBe(ownerFilter.id)
   expect(writes).toHaveLength(0)
   const dialog = await chooseAndReview()
   expect(dialog).toHaveTextContent("gaining control of this private output and its retained history")
