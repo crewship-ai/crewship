@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/untrusted"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -62,12 +63,6 @@ func (h *InternalIssueHandler) SetMentionDispatcher(d mentionDispatcher) {
 	h.mentionDispatch = d
 }
 
-// mentionRecorder builds the shared mention write path. Per call, so a
-// dispatcher wired after construction is picked up.
-func (h *InternalIssueHandler) mentionRecorder() mentionRecorder {
-	return mentionRecorder{db: h.db, logger: h.logger, events: h.events(), dispatcher: h.mentionDispatch}
-}
-
 // logActivity is the compatibility shim for the call sites that still pass
 // a bare action string (issues_internal_relations.go). It records the audit
 // row and the journal entry but does not broadcast — those call sites own
@@ -113,29 +108,6 @@ func (h *InternalIssueHandler) assertAuthorAgentInWorkspace(w http.ResponseWrite
 		return false
 	}
 	return true
-}
-
-// resolveCommentAuthorName reads an agent's display name for the mention
-// brief, scoped to the workspace.
-//
-// The scope is not belt-and-braces even though the callers now prove the
-// binding first. A display name is chosen by whoever created the agent, so an
-// unscoped read here is a way to pull a string out of another tenant through a
-// field nobody thinks of as a read — and it lands inside the task brief handed
-// to the woken agent, which is the one place attacker-chosen text is most
-// worth having. Keeping the predicate on the query means the guard cannot be
-// removed from a caller without this failing too.
-//
-// Best-effort by design: an unreadable name yields "", and the brief renders
-// without it rather than failing a comment that already landed.
-func (h *InternalIssueHandler) resolveCommentAuthorName(ctx context.Context, workspaceID, agentID string) string {
-	if agentID == "" {
-		return ""
-	}
-	var name string
-	_ = h.db.QueryRowContext(ctx,
-		`SELECT name FROM agents WHERE id = ? AND workspace_id = ?`, agentID, workspaceID).Scan(&name)
-	return name
 }
 
 // List handles GET /api/v1/internal/issues
@@ -406,6 +378,8 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		AuthorAgentID string   `json:"author_agent_id"`
 		AuthorChatID  string   `json:"author_chat_id"`
 		AuthorRunID   string   `json:"author_run_id"`
+		OperationKey  string   `json:"operation_key"`
+		ProjectID     *string  `json:"project_id"`
 		Labels        []string `json:"labels"`
 	}
 	if err := readJSON(r, &req); err != nil {
@@ -454,12 +428,53 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A chat origin is resolved from durable run authority, never this field.
+	if req.AuthorRunID != "" {
+		req.AuthorChatID = ""
+	}
+	if h.checkChatIssueReplay(w, r, req.WorkspaceID, req.AuthorAgentID, req.AuthorRunID, req.OperationKey, "created", "", req) {
+		return
+	}
+	if req.ProjectID != nil && *req.ProjectID != "" {
+		var present int
+		if err := h.db.QueryRowContext(r.Context(), `SELECT 1 FROM projects WHERE id=? AND workspace_id=?`, *req.ProjectID, req.WorkspaceID).Scan(&present); err != nil {
+			writeProblem(w, r, http.StatusBadRequest, "project not found in workspace")
+			return
+		}
+	}
+
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		internalError(w, r, h.logger, "begin tx", err)
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
+	op, replay, err := h.beginChatIssueOperation(r.Context(), tx, req.WorkspaceID, req.AuthorAgentID, req.AuthorRunID, req.OperationKey, "created", "", req)
+	if err != nil {
+		writeChatIssueError(w, err)
+		return
+	}
+	if replay {
+		_ = tx.Rollback()
+		h.mutationDelivery().drainCommittedIssueMutation(req.WorkspaceID)
+		writeChatIssueReplay(w, op.operation)
+		return
+	}
+	if op != nil && op.actorType != "system" {
+		var validAgent bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM agents WHERE id=? AND workspace_id=? AND crew_id=? AND deleted_at IS NULL)`, req.AuthorAgentID, req.WorkspaceID, req.CrewID).Scan(&validAgent); err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if !validAgent {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+	}
+	authorChatID := req.AuthorChatID
+	if op != nil {
+		authorChatID = op.authority.ChatID
+	}
 
 	// Creator attribution (v129): this endpoint is only reachable through
 	// the sidecar's trusted IPC identity, so a supplied author_agent_id
@@ -486,8 +501,9 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Labels:        req.Labels,
 		AuthoredVia:   "agent_tool_call",
 		AuthorAgentID: req.AuthorAgentID,
-		AuthorChatID:  req.AuthorChatID,
+		AuthorChatID:  authorChatID,
 		AuthorRunID:   req.AuthorRunID,
+		ProjectID:     req.ProjectID,
 	})
 	switch {
 	case errors.Is(err, errIssueCrewNotFound):
@@ -504,19 +520,40 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, h.logger, "insert issue", err)
 		return
 	}
+	// A later autonomous assignment of this issue must retain its requesting
+	// human even when no public Start request supplies a fresh admission.
+	if originID := chatIssueOriginID(op); originID != "" {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE missions SET chat_origin_id=? WHERE id=?`, originID, id); err != nil {
+			internalError(w, r, h.logger, "persist issue execution origin", err)
+			return
+		}
+	}
 
+	actorType, actorID := "agent", req.AuthorAgentID
+	if actorID == "" {
+		actorType, actorID = "system", "system"
+	}
+	if _, err := persistIssueActivityTx(r.Context(), tx, issueEvent{MissionID: id, ActorType: actorType, ActorID: actorID, RunID: req.AuthorRunID, Action: actionCreated, Details: req.Title}); err != nil {
+		internalError(w, r, h.logger, "persist agent issue creation", err)
+		return
+	}
+	result := map[string]string{"id": id, "identifier": identifier, "status": "BACKLOG"}
+	if op != nil {
+		result["operation_id"] = op.operation.ID
+	}
+	if err := completeChatIssueOperation(r.Context(), tx, op, id, result); err != nil {
+		writeChatIssueError(w, err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		internalError(w, r, h.logger, "commit issue", err)
 		return
 	}
 
+	h.mutationDelivery().drainCommittedIssueMutation(req.WorkspaceID)
 	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.created", map[string]string{"id": id, "identifier": identifier, "title": req.Title, "crew_id": req.CrewID})
 
-	writeJSON(w, http.StatusCreated, map[string]string{
-		"id":         id,
-		"identifier": identifier,
-		"status":     "BACKLOG",
-	})
+	writeJSON(w, http.StatusCreated, result)
 }
 
 // UpdateStatus handles PATCH /api/v1/internal/issues/{identifier}
@@ -562,7 +599,8 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		// the resulting journal entry named no cause. That is what made the
 		// composition depth cap unreachable — see
 		// TestInternalIssue_UpdateStatus_StampsTheCausingRunOnTheJournalEntry.
-		AuthorRunID string `json:"author_run_id"`
+		AuthorRunID  string `json:"author_run_id"`
+		OperationKey string `json:"operation_key"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -610,8 +648,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	}
 	// …and it must be an agent of THIS workspace. The issue is already scoped
 	// (F-4 below); the author was not, so an inline comment could be attributed
-	// to a stranger — see resolveCommentAuthorName for why that is a read of
-	// another tenant and not only a mis-attribution.
+	// to a stranger and leak another tenant’s display name through the mention brief.
 	if req.Comment != nil && *req.Comment != "" &&
 		!h.assertAuthorAgentInWorkspace(w, r, req.WorkspaceID, req.AgentID) {
 		return
@@ -628,6 +665,9 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		actorID = "system"
 	}
 
+	if h.checkChatIssueReplay(w, r, req.WorkspaceID, req.AgentID, req.AuthorRunID, req.OperationKey, "updated", missionID, req) {
+		return
+	}
 	ub := newUpdate()
 	statusChanged := false
 
@@ -737,6 +777,36 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	// Set inside the transaction, read after it commits, by the @mention
 	// trigger. Empty means no inline comment was written, so nothing to parse.
 	var inlineCommentID string
+	operationResult := map[string]string{"status": "ok"}
+
+	var evs []issueEvent
+	ev := func(action issueAction, details string) {
+		evs = append(evs, issueEvent{
+			MissionID: missionID, ActorType: actorType, ActorID: actorID,
+			RunID:  req.AuthorRunID,
+			Action: action, Details: details,
+		})
+	}
+	if !ub.Empty() {
+		if statusChanged {
+			evs = append(evs, issueEvent{
+				MissionID: missionID, ActorType: actorType, ActorID: actorID,
+				// The run that caused it. This is the pointer the composition
+				// depth cap resolves; without it every automation hop opens a
+				// fresh budget and the cap is unreachable.
+				RunID:   req.AuthorRunID,
+				Action:  actionStatusChanged,
+				Details: currentStatus + " → " + req.Status,
+				From:    currentStatus, To: req.Status,
+			})
+		}
+		if req.Priority != "" {
+			ev(actionPriorityChanged, req.Priority)
+		}
+		if assigneeChanged {
+			ev(actionAssigneeChanged, "assignee_id: "+*req.AssigneeID)
+		}
+	}
 
 	// The column update, the label replacement and the comment go in ONE
 	// transaction, the same shape Create already uses. Label replacement is
@@ -750,13 +820,24 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	// label bug, ten lines below it — and this PR makes the comment the agent's
 	// primary way of reporting progress to a human. "Moved to IN_PROGRESS" with
 	// the explanation silently dropped is worse than the whole call failing.
-	if !ub.Empty() || req.Labels != nil || hasComment {
+	if !ub.Empty() || req.Labels != nil || hasComment || req.AuthorRunID != "" {
 		tx, err := h.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			internalError(w, r, h.logger, "begin issue update tx", err)
 			return
 		}
 		defer tx.Rollback() //nolint:errcheck
+		op, replay, err := h.beginChatIssueOperation(r.Context(), tx, req.WorkspaceID, req.AgentID, req.AuthorRunID, req.OperationKey, "updated", missionID, req)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if replay {
+			_ = tx.Rollback()
+			h.mutationDelivery().drainCommittedIssueMutation(req.WorkspaceID)
+			writeChatIssueReplay(w, op.operation)
+			return
+		}
 		if req.Status != "" || req.AssigneeID != nil {
 			var held bool
 			if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM issue_work WHERE mission_id=? AND mode='human')`, missionID).Scan(&held); err != nil {
@@ -796,9 +877,9 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			// exactly like CreateComment does, so it must parse too.
 			inlineCommentID = generateCUID()
 			if _, err := tx.ExecContext(r.Context(), `
-				INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
-				VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-				inlineCommentID, missionID, req.AgentID, *req.Comment, now, now); err != nil {
+				INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at, chat_origin_id)
+				VALUES (?, ?, 'agent', ?, ?, ?, ?, NULLIF(?,''))`,
+				inlineCommentID, missionID, req.AgentID, *req.Comment, now, now, chatIssueOriginID(op)); err != nil {
 				internalError(w, r, h.logger, "insert internal comment", err)
 				return
 			}
@@ -814,67 +895,55 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		// a driver or constraint error, which now fails the whole request
 		// instead of being logged under a 200.
 		if req.Labels != nil {
-			if _, err := tx.ExecContext(r.Context(),
-				`DELETE FROM mission_labels WHERE mission_id = ?`, missionID); err != nil {
-				internalError(w, r, h.logger, "clear issue labels", err)
-				return
-			}
-			for _, labelID := range *req.Labels {
-				if _, err := tx.ExecContext(r.Context(),
-					`INSERT OR IGNORE INTO mission_labels (mission_id, label_id)
-					 SELECT ?, id FROM labels WHERE id = ? AND workspace_id = ?`,
-					missionID, labelID, req.WorkspaceID); err != nil {
-					internalError(w, r, h.logger, "insert mission label", err)
+			valid := make([]string, 0, len(*req.Labels))
+			for _, label := range *req.Labels {
+				var exists bool
+				if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM labels WHERE id=? AND workspace_id=?)`, label, req.WorkspaceID).Scan(&exists); err != nil {
+					internalError(w, r, h.logger, "validate agent issue labels", err)
 					return
 				}
+				if exists {
+					valid = append(valid, label)
+				}
+			}
+			if err := replaceIssueLabelsTx(r.Context(), tx, missionID, valid); err != nil {
+				internalError(w, r, h.logger, "replace agent issue labels", err)
+				return
 			}
 		}
 
+		for _, ev := range evs {
+			if _, err := persistIssueActivityTx(r.Context(), tx, ev); err != nil {
+				internalError(w, r, h.logger, "persist agent issue activity", err)
+				return
+			}
+		}
+		if inlineCommentID != "" {
+			if _, err := persistIssueActivityTx(r.Context(), tx, issueEvent{MissionID: missionID, ActorType: "agent", ActorID: req.AgentID, RunID: req.AuthorRunID, Action: actionCommented, Details: "Comment added"}); err != nil {
+				internalError(w, r, h.logger, "persist inline comment audit", err)
+				return
+			}
+			if err := persistIssueCommentMentionsTx(r.Context(), tx, req.WorkspaceID, missionID, ident, inlineCommentID, *req.Comment, "agent", req.AgentID, req.AuthorRunID); err != nil {
+				internalError(w, r, h.logger, "persist agent inline mentions", err)
+				return
+			}
+		}
+		result := operationResult
+		if op != nil {
+			result["operation_id"] = op.operation.ID
+		}
+		if err := completeChatIssueOperation(r.Context(), tx, op, missionID, result); err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
 		if err := tx.Commit(); err != nil {
 			internalError(w, r, h.logger, "commit issue update", err)
 			return
 		}
 	}
 
-	// Audit trail: the same rows, the same journal entries and the same
-	// broadcast the human handlers produce. Best-effort and after the commit —
-	// the mutation has already landed, and a failed activity row must not roll
-	// it back.
-	//
-	// Collected first and handed to record() in one call so the batch produces
-	// exactly ONE issue.updated broadcast, not one per changed field. A
-	// label-only or comment-only PATCH collects no events and still
-	// broadcasts — the board changed even when no field did.
-	var evs []issueEvent
-	ev := func(action issueAction, details string) {
-		evs = append(evs, issueEvent{
-			MissionID: missionID, ActorType: actorType, ActorID: actorID,
-			RunID:  req.AuthorRunID,
-			Action: action, Details: details,
-		})
-	}
-	if !ub.Empty() {
-		if statusChanged {
-			evs = append(evs, issueEvent{
-				MissionID: missionID, ActorType: actorType, ActorID: actorID,
-				// The run that caused it. This is the pointer the composition
-				// depth cap resolves; without it every automation hop opens a
-				// fresh budget and the cap is unreachable.
-				RunID:   req.AuthorRunID,
-				Action:  actionStatusChanged,
-				Details: currentStatus + " → " + req.Status,
-				From:    currentStatus, To: req.Status,
-			})
-		}
-		if req.Priority != "" {
-			ev(actionPriorityChanged, req.Priority)
-		}
-		if assigneeChanged {
-			ev(actionAssigneeChanged, "assignee_id: "+*req.AssigneeID)
-		}
-	}
-	h.events().record(r.Context(), req.WorkspaceID,
-		map[string]string{"id": missionID, "identifier": ident}, evs...)
+	h.mutationDelivery().drainCommittedIssueMutation(req.WorkspaceID)
+	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
 
 	// Mirrors the human PATCH's issue.status_changed broadcast (#2257,
 	// issue_handler_update.go) — same reasoning: issue.updated above is a
@@ -887,29 +956,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
-	// @mentions in the inline comment. After the commit and after the audit
-	// batch, for the same reason both of those are after the mutation: the
-	// PATCH has already landed and been answered, and a mention that could not
-	// be recorded must not undo it.
-	if inlineCommentID != "" {
-		var issueTitle, authorName string
-		_ = h.db.QueryRowContext(r.Context(), `SELECT title FROM missions WHERE id = ?`, missionID).Scan(&issueTitle)
-		authorName = h.resolveCommentAuthorName(r.Context(), req.WorkspaceID, req.AgentID)
-		h.mentionRecorder().record(r.Context(), mentionContext{
-			WorkspaceID: req.WorkspaceID,
-			MissionID:   missionID,
-			Identifier:  ident,
-			IssueTitle:  issueTitle,
-			IssueCrewID: crewID,
-			CommentID:   inlineCommentID,
-			CommentBody: *req.Comment,
-			AuthorType:  "agent",
-			AuthorID:    req.AgentID,
-			AuthorName:  authorName,
-		})
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, operationResult)
 }
 
 // CreateComment handles POST /api/v1/internal/issues/{identifier}/comments
@@ -918,9 +965,11 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 	ident := r.PathValue("identifier")
 
 	var req struct {
-		WorkspaceID string `json:"workspace_id"`
-		AgentID     string `json:"agent_id"`
-		Body        string `json:"body"`
+		WorkspaceID  string `json:"workspace_id"`
+		AgentID      string `json:"agent_id"`
+		Body         string `json:"body"`
+		AuthorRunID  string `json:"author_run_id"`
+		OperationKey string `json:"operation_key"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -965,52 +1014,67 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if h.checkChatIssueReplay(w, r, req.WorkspaceID, req.AgentID, req.AuthorRunID, req.OperationKey, "commented", missionID, req) {
+		return
+	}
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin issue comment", err)
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+	op, replay, err := h.beginChatIssueOperation(r.Context(), tx, req.WorkspaceID, req.AgentID, req.AuthorRunID, req.OperationKey, "commented", missionID, req)
+	if err != nil {
+		writeChatIssueError(w, err)
+		return
+	}
+	if replay {
+		_ = tx.Rollback()
+		h.mutationDelivery().drainCommittedIssueMutation(req.WorkspaceID)
+		writeChatIssueReplay(w, op.operation)
+		return
+	}
 	commentID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 	// agent_id presence was validated above — the author is always a real agent.
 	authorType := "agent"
 	authorID := req.AgentID
 
-	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		commentID, missionID, authorType, authorID, req.Body, now, now)
+	_, err = tx.ExecContext(r.Context(), `
+		INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at, chat_origin_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?,''))`,
+		commentID, missionID, authorType, authorID, req.Body, now, now, chatIssueOriginID(op))
 	if err != nil {
 		internalError(w, r, h.logger, "insert comment", err)
 		return
 	}
 
-	// @mentions (#1768 item 3) — the AGENT door. Same wire format, same
-	// resolution, same caps as the human one; the difference is that an agent
-	// author carries a position in the delegation tree, so a mention chain
-	// (A mentions B, B's reply mentions C) is bounded by the depth cap read
-	// off the assignment row A is executing. See issue_mentions.go.
-	var authorName string
-	authorName = h.resolveCommentAuthorName(r.Context(), req.WorkspaceID, authorID)
-	h.mentionRecorder().record(r.Context(), mentionContext{
-		WorkspaceID: req.WorkspaceID,
-		MissionID:   missionID,
-		Identifier:  ident,
-		IssueTitle:  issueTitle,
-		IssueCrewID: crewID,
-		CommentID:   commentID,
-		CommentBody: req.Body,
-		AuthorType:  authorType,
-		AuthorID:    authorID,
-		AuthorName:  authorName,
-	})
+	if _, err := persistIssueActivityTx(r.Context(), tx, issueEvent{MissionID: missionID, ActorType: authorType, ActorID: authorID, RunID: req.AuthorRunID, Action: actionCommented, Details: "Comment added"}); err != nil {
+		internalError(w, r, h.logger, "persist agent comment activity", err)
+		return
+	}
+	if err := persistIssueCommentMentionsTx(r.Context(), tx, req.WorkspaceID, missionID, ident, commentID, req.Body, authorType, authorID, req.AuthorRunID); err != nil {
+		internalError(w, r, h.logger, "persist agent comment mentions", err)
+		return
+	}
+	result := commentResponse{ID: commentID, MissionID: missionID, AuthorType: authorType, AuthorID: authorID, Body: req.Body, CreatedAt: now, UpdatedAt: now}
+	if op != nil {
+		result.OperationID = op.operation.ID
+	}
+	if err := completeChatIssueOperation(r.Context(), tx, op, missionID, result); err != nil {
+		writeChatIssueError(w, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit issue comment", err)
+		return
+	}
+
+	h.mutationDelivery().drainCommittedIssueMutation(req.WorkspaceID)
 
 	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
 
-	writeJSON(w, http.StatusCreated, commentResponse{
-		ID:         commentID,
-		MissionID:  missionID,
-		AuthorType: authorType,
-		AuthorID:   authorID,
-		Body:       req.Body,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	})
+	writeJSON(w, http.StatusCreated, result)
 }
 
 // ListComments handles GET /api/v1/internal/issues/{identifier}/comments —

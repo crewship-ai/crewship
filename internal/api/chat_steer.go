@@ -75,6 +75,10 @@ func (h *SteerHandler) Steer(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	if limitedChatToken(r.Context()) {
+		replyError(w, http.StatusForbidden, "scoped_token_chat_unavailable")
+		return
+	}
 	if !h.ensureChatVisible(r, chatID) {
 		replyError(w, http.StatusNotFound, "chat not found")
 		return

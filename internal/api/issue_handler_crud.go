@@ -277,6 +277,10 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, h.logger, "get execution", err)
 		return
 	}
+	if err := h.loadChatMetadata(r, &issue); err != nil {
+		internalError(w, r, h.logger, "load issue chat metadata", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, issue)
 }
 
@@ -310,6 +314,10 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.loadIssueExecution(r.Context(), &issue); err != nil {
 		internalError(w, r, h.logger, "get execution", err)
+		return
+	}
+	if err := h.loadChatMetadata(r, &issue); err != nil {
+		internalError(w, r, h.logger, "load issue chat metadata", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, issue)

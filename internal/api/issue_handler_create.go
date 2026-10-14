@@ -283,6 +283,16 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	originID, originErr := captureHumanIssueOrigin(r.Context(), tx, r, id)
+	if originErr != nil {
+		writeChatIssueError(w, originErr)
+		return
+	}
+	if _, err = tx.ExecContext(r.Context(), `UPDATE missions SET chat_origin_id=NULLIF(?,'') WHERE id=? AND workspace_id=?`, originID, id, wsID); err != nil {
+		internalError(w, r, h.logger, "persist issue authority", err)
+		return
+	}
+
 	// Insert label associations
 	for _, labelID := range req.Labels {
 		_, err = tx.ExecContext(r.Context(),
@@ -294,6 +304,10 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if _, err = persistIssueActivityTx(r.Context(), tx, issueEvent{MissionID: id, ActorType: "user", ActorID: callerID, Action: actionCreated, Details: req.Title}); err != nil {
+		internalError(w, r, h.logger, "persist issue creation activity", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		internalError(w, r, h.logger, "commit issue", err)
 		return
@@ -348,7 +362,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// channel. Until now an issue appearing left no journal trace at all —
 	// only a mission_activity row and a WebSocket event that nothing outside
 	// an open browser tab could see.
-	h.logActivity(r.Context(), id, "user", callerID, "created", req.Title)
+	h.drainCommittedIssueMutation(wsID)
 
 	h.broadcastIssueEvent(wsID, "issue.created", map[string]string{"id": id, "crew_id": crewID})
 

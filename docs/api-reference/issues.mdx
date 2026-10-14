@@ -1969,3 +1969,76 @@ milestone is not in the workspace.
 | `medium` | Medium priority |
 | `high` | High priority |
 | `urgent` | Urgent priority |
+
+
+## Read issue revisions
+
+`GET /api/v1/issues/{identifier}/revision`
+
+`GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision`
+
+Request path parameters are `identifier` and, for the workspace alias,
+`workspaceId`. Neither route accepts a request body.
+
+Both routes require authentication and selected workspace membership. Only
+ordinary trusted sessions are supported. The identifier can also be the issue's
+internal ID. A workspace path must agree with the authorized selected workspace;
+it never overrides that workspace.
+
+Response (`200`):
+
+```json
+{"revision":1,"aggregate_revision":1}
+```
+
+`revision` changes when issue fields change; `aggregate_revision` also covers
+related comments, labels, links, attachments and sub-issues. They describe
+issue data, not unrelated execution or automation freshness. Existing issue
+GET responses include these counters and `allowed_actions` for the current
+viewer. Joined identity names, membership visibility, current execution state
+and allowed actions are read-time projections: they may change while these
+counters stay equal. An open detail must refetch on focus, reconnect and a
+bounded interval while visible. Counter equality alone does not establish that
+the complete detail is live. Actual mutations reauthorize and validate state.
+
+Missing, foreign-workspace and inaccessible issues return `404`; backend
+failures return `503`. Responses set `Cache-Control: no-store`.
+
+
+### Safe retries and human edit conflicts
+
+`PATCH /api/v1/crews/{crewId}/issues/{identifier}` accepts `expected_revision`
+in its body or a numeric `If-Match` header, optionally quoted. Both must agree
+when supplied together. This is an issue-field precondition; wildcard, weak and
+multiple HTTP validators are unsupported. It does not identify the complete
+joined detail as an HTTP ETag.
+
+PATCH and `POST /api/v1/crews/{crewId}/issues/{identifier}/comments` accept an
+`Idempotency-Key` of 1–200 UTF-8 bytes. Retry the same intent with the same key.
+A successful replay returns the original response and status with
+`Idempotency-Replayed: true`; `Operation-ID` identifies the saved operation.
+Changed intent returns `409` with `error: operation_key_conflict`. A stale edit
+returns `409` with `error: revision_conflict` and the current `revision`.
+
+These operation errors use the `{error,...}` JSON envelope. Existing business
+validation conflicts, such as open child issues preventing completion, retain
+the existing Problem Details envelope. Both have Content-Type application/json.
+Clients must handle both documented shapes; this release preserves their wire
+format rather than converting existing errors. Missing current authority is
+rechecked before replay and does not return the stored response.
+
+## Failed issue mutation deliveries
+
+`GET /api/v1/workspaces/{workspaceId}/issue-mutation-outbox?state=failed`
+returns read-only delivery diagnostics for current trusted workspace OWNER/ADMIN
+members. Scoped tokens also require `workspace:admin`. Restricted accounts are
+denied. The response uses `Cache-Control: no-store`.
+
+Optional `limit` is 1–100 (default 50); `cursor` is the opaque next-page token
+bound to the viewer and workspace. Jobs are ordered by `(created_at, id)`.
+The response is `{jobs, next_cursor, has_more}`. Each job has `id`, `kind`,
+`attempts`, `max_attempts`, `created_at`, nullable `failed_at` and `error_code`
+(`invalid_payload`, `delivery_exhausted`, `authority_revoked` or `unknown`). No payload, requester
+receipt, raw delivery error or inaccessible job count is returned. There is no
+retry endpoint. Invalid page arguments return 400, authorization failures 403,
+and unavailable diagnostics 503.

@@ -11,6 +11,7 @@ import (
 )
 
 type internalDraftRequest struct {
+	SourceRunID    string         `json:"source_run_id"`
 	WorkspaceID    string         `json:"workspace_id"`
 	Slug           string         `json:"slug"`
 	AuthorCrewID   string         `json:"author_crew_id"`
@@ -75,6 +76,8 @@ func (h *PipelineHandler) internalDraft(w http.ResponseWriter, r *http.Request, 
 	}
 	if save {
 		d := in.Draft
+		d.SourceRunID = in.SourceRunID
+		d.SourceAgentID = callerAgent
 		// The ownership check above applies to this slug's current draft.
 		// Agent saves cannot use another draft's ID to rename it past that check.
 		if d.ID != "" && d.ID != current.ID {
@@ -97,9 +100,7 @@ func (h *PipelineHandler) internalDraft(w http.ResponseWriter, r *http.Request, 
 			replyError(w, 400, "draft document required")
 			return
 		}
-		for _, key := range []string{"save_token", "skip_test_gate", "skip_governance_gate", "last_test_run_at", "last_test_run_passed"} {
-			delete(document, key)
-		}
+		stripRoutineJSONFields(document, "save_token", "skip_test_gate", "skip_governance_gate", "last_test_run_at", "last_test_run_passed", "source_run_id", "source_agent_id", "chat_origin_id", "author_crew_id", "author_agent_id")
 		document["author_crew_id"], _ = json.Marshal(in.AuthorCrewID)
 		document["author_agent_id"], _ = json.Marshal(in.AuthorAgentID)
 		if d.Document, err = encodeDraftDocument(document); err != nil {
@@ -112,6 +113,9 @@ func (h *PipelineHandler) internalDraft(w http.ResponseWriter, r *http.Request, 
 			d.UpdatedBy = "agent:" + callerAgent
 		}
 		current, err = h.store.SaveDraft(r.Context(), d)
+		if writeRoutineOriginError(w, err) {
+			return
+		}
 		if errors.Is(err, pipeline.ErrDraftConflict) {
 			replyError(w, http.StatusConflict, err.Error())
 			return

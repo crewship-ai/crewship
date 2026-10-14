@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // ErrInvokingUserNotMember stops human-triggered work after membership
@@ -20,6 +22,14 @@ var ErrInvokingUserNotMember = errors.New("routine invoking user is no longer a 
 func (e *Executor) checkInvokingUser(ctx context.Context, in RunInput) error {
 	if in.Mode == ModeDryRun {
 		return nil
+	}
+	if in.ChatOriginID != "" {
+		if e.store == nil || e.store.db == nil {
+			return runauthority.ErrUnavailable
+		}
+		if _, err := runauthority.ValidateOriginReceipt(ctx, e.store.db, in.ChatOriginID, in.WorkspaceID); err != nil {
+			return err
+		}
 	}
 	if in.InvokingUserID == "" && in.InvocationAuthority == "" {
 		if unattendedAccountTrigger(in.TriggeredVia) && e.invocationCheck != nil {

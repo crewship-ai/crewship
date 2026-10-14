@@ -274,20 +274,23 @@ func (h *IssueHandler) broadcastIssueEvent(wsID, eventType string, payload map[s
 // ── Response types ──────────────────────────────────────────────────────────
 
 type issueResponse struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	CrewID       string  `json:"crew_id"`
-	CrewName     string  `json:"crew_name,omitempty"`
-	CrewSlug     string  `json:"crew_slug,omitempty"`
-	Number       *int    `json:"number"`
-	Identifier   *string `json:"identifier"`
-	Title        string  `json:"title"`
-	Description  *string `json:"description"`
-	Status       string  `json:"status"`
-	Priority     string  `json:"priority"`
-	AssigneeType *string `json:"assignee_type"`
-	AssigneeID   *string `json:"assignee_id"`
-	AssigneeName *string `json:"assignee_name,omitempty"`
+	Revision          int64    `json:"revision,omitempty"`
+	AggregateRevision int64    `json:"aggregate_revision,omitempty"`
+	AllowedActions    []string `json:"allowed_actions,omitempty"`
+	ID                string   `json:"id"`
+	WorkspaceID       string   `json:"workspace_id"`
+	CrewID            string   `json:"crew_id"`
+	CrewName          string   `json:"crew_name,omitempty"`
+	CrewSlug          string   `json:"crew_slug,omitempty"`
+	Number            *int     `json:"number"`
+	Identifier        *string  `json:"identifier"`
+	Title             string   `json:"title"`
+	Description       *string  `json:"description"`
+	Status            string   `json:"status"`
+	Priority          string   `json:"priority"`
+	AssigneeType      *string  `json:"assignee_type"`
+	AssigneeID        *string  `json:"assignee_id"`
+	AssigneeName      *string  `json:"assignee_name,omitempty"`
 	// AssigneeSlug is set for an agent assignee — what the agent's page is
 	// keyed on, so a client can link the assignee instead of naming it.
 	AssigneeSlug *string `json:"assignee_slug,omitempty"`
@@ -407,14 +410,15 @@ type relationResponse struct {
 }
 
 type commentResponse struct {
-	ID         string `json:"id"`
-	MissionID  string `json:"mission_id"`
-	AuthorType string `json:"author_type"`
-	AuthorID   string `json:"author_id"`
-	AuthorName string `json:"author_name,omitempty"`
-	Body       string `json:"body"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	OperationID string `json:"operation_id,omitempty"`
+	ID          string `json:"id"`
+	MissionID   string `json:"mission_id"`
+	AuthorType  string `json:"author_type"`
+	AuthorID    string `json:"author_id"`
+	AuthorName  string `json:"author_name,omitempty"`
+	Body        string `json:"body"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 type activityResponse struct {
@@ -607,7 +611,7 @@ func issueSelectQuery() string {
  COALESCE(iw.mode,'agent'),COALESCE(iw.revision,0),iw.worker_user_id,
  (SELECT u.full_name FROM users u JOIN workspace_members wm ON wm.user_id=u.id WHERE u.id=iw.worker_user_id AND wm.workspace_id=m.workspace_id),
  COALESCE(iw.note,''),
- CASE WHEN iw.mode='human' THEN EXISTS(SELECT 1 FROM assignments a WHERE (a.mission_id=m.id OR a.chat_id=m.id OR a.group_id=m.id) AND a.status NOT IN ('COMPLETED','FAILED','CANCELLED')) OR EXISTS(SELECT 1 FROM pipeline_runs pr JOIN issue_executions x ON x.routine_run_id=pr.id WHERE x.mission_id=m.id AND pr.status IN ('queued','running','waiting')) ELSE 0 END
+ CASE WHEN iw.mode='human' THEN EXISTS(SELECT 1 FROM assignments a WHERE (a.mission_id=m.id OR a.chat_id=m.id OR a.group_id=m.id) AND a.status NOT IN ('COMPLETED','FAILED','CANCELLED')) OR EXISTS(SELECT 1 FROM pipeline_runs pr JOIN issue_executions x ON x.routine_run_id=pr.id WHERE x.mission_id=m.id AND pr.status IN ('queued','running','waiting')) ELSE 0 END, m.revision, m.aggregate_revision
 	FROM missions m
 	LEFT JOIN issue_work iw ON iw.mission_id=m.id
 	LEFT JOIN crews c ON m.crew_id = c.id
@@ -632,6 +636,7 @@ func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, e
 		&authorAgentID, &createdByUserID, &authoredVia, &creatorName,
 		&ownerUserID, &ownerName, &delegateAgentID, &delegateName,
 		&issue.WorkMode, &issue.WorkRevision, &issue.WorkerUserID, &issue.WorkerName, &issue.WorkNote, &issue.WorkStopping,
+		&issue.Revision, &issue.AggregateRevision,
 	)
 	if err == nil {
 		issue.Labels = []labelResponse{}

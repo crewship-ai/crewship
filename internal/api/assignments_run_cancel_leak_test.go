@@ -126,6 +126,11 @@ func TestFinishAssignment_CancelRequested_LateFailure_MissionCommentIsCancellati
 		t.Fatalf("seed live-then-stopped mission-linked assignment: %v", err)
 	}
 
+	// This is an issue assignment, not a plain chat sharing the same group ID.
+	if _, err := h.db.Exec(`UPDATE assignments SET mission_id = ? WHERE id = ? AND workspace_id = ?`, missionID, assignmentID, wsID); err != nil {
+		t.Fatalf("bind assignment mission: %v", err)
+	}
+
 	lateErr := "container blew up, arrived after stop"
 	h.finishAssignment(context.Background(), assignmentID, "", missionID, "asg-worker", wsID, "", lateErr, nil)
 

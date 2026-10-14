@@ -59,9 +59,10 @@ import (
 // the schema is either listed or explicitly excluded with a reason.
 //
 // Still out of scope for MVP (deliberate, with reasons):
-//   - workspace_members: instance-level invitations / role assignments.
-//     Adding it without also adding a user-existence guarantee leaks
-//     across tenants; revisit when multi-tenant restore is in scope.
+// Workspace membership rows are included below. Their restored web execution
+// epochs are advanced atomically; historical receipts never authorize new work.
+//
+// Still excluded:
 //   - credentials, oauth_tokens: handled separately by instance backup
 //     (PR 4) and intentionally excluded from workspace bundles.
 //   - sessions, audit_logs: operational data that stays with the
@@ -102,6 +103,9 @@ var BackupTables = []string{
 	"environment_revisions",
 	"service_runtime_intents",
 	"chats",
+	"execution_origins",
+	"agent_operations",
+	"chat_entity_refs",
 	"workspace_files",
 	"journal_entries",
 	// journal_entry_priorities (v166) FKs journal_entries(id), so it must land
@@ -250,6 +254,7 @@ var BackupTables = []string{
 	// restore. mission_activity is dumped further above too (see its own
 	// entry), so event_id's FK is satisfied by the same ordering.
 	"mission_comment_mentions",
+	"issue_mutation_outbox",
 	"mission_labels",
 	"mission_proposals",
 	"mission_relations",
@@ -453,6 +458,13 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
 		// Scope through the owning page, never the nullable (or cross-workspace) editor.
 		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "pipeline_versions":
+		// Human/autonomous historical versions have no execution origin. Scope
+		// through the owning routine, never the optional admission fence.
+		return "pipeline_id IN (SELECT id FROM pipelines WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "mission_comments":
+		// An optional queued-mention origin must not exclude ordinary comments.
+		return "mission_id IN (SELECT id FROM missions WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "page_versions":
 		// Scoped through the page, not through the author. author_agent_id is
 		// NULL for every version a HUMAN saved — which is most of them — and
@@ -490,6 +502,8 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 		return "source_conversation_id IN (SELECT id FROM workspace_conversations WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "workspace_conversation_activity", "workspace_conversation_members", "workspace_conversation_messages", "workspace_conversation_agents", "workspace_conversation_agent_jobs", "workspace_conversation_outbox":
 		return "conversation_id IN (SELECT id FROM workspace_conversations WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "chat_entity_refs":
+		return "chat_id IN (SELECT id FROM chats WHERE workspace_id = ?) AND operation_id IN (SELECT id FROM agent_operations WHERE workspace_id = ?)", []any{workspaceID, workspaceID}, true
 	case "chat_participants", "chat_read_cursors":
 		// No workspace_id column — scoped via the chat.
 		return "chat_id IN (SELECT id FROM chats WHERE workspace_id = ?)", []any{workspaceID}, true
@@ -1078,6 +1092,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			_ = tx.Rollback()
 		}
 	}()
+	webEpochBefore, err := webAuthorityEpoch(ctx, tx)
+	if err != nil {
+		return stats, fmt.Errorf("backup: read live web authority epoch: %w", err)
+	}
 	// PreInsert hook runs BEFORE any per-table INSERT. The canonical
 	// use case is --replace: clear the target workspace's rows so the
 	// bundle's rows land with their original IDs instead of either
@@ -1102,6 +1120,13 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	if err != nil {
 		return stats, fmt.Errorf("backup: probe issue_work: %w", err)
 	}
+	legacyRestoreOrigins := map[string]string{}
+	type legacyRecoveryRow struct {
+		table   string
+		row     map[string]any
+		allowed map[string]bool
+	}
+	var legacyRecoveryRows []legacyRecoveryRow
 	conversationAssignments := map[string]bool{}
 	for _, job := range dump.Tables["workspace_conversation_agent_jobs"] {
 		if id, _ := job["assignment_id"].(string); id != "" {
@@ -1126,6 +1151,17 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		allowed, err := tableColumns(ctx, tx, table)
 		if err != nil {
 			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
+		}
+		// Dropping an admission fence is a security downgrade, not ordinary
+		// schema skew: an older target would classify this work as autonomous.
+		if !allowed["chat_origin_id"] {
+			for _, row := range rows {
+				if value, exists := row["chat_origin_id"]; exists && value != nil {
+					if text, ok := value.(string); !ok || text != "" {
+						return stats, fmt.Errorf("backup: unsupported authority schema: target %s cannot preserve chat_origin_id", table)
+					}
+				}
+			}
 		}
 		// #2034: a pre-#1797 bundle's issue_counters rows are keyed on
 		// crew_id, which a post-#1797 target does not have a column for.
@@ -1156,6 +1192,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				return stats, err
 			}
 		}
+		if table == "chat_entity_refs" {
+			rows = orderedChatEntityRefs(rows)
+		}
 		tableInserted := 0
 		for _, originalRow := range rows {
 			// main's conversation sanitiser runs FIRST: it rebuilds the row
@@ -1183,6 +1222,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					}
 				}
 			}
+			legacySourceRow := row
+			row, err = fenceLegacyRestoredWork(ctx, tx, table, row, allowed, legacyRestoreOrigins)
+			if err != nil {
+				return stats, err
+			}
 			// pendingClamp is only reported if the row actually lands:
 			// INSERT OR IGNORE silently drops a PK collision, and telling an
 			// admin to go re-tier a credential this restore never touched
@@ -1198,6 +1242,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			sortStrings(keys)
 			tallyDroppedColumns(&dropped, table, keys, allowed)
 			for _, k := range keys {
+				// Sequence is an installation-local scan position, not event identity.
+				// Let SQLite allocate it so imports cannot collide with another tenant.
+				if table == "chat_entity_refs" && k == "chat_seq" {
+					continue
+				}
 				if !allowed[k] {
 					continue
 				}
@@ -1286,6 +1335,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					restoredMissions[id] = true
 				}
 			}
+			if landed {
+				if _, present := legacySourceRow["chat_origin_id"]; !present && row["chat_origin_id"] != nil {
+					legacyRecoveryRows = append(legacyRecoveryRows, legacyRecoveryRow{table, legacySourceRow, allowed})
+				}
+			}
 			if pendingClamp != nil && landed {
 				appendSecurityLevelClamp(&stats, *pendingClamp)
 			}
@@ -1294,6 +1348,18 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			stats.RowsInsertedByTable = map[string]int{}
 		}
 		stats.RowsInsertedByTable[table] += tableInserted
+	}
+	// Assignments precede pipeline_runs in FK-safe restore order. Revisit only
+	// newly inserted legacy rows after their complete historical chain lands,
+	// inside this transaction; never rewrite existing target work or renew epochs.
+	for _, candidate := range legacyRecoveryRows {
+		resolved, err := fenceLegacyRestoredWork(ctx, tx, candidate.table, candidate.row, candidate.allowed, legacyRestoreOrigins)
+		if err != nil {
+			return stats, err
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE "+quoteIdent(candidate.table)+" SET chat_origin_id=? WHERE id=? AND workspace_id=?", resolved["chat_origin_id"], candidate.row["id"], candidate.row["workspace_id"]); err != nil {
+			return stats, fmt.Errorf("backup: recover historical origin: %w", err)
+		}
 	}
 	// Settled once the insert pass is done, so the caller sees one number
 	// for the whole restore. On an early error return above, the tx rolls
@@ -1314,6 +1380,12 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		if err := hooks.PostInsert(ctx, tx); err != nil {
 			return stats, fmt.Errorf("backup: post-insert hook: %w", err)
 		}
+	}
+	if err := fenceRestoredWebAuthority(ctx, tx, dump, webEpochBefore); err != nil {
+		return stats, fmt.Errorf("backup: fence restored web authority: %w", err)
+	}
+	if err := reconcileRestoredIssueOutbox(ctx, tx); err != nil {
+		return stats, fmt.Errorf("backup: reconcile durable issue audit delivery: %w", err)
 	}
 	if err := assertNoFKViolationsTx(ctx, tx); err != nil {
 		return stats, err

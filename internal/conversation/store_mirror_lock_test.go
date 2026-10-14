@@ -18,7 +18,7 @@ func TestAppendReleasesTranscriptLockWhileMirrorWaitsForDatabase(t *testing.T) {
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
-	if _, err = db.Exec(`CREATE TABLE conversation_messages(id TEXT,session_id TEXT,agent_id TEXT,role TEXT,content TEXT,tool_summary TEXT,ts TEXT,author_user_id TEXT)`); err != nil {
+	if _, err = db.Exec(`CREATE TABLE conversation_messages(id TEXT,session_id TEXT,agent_id TEXT,role TEXT,content TEXT,tool_summary TEXT,ts TEXT,author_user_id TEXT,run_id TEXT)`); err != nil {
 		t.Fatal(err)
 	}
 	store := NewStore(t.TempDir(), logging.New("error", "json", nil), WithDB(db))

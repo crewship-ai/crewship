@@ -126,13 +126,38 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin comment", err)
+		return
+	}
+	defer tx.Rollback()
+	var exists bool
+	if err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM missions WHERE id=? AND workspace_id=? AND crew_id=?)`, missionID, wsID, crewID).Scan(&exists); err != nil {
+		internalError(w, r, h.logger, "recheck comment issue", err)
+		return
+	}
+	if !exists {
+		writeProblem(w, r, 404, "Issue not found")
+		return
+	}
+	op, handled := h.beginHumanIssueOperation(w, r, tx, "commented", missionID, req)
+	if handled {
+		return
+	}
+
+	originID, err := captureHumanIssueOrigin(r.Context(), tx, r, missionID)
+	if err != nil {
+		writeChatIssueError(w, err)
+		return
+	}
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
-		VALUES (?, ?, 'user', ?, ?, ?, ?)`,
-		id, missionID, user.ID, req.Body, now, now)
+	_, err = tx.ExecContext(r.Context(), `
+		INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at, chat_origin_id)
+		VALUES (?, ?, 'user', ?, ?, ?, ?, NULLIF(?,''))`,
+		id, missionID, user.ID, req.Body, now, now, originID)
 	if err != nil {
 		internalError(w, r, h.logger, "create comment", err)
 		return
@@ -149,32 +174,32 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:  now,
 	}
 
-	// @mentions (#1768 item 3) — the HUMAN door. Both doors have to parse or
-	// the feature half-works: a mention typed by a person and one written by an
-	// agent are the same wire format and must behave the same.
-	//
-	// After the comment is committed, deliberately: the comment is the thing
-	// the user asked for, and a mention that could not be recorded must not
-	// turn a posted comment into a 500.
-	// crew_id is read off the mission rather than off the path, so the crew the
-	// connection rule is judged against is the issue's own — the path value is
-	// caller-supplied and resolveMissionID only proves the two agree today.
 	var issueTitle, issueCrewID string
-	_ = h.db.QueryRowContext(r.Context(),
-		`SELECT title, COALESCE(crew_id,'') FROM missions WHERE id = ?`, missionID).
-		Scan(&issueTitle, &issueCrewID)
-	h.mentionRecorder().record(r.Context(), mentionContext{
-		WorkspaceID: wsID,
-		MissionID:   missionID,
-		Identifier:  ident,
-		IssueTitle:  issueTitle,
-		IssueCrewID: issueCrewID,
-		CommentID:   id,
-		CommentBody: req.Body,
-		AuthorType:  "user",
-		AuthorID:    user.ID,
-		AuthorName:  user.Name,
-	})
+	if err = tx.QueryRowContext(r.Context(), `SELECT title,COALESCE(crew_id,'') FROM missions WHERE id=? AND workspace_id=?`, missionID, wsID).Scan(&issueTitle, &issueCrewID); err != nil {
+		internalError(w, r, h.logger, "load mention issue", err)
+		return
+	}
+	if _, err = persistIssueActivityTx(r.Context(), tx, issueEvent{MissionID: missionID, ActorType: "user", ActorID: user.ID, Action: actionCommented, Details: "Comment added"}); err != nil {
+		internalError(w, r, h.logger, "persist comment audit", err)
+		return
+	}
+	if err = persistCommentMentionsTx(r.Context(), tx, mentionContext{WorkspaceID: wsID, MissionID: missionID, Identifier: ident, IssueTitle: issueTitle, IssueCrewID: issueCrewID, CommentID: id, CommentBody: req.Body, AuthorType: "user", AuthorID: user.ID, AuthorName: user.Name}); err != nil {
+		internalError(w, r, h.logger, "persist comment mentions", err)
+		return
+	}
+	if err = completeHumanIssueOperation(r, tx, op, missionID, resp); err != nil {
+		internalError(w, r, h.logger, "complete comment operation", err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit comment", err)
+		return
+	}
+	if op != nil {
+		w.Header().Set("Operation-ID", op.ID)
+	}
+
+	h.drainCommittedIssueMutation(wsID)
 
 	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID})
 

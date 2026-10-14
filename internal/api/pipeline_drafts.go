@@ -86,9 +86,7 @@ func (h *PipelineHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	// Saving incomplete work is not validation or an approval. Never retain a
 	// short-lived validation token or legacy gate overrides in a durable draft.
-	for _, key := range []string{"save_token", "skip_test_gate", "skip_governance_gate", "last_test_run_at", "last_test_run_passed"} {
-		delete(doc, key)
-	}
+	stripRoutineJSONFields(doc, "save_token", "skip_test_gate", "skip_governance_gate", "last_test_run_at", "last_test_run_passed", "source_run_id", "source_agent_id", "chat_origin_id")
 	encoded, err := encodeDraftDocument(doc)
 	if err != nil {
 		replyError(w, 500, "Could not prepare routine draft")

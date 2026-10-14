@@ -1,0 +1,22 @@
+{
+  "entity": {
+    "id": "op-issue",
+    "identifier": "ENG-1",
+    "workspace_id": "test-workspace-id"
+  },
+  "id": "operation",
+  "kind": "issue",
+  "provenance": {
+    "actor": {
+      "id": "op-agent",
+      "type": "agent"
+    },
+    "at": "2026-10-13T09:00:00Z"
+  },
+  "revision_at_action": {
+    "aggregate_revision": 0,
+    "revision": 0
+  },
+  "status": "completed",
+  "verb": "created"
+}

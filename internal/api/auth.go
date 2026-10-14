@@ -940,7 +940,9 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 }
 
 // WsToken generates a short-lived JWE for authenticating WebSocket connections.
-// GET /api/v1/ws-token — works with both session cookies and CLI tokens.
+// GET /api/v1/ws-token — works with session cookies and unrestricted CLI tokens.
+// Limited CLI tokens cannot mint a ticket until scope-bearing chat authority is
+// supported; issuing an identity-only ticket would discard their restrictions.
 //
 // For browser auth: ticket carries user.SessionID so the WS hub can
 // enforce server-side revocation (close 4401 if the session gets
@@ -955,6 +957,10 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
 		writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)
+		return
+	}
+	if limitedChatToken(r.Context()) {
+		replyError(w, http.StatusForbidden, "scoped_token_chat_unavailable")
 		return
 	}
 	// Audit H7: defensive nil check. The router only mounts AuthHandler

@@ -371,6 +371,7 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable roleManage
+POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/publish roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback roleManage

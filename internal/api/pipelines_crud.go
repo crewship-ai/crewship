@@ -584,6 +584,7 @@ type internalSaveRequest struct {
 	AuthorAgentID string          `json:"author_agent_id"`
 	AuthorChatID  string          `json:"author_chat_id"`
 	AuthorRunID   string          `json:"author_run_id"`
+	SourceRunID   string          `json:"source_run_id"`
 	// TargetCrewSlug re-points ownership at the crew this routine is being
 	// built FOR. Accepted only from the onboarding setup crew, which in
 	// exchange may own nothing itself — see internal_delegated_crew.go.
@@ -937,6 +938,9 @@ func (h *PipelineHandler) saveWithPublication(w http.ResponseWriter, r *http.Req
 	}
 
 	saved, sched, err := h.store.SaveWithTrigger(r.Context(), in, trigger)
+	if writeRoutineOriginError(w, err) {
+		return
+	}
 	if replyScheduleConflict(w, err) {
 		return
 	}
@@ -1030,6 +1034,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.AuthorCrewID) {
 		return
 	}
+	sourceAgentID := body.AuthorAgentID
 	// Delegated authorship, for the onboarding Guide only: re-point the write
 	// from the crew that CALLED to the crew it is building for. Runs after the
 	// assert above, which is what proves AuthorCrewID is the caller's own crew
@@ -1123,6 +1128,8 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		description = *body.Description
 	}
 	in := pipeline.SaveInput{
+		SourceRunID:         body.SourceRunID,
+		SourceAgentID:       sourceAgentID,
 		WorkspaceID:         body.WorkspaceID,
 		Slug:                body.Slug,
 		Name:                body.Name,
@@ -1168,6 +1175,9 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	saved, sched, err := h.store.SaveWithTrigger(r.Context(), in, trigger)
+	if writeRoutineOriginError(w, err) {
+		return
+	}
 	if errors.Is(err, pipeline.ErrTestRunGateFailed) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
 			"error": "save requires a fresh, passing test_run (within 5 minutes)",

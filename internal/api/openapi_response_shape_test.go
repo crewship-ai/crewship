@@ -45,6 +45,13 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "RoutineOriginBinding", pointer: "/components/schemas/RoutineOriginBinding", value: routineOriginBindingResponse{}},
+	{name: "FailedIssueMutationJob", pointer: "/components/schemas/FailedIssueMutationJob", value: failedIssueMutationJob{}},
+	{name: "FailedIssueMutationPage", pointer: "/components/schemas/FailedIssueMutationPage", value: failedIssueMutationPage{}},
+	{name: "RoutineOriginDraftBinding", pointer: "/components/schemas/RoutineOriginDraftBinding", value: routineOriginDraftBinding{}},
+	{name: "RoutineOriginScheduleBinding", pointer: "/components/schemas/RoutineOriginScheduleBinding", value: routineOriginScheduleBinding{}},
+	{name: "ChatEntityReferencePage", pointer: "/components/schemas/ChatEntityReferencePage", value: EntityRefPage{}},
+	{name: "ChatEntityOperation", pointer: "/components/schemas/ChatEntityOperation", value: EntityOperationResponse{}},
 	{name: "WorkspacePendingRunResponseV1", pointer: "/components/schemas/WorkspacePendingRunResponseV1", value: pendingRunReceipt{}},
 	{name: "WorkspacePendingRunsResponseV1[]", pointer: "/components/schemas/WorkspacePendingRunsResponseV1/items", value: pendingRunReceipt{}},
 	{name: "RestrictedAgentProfile", pointer: "/components/schemas/RestrictedAgentProfile", value: restrictedAgentProfileResponse{}},

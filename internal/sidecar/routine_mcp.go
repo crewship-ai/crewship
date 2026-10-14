@@ -387,6 +387,13 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if params.Name == "save_routine" || params.Name == "run_routine" || params.Name == "save_routine_draft" {
+		ctx, ok := s.routineOrigin(w, r)
+		if !ok {
+			return
+		}
+		r = r.WithContext(ctx)
+	}
 	var status int
 	var bodyBytes []byte
 	switch params.Name {

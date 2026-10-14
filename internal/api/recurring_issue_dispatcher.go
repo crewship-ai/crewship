@@ -12,6 +12,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/quiesce"
+	"github.com/crewship-ai/crewship/internal/runauthority"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -123,7 +125,7 @@ func (d *RecurringIssueDispatcher) tick(ctx context.Context) {
 		FROM recurring_issues
 		WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ?
 		ORDER BY next_run ASC LIMIT 100`,
-		time.Now().UTC().Format(time.RFC3339Nano))
+		tsformat.Format(time.Now()))
 	if err != nil {
 		d.logger.Error("recurring issue dispatcher: list due", "error", err)
 		return
@@ -151,22 +153,9 @@ func (d *RecurringIssueDispatcher) tick(ctx context.Context) {
 }
 
 func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDueRow) {
-	// Compute the next occurrence up front (5-field cron, UTC — the table has no
-	// timezone column, unlike pipeline_schedules). A bad expr disables the row
-	// so a un-parseable cron can't spin the ticker forever.
-	sched, err := cronParser.Parse(row.cronExpr)
-	if err != nil {
-		d.logger.Error("recurring issue dispatcher: bad cron, disabling", "id", row.id, "error", err)
-		if _, derr := d.db.ExecContext(ctx,
-			`UPDATE recurring_issues SET enabled = 0, updated_at = ? WHERE id = ?`,
-			time.Now().UTC().Format(time.RFC3339), row.id); derr != nil {
-			d.logger.Error("recurring issue dispatcher: disable bad-cron row", "id", row.id, "error", derr)
-		}
-		return
-	}
 	now := time.Now().UTC()
-	nextRun := sched.Next(now).UTC().Format(time.RFC3339)
-	nowStr := now.Format(time.RFC3339)
+	nowStr := tsformat.Format(now)
+	nextRun := ""
 
 	// Durable fire-idempotency: reserve a per-occurrence key BEFORE inserting
 	// so two replicas racing the same due row can't both create an issue. The
@@ -223,6 +212,59 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 		reserved = true
 	}
 
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		d.logger.Error("recurring issue dispatcher: begin tx", "id", row.id, "error", err)
+		releaseReservation() // next_run not advanced — free the key so the next tick retries
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Reload content, grant and schedule together. A stale tick must never
+	// combine one person's old definition with another person's new admission.
+	var originID, currentBucket string
+	err = tx.QueryRowContext(ctx, `SELECT crew_id,title,description,priority,project_id,milestone_id,assignee_type,assignee_id,labels_json,cron_expression,created_by,next_run,COALESCE(chat_origin_id,'') FROM recurring_issues WHERE id=? AND workspace_id=? AND enabled=1 AND next_run IS NOT NULL AND next_run<=?`, row.id, row.workspaceID, tsformat.Format(now)).Scan(&row.crewID, &row.title, &row.description, &row.priority, &row.projectID, &row.milestoneID, &row.assigneeType, &row.assigneeID, &row.labelsJSON, &row.cronExpr, &row.createdBy, &currentBucket, &originID)
+	if err != nil || (row.nextRunBucket != "" && row.nextRunBucket != currentBucket) {
+		_ = tx.Rollback()
+		releaseReservation()
+		return
+	}
+	sched, parseErr := cronParser.Parse(row.cronExpr)
+	if parseErr != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE recurring_issues SET enabled=0,updated_at=? WHERE id=? AND workspace_id=?`, nowStr, row.id, row.workspaceID); err == nil {
+			err = tx.Commit()
+		}
+		if err != nil {
+			d.logger.Warn("recurring issue dispatcher: could not disable bad cron", "id", row.id, "error", err)
+		}
+		_ = tx.Rollback()
+		releaseReservation()
+		d.logger.Warn("recurring issue dispatcher: bad cron disabled", "id", row.id, "error", parseErr)
+		return
+	}
+	nextRun = tsformat.Format(sched.Next(now))
+
+	var sourceOrigin runauthority.Origin
+	if originID != "" {
+		var authorityErr error
+		sourceOrigin, authorityErr = runauthority.ValidateOriginReceipt(ctx, tx, originID, row.workspaceID)
+		if authorityErr != nil {
+			if permanentRecurringAuthorityError(authorityErr) {
+				if pauseErr := pauseRecurringAuthorityTx(ctx, tx, row, sourceOrigin, nowStr, nextRun); pauseErr == nil {
+					if commitErr := tx.Commit(); commitErr != nil {
+						d.logger.Warn("recurring authority pause commit failed", "id", row.id, "error", commitErr)
+					}
+				} else {
+					d.logger.Warn("recurring authority pause failed", "id", row.id, "error", pauseErr)
+				}
+			}
+			_ = tx.Rollback()
+			releaseReservation()
+			d.logger.Warn("recurring authority unavailable", "id", row.id, "error", authorityErr)
+			return
+		}
+	}
+
 	var labels []string
 	if row.labelsJSON.Valid && row.labelsJSON.String != "" {
 		if err := json.Unmarshal([]byte(row.labelsJSON.String), &labels); err != nil {
@@ -235,14 +277,6 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 		}
 		return nil
 	}
-
-	tx, err := d.db.BeginTx(ctx, nil)
-	if err != nil {
-		d.logger.Error("recurring issue dispatcher: begin tx", "id", row.id, "error", err)
-		releaseReservation() // next_run not advanced — free the key so the next tick retries
-		return
-	}
-	defer tx.Rollback() //nolint:errcheck
 
 	issueID, identifier, cerr := insertIssueTx(ctx, tx, d.logger, issueSpec{
 		WorkspaceID:  row.workspaceID,
@@ -269,11 +303,49 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 		d.logger.Warn("recurring issue dispatcher: create failed, advancing to next occurrence",
 			"id", row.id, "crew_id", row.crewID, "error", cerr)
 		if _, uerr := d.db.ExecContext(ctx,
-			`UPDATE recurring_issues SET next_run = ?, updated_at = ? WHERE id = ?`,
-			nextRun, nowStr, row.id); uerr != nil {
+			`UPDATE recurring_issues SET next_run = ?, updated_at = ? WHERE id = ? AND workspace_id=? AND cron_expression=? AND next_run=? AND chat_origin_id IS NULLIF(?,'')`,
+			nextRun, nowStr, row.id, row.workspaceID, row.cronExpr, currentBucket, originID); uerr != nil {
 			d.logger.Error("recurring issue dispatcher: advance after failure", "id", row.id, "error", uerr)
 		}
+		releaseReservation()
 		return
+	}
+
+	issueOriginID := originID
+	if originID != "" {
+		if sourceOrigin.HumanAuthority.Kind == "web_recurring" {
+			occurrence, deriveErr := runauthority.DeriveWebIssueOrigin(ctx, tx, originID, issueID, row.workspaceID)
+			if deriveErr != nil {
+				_ = tx.Rollback()
+				releaseReservation()
+				d.logger.Warn("recurring occurrence authority unavailable", "id", row.id, "error", deriveErr)
+				return
+			}
+			issueOriginID = occurrence.ID
+		}
+	} else {
+		// An unknown template admission may generate records, but it must not
+		// become an autonomous grant when legacy creator attribution is absent.
+		// This is deliberately unavailable provenance, not a synthetic human.
+		issueOriginID = generateCUID()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO execution_origins(id,workspace_id,root_run_id,chat_id,trigger_message_id,human_authority,created_at) VALUES(?,?,?,'','','{}',?)`, issueOriginID, row.workspaceID, "unverified-recurring:"+issueID, nowStr); err != nil {
+			_ = tx.Rollback()
+			releaseReservation()
+			return
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE missions SET chat_origin_id=? WHERE id=? AND workspace_id=?`, issueOriginID, issueID, row.workspaceID); err != nil {
+		_ = tx.Rollback()
+		releaseReservation()
+		return
+	}
+
+	if originID == "" {
+		if err := notifyRecurringAuthorityTx(ctx, tx, row, sourceOrigin, "recurring-reauthorize:", "Recurring schedule needs authorization", "can create issue records but cannot authorize agent execution", nowStr); err != nil {
+			// Notification delivery must not turn a legacy record-only schedule
+			// into a globally blocking due item. The next occurrence retries it.
+			d.logger.Warn("recurring reauthorization notice failed", "id", row.id, "error", err)
+		}
 	}
 
 	// Advance the schedule in the SAME tx as the issue insert, so a crash can't

@@ -172,6 +172,8 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// (see the comment below on /pipeline-runs/).
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/budget-summary", authed(wsCtx(http.HandlerFunc(pipes.GetBudgetSummary))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", authed(wsCtx(http.HandlerFunc(pipes.GetBudget))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding", authed(wsCtx(http.HandlerFunc(pipes.GetOriginBinding))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding", roleManage, pipes.ClearOriginBinding)
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", roleManage, pipes.SetBudget)
 	// Appearance is presentation, so it sits at the create tier rather
 	// than manage: picking an icon is not an operational act, and a

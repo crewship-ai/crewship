@@ -8,10 +8,12 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // maxJournalEscalationFieldLen bounds each agent-supplied text field
@@ -55,18 +57,59 @@ func (h *QueryHandler) PendingEscalationCount(w http.ResponseWriter, r *http.Req
 // Auth: protected by internalAuth middleware (X-Internal-Token) in router.go.
 func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		FromSlug    string `json:"from_slug"`
-		Reason      string `json:"reason"`
-		Context     string `json:"context"`
-		Type        string `json:"type"`
-		Metadata    string `json:"metadata"`
-		CrewID      string `json:"crew_id"`
-		WorkspaceID string `json:"workspace_id"`
-		ChatID      string `json:"chat_id"`
+		FromSlug     string `json:"from_slug"`
+		Reason       string `json:"reason"`
+		Context      string `json:"context"`
+		Type         string `json:"type"`
+		Metadata     string `json:"metadata"`
+		CrewID       string `json:"crew_id"`
+		WorkspaceID  string `json:"workspace_id"`
+		SourceRunID  string `json:"source_run_id"`
+		ActorAgentID string `json:"actor_agent_id"`
+		ChatID       string `json:"chat_id"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
+	}
+	if body.WorkspaceID == "" || body.CrewID == "" || body.Reason == "" {
+		replyError(w, 400, "reason, crew_id and workspace_id required")
+		return
+	}
+	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) || !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
+		return
+	}
+	if body.SourceRunID == "" && r.Header.Get("X-Crewship-Run-Token") != "" {
+		writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+		return
+	}
+	if body.SourceRunID != "" {
+		key := internaltoken.DeriveAgentRunKey(h.internalToken, body.WorkspaceID, body.CrewID)
+		ws, agent, run, valid := internaltoken.ValidateAgentRunToken(key, r.Header.Get("X-Crewship-Run-Token"))
+		if !valid || ws != body.WorkspaceID || agent != body.ActorAgentID || run != body.SourceRunID {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		chat, err := escalationExecutionChat(r.Context(), h.db, run, agent, ws)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if body.ChatID != "" && body.ChatID != chat {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		body.ChatID = chat
+		var slug string
+		if err = h.db.QueryRowContext(r.Context(), `SELECT slug FROM agents WHERE id=? AND workspace_id=? AND crew_id=? AND deleted_at IS NULL`, agent, ws, body.CrewID).Scan(&slug); err != nil {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		if body.FromSlug != "" && body.FromSlug != slug {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		body.FromSlug = slug
 	}
 	if body.FromSlug == "" || body.Reason == "" || body.CrewID == "" || body.WorkspaceID == "" || body.ChatID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -74,19 +117,9 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
-	// PR-F24 F-4: a bound token may only raise escalations in its own
-	// workspace (body workspace_id is the insert scope; the auth
-	// middleware can't inspect bodies).
-	if !assertInternalTokenWorkspace(w, r, body.WorkspaceID) {
-		return
-	}
-	// PR-F24 foreign-ID closure: crew_id and chat_id are independent of the
-	// workspace_id checked above — prove they belong to the bound workspace
-	// before inserting the escalation so a ws-A token can't raise one
-	// attributed to a ws-B crew/chat.
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
-		return
-	}
+	// Legacy IPC calls without run identity remain trusted sidecar-service
+	// traffic. Agents cannot obtain the sidecar's crew IPC credential; v2
+	// configuration is enforced at the agent-facing sidecar boundary.
 	if !assertBoundChatWorkspaceDB(w, r, h.db, h.logger, body.ChatID) {
 		return
 	}

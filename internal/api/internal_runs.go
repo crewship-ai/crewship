@@ -11,8 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/runverdict"
 	"github.com/crewship-ai/crewship/internal/work"
 )
@@ -26,12 +28,15 @@ const runVerdictFlagKey = "run_verdict_summaries"
 // POST /api/v1/internal/runs
 func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ID          string          `json:"id"`
-		AgentID     string          `json:"agent_id"`
-		ChatID      string          `json:"chat_id"`
-		WorkspaceID string          `json:"workspace_id"`
-		TriggerType string          `json:"trigger_type"`
-		Metadata    json.RawMessage `json:"metadata"`
+		ID               string                `json:"id"`
+		AgentID          string                `json:"agent_id"`
+		ChatID           string                `json:"chat_id"`
+		WorkspaceID      string                `json:"workspace_id"`
+		TriggerType      string                `json:"trigger_type"`
+		Metadata         json.RawMessage       `json:"metadata"`
+		HumanAuthority   *chataudience.Receipt `json:"human_authority"`
+		TriggerMessageID string                `json:"trigger_message_id"`
+		ChatOriginID     string                `json:"chat_origin_id"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
@@ -79,6 +84,39 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if body.ChatOriginID != "" {
+		if InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" || body.HumanAuthority != nil || body.TriggerMessageID != "" {
+			replyError(w, 403, "human_origin_requires_host")
+			return
+		}
+		if _, err := runauthority.ValidateOrigin(r.Context(), h.db, body.ChatOriginID, body.AgentID, body.WorkspaceID); err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+	}
+	if body.HumanAuthority != nil || body.TriggerMessageID != "" {
+		// Only host dispatch may assert a human. Container/crew tokens cannot
+		// forge a receipt, even if its IDs and epochs happen to be current.
+		if InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" {
+			replyError(w, http.StatusForbidden, "Human authority requires host authentication")
+			return
+		}
+		receipt := body.HumanAuthority
+		if receipt == nil || body.TriggerMessageID == "" || body.ChatID == "" || receipt.ChatID != body.ChatID || receipt.AgentID != body.AgentID || receipt.WorkspaceID != body.WorkspaceID {
+			replyError(w, http.StatusForbidden, "run_identity_mismatch")
+			return
+		}
+		live, err := chataudience.CaptureTrusted(r.Context(), h.db, body.ChatID, receipt.UserID, receipt)
+		if err != nil {
+			replyInternalError(w, h.logger, "create run: validate human authority", err)
+			return
+		}
+		if live == nil {
+			replyError(w, http.StatusForbidden, "requester_authority_stale")
+			return
+		}
+	}
+
 	if h.rejectRecoveredStopWrite(w, r, body.WorkspaceID, body.AgentID, body.ID) {
 		return
 	}
@@ -96,17 +134,27 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusServiceUnavailable, "Durable run journal unavailable")
 			return
 		}
-		payload := map[string]any{"trigger_type": body.TriggerType}
+		payload := map[string]any{"trigger_type": body.TriggerType, "host_admitted": InternalTokenWorkspaceFromContext(r.Context()) == "" && InternalTokenCrewFromContext(r.Context()) == ""}
+		if body.ChatOriginID != "" {
+			payload["chat_origin_id"] = body.ChatOriginID
+		}
+		if body.HumanAuthority != nil {
+			payload["human_authority"] = body.HumanAuthority
+			payload["trigger_message_id"] = body.TriggerMessageID
+		}
 		if body.ChatID != "" {
 			payload["chat_id"] = body.ChatID
 		}
 		if body.Metadata != nil {
 			var md map[string]any
-			if err := json.Unmarshal(body.Metadata, &md); err == nil && md != nil {
+			metadataDecoder := json.NewDecoder(bytes.NewReader(body.Metadata))
+			metadataDecoder.UseNumber()
+			if err := metadataDecoder.Decode(&md); err == nil && md != nil {
 				payload["metadata"] = md
 			}
 		}
-		if _, err := synchronous.EmitSync(r.Context(), journal.Entry{
+		entry := journal.Entry{
+			ID:          "run-start:" + body.ID,
 			WorkspaceID: body.WorkspaceID,
 			// The agent's crew at run time: crew-scoped run insights read
 			// recorded ownership, so a run without it belongs to no crew.
@@ -118,13 +166,32 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			Summary:   fmt.Sprintf("run %s started", shortRunID(body.ID)),
 			Payload:   payload,
 			TraceID:   body.ID,
-		}); err != nil {
-			if errors.Is(err, journal.ErrRecoveredStopConflict) {
-				replyError(w, http.StatusConflict, "Run was stopped during recovery without a recorded start")
-				return
+		}
+		matched, err := h.matchRunStart(r.Context(), entry)
+		if err != nil {
+			if errors.Is(err, errRunStartIdentityConflict) || errors.Is(err, errRunAlreadyTerminal) {
+				replyError(w, http.StatusConflict, err.Error())
+			} else {
+				replyInternalError(w, h.logger, "create run: match run.started", err)
 			}
-			replyInternalError(w, h.logger, "create run: emit run.started", err)
 			return
+		}
+		if !matched {
+			if _, err := synchronous.EmitSync(r.Context(), entry); err != nil {
+				// A concurrent identical admission may win the stable journal ID.
+				// Compare its committed identity rather than appending another start.
+				replayed, matchErr := h.matchRunStart(r.Context(), entry)
+				if matchErr != nil || !replayed {
+					if errors.Is(matchErr, errRunStartIdentityConflict) || errors.Is(matchErr, errRunAlreadyTerminal) {
+						replyError(w, http.StatusConflict, matchErr.Error())
+					} else if errors.Is(err, journal.ErrRecoveredStopConflict) {
+						replyError(w, http.StatusConflict, "Run was stopped during recovery without a recorded start")
+					} else {
+						replyInternalError(w, h.logger, "create run: emit run.started", err)
+					}
+					return
+				}
+			}
 		}
 	}
 
