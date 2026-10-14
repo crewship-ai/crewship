@@ -10,6 +10,12 @@ import (
 	"github.com/crewship-ai/crewship/internal/access"
 )
 
+// Paths may reject a mismatch; only the validated context scopes queries.
+func memberAccessWorkspace(r *http.Request) (string, bool) {
+	workspace := WorkspaceIDFromContext(r.Context())
+	return workspace, workspace != "" && workspace == r.PathValue("workspaceId")
+}
+
 // memberAccessTarget uses the authenticated workspace and membership row ID;
 // neither the actor nor the target user can be supplied in the policy body.
 func (h *WorkspaceHandler) memberAccessTarget(w http.ResponseWriter, r *http.Request) (actor, user, workspace string, ok bool) {

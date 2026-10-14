@@ -99,6 +99,16 @@ never includes the member's private conversation or run contents. An execution
 grant can be conditional or unavailable: provider/profile dependencies, inputs,
 budgets and installed runtime still matter. Unshared resources remain denied.
 
+Members can inspect the same explanation for themselves with
+`GET /api/v1/workspaces/{workspaceId}/access/me` or
+`crewship workspace access me`. The target identity comes only from authentication;
+query parameters cannot select another member. This route requires current local
+membership and a live account, is allowlisted for Guests, and fences the response
+against membership revision changes. Guest Settings includes **Your access** with
+current decisions and execution prerequisites. This explains saved grants rather
+than enumerating unshared resources. Trusted members receive their role-based
+explanation; the endpoint does not grant new authority.
+
 Supported operations:
 
 | Resource | Operations | Current scope |

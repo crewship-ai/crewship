@@ -492,3 +492,18 @@ crewship workspace invite create client@example.test --role VIEWER --access-mode
 `grants.json` is an array, for example
 `[{"kind":"routine","id":"routine-id","operation":"run"},{"kind":"agent","id":"agent-id","operation":"run"}]`.
 Grant every dependency's agent run/delegate rights separately.
+
+## `crewship workspace access`
+
+Inspect your own access in the selected workspace.
+
+## `crewship workspace access me`
+
+Calls `GET /api/v1/workspaces/{workspaceId}/access/me` without looking up the
+workspace roster. Available to Guests and trusted members. The table explains
+saved resource grants and execution prerequisites; JSON/YAML includes membership
+revision and the account-wide restriction explanation.
+
+```bash
+crewship --format json workspace access me
+```

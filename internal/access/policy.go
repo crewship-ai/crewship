@@ -12,6 +12,16 @@ type Policy struct {
 // Policy reads membership and grants in one snapshot, only for a current trusted
 // administrator. A stale document cannot overwrite a later revocation.
 func (s Store) Policy(ctx context.Context, actor, user, workspace string) (Policy, error) {
+	return s.policy(ctx, actor, user, workspace, false)
+}
+
+// OwnPolicy exposes only the authenticated caller's saved grants. It does not
+// require workspace administration and never accepts another target identity.
+func (s Store) OwnPolicy(ctx context.Context, user, workspace string) (Policy, error) {
+	return s.policy(ctx, user, user, workspace, true)
+}
+
+func (s Store) policy(ctx context.Context, actor, user, workspace string, own bool) (Policy, error) {
 	if s.DB == nil {
 		return Policy{}, ErrDenied
 	}
@@ -20,8 +30,18 @@ func (s Store) Policy(ctx context.Context, actor, user, workspace string) (Polic
 		return Policy{}, err
 	}
 	defer tx.Rollback()
-	if err = operator(ctx, tx, actor, workspace); err != nil {
-		return Policy{}, err
+	if own {
+		var active bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND suspended_at IS NULL)`, user).Scan(&active); err != nil {
+			return Policy{}, err
+		}
+		if !active {
+			return Policy{}, ErrDenied
+		}
+	} else {
+		if err = operator(ctx, tx, actor, workspace); err != nil {
+			return Policy{}, err
+		}
 	}
 	m, err := member(ctx, tx, user, workspace)
 	if err != nil {
