@@ -340,6 +340,14 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 		return
 	}
 
+	if originID == "" {
+		if err := notifyRecurringAuthorityTx(ctx, tx, row, sourceOrigin, "recurring-reauthorize:", "Recurring schedule needs authorization", "can create issue records but cannot authorize agent execution", nowStr); err != nil {
+			// Notification delivery must not turn a legacy record-only schedule
+			// into a globally blocking due item. The next occurrence retries it.
+			d.logger.Warn("recurring reauthorization notice failed", "id", row.id, "error", err)
+		}
+	}
+
 	// Advance the schedule in the SAME tx as the issue insert, so a crash can't
 	// create the issue without recording the fire (double-fire) or vice versa.
 	if _, uerr := tx.ExecContext(ctx,

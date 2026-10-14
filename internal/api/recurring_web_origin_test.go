@@ -148,3 +148,34 @@ func TestLegacyRecurringWithoutCreatorCannotBecomeAutonomousAssignment(t *testin
 		t.Fatalf("record generation changed: enabled=%d count=%d origin=%+v", enabled, count, templateOrigin)
 	}
 }
+
+func TestLegacyRecurringNoticeIsOnceAndNoRecipientDoesNotBlockGeneration(t *testing.T) {
+	for _, restricted := range []bool{false, true} {
+		t.Run(map[bool]string{false: "eligible owner", true: "no eligible recipient"}[restricted], func(t *testing.T) {
+			h, user, workspace, crew := newRecurringHandler(t)
+			if restricted {
+				execOrFatal(t, h.db, `UPDATE workspace_members SET access_mode='restricted' WHERE user_id=?`, user)
+			}
+			execOrFatal(t, h.db, `INSERT INTO recurring_issues(id,workspace_id,crew_id,title,cron_expression,enabled,next_run) VALUES('legacy-notice-template',?,?,'Legacy','0 9 * * *',1,'2020-01-01T00:00:00Z')`, workspace, crew)
+			d := NewRecurringIssueDispatcher(h.db, nil, newTestLogger())
+			row := recurringDueRow{id: "legacy-notice-template", workspaceID: workspace}
+			d.fireOne(t.Context(), row)
+			execOrFatal(t, h.db, `UPDATE recurring_issues SET next_run='2020-01-02T00:00:00Z' WHERE id='legacy-notice-template'`)
+			d.fireOne(t.Context(), row)
+			var count, enabled, runs, notices int
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM missions WHERE workspace_id=? AND chat_origin_id IS NOT NULL`, workspace).Scan(&count); err != nil || count != 2 {
+				t.Fatalf("generation %d %v", count, err)
+			}
+			if err := h.db.QueryRow(`SELECT enabled,run_count FROM recurring_issues WHERE id='legacy-notice-template'`).Scan(&enabled, &runs); err != nil || enabled != 1 || runs != 2 {
+				t.Fatalf("schedule stalled %d %d %v", enabled, runs, err)
+			}
+			want := 1
+			if restricted {
+				want = 0
+			}
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id='recurring-reauthorize:legacy-notice-template'`).Scan(&notices); err != nil || notices != want {
+				t.Fatalf("notice count %d want%d %v", notices, want, err)
+			}
+		})
+	}
+}

@@ -87,7 +87,7 @@ Existing admitted work retains its own origin when a later request starts new
 work. These verified web origins authorize operations but do not manufacture
 chat cards or a triggering chat message. Narrow CLI tokens cannot be converted
 into a broader standing execution grant. Their permitted issue CRUD, comments
-and recurring-template edits/disable remain available with a NULL origin;
+and recurring-template edits/disable remain available without acquiring a new origin;
 explicit Start and human-to-agent handoff require capture-capable authority.
 Unrestricted tokens and the explicit global wildcard follow the same admission
 policy as the web session. The existing account-level restricted-member rule
@@ -99,8 +99,11 @@ do not authorize agent execution. Each such occurrence receives an immutable
 unavailable origin (`unverified-recurring:<issueID>`, empty chat/message and
 `human_authority={}`), including templates without creator attribution. This
 prevents later assignment dispatch from classifying unknown provenance as
-autonomous. The template remains NULL-origin and its schedule advances;
-a fresh authenticated Start can authorize the occurrence explicitly.
+autonomous. The template remains NULL-origin and its schedule advances, with one reauthorization
+notice to an eligible owner per template. A fresh authenticated Start can authorize
+the occurrence explicitly. Repeated pauses deduplicate notices per template/origin.
+Scoped edits and disable preserve an existing pinned origin; scoped explicit
+re-enable is refused without changing the template.
 
 Channel jobs without a verified authenticated admission may answer,
 but their runs carry a host-derived missing-requester marker. Issue mutations
@@ -117,13 +120,14 @@ RUNNING state. Admission failure fails the step; this is intentional so every
 issued run token has a durable authority record.
 
 Backup and fork include origins alongside their dependent records. Forks clear
-the human receipt rather than silently granting the copied work autonomous
-rights. Normal restore preserves provenance without renewing admission.
-Refreshed chat authority makes chat receipts stale. Web receipts still require
-the same current membership epoch and live account/resource scope; workspace
-membership grants are not restored from the bundle. A previously valid web
-admission can resume only if those live checks still pass. Restoring historical
-data cannot recreate a removed membership or renew a revoked receipt.
+human receipts without granting copied work autonomy. Membership rows are restored,
+but each imported membership receives a new web execution epoch above live and
+archived epochs in the same restore transaction. Historical web receipts are
+preserved for audit and become stale, including after replacement restore;
+a fresh authenticated action must admit new web-origin work. Chat receipts still
+require current audience authority. Restore does not promise exactly-once model
+delivery: nonterminal mention reconciliation and fork claimed-state handling
+remain tracked in #3103.
 
 ## Upgrade boundary
 
@@ -422,3 +426,41 @@ agents; supplying a source run without its proof is always refused.
 Routine action arguments cannot override server identity or operation keys with
 Unicode/case-fold aliases. Explicit canonical operation keys remain supported
 for legacy autonomous calls; human-origin calls use the dispatcher's stable key.
+
+## Closeout regression matrix and delivery limits
+
+Automated evidence and live-agent acceptance are separate. These tests protect
+existing paths; the dev-slot real-agent restart/retry/revocation/restore scenario
+and the 500-reference / 50-object / 10-viewer performance profile remain required
+before promoting this E0 delivery.
+
+| Existing path | Regression entry point | Evidence boundary |
+| --- | --- | --- |
+| UI issue -> agent mutation/comment/result | `TestWebIssueStartSidecarMutationsDelegationResultAndRevocation` | Real router and sidecar; synthetic executor |
+| UI comment mention | `TestHumanCommentDisconnectAndReplayKeepOneDurableMention` and `TestIssueOutbox` tests | Handler/outbox admission, not a live model |
+| Legacy and new recurring templates | `TestLegacyRecurring`, `TestRecurringPermanentAuthorityFailureLeavesGlobalDueQueue` | Dispatcher and real migrated database |
+| Cron/webhook/manual routine authority | `TestRoutineChatOrigin`, `TestResolveAutonomousRunRequiresHostAdmission` | Handler/authority tests; complete trigger-to-sidecar integration pending |
+| Nested routine | `TestAssignmentChainOrigin_RoutineDispatchInheritsTheCausingRunsChain` | Chain attribution; complete nested execution pending |
+| Peer query and second-run assignment | `TestQueryUsesVerifiedActorIDWithoutRosterSlug`, `TestDelegationRejectsBootIssueAndDerivesVerifiedExecutionChat` | Host handler identity; combined sidecar execution pending |
+| Boot/nonboot/fenced escalation | `TestEscalationRealHostRecoversSecondRunChatAndRejectsMismatch` | Real router and sidecar |
+| Scoped token CRUD and refused execution | `TestScopedIssueCRUDDoesNotCaptureExecutionGrant`, `TestScopedRecurringCRUDPreservesStandingGrantAndCanDisable` | Real handlers and migrated database |
+| Legacy crew MCP | `TestIssuesMCPLegacyCrewDropsUnscopedOperationKey` | Sidecar MCP; no claim of v2 requester guarantees |
+| Backup, restore, fork | `TestIssueMutationOutboxRestoreAndForkKeepDeliveryBoundaries`, `TestRestoreFencesWebReceiptsWithoutGrantingAutonomousWork` | Real migrated database; runtime recovery acceptance pending |
+
+Projection-only attachment/code-link drains never consume mention attempts.
+Delivery outcome ACK/backoff/terminal writes detach from the request deadline
+with a separate two-second bound and retain the same lease fence. Foreground
+recovery is still workspace-scoped, not restricted to the originating transaction.
+Plain comments now produce `mission.comment` audit events and follow existing
+`issues.comment` notification preferences and automation rules; no preference is
+silently enabled or muted. The `issue-activity:` audit trace is not an agent run
+and renders as an empty `event.run_id` in automation inputs.
+
+Remaining bounded follow-ups: ordinary CRUD versus unavailable admission (#3101),
+legacy comment source attribution (#3102), restore/fork mention reconciliation
+(#3103), failed payload retention and safe journal recovery (#3104), and bulk
+label/project audit semantics (#3105). Failed jobs currently retain payloads;
+exhausted journal projections require operator diagnosis and have no requeue API.
+Bulk status/priority/assignment audit is transactional; bulk label/project fields,
+internal relation changes, workflow and Inbox mutation doors are not covered by
+this PR's durable audit guarantee.

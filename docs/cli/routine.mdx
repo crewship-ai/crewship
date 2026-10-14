@@ -2234,7 +2234,7 @@ or `null`. A bound draft requires `--draft DRAFT_ID=REVISION=ORIGIN_ID` (or `nul
 in the final field), using values from get. Clearing it increments its revision
 and invalidates previously prepared publications. Selecting a pinned schedule
 whose immutable version still has authority returns 409 and changes nothing.
-A stale binding returns 409 and changes nothing. The clear command supports
+A stale binding returns 409 and changes nothing. Both get and clear support
 the global output format flags.
 
 ```bash

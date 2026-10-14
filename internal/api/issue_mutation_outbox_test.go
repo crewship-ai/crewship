@@ -515,3 +515,108 @@ func TestIssueOutboxStableAdmissionReplayDoesNotBecomeNewDispatch(t *testing.T) 
 		t.Fatalf("stable replay was treated as a fresh admission: %v", err)
 	}
 }
+
+func TestIssueOutboxProjectionOnlyDrainsPreservePendingMentions(t *testing.T) {
+	for _, kind := range []string{"attachment", "code-link"} {
+		t.Run(kind, func(t *testing.T) {
+			f := setupMentionFixture(t)
+			dispatch := &failBeforeMentionAdmission{delegate: f.assign}
+			f.issues.SetMentionDispatcher(dispatch)
+			rr := httptest.NewRecorder()
+			f.issues.CreateComment(rr, outboxCommentRequest(f, "projection-only", mentionToken("lead", f.target)))
+			if rr.Code != 201 || dispatch.calls.Load() != 1 {
+				t.Fatalf("initial retryable mention: %d calls=%d", rr.Code, dispatch.calls.Load())
+			}
+			execOrFatal(t, f.db, `UPDATE issue_mutation_outbox SET next_attempt_at='2000-01-01T00:00:00.000Z' WHERE kind='mention'`)
+			var before int
+			if err := f.db.QueryRow(`SELECT attempts FROM issue_mutation_outbox WHERE kind='mention'`).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			// These are the actual postcommit projection drains used by the upload
+			// and code-link endpoints. They intentionally have no model dispatcher.
+			if kind == "attachment" {
+				h := NewAttachmentHandler(f.db, nil, newTestLogger())
+				h.publishAttachmentMutation(f.missionID, f.wsID)
+			} else {
+				h := NewCodeLinkHandler(f.db, nil, newTestLogger())
+				h.publishCodeLinkMutation(f.missionID, f.wsID)
+			}
+			var state string
+			var after int
+			if err := f.db.QueryRow(`SELECT state,attempts FROM issue_mutation_outbox WHERE kind='mention'`).Scan(&state, &after); err != nil || state != "pending" || after != before {
+				t.Fatalf("projection drain consumed model intent: %s attempts %d -> %d err=%v", state, before, after, err)
+			}
+			if f.assignments(t) != 0 || dispatch.calls.Load() != 1 {
+				t.Fatal("projection drain ran model work")
+			}
+			_ = f.issues.DrainIssueMutationOutbox(t.Context(), 50)
+			f.assign.WaitDispatches()
+			if f.assignments(t) != 1 || dispatch.calls.Load() != 2 {
+				t.Fatal("host worker could not recover preserved mention")
+			}
+		})
+	}
+}
+
+type deadlineIssueJournal struct {
+	*journal.Writer
+	cancel context.CancelFunc
+	fail   bool
+}
+
+func (w *deadlineIssueJournal) EmitReplaySync(ctx context.Context, e journal.Entry) (string, bool, error) {
+	if w.fail {
+		w.cancel()
+		return "", false, errors.New("temporary writer outage")
+	}
+	id, replayed, err := w.Writer.EmitReplaySync(ctx, e)
+	w.cancel()
+	return id, replayed, err
+}
+
+func TestIssueOutboxPersistsOutcomeAfterDeliveryDeadline(t *testing.T) {
+	for _, state := range []string{"done", "pending", "failed"} {
+		t.Run(state, func(t *testing.T) {
+			h, user, ws, crew, lead, _ := newTestIssueHandler(t)
+			mission := seedIssue(t, h.db, ws, crew, lead, "ENG-1", "BACKLOG")
+			tx, err := h.db.BeginTx(t.Context(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = persistIssueActivityTx(t.Context(), tx, issueEvent{MissionID: mission, ActorType: "user", ActorID: user, Action: actionPriorityChanged, Details: "high"}); err != nil {
+				tx.Rollback()
+				t.Fatal(err)
+			}
+			if err = tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			if state == "failed" {
+				execOrFatal(t, h.db, `UPDATE issue_mutation_outbox SET max_attempts=1`)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			writer := journal.NewWriter(h.db, newTestLogger(), journal.WriterOptions{})
+			defer writer.Close()
+			h.SetJournal(&deadlineIssueJournal{Writer: writer, cancel: cancel, fail: state != "done"})
+			_ = h.DrainIssueMutationOutbox(ctx, 1)
+			if ctx.Err() == nil {
+				t.Fatal("delivery did not reach cancellation boundary")
+			}
+			var actual string
+			var attempts int
+			if err = h.db.QueryRow(`SELECT state,attempts FROM issue_mutation_outbox`).Scan(&actual, &attempts); err != nil || actual != state || attempts != 1 {
+				t.Fatalf("deadline lost outcome: expected=%s actual=%s attempts=%d err=%v", state, actual, attempts, err)
+			}
+			if state == "done" {
+				var count int
+				if err = h.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE mission_id=?`, mission).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("delivered effect missing: %d %v", count, err)
+				}
+				_ = h.DrainIssueMutationOutbox(t.Context(), 1)
+				if err = h.db.QueryRow(`SELECT attempts FROM issue_mutation_outbox`).Scan(&attempts); err != nil || attempts != 1 {
+					t.Fatal("persisted ACK burned another attempt", err)
+				}
+			}
+		})
+	}
+}

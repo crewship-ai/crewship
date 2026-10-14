@@ -18,7 +18,7 @@ func TestAcceptanceIssueDeliveriesFailed(t *testing.T) {
 		calls <- r.Method + " " + r.URL.RequestURI()
 		if r.URL.Query().Get("cursor") == "forbidden" {
 			w.WriteHeader(403)
-			w.Write([]byte(`{"error":"workspace administration required"}`))
+			w.Write([]byte(`{"error":"workspace_admin_required"}`))
 			return
 		}
 		w.Write([]byte(`{"jobs":[{"id":"job-1","kind":"journal","attempts":8,"max_attempts":8,"created_at":"2026-10-14T09:00:00Z","failed_at":"2026-10-14T10:00:00Z","error_code":"delivery_exhausted"}],"has_more":false,"next_cursor":""}`))
@@ -33,7 +33,7 @@ func TestAcceptanceIssueDeliveriesFailed(t *testing.T) {
 		t.Fatal(call)
 	}
 	out, err = runChatListCLI(t, srv.URL, "issue", "deliveries", "failed", "--cursor", "forbidden")
-	if err == nil || !strings.Contains(out, "workspace administration required") {
+	if err == nil || !strings.Contains(out, "workspace_admin_required") {
 		t.Fatalf("%v %s", err, out)
 	}
 }

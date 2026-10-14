@@ -184,3 +184,10 @@ func TestJournalItemProjection(t *testing.T) {
 		t.Errorf("Title for a summary-less entry = %q, want the entry type as a fallback", bare.Title)
 	}
 }
+
+func TestPlainIssueCommentsUseExistingCommentCategory(t *testing.T) {
+	e := journal.Entry{Type: journal.EntryMissionComment, TraceID: "issue-activity:receipt"}
+	if got := CategoryForJournalEntry(e); got != notify.CategoryIssuesComment {
+		t.Fatalf("comment category=%q", got)
+	}
+}

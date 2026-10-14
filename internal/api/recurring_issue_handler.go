@@ -462,6 +462,11 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Enabled != nil && *req.Enabled && limitedChatToken(r.Context()) {
+		writeChatIssueError(w, runauthority.ErrUnavailable)
+		return
+	}
+
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		internalError(w, r, h.logger, "begin recurring update", err)
@@ -487,20 +492,18 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeChatIssueError(w, runauthority.ErrUnavailable)
 		return
 	}
-	var originID string
-	if !limitedChatToken(r.Context()) {
+	// Scoped CRUD keeps the existing pinned grant; it cannot establish or
+	// re-enable execution. Disabling never needs a fresh execution admission.
+	if !limitedChatToken(r.Context()) && !(req.Enabled != nil && !*req.Enabled) {
 		origin, captureErr := runauthority.CaptureWebOrigin(r.Context(), tx, "web_recurring", riID, user.ID, wsID)
 		if captureErr != nil {
 			writeChatIssueError(w, captureErr)
 			return
 		}
-		originID = origin.ID
-	}
-	// A scoped editor may save or disable the template, but its new definition
-	// must not retain a previous person's unrestricted standing execution grant.
-	if _, err = tx.ExecContext(r.Context(), `UPDATE recurring_issues SET chat_origin_id=NULLIF(?,'') WHERE id=? AND workspace_id=?`, originID, riID, wsID); err != nil {
-		internalError(w, r, h.logger, "persist recurring authority", err)
-		return
+		if _, err = tx.ExecContext(r.Context(), `UPDATE recurring_issues SET chat_origin_id=? WHERE id=? AND workspace_id=?`, origin.ID, riID, wsID); err != nil {
+			internalError(w, r, h.logger, "persist recurring authority", err)
+			return
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		internalError(w, r, h.logger, "commit recurring update", err)

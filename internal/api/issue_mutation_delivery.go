@@ -9,6 +9,8 @@ import (
 
 // Share the durable projection worker across public and internal mutation doors.
 // The host boot worker drains the same table; this value has no daemon lifecycle.
+// Projection-only users have no dispatcher: their drains select journal jobs
+// only, leaving mention attempts untouched for the fully wired host worker.
 func (e issueEvents) mutationDelivery() *IssueHandler {
 	return &IssueHandler{db: e.db, hub: e.hub, logger: e.logger, journal: e.journal}
 }

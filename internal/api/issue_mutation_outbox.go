@@ -125,15 +125,24 @@ func (h *IssueHandler) claimIssueMutation(ctx context.Context, workspace string)
 	defer tx.Rollback()
 	now := tsformat.Format(time.Now())
 	var raw string
-	err = tx.QueryRowContext(ctx, `SELECT id,workspace_id,payload,attempts,max_attempts FROM issue_mutation_outbox WHERE (?='' OR workspace_id=?) AND ((state='pending' AND next_attempt_at<=?) OR (state='processing' AND lease_expires_at<=?)) ORDER BY next_attempt_at,created_at,id LIMIT 1`, workspace, workspace, now, now).Scan(&job.id, &job.workspace, &raw, &job.attempts, &job.maxAttempts)
+	err = tx.QueryRowContext(ctx, `SELECT id,workspace_id,payload,attempts,max_attempts FROM issue_mutation_outbox WHERE (?='' OR workspace_id=?) AND (kind<>'mention' OR ?) AND ((state='pending' AND next_attempt_at<=?) OR (state='processing' AND lease_expires_at<=?)) ORDER BY next_attempt_at,created_at,id LIMIT 1`, workspace, workspace, h.mentionDispatch != nil, now, now).Scan(&job.id, &job.workspace, &raw, &job.attempts, &job.maxAttempts)
 	if err != nil {
 		return job, err
 	}
 
 	job.token = generateCUID()
-	if _, err = tx.ExecContext(ctx, `UPDATE issue_mutation_outbox SET state='processing',lease_token=?,lease_expires_at=?,attempts=attempts+1 WHERE id=?`, job.token, tsformat.Format(time.Now().Add(2*time.Minute)), job.id); err != nil {
+	res, err := tx.ExecContext(ctx, `UPDATE issue_mutation_outbox SET state='processing',lease_token=?,lease_expires_at=?,attempts=attempts+1 WHERE id=? AND ((state='pending' AND next_attempt_at<=?) OR (state='processing' AND lease_expires_at<=?))`, job.token, tsformat.Format(time.Now().Add(2*time.Minute)), job.id, now, now)
+	if err != nil {
 		return job, err
 	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return job, err
+	}
+	if changed != 1 {
+		return job, sql.ErrNoRows
+	}
+
 	if err = tx.Commit(); err != nil {
 		return job, err
 	}
@@ -176,6 +185,10 @@ func (h *IssueHandler) deliverIssueMutation(ctx context.Context, p issueMutation
 	}
 	if p.Mention == nil {
 		return fmt.Errorf("invalid issue mutation delivery")
+	}
+	// Projection-only drains (attachments/code links) never own model delivery.
+	if h.mentionDispatch == nil {
+		return fmt.Errorf("issue mention dispatcher unavailable")
 	}
 	mc := *p.Mention
 	if p.Overflow > 0 {
@@ -336,21 +349,7 @@ func (h *IssueHandler) drainIssueMutationOutbox(ctx context.Context, limit int, 
 		}
 		var permanent *issueMutationAuthorityRevoked
 		terminal := deliveryErr != nil && (errors.As(deliveryErr, &permanent) || job.decodeErr != nil || job.attempts >= job.maxAttempts)
-		if deliveryErr == nil {
-			_, err = h.db.ExecContext(ctx, `UPDATE issue_mutation_outbox SET state='done',payload='{}',failure_code='',failed_at=NULL,completed_at=?,lease_token=NULL,lease_expires_at=NULL,last_error='' WHERE id=? AND lease_token=?`, tsformat.Format(time.Now()), job.id, job.token)
-		} else if terminal {
-			err = h.failIssueMutation(ctx, job, deliveryErr)
-
-		} else {
-			delay := 5 * time.Second
-			for n := 1; n < job.attempts && delay < 10*time.Minute; n++ {
-				delay *= 2
-			}
-			if delay > 10*time.Minute {
-				delay = 10 * time.Minute
-			}
-			_, err = h.db.ExecContext(ctx, `UPDATE issue_mutation_outbox SET state='pending',next_attempt_at=?,lease_token=NULL,lease_expires_at=NULL,last_error=? WHERE id=? AND lease_token=?`, tsformat.Format(time.Now().Add(delay)), truncate(deliveryErr.Error(), 500), job.id, job.token)
-		}
+		err = h.finishIssueMutation(ctx, job, deliveryErr, terminal)
 		if err != nil {
 			return err
 		}
@@ -363,6 +362,31 @@ func (h *IssueHandler) drainIssueMutationOutbox(ctx context.Context, limit int, 
 	_, err := h.db.ExecContext(ctx, `DELETE FROM issue_mutation_outbox WHERE state='done' AND completed_at<? AND (?='' OR workspace_id=?)`, tsformat.Format(time.Now().Add(-7*24*time.Hour)), workspace, workspace)
 	if firstError != nil {
 		return firstError
+	}
+	return err
+}
+
+// An admitted effect may finish exactly as the delivery deadline expires.
+// Persist its outcome under a fresh bounded context, preserving the lease fence.
+func (h *IssueHandler) finishIssueMutation(ctx context.Context, job claimedIssueMutation, deliveryErr error, terminal bool) error {
+	outcomeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	var err error
+
+	if deliveryErr == nil {
+		_, err = h.db.ExecContext(outcomeCtx, `UPDATE issue_mutation_outbox SET state='done',payload='{}',failure_code='',failed_at=NULL,completed_at=?,lease_token=NULL,lease_expires_at=NULL,last_error='' WHERE id=? AND lease_token=?`, tsformat.Format(time.Now()), job.id, job.token)
+	} else if terminal {
+		err = h.failIssueMutation(outcomeCtx, job, deliveryErr)
+
+	} else {
+		delay := 5 * time.Second
+		for n := 1; n < job.attempts && delay < 10*time.Minute; n++ {
+			delay *= 2
+		}
+		if delay > 10*time.Minute {
+			delay = 10 * time.Minute
+		}
+		_, err = h.db.ExecContext(outcomeCtx, `UPDATE issue_mutation_outbox SET state='pending',next_attempt_at=?,lease_token=NULL,lease_expires_at=NULL,last_error=? WHERE id=? AND lease_token=?`, tsformat.Format(time.Now().Add(delay)), truncate(deliveryErr.Error(), 500), job.id, job.token)
 	}
 	return err
 }

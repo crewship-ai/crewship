@@ -147,11 +147,14 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Metadata != nil {
 			var md map[string]any
-			if err := json.Unmarshal(body.Metadata, &md); err == nil && md != nil {
+			metadataDecoder := json.NewDecoder(bytes.NewReader(body.Metadata))
+			metadataDecoder.UseNumber()
+			if err := metadataDecoder.Decode(&md); err == nil && md != nil {
 				payload["metadata"] = md
 			}
 		}
-		if _, err := synchronous.EmitSync(r.Context(), journal.Entry{
+		entry := journal.Entry{
+			ID:          "run-start:" + body.ID,
 			WorkspaceID: body.WorkspaceID,
 			// The agent's crew at run time: crew-scoped run insights read
 			// recorded ownership, so a run without it belongs to no crew.
@@ -163,7 +166,30 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			Summary:   fmt.Sprintf("run %s started", shortRunID(body.ID)),
 			Payload:   payload,
 			TraceID:   body.ID,
-		}); err != nil {
+		}
+		matched, err := h.matchRunStart(r.Context(), entry)
+		if err != nil {
+			if errors.Is(err, errRunStartIdentityConflict) || errors.Is(err, errRunAlreadyTerminal) {
+				replyError(w, http.StatusConflict, err.Error())
+			} else {
+				replyInternalError(w, h.logger, "create run: match run.started", err)
+			}
+			return
+		}
+		if matched {
+			writeJSON(w, http.StatusCreated, map[string]string{"id": body.ID, "status": "RUNNING"})
+			return
+		}
+		if _, err := synchronous.EmitSync(r.Context(), entry); err != nil {
+			// A concurrent identical admission may win the stable journal ID.
+			// Compare its committed identity rather than appending another start.
+			if matched, matchErr := h.matchRunStart(r.Context(), entry); matchErr == nil && matched {
+				writeJSON(w, http.StatusCreated, map[string]string{"id": body.ID, "status": "RUNNING"})
+				return
+			} else if errors.Is(matchErr, errRunStartIdentityConflict) || errors.Is(matchErr, errRunAlreadyTerminal) {
+				replyError(w, http.StatusConflict, matchErr.Error())
+				return
+			}
 			if errors.Is(err, journal.ErrRecoveredStopConflict) {
 				replyError(w, http.StatusConflict, "Run was stopped during recovery without a recorded start")
 				return

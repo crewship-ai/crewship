@@ -59,9 +59,10 @@ import (
 // the schema is either listed or explicitly excluded with a reason.
 //
 // Still out of scope for MVP (deliberate, with reasons):
-//   - workspace_members: instance-level invitations / role assignments.
-//     Adding it without also adding a user-existence guarantee leaks
-//     across tenants; revisit when multi-tenant restore is in scope.
+// Workspace membership rows are included below. Their restored web execution
+// epochs are advanced atomically; historical receipts never authorize new work.
+//
+// Still excluded:
 //   - credentials, oauth_tokens: handled separately by instance backup
 //     (PR 4) and intentionally excluded from workspace bundles.
 //   - sessions, audit_logs: operational data that stays with the
@@ -1086,6 +1087,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			_ = tx.Rollback()
 		}
 	}()
+	webEpochBefore, err := webAuthorityEpoch(ctx, tx)
+	if err != nil {
+		return stats, fmt.Errorf("backup: read live web authority epoch: %w", err)
+	}
 	// PreInsert hook runs BEFORE any per-table INSERT. The canonical
 	// use case is --replace: clear the target workspace's rows so the
 	// bundle's rows land with their original IDs instead of either
@@ -1370,6 +1375,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		if err := hooks.PostInsert(ctx, tx); err != nil {
 			return stats, fmt.Errorf("backup: post-insert hook: %w", err)
 		}
+	}
+	if err := fenceRestoredWebAuthority(ctx, tx, dump, webEpochBefore); err != nil {
+		return stats, fmt.Errorf("backup: fence restored web authority: %w", err)
 	}
 	if err := reconcileRestoredIssueOutbox(ctx, tx); err != nil {
 		return stats, fmt.Errorf("backup: reconcile durable issue audit delivery: %w", err)

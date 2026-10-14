@@ -62,7 +62,7 @@ func TestScopedIssueCRUDDoesNotCaptureExecutionGrant(t *testing.T) {
 	}
 }
 
-func TestScopedRecurringCRUDClearsStandingGrantAndCanDisable(t *testing.T) {
+func TestScopedRecurringCRUDPreservesStandingGrantAndCanDisable(t *testing.T) {
 	h, user, workspace, crew := newRecurringHandler(t)
 	req := httptest.NewRequest("POST", "/", strings.NewReader(`{"crew_id":"`+crew+`","title":"Standing schedule","cron_expression":"0 9 * * *"}`))
 	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: user}), workspace, "OWNER"))
@@ -77,6 +77,15 @@ func TestScopedRecurringCRUDClearsStandingGrantAndCanDisable(t *testing.T) {
 	if err := h.db.QueryRow(`SELECT chat_origin_id FROM recurring_issues WHERE id=?`, template.ID).Scan(&oldOrigin); err != nil || oldOrigin == "" {
 		t.Fatalf("standing grant %s %v", oldOrigin, err)
 	}
+	edit := httptest.NewRequest("PATCH", "/", strings.NewReader(`{"title":"Edited by scoped token"}`))
+	edit.SetPathValue("recurringId", template.ID)
+	edit = withTokenScopes(edit.WithContext(withWorkspace(withUser(edit.Context(), &AuthUser{ID: user}), workspace, "OWNER")), "workspace:admin")
+	edited := httptest.NewRecorder()
+	h.Update(edited, edit)
+	var retained string
+	if err := h.db.QueryRow(`SELECT chat_origin_id FROM recurring_issues WHERE id=?`, template.ID).Scan(&retained); err != nil || edited.Code != 200 || retained != oldOrigin {
+		t.Fatalf("scoped edit changed origin %d %s %v", edited.Code, retained, err)
+	}
 	disable := httptest.NewRequest("PATCH", "/", strings.NewReader(`{"enabled":false}`))
 	disable.SetPathValue("recurringId", template.ID)
 	disable = withTokenScopes(disable.WithContext(withWorkspace(withUser(disable.Context(), &AuthUser{ID: user}), workspace, "OWNER")), "workspace:admin")
@@ -87,8 +96,17 @@ func TestScopedRecurringCRUDClearsStandingGrantAndCanDisable(t *testing.T) {
 	}
 	var enabled bool
 	var origin string
-	if err := h.db.QueryRow(`SELECT enabled,COALESCE(chat_origin_id,'') FROM recurring_issues WHERE id=?`, template.ID).Scan(&enabled, &origin); err != nil || enabled || origin != "" {
-		t.Fatalf("scoped edit retained grant %v %s %v", enabled, origin, err)
+	if err := h.db.QueryRow(`SELECT enabled,COALESCE(chat_origin_id,'') FROM recurring_issues WHERE id=?`, template.ID).Scan(&enabled, &origin); err != nil || enabled || origin != oldOrigin {
+		t.Fatalf("scoped edit changed pinned grant %v %s %v", enabled, origin, err)
+	}
+	reenable := httptest.NewRequest("PATCH", "/", strings.NewReader(`{"enabled":true,"title":"Must not persist"}`))
+	reenable.SetPathValue("recurringId", template.ID)
+	reenable = withTokenScopes(reenable.WithContext(withWorkspace(withUser(reenable.Context(), &AuthUser{ID: user}), workspace, "OWNER")), "workspace:admin")
+	denied := httptest.NewRecorder()
+	h.Update(denied, reenable)
+	var title string
+	if err := h.db.QueryRow(`SELECT enabled,title,chat_origin_id FROM recurring_issues WHERE id=?`, template.ID).Scan(&enabled, &title, &origin); err != nil || denied.Code != 403 || enabled || title != "Edited by scoped token" || origin != oldOrigin {
+		t.Fatalf("scoped re-enable mutated row %d %v %s %s %v", denied.Code, enabled, title, origin, err)
 	}
 	scopedCreate := withTokenScopes(req, "crews:write")
 	scopedCreate.Body = io.NopCloser(strings.NewReader(`{"crew_id":"` + crew + `","title":"Scoped schedule","cron_expression":"0 9 * * *"}`))
@@ -124,13 +142,38 @@ func TestRecurringPermanentAuthorityFailureLeavesGlobalDueQueue(t *testing.T) {
 		t.Fatalf("stale authority poisons due queue %v %s %v", enabled, next, err)
 	}
 	var notifications int
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id=?`, "recurring-authority:"+template.ID).Scan(&notifications); err != nil || notifications != 1 {
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id LIKE ?`, "recurring-authority:"+template.ID+"%").Scan(&notifications); err != nil || notifications != 1 {
 		t.Fatalf("missing pause notice %d %v", notifications, err)
 	}
 	dispatcher.tick(t.Context())
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id=?`, "recurring-authority:"+template.ID).Scan(&notifications); err != nil || notifications != 1 {
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id LIKE ?`, "recurring-authority:"+template.ID+"%").Scan(&notifications); err != nil || notifications != 1 {
 		t.Fatalf("duplicate pause notice %d %v", notifications, err)
 	}
+	// A new person's explicit admission must produce its own eventual notice.
+	const nextOwner = "recurring-next-owner"
+	execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,'Next owner')`, nextOwner, nextOwner+"@example.test")
+	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('recurring-next-member',?,?,'OWNER')`, workspace, nextOwner)
+	reenable := httptest.NewRequest("PATCH", "/", strings.NewReader(`{"enabled":true}`))
+	reenable.SetPathValue("recurringId", template.ID)
+	reenable = reenable.WithContext(withWorkspace(withUser(reenable.Context(), &AuthUser{ID: nextOwner}), workspace, "OWNER"))
+	resaved := httptest.NewRecorder()
+	h.Update(resaved, reenable)
+	if resaved.Code != 200 {
+		t.Fatalf("re-admission %d %s", resaved.Code, resaved.Body.String())
+	}
+	execOrFatal(t, h.db, `UPDATE workspace_members SET role='VIEWER' WHERE workspace_id=? AND user_id=?`, workspace, nextOwner)
+	execOrFatal(t, h.db, `UPDATE recurring_issues SET next_run='2020-01-02T00:00:00Z' WHERE id=?`, template.ID)
+	dispatcher.tick(t.Context())
+	if err := h.db.QueryRow(`SELECT enabled,next_run FROM recurring_issues WHERE id=?`, template.ID).Scan(&enabled, &next); err != nil || enabled || next <= "2020-01-02T00:00:00Z" {
+		t.Fatalf("second pause starved queue %v %s %v", enabled, next, err)
+	}
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id LIKE ?`, "recurring-authority:"+template.ID+"%").Scan(&notifications); err != nil || notifications != 2 {
+		t.Fatalf("repeat pause notices %d %v", notifications, err)
+	}
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE target_user_id=?`, nextOwner).Scan(&notifications); err != nil || notifications != 1 {
+		t.Fatalf("new owner uninformed %d %v", notifications, err)
+	}
+
 }
 
 func TestRecurringIssuedGrantSurvivesTemplateDeletion(t *testing.T) {

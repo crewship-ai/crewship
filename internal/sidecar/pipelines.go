@@ -410,10 +410,6 @@ func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "marshal body"})
 		return
 	}
-	suffix := "/run"
-	if body.DryRun {
-		suffix = "/dry_run"
-	}
 	// #812: refuse forged per-agent tokens before either execution or dry run.
 	agentID, ok := s.actingAgentID(r)
 	if !ok {
@@ -432,7 +428,7 @@ func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug
 		return
 	}
 
-	path := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines/" + slug + suffix
+	path := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines/" + slug + "/dry_run"
 	s.proxyIPCJSON(w, r, http.MethodPost, path, "pipeline-run", bodyJSON)
 }
 

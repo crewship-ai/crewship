@@ -75,7 +75,7 @@ func (r *Router) failedIssueMutationJobs(w http.ResponseWriter, req *http.Reques
 	user := UserFromContext(req.Context())
 	workspace := WorkspaceIDFromContext(req.Context())
 	if user == nil || !canScope(req.Context(), "workspace:admin") {
-		replyError(w, 403, "workspace administration required")
+		replyError(w, 403, "workspace_admin_required")
 		return
 	}
 	var allowed bool
@@ -85,11 +85,11 @@ func (r *Router) failedIssueMutationJobs(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	if !allowed {
-		replyError(w, 403, "workspace administration required")
+		replyError(w, 403, "workspace_admin_required")
 		return
 	}
 	if state := req.URL.Query().Get("state"); state != "" && state != "failed" {
-		replyError(w, 400, "state must be failed")
+		replyError(w, 400, "state_invalid")
 		return
 	}
 	limit := 50

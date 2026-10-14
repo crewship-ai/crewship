@@ -648,8 +648,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	}
 	// …and it must be an agent of THIS workspace. The issue is already scoped
 	// (F-4 below); the author was not, so an inline comment could be attributed
-	// to a stranger — see resolveCommentAuthorName for why that is a read of
-	// another tenant and not only a mis-attribution.
+	// to a stranger and leak another tenant’s display name through the mention brief.
 	if req.Comment != nil && *req.Comment != "" &&
 		!h.assertAuthorAgentInWorkspace(w, r, req.WorkspaceID, req.AgentID) {
 		return

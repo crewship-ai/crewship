@@ -82,10 +82,16 @@ func TestEscalationRealHostRecoversSecondRunChatAndRejectsMismatch(t *testing.T)
 		if err != nil || receipt == nil {
 			t.Fatalf("receipt %v %v", receipt, err)
 		}
-		admission := post("/api/v1/internal/runs", runTestMaster, map[string]any{"id": tc.run, "workspace_id": "ws-1", "agent_id": "agent-boot", "chat_id": tc.chat, "human_authority": receipt, "trigger_message_id": "trigger-" + tc.run, "trigger_type": "USER"}, "")
-		admission.Body.Close()
-		if admission.StatusCode != 201 {
-			t.Fatalf("admit %d", admission.StatusCode)
+		for retry := 0; retry < 2; retry++ {
+			admission := post("/api/v1/internal/runs", runTestMaster, map[string]any{"id": tc.run, "workspace_id": "ws-1", "agent_id": "agent-boot", "chat_id": tc.chat, "human_authority": receipt, "trigger_message_id": "trigger-" + tc.run, "trigger_type": "USER"}, "")
+			admission.Body.Close()
+			if admission.StatusCode != 201 {
+				t.Fatalf("admit retry %d: %d", retry, admission.StatusCode)
+			}
+		}
+		var starts int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type='run.started'`, tc.run).Scan(&starts); err != nil || starts != 1 {
+			t.Fatalf("retried start count %d %v", starts, err)
 		}
 		token := internaltoken.DeriveAgentRunToken(key, "ws-1", "agent-boot", tc.run)
 		raw, _ := json.Marshal(map[string]any{"from": "boot", "reason": "Question " + tc.run})
