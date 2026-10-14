@@ -291,7 +291,7 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 	if err := departWorkspace(r.Context(), h.db, h.journal, actorID, workspaceID, memberUserID); err != nil {
 		var needsManual *ErrPagesNeedManualTransfer
 		if errors.As(err, &needsManual) {
-			replyError(w, http.StatusConflict, "cannot remove this member: "+err.Error())
+			replyPageOwnershipConflict(w, "cannot remove this member: ", needsManual)
 			return
 		}
 		replyInternalError(w, h.logger, "remove member", err)

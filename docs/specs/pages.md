@@ -11,7 +11,11 @@ Internal research, work allocation and session evidence are maintained in
 
 ## Delivery boundary
 
-This delivery exposes HTML artifacts, comments and agent requests. Board editors,
+**Artifacts 1.0 is static only:** this delivery exposes HTML artifacts, comments
+and agent requests. Interactive HTML execution, R1 runtime transport, DOM element
+anchors and the **Use** flow belong to Artifacts 1.1. Preparatory execution code
+remains dormant and reports `feature_disabled`; configuration or client input
+cannot activate it. Board editors,
 Board HTTP/CLI/MCP operations and Board job admission are delivered separately.
 The immutable migration chain includes dormant Board tables because later
 Artifact migrations depend on them. Existing Board blobs, pins, history and
@@ -151,8 +155,8 @@ to external channels. Restores suppress pending notices. The authenticated
 and an optional retained result revision only after checking the initiating
 human's live membership and Page access. Inbox pointers never grant access.
 
-DOM element anchors and interactive runtime
-are not part of this implemented slice. Static point capture reloads the preview
+DOM element anchors, interactive runtime, R1 transport and the **Use** flow
+are reserved for Artifacts 1.1 and are not part of the static 1.0 delivery. Static point capture reloads the preview
 to the top, records CSS viewport dimensions, and never silently repositions a
 point onto another revision or responsive layout. The runtime
 matrix measures known iframe unresponsiveness in Firefox/WebKit explicitly;
@@ -1455,11 +1459,49 @@ artifact revisions or grant additional rights.
 
 ### Artifact and Board lifecycle maintenance
 
-Artifacts and Boards retain human ownership on member removal or workspace-scoped
-user erasure. An active, unrestricted workspace OWNER (then ADMIN, ordered by user
-ID) takes custody, with an administrator Inbox notice and journal entry. Without
-such a successor, the entire departure fails with 409 and preserves all data and
-membership. Regular panel Pages continue to use their existing crew transfer rule.
+Artifacts and Boards require an **explicit human ownership transfer** before
+member removal or workspace-scoped user erasure. No administrator is selected
+automatically. While the departing user owns any output, the entire departure
+returns 409 with `code: "page_ownership_transfer_required"` and a `pages` array
+of metadata (`id`, `slug`, `name`, `type`, `owner_user_id`, `owner_name` and an
+empty `eligible_successors` array). Ownership, source, scene, history, grants,
+membership and notices remain unchanged, including regular Pages that otherwise
+could transfer to a crew. GDPR preserves its existing failed-attempt audit row.
+Regular panel Pages otherwise continue to use their existing crew transfer rule.
+
+Only a currently active, unrestricted human workspace OWNER or ADMIN can manage
+output custody through these workspace-scoped endpoints:
+
+- `GET /api/v1/workspaces/{workspaceId}/page-ownership`, optionally filtered by
+  `owner_user_id`, returns `{pages: [...]}`. Each summary includes the fields
+  above and `eligible_successors: [{user_id, name, email}]`. It exposes metadata
+  and workspace member contacts only, never HTML, scenes, specs or history.
+  Keyset pagination defaults to 25 outputs per request; `limit` accepts 1–100.
+  When more outputs remain, follow `next_cursor` as `cursor` with the same
+  workspace and owner filter. Invalid parameters return 400. Each request
+  evaluates current successor eligibility for at most 100 returned outputs;
+  it still scans current workspace members for each returned output.
+- `POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID}` accepts
+  `{expected_owner_user_id, successor_user_id}` and immediately transfers that
+  one Artifact or Board. Success returns 200 with the refreshed page summary
+  directly. A stale owner returns 409 with `code: "owner_changed"`; an ineligible
+  successor returns 403, and a foreign or ordinary panel Page returns 404.
+
+The successor must be another active, unrestricted human workspace member who
+already has current read access through the canonical Page ACL. This includes
+intrinsic administrator access, valid live Page grants and folder access; it
+does not create a grant. Actor rights, successor rights and expected ownership
+are rechecked under the same database writer fence. The ownership change and
+administrator Inbox notice commit together, followed by the existing journal
+audit emission. Private content, revisions and stored grant rows are preserved.
+Effective access
+is re-evaluated: grants issued by a former MEMBER owner become inert when that
+human no longer owns or administers the Page. The transfer does not reissue
+those grants or preserve their former authority. The new human owner reads
+through ownership; other access continues only while its existing issuer
+standing remains valid.
+After the administrator confirms each explicit transfer, retry departure.
+No separate plan or pending ownership state is stored.
 
 Discussion replay receipts have a 24-hour minimum lifetime. Thread-creation
 receipts remain for the thread lifetime because creation has no version

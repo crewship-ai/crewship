@@ -499,12 +499,17 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 				"action_id", actionID, "workspace_id", wsID, "target", targetID, "err", err)
 		}
 		h.finalizeGDPRAction(r.Context(), actionID, scope, err)
-		writeJSON(w, status, map[string]any{
+		response := map[string]any{
 			"action_id":    actionID,
 			"data_subject": targetID,
 			"workspace_id": wsID,
 			"error":        msg,
-		})
+		}
+		if needsManual != nil {
+			response["code"] = "page_ownership_transfer_required"
+			response["pages"] = needsManual.OutputPages
+		}
+		writeJSON(w, status, response)
 		return
 	}
 
