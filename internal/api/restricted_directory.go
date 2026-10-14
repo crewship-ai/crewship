@@ -26,20 +26,21 @@ func restrictedDirectory(db *sql.DB, w http.ResponseWriter, r *http.Request) boo
 	}
 	workspace := WorkspaceIDFromContext(r.Context())
 	id := r.PathValue("agentId")
-	rows, err := db.QueryContext(r.Context(), `SELECT a.id,a.name,a.slug,a.agent_role FROM agents a JOIN workspace_members wm ON wm.workspace_id=a.workspace_id AND wm.user_id=? JOIN access_grants g ON g.member_id=wm.id AND g.resource_kind='agent' AND g.agent_id=a.id AND g.operation='discover' WHERE a.workspace_id=? AND a.deleted_at IS NULL AND (?='' OR a.id=?) AND (?='' OR a.name LIKE ? OR a.slug LIKE ?) ORDER BY a.slug LIMIT 500`, user.ID, workspace, id, id, r.URL.Query().Get("search"), "%"+r.URL.Query().Get("search")+"%", "%"+r.URL.Query().Get("search")+"%")
+	rows, err := db.QueryContext(r.Context(), `SELECT a.id,a.name,a.slug,a.agent_role,EXISTS(SELECT 1 FROM access_grants cg WHERE cg.member_id=wm.id AND cg.agent_id=a.id AND cg.resource_kind='agent' AND cg.operation='chat') FROM agents a JOIN workspace_members wm ON wm.workspace_id=a.workspace_id AND wm.user_id=? JOIN access_grants g ON g.member_id=wm.id AND g.resource_kind='agent' AND g.agent_id=a.id AND g.operation='discover' WHERE a.workspace_id=? AND a.deleted_at IS NULL AND (?='' OR a.id=?) AND (?='' OR a.name LIKE ? OR a.slug LIKE ?) ORDER BY a.slug LIMIT 500`, user.ID, workspace, id, id, r.URL.Query().Get("search"), "%"+r.URL.Query().Get("search")+"%", "%"+r.URL.Query().Get("search")+"%")
 	if err != nil {
 		replyError(w, http.StatusInternalServerError, "directory unavailable")
 		return true
 	}
 	defer rows.Close()
-	result := []map[string]string{}
+	result := []map[string]any{}
 	for rows.Next() {
 		var id, name, slug, role string
-		if rows.Scan(&id, &name, &slug, &role) != nil {
+		var canChat bool
+		if rows.Scan(&id, &name, &slug, &role, &canChat) != nil {
 			replyError(w, http.StatusInternalServerError, "directory unavailable")
 			return true
 		}
-		result = append(result, map[string]string{"id": id, "name": name, "slug": slug, "agent_role": role})
+		result = append(result, map[string]any{"id": id, "name": name, "slug": slug, "agent_role": role, "current_user_can_chat": canChat})
 	}
 	if rows.Err() != nil {
 		replyError(w, http.StatusInternalServerError, "directory unavailable")
@@ -115,6 +116,7 @@ func (h *WorkspaceHandler) restrictedWorkspaceDirectory(w http.ResponseWriter, r
 		return true
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Workspace-Directory-Complete", strconv.FormatBool(len(visible) == len(result)))
 	writeJSON(w, http.StatusOK, visible)
 	return true
 }

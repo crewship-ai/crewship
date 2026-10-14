@@ -768,6 +768,23 @@ crewship memory search "PostgreSQL" -p /path -S crew -F json
 Agents in one crew cannot access another crew's shared memory. Container bind mounts enforce this isolation at the filesystem level.
 </Warning>
 
+### Filesystem confinement for local sidecar memory
+
+The sidecar memory configuration supplies `trusted_storage_root`; Crewship's
+orchestrator sets it to the container's `/crew` bind-mount root. Local canonical
+reads, mutations, locks and index content reads open target components through
+that trusted root, reject symlinks throughout the path and pin the file's parent
+for the operation. Replacing an agent tier with a symlink to another tier inside
+`/crew` is also refused. Tier selection and agent permissions still apply.
+
+A custom sidecar configuration must explicitly supply its trusted root. Without
+one, local HTTP and MCP memory fallback returns `503`; the authenticated host
+bridge can still serve supported operations. Operators must keep the configured
+root and its mount ancestry trusted. The existing SQLite FTS index database
+initialization still uses a pathname after directory validation; this change
+covers canonical file operations and indexed content reads, and does not claim
+complete filesystem isolation for SQLite's own database files.
+
 ## Limits
 
 | Limit | Value | Description |

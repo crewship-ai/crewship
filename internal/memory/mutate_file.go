@@ -9,8 +9,9 @@ import (
 	"strings"
 )
 
-// mutationFile pins the canonical file's parent for the whole operation. The
-// absolute path remains the ledger identity, never a fallback for rooted I/O.
+// mutationFile pins the canonical file's parent for the whole operation.
+// Only the trusted legacy constructor populates path. Rooted constructors
+// carry root/name exclusively; ledger identity stays in the request.
 type mutationFile struct {
 	path    string
 	root    *os.Root
@@ -38,7 +39,7 @@ func openRootedMutationFile(storageRoot, path string, create bool) (*mutationFil
 	if storageRoot == "" {
 		return nil, fmt.Errorf("memory mutation requires a storage root")
 	}
-	file := &mutationFile{path: path}
+	file := &mutationFile{}
 	base, err := filepath.Abs(storageRoot)
 	if err != nil {
 		return nil, err
@@ -120,7 +121,14 @@ func (f *mutationFile) read() ([]byte, error) {
 	if f.root == nil {
 		return readRegularNoFollow(f.path)
 	}
-	file, err := openRootNoFollow(f.root, f.name)
+	return readRegularRootNoFollow(f.root, f.name)
+}
+
+func readRegularRootNoFollow(root *os.Root, name string) ([]byte, error) {
+	if root == nil {
+		return nil, os.ErrPermission
+	}
+	file, err := openRootNoFollow(root, name)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +138,7 @@ func (f *mutationFile) read() ([]byte, error) {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("not a regular file: %s", f.name)
+		return nil, fmt.Errorf("not a regular file: %s", name)
 	}
 	return io.ReadAll(file)
 }

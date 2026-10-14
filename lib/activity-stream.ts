@@ -163,6 +163,10 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "audit.entity_updated",
       "audit.entity_deleted",
       "audit.entity_restored",
+      "invitation.created",
+      "invitation.reissued",
+      "invitation.revoked",
+      "invitation.accepted",
     ],
   },
   {

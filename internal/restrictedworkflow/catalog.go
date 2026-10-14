@@ -11,6 +11,7 @@ import (
 // CatalogRoutine is the minimal invocation contract, never the stored recipe,
 // provider configuration, step prompts, or input default values.
 type CatalogRoutine struct {
+	ID             string         `json:"-"`
 	Slug           string         `json:"slug"`
 	Name           string         `json:"name"`
 	DefinitionHash string         `json:"definition_hash"`
@@ -52,7 +53,7 @@ func (s *Service) authorizedCatalog(ctx context.Context, user, workspace string,
 		return nil, ErrDenied
 	}
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id,slug,name FROM pipelines WHERE workspace_id=? AND status='active' AND deleted_at IS NULL ORDER BY slug`, workspace)
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id,p.slug,p.name FROM pipelines p JOIN access_grants g ON g.routine_id=p.id AND g.resource_kind='routine' AND g.operation='run' AND g.member_id=? WHERE p.workspace_id=? AND p.status='active' AND p.deleted_at IS NULL ORDER BY p.slug`, member.ID, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +96,7 @@ func (s *Service) authorizedCatalog(ctx context.Context, user, workspace string,
 		if err != nil {
 			return nil, err
 		}
-		item := CatalogRoutine{ExecutionHash: hash(string(rawGraph)), Slug: c.slug, Name: c.name, DefinitionHash: graph.Root.Hash, Inputs: []CatalogInput{}}
+		item := CatalogRoutine{ID: c.id, ExecutionHash: hash(string(rawGraph)), Slug: c.slug, Name: c.name, DefinitionHash: graph.Root.Hash, Inputs: []CatalogInput{}}
 		for _, input := range d.DSL.Inputs {
 			item.Inputs = append(item.Inputs, CatalogInput{Name: input.Name, Type: input.Type, Required: input.Required && input.Default == nil})
 		}

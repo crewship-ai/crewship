@@ -125,11 +125,11 @@ func TestFailedIssueMutationJobsAuthorizationPagingAndFixtures(t *testing.T) {
 		t.Fatalf("stale role trusted: %d", denied.Code)
 	}
 	fixture("forbidden.json", denied)
-	execOrFatal(t, db, `UPDATE workspace_members SET role='OWNER',access_mode='restricted' WHERE id='m1'`)
+	execOrFatal(t, db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE id='m1'`)
 	if rec := request("", nil); rec.Code != 403 {
 		t.Fatalf("restricted %d", rec.Code)
 	}
-	execOrFatal(t, db, `UPDATE workspace_members SET access_mode='trusted' WHERE id='m1'`)
+	execOrFatal(t, db, `UPDATE workspace_members SET role='OWNER',access_mode='trusted' WHERE id='m1'`)
 	execOrFatal(t, db, `UPDATE users SET suspended_at='2026-10-14T10:00:00Z' WHERE id=?`, user)
 	if rec := request("", nil); rec.Code != 403 {
 		t.Fatalf("suspended %d", rec.Code)

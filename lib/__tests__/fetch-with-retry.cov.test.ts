@@ -65,9 +65,10 @@ describe("fetchWithRetry — success and routing", () => {
     const init = { method: "POST", body: stream, duplex: "half" } as RequestInit
     await fetchWithRetry("/api/v1/upload", init)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    // Plain fetch hands init through untouched — apiFetch would have
-    // cloned it and added credentials: "include".
-    expect(fetchMock.mock.calls[0][1]).toBe(init)
+    // Workspace fencing adds only an AbortSignal; the stream and all caller
+    // options remain intact, without apiFetch credential injection.
+    expect(fetchMock.mock.calls[0][1]).toEqual({ ...init, signal: expect.any(AbortSignal) })
+    expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe(stream)
     expect((fetchMock.mock.calls[0][1] as RequestInit).credentials).toBeUndefined()
   })
 })

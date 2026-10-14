@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
 
 export type ProjectInputOption = {
   version_id: string
@@ -36,7 +37,7 @@ export function ProjectInputPicker({ chatId, workspaceId, userId, selected, onCh
     const controller = new AbortController()
     setLoading(true)
     const query = new URLSearchParams({ workspace_id: workspaceId, search })
-    void apiFetch(`/api/v1/chats/${encodeURIComponent(chatId)}/project-input-options?${query}`, { signal: controller.signal }).then(async response => {
+    void Promise.resolve().then(() => apiFetch(`/api/v1/chats/${requireApiPathSegment(chatId)}/project-input-options?${query}`, { signal: controller.signal })).then(async response => {
       if (!response.ok) {
         if (response.status === 404 || response.status === 403) {
           if (!controller.signal.aborted) { setSnapshot({ scope, files: [], available: false, more: false }); onChange([]); setError("") }

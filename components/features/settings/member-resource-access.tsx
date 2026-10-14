@@ -6,10 +6,11 @@ import { z } from "zod"
 
 import { Button } from "@/components/ui/button"
 import { usePageSave } from "@/components/ui/page-save-bar"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { apiFetch } from "@/lib/api-fetch"
 import { nativeSelect } from "@/components/features/settings/shared"
 
-const rightSchema = z.object({ kind: z.enum(["agent", "project"]), id: z.string().min(1), operation: z.string() })
+const rightSchema = z.object({ kind: z.enum(["agent", "project", "routine"]), id: z.string().min(1), operation: z.string() })
 const policySchema = z.object({
   membership_id: z.string(), revision: z.number().int().positive(),
   mode: z.enum(["trusted", "restricted"]), rights: z.array(rightSchema),
@@ -17,7 +18,7 @@ const policySchema = z.object({
 type Policy = z.infer<typeof policySchema>
 type Right = z.infer<typeof rightSchema>
 const directorySchema = z.array(z.object({ id: z.string(), name: z.string() }))
-const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "write", "delete"] }
+const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "write", "delete"], routine: ["run"] }
 
 export function MemberResourceAccess({ workspaceId, memberId, label, role, onSaved }: {
   workspaceId: string; memberId: string; label: string; role: string
@@ -25,7 +26,7 @@ export function MemberResourceAccess({ workspaceId, memberId, label, role, onSav
   onSaved?: () => void
 }) {
   const [open, setOpen] = useState(false)
-  const url = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(memberId)}/access?workspace_id=${encodeURIComponent(workspaceId)}`
+  const url = `/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/members/${requireApiPathSegment(memberId)}/access?workspace_id=${encodeURIComponent(workspaceId)}`
   const queryKey = ["member-resource-access", workspaceId, memberId]
   const policy = useQuery({
     queryKey, enabled: open, retry: false, staleTime: Infinity, refetchOnWindowFocus: false,
@@ -64,6 +65,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
   const directories = {
     agent: useResourceDirectory(workspaceId, "agent", mode === "restricted"),
     project: useResourceDirectory(workspaceId, "project", mode === "restricted"),
+    routine: useResourceDirectory(workspaceId, "routine", mode === "restricted"),
   }
   const directory = directories[kind]
   const save = useMutation({
@@ -104,12 +106,12 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
       <select aria-label="Access mode" className={selectClass} value={mode} disabled={save.isPending || conflict}
         onChange={event => setMode(event.target.value as Policy["mode"])}>
         <option value="trusted">Trusted workspace access</option>
-        <option value="restricted" disabled={protectedRole}>Restricted to explicit resources</option>
+        <option value="restricted" disabled={protectedRole}>Guest — explicit resources</option>
       </select>
     </label>
     <p className="text-muted-foreground">{mode === "trusted"
       ? "Trusted access uses the member’s workspace role and capabilities. Saving clears individual resource grants."
-      : "Only listed operations are allowed. Role and conversation privacy checks still apply. Some agent features may be unavailable in restricted mode."}</p>
+      : "Guest restrictions apply to the entire account, across all workspaces. Only listed operations are allowed; conversation privacy checks still apply. Running a routine also requires run access to every agent it uses, and uses its configured credentials."}</p>
     {mode === "restricted" && <>
       <ul className="space-y-1" aria-label="Resource grants">{rights.map((right, index) => <li key={`${right.kind}:${right.id}:${right.operation}`} className="flex flex-wrap items-center gap-2">
         <span>{right.kind}: {directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {right.operation}</span>
@@ -120,7 +122,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
       <div className="flex flex-wrap gap-2">
         <select aria-label="Resource kind" className={selectClass} value={kind} disabled={save.isPending || conflict} onChange={event => {
           const next = event.target.value as Right["kind"]; setKind(next); setResourceId(""); setOperation(operations[next][0])
-        }}><option value="agent">Agent</option><option value="project">Project</option></select>
+        }}><option value="agent">Agent</option><option value="project">Project</option><option value="routine">Routine</option></select>
         <select aria-label="Resource" className={selectClass} value={resourceId} disabled={save.isPending || conflict || !directory.data} onChange={event => setResourceId(event.target.value)}>
           <option value="">Choose a resource</option>{directory.data?.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}
         </select>
@@ -131,6 +133,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
       </div>
       {directory.isError && <p role="alert">Resources unavailable. <button type="button" onClick={() => void directory.refetch()}>Reload resources</button></p>}
     </>}
+    <EffectiveAccess url={url.replace("/access?", "/access/effective?")} revision={policy.revision} memberId={policy.membership_id} />
     {conflict && <p role="alert">Policy changed. Reload to discard this draft and review the current grants.</p>}
     <div className="flex flex-wrap gap-2">
       <Button size="sm" variant="outline" className="coarse:h-12" disabled={save.isPending} onClick={() => void queryClient.invalidateQueries({ queryKey })}>Reload current policy</Button>
@@ -154,9 +157,30 @@ function useResourceDirectory(workspaceId: string, kind: Right["kind"], enabled:
   return useQuery({
     queryKey: ["resource-access-directory", workspaceId, kind], enabled, retry: false,
     queryFn: async ({ signal }) => {
-      const response = await apiFetch(`/api/v1/${kind === "agent" ? "agents" : "projects"}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
+      const path = kind === "routine" ? `workspaces/${requireApiPathSegment(workspaceId)}/pipelines` : kind === "agent" ? "agents" : "projects"
+      const response = await apiFetch(`/api/v1/${path}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal })
       if (!response.ok) throw new Error("Resources unavailable")
       return directorySchema.parse(await response.json())
     },
   })
+}
+
+const effectiveSchema = z.object({membership_id:z.string(), revision:z.number(), explanation:z.string(), account_restricted:z.boolean(), decisions:z.array(rightSchema.extend({state:z.string(),reason:z.string()}))})
+function EffectiveAccess({url,revision,memberId}:{url:string;revision:number;memberId:string}) {
+  const query=useQuery({
+    queryKey:["member-effective-access",url,revision],retry:false,
+    queryFn:async({signal})=>{
+      const response=await apiFetch(url,{signal})
+      if(!response.ok)throw new Error("Effective access unavailable")
+      const result=effectiveSchema.parse(await response.json())
+      if(result.membership_id!==memberId||result.revision!==revision)throw new Error("Policy changed; reload current policy")
+      return result
+    },
+  })
+  return <details className="rounded-md border p-3">
+    <summary className="cursor-pointer">Effective access — saved policy</summary>
+    {query.isPending && <p>Checking current access…</p>}
+    {query.isError && <p role="status">Effective access unavailable. <button type="button" onClick={()=>void query.refetch()}>Retry access check</button></p>}
+    {query.data && <><p className="mt-2 text-muted-foreground">{query.data.explanation}</p><ul className="mt-2 space-y-2">{query.data.decisions.map(row=><li key={rightKey(row)}><span className="font-medium">{row.kind} · {row.id} · {row.operation}: {row.state}</span><p className="text-muted-foreground">{row.reason}</p></li>)}</ul></>}
+  </details>
 }

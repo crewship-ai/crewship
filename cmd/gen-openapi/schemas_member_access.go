@@ -24,7 +24,29 @@ func memberAccessPolicySchema() map[string]any {
 			"rights": map[string]any{"type": "array", "maxItems": 256, "uniqueItems": true, "items": map[string]any{"oneOf": []any{
 				right("agent", []string{"discover", "chat", "run", "delegate"}),
 				right("project", []string{"list", "read", "write", "delete"}),
+				right("routine", []string{"run"}),
 			}}},
 		},
 	}
+}
+
+func memberEffectiveAccessSchema() map[string]any {
+	properties := memberAccessPolicySchema()["properties"].(map[string]any)
+	delete(properties, "rights")
+	properties["account_restricted"] = map[string]any{"type": "boolean"}
+	properties["restriction_scope"] = map[string]any{"type": "string", "enum": []string{"account"}}
+	properties["explanation"] = map[string]any{"type": "string"}
+	properties["decisions"] = map[string]any{"type": "array", "items": map[string]any{
+		"type": "object", "additionalProperties": false, "required": []string{"kind", "id", "operation", "state", "reason"},
+		"properties": map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"agent", "project", "routine"}}, "id": map[string]any{"type": "string"}, "operation": map[string]any{"type": "string"}, "state": map[string]any{"type": "string", "enum": []string{"allowed", "denied", "conditional", "unavailable"}}, "reason": map[string]any{"type": "string"}},
+	}}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"membership_id", "mode", "revision", "account_restricted", "restriction_scope", "explanation", "decisions"}, "properties": properties}
+}
+
+func restrictedIssueSchema() map[string]any {
+	properties := map[string]any{"can_read": map[string]any{"type": "boolean"}}
+	for _, key := range []string{"id", "identifier", "title", "status", "project_id", "project_name", "description"} {
+		properties[key] = map[string]any{"type": "string"}
+	}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "identifier", "title", "status", "project_id", "project_name", "can_read"}, "properties": properties}
 }

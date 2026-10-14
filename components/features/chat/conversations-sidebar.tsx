@@ -718,7 +718,7 @@ export function ConversationsSidebar({
                   onSelect={() => {
                     setPicking(false)
                     setQuery("")
-                    onStartConversation(a)
+                    a.current_user_can_chat !== false && onStartConversation(a)
                   }}
                 >
                   <AgentAvatar
@@ -924,7 +924,7 @@ export function ConversationsSidebar({
                   {idle.slice(0, 6).map((a) => (
                     <SidebarRow
                       key={a.id}
-                      onSelect={() => onStartConversation(a)}
+                      onSelect={() => a.current_user_can_chat !== false && onStartConversation(a)}
                       className="items-center"
                     >
                       <AgentAvatar

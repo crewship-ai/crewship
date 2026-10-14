@@ -815,12 +815,15 @@ func TestWorkItems_PrivateMetadataRequiresCurrentTrustedOperator(t *testing.T) {
 	if rr.Code != 404 {
 		t.Fatalf("stale owner metadata survived role loss: %d %s", rr.Code, rr.Body.String())
 	}
-	if _, err := db.Exec(`UPDATE workspace_members SET role='OWNER',access_mode='restricted' WHERE id='op'`); err != nil {
+	if _, err := db.Exec(`UPDATE workspace_members SET role='OWNER',access_mode='restricted' WHERE id='op'`); err == nil {
+		t.Fatal("database allowed a restricted owner")
+	}
+	if _, err := db.Exec(`UPDATE workspace_members SET access_mode='restricted' WHERE id='op'`); err != nil {
 		t.Fatal(err)
 	}
 	rr = httptest.NewRecorder()
 	h.Get(rr, req)
 	if rr.Code != 404 {
-		t.Fatalf("restricted owner reached operator metadata: %d %s", rr.Code, rr.Body.String())
+		t.Fatalf("Guest with a stale owner session reached operator metadata: %d %s", rr.Code, rr.Body.String())
 	}
 }

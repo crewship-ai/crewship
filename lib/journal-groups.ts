@@ -161,6 +161,10 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "audit.entity_updated",
     "audit.entity_deleted",
     "audit.entity_restored",
+    "invitation.created",
+    "invitation.reissued",
+    "invitation.revoked",
+    "invitation.accepted",
   ],
   provisioning: [
     "provisioning.queued",

@@ -151,6 +151,10 @@ export const JOURNAL_ENTRY_TYPES = [
   "audit.entity_updated",
   "audit.entity_deleted",
   "audit.entity_restored",
+  "invitation.created",
+  "invitation.reissued",
+  "invitation.revoked",
+  "invitation.accepted",
   // Memory (extended)
   "memory.write_rejected",
   "memory.consolidation_proposed",

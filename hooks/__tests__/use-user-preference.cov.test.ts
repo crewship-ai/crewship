@@ -74,6 +74,8 @@ describe("server sync on mount", () => {
     await waitFor(() => expect(result.current[2].ready).toBe(true))
     expect(result.current[0]).toBe("dark") // server wins on initial sync
     expect(storage.get(`${LS_PREFIX}theme`)).toBe(JSON.stringify("dark"))
+    // Account preferences are independent of workspace availability and do
+    // not receive the workspace-switch cancellation signal.
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/me/preferences", { credentials: "include" })
   })
 
