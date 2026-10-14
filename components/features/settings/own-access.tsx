@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 const ownAccessSchema = z.object({
+  membership_id: z.string().min(1), revision: z.number().int().positive(),
+  mode: z.enum(["trusted", "restricted"]), account_restricted: z.boolean(), restriction_scope: z.literal("account"),
   explanation: z.string(),
   decisions: z.array(z.object({
     kind: z.enum(["agent", "routine", "project"]), id: z.string(), name: z.string().optional(),
@@ -29,7 +31,9 @@ export function OwnAccessCard() {
     queryFn: async ({ signal }) => {
       const response = await apiFetch(`/api/v1/workspaces/${requireApiPathSegment(workspaceId!)}/access/me`, { signal })
       if (!response.ok) throw new Error("Access details unavailable. Retry or ask your administrator.")
-      return ownAccessSchema.parse(await response.json())
+      const result = ownAccessSchema.safeParse(await response.json())
+      if (!result.success) throw new Error("Access details unavailable. Retry or ask your administrator.")
+      return result.data
     },
     // Guest sessions have no WebSocket; recheck while the screen is visible.
     refetchInterval: 60_000,
