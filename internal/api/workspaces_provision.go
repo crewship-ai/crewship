@@ -165,6 +165,14 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if err := administratorAccountEligible(r.Context(), tx, userID, role); err != nil {
+		if errors.Is(err, errGuestAdministrator) {
+			writeJSON(w, http.StatusConflict, invitationConflict(err))
+		} else {
+			replyInternalError(w, h.logger, "administrator eligibility", err)
+		}
+		return
+	}
 	if req.AccessMode == "restricted" {
 		if err := guestAccountEligible(r.Context(), tx, userID); err != nil {
 			if errors.Is(err, errGuestAdministrator) {

@@ -120,7 +120,7 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		UPDATE workspace_members
 		SET role = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ?
-		  AND (access_mode!='restricted' OR ? NOT IN ('ADMIN','OWNER'))
+		  AND (? NOT IN ('ADMIN','OWNER') OR NOT EXISTS (SELECT 1 FROM workspace_members guest WHERE guest.user_id=workspace_members.user_id AND guest.access_mode='restricted'))
 		  AND NOT (
 		    role = 'OWNER'
 		    AND ? != 'OWNER'

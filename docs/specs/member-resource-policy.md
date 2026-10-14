@@ -8,7 +8,7 @@ denied; the policy does not bypass roles, token scopes or conversation audience.
 Only a **current trusted OWNER/ADMIN** of the target workspace may read or replace
 these policies. Scoped CLI tokens additionally require `workspace:admin` (or its
 wildcard). Restricted administrators cannot administer policy. OWNER/ADMIN members
-cannot be changed to restricted mode by this endpoint. The current global
+cannot be changed to restricted mode, and an account restricted anywhere cannot acquire OWNER/ADMIN in another workspace. An append-only database migration enforces both directions on membership insertion and role, identity or access-mode updates; handler checks return friendly conflicts. The current global
 restricted-user boundary also applies to users with mixed trusted/restricted
 memberships: adding a restricted membership closes unintegrated routes across
 their session, including administration of another workspace.
@@ -163,7 +163,7 @@ detail accepts an issue ID or identifier, requires project.read and adds its
 description. Neither returns crew/agent references, comments, activity, relations
 or run history. Foreign and revoked details return 404. The shared issue board,
 search, statistics and mutation routes remain closed to Guests. Collection
-`X-Total-Count` counts all authorized rows matching the filter; the next-offset header supports pagination.
+`X-Total-Count` counts the filtered total before pagination; the next-offset header supports pagination.
 
 Crews, credentials, routine View/Edit levels, guest issue contribution, explicit
 Page-action selection and a Pages grant migration remain separate work. This
@@ -220,3 +220,4 @@ stored provenance. Hard deletion of an issuer account is an exception: its
 grants are deleted to satisfy the user foreign key.
 
 Policy replacement and deliberate reissue append `member.access_changed` atomically with the policy, recording previous/current rights, issuers, revisions and mode. API and CLI may explicitly reissue live shares; Settings offers reissue for inactive shares.
+Guest Page actions retain the Pages ACL checks and additionally require an explicit `routine:run` grant and the routine’s agent grants. Existing `routine.run` capabilities are not backfilled into routine grants.
