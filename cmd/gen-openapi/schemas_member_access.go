@@ -14,7 +14,7 @@ func memberAccessPolicySchema() map[string]any {
 			},
 		}
 	}
-	return map[string]any{
+	schema := map[string]any{
 		"type": "object", "additionalProperties": false,
 		"required": []string{"membership_id", "mode", "revision", "rights"},
 		"properties": map[string]any{
@@ -28,11 +28,20 @@ func memberAccessPolicySchema() map[string]any {
 			}}},
 		},
 	}
+	properties := schema["properties"].(map[string]any)
+	properties["reissue"] = properties["rights"]
+	properties["grant_details"] = map[string]any{"type": "array", "readOnly": true, "items": map[string]any{
+		"type": "object", "additionalProperties": false, "required": []string{"kind", "id", "operation", "issuer_id", "created_at", "live"},
+		"properties": map[string]any{"kind": map[string]any{"type": "string"}, "id": map[string]any{"type": "string"}, "operation": map[string]any{"type": "string"}, "issuer_id": map[string]any{"type": "string"}, "created_at": map[string]any{"type": "string"}, "live": map[string]any{"type": "boolean"}},
+	}}
+	return schema
 }
 
 func memberEffectiveAccessSchema() map[string]any {
 	properties := memberAccessPolicySchema()["properties"].(map[string]any)
 	delete(properties, "rights")
+	delete(properties, "grant_details")
+	delete(properties, "reissue")
 	properties["account_restricted"] = map[string]any{"type": "boolean"}
 	properties["restriction_scope"] = map[string]any{"type": "string", "enum": []string{"account"}}
 	properties["explanation"] = map[string]any{"type": "string"}

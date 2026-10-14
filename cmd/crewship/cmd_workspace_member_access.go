@@ -122,7 +122,7 @@ func memberAccessCommand(cmd *cobra.Command, target string, replace bool) error 
 			defer f.Close()
 			input = f
 		}
-		d := json.NewDecoder(io.LimitReader(input, (64<<10)+1))
+		d := json.NewDecoder(io.LimitReader(input, (256<<10)+1))
 		d.DisallowUnknownFields()
 		if d.Decode(&policy) != nil || d.Decode(new(any)) != io.EOF || policy.ID == "" || policy.Revision < 1 || policy.Rights == nil || (policy.Mode != "trusted" && policy.Mode != "restricted") {
 			return fmt.Errorf("invalid policy: provide membership_id, revision, mode and explicit rights array")

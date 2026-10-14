@@ -2236,3 +2236,8 @@ Returns the authenticated member's own effective access explanation, including
 `reason`). Available to Guests without workspace administration. No target user
 parameter is accepted. An unavailable membership returns 404; a concurrent
 policy change returns 409. Responses use `Cache-Control: no-store`.
+Member policy responses also include read-only `grant_details` (`kind`, `id`,
+`operation`, `issuer_id`, `created_at`, `live`). Policy replacements preserve
+unchanged grants, including inactive ones. Optional `reissue` contains exact
+rights also present in `rights`, deliberately issued by the authenticated admin.
+Client-supplied grant metadata is ignored and recalculated in the response.

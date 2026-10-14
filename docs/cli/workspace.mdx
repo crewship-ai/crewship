@@ -507,3 +507,8 @@ revision and the account-wide restriction explanation.
 ```bash
 crewship --format json workspace access me
 ```
+Resource policy JSON includes read-only `grant_details` with each grant’s
+`issuer_id`, `created_at` and `live` status. Saving unchanged rights preserves
+their provenance. To deliberately reissue a share as the authenticated admin,
+include its exact `{kind,id,operation}` in both `rights` and optional `reissue`.
+Unrelated edits do not reactivate shares from an inactive issuer.
