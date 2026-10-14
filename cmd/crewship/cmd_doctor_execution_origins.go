@@ -14,6 +14,7 @@ import (
 
 func newDoctorExecutionOriginsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "execution-origins", Short: "Read-only local inventory of potentially fenced execution authority", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		formatter := resolvedFormatter(cmd)
 		limit, _ := cmd.Flags().GetInt("limit")
 		if limit < 1 || limit > 1000 {
 			return fmt.Errorf("--limit must be between 1 and 1000")
@@ -33,7 +34,7 @@ func newDoctorExecutionOriginsCmd() *cobra.Command {
 		if jsonFlag {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
 		}
-		return resolvedFormatter(cmd).Machine(report)
+		return formatter.Machine(report)
 	}}
 	cmd.Flags().Int("limit", 200, "Maximum record IDs to inspect and display (1–1000; totals cover all candidates)")
 	cmd.Flags().Bool("json", false, "Emit the read-only audit as JSON")
