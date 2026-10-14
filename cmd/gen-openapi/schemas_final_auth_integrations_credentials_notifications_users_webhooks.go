@@ -65,8 +65,8 @@ func finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog() (
 	empty := ref("FinalAuthEmptyRequest")
 	routes := map[string]DomainSchema{
 		"POST /api/v1/workspaces/{workspaceId}/invitations/{invitationId}/reissue": {Request: empty, Response: ref("RemainingWorkspaceInvitationCreatedV1")},
-		"POST /api/v1/auth/invitation/accept":                                      {Request: ref("FinalAuthInvitationAcceptRequest"), Response: ref("FinalAuthInvitationAcceptResponse")},
-		"POST /api/v1/auth/signup":                                                 {Request: ref("FinalAuthSignupRequest")},
+		"POST /api/v1/auth/invitation/accept":                                      {Request: ref("FinalAuthInvitationAcceptRequest"), Response: ref("FinalAuthInvitationAcceptResponse"), ErrorMedia: []string{"application/json"}, ErrorResponse: object(map[string]any{"error": str(), "code": str()}, "error")},
+		"POST /api/v1/auth/signup":                                                 {Request: ref("FinalAuthSignupRequest"), ErrorMedia: []string{"application/json"}, ErrorResponse: object(map[string]any{"error": str(), "code": str()}, "error")},
 		"POST /api/v1/auth/forgot":                                                 {Request: ref("FinalAuthForgotRequest")},
 		"POST /api/v1/auth/reset":                                                  {Request: ref("FinalAuthResetRequest")},
 		"POST /api/v1/onboarding/complete":                                         {Request: empty},

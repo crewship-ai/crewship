@@ -168,7 +168,7 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 	if req.AccessMode == "restricted" {
 		if err := guestAccountEligible(r.Context(), tx, userID); err != nil {
 			if errors.Is(err, errGuestAdministrator) {
-				writeInvitationConflict(w, err)
+				writeJSON(w, http.StatusConflict, invitationConflict(err))
 			} else {
 				replyInternalError(w, h.logger, "Guest account eligibility", err)
 			}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"net/http"
 )
 
 var errGuestAdministrator = errors.New("Guest accounts cannot administer workspaces")
@@ -22,10 +21,10 @@ func guestAccountEligible(ctx context.Context, tx *sql.Tx, user string) error {
 	return nil
 }
 
-func writeInvitationConflict(w http.ResponseWriter, err error) {
+func invitationConflict(err error) map[string]string {
 	code, message := "invitation_changed", "This invitation changed or is no longer available. Ask your administrator for a new invitation."
 	if errors.Is(err, errGuestAdministrator) {
 		code, message = "guest_administrator_conflict", "This account owns or administers a workspace and cannot become a Guest. Use a separate account for Guest access."
 	}
-	writeJSON(w, http.StatusConflict, map[string]string{"code": code, "error": message})
+	return map[string]string{"code": code, "error": message}
 }

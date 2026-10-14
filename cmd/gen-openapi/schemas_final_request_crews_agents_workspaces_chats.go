@@ -104,6 +104,10 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 	add("POST", "/api/v1/onboarding/complete", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/workspaces/{workspaceId}/invitations", "FinalCoreInvitationRequest")
 	add("POST", "/api/v1/workspaces/{workspaceId}/members/provision", "FinalCoreProvisionMemberRequest")
+	provision := routes["POST /api/v1/workspaces/{workspaceId}/members/provision"]
+	provision.ErrorMedia = []string{"application/json"}
+	provision.ErrorResponse = object(map[string]any{"error": str(), "code": str()}, "error")
+	routes["POST /api/v1/workspaces/{workspaceId}/members/provision"] = provision
 	add("PUT", "/api/v1/agents/{agentId}/avatar", "FinalCoreAgentAvatarRequest")
 	add("PUT", "/api/v1/agents/{agentId}/chats/{chatId}/read", "FinalCoreEmptyRequest")
 	return routes, components

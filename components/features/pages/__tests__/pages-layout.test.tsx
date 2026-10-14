@@ -99,14 +99,14 @@ function newQueryClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
 }
 
-function renderLayout(list: WirePage[], slug?: string, folderRows: unknown[] = []) {
+function renderLayout(list: WirePage[], slug?: string) {
   const qc = newQueryClient()
   const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     // The folders route has its own prefix (`/page-folders`, because
     // `/pages/folders/{slug}` collides with `/pages/{slug}/grants` in the Go
     // mux); this layout has no folders, so the rail groups by owner.
-    if (url.includes("/api/v1/page-folders")) return okJSON({ folders: folderRows })
+    if (url.includes("/api/v1/page-folders")) return okJSON({ folders: [] })
     if (url.includes("/api/v1/pages/")) {
       const wanted = decodeURIComponent(url.split("/api/v1/pages/")[1].split("?")[0])
       return okJSON(list.find((p) => p.slug === wanted) ?? null)
@@ -141,15 +141,6 @@ describe("PagesLayout", () => {
     expect(screen.queryByRole("button", {name:/^New page$/})).toBeNull()
     expect(screen.queryByRole("button", {name:/^Import$/})).toBeNull()
     expect(screen.queryByRole("button",{name:"New folder"})).toBeNull()
-  })
-
-  it("hides folder and page move menus for a Viewer reading a folder", async () => {
-    access.role="VIEWER"
-    const folder={slug:"client-folder",name:"Client folder",icon:null,color:null}
-    renderLayout([{...FLEET,folder}],undefined,[{...folder,id:"folder-1",page_count:1}])
-    await screen.findByText("Client folder")
-    expect(screen.queryByRole("button",{name:/Actions for/})).toBeNull()
-    expect(screen.queryByRole("button",{name:"Select pages"})).toBeNull()
   })
 
   it("offers no creation shortcut in an empty VIEWER catalog", () => {

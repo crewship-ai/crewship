@@ -52912,6 +52912,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -52930,6 +52933,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -52948,6 +52954,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -52966,6 +52975,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -52984,6 +52996,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -53002,6 +53017,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -53623,6 +53641,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -53641,6 +53662,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -53654,11 +53678,35 @@
             },
             "description": "Forbidden"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "500": {
             "content": {
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139353,6 +139401,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139371,6 +139422,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139389,6 +139443,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139407,6 +139464,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139425,6 +139485,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139443,6 +139506,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }

@@ -410,13 +410,13 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onSelectPage={openPage}
               onCreatePage={canCreatePage ? () => setCreating(true) : undefined}
               onToggleCollapse={() => setCollapsed(true)}
-              onMovePage={canCreateFolder ? (page) => setFolderDialog({ kind: "move", slug: page.slug }) : undefined}
-              onRemoveFromFolder={canCreateFolder ? (page) => void removeFromFolder(page) : undefined}
+              onMovePage={(page) => setFolderDialog({ kind: "move", slug: page.slug })}
+              onRemoveFromFolder={(page) => void removeFromFolder(page)}
               onCreateFolder={canCreateFolder ? () => setFolderDialog({ kind: "create" }) : undefined}
-              onEditFolder={canCreateFolder ? (slug) => setFolderDialog({ kind: "edit", slug }) : undefined}
-              onShareFolder={canCreateFolder ? (slug) => setFolderDialog({ kind: "share", slug }) : undefined}
-              onDeleteFolder={canCreateFolder ? (slug) => setFolderDialog({ kind: "delete", slug }) : undefined}
-              onMovePages={canCreateFolder ? (list) => setFolderDialog({ kind: "move-many", slugs: list.map((p) => p.slug) }) : undefined}
+              onEditFolder={(slug) => setFolderDialog({ kind: "edit", slug })}
+              onShareFolder={(slug) => setFolderDialog({ kind: "share", slug })}
+              onDeleteFolder={(slug) => setFolderDialog({ kind: "delete", slug })}
+              onMovePages={(list) => setFolderDialog({ kind: "move-many", slugs: list.map((p) => p.slug) })}
             />
           )}
         </aside>

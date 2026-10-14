@@ -435,7 +435,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	// (#3006). Only a signup with nothing to redeem gets one to work in.
 	joined, err := redeemPendingInvitations(r.Context(), tx, userID, req.Email, req.InvitationToken, now, h.checkInvitationAdmission)
 	if errors.Is(err, errInvitationConflict) || errors.Is(err, errGuestAdministrator) {
-		writeInvitationConflict(w, err)
+		writeJSON(w, http.StatusConflict, invitationConflict(err))
 		return
 	}
 	if err != nil {
