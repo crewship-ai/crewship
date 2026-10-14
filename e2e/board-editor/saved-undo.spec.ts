@@ -39,11 +39,19 @@ test('saved undo walks repeated edits and still refuses a foreign same-value rev
     await expect(save).toBeEnabled(); await save.click()
     await expect(page.getByText('Board · Saved sequence 1')).toBeVisible()
     const originalX = Number(board.records[0].element!.x)
+    const savedElementId = board.records[0].element_id
     for (let seq = 2; seq <= 3; seq++) {
-      await page.locator('canvas.interactive').click({ position: { x: 350 + seq - 2, y: 220 } })
-      await page.keyboard.press('v'); await page.keyboard.press('ArrowRight')
+      const previousX = Number(board.records[0].element!.x)
+      // Native select-all avoids assuming a hit target from pointer coordinates:
+      // browser event delivery can produce different initial drawing extents.
+      await page.locator('canvas.interactive').click({ position: { x: 700, y: 350 } })
+      await page.keyboard.press('v'); await page.keyboard.press('ControlOrMeta+a')
+      await expect(page.getByText('1 saved drawing element selected', { exact: true })).toBeVisible()
+      await page.keyboard.press('Shift+ArrowRight')
       await expect(save).toBeEnabled(); await save.click()
       await expect(page.getByText(`Board · Saved sequence ${seq}`)).toBeVisible()
+      expect(batches.at(-1)!.upserts.map(item => item.element.id)).toEqual([savedElementId])
+      expect(Number(board.records[0].element!.x)).toBeGreaterThan(previousX)
     }
     expect(board.records).toHaveLength(1)
     expect(Number(board.records[0].element!.x)).toBeGreaterThan(originalX)
