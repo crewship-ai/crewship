@@ -436,7 +436,9 @@ func (h *PageHandler) writeArtifact(w http.ResponseWriter, r *http.Request, rest
 		return
 	}
 	if h.journal != nil {
-		_, err := h.journal.Emit(r.Context(), journal.Entry{WorkspaceID: ws, Type: journal.EntryPageSpecChanged, Severity: journal.SeverityInfo, ActorType: artifactActorType(r), ActorID: artifactActorID(r, user.ID), Summary: fmt.Sprintf("Artifact %s revision %d saved", rec.Slug, revision), Payload: map[string]any{"page_id": rec.ID, "page": rec.Slug, "artifact_revision": revision, "sha256": sha, "restored_from": restoredFrom, "on_behalf_of_user_id": user.ID, "agent_id": artifactAgentID(r), "run_id": artifactRunID(r), "request_id": req.RequestID}})
+		// Workspace journal readers need not have access to this private Page.
+		// Only opaque Page identity and publication provenance belong here.
+		_, err := h.journal.Emit(r.Context(), journal.Entry{WorkspaceID: ws, Type: journal.EntryPageSpecChanged, Severity: journal.SeverityInfo, ActorType: artifactActorType(r), ActorID: artifactActorID(r, user.ID), Summary: fmt.Sprintf("Artifact revision %d saved", revision), Payload: map[string]any{"page_id": rec.ID, "artifact_revision": revision, "restored_from": restoredFrom, "on_behalf_of_user_id": user.ID, "agent_id": artifactAgentID(r), "run_id": artifactRunID(r), "request_id": req.RequestID}})
 		if err != nil && h.logger != nil {
 			h.logger.Warn("artifact revision audit failed", "error", err)
 		}

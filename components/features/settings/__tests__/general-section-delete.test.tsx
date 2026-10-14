@@ -5,6 +5,10 @@ import { GeneralSection } from "../sections/general-section"
 // #881 — the workspace delete flow requires typing the slug to confirm and
 // sends { confirm_slug } in the DELETE body (the server re-validates it).
 
+vi.mock("@/components/features/settings/sections/page-ownership-card", () => ({
+  PageOwnershipCard: () => <div data-testid="page-ownership-card" />,
+}))
+
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a) }))
 

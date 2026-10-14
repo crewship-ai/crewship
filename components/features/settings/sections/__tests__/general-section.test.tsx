@@ -9,6 +9,10 @@ import { GeneralSection } from "../general-section"
 // rest of settings copies from: nothing typed = nothing on screen, one write
 // per Save, and a failed write never eats what someone typed.
 
+vi.mock("@/components/features/settings/sections/page-ownership-card", () => ({
+  PageOwnershipCard: () => <div data-testid="page-ownership-card" />,
+}))
+
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a) }))
 

@@ -60,7 +60,7 @@ func TestOpenAPIResponseComponents_AreGradedOrExcused(t *testing.T) {
 	// means a route shipped a response shape nothing can check.
 	// Measured after combining #1849’s reachability cleanup with the
 	// audit’s additional response-shape contracts.
-	const budget = 183
+	const budget = 182
 
 	raw, err := os.ReadFile("openapi.gen.json")
 	if err != nil {

@@ -407,15 +407,18 @@ func TestPagesOwnerTransferHumanOnlyTypesOnDeparture(t *testing.T) {
 				if erase {
 					w := httptest.NewRecorder()
 					r.h.DeleteUserData(w, r.deleteReq(t, "human-owned-output"))
-					if w.Code != http.StatusAccepted {
-						t.Fatalf("status %d: %s", w.Code, w.Body.String())
+					if w.Code != http.StatusConflict {
+						t.Fatalf("want explicit transfer conflict, status %d: %s", w.Code, w.Body.String())
 					}
-				} else if err := departWorkspace(t.Context(), r.db, r.spy, r.adminID, r.wsID, r.userID); err != nil {
-					t.Fatal(err)
+				} else {
+					var manual *ErrPagesNeedManualTransfer
+					if err := departWorkspace(t.Context(), r.db, r.spy, r.adminID, r.wsID, r.userID); !errors.As(err, &manual) {
+						t.Fatalf("want explicit transfer conflict, got %v", err)
+					}
 				}
 				var owner string
 				var crew sql.NullString
-				if err := r.db.QueryRow(`SELECT owner_user_id,owner_crew_id FROM pages WHERE id='human-page'`).Scan(&owner, &crew); err != nil || owner != r.adminID || crew.Valid {
+				if err := r.db.QueryRow(`SELECT owner_user_id,owner_crew_id FROM pages WHERE id='human-page'`).Scan(&owner, &crew); err != nil || owner != r.userID || crew.Valid {
 					t.Fatalf("owner %q crew %v err %v", owner, crew, err)
 				}
 			})

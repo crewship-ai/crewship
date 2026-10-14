@@ -698,6 +698,7 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 		h.replyFolderPage(w, r, wsID, viewer, rec, false)
 		return
 	}
+	fromID := rec.FolderID
 	from := ""
 	if rec.FolderID != "" {
 		if prev, err := h.loadFolderByID(r.Context(), rec.FolderID); err == nil {
@@ -722,8 +723,8 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 	}
 	rec.FolderID = f.ID
 	rec.PagesVersion++
-	h.journalFolderMembership(r.Context(), wsID, user, rec, "moved", from, f.Slug)
-	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
+	h.journalFolderMembership(r.Context(), wsID, user, rec, "moved", from, f.Slug, fromID, f.ID)
+	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", h.folderMembershipInvalidation(r.Context(), rec))
 	h.replyFolderPage(w, r, wsID, viewer, rec, false)
 }
 
@@ -783,8 +784,8 @@ func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 	}
 	rec.FolderID = ""
 	rec.PagesVersion++
-	h.journalFolderMembership(r.Context(), wsID, user, rec, "removed", f.Slug, "")
-	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
+	h.journalFolderMembership(r.Context(), wsID, user, rec, "removed", f.Slug, "", f.ID, "")
+	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", h.folderMembershipInvalidation(r.Context(), rec))
 	// A `w` holder who just removed a page they reached only through the
 	// folder no longer reaches it: the row comes back with an empty reach,
 	// which is the honest answer to their own action, not a 404.
@@ -981,7 +982,16 @@ func (h *PageHandler) journalFolderChange(ctx context.Context, wsID string, acto
 	}
 }
 
-func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, actor *AuthUser, rec *pageRecord, op, from, to string) {
+// Folder membership notifications are workspace-wide, just like metadata edits.
+func (h *PageHandler) folderMembershipInvalidation(ctx context.Context, rec *pageRecord) map[string]any {
+	payload := map[string]any{"page_id": rec.ID}
+	if !h.hasPrivateOutputMetadata(ctx, rec) {
+		payload["slug"] = rec.Slug
+	}
+	return payload
+}
+
+func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, actor *AuthUser, rec *pageRecord, op, from, to, fromID, toID string) {
 	if h.journal == nil {
 		return
 	}
@@ -991,6 +1001,18 @@ func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, 
 	} else if from != "" {
 		summary = fmt.Sprintf("%s moved page %s from folder %s into folder %s", actor.Email, rec.Slug, from, to)
 	}
+	payload := map[string]any{
+		"page": rec.Slug, "page_id": rec.ID, "op": op, "from": from, "to": to,
+		"pages_version": rec.PagesVersion, "actor_user_id": actor.ID,
+	}
+	if h.hasPrivateOutputMetadata(ctx, rec) {
+		summary = "Page folder membership " + op
+		delete(payload, "page")
+		delete(payload, "from")
+		delete(payload, "to")
+		payload["from_folder_id"] = fromID
+		payload["to_folder_id"] = toID
+	}
 	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: wsID,
 		Type:        entryPageFolderMembershipChanged,
@@ -998,10 +1020,7 @@ func (h *PageHandler) journalFolderMembership(ctx context.Context, wsID string, 
 		ActorType:   journal.ActorUser,
 		ActorID:     actor.ID,
 		Summary:     summary,
-		Payload: map[string]any{
-			"page": rec.Slug, "page_id": rec.ID, "op": op, "from": from, "to": to,
-			"pages_version": rec.PagesVersion, "actor_user_id": actor.ID,
-		},
+		Payload:     payload,
 	}); err != nil && h.logger != nil {
 		h.logger.Warn("pages: folder membership change was not journalled", "page", rec.Slug, "op", op, "error", err)
 	}

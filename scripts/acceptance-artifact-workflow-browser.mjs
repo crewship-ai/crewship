@@ -25,6 +25,66 @@ async function captureBoardDraft(page) {
   await (await pending).saveAs(join(output, 'owner-board-draft.json'))
   return true
 }
+async function transferOutputThroughSettings(slug, name, type) {
+  const ownershipURL = `${fixture.server}/api/v1/workspaces/${encodeURIComponent(fixture.workspace)}/page-ownership?workspace_id=${encodeURIComponent(fixture.workspace)}`
+  const beforeResponse = await contexts.owner.request.get(ownershipURL)
+  const before = (await beforeResponse.json()).pages?.find(page => page.slug === slug)
+  await check(`real custody metadata selects the existing ${type} reader`, beforeResponse.status() === 200 && before?.type === type && before.owner_user_id === fixture.owner && before.eligible_successors.some(candidate => candidate.user_id === fixture.commenter))
+  const owner = pages.owner
+  const uiListing = owner.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/page-ownership'))
+  await owner.goto(`${fixture.server}/settings?tab=general`)
+  const uiResponse = await uiListing
+  await writeFile(join(output, 'owner-custody-response.json'), JSON.stringify({ status: uiResponse.status(), body: await uiResponse.json() }, null, 2))
+  const card = owner.locator('#settings-card-artifact-and-board-ownership')
+  await expect(card).toBeVisible()
+  await expect(card.locator('iframe')).toHaveCount(0)
+  await expect(card.getByRole('combobox', { name: `New owner for ${name}`, exact: true })).toBeVisible()
+  await writeFile(join(output, 'owner-custody-controls.json'), JSON.stringify({ expected_label: `New owner for ${name}`, exact_label_matches: await card.getByLabel(`New owner for ${name}`, { exact: true }).count(), controls: await card.locator('select').evaluateAll(selects => selects.map(select => ({ id: select.id, labels: [...select.labels].map(label => label.textContent) }))) }, null, 2))
+  await card.getByLabel(`New owner for ${name}`, { exact: true }).selectOption(fixture.commenter)
+  const start = card.getByRole('button', { name: `Transfer ownership of ${name}`, exact: true })
+  const posts = []
+  const observe = request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith(`/page-ownership/${before.id}`)) posts.push(request.postDataJSON())
+  }
+  owner.on('request', observe)
+  try {
+    await start.click()
+    await expect(owner.getByRole('alertdialog')).toContainText('gaining control of this private output and its retained history')
+    await expect(owner.getByRole('alertdialog')).toContainText('Existing grants are rechecked under current permissions')
+    await owner.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await check(`cancelling ${type} ownership confirmation sends no transfer`, posts.length === 0)
+    await start.click()
+    const transferred = owner.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith(`/page-ownership/${before.id}`))
+    await owner.getByRole('button', { name: 'Confirm ownership transfer', exact: true }).click()
+    const response = await transferred
+    const summary = await response.json()
+    await check(`Settings explicitly transfers ${type} ownership through the real route`, response.status() === 200 && summary.id === before.id && summary.owner_user_id === fixture.commenter && posts.length === 1 && JSON.stringify(posts[0]) === JSON.stringify({ expected_owner_user_id: fixture.owner, successor_user_id: fixture.commenter }))
+  } finally { owner.off('request', observe) }
+  const afterResponse = await contexts.owner.request.get(ownershipURL)
+  const after = (await afterResponse.json()).pages?.find(page => page.id === before.id)
+  await check(`real custody listing confirms the new ${type} owner`, afterResponse.status() === 200 && after?.owner_user_id === fixture.commenter)
+}
+// Called after the complete Board workflow in the Board delivery script.
+export async function transferBoardOwnership(image) {
+  const boardURL = `${fixture.server}/api/v1/pages/browser-board/board?workspace_id=${encodeURIComponent(fixture.workspace)}`
+  const beforeResponse = await contexts.owner.request.get(boardURL)
+  const boardBefore = await beforeResponse.json()
+  expect(beforeResponse.status()).toBe(200)
+  if (!image?.file_id) throw new Error('Board custody regression requires the preceding canonical raster upload receipt')
+  const imageURL = `${boardURL.replace('/board?', `/board/files/${encodeURIComponent(image.file_id)}?`)}`
+  const beforeImageResponse = await contexts.owner.request.get(imageURL)
+  expect(beforeImageResponse.status()).toBe(200)
+  const beforeImage = await beforeImageResponse.body()
+  const grant = await contexts.owner.request.put(`${fixture.server}/api/v1/pages/browser-board/grants?workspace_id=${encodeURIComponent(fixture.workspace)}`, { data: { subject_type: 'user', subject: fixture.commenter, level: 'read' } })
+  await check('owner restores explicit current Board read access before choosing a successor', grant.status() === 200)
+  await transferOutputThroughSettings('browser-board', 'Browser Board', 'board')
+  const afterResponse = await contexts.commenter.request.get(boardURL)
+  const boardAfter = await afterResponse.json()
+  const snapshot = board => ({ format: board.format, seq: board.seq, records: board.records, placements: board.placements, placement_tombstones: board.placement_tombstones })
+  await check('Board custody transfer preserves saved sequence and every drawing and pin', afterResponse.status() === 200 && JSON.stringify(snapshot(boardAfter)) === JSON.stringify(snapshot(boardBefore)))
+  const afterImageResponse = await contexts.commenter.request.get(imageURL)
+  await check('new Board owner reads the unchanged canonical private raster', afterImageResponse.status() === 200 && afterImageResponse.headers()['content-type'] === 'image/png' && (await afterImageResponse.body()).equals(beforeImage))
+}
 try {
   for (const actor of ['owner', 'commenter']) {
     contexts[actor] = await browser.newContext({ viewport: { width: 1280, height: 900 } })
@@ -140,6 +200,18 @@ try {
   await expect(owner.getByLabel('Comment point', { exact: true })).toBeVisible()
   await expect.poll(() => pointLocation(owner)).toEqual(clickPoint)
   await check('viewing the historical point returns to revision one at the top and original viewport location', true)
+  const artifactHistory = async () => Promise.all([1, 2, 3].map(async revision => {
+    const response = await contexts.owner.request.get(`${endpoint('/artifact')}&revision=${revision}`)
+    expect(response.status()).toBe(200)
+    const { head_rev, revision: selected, html, manifest, manifest_status, revisions } = await response.json()
+    return { head_rev, revision: selected, html, manifest, manifest_status, revisions }
+  }))
+  const artifactBeforeTransfer = await artifactHistory()
+  const threadsBeforeTransfer = (await (await contexts.owner.request.get(endpoint('/artifact/threads'))).json()).threads
+  await transferOutputThroughSettings('browser-report', 'Browser report', 'artifact')
+  const artifactAfterTransfer = await artifactHistory()
+  const threadsAfterTransfer = (await (await contexts.owner.request.get(endpoint('/artifact/threads'))).json()).threads
+  await check('Artifact custody transfer preserves all retained source revisions, manifests, authors and comment anchors', JSON.stringify(artifactAfterTransfer) === JSON.stringify(artifactBeforeTransfer) && artifactAfterTransfer.every(revision => revision.head_rev === 3) && JSON.stringify(threadsAfterTransfer) === JSON.stringify(threadsBeforeTransfer) && threadsAfterTransfer[0]?.revision === 1 && JSON.stringify(threadsAfterTransfer[0]?.anchor) === JSON.stringify(capturedAnchor))
   const boardEndpoint = path => `${fixture.server}/api/v1/pages/browser-board${path}?workspace_id=${encodeURIComponent(fixture.workspace)}`
   response = await contexts.owner.request.post(`${fixture.server}/api/v1/pages?workspace_id=${fixture.workspace}`, { data: { slug: 'browser-board', name: 'Browser Board', panels: [], allow_empty: true } })
   await check('owner creates Board source through real route', response.status() === 201)
@@ -295,12 +367,14 @@ try {
   await check('owner reads the real canonical raster through its authorized route', response.status() === 200 && response.headers()['content-type'] === 'image/png')
   response = await contexts.commenter.request.get(boardEndpoint(`/board/files/${encodeURIComponent(uploaded.file_id)}`))
   await check('revoked participant cannot read Board image bytes', [403, 404].includes(response.status()))
+  await transferBoardOwnership(uploaded)
   console.log(`Artifact workflow browser passed ${results.length} checks; evidence: ${output}`)
 } catch (error) {
   await writeFile(join(output, 'failure.txt'), String(error))
   await captureBoardDraft(pages.owner).catch(() => {})
   const canonical = contexts.owner ? await contexts.owner.request.get(`${fixture.server}/api/v1/pages/browser-board/board?workspace_id=${encodeURIComponent(fixture.workspace)}`, { timeout: 5000 }).catch(() => null) : null
   if (canonical?.ok()) await writeFile(join(output, 'owner-board-canonical.json'), JSON.stringify(await canonical.json(), null, 2))
+  if (pages.owner) await pages.owner.locator('#settings-card-artifact-and-board-ownership').ariaSnapshot({ timeout: 1000 }).then(snapshot => writeFile(join(output, 'owner-custody-card.yml'), snapshot)).catch(() => {})
   for (const [actor, page] of Object.entries(pages)) await page.screenshot({ path: join(output, `${actor}-failure.png`) }).catch(() => {})
   throw error
 } finally { await browser.close() }

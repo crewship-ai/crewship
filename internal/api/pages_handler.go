@@ -942,8 +942,12 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// entry in memory, so an entry emitted while the registry still held the
 	// old rule set would be the one arrangement change a page never sees — its
 	// first (pages_refresh.go).
-	h.emitPageSpecChanged(r.Context(), wsID, rec, doc, true, pageArrangementFingerprint(doc))
-	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
+	if req.AllowEmpty {
+		h.emitEmptyPageCreated(r.Context(), wsID, rec, user.ID)
+	} else {
+		h.emitPageSpecChanged(r.Context(), wsID, rec, doc, true, pageArrangementFingerprint(doc))
+	}
+	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", pageWorkspaceInvalidation(rec, len(panels) != 0))
 	writeJSON(w, http.StatusCreated, h.pageDocument(r.Context(), rec, panels, nil))
 }
 
@@ -1125,7 +1129,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "reload updated panels", err)
 			return
 		}
-		broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": updated.ID, "slug": updated.Slug})
+		broadcastWorkspaceEvent(h.hub, wsID, "page.updated", pageWorkspaceInvalidation(updated, len(panels) != 0))
 		writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)))
 		return
 	}
@@ -1217,7 +1221,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if after := pageArrangementFingerprint(base); after != beforeArrangement {
 		h.emitPageSpecChanged(r.Context(), wsID, updated, base, false, after)
 	}
-	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": updated.ID, "slug": updated.Slug})
+	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", pageWorkspaceInvalidation(updated, len(panels) != 0))
 	writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)))
 }
 
@@ -1248,6 +1252,11 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may delete this page", "")
 		return
 	}
+	// Classify an uninitialized human output shell before its panels cascade.
+	payload := map[string]any{"page_id": rec.ID}
+	if !h.hasPrivateOutputMetadata(r.Context(), rec) {
+		payload["slug"] = rec.Slug
+	}
 	if _, err := h.db.ExecContext(r.Context(), `DELETE FROM pages WHERE id = ?`, rec.ID); err != nil {
 		replyInternalError(w, h.logger, "delete page", err)
 		return
@@ -1264,8 +1273,37 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			"page", rec.Slug, "page_id", rec.ID, "error", err)
 	}
 	h.refreshAutomations(r.Context())
-	broadcastWorkspaceEvent(h.hub, wsID, "page.deleted", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
+	broadcastWorkspaceEvent(h.hub, wsID, "page.deleted", payload)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Workspace members can subscribe without a Page grant. Output titles often
+// become their slugs, so only opaque IDs may invalidate private outputs,
+// including their empty human-owned staging phase before first publication.
+func pageWorkspaceInvalidation(rec *pageRecord, hasPanels bool) map[string]any {
+	payload := map[string]any{"page_id": rec.ID}
+	if !pageHasPrivateOutputMetadata(rec, hasPanels) {
+		payload["slug"] = rec.Slug
+	}
+	return payload
+}
+
+func pageHasPrivateOutputMetadata(rec *pageRecord, hasPanels bool) bool {
+	return rec.HasArtifact || rec.HasBoard || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
+}
+
+// Use when panels are not already loaded, before deleting or moving the Page.
+// A failed classification must hide descriptive metadata, never disclose it.
+func (h *PageHandler) hasPrivateOutputMetadata(ctx context.Context, rec *pageRecord) bool {
+	if rec.HasArtifact || rec.HasBoard {
+		return true
+	}
+	if rec.OwnerUserID == "" || rec.HasProject || rec.HasApplication {
+		return false
+	}
+	var hasPanels bool
+	err := h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM page_panels WHERE page_id=?)`, rec.ID).Scan(&hasPanels)
+	return err != nil || pageHasPrivateOutputMetadata(rec, hasPanels)
 }
 
 // ── Loading ────────────────────────────────────────────────────────────────
