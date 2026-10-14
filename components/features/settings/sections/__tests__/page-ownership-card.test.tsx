@@ -38,7 +38,7 @@ afterEach(() => { cleanup(); client.clear() })
 const view = (workspaceId = "ws", role = "ADMIN") => <QueryClientProvider client={client}><PageOwnershipCard key={`${workspaceId}:${role}`} workspaceId={workspaceId} role={role} /></QueryClientProvider>
 async function chooseAndReview() {
   fireEvent.change(await screen.findByLabelText("New owner for Private report"), { target: { value: "reader" } })
-  fireEvent.click(screen.getByRole("button", { name: "Transfer ownership of Private report", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Transfer ownership of Private report" }))
   return screen.getByRole("alertdialog")
 }
 
@@ -58,10 +58,10 @@ it("requires an explicit privacy confirmation and sends only the reviewed owner 
   const dialog = await chooseAndReview()
   expect(dialog).toHaveTextContent("gaining control of this private output and its retained history")
   expect(dialog).toHaveTextContent("Existing grants are rechecked under current permissions")
-  fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
   expect(writes).toHaveLength(0)
   await chooseAndReview()
-  fireEvent.click(screen.getByRole("button", { name: "Confirm ownership transfer", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Confirm ownership transfer" }))
   await screen.findByText("Artifact · Owner: Existing reader")
   expect(writes).toEqual([{ url: "/api/v1/workspaces/ws/page-ownership/page-1?workspace_id=ws", body: { expected_owner_user_id: "departing", successor_user_id: "reader" } }])
   expect(screen.queryByRole("alertdialog")).toBeNull()
@@ -74,13 +74,13 @@ it("never advances an open confirmation's owner after a background read and refr
   await act(async () => { await client.invalidateQueries({ queryKey: ["page-ownership", "ws"] }) })
   expect(screen.getByRole("alertdialog")).toHaveTextContent("replace Departing owner")
   writeStatus = 409
-  fireEvent.click(screen.getByRole("button", { name: "Confirm ownership transfer", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Confirm ownership transfer" }))
   await screen.findByText(/Ownership changed\. Review the refreshed owner/)
   expect(writes).toHaveLength(1)
   expect(writes[0].body.expected_owner_user_id).toBe("departing")
   expect(screen.getByText("Artifact · Owner: Other owner")).toBeInTheDocument()
   expect(screen.getByLabelText("New owner for Private report")).toHaveValue("")
-  expect(screen.getByRole("button", { name: "Transfer ownership of Private report", exact: true })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Transfer ownership of Private report" })).toBeDisabled()
 })
 
 it("purges metadata, candidates and confirmation on denied refresh and permits only a fresh explicit review", async () => {
@@ -95,14 +95,14 @@ it("purges metadata, candidates and confirmation on denied refresh and permits o
   expect(client.getQueriesData({ queryKey: ["page-ownership", "ws"] }).every(([, data]) => data === undefined)).toBe(true)
   expect(writes).toHaveLength(0)
   readStatus = 200
-  fireEvent.click(screen.getByRole("button", { name: "Refresh ownership", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Refresh ownership" }))
   expect(await screen.findByLabelText("New owner for Private report")).toHaveValue("")
 })
 
 it("clears metadata on mutation permission loss without retrying or adding a grant", async () => {
   render(view())
   await chooseAndReview(); writeStatus = 403
-  fireEvent.click(screen.getByRole("button", { name: "Confirm ownership transfer", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Confirm ownership transfer" }))
   await screen.findByText("Eligibility lost")
   expect(screen.queryByLabelText("New owner for Private report")).toBeNull()
   expect(screen.queryByRole("alertdialog")).toBeNull()
@@ -124,7 +124,7 @@ it("guides an owner to existing sharing controls when no candidate is eligible a
 
 it("does not automatically retry an unconfirmed transfer and reads back the already-transferred owner", async () => {
   render(view()); await chooseAndReview(); lostResponse = true
-  fireEvent.click(screen.getByRole("button", { name: "Confirm ownership transfer", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Confirm ownership transfer" }))
   await screen.findByText("Transfer could not be confirmed. Refresh ownership before trying again.")
   await screen.findByText("Artifact · Owner: Existing reader")
   expect(writes).toHaveLength(1)
@@ -159,15 +159,15 @@ it("loads every output page and resets the opaque cursor and rows when the owner
   pages = Array.from({ length: 26 }, (_, index) => ({ ...initial(), id: `page-${index}`, name: `Output ${index}`, slug: `output-${index}` }))
   pages.push({ ...initial(), id: "other-page", name: "Other output", owner_user_id: "other", owner_name: "Other owner" })
   render(view())
-  await screen.findByRole("link", { name: "Output 0", exact: true })
-  expect(screen.queryByRole("link", { name: "Output 25", exact: true })).toBeNull()
-  fireEvent.click(screen.getByRole("button", { name: "Load more outputs", exact: true }))
-  await screen.findByRole("link", { name: "Output 25", exact: true })
+  await screen.findByRole("link", { name: "Output 0" })
+  expect(screen.queryByRole("link", { name: "Output 25" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Load more outputs" }))
+  await screen.findByRole("link", { name: "Output 25" })
   expect(screen.getAllByRole("link")).toHaveLength(27)
-  expect(screen.queryByRole("button", { name: "Load more outputs", exact: true })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Load more outputs" })).toBeNull()
   expect(new URL(reads.at(-1)!, "http://fixture.test").searchParams.get("cursor")).toBe("25")
   fireEvent.change(screen.getByLabelText("Filter by owner"), { target: { value: "other" } })
-  await screen.findByRole("link", { name: "Other output", exact: true })
+  await screen.findByRole("link", { name: "Other output" })
   expect(screen.getAllByRole("link")).toHaveLength(1)
   const query = new URL(reads.at(-1)!, "http://fixture.test").searchParams
   expect(query.get("owner_user_id")).toBe("other")
