@@ -141,7 +141,7 @@ func (h *PageHandler) changeBoardComment(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	var total, recent int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(created_at>?),0) FROM page_board_comment_mutations WHERE page_id=?`, tsformat.Format(now.Add(-time.Hour)), rec.ID).Scan(&total, &recent); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN operation!='create' THEN 1 ELSE 0 END),0),COALESCE(SUM(created_at>?),0) FROM page_board_comment_mutations WHERE page_id=?`, tsformat.Format(now.Add(-time.Hour)), rec.ID).Scan(&total, &recent); err != nil {
 		h.boardError(w, err)
 		return
 	}

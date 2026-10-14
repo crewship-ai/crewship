@@ -23,7 +23,8 @@ func compactArtifactReceipts(ctx context.Context, tx *sql.Tx, page string, now t
 
 // Discussion versions are monotonic, so an expired reply/edit/reaction retry
 // still fails its original precondition after compaction. Keep thread-creation
-// receipts (at most the thread bound): creation has no version precondition.
+// receipts for the thread lifetime: creation has no version precondition.
+// They do not consume the transient mutation quota.
 // This does not delete comments, original anchors or private body history.
 func compactDiscussionReceipts(ctx context.Context, tx *sql.Tx, page string, board bool, now time.Time) error {
 	table := "page_artifact_comment_mutations"

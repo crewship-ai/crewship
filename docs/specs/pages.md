@@ -1592,7 +1592,10 @@ membership. Regular panel Pages continue to use their existing crew transfer rul
 
 Discussion replay receipts have a 24-hour minimum lifetime. Thread-creation
 receipts remain for the thread lifetime because creation has no version
-precondition; the thread count bounds them. Other expired mutation retries fail
+precondition; they do not consume the transient mutation receipt cap. The limit
+of 100 threads applies to open threads, including reopening. Resolution frees
+capacity without deleting comments or anchors. Bounded thread lists prioritize
+open discussions ahead of resolved history. Other expired mutation retries fail
 monotonic thread version preconditions. Comments, original revision anchors and
 private body history are preserved separately from replay receipts.
 

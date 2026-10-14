@@ -103,7 +103,7 @@ func (h *PageHandler) ListBoardThreads(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := tx.QueryContext(r.Context(), `SELECT id FROM page_board_threads WHERE page_id=? ORDER BY created_at DESC,id DESC LIMIT 100`, rec.ID)
+	rows, err := tx.QueryContext(r.Context(), `SELECT id FROM page_board_threads WHERE page_id=? ORDER BY (status='open') DESC,created_at DESC,id DESC LIMIT 100`, rec.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "list board threads", err)
 		return
@@ -293,7 +293,7 @@ func (h *PageHandler) mutateBoardThread(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	var total, recent int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN created_at>? THEN 1 ELSE 0 END),0) FROM page_board_comment_mutations WHERE page_id=?`, tsformat.Format(now.Add(-time.Hour)), rec.ID).Scan(&total, &recent); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN operation!='create' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN created_at>? THEN 1 ELSE 0 END),0) FROM page_board_comment_mutations WHERE page_id=?`, tsformat.Format(now.Add(-time.Hour)), rec.ID).Scan(&total, &recent); err != nil {
 		replyInternalError(w, h.logger, "check comment quota", err)
 		return
 	}
@@ -312,7 +312,7 @@ func (h *PageHandler) mutateBoardThread(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		var threads int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_board_threads WHERE page_id=?`, rec.ID).Scan(&threads); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_board_threads WHERE page_id=? AND status='open'`, rec.ID).Scan(&threads); err != nil {
 			replyInternalError(w, h.logger, "count artifact threads", err)
 			return
 		}
@@ -356,6 +356,17 @@ func (h *PageHandler) mutateBoardThread(w http.ResponseWriter, r *http.Request, 
 				return
 			}
 		} else {
+			if !*req.Resolved {
+				var others int
+				if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_board_threads WHERE page_id=? AND status='open' AND id!=?`, rec.ID, threadID).Scan(&others); err != nil {
+					replyInternalError(w, h.logger, "count open discussion threads", err)
+					return
+				}
+				if others >= maxArtifactThreads {
+					artifactCommentError(w, 409, "thread_limit", "open discussion thread limit reached")
+					return
+				}
+			}
 			status, resolver, resolvedAt := "open", "", ""
 			operation = "reopen"
 			if *req.Resolved {
