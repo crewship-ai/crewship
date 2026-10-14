@@ -41,3 +41,13 @@ it("scrubs proof from the address and link URLs before interaction",()=>{
  expect(window.location.href).not.toContain("synthetic-proof")
  for(const link of screen.getAllByRole("link")){expect(link.getAttribute("href")).not.toContain("synthetic-proof")}
 })
+
+it("discloses the Guest account restriction before explicitly accepting it",async()=>{
+ vi.mocked(serverFetch).mockResolvedValueOnce(new Response('{"code":"guest_confirmation_required"}',{status:400})).mockResolvedValueOnce(new Response('{"ok":true}',{status:200}))
+ render(<JoinPage/>);await act(async()=>{fireEvent.click(screen.getByRole("button",{name:"Accept invitation"}))})
+ expect(screen.getByRole("status")).toHaveTextContent("entire account across all workspaces")
+ expect(router.replace).not.toHaveBeenCalled()
+ await act(async()=>{fireEvent.click(screen.getByRole("button",{name:"Accept Guest restrictions"}))})
+ expect(JSON.parse(String(vi.mocked(serverFetch).mock.calls[1][1]?.body))).toEqual({token:"synthetic-proof",confirm_account_restriction:true})
+ expect(router.replace).toHaveBeenCalledWith("/")
+})

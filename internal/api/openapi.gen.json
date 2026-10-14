@@ -5472,6 +5472,9 @@
       },
       "FinalAuthInvitationAcceptRequest": {
         "properties": {
+          "confirm_account_restriction": {
+            "type": "boolean"
+          },
           "token": {
             "type": "string"
           }
@@ -6074,8 +6077,111 @@
       },
       "FinalCoreInvitationRequest": {
         "properties": {
+          "access_mode": {
+            "enum": [
+              "trusted",
+              "restricted"
+            ],
+            "type": "string"
+          },
           "email": {
             "type": "string"
+          },
+          "rights": {
+            "items": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "agent"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "discover",
+                        "chat",
+                        "run",
+                        "delegate"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "project"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "list",
+                        "read",
+                        "write",
+                        "delete"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "routine"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "run"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "maxItems": 256,
+            "type": "array",
+            "uniqueItems": true
           },
           "role": {
             "type": "string"
@@ -6156,6 +6262,13 @@
       },
       "FinalCoreProvisionMemberRequest": {
         "properties": {
+          "access_mode": {
+            "enum": [
+              "trusted",
+              "restricted"
+            ],
+            "type": "string"
+          },
           "create_only": {
             "description": "Reject existing accounts without changing membership or setup tokens.",
             "type": "boolean"
@@ -6165,6 +6278,102 @@
           },
           "full_name": {
             "type": "string"
+          },
+          "rights": {
+            "items": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "agent"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "discover",
+                        "chat",
+                        "run",
+                        "delegate"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "project"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "list",
+                        "read",
+                        "write",
+                        "delete"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "routine"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "run"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "maxItems": 256,
+            "type": "array",
+            "uniqueItems": true
           },
           "role": {
             "type": "string"
@@ -139781,6 +139990,33 @@
                               "operation"
                             ],
                             "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "run"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "operation"
+                            ],
+                            "type": "object"
                           }
                         ]
                       },
@@ -140014,6 +140250,33 @@
                             "operation"
                           ],
                           "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "routine"
+                              ],
+                              "type": "string"
+                            },
+                            "operation": {
+                              "enum": [
+                                "run"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id",
+                            "operation"
+                          ],
+                          "type": "object"
                         }
                       ]
                     },
@@ -140109,6 +140372,33 @@
                                   "read",
                                   "write",
                                   "delete"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "operation"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "run"
                                 ],
                                 "type": "string"
                               }
@@ -140302,6 +140592,88 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "account_restricted": {
+                      "type": "boolean"
+                    },
+                    "decisions": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "agent",
+                              "project",
+                              "routine"
+                            ],
+                            "type": "string"
+                          },
+                          "operation": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "enum": [
+                              "allowed",
+                              "denied",
+                              "conditional",
+                              "unavailable"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "id",
+                          "operation",
+                          "state",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "explanation": {
+                      "type": "string"
+                    },
+                    "membership_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "mode": {
+                      "enum": [
+                        "trusted",
+                        "restricted"
+                      ],
+                      "type": "string"
+                    },
+                    "restriction_scope": {
+                      "enum": [
+                        "account"
+                      ],
+                      "type": "string"
+                    },
+                    "revision": {
+                      "format": "int64",
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "membership_id",
+                    "mode",
+                    "revision",
+                    "account_restricted",
+                    "restriction_scope",
+                    "explanation",
+                    "decisions"
+                  ],
                   "type": "object"
                 }
               }
@@ -153627,7 +153999,46 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "can_read": {
+                        "type": "boolean"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "identifier": {
+                        "type": "string"
+                      },
+                      "project_id": {
+                        "type": "string"
+                      },
+                      "project_name": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "identifier",
+                      "title",
+                      "status",
+                      "project_id",
+                      "project_name",
+                      "can_read"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -153742,6 +154153,42 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "can_read": {
+                      "type": "boolean"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "identifier": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "project_name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "identifier",
+                    "title",
+                    "status",
+                    "project_id",
+                    "project_name",
+                    "can_read"
+                  ],
                   "type": "object"
                 }
               }

@@ -116,6 +116,7 @@ func (h *WorkspaceHandler) restrictedWorkspaceDirectory(w http.ResponseWriter, r
 		return true
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Workspace-Directory-Complete", strconv.FormatBool(len(visible) == len(result)))
 	writeJSON(w, http.StatusOK, visible)
 	return true
 }

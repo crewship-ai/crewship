@@ -27,7 +27,7 @@ func finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog() (
 		"FinalAuthSignupRequest": object(map[string]any{
 			"full_name": str(), "email": str(), "password": str(), "invitation_token": str(),
 		}, "full_name", "email", "password"),
-		"FinalAuthInvitationAcceptRequest":  object(map[string]any{"token": str()}, "token"),
+		"FinalAuthInvitationAcceptRequest":  object(map[string]any{"token": str(), "confirm_account_restriction": boolean()}, "token"),
 		"FinalAuthInvitationAcceptResponse": object(map[string]any{"ok": boolean()}, "ok"),
 		"FinalAuthForgotRequest":            object(map[string]any{"email": str()}),
 		"FinalAuthResetRequest": object(map[string]any{

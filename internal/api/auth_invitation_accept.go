@@ -21,7 +21,8 @@ func (h *AuthHandler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Token string `json:"token"`
+		Token                     string `json:"token"`
+		ConfirmAccountRestriction bool   `json:"confirm_account_restriction,omitempty"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
 	decoder.DisallowUnknownFields()
@@ -42,6 +43,18 @@ func (h *AuthHandler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	if tx.QueryRowContext(r.Context(), `SELECT email FROM users WHERE id=? AND suspended_at IS NULL`, user.ID).Scan(&email) != nil {
 		replyError(w, 404, "Invitation unavailable")
 		return
+	}
+	if !request.ConfirmAccountRestriction {
+		var guest bool
+		err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM workspace_invitations i JOIN workspaces w ON w.id=i.workspace_id AND w.deleted_at IS NULL WHERE (i.token=? OR (i.token NOT LIKE 'sha256:%' AND i.token=?)) AND LOWER(i.email)=LOWER(?) AND i.access_mode='restricted' AND i.accepted_at IS NULL AND julianday(i.expires_at)>julianday('now'))`, invitationTokenHash(request.Token), request.Token, email).Scan(&guest)
+		if err != nil {
+			replyInternalError(w, h.logger, "check Guest invitation", err)
+			return
+		}
+		if guest {
+			writeJSON(w, 400, map[string]string{"error": "Accepting this Guest invitation restricts your entire account across workspaces.", "code": "guest_confirmation_required"})
+			return
+		}
 	}
 	joined, err := redeemPendingInvitations(r.Context(), tx, user.ID, email, request.Token, time.Now().UTC().Format(time.RFC3339), h.checkInvitationAdmission)
 	if errors.Is(err, errInvitationConflict) {

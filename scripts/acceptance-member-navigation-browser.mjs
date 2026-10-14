@@ -37,11 +37,11 @@ try {
   for (const [actor, user, width] of [['owner', fixture.owner, 1280], ['desktop', 'nav-client-a', 1280], ['phone', 'nav-client-a', 390], ['other', 'nav-client-b', 1280], ['reader', 'nav-page-reader', 1280]]) {
     contexts[actor] = await browser.newContext({ viewport: { width, height: 900 } })
     await contexts[actor].addCookies([{ name: 'authjs.session-token', value: fixture.tokens[user], url: fixture.server, httpOnly: true, sameSite: 'Lax' }])
-    await contexts[actor].addInitScript(id => localStorage.setItem('crewship.workspaceId', id), fixture.workspace)
+    await contexts[actor].addInitScript(({id,user}) => localStorage.setItem(`crewship.workspaceId:${user}`, id), {id:fixture.workspace,user})
     await contexts[actor].addInitScript(() => {
       window.__navigationUnavailableShown = false
       new MutationObserver(() => {
-        if ([...document.querySelectorAll('h1')].some(node => node.textContent === 'Not available with your access')) window.__navigationUnavailableShown = true
+        if ([...document.querySelectorAll('h1,h2')].some(node => node.textContent === 'Not available with your access')) window.__navigationUnavailableShown = true
       }).observe(document, { childList: true, subtree: true, characterData: true })
     })
     pages[actor] = await contexts[actor].newPage()
@@ -75,7 +75,7 @@ try {
   await expect(unavailable).toBeVisible({timeout:70000})
   await expect(editor).toHaveCount(0)
   await expect.poll(()=>unavailable.evaluate(element=>element.contains(document.activeElement))).toBe(true)
-  await check('omission preserves persisted selected workspace',await pages.owner.evaluate(()=>localStorage.getItem('crewship.workspaceId'))===fixture.workspace)
+  await check('omission preserves persisted selected workspace',await pages.owner.evaluate(user=>localStorage.getItem(`crewship.workspaceId:${user}`),fixture.owner)===fixture.workspace)
   await unavailable.press('Escape')
   await expect(unavailable).toBeVisible()
   await pages.owner.evaluate(()=>{
@@ -88,7 +88,7 @@ try {
   pages.owner.once('dialog',dialog=>dialog.dismiss())
   await unavailable.getByRole('button',{name:'Choose Empty workspace',exact:true}).click()
   await expect(unavailable).toBeVisible()
-  await check('cancelled explicit choice retains selected workspace',await pages.owner.evaluate(()=>localStorage.getItem('crewship.workspaceId'))===fixture.workspace)
+  await check('cancelled explicit choice retains selected workspace',await pages.owner.evaluate(user=>localStorage.getItem(`crewship.workspaceId:${user}`),fixture.owner)===fixture.workspace)
   await availability(false)
   await unavailable.getByRole('button',{name:'Retry workspace',exact:true}).click()
   await expect(unavailable).toHaveCount(0)
@@ -102,10 +102,10 @@ try {
   await unavailable.getByRole('button',{name:'Choose Empty workspace',exact:true}).click()
   await expect(unavailable).toHaveCount(0)
   await expect(pages.owner.getByRole('dialog',{name:/New page/})).toHaveCount(0)
-  await check('confirmed explicit choice changes context and discards old draft',await pages.owner.evaluate(()=>localStorage.getItem('crewship.workspaceId'))===fixture.empty_workspace)
+  await check('confirmed explicit choice changes context and discards old draft',await pages.owner.evaluate(user=>localStorage.getItem(`crewship.workspaceId:${user}`),fixture.owner)===fixture.empty_workspace)
   await availability(false)
   pages.owner.off('request',countWrites)
-  await pages.owner.evaluate(id=>localStorage.setItem('crewship.workspaceId',id),fixture.workspace)
+  await pages.owner.evaluate(({id,user})=>localStorage.setItem(`crewship.workspaceId:${user}`,id),{id:fixture.workspace,user:fixture.owner})
   // Subsequent preexisting scenarios load the selected fixture workspace anew.
   await pages.owner.reload()
   // Page creation uses the existing role-or-capability contract; reads remain available.

@@ -128,7 +128,7 @@ export function AccessNotice({
         <KeyRound className="h-3.5 w-3.5 text-primary-hover" aria-hidden />
         <h2 className="eyebrow">Your access</h2>
         <span className="font-mono text-[11px] text-muted-foreground-soft">
-          {[role, context?.workspaceName].filter(Boolean).join(" · ") || "Guest"}
+          {["Guest", role, context?.workspaceName].filter(Boolean).join(" · ")}
         </span>
       </div>
 

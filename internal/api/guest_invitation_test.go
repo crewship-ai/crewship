@@ -71,6 +71,14 @@ func TestGuestInvitationAtomicallyInstallsInitialGrants(t *testing.T) {
 			if err = json.Unmarshal(created.Body.Bytes(), &inv); err != nil {
 				t.Fatal(err)
 			}
+			confirmation := request("guest-user", "/api/v1/auth/invitation/accept", map[string]string{"token": inv.Token}, 400)
+			if !strings.Contains(confirmation.Body.String(), "guest_confirmation_required") {
+				t.Fatal("Guest account restriction was not disclosed")
+			}
+			var prior int
+			if err = db.QueryRow(`SELECT COUNT(*) FROM workspace_members WHERE user_id='guest-user'`).Scan(&prior); err != nil || prior != 0 {
+				t.Fatal("Guest mode applied before confirmation", prior, err)
+			}
 			if scenario == "resource-removed" {
 				execOrFatal(t, db, `DELETE FROM agents WHERE id='guest-agent'`)
 			}
@@ -78,7 +86,7 @@ func TestGuestInvitationAtomicallyInstallsInitialGrants(t *testing.T) {
 			if scenario == "resource-removed" {
 				want = 409
 			}
-			request("guest-user", "/api/v1/auth/invitation/accept", map[string]string{"token": inv.Token}, want)
+			request("guest-user", "/api/v1/auth/invitation/accept", map[string]any{"token": inv.Token, "confirm_account_restriction": true}, want)
 			if scenario == "resource-removed" {
 				var n int
 				if err = db.QueryRow(`SELECT COUNT(*) FROM workspace_members WHERE user_id='guest-user'`).Scan(&n); err != nil || n != 0 {
@@ -92,7 +100,7 @@ func TestGuestInvitationAtomicallyInstallsInitialGrants(t *testing.T) {
 			}
 			// The same authenticated identity may replay acceptance after becoming
 			// restricted, without restoring removed grants or creating membership.
-			request("guest-user", "/api/v1/auth/invitation/accept", map[string]string{"token": inv.Token}, 200)
+			request("guest-user", "/api/v1/auth/invitation/accept", map[string]any{"token": inv.Token, "confirm_account_restriction": true}, 200)
 		})
 	}
 }
@@ -116,5 +124,36 @@ func TestGuestSignupRedeemsRestrictedPolicy(t *testing.T) {
 	policy, err := (access.Store{DB: db}).Policy(t.Context(), owner, user, ws)
 	if err != nil || policy.Mode != "restricted" || len(policy.Rights) != 1 || policy.Rights[0].ID != "signup-guest-agent" {
 		t.Fatalf("signup policy=%+v %v", policy, err)
+	}
+}
+
+func TestGuestProvisionCannotRestrictAnExistingAccountWithoutConsent(t *testing.T) {
+	db := setupTestDB(t)
+	owner, ws := seedInviter(t, db)
+	execOrFatal(t, db, `INSERT INTO users(id,email,hashed_password) VALUES('claimed-guest','claimed-guest@example.test','synthetic-existing-password-hash')`)
+	execOrFatal(t, db, `INSERT INTO workspaces(id,name,slug) VALUES('claimed-own-ws','Own','claimed-own-ws')`)
+	execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('claimed-own-membership','claimed-own-ws','claimed-guest','OWNER')`)
+	router, err := NewRouter(db, "guest-provision-consent-test-secret-long", newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(router.Shutdown)
+	token := mintTokenFor(t, db, owner, "guest-consent-owner-"+strings.Repeat("0", 40))
+	req := httptest.NewRequest("POST", "/api/v1/workspaces/"+ws+"/members/provision", strings.NewReader(`{"email":"claimed-guest@example.test","role":"VIEWER","access_mode":"restricted","rights":[]}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Workspace-ID", ws)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != 409 {
+		t.Fatalf("unconsented restriction=%d: %s", rr.Code, rr.Body.String())
+	}
+	restricted, err := (access.Store{DB: db}).HasRestrictedMembership(t.Context(), "claimed-guest")
+	if err != nil || restricted {
+		t.Fatalf("existing account was restricted: %t %v", restricted, err)
+	}
+	var n int
+	if err = db.QueryRow(`SELECT COUNT(*) FROM workspace_members WHERE user_id='claimed-guest'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("failed provisioning changed memberships: %d %v", n, err)
 	}
 }

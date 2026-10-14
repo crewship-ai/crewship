@@ -93,7 +93,7 @@ Both invitation creation and account provisioning accept `access_mode` and
 with an empty rights array. Initial grants, membership and invitation redemption
 commit together, including signup redemption. Removed/cross-workspace resources
 refuse redemption; an existing membership is not silently converted or regranted.
-The Add member dialog can select Guest and initial resources before submission.
+The Add member dialog can select Guest and initial resources before creating an invitation. Existing accounts explicitly accept the account-wide restriction; direct provisioning refuses to restrict an existing claimed account.
 Invitation acceptance remains available to an already restricted account, but
 still requires the matching token, live email and an unrestricted authentication
 credential. Accepting another workspace does not remove its account ceiling.
@@ -146,7 +146,9 @@ Navigation is an existence projection: it stops after the first authorized
 routine or Page action rather than constructing every frozen execution contract.
 Denied candidates may still require a scan; this is not a constant-cost promise.
 A workspace-local catalog failure omits that workspace row, while healthy rows
-remain usable. Failure of every workspace projection returns an error, never an
+remain usable. `X-Workspace-Directory-Complete` is false for such a partial
+projection. Only a complete directory permits automatic recovery from a missing
+preference during a fresh login; active drafts still require a guarded selection. Failure of every workspace projection returns an error, never an
 empty grant projection. Logs contain no resource names or session credentials.
 A chat grant alone still permits direct access to a known agent's private chat;
 it does not grant directory discovery. Assign discover and chat for navigable chat.

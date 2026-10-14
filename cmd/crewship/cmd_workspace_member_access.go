@@ -37,6 +37,23 @@ var workspaceMemberAccessSetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error { return memberAccessCommand(cmd, args[0], true) },
 }
 
+type memberEffectiveExplanation struct {
+	MembershipID      string                            `json:"membership_id" yaml:"membership_id"`
+	Mode              string                            `json:"mode" yaml:"mode"`
+	Revision          int64                             `json:"revision" yaml:"revision"`
+	Explanation       string                            `json:"explanation" yaml:"explanation"`
+	AccountRestricted bool                              `json:"account_restricted" yaml:"account_restricted"`
+	RestrictionScope  string                            `json:"restriction_scope" yaml:"restriction_scope"`
+	Decisions         []memberAccessExplanationDecision `json:"decisions" yaml:"decisions"`
+}
+type memberAccessExplanationDecision struct {
+	Kind      string `json:"kind" yaml:"kind"`
+	ID        string `json:"id" yaml:"id"`
+	Operation string `json:"operation" yaml:"operation"`
+	State     string `json:"state" yaml:"state"`
+	Reason    string `json:"reason" yaml:"reason"`
+}
+
 var workspaceMemberAccessExplainCmd = &cobra.Command{
 	Use: "explain <member-id-or-user-id>", Short: "Explain a member's current grants and execution prerequisites", Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -60,17 +77,7 @@ var workspaceMemberAccessExplainCmd = &cobra.Command{
 		if err = cli.CheckError(response); err != nil {
 			return err
 		}
-		var result struct {
-			Explanation       string `json:"explanation"`
-			AccountRestricted bool   `json:"account_restricted"`
-			RestrictionScope  string `json:"restriction_scope"`
-			access.Membership
-			Decisions []struct {
-				access.Right
-				State  string `json:"state"`
-				Reason string `json:"reason"`
-			} `json:"decisions"`
-		}
+		var result memberEffectiveExplanation
 		if err = cli.ReadJSON(response, &result); err != nil {
 			return err
 		}

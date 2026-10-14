@@ -137,7 +137,7 @@ describe("useWorkspace", () => {
     storage.set("crewship.workspaceId:alice", "ws-b")
     storage.set("crewship.workspaceId:bob", "removed-workspace")
     mockFetch.mockResolvedValueOnce({ok:true,json:async()=>[WS_A,WS_B]})
-      .mockResolvedValueOnce({ok:true,json:async()=>[WS_A]})
+      .mockResolvedValueOnce({ok:true,headers:new Headers({"X-Workspace-Directory-Complete":"true"}),json:async()=>[WS_A]})
       .mockResolvedValueOnce({ok:true,json:async()=>[WS_A,WS_B]})
     act(()=>bindWorkspaceSession("alice"))
     const {result}=renderHook(()=>useWorkspace())
@@ -351,7 +351,7 @@ describe("useWorkspace", () => {
 
   it("recovers a stale persisted workspace on initial load", async () => {
     window.localStorage.setItem("crewship.workspaceId", "ws-gone")
-    mockFetch.mockResolvedValue({ ok: true, json: async () => [WS_A, WS_B] })
+    mockFetch.mockResolvedValue({ ok: true, headers:new Headers({"X-Workspace-Directory-Complete":"true"}), json: async () => [WS_A, WS_B] })
 
     const { result } = renderHook(() => useWorkspace())
     await waitFor(() => expect(result.current.loading).toBe(false))
@@ -361,6 +361,16 @@ describe("useWorkspace", () => {
     act(() => result.current.setWorkspaceId("ws-a"))
     expect(result.current.workspaceId).toBe("ws-a")
     expect(result.current.workspaceUnavailable).toBe(false)
+  })
+
+  it("preserves a cold persisted selection when the server reports a partial directory",async()=>{
+    storage.set("crewship.workspaceId","ws-b")
+    mockFetch.mockResolvedValue({ok:true,headers:new Headers({"X-Workspace-Directory-Complete":"false"}),json:async()=>[WS_A]})
+    const {result}=renderHook(()=>useWorkspace())
+    await waitFor(()=>expect(result.current.loading).toBe(false))
+    expect(result.current.workspaceId).toBe("ws-b")
+    expect(result.current.workspaceUnavailable).toBe(true)
+    expect(storage.get("crewship.workspaceId")).toBe("ws-b")
   })
 
   it("shares state across hook instances (module-level store)", async () => {

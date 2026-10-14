@@ -51,6 +51,7 @@ interface InviteMemberDialogProps {
 }
 
 interface ProvisionResult {
+  invitation?: boolean
   setup_url: string
   created_user: boolean
   email: string
@@ -120,7 +121,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
 
     try {
       const res = await apiFetch(
-        `/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/members/provision?workspace_id=${encodeURIComponent(workspaceId)}`,
+        `/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/${guest ? "invitations" : "members/provision"}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -131,7 +132,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
             email: email.trim(),
             role,
             ...(guest ? {access_mode:"restricted",rights} : {}),
-            ...(fullName.trim() ? { full_name: fullName.trim() } : {}),
+            ...(!guest && fullName.trim() ? { full_name: fullName.trim() } : {}),
           }),
         },
       )
@@ -144,7 +145,11 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
         setError(typeof body?.error === "string" ? body.error : `Failed (HTTP ${res.status})`)
         return
       }
-      const created = (await res.json()) as ProvisionResult
+      const response = await res.json()
+      if (guest && (typeof response.token !== "string" || typeof response.email !== "string")) throw new Error("Invalid invitation response")
+      const created: ProvisionResult = guest
+        ? {invitation:true,created_user:false,email:response.email,setup_url:`${window.location.origin}/join#invitation_token=${encodeURIComponent(response.token)}`}
+        : response as ProvisionResult
       if (!guest && access && created.user_id) {
         const ws = encodeURIComponent(workspaceId)
         const set = await apiFetch(`/api/v1/workspaces/${ws}/members/${encodeURIComponent(created.user_id)}/capabilities?workspace_id=${ws}`, {
@@ -215,7 +220,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
               ? result.setup_url
                 ? "This is the only time the link is shown — the token is stored hashed and cannot be displayed again."
                 : "They already have an account, so nothing needs setting up."
-              : "Creates the account if the email is new, then gives you a setup link to send them."}
+              : guest ? "Creates a Guest invitation with your initial shares. Existing accounts change only after acceptance." : "Creates the account if the email is new, then gives you a setup link to send them."}
           </DialogDescription>
           </div>
         </DialogHeader>
@@ -231,7 +236,9 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
                   created_user=false AND a fresh link, so branching on the
                   former printed "no setup link is issued" directly above the
                   setup link. */}
-              {result.created_user
+              {result.invitation
+                ? `Guest invitation created for ${result.email}. They join with the link and explicitly accept the account-wide restriction. No existing account has been changed.`
+                : result.created_user
                 ? `Account created for ${result.email}. They set their own password through this link.`
                 : result.setup_url
                   ? `${result.email} already had an account here but had never set it up, so this link is a fresh one. The previous link, if any, no longer works.`
@@ -245,7 +252,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
             )}
             {result.setup_url ? (
             <div className="space-y-2">
-              <Label htmlFor="setup-link">Setup link</Label>
+              <Label htmlFor="setup-link">{result.invitation ? "Invitation link" : "Setup link"}</Label>
               <div className="flex gap-2">
                 <Input id="setup-link" readOnly value={result.setup_url} className="font-mono text-xs" />
                 <Button type="button" variant="outline" onClick={copyLink} aria-label="Copy setup link">

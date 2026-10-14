@@ -276,7 +276,7 @@ describe("InviteMemberDialog — what they can do", () => {
 it("creates a Guest with selected initial grants in one request", async () => {
   cleanup();apiFetch.mockReset()
   apiFetch.mockImplementation(async (_url:string,init?:RequestInit)=>init?.method==="POST"
-    ?jsonResponse({setup_url:SETUP_URL,created_user:true,email:"guest@example.test"},201)
+    ?jsonResponse({token:"test-token",email:"guest@example.test"},201)
     :jsonResponse([{id:"routine-1",name:"Shared routine"}]))
   const client=new QueryClient({defaultOptions:{queries:{retry:false}}})
   render(<QueryClientProvider client={client}><InviteMemberDialog workspaceId="ws1" /></QueryClientProvider>)
@@ -290,5 +290,6 @@ it("creates a Guest with selected initial grants in one request", async () => {
   await waitFor(()=>expect(apiFetch.mock.calls.some(([,init])=>init?.method==="POST")).toBe(true))
   const writes=apiFetch.mock.calls.filter(([,init])=>init?.method==="POST"||init?.method==="PATCH")
   expect(writes).toHaveLength(1)
+  expect(writes[0][0]).toContain("/invitations?")
   expect(JSON.parse(writes[0][1].body)).toMatchObject({access_mode:"restricted",rights:[{kind:"routine",id:"routine-1",operation:"run"}]})
 })

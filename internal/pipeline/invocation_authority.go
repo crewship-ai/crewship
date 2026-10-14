@@ -38,13 +38,27 @@ func NewInvocationAuthorityChecker(db *sql.DB) func(context.Context, RunInput) e
 			if db == nil {
 				return ErrInvocationAuthorityRevoked
 			}
-			var allowed bool
-			err := db.QueryRowContext(ctx, `SELECT p.author_user_id IS NULL OR p.author_user_id='' OR EXISTS(SELECT 1 FROM users u WHERE u.id=p.author_user_id AND u.suspended_at IS NULL AND NOT EXISTS(SELECT 1 FROM workspace_members wm WHERE wm.user_id=u.id AND wm.access_mode='restricted')) FROM pipelines p WHERE p.id=? AND p.workspace_id=? AND p.deleted_at IS NULL`, in.PipelineID, in.WorkspaceID).Scan(&allowed)
+			var author sql.NullString
+			err := db.QueryRowContext(ctx, `SELECT author_user_id FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, in.PipelineID, in.WorkspaceID).Scan(&author)
 			if err != nil {
-				return fmt.Errorf("routine trigger account authority: %w", err)
+				return fmt.Errorf("routine trigger owner authority: %w", err)
 			}
-			if !allowed {
-				return ErrInvocationAuthorityRevoked
+			if author.Valid && author.String != "" {
+				var active bool
+				err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND suspended_at IS NULL)`, author.String).Scan(&active)
+				if err != nil {
+					return fmt.Errorf("routine trigger account authority: %w", err)
+				}
+				if !active {
+					return ErrInvocationAuthorityRevoked
+				}
+				restricted, err := (access.Store{DB: db}).HasRestrictedMembership(ctx, author.String)
+				if err != nil {
+					return fmt.Errorf("routine trigger resource authority: %w", err)
+				}
+				if restricted {
+					return ErrInvocationAuthorityRevoked
+				}
 			}
 		}
 

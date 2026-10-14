@@ -5,8 +5,9 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 type sharedIssue struct {

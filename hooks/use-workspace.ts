@@ -148,7 +148,7 @@ function loadWorkspaces(): Promise<void> {
       const selected = snapshot.currentId ?? persisted
       // On a fresh login there is no workspace draft to preserve. A stale
       // account preference (e.g. removed membership) may safely recover.
-      const next = snapshot.loading && selected && !list.some(w => w.id === selected)
+      const next = snapshot.loading && res.headers?.get("X-Workspace-Directory-Complete") === "true" && selected && !list.some(w => w.id === selected)
         ? list[0]?.id ?? null
         : selected ?? list[0]?.id ?? null
       if (next && next !== persisted) persistId(next)

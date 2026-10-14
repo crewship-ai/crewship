@@ -228,6 +228,10 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		replyInternalError(w, h.logger, "provision: claimed check", err)
 		return
 	}
+	if claimed && req.AccessMode == "restricted" {
+		replyError(w, 409, "An existing account must accept a Guest invitation before account-wide restrictions apply")
+		return
+	}
 	if claimed {
 		if err := tx.Commit(); err != nil {
 			replyInternalError(w, h.logger, "provision: commit", err)

@@ -35,3 +35,17 @@ func TestAutonomousTriggersRespectHumanAuthorAccount(t *testing.T) {
 		}
 	}
 }
+
+func TestAutonomousTriggerCannotBorrowForeignRoutine(t *testing.T) {
+	db := openFactoryTestDB(t)
+	defer db.Close()
+	runner := newMockRunner()
+	deps := fullExecutorDeps(t, db, runner)
+	p := saveResumePipeline(t, deps.Store, "foreign-trigger", resumeLinearDSL)
+	result, err := NewWiredExecutor(deps).Run(t.Context(), RunInput{PipelineID: p.ID, WorkspaceID: "foreign-workspace", Mode: ModeRun, TriggeredVia: TriggeredViaWebhook})
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	if err == nil || len(runner.calls) != 0 {
+		t.Fatalf("foreign routine dispatched: %+v %v starts=%d", result, err, len(runner.calls))
+	}
+}

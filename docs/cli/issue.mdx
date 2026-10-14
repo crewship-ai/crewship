@@ -734,3 +734,23 @@ crewship issue bulk update --ids ms_a,ms_b --labels lbl_bug,lbl_p0
 | `--labels` | string | | Comma-separated label IDs. **REPLACES** the existing label set on each issue; empty string clears all labels. |
 
 At least one of `--status` / `--priority` / `--assignee` / `--project` / `--labels` must be supplied. Response surfaces as `Bulk update applied to <updated>/<requested> issue(s).` — the two counts differ when some IDs were 404 or 403.
+
+## `crewship issue shared`
+
+List or read the current Guest projection of issues in shared projects. This
+command uses project grants and does not request the shared workspace board.
+
+```bash
+crewship issue shared --project PROJECT_ID --limit 100 --offset 0
+crewship issue shared ISSUE_IDENTIFIER --format json
+```
+
+| Flag | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `--project` | string | none | Restrict the list to a granted project ID. |
+| `--limit` | integer | 100 | Maximum returned rows, capped at 500 by the API. |
+| `--offset` | integer | 0 | Pagination offset. |
+
+Listing requires project.list; detail requires project.read. A revoked or
+foreign issue returns 404, never a cached body. No issue mutations, comments,
+related-resource metadata or run history are returned.

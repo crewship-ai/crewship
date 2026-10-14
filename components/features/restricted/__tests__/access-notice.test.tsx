@@ -19,7 +19,7 @@ describe("AccessNotice", () => {
   it("lists exactly the server's surfaces and marks the current one", () => {
     render(<AccessNotice kind="no-access" title="No routines shared with you yet" description="None." context={{ ...context, surfaces: [...context.surfaces] }} current="routines" />)
     expect(screen.getByRole("heading", { name: "No routines shared with you yet" })).toBeTruthy()
-    expect(screen.getByText("Viewer · Acme")).toBeTruthy()
+    expect(screen.getByText("Guest · Viewer · Acme")).toBeTruthy()
     expect(screen.getByRole("link", { name: /Routines/, current: "page" })).toBeTruthy()
     expect(screen.getByRole("link", { name: "Go to Chat" }).getAttribute("href")).toBe("/chat")
     expect(screen.queryByText("Pages")).toBeNull()
