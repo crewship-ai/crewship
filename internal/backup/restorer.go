@@ -98,6 +98,7 @@ type ExtractedPayload struct {
 	// section (see attachmentblobs.go). Empty for bundles written before
 	// the section existed.
 	attachmentBlobsPath string
+	agentChatsPath      string
 
 	// Complete environments (environment_payload.go).
 	environments
@@ -487,6 +488,10 @@ func ExtractPayload(ctx context.Context, payload io.Reader, stagingParents ...st
 			if err := repackIntoSink(tr, hdr, name, memoryBlobsSectionPrefix, sinkFor); err != nil {
 				return nil, err
 			}
+		case strings.HasPrefix(name, agentChatsPrefix):
+			if err := repackIntoSink(tr, hdr, name, agentChatsPrefix, sinkFor); err != nil {
+				return nil, err
+			}
 		case strings.HasPrefix(name, attachmentBlobsSectionPrefix):
 			if err := repackIntoSink(tr, hdr, name, attachmentBlobsSectionPrefix, sinkFor); err != nil {
 				return nil, err
@@ -525,6 +530,10 @@ func ExtractPayload(ctx context.Context, payload io.Reader, stagingParents ...st
 		}
 		if key == memoryBlobsSinkKey {
 			out.memoryBlobsPath = name
+			continue
+		}
+		if key == "agent-chats" {
+			out.agentChatsPath = name
 			continue
 		}
 		if key == attachmentBlobsSinkKey {
@@ -649,6 +658,9 @@ func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, s
 		// already "<sha[:2]>/<sha>", so it rides straight through as
 		// both the sink key and the inner tar entry name.
 		key = memoryBlobsSinkKey
+		strip = ""
+	case agentChatsPrefix:
+		key = "agent-chats"
 		strip = ""
 	case attachmentBlobsSectionPrefix:
 		// Same shape as memory-blobs: "<sha[:2]>/<sha>", no crew slug.

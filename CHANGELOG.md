@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Agent chat transcripts survive workspace and crew backups (#3109).** Encrypted bundles include scoped structured history, remapped fork identities and stable message/run anchors. Damaged lines produce per-chat completeness warnings instead of blocking all backups. Collection only fences file pinning; restore fences publication and commit, preserving existing histories unless replacement is explicit. Cross-workspace chat collisions are refused. The search/feedback mirror and atomic hard-crash recovery across filesystem/DB publication remain separate limitations.
+
+
 - **Share routines and projects from their detail cards.** Workspace administrators can inspect Guest shares, preserve unrelated rights and issuer provenance, revoke individual operations or explicitly reissue inactive shares. Conflicting saves require a fresh review. Routine sharing offers Run; project sharing offers independent List and Read.
 - **Share individual routines and projects from the CLI.** `share`, `share list` and `unshare` preserve unrelated rights and issuer provenance, expose inactive shares and require explicit `--reissue` to move authority. Stale policy saves fail without retry.
 

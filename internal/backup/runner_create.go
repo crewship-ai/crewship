@@ -77,6 +77,11 @@ type CreateOptions struct {
 	// Empty collects none, and every referenced blob is then recorded as
 	// missing in the manifest rather than silently left behind.
 	AttachmentRoot string
+	// ConversationRoot is the host storage base containing conversations/*.jsonl.
+	ConversationRoot string
+	// LockTranscripts briefly fences live JSONL writers while pinning file descriptors
+	// and sizes after the DB dump. Validation and compression run after release.
+	LockTranscripts func(context.Context) (func(), error)
 	// Categories, when non-empty, makes this a custom bundle that carries
 	// only these contents categories (categories.go): the dump keeps the
 	// tables of those categories plus the anchor rows, and the collectors
@@ -484,6 +489,22 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	// rows). Filtered before anything reads the dump, so the row counts,
 	// the memory and attachment sections and the page files all follow.
 	filter.filterDump(dump)
+	pinnedTranscripts, err := pinAgentChatTranscripts(ctx, opts.ConversationRoot, dump, opts.LockTranscripts)
+	if err != nil {
+		_ = payloadWriter.Close()
+		_ = sealedFile.Close()
+		return nil, err
+	}
+	defer pinnedTranscripts.Close()
+	chatMissing := pinnedTranscripts.missing
+	chatIncomplete, err := pinnedTranscripts.write(ctx, payloadWriter, dump, now)
+	if err != nil {
+		_ = payloadWriter.Close()
+		_ = sealedFile.Close()
+		return nil, err
+	}
+	pinnedTranscripts.Close()
+
 	if dump != nil {
 		if err := requireSupportedDumpServiceBackups(dump, capturedServiceSnapshots); err != nil {
 			_ = payloadWriter.Close()
@@ -582,6 +603,10 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		contents.AttachmentsMissing = len(attachmentBlobsResult.Missing)
 	}
 	contents.Incomplete = buildIncomplete(target, contents, attachmentBlobsResult)
+	contents.Incomplete = append(contents.Incomplete, chatIncomplete...)
+	if chatMissing > 0 {
+		contents.Incomplete = append(contents.Incomplete, IncompleteItem{Kind: "agent_chat_transcript_missing", Count: chatMissing, Workspace: target.ID, Detail: "Agent chat transcript files were missing or chat storage was not configured"})
+	}
 	contents.Environments = envRun.summaries()
 	contents.Incomplete = append(contents.Incomplete, envRun.incompleteItems()...)
 	// #2009: record what the dump actually carries so verify and restore
