@@ -193,7 +193,7 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 	// re-propose the same pattern across consecutive 6h ticks while
 	// the underlying entries are still in the window; the dedup
 	// guards the on-disk corpus against re-appending those.
-	rules = dedupAgainstPrior(rules, cfg.OutputDir, now, 7*24*time.Hour)
+	rules = dedupAgainstPriorRooted(rules, cfg.OutputRoot, cfg.OutputDir, now, 7*24*time.Hour)
 	if len(rules) == 0 {
 		// Still emit the journal marker so operators can see the worker
 		// ran. Nothing written to disk because there is nothing to write.
@@ -728,7 +728,17 @@ func (c *Consolidator) recordCanonicalVersion(ctx context.Context, cfg Config, c
 	if c.DB == nil || cfg.BlobRoot == "" {
 		return
 	}
-	content, err := memory.ReadFileNoFollow(canonicalPath)
+	// HTTP/scheduler callers provide the trusted installation storage root.
+	// Older in-process callers retain their output-directory contract, but
+	// still read through a pinned root rather than an unconfined pathname.
+	root := cfg.OutputRoot
+	if root == "" {
+		root = cfg.OutputDir
+	}
+	if root == "" {
+		root = filepath.Dir(canonicalPath)
+	}
+	content, err := memory.ReadFileNoFollowRoot(root, canonicalPath)
 	if err != nil {
 		c.logger().Warn("version record: read canonical failed",
 			"err", err, "path", canonicalPath)
