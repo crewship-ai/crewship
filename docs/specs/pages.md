@@ -1628,14 +1628,20 @@ membership and notices remain unchanged, including regular Pages that otherwise
 could transfer to a crew. GDPR preserves its existing failed-attempt audit row.
 Regular panel Pages otherwise continue to use their existing crew transfer rule.
 The instance-admin membership-removal route instead returns `pages: [{id}]` for
-all unresolved Pages and a generic administrator-guidance message: instance
-administration alone does not authorize private Page names, slugs, ownership or
-contacts. The workspace-admin removal route retains its authorized output metadata.
+all unresolved Pages and a generic administrator-guidance message after rechecking
+current instance authority; a revoked instance administrator receives 403 without
+Page IDs. Instance administration alone does not authorize private Page names,
+slugs, ownership or
+contacts. The workspace-admin removal route retains its authorized output metadata
+only after rechecking current workspace OWNER/ADMIN standing following custody
+refusal; a removed or demoted actor receives 403 without Page IDs.
 GDPR conflicts disclose those details only to a currently active, unrestricted
 workspace OWNER/ADMIN, rechecked after custody refusal; instance-only administrators
 and instance administrators with only MEMBER standing receive ID-only Pages and
-generic guidance. GDPR retains `action_id`, `data_subject` and `workspace_id`, and its
-failed custody audit records the reason and opaque Page IDs without private Page
+generic guidance only while canonical instance authority remains current. Without
+either authority GDPR returns 403 without Page IDs. GDPR retains `action_id`,
+`data_subject` and `workspace_id`, and its failed custody audit records the reason
+and opaque Page IDs without private Page
 names. Conflict messages direct administrators to Settings > General >
 Artifact and Board ownership; a regular member cannot use the admin-only removal
 endpoint as a self-service leave operation.
