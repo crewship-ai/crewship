@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Agent chat transcripts survive workspace and crew backups (#3109).** Encrypted bundles now carry scoped structured JSONL history, including additive run/message fields. Forks remap chat and agent identities; restore coordinates cached append writers, validates dry-run conflicts and rolls transcript publication back on transaction failure. Older bundles explicitly report missing transcripts. The search/feedback mirror and hard-crash recovery across filesystem/DB publication remain separate limitations.
+
 - **Pages creation and import controls follow current workspace permissions (#3081).** Readers keep access to existing content; authorized roles and explicit `page.create` grants retain authoring. An open draft survives permission loss while submission is disabled.
 
 - **Members never shows another workspace's roster while loading.** Switching workspaces clears the previous roster immediately, including when the new request fails; refreshing the same workspace keeps an open invitation's setup link visible and refreshes capability grants too. A member whose grants have not loaded cannot have them overwritten by an edit. Reopening backup setup also selects the current instance plan instead of retaining a plan from an earlier opening.

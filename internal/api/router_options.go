@@ -471,3 +471,8 @@ type AgentRunStopper func(ctx context.Context, agentID string) (stopped, pending
 func WithAgentRunStopper(f AgentRunStopper) RouterOption {
 	return func(r *Router) { r.agentRunStopper = f }
 }
+
+// WithTranscriptLock coordinates the live conversation store with backups.
+func WithTranscriptLock(lock func(context.Context) (func(), error)) RouterOption {
+	return func(r *Router) { r.transcriptLock = lock }
+}

@@ -61,6 +61,7 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	transcriptLock       func(context.Context) (func(), error)
 	issueMutationHandler *IssueHandler
 	issueMutationWorker  *issueMutationWorker
 	restrictedWorkflow   *restrictedworkflow.Service

@@ -105,6 +105,10 @@ type RestoreOptions struct {
 	// rows (whose workspace_id RemapIDs regenerated) find their files. Empty
 	// lands no attachment files; the report then counts them as missing.
 	AttachmentRoot string
+	// ConversationRoot is the host storage base containing conversations/*.jsonl.
+	ConversationRoot string
+	// LockTranscripts fences live JSONL writers before acquiring a DB transaction.
+	LockTranscripts func(context.Context) (func(), error)
 	// EnvironmentStore is an extra place complete-environment layers are
 	// read from, after the bundle's inline blobs and the store beside the
 	// bundle file (e.g. layers an off-site download fetched elsewhere).
@@ -290,6 +294,13 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil, fmt.Errorf("backup: RestoreOptions.Path required")
 	}
 	st := resolveStorage(opts.Storage)
+	if opts.LockTranscripts != nil {
+		release, err := opts.LockTranscripts(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
 
 	// Manifest metadata captured as the restore progresses, so the
 	// webhook can report scope/workspace even on failure paths that
@@ -875,6 +886,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 		return nil
 	}
+	transcripts := &transcriptRestore{}
+	defer func() { retErr = errors.Join(retErr, transcripts.finish(serviceDatabaseCommitted)) }()
 	// memoryBlobsRestore lands the memory-blobs/ section (if any) onto
 	// opts.BlobRoot. Unlike dockerRestore this is NOT gated on
 	// skipDocker — memory_versions blobs are workspace-scoped content-
@@ -927,6 +940,15 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// already recorded, plus what this restore found.
 	restoreIncomplete := func() []IncompleteItem {
 		out := append([]IncompleteItem(nil), manifest.Contents.Incomplete...)
+		if missing := missingAgentTranscripts(extracted.DBDump); missing > 0 {
+			known := false
+			for _, item := range out {
+				known = known || item.Kind == "agent_chat_transcript_missing"
+			}
+			if !known {
+				out = append(out, IncompleteItem{Kind: "agent_chat_transcript_missing", Count: missing, Workspace: firstWorkspaceID(extracted.DBDump), Detail: "Bundle does not contain transcript files for recorded agent chat messages"})
+			}
+		}
 		// The manifest's attachment_missing item and the restore's own
 		// count describe the same files; keep the restore's (it also
 		// covers a target without attachment storage) when it has one.
@@ -980,6 +1002,25 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		defer clean()
 	}
 	if opts.DryRun {
+		if !opts.FilesOnly && extracted.DBDump != nil {
+			tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+			if err != nil {
+				return nil, err
+			}
+			users, err := ReconcileUsersByEmail(ctx, tx, extracted.DBDump)
+			_ = tx.Rollback()
+			if err != nil {
+				return nil, err
+			}
+			if extracted.DBDump.chatTranscriptRemap == nil {
+				extracted.DBDump.chatTranscriptRemap = map[string]map[string]string{}
+			}
+			extracted.DBDump.chatTranscriptRemap["users"] = users
+			transcripts, err = prepareAgentChatTranscripts(ctx, opts.ConversationRoot, extracted, true, opts.Replace)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if opts.Logger != nil {
 			opts.Logger("dry-run: checksum + schema compat OK; no DB or docker writes performed")
 		}
@@ -1182,6 +1223,10 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			if err != nil {
 				return err
 			}
+			if extracted.DBDump.chatTranscriptRemap == nil {
+				extracted.DBDump.chatTranscriptRemap = map[string]map[string]string{}
+			}
+			extracted.DBDump.chatTranscriptRemap["users"] = remap
 			reconciledUsers = len(remap)
 			if opts.Logger != nil && len(remap) > 0 {
 				opts.Logger(fmt.Sprintf("user reconciliation: aligned %d bundle user(s) to target by email", len(remap)))
@@ -1197,6 +1242,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			// later. Inside the tx, so a rolled back restore leaves no
 			// claim behind.
 			PostInsert: func(ctx context.Context, tx *sql.Tx) error {
+				var err error
+				transcripts, err = prepareAgentChatTranscripts(ctx, opts.ConversationRoot, extracted, false, opts.Replace)
+				if err != nil {
+					return err
+				}
+
 				if err := servicePlan.insertFences(ctx, tx); err != nil {
 					return err
 				}
@@ -1207,6 +1258,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				return recordForkOrigin(ctx, tx, opts, manifest, extracted.DBDump, bundleCrewSlugs)
 			},
 			PreCommit: func(ctx context.Context) error {
+
 				if err := servicePlan.importImages(ctx, opts.ServiceSnapshots); err != nil {
 					return err
 				}
@@ -1222,7 +1274,10 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				if err := dockerRestore(ctx); err != nil {
 					return err
 				}
-				return servicePlan.renewCommitFences(ctx, commitTx)
+				if err := servicePlan.renewCommitFences(ctx, commitTx); err != nil {
+					return err
+				}
+				return transcripts.publish()
 			},
 			PreInsert: func(ctx context.Context, tx *sql.Tx) error {
 				// The writer transaction now excludes all cross-process
