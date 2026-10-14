@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - **Saved Board undo works through repeated edits of the same drawing or pin (#3069).** Successful undo receipts advance earlier local commands to the restored server revisions, while intervening foreign edits still prevent undo even when geometry matches. Uncertain undo retries keep their original batch and identity; saved undo deadlines do not extend.
+- **Board image uploads use less memory (#3069).** Bounded private staging streams replace compressed image buffers while preserving raster re-encoding, workspace quotas and exact retry identities.
 
 - **Resolved discussions release Artifact and Board thread capacity (#3069).** The 100-thread cap counts open threads and also applies to reopening. Original comments, anchors and creation-retry identities remain available; creation receipts do not exhaust the transient mutation quota.
 
