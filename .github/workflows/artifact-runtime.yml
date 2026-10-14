@@ -83,6 +83,9 @@ jobs:
       - name: Verify durable Artifact publication boundaries
         timeout-minutes: 6
         run: go test ./internal/api -run '^Test(PageArtifactCrashAfterCommitBeforeResponseRetriesOnce|PageArtifactPublishGCAndSharedAttachmentLifetime|PageArtifactAllRetainedRevisionsPinnedRejectsPublishAndRestore|PageArtifacts_ConcurrentCASAndPageTypeBoundary)$' -count=1 -timeout 4m
+      - name: Verify Board conversion and job authorization boundaries
+        timeout-minutes: 6
+        run: go test ./internal/api -run '^Test(BoardRequestInsertTamperedPayloadIsAtomicAndHumanAttributed|BoardRequestAssetsRequireExactJobSelectionAndCurrentSourceGrant|BoardRequestCompletionAfterWriteGrantRevocationRetainsPrivateUnpinnedArtifact)$' -count=1 -timeout 4m
       - name: Build the production frontend
         timeout-minutes: 10
         env:
