@@ -30,6 +30,7 @@ export function OwnAccessCard() {
     enabled: Boolean(workspaceId && session?.user?.id) && !workspaceUnavailable && !loading,
     queryFn: async ({ signal }) => {
       const response = await apiFetch(`/api/v1/workspaces/${requireApiPathSegment(workspaceId!)}/access/me`, { signal })
+      if ([401, 403, 404].includes(response.status)) return null
       if (!response.ok) throw new Error("Access details unavailable. Retry or ask your administrator.")
       const result = ownAccessSchema.safeParse(await response.json())
       if (!result.success) throw new Error("Access details unavailable. Retry or ask your administrator.")
@@ -44,6 +45,7 @@ export function OwnAccessCard() {
     <CardHeader><CardTitle>Your access</CardTitle></CardHeader>
     <CardContent className="space-y-3">
       {workspaceUnavailable ? <p>Select an available workspace to see your access.</p>
+        : query.data === null ? <div role="alert"><p>Access details unavailable. Retry or ask your administrator.</p><Button variant="outline" onClick={() => void query.refetch()}>Retry</Button></div>
         : query.isError && !query.data ? <div role="alert"><p>{query.error.message}</p><Button variant="outline" onClick={() => void query.refetch()}>Retry</Button></div>
           : !query.data ? <p role="status">Loading your access…</p>
             : <>
