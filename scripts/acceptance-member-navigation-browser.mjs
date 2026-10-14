@@ -200,7 +200,10 @@ try {
     await check(`${actor} original browser session unchanged`, cookies.some(cookie => cookie.name === 'authjs.session-token' && cookie.value === fixture.tokens['nav-client-a']))
   }
   await directDenied('other')
-  await desktop.screenshot({ path: join(output, 'revoked-navigation.png') })
+  // The workspace switch leaves the pointer over the rail's hover overlay.
+  // Move into content so the captured notice and Crewship mark remain readable.
+  await desktop.mouse.move(1100, 700)
+  await desktop.screenshot({ path: join(output, 'revoked-navigation.png'), animations: 'disabled' })
 } catch (error) {
   results.push({ name: 'browser harness', status: 'ERROR', error: String(error) })
   for (const [actor, page] of Object.entries(pages)) await page.screenshot({ path: join(output, `${actor}-failure.png`) }).catch(() => {})
