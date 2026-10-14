@@ -108,6 +108,7 @@ against membership revision changes. Guest Settings includes **Your access** wit
 current decisions and execution prerequisites. This explains saved grants rather
 than enumerating unshared resources. Trusted members receive their role-based
 explanation; the endpoint does not grant new authority.
+
 Resource grants recheck their issuer at use time. The issuer must remain an
 active, trusted OWNER/ADMIN in the resource's workspace and must not have an
 account-wide Guest ceiling. This applies to discovery, Issues projections,
@@ -205,7 +206,6 @@ Installed adapters' static profile declarations constrain navigation. Missing
 runtime installation preserves known declaration authority; unknown profiles
 remain denied. Operational readiness checks stay at execution time.
 
-Guest Page actions retain the Pages ACL checks and additionally require an explicit `routine:run` grant and the routine’s agent grants. Existing `routine.run` capabilities are not backfilled into routine grants.
 Complete policy saves preserve the id, issuer and creation time of unchanged
 rights, including inactive shares. `grant_details` is read-only administrative
 metadata with `issuer_id`, `created_at` and `live`; submitted metadata never
@@ -220,3 +220,4 @@ stored provenance. Hard deletion of an issuer account is an exception: its
 grants are deleted to satisfy the user foreign key.
 
 Policy replacement and deliberate reissue append `member.access_changed` atomically with the policy, recording previous/current rights, issuers, revisions and mode. API and CLI may explicitly reissue live shares; Settings offers reissue for inactive shares.
+Guest Page actions retain the Pages ACL checks and additionally require an explicit `routine:run` grant and the routine’s agent grants. Existing `routine.run` capabilities are not backfilled into routine grants.
