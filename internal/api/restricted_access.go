@@ -38,6 +38,7 @@ var restrictedAgentChatGrant = restrictedRule{check: func(m *AuthMiddleware, sto
 // with an acceptance test, and update restrictedAllowedPatterns in
 // restricted_route_table_test.go in the same change.
 var restrictedRoutes = map[string]restrictedRule{
+	"GET /api/v1/workspaces/{workspaceId}/access/me":                   restrictedPass,
 	"GET /api/v1/workspaces/{workspaceId}/restricted-issues":           restrictedPass,
 	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}": restrictedPass,
 

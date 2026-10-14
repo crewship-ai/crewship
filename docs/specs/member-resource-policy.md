@@ -99,6 +99,16 @@ never includes the member's private conversation or run contents. An execution
 grant can be conditional or unavailable: provider/profile dependencies, inputs,
 budgets and installed runtime still matter. Unshared resources remain denied.
 
+Members can inspect the same explanation for themselves with
+`GET /api/v1/workspaces/{workspaceId}/access/me` or
+`crewship workspace access me`. The target identity comes only from authentication;
+query parameters cannot select another member. This route requires current local
+membership and a live account, is allowlisted for Guests, and fences the response
+against membership revision changes. Guest Settings includes **Your access** with
+current decisions and execution prerequisites. This explains saved grants rather
+than enumerating unshared resources. Trusted members receive their role-based
+explanation; the endpoint does not grant new authority.
+
 Supported operations:
 
 | Resource | Operations | Current scope |
@@ -139,7 +149,7 @@ detail accepts an issue ID or identifier, requires project.read and adds its
 description. Neither returns crew/agent references, comments, activity, relations
 or run history. Foreign and revoked details return 404. The shared issue board,
 search, statistics and mutation routes remain closed to Guests. Collection
-`X-Total-Count` counts returned rows; the next-offset header supports pagination.
+`X-Total-Count` counts all authorized rows matching the filter; the next-offset header supports pagination.
 
 Crews, credentials, routine View/Edit levels, guest issue contribution, explicit
 Page-action selection and a Pages grant migration remain separate work. This

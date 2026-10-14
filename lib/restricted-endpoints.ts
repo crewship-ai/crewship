@@ -17,6 +17,7 @@
  * source: `{name}` matches one non-empty path segment.
  */
 export const RESTRICTED_FE_ENDPOINTS = [
+ "GET /api/v1/workspaces/{workspaceId}/access/me",
  "POST /api/v1/auth/invitation/accept",
  "GET /api/v1/workspaces/{workspaceId}/restricted-issues",
  "GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",

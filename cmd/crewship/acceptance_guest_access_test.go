@@ -39,6 +39,8 @@ func TestAcceptanceGuestAccessCLI(t *testing.T) {
 			_, _ = io.WriteString(w, `[{"id":"member-1","user_id":"user-1"}]`)
 		case "/api/v1/workspaces/ws_test/members/member-1/access/effective":
 			_, _ = io.WriteString(w, `{"membership_id":"member-1","mode":"restricted","revision":3,"account_restricted":true,"restriction_scope":"account","decisions":[{"kind":"routine","id":"routine-1","operation":"run","state":"conditional","reason":"runtime checked at invocation"}]}`)
+		case "/api/v1/workspaces/ws_test/access/me":
+			_, _ = io.WriteString(w, `{"membership_id":"self-member","mode":"restricted","revision":3,"account_restricted":true,"restriction_scope":"account","explanation":"Your saved grants","decisions":[]}`)
 		case "/api/v1/workspaces/ws_test/invitations", "/api/v1/workspaces/ws_test/members/provision":
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -77,13 +79,14 @@ func TestAcceptanceGuestAccessCLI(t *testing.T) {
 		{"--format", "json", "issue", "shared", "--project", "project-1", "--limit", "20", "--offset", "0"},
 		{"--format", "json", "issue", "shared", "CLIENT-1"},
 		{"--format", "json", "workspace", "member", "access", "explain", "user-1"},
+		{"--format", "json", "workspace", "access", "me"},
 	}
 	for _, args := range cases {
 		out, err := runIssueRunsCLI(t, server.URL, args...)
 		if err != nil {
 			t.Fatalf("%v: %v %s", args, err, out)
 		}
-		if !strings.Contains(out, "issue-1") && !strings.Contains(out, "routine-1") {
+		if !strings.Contains(out, "issue-1") && !strings.Contains(out, "routine-1") && !strings.Contains(out, "self-member") {
 			t.Fatalf("machine output lost resource: %s", out)
 		}
 	}
@@ -109,7 +112,7 @@ func TestAcceptanceGuestAccessCLI(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(requests) != 9 {
+	if len(requests) != 10 {
 		t.Fatalf("unexpected requests: %v", requests)
 	}
 }

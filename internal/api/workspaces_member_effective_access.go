@@ -10,6 +10,7 @@ import (
 
 type memberAccessDecision struct {
 	access.Right
+	Name   string `json:"name,omitempty"`
 	State  string `json:"state"`
 	Reason string `json:"reason"`
 }
@@ -40,6 +41,29 @@ func (h *WorkspaceHandler) GetMemberEffectiveAccess(w http.ResponseWriter, r *ht
 		h.memberAccessError(w, access.ErrDenied)
 		return
 	}
+	h.writeEffectiveAccess(w, r, actor, user, workspace, p, false)
+}
+
+// GetOwnEffectiveAccess explains only the authenticated member's access.
+// GET /api/v1/workspaces/{workspaceId}/access/me
+func (h *WorkspaceHandler) GetOwnEffectiveAccess(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	caller := UserFromContext(r.Context())
+	workspace := WorkspaceIDFromContext(r.Context())
+	if caller == nil || workspace == "" || workspace != r.PathValue("workspaceId") {
+		h.memberAccessError(w, access.ErrDenied)
+		return
+	}
+	p, err := (access.Store{DB: h.db}).OwnPolicy(r.Context(), caller.ID, workspace)
+	if err != nil {
+		h.memberAccessError(w, err)
+		return
+	}
+	h.writeEffectiveAccess(w, r, caller.ID, caller.ID, workspace, p, true)
+}
+
+func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.Request, actor, user, workspace string, p access.Policy, own bool) {
+	store := access.Store{DB: h.db}
 	restricted, err := store.HasRestrictedMembership(r.Context(), user)
 	if err != nil {
 		h.memberAccessError(w, err)
@@ -70,7 +94,27 @@ func (h *WorkspaceHandler) GetMemberEffectiveAccess(w http.ResponseWriter, r *ht
 	}
 	for _, right := range p.Rights {
 		decision := memberAccessDecision{Right: right, State: "allowed", Reason: "explicit_resource_grant"}
-		if err = store.Check(r.Context(), user, workspace, right); err != nil {
+		// Names are read only for currently granted local resources. The final
+		// membership fence also covers changes while building this explanation.
+		grantErr := store.Check(r.Context(), user, workspace, right)
+		if grantErr == nil {
+			query := ""
+			switch right.Kind {
+			case "agent":
+				query = `SELECT name FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
+			case "routine":
+				query = `SELECT name FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
+			case "project":
+				query = `SELECT name FROM projects WHERE id=? AND workspace_id=?`
+			}
+			if query != "" {
+				if err = h.db.QueryRowContext(r.Context(), query, right.ID, workspace).Scan(&decision.Name); err != nil {
+					h.memberAccessError(w, err)
+					return
+				}
+			}
+		}
+		if err = grantErr; err != nil {
 			if !errors.Is(err, access.ErrDenied) {
 				h.memberAccessError(w, err)
 				return
@@ -103,7 +147,12 @@ func (h *WorkspaceHandler) GetMemberEffectiveAccess(w http.ResponseWriter, r *ht
 		}
 		result.Decisions = append(result.Decisions, decision)
 	}
-	current, err := store.Policy(r.Context(), actor, user, workspace)
+	var current access.Policy
+	if own {
+		current, err = store.OwnPolicy(r.Context(), user, workspace)
+	} else {
+		current, err = store.Policy(r.Context(), actor, user, workspace)
+	}
 	if err != nil {
 		h.memberAccessError(w, err)
 		return

@@ -47,6 +47,7 @@ type memberEffectiveExplanation struct {
 	Decisions         []memberAccessExplanationDecision `json:"decisions" yaml:"decisions"`
 }
 type memberAccessExplanationDecision struct {
+	Name      string `json:"name,omitempty" yaml:"name,omitempty"`
 	Kind      string `json:"kind" yaml:"kind"`
 	ID        string `json:"id" yaml:"id"`
 	Operation string `json:"operation" yaml:"operation"`
@@ -83,13 +84,20 @@ var workspaceMemberAccessExplainCmd = &cobra.Command{
 		}
 		rows := [][]string{}
 		for _, decision := range result.Decisions {
-			rows = append(rows, []string{decision.Kind, decision.ID, decision.Operation, decision.State, decision.Reason})
+			rows = append(rows, []string{decision.Kind, decision.resourceName(), decision.Operation, decision.State, decision.Reason})
 		}
 		if len(rows) == 0 {
 			rows = append(rows, []string{"", "", "", "", result.Explanation})
 		}
 		return newFormatter().Auto(result, []string{"KIND", "RESOURCE", "OPERATION", "STATE", "REASON"}, rows)
 	},
+}
+
+func (d memberAccessExplanationDecision) resourceName() string {
+	if d.Name != "" {
+		return d.Name
+	}
+	return d.ID
 }
 
 func memberAccessCommand(cmd *cobra.Command, target string, replace bool) error {
