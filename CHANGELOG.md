@@ -35,8 +35,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **A temporarily missing workspace no longer silently switches context or discards a draft (#3083).** Retry preserves the selected workspace and local draft while content and workspace requests remain unavailable; choosing another workspace uses the existing unsaved-change confirmation.
 - **Memory file access remains inside its configured storage root during directory replacement.** Sidecar fallback reads and writes, indexing, restores and proposed-skill reads use pinned directory handles and reject symlinked path components. Local sidecar fallback requires an explicit trusted storage root; ordinary crew launches configure it automatically. Custom sidecars without one retain the host bridge but refuse unsafe local fallback.
 
-- **Boards support reviewed agent work and collaborative editing (#3069).** Discuss saved drawings, upload private images and insert local library elements. Disjoint remote changes can be rebased while conflicting drafts remain available; saved undo checks current server revisions. Editors can send a selected wireframe to an agent or request a Mermaid diagram, then confirm insertion through an isolated converter on supported desktop Chromium installations. One-use permissions explicitly authorize a live run to edit selected human drawings. Agent outputs remain private artifacts when automatic pinning is no longer allowed.
-
 - Invitation creation, reissue, withdrawal and acceptance record non-secret workspace activity atomically with their state changes (#3084).
 - **Private workflow dispatch follows current account status.** Queued and recovered work retains its existing resource, role and execution safety checks.
 
