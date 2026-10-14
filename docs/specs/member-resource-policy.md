@@ -208,3 +208,5 @@ Issuer triggers fence only live-to-inactive transitions, not later changes to
 an already inactive issuer. Role, suspension and membership changes preserve
 stored provenance. Hard deletion of an issuer account is an exception: its
 grants are deleted to satisfy the user foreign key.
+
+Policy replacement and deliberate reissue append `member.access_changed` atomically with the policy, recording previous/current rights, issuers, revisions and mode. API and CLI may explicitly reissue live shares; Settings offers reissue for inactive shares.

@@ -19,6 +19,7 @@ func TestMemberEffectiveAccessExplainsInertIssuer(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('reason-admin-member',?,'reason-admin','ADMIN'),('reason-guest-member',?,'reason-guest','VIEWER')`, ws, ws)
 	execOrFatal(t, db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('reason-crew',?,'Crew','reason-crew')`, ws)
 	seedAgentRow(t, db, "reason-agent", ws, "reason-crew", "Shared worker", "reason-agent", "AGENT")
+	execOrFatal(t, db, `UPDATE users SET full_name='Former administrator' WHERE id='reason-admin'`)
 	store := access.Store{DB: db}
 	m, err := store.Membership(t.Context(), "reason-guest", ws)
 	if err != nil {
@@ -50,6 +51,9 @@ func TestMemberEffectiveAccessExplainsInertIssuer(t *testing.T) {
 	policy, err := store.Policy(t.Context(), owner, "reason-guest", ws)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if policy.GrantDetails[0].IssuerName != "Former administrator" {
+		t.Fatalf("issuer display name missing: %+v", policy)
 	}
 	policy.GrantDetails[0].IssuerID = owner
 	policy.GrantDetails[0].Live = true
@@ -83,4 +87,42 @@ func TestMemberEffectiveAccessExplainsInertIssuer(t *testing.T) {
 		t.Fatalf("explicit reissue did not use authenticated issuer: %+v", policy)
 	}
 
+	var payload string
+	if err := db.QueryRow(`SELECT payload FROM journal_entries WHERE entry_type='member.access_changed' AND workspace_id=? ORDER BY rowid DESC LIMIT 1`, ws).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var event struct {
+		Previous []access.GrantDetail `json:"previous_grants"`
+		Current  []access.GrantDetail `json:"grants"`
+		Reissued []access.Right       `json:"reissued_rights"`
+	}
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		t.Fatal(err)
+	}
+	if len(event.Previous) != 1 || event.Previous[0].IssuerID != "reason-admin" || event.Previous[0].Live || len(event.Current) != 1 || event.Current[0].IssuerID != owner || !event.Current[0].Live || len(event.Reissued) != 1 || event.Reissued[0] != policy.Rights[0] {
+		t.Fatalf("incomplete reissue audit: %s", payload)
+	}
+	if strings.Contains(payload, "@") || strings.Contains(payload, "Former administrator") {
+		t.Fatalf("audit contains an email: %s", payload)
+	}
+	// If journaling fails, the policy, issuer and revision must all roll back.
+	before := policy
+	execOrFatal(t, db, `CREATE TRIGGER reject_member_access_audit BEFORE INSERT ON journal_entries WHEN NEW.entry_type='member.access_changed' BEGIN SELECT RAISE(ABORT,'synthetic audit failure'); END`)
+	body, _ := json.Marshal(access.Policy{Membership: before.Membership, Rights: []access.Right{}})
+	request := withWorkspaceUser(httptest.NewRequest("PUT", "/", bytes.NewReader(body)), owner, ws, "OWNER")
+	request.SetPathValue("workspaceId", ws)
+	request.SetPathValue("memberId", before.ID)
+	response := httptest.NewRecorder()
+	h.PutMemberAccess(response, request)
+	if response.Code != 500 {
+		t.Fatalf("audit failure = %d %s", response.Code, response.Body.String())
+	}
+	after, err := store.Policy(t.Context(), owner, "reason-guest", ws)
+	if err != nil || after.Revision != before.Revision || len(after.Rights) != 1 || after.GrantDetails[0].IssuerID != owner {
+		t.Fatalf("audit failure committed policy: %+v %v", after, err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE entry_type='member.access_changed' AND workspace_id=?`, ws).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("expected one event per successful policy save: %d %v", count, err)
+	}
 }

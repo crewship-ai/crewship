@@ -139991,6 +139991,9 @@
                           "issuer_id": {
                             "type": "string"
                           },
+                          "issuer_name": {
+                            "type": "string"
+                          },
                           "kind": {
                             "type": "string"
                           },
@@ -140383,6 +140386,9 @@
                         "issuer_id": {
                           "type": "string"
                         },
+                        "issuer_name": {
+                          "type": "string"
+                        },
                         "kind": {
                           "type": "string"
                         },
@@ -140645,6 +140651,9 @@
                             "type": "string"
                           },
                           "issuer_id": {
+                            "type": "string"
+                          },
+                          "issuer_name": {
                             "type": "string"
                           },
                           "kind": {

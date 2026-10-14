@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Policy saves and explicit grant reissues record previous and new issuers and rights atomically. Member access CLI supports `--reissue` and shows inactive shares; Settings displays issuer names when available.
+
 - **Editing one Guest share preserves other administrators’ grants.** Unchanged rights retain their issuer and creation time, and inactive grants require an explicit reissue. Administrative policy shows issuer and active status; changes to already inactive issuers no longer stop newly authorized work.
 
 - ⚠️ **Behaviour change: resource shares follow current administrator authority.** Guest discovery, Issues, chat and routine execution stop using a grant when its issuer leaves, is demoted or suspended, or becomes a Guest. Stored shares are preserved; restoring the issuer does not revive previously admitted runs.
