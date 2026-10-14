@@ -36,6 +36,8 @@ import (
 // field is covered even though a populated document would drop it.
 func yamlParityTypes() []any {
 	return []any{
+		// cmd_share.go
+		objectShareRow{},
 		// cmd_doctor_cleanup.go
 		localCleanupSnapshot{},
 		// cmd_config.go

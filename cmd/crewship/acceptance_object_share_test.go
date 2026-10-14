@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/crewship-ai/crewship/internal/access"
 )
 
@@ -23,7 +25,7 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 		wantOperations []string
 		wantReissue    bool
 	}{
-		{"share project by email", []string{"share", "project", "project-1", "--with", "CLIENT@example.test", "--operation", "list,read"}, "restricted", 200, false, []string{"list", "read"}, false},
+		{"share project by email", []string{"share", "project", "project-1", "--with", "CLIENT@example.test", "--operation", "list,read", "--format", "yaml"}, "restricted", 200, false, []string{"list", "read"}, false},
 		{"unshare routine by user", []string{"unshare", "routine", "routine-1", "--with", "user-1", "--operation", "run"}, "restricted", 200, false, []string{}, false},
 		{"explicit reissue", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "run,run", "--reissue"}, "restricted", 200, false, []string{"run"}, true},
 		{"conflict no retry", []string{"unshare", "routine", "routine-1", "--with", "member-1", "--operation", "run"}, "restricted", 409, true, []string{}, false},
@@ -78,6 +80,15 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 			out, err := runGuestCLI(t, server.URL, "", tc.args...)
 			if (err != nil) != tc.wantError {
 				t.Fatalf("err=%v output=%s", err, out)
+			}
+			if tc.name == "share project by email" {
+				var document map[string]any
+				if err := yaml.Unmarshal([]byte(out), &document); err != nil {
+					t.Fatal(err, out)
+				}
+				if document["membership_id"] != "member-1" || document["revision"] != 8 || document["mode"] != "restricted" {
+					t.Fatalf("YAML snapshot keys differ: %s", out)
+				}
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -155,6 +166,29 @@ func TestAcceptanceObjectShareListCLI(t *testing.T) {
 	for _, text := range []string{"MEMBER", "EMAIL", "OPERATION", "ISSUER", "STATE", "old-admin", "inactive", "client@example.test"} {
 		if !strings.Contains(out, text) {
 			t.Fatalf("missing %s: %s", text, out)
+		}
+	}
+	jsonOut, err := runGuestCLI(t, server.URL, "", "--format", "json", "share", "list", "routine", "routine-1")
+	if err != nil {
+		t.Fatal(err, jsonOut)
+	}
+	yamlOut, err := runGuestCLI(t, server.URL, "", "--format", "yaml", "share", "list", "routine", "routine-1")
+	if err != nil {
+		t.Fatal(err, yamlOut)
+	}
+	var jsonRows, yamlRows []map[string]any
+	if err = json.Unmarshal([]byte(jsonOut), &jsonRows); err != nil {
+		t.Fatal(err)
+	}
+	if err = yaml.Unmarshal([]byte(yamlOut), &yamlRows); err != nil {
+		t.Fatal(err)
+	}
+	if len(jsonRows) != 1 || len(yamlRows) != 1 {
+		t.Fatalf("wrong machine rows: %s / %s", jsonOut, yamlOut)
+	}
+	for _, key := range []string{"member_id", "email", "kind", "id", "operation", "issuer_id", "created_at", "live"} {
+		if jsonRows[0][key] != yamlRows[0][key] {
+			t.Fatalf("machine key %s mismatch: %s / %s", key, jsonOut, yamlOut)
 		}
 	}
 	if strings.Contains(out, "foreign-agent") {

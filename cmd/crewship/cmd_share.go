@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -196,13 +197,23 @@ func changeObjectShare(kind, id, target string, operations []string, remove, rei
 	if updated.ID != policy.ID || updated.Mode != policy.Mode || updated.Revision <= policy.Revision {
 		return fmt.Errorf("save returned an unexpected policy snapshot; read the current policy")
 	}
-	return newFormatter().Auto(updated, []string{"MEMBER", "MODE", "REVISION"}, [][]string{{updated.ID, updated.Mode, fmt.Sprint(updated.Revision)}})
+	document, err := json.Marshal(updated)
+	if err != nil {
+		return err
+	}
+	return newFormatter().Auto(cli.RawJSON(document), []string{"MEMBER", "MODE", "REVISION"}, [][]string{{updated.ID, updated.Mode, fmt.Sprint(updated.Revision)}})
 }
 
 type objectShareRow struct {
-	MemberID string `json:"member_id"`
-	Email    string `json:"email"`
-	access.GrantDetail
+	MemberID   string `json:"member_id" yaml:"member_id"`
+	Email      string `json:"email" yaml:"email"`
+	Kind       string `json:"kind" yaml:"kind"`
+	ID         string `json:"id" yaml:"id"`
+	Operation  string `json:"operation" yaml:"operation"`
+	IssuerID   string `json:"issuer_id" yaml:"issuer_id"`
+	IssuerName string `json:"issuer_name,omitempty" yaml:"issuer_name,omitempty"`
+	CreatedAt  string `json:"created_at" yaml:"created_at"`
+	Live       bool   `json:"live" yaml:"live"`
 }
 
 func listObjectShares(kind, id string) error {
@@ -230,7 +241,7 @@ func listObjectShares(kind, id string) error {
 				if grant.Live {
 					state = "active"
 				}
-				result = append(result, objectShareRow{MemberID: member.ID, Email: member.email(), GrantDetail: grant})
+				result = append(result, objectShareRow{MemberID: member.ID, Email: member.email(), Kind: grant.Kind, ID: grant.ID, Operation: grant.Operation, IssuerID: grant.IssuerID, IssuerName: grant.IssuerName, CreatedAt: grant.CreatedAt, Live: grant.Live})
 				rows = append(rows, []string{member.ID, member.email(), grant.Operation, grant.IssuerID, state})
 			}
 		}
