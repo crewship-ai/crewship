@@ -147,6 +147,9 @@ counters or filter the per-check array.`,
 		// do (#1672). Advisory — WARN at worst, because a known limitation is
 		// not a broken install.
 		runProbe(runCheckRuntimeGaps)
+		// Pages Apps (#3108): optional, so "not enabled" is INFO. Lists
+		// images only — never builds or starts a container.
+		runProbe(runCheckPagesApps)
 		results = append(results, checkDataDir(fixMode))
 		results = append(results, checkDataDirWritable())
 		runProbe(checkDBMigrationVersion)
