@@ -1493,7 +1493,11 @@ intrinsic administrator access, valid live Page grants and folder access; it
 does not create a grant. Actor rights, successor rights and expected ownership
 are rechecked under the same database writer fence. The ownership change and
 administrator Inbox notice commit together, followed by the existing journal
-audit emission. Private content, revisions and stored grant rows are preserved.
+audit emission. Repeated transfers refresh the existing administrator Inbox card
+for that output as unread, clearing global read/resolved markers and all per-user
+read markers. Each committed transfer retains a separate opaque journal event.
+Private content, revisions
+and stored grant rows are preserved.
 Effective access
 is re-evaluated: grants issued by a former MEMBER owner become inert when that
 human no longer owns or administers the Page. The transfer does not reissue
