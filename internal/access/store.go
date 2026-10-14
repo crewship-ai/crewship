@@ -9,12 +9,14 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 var ErrDenied = errors.New("resource authority denied")
+var ErrIssuerDenied = fmt.Errorf("grant issuer authority unavailable: %w", ErrDenied)
 var ErrConflict = errors.New("resource authority revision changed")
 
 type Store struct{ DB *sql.DB }
@@ -125,9 +127,23 @@ func check(ctx context.Context, q queryer, user, workspace string, r Right) (Mem
 		return m, ErrDenied
 	}
 	var one int
-	err = q.QueryRowContext(ctx, `SELECT 1 FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&one)
+	err = q.QueryRowContext(ctx, `SELECT 1 FROM live_access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = ErrDenied
+		// Retained inert rows explain denial without treating them as authority.
+		var issuer string
+		err = q.QueryRowContext(ctx, `SELECT created_by FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&issuer)
+		if errors.Is(err, sql.ErrNoRows) {
+			return m, ErrDenied
+		}
+		if err != nil {
+			return m, err
+		}
+		if err = operator(ctx, q, issuer, workspace); errors.Is(err, ErrDenied) {
+			return m, ErrIssuerDenied
+		} else if err != nil {
+			return m, err
+		}
+		return m, ErrDenied
 	}
 	return m, err
 }
@@ -144,8 +160,10 @@ func (s Store) Check(ctx context.Context, user, workspace string, r Right) error
 func operator(ctx context.Context, q queryer, user, workspace string) error {
 	var one int
 	err := q.QueryRowContext(ctx, `SELECT 1 FROM workspace_members wm JOIN workspaces w ON w.id=wm.workspace_id
+        JOIN users actor ON actor.id=wm.user_id AND actor.suspended_at IS NULL
         WHERE wm.user_id=? AND wm.workspace_id=? AND wm.access_mode='trusted'
-        AND wm.role IN ('OWNER','ADMIN') AND w.deleted_at IS NULL`, user, workspace).Scan(&one)
+        AND wm.role IN ('OWNER','ADMIN') AND w.deleted_at IS NULL
+        AND NOT EXISTS(SELECT 1 FROM workspace_members ceiling WHERE ceiling.user_id=wm.user_id AND ceiling.access_mode='restricted')`, user, workspace).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrDenied
 	}
@@ -155,7 +173,7 @@ func operator(ctx context.Context, q queryer, user, workspace string) error {
 // Replace atomically replaces an explicit member policy. Optimistic revisions
 // prevent a stale Settings save from restoring a concurrently revoked grant.
 // Restricting administrators is forbidden: access administration has one owner.
-func (s Store) Replace(ctx context.Context, actor, user, workspace, mode string, expected Membership, rights []Right) (Membership, error) {
+func (s Store) Replace(ctx context.Context, actor, user, workspace, mode string, expected Membership, rights []Right, reissue ...Right) (Membership, error) {
 	if s.DB == nil {
 		return Membership{}, ErrDenied
 	}
@@ -164,7 +182,7 @@ func (s Store) Replace(ctx context.Context, actor, user, workspace, mode string,
 		return Membership{}, err
 	}
 	defer tx.Rollback()
-	m, err := s.ReplaceIn(ctx, tx, actor, user, workspace, mode, expected, rights)
+	m, err := s.ReplaceIn(ctx, tx, actor, user, workspace, mode, expected, rights, reissue...)
 	if err != nil {
 		return m, err
 	}
@@ -173,7 +191,7 @@ func (s Store) Replace(ctx context.Context, actor, user, workspace, mode string,
 
 // ReplaceIn applies the same complete policy inside a caller-owned transaction.
 // The caller must commit membership creation, grants and its audit atomically.
-func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace, mode string, expected Membership, rights []Right) (Membership, error) {
+func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace, mode string, expected Membership, rights []Right, reissue ...Right) (Membership, error) {
 	if tx == nil {
 		return Membership{}, ErrDenied
 	}
@@ -212,13 +230,53 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 			return m, err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM access_grants WHERE member_id=?`, m.ID); err != nil {
+	renew := map[Right]bool{}
+	for _, r := range reissue {
+		if !seen[r] || renew[r] {
+			return m, ErrDenied
+		}
+		renew[r] = true
+	}
+	// Read before modifying: a complete-document save must preserve the issuer
+	// and timestamp of unchanged rights, including inert shares.
+	rows, err := tx.QueryContext(ctx, `SELECT id,resource_kind,COALESCE(agent_id,project_id,routine_id),operation FROM access_grants WHERE member_id=?`, m.ID)
+	if err != nil {
 		return m, err
+	}
+	type savedGrant struct {
+		id    string
+		right Right
+	}
+	var saved []savedGrant
+	for rows.Next() {
+		var g savedGrant
+		if err = rows.Scan(&g.id, &g.right.Kind, &g.right.ID, &g.right.Operation); err != nil {
+			rows.Close()
+			return m, err
+		}
+		saved = append(saved, g)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return m, err
+	}
+	for _, g := range saved {
+		if seen[g.right] && !renew[g.right] {
+			delete(seen, g.right)
+			continue
+		}
+		if _, err = tx.ExecContext(ctx, `DELETE FROM access_grants WHERE id=? AND member_id=?`, g.id, m.ID); err != nil {
+			return m, err
+		}
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE workspace_members SET access_mode=?,access_revision=access_revision+1 WHERE id=?`, mode, m.ID); err != nil {
 		return m, err
 	}
 	for _, r := range rights {
+		if !seen[r] {
+			continue
+		}
 		var agentID, projectID, routineID any
 		if r.Kind == "agent" {
 			agentID = r.ID

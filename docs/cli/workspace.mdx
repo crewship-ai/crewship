@@ -420,6 +420,9 @@ crewship --workspace WORKSPACE --format json workspace member access get MEMBER 
 
 ### `crewship workspace member access set <member-id-or-user-id>`
 
+To deliberately take over a saved share, use `workspace member access set MEMBER --file policy.json --reissue routine:ROUTINE_ID:run` (repeatable). The right must be in the complete policy. The default policy table shows each issuer and whether a share is active or inactive. The API and CLI can explicitly reissue active shares too; Settings offers this action for inactive shares. Policy saves and reissues record old and new issuers and rights atomically in workspace activity.
+
+
 Replace the complete policy using its original membership ID and revision.
 Edit the `mode` and `rights` fields from `access get`; do not invent a revision.
 An explicit empty `rights` array in restricted mode denies all resource grants.
@@ -507,3 +510,9 @@ revision and the account-wide restriction explanation.
 ```bash
 crewship --format json workspace access me
 ```
+
+Resource policy JSON includes read-only `grant_details` with each grant’s
+`issuer_id`, `created_at` and `live` status. Saving unchanged rights preserves
+their provenance. To deliberately reissue a share as the authenticated admin,
+include its exact `{kind,id,operation}` in both `rights` and optional `reissue`.
+Unrelated edits do not reactivate shares from an inactive issuer.

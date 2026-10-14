@@ -109,6 +109,20 @@ current decisions and execution prerequisites. This explains saved grants rather
 than enumerating unshared resources. Trusted members receive their role-based
 explanation; the endpoint does not grant new authority.
 
+Resource grants recheck their issuer at use time. The issuer must remain an
+active, trusted OWNER/ADMIN in the resource's workspace and must not have an
+account-wide Guest ceiling. This applies to discovery, Issues projections,
+project inputs, chat audiences, private preflight, routine catalogs, admission,
+recovery and dispatch. Stored grants remain visible in the saved policy but are
+inert while the issuer lacks authority. This retains stored shares like Pages;
+Pages currently has a narrower issuer check and is not yet unified with this model.
+Role loss, removal, suspension or a Guest ceiling advances affected recipient
+revisions transactionally. Restoring the issuer can authorize a new use of the
+preserved grant; previously admitted work remains fenced and requires a fresh
+admission. Changes in an unrelated workspace do not revoke valid local shares.
+The upgrade preserves valid and inert grant metadata and fences work whose
+issuer was already unavailable. Effective access explains an unavailable issuer.
+
 Supported operations:
 
 | Resource | Operations | Current scope |
@@ -192,4 +206,18 @@ Installed adapters' static profile declarations constrain navigation. Missing
 runtime installation preserves known declaration authority; unknown profiles
 remain denied. Operational readiness checks stay at execution time.
 
+Complete policy saves preserve the id, issuer and creation time of unchanged
+rights, including inactive shares. `grant_details` is read-only administrative
+metadata with `issuer_id`, `created_at` and `live`; submitted metadata never
+confers authority. To deliberately issue an inactive share under the current
+administrator, include that exact right in both `rights` and `reissue`.
+The Settings editor labels inactive shares and offers “Reissue as me”; an
+unrelated edit never silently reissues them. A reissue uses the authenticated
+actor and fresh metadata and participates in the same revision check.
+Issuer triggers fence only live-to-inactive transitions, not later changes to
+an already inactive issuer. Role, suspension and membership changes preserve
+stored provenance. Hard deletion of an issuer account is an exception: its
+grants are deleted to satisfy the user foreign key.
+
+Policy replacement and deliberate reissue append `member.access_changed` atomically with the policy, recording previous/current rights, issuers, revisions and mode. API and CLI may explicitly reissue live shares; Settings offers reissue for inactive shares.
 Guest Page actions retain the Pages ACL checks and additionally require an explicit `routine:run` grant and the routine’s agent grants. Existing `routine.run` capabilities are not backfilled into routine grants.

@@ -3,68 +3,24 @@ package ws
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"testing"
 
-	_ "modernc.org/sqlite"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // seededDB returns a sqlite test DB pre-populated with one workspace, crew,
 // agent, mission, and chat all wired to user "u-good".
 func seededDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := sql.Open("sqlite", filepath.Join(dir, "auth.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	schema := `
-		CREATE TABLE workspace_members (
-            id TEXT,
-            access_mode TEXT NOT NULL DEFAULT 'trusted',
-			workspace_id TEXT NOT NULL,
-			user_id TEXT NOT NULL,
-			role TEXT NOT NULL DEFAULT 'MEMBER'
-		);
-		CREATE TABLE crews (
-			id TEXT PRIMARY KEY,
-			workspace_id TEXT NOT NULL,
-			deleted_at TEXT
-		);
-		CREATE TABLE agents (
-			id TEXT PRIMARY KEY,
-			workspace_id TEXT NOT NULL,
-			deleted_at TEXT
-		);
-		CREATE TABLE missions (
-			id TEXT PRIMARY KEY,
-			crew_id TEXT NOT NULL
-		);
-		CREATE TABLE chats (
-            agent_id TEXT,
-			id TEXT PRIMARY KEY,
-			workspace_id TEXT NOT NULL,
-			created_by TEXT,
-			mode TEXT NOT NULL DEFAULT 'CHAT',
-			origin TEXT,
-			visibility TEXT NOT NULL DEFAULT 'private'
-		);
-		CREATE TABLE access_grants (member_id TEXT, resource_kind TEXT, agent_id TEXT, project_id TEXT, operation TEXT);
-        CREATE TABLE chat_participants (chat_id TEXT NOT NULL, user_id TEXT NOT NULL);
-	`
-	if _, err := db.Exec(schema); err != nil {
-		t.Fatalf("schema: %v", err)
-	}
+	db := testutil.MigratedSQLDB(t)
 	stmts := []string{
-		`INSERT INTO workspace_members(workspace_id, user_id) VALUES ('ws-1', 'u-good')`,
-		`INSERT INTO crews(id, workspace_id, deleted_at) VALUES ('crew-live', 'ws-1', NULL)`,
-		`INSERT INTO crews(id, workspace_id, deleted_at) VALUES ('crew-deleted', 'ws-1', '2024-01-01')`,
-		`INSERT INTO agents(id, workspace_id, deleted_at) VALUES ('agent-live', 'ws-1', NULL)`,
-		`INSERT INTO agents(id, workspace_id, deleted_at) VALUES ('agent-deleted', 'ws-1', '2024-01-01')`,
-		`INSERT INTO missions(id, crew_id) VALUES ('mission-1', 'crew-live')`,
-		`INSERT INTO chats(id, workspace_id, created_by) VALUES ('chat-1', 'ws-1', 'u-good')`,
+		`INSERT INTO users(id,email) VALUES ('u-good','u-good@ws.test')`,
+		`INSERT INTO workspaces(id,name,slug) VALUES ('ws-1','WS fixture','ws-fixture')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id) VALUES ('ws-member','ws-1','u-good')`,
+		`INSERT INTO crews(id,workspace_id,name,slug,deleted_at) VALUES ('crew-live','ws-1','Live','ws-live',NULL),('crew-deleted','ws-1','Deleted','ws-deleted','2024-01-01')`,
+		`INSERT INTO agents(id,workspace_id,crew_id,name,slug,agent_role,deleted_at) VALUES ('agent-live','ws-1','crew-live','Live','ws-agent-live','AGENT',NULL),('agent-deleted','ws-1','crew-live','Deleted','ws-agent-deleted','AGENT','2024-01-01')`,
+		`INSERT INTO missions(id,workspace_id,crew_id,lead_agent_id,trace_id,title,status) VALUES ('mission-1','ws-1','crew-live','agent-live','ws-test-trace','WS fixture','TODO')`,
+		`INSERT INTO chats(id,workspace_id,agent_id,created_by) VALUES ('chat-1','ws-1','agent-live','u-good')`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
