@@ -669,7 +669,7 @@ func (h *InstanceAdminHandler) RemoveMembership(w http.ResponseWriter, r *http.R
 	if err := departWorkspace(ctx, h.db, h.journal, actorID, wsID, userID, audit); err != nil {
 		var needsManual *ErrPagesNeedManualTransfer
 		if errors.As(err, &needsManual) {
-			replyPageOwnershipConflict(w, "cannot remove this member: ", needsManual)
+			replyInstancePageOwnershipConflict(w, needsManual)
 			return
 		}
 		replyInternalError(w, h.logger, "remove membership", err)

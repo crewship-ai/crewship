@@ -192,7 +192,7 @@ func TestOutputCustodyDepartureAndGDPRRefuseAtomically(t *testing.T) {
 				if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
 					t.Fatal(err)
 				}
-				if doc.Code != "page_ownership_transfer_required" || len(doc.Pages) != 1 || doc.Pages[0].ID != "private-output" || doc.Pages[0].Type != kind {
+				if doc.Code != "page_ownership_transfer_required" || len(doc.Pages) != 1 || doc.Pages[0].ID != "private-output" || (mode != "instance" && doc.Pages[0].Type != kind) {
 					t.Fatalf("structured conflict %s", w.Body.String())
 				}
 				if after := custodySnapshot(t, f.db, custodyProtectedTables...); after != before {
