@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/inbox"
 )
 
 // Custody metadata never includes private source, scene, spec or history.
@@ -294,8 +296,20 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 		writeJSON(w, 409, WorkspacePageOwnershipError{Error: "page ownership changed; refresh before transferring", Code: "owner_changed"})
 		return
 	}
-	payload, _ := json.Marshal(map[string]any{"page_id": id, "page_slug": p.Slug, "from_user_id": p.OwnerUserID, "to_user_id": body.SuccessorUserID, "actor_user_id": actor.ID, "reason": "explicit_human_transfer"})
-	if _, err = tx.ExecContext(ctx, `INSERT INTO inbox_items(id,workspace_id,kind,source_id,target_role,title,body_md,sender_type,sender_name,state,priority,blocking,payload_json,created_at,updated_at) VALUES(?,?,?,?,'ADMIN',?,?,'system','Pages','unread','medium',0,?,?,?)`, generateCUID(), ws, pagesTransferInboxKind, id, "Output ownership explicitly transferred", "A workspace administrator selected a human successor who already had read access. Private content and stored grant rows were preserved; effective access follows current Page permissions.", string(payload), now, now); err != nil {
+	// The Page identifies a subject with new custody news, not a once-only
+	// event. Reopen its administrator card atomically; the journal below keeps
+	// the history of every committed transfer.
+	if err = inbox.UpsertTx(ctx, tx, h.logger, inbox.Item{
+		WorkspaceID: ws,
+		Kind:        pagesTransferInboxKind,
+		SourceID:    id,
+		TargetRole:  "ADMIN",
+		Title:       "Output ownership explicitly transferred",
+		BodyMD:      "A workspace administrator selected a human successor who already had read access. Private content and stored grant rows were preserved; effective access follows current Page permissions.",
+		SenderType:  "system",
+		SenderName:  "Pages",
+		Payload:     map[string]any{"page_id": id, "page_slug": p.Slug, "from_user_id": p.OwnerUserID, "to_user_id": body.SuccessorUserID, "actor_user_id": actor.ID, "reason": "explicit_human_transfer"},
+	}); err != nil {
 		replyInternalError(w, h.logger, "record output custody notice", err)
 		return
 	}
