@@ -207,7 +207,7 @@ try {
   await expect(pages.reader.getByRole('menuitem',{name:/Delete/})).toHaveCount(0)
   await pages.reader.getByRole('menuitem',{name:/Rename/}).click()
   const renameDialog = pages.reader.getByRole('dialog',{name:'Rename or change icon'})
-  await renameDialog.getByLabel('Name',{exact:true}).fill('ACL browser renamed')
+  await renameDialog.getByLabel(/^Name/).fill('ACL browser renamed')
   const renamed = pages.reader.waitForResponse(r=>r.request().method()==='PATCH' && new URL(r.url()).pathname==='/api/v1/page-folders/acl-browser')
   await renameDialog.getByRole('button',{name:'Save',exact:true}).click()
   await check('VIEWER folder writer can rename through the real handler',(await renamed).status()===200)
