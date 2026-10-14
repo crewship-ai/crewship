@@ -17,10 +17,10 @@ anchors and the **Use** flow belong to Artifacts 1.1. Preparatory execution code
 remains dormant and reports `feature_disabled`; configuration or client input
 cannot activate it. Board editors,
 Board HTTP/CLI/MCP operations and Board job admission are delivered separately.
-The immutable migration chain includes dormant Board tables because later
-Artifact migrations depend on them. Existing Board blobs, pins, history and
-backups remain protected; they do not expose a drawing editor or authorize a
-Board job in this version. Interactive artifact execution remains disabled.
+Three consolidated migrations define comment grants, Artifacts and the shared
+Board storage schema. Dormant Board tables preserve the common storage and backup
+contract; their presence does not expose a drawing editor or authorize a Board
+job in this version. Interactive artifact execution remains disabled.
 
 ## Private content presence
 

@@ -16269,6 +16269,123 @@
         },
         "type": "array"
       },
+      "WorkspacePageOwnershipError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "owner_changed"
+            ],
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "WorkspacePageOwnershipListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "next_cursor": {
+            "type": "string"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspacePageOwnershipSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "pages"
+        ],
+        "type": "object"
+      },
+      "WorkspacePageOwnershipSuccessor": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "name",
+          "email"
+        ],
+        "type": "object"
+      },
+      "WorkspacePageOwnershipSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "eligible_successors": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspacePageOwnershipSuccessor"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_name": {
+            "type": "string"
+          },
+          "owner_user_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "artifact",
+              "board"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "type",
+          "owner_user_id",
+          "owner_name",
+          "eligible_successors"
+        ],
+        "type": "object"
+      },
+      "WorkspacePageOwnershipTransferRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_owner_user_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "successor_user_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_owner_user_id",
+          "successor_user_id"
+        ],
+        "type": "object"
+      },
       "WorkspacePendingRunResponseV1": {
         "properties": {
           "can_cancel": {
@@ -148736,6 +148853,7 @@
             }
           },
           {
+            "description": "Filter outputs by their current human owner.",
             "in": "query",
             "name": "owner_user_id",
             "required": false,
@@ -148751,6 +148869,28 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Maximum output summaries per page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque next_cursor returned for the same workspace and owner filter.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 1024,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -148758,11 +148898,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipListResponse"
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "Private custody metadata and workspace member contacts must not be cached.",
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -148881,35 +149032,39 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkspacePageOwnershipTransferRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipSummary"
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "Private custody metadata and workspace member contacts must not be cached.",
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
                 }
               }
             },
@@ -148919,15 +149074,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
                 }
               }
             },
@@ -148937,15 +149084,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
                 }
               }
             },
@@ -148955,15 +149094,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
                 }
               }
             },
@@ -148973,15 +149104,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
                 }
               }
             },
@@ -148991,15 +149114,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePageOwnershipError"
                 }
               }
             },
