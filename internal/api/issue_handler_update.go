@@ -352,36 +352,10 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Labels != nil {
-		if _, err := tx.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id=?`, missionID); err != nil {
-			internalError(w, r, h.logger, "delete issue labels", err)
+		if err = replaceIssueLabelsTx(r.Context(), tx, missionID, *req.Labels); err != nil {
+			internalError(w, r, h.logger, "replace issue labels", err)
 			return
 		}
-		for _, labelID := range *req.Labels {
-			if _, err := tx.ExecContext(r.Context(), `INSERT OR IGNORE INTO mission_labels (mission_id,label_id) VALUES(?,?)`, missionID, labelID); err != nil {
-				internalError(w, r, h.logger, "insert issue label", err)
-				return
-			}
-		}
-	}
-	issue, err := scanIssueRow(tx.QueryRowContext(r.Context(), issueSelectQuery()+` WHERE m.id=?`, missionID))
-	if err != nil {
-		internalError(w, r, h.logger, "read updated issue", err)
-		return
-	}
-	if err = h.loadChatMetadataQuery(r, tx, &issue); err != nil {
-		internalError(w, r, h.logger, "issue capabilities", err)
-		return
-	}
-	if err = completeHumanIssueOperation(r, tx, op, missionID, issue); err != nil {
-		internalError(w, r, h.logger, "complete issue operation", err)
-		return
-	}
-	if err = tx.Commit(); err != nil {
-		internalError(w, r, h.logger, "commit issue update", err)
-		return
-	}
-	if op != nil {
-		w.Header().Set("Operation-ID", op.ID)
 	}
 
 	// Log activity for significant changes. Collected into one batch so the
@@ -434,7 +408,35 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		ev(actionDescriptionChanged, describeDescriptionChange(currentDescription.String, *req.Description))
 	}
 
-	h.events().record(r.Context(), wsID, map[string]string{"id": missionID}, evs...)
+	for _, event := range evs {
+		if _, err = persistIssueActivityTx(r.Context(), tx, event); err != nil {
+			internalError(w, r, h.logger, "persist issue activity", err)
+			return
+		}
+	}
+	issue, err := scanIssueRow(tx.QueryRowContext(r.Context(), issueSelectQuery()+` WHERE m.id=?`, missionID))
+	if err != nil {
+		internalError(w, r, h.logger, "read updated issue", err)
+		return
+	}
+	if err = h.loadChatMetadataQuery(r, tx, &issue); err != nil {
+		internalError(w, r, h.logger, "issue capabilities", err)
+		return
+	}
+	if err = completeHumanIssueOperation(r, tx, op, missionID, issue); err != nil {
+		internalError(w, r, h.logger, "complete issue operation", err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit issue update", err)
+		return
+	}
+	if op != nil {
+		w.Header().Set("Operation-ID", op.ID)
+	}
+
+	h.drainCommittedIssueMutation(wsID)
+	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID})
 
 	// A distinct, second broadcast for a status transition specifically
 	// (#2257). issue.updated (just above) tells a subscriber "refetch this

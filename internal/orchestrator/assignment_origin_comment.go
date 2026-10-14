@@ -17,8 +17,17 @@ func WriteAssignmentResultComment(ctx context.Context, db *sql.DB, assignmentID,
 		return false, err
 	}
 	defer tx.Rollback()
+	if assignmentID != "" {
+		var wrongTarget bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM assignments WHERE id=? AND (workspace_id<>? OR mission_id IS NOT ?))`, assignmentID, workspaceID, missionID).Scan(&wrongTarget); err != nil {
+			return false, err
+		}
+		if wrongTarget {
+			return false, nil
+		}
+	}
 	var originID, requesterID string
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(a.chat_origin_id,m.chat_origin_id,''),COALESCE(a.created_by_user_id,'') FROM missions m LEFT JOIN assignments a ON a.id=? AND a.workspace_id=m.workspace_id WHERE m.id=? AND m.workspace_id=?`, assignmentID, missionID, workspaceID).Scan(&originID, &requesterID)
+	err = tx.QueryRowContext(ctx, `SELECT CASE WHEN a.id IS NOT NULL THEN COALESCE(a.chat_origin_id,'') ELSE COALESCE(m.chat_origin_id,'') END,COALESCE(a.created_by_user_id,'') FROM missions m LEFT JOIN assignments a ON a.id=? AND a.workspace_id=m.workspace_id AND a.mission_id=m.id WHERE m.id=? AND m.workspace_id=?`, assignmentID, missionID, workspaceID).Scan(&originID, &requesterID)
 	if err != nil {
 		return false, err
 	}

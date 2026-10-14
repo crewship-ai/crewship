@@ -29,17 +29,19 @@ func chatEntitySchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"GET /api/v1/issues/{identifier}/revision":                          "IssueEntityRevision",
 		"GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision": "IssueEntityRevision",
 	} {
-		routes[route] = DomainSchema{Response: ref(schema), SuccessStatuses: []string{"200"}, SuccessHeaders: noStore}
+		routes[route] = DomainSchema{Response: ref(schema), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "404", "503"}, SuccessHeaders: noStore}
 	}
 	route := routes["GET /api/v1/chats/{chatId}/entity-refs"]
 	route.Parameters = []map[string]any{path("chatId"), {"name": "cursor", "in": "query", "schema": str()}, {"name": "limit", "in": "query", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 100}}}
 	routes["GET /api/v1/chats/{chatId}/entity-refs"] = route
 	for _, key := range []string{"PATCH /api/v1/crews/{crewId}/issues/{identifier}", "POST /api/v1/crews/{crewId}/issues/{identifier}/comments"} {
-		params := []map[string]any{{"name": "Idempotency-Key", "in": "header", "schema": map[string]any{"type": "string", "maxLength": 200}, "description": "Stable UTF-8 key of at most 200 bytes, scoped to the authenticated user. Same key with changed intent returns 409."}}
+		operationError := errorSchema()
+		operationError["properties"].(map[string]any)["revision"] = map[string]any{"type": "integer", "minimum": 1, "description": "Current issue-field revision on a revision_conflict."}
+		params := []map[string]any{{"name": "Idempotency-Key", "in": "header", "schema": map[string]any{"type": "string", "minLength": 1}, "description": "Stable key of 1–200 UTF-8 bytes (the server checks bytes, not Unicode character count), scoped to the authenticated user. Same key with changed intent returns 409."}}
 		if key[:5] == "PATCH" {
 			params = append(params, map[string]any{"name": "If-Match", "in": "header", "schema": str(), "description": "Expected positive revision, optionally quoted; must agree with expected_revision when both are provided."})
 		}
-		routes[key] = DomainSchema{Parameters: params}
+		routes[key] = DomainSchema{Parameters: params, ErrorStatuses: []string{"400", "403", "404", "409", "500"}, ErrorMedia: []string{"application/json"}, ErrorResponse: map[string]any{"anyOf": []any{operationError, problemSchema()}}}
 	}
 	return routes, components
 }

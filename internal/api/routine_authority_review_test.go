@@ -173,3 +173,25 @@ func TestRoutineDraftUnicodeGateAliasesAreRemoved(t *testing.T) {
 		t.Fatalf("draft gate aliases survived: %+v", fields)
 	}
 }
+
+func TestCrewshipOperationKeyAliasesCannotOverrideCanonical(t *testing.T) {
+	for _, tc := range []struct{ name, origin, canonical, want string }{{"host", "human-origin", "caller-key", "host-step-key"}, {"autonomous-explicit", "", "caller-key", "caller-key"}, {"autonomous-keyless", "", "", ""}} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := map[string]any{"operation_Key": "forged", "OPERATION_KEY": "forged"}
+			if tc.canonical != "" {
+				args["operation_key"] = tc.canonical
+			}
+			body := crewshipBody(pipeline.CrewshipRequest{ChatOriginID: tc.origin, OperationKey: "host-step-key", Args: args})
+			raw, _ := json.Marshal(body)
+			var decoded struct {
+				Key string `json:"operation_key"`
+			}
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if decoded.Key != tc.want {
+				t.Fatalf("operation key alias won: %s", raw)
+			}
+		})
+	}
+}

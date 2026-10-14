@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -67,7 +68,7 @@ func TestInternalIssue_UpdateStatus_StampsTheCausingRunOnTheJournalEntry(t *test
 // A change with no run behind it — a person moving a card — must NOT invent
 // one. An entry claiming a run that never ran would give the walk a parent to
 // follow into nothing, and would make a human action read as a composed hop.
-func TestInternalIssue_UpdateStatus_LeavesTraceEmptyWhenNoRunCausedIt(t *testing.T) {
+func TestInternalIssue_UpdateStatus_UsesAuditDeliveryTraceWhenNoRunCausedIt(t *testing.T) {
 	h, wsID, crewID, leadID, _ := newInternalIssueHandler(t)
 	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
 
@@ -84,8 +85,8 @@ func TestInternalIssue_UpdateStatus_LeavesTraceEmptyWhenNoRunCausedIt(t *testing
 	}
 
 	for _, e := range rec.entries {
-		if e.Type == "mission.status_change" && e.TraceID != "" {
-			t.Errorf("trace_id = %q, want empty — nothing ran, so there is no run to name", e.TraceID)
+		if e.Type == "mission.status_change" && !strings.HasPrefix(e.TraceID, "issue-activity:") {
+			t.Errorf("trace_id = %q, want an audit-delivery trace, never an invented agent run", e.TraceID)
 		}
 	}
 }

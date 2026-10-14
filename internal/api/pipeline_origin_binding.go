@@ -9,18 +9,32 @@ import (
 )
 
 type routineOriginScheduleBinding struct {
+	ID              string  `json:"id"`
+	OriginID        *string `json:"origin_id"`
+	PinnedVersion   *int    `json:"pinned_version"`
+	VersionOriginID *string `json:"version_origin_id"`
+}
+type routineOriginDraftBinding struct {
 	ID       string  `json:"id"`
+	Revision int     `json:"revision"`
 	OriginID *string `json:"origin_id"`
+}
+type routineOriginDraftClear struct {
+	ID               string          `json:"id"`
+	ExpectedRevision int             `json:"expected_revision"`
+	ExpectedOriginID json.RawMessage `json:"expected_origin_id"`
 }
 type routineOriginBindingResponse struct {
 	PipelineID string                         `json:"pipeline_id"`
+	Draft      *routineOriginDraftBinding     `json:"draft"`
 	OriginID   *string                        `json:"origin_id"`
 	Schedules  []routineOriginScheduleBinding `json:"schedules"`
 }
 type routineOriginClearRequest struct {
-	Action           string          `json:"action"`
-	Reason           string          `json:"reason"`
-	ExpectedOriginID json.RawMessage `json:"expected_origin_id"`
+	Action           string                   `json:"action"`
+	Draft            *routineOriginDraftClear `json:"draft,omitempty"`
+	Reason           string                   `json:"reason"`
+	ExpectedOriginID json.RawMessage          `json:"expected_origin_id"`
 	Schedules        []struct {
 		ID               string          `json:"id"`
 		ExpectedOriginID json.RawMessage `json:"expected_origin_id"`
@@ -76,7 +90,14 @@ func (h *PipelineHandler) GetOriginBinding(w http.ResponseWriter, r *http.Reques
 		replyError(w, 500, "Could not read origin binding")
 		return
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT id,chat_origin_id FROM pipeline_schedules WHERE workspace_id=? AND target_pipeline_id=? ORDER BY id`, WorkspaceIDFromContext(r.Context()), out.PipelineID)
+	var draft routineOriginDraftBinding
+	if err = h.db.QueryRowContext(r.Context(), `SELECT id,revision,chat_origin_id FROM pipeline_drafts WHERE workspace_id=? AND slug=?`, WorkspaceIDFromContext(r.Context()), r.PathValue("slug")).Scan(&draft.ID, &draft.Revision, &draft.OriginID); err == nil {
+		out.Draft = &draft
+	} else if err != sql.ErrNoRows {
+		replyError(w, 500, "Could not read draft binding")
+		return
+	}
+	rows, err := h.db.QueryContext(r.Context(), `SELECT s.id,s.chat_origin_id,s.target_pipeline_version,v.chat_origin_id FROM pipeline_schedules s LEFT JOIN pipeline_versions v ON v.pipeline_id=s.target_pipeline_id AND v.version=s.target_pipeline_version WHERE s.workspace_id=? AND s.target_pipeline_id=? ORDER BY s.id`, WorkspaceIDFromContext(r.Context()), out.PipelineID)
 	if err != nil {
 		replyError(w, 500, "Could not read schedule bindings")
 		return
@@ -84,7 +105,7 @@ func (h *PipelineHandler) GetOriginBinding(w http.ResponseWriter, r *http.Reques
 	defer rows.Close()
 	for rows.Next() {
 		var item routineOriginScheduleBinding
-		if err = rows.Scan(&item.ID, &item.OriginID); err != nil {
+		if err = rows.Scan(&item.ID, &item.OriginID, &item.PinnedVersion, &item.VersionOriginID); err != nil {
 			replyError(w, 500, "Could not read schedule bindings")
 			return
 		}
@@ -142,6 +163,28 @@ func (h *PipelineHandler) ClearOriginBinding(w http.ResponseWriter, r *http.Requ
 		replyError(w, 409, "origin_binding_conflict")
 		return
 	}
+	var draftID, draftOrigin string
+	var draftRevision int
+	err = tx.QueryRowContext(r.Context(), `SELECT id,revision,COALESCE(chat_origin_id,'') FROM pipeline_drafts WHERE workspace_id=? AND slug=?`, WorkspaceIDFromContext(r.Context()), r.PathValue("slug")).Scan(&draftID, &draftRevision, &draftOrigin)
+	if err != nil && err != sql.ErrNoRows {
+		replyError(w, 500, "Could not read draft binding")
+		return
+	}
+	if draftOrigin != "" && in.Draft == nil {
+		replyError(w, 409, "draft_binding_review_required")
+		return
+	}
+	if in.Draft != nil {
+		want, valid := decodeExpectedOrigin(in.Draft.ExpectedOriginID)
+		if !valid || in.Draft.ID == "" || in.Draft.ExpectedRevision < 1 {
+			replyError(w, 400, "draft ID, expected_revision and expected_origin_id required")
+			return
+		}
+		if draftID != in.Draft.ID || draftRevision != in.Draft.ExpectedRevision || draftOrigin != want {
+			replyError(w, 409, "draft_binding_conflict")
+			return
+		}
+	}
 	seen := map[string]bool{}
 	for _, item := range in.Schedules {
 		want, valid := decodeExpectedOrigin(item.ExpectedOriginID)
@@ -158,6 +201,15 @@ func (h *PipelineHandler) ClearOriginBinding(w http.ResponseWriter, r *http.Requ
 			replyError(w, 500, "Could not read schedule binding")
 			return
 		}
+		var immutable bool
+		if err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM pipeline_schedules s JOIN pipeline_versions v ON v.pipeline_id=s.target_pipeline_id AND v.version=s.target_pipeline_version WHERE s.id=? AND s.workspace_id=? AND v.chat_origin_id IS NOT NULL)`, item.ID, WorkspaceIDFromContext(r.Context())).Scan(&immutable); err != nil {
+			replyError(w, 500, "Could not read pinned authority")
+			return
+		}
+		if immutable {
+			replyError(w, 409, "pinned_version_authority_immutable")
+			return
+		}
 		if actual != want {
 			replyError(w, 409, "origin_binding_conflict")
 			return
@@ -170,6 +222,12 @@ func (h *PipelineHandler) ClearOriginBinding(w http.ResponseWriter, r *http.Requ
 	for _, item := range in.Schedules {
 		if _, err = tx.ExecContext(r.Context(), `UPDATE pipeline_schedules SET chat_origin_id=NULL WHERE id=?`, item.ID); err != nil {
 			replyError(w, 500, "Could not clear schedule binding")
+			return
+		}
+	}
+	if in.Draft != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE pipeline_drafts SET chat_origin_id=NULL,revision=revision+1,updated_by=?,updated_at=? WHERE id=? AND workspace_id=?`, UserFromContext(r.Context()).ID, time.Now().UTC().Format(time.RFC3339), draftID, WorkspaceIDFromContext(r.Context())); err != nil {
+			replyError(w, 500, "Could not clear draft binding")
 			return
 		}
 	}

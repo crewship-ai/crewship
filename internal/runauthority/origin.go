@@ -49,6 +49,12 @@ func loadOrigin(ctx context.Context, q Queryer, id, workspaceID string) (Origin,
 		return origin, ErrUnavailable
 	}
 	r := origin.HumanAuthority
+	if r.Kind != "" {
+		if (r.Kind != "web_issue" && r.Kind != "web_recurring") || origin.RootRunID == "" || origin.ChatID != "" || origin.TriggerMessageID != "" || r.ChatID != "" || r.AgentID != "" || r.ResourceID == "" || r.CrewID == "" || r.UserID == "" || r.WorkspaceID != workspaceID {
+			return origin, ErrIdentityMismatch
+		}
+		return origin, nil
+	}
 	if origin.RootRunID == "" || origin.ChatID == "" || origin.TriggerMessageID == "" || r.UserID == "" || r.AgentID == "" || r.WorkspaceID != workspaceID || r.ChatID != origin.ChatID {
 		return origin, ErrIdentityMismatch
 	}
@@ -106,7 +112,7 @@ func ValidateOriginReceipt(ctx context.Context, q Queryer, originID, workspaceID
 	if err != nil {
 		return origin, err
 	}
-	live, err := chataudience.CaptureTrustedQuery(ctx, q, origin.ChatID, origin.HumanAuthority.UserID, origin.HumanAuthority)
+	live, err := chataudience.RevalidateTrustedQuery(ctx, q, origin.HumanAuthority)
 	if err != nil {
 		return origin, err
 	}
@@ -137,4 +143,55 @@ func ValidateOrigin(ctx context.Context, q Queryer, originID, executorAgentID, w
 	}
 	a.ChatID, a.TriggerMessageID, a.HumanAuthority = origin.ChatID, origin.TriggerMessageID, origin.HumanAuthority
 	return a, nil
+}
+
+// CaptureWebOrigin persists a host-authenticated admission in the caller's
+// transaction. It has no synthetic chat, message, or run identity.
+func CaptureWebOrigin(ctx context.Context, tx *sql.Tx, kind, resource, user, workspace string) (Origin, error) {
+	if tx == nil {
+		return Origin{}, ErrUnavailable
+	}
+	receipt, err := chataudience.CaptureWebTrustedQuery(ctx, tx, kind, resource, user, workspace, nil)
+	if err != nil {
+		return Origin{}, err
+	}
+	if receipt == nil {
+		return Origin{}, ErrRequesterStale
+	}
+	var entropy [16]byte
+	if _, err = rand.Read(entropy[:]); err != nil {
+		return Origin{}, err
+	}
+	id := "c" + hex.EncodeToString(entropy[:])
+	raw, err := json.Marshal(receipt)
+	if err != nil {
+		return Origin{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO execution_origins(id,workspace_id,root_run_id,chat_id,trigger_message_id,human_authority,created_at) VALUES(?,?,?,'','',?,?)`, id, workspace, "web-admission:"+id, string(raw), tsformat.Format(time.Now()))
+	if err != nil {
+		return Origin{}, err
+	}
+	return loadOrigin(ctx, tx, id, workspace)
+}
+
+// DeriveWebIssueOrigin freezes a validated template's existing human grant for
+// one issued resource. It never refreshes a revoked membership epoch, and later
+// deletion or editing of the template cannot revoke an already-issued resource.
+func DeriveWebIssueOrigin(ctx context.Context, tx *sql.Tx, templateOriginID, issueID, workspace string) (Origin, error) {
+	source, err := ValidateOriginReceipt(ctx, tx, templateOriginID, workspace)
+	if err != nil {
+		return Origin{}, err
+	}
+	if source.HumanAuthority.Kind != "web_recurring" {
+		return Origin{}, ErrIdentityMismatch
+	}
+	child, err := CaptureWebOrigin(ctx, tx, "web_issue", issueID, source.HumanAuthority.UserID, workspace)
+	if err != nil {
+		return Origin{}, err
+	}
+	old, current := source.HumanAuthority, child.HumanAuthority
+	if old.MemberID != current.MemberID || old.MemberRevision != current.MemberRevision || old.CrewID != current.CrewID {
+		return Origin{}, ErrRequesterStale
+	}
+	return child, nil
 }

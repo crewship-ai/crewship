@@ -71,7 +71,33 @@ routine-launch authorization policy and any stored authoring origin; this
 contract does not replace standing automation grants with a new launcher role
 policy. Immutable pinned versions retain their original authoring origin. Unpinned schedules store only their own explicit invocation override; otherwise they resolve the current head at execution, rather than freezing its origin at schedule creation. A fresh chat save can bind the head to a fresh verified source. An authenticated OWNER/ADMIN may explicitly clear the head and selected schedule bindings through the audited [operator origin-binding API](routine-origin-binding.md). This never clears immutable versions or already admitted work. Clearing a binding does not re-enable a circuit-broken schedule; use its ordinary operator enable action afterward.
 
-Channel jobs and human issue mentions without a durable chat receipt may answer,
+Authenticated public issue creation, starting work, handing work back to an
+agent and commenting capture a web requester admission, rather than inventing
+a chat receipt. The resource identifies where admission happened; it does not
+grant unrestricted access or restrict all subsequent actions to that one issue.
+Existing backend action, target and crew checks remain authoritative. It pins
+the actual requesting person and membership identity plus a dedicated
+`web_execution_revision`. Only role, capabilities and access-mode changes
+advance that fence; unrelated chat participant/grant changes do not revoke it.
+Execution rechecks the live account, membership and target permissions.
+Recurring issue admissions bind the authenticated recurring definition and
+derive separate per-issue receipts without renewing the captured membership
+epoch. Deleting a template does not revoke work it already admitted.
+Existing admitted work retains its own origin when a later request starts new
+work. These verified web origins authorize operations but do not manufacture
+chat cards or a triggering chat message. Narrow CLI tokens cannot be converted
+into a broader standing execution grant. Their permitted issue CRUD, comments
+and recurring-template edits/disable remain available with a NULL origin;
+explicit Start and human-to-agent handoff require capture-capable authority.
+Unrestricted tokens and the explicit global wildcard follow the same admission
+policy as the web session. The existing account-level restricted-member rule
+is intentionally global across workspaces, consistently with chat admissions.
+Permanent invalid recurring receipts disable the template, advance its due
+bucket and notify a current eligible member. Transient database failures retry.
+Legacy/scoped NULL-origin templates may generate ordinary issue records, but
+do not authorize agent execution.
+
+Channel jobs without a verified authenticated admission may answer,
 but their runs carry a host-derived missing-requester marker. Issue mutations
 and further delegation fail closed; they do not inherit the completing run's
 authority or become autonomous. Queued mentions are grouped by their actual
@@ -87,9 +113,12 @@ issued run token has a durable authority record.
 
 Backup and fork include origins alongside their dependent records. Forks clear
 the human receipt rather than silently granting the copied work autonomous
-rights. Normal restore preserves provenance, but refreshed chat authority makes
-old receipts stale: restoring a backup does not authorize future work on behalf
-of a previously admitted human.
+rights. Normal restore preserves provenance without renewing admission.
+Refreshed chat authority makes chat receipts stale. Web receipts still require
+the same current membership epoch and live account/resource scope; workspace
+membership grants are not restored from the bundle. A previously valid web
+admission can resume only if those live checks still pass. Restoring historical
+data cannot recreate a removed membership or renew a revoked receipt.
 
 ## Upgrade boundary
 
@@ -259,6 +288,24 @@ counters. Missing or inaccessible issues return `404`. Revision counters come
 from the issue and child-data database triggers; they are not timestamps or an
 assertion that unrelated run/automation data has been refreshed.
 
+The counters cover issue-owned fields and child records, not a version of the
+entire rendered detail. Joined crew, project, routine, creator, assignee, owner,
+delegate and worker display names, membership-dependent name visibility, run
+state and `allowed_actions` are read-time projections. Renaming an assignee or
+changing an active run can change a GET response while both counters stay equal.
+Label membership belongs to the field revision; label definition changes also
+invalidate the aggregate through the label trigger.
+
+An open detail must refresh its current GET on focus, reconnect and a bounded
+poll while visible, even when the revision counters match. Resource/roster
+events can refresh joined names sooner but do not replace reconnect recovery.
+Until dedicated projection freshness is supplied, show the detail's last
+successful fetch time; counter equality alone must never label the entire
+detail as live. Refresh permissions before presenting an action after a stale
+interval; the mutation endpoint remains authoritative. The reference endpoint
+already returns replacement snapshots of current card data on each completed
+poll, including current actions.
+
 Existing issue detail responses also include `revision`, `aggregate_revision`
 and `allowed_actions`. Revisions are selected with the issue fields, rather
 than assigned after another query. Actions describe the viewer's current
@@ -273,6 +320,9 @@ Existing `PATCH /api/v1/crews/{crewId}/issues/{identifier}` accepts optional
 `expected_revision` (positive integer) or `If-Match` (positive integer, optionally
 quoted). If both appear they must agree. A stale edit returns
 `409 {"error":"revision_conflict","revision":2}` without mutation.
+This header is a numeric issue-field precondition, not general HTTP ETag
+negotiation: wildcard `*`, weak validators and validator lists are rejected.
+Clients must not infer an ETag for the complete joined detail from this number.
 
 PATCH and `POST .../comments` accept `Idempotency-Key` (1–200 UTF-8 bytes),
 scoped to the authenticated human and selected workspace. The reserve, mutation
@@ -282,8 +332,41 @@ include `Operation-ID`. Changed intent returns `409 operation_key_conflict`.
 Current account and membership authority are checked before replay; a successful
 old response cannot authorize access after revocation. Replays do not repeat
 comments, activity or mention dispatch. PATCH labels and fields are atomic.
+Mutation-owned activity records and durable delivery intent commit in the same
+transaction. A bounded server worker resumes pending intent after disconnect,
+restart or a lost acknowledgement. Stable journal replay IDs and stable mention
+assignment IDs prevent repeating completed effects. Human activity uses an
+`issue-activity:<event_id>` audit trace, never a fabricated agent run ID.
+Pending journal audit intent survives hard deletion with a historical issue
+reference; pending model mentions are cancelled when their comment or issue is
+deleted. Recovery preserves the original audit event without exposing a deleted
+object snapshot through the chat reference API.
+Human and agent Create, PATCH/comments, bulk edits, attachment add/remove and
+code-link add/remove persist audit intent with their mutation. Other issue
+workflow audit paths retain their existing behavior; this contract does not
+claim all historic issue emitters were converted.
+Request-side recovery is bounded to the authenticated/verified workspace
+(32 jobs, one second); it may recover other jobs in that same workspace, never
+another workspace. The background worker handles global recovery.
+Retries back off exponentially from five seconds to ten minutes and stop after
+eight attempts. Malformed payloads and permanent authority refusals fail
+immediately, without blocking the tail. Only terminal failures tell the author
+to retry; their private notice and failed receipt commit together. Administrators
+can inspect sanitized diagnostics with `crewship issue deliveries failed`.
+Successful ACKs clear the payload and completed receipts expire after seven
+days. Failed rows remain for diagnosis; they are not retried automatically.
+A committed autonomous pipeline mention carries a server-only admission marker
+and source crew snapshot; neither can come from tool arguments. Recovery checks
+its persisted origin-free pipeline run/version and live source actor. Ordinary
+agent machine roots require positive host `run.started` admission. Unproven
+legacy agent sources do not acquire autonomous mention execution authority.
+Journal outages retain retry intent and do not starve unrelated mention work.
+Normal restore recognizes an exactly matching already-written journal effect;
+forks retain history but never replay source notifications or model dispatches.
 Label membership changes advance the field revision as well as the aggregate
 revision, so concurrent labels-only editors cannot overwrite a newer label set.
+Replacing a label set with the same IDs, in any order or with duplicates, is a
+no-op and does not advance either counter. A changed set writes only its diff.
 
 These parameters remain optional for old clients. Chat card editors MUST send
 both an explicit expected revision and stable retry key; they retain the same
@@ -320,3 +403,17 @@ a failed run, an invalid cursor, an empty list, a deleted receipt, an edit
 conflict, a repeated comment and the sanitized operation response. Random
 cursor and snapshot values are normalized in the fixtures; they are not usable
 credentials. Tests compare these fixtures with the production handlers.
+
+Escalations from run-token callers carry the verified source run and actor. The
+host verifies the token proof, live run and matching agent/workspace/chat from
+the durable execution record. A conflicting chat, actor or run is refused; the
+shared sidecar boot chat never replaces an unknown execution chat. Escalating
+asks for help and does not authorize work: missing or revoked requester authority
+may still escalate, without restoring permission to mutate or delegate. A
+configured v2 sidecar requires run-token proof. The host's proof-less legacy
+path trusts its internal sidecar IPC service credential, which is not issued to
+agents; supplying a source run without its proof is always refused.
+
+Routine action arguments cannot override server identity or operation keys with
+Unicode/case-fold aliases. Explicit canonical operation keys remain supported
+for legacy autonomous calls; human-origin calls use the dispatcher's stable key.

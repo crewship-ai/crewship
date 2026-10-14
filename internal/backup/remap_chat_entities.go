@@ -13,6 +13,20 @@ import (
 // Run and trigger message IDs retain their historical meaning; imported
 // operation authority is explicitly removed rather than admitted on this host.
 func remapChatEntityHistory(dump *DBDump, ids map[string]map[string]string) {
+	// Forks copy history, not pending notifications or model dispatches. The
+	// source workspace alone owns these effects; preserve a minimal completion
+	// receipt without transplanted payloads or outstanding processing leases.
+	for _, row := range dump.Tables["issue_mutation_outbox"] {
+		row["state"], row["payload"], row["last_error"] = "done", "{}", "forked historical delivery is not resumed"
+		row["lease_token"], row["lease_expires_at"] = nil, nil
+		row["completed_at"] = row["created_at"]
+		if _, ok := row["failure_code"]; ok {
+			row["failure_code"] = ""
+		}
+		if _, ok := row["failed_at"]; ok {
+			row["failed_at"] = nil
+		}
+	}
 	// Keep the typed origin and its already-remapped chat/workspace edges, but
 	// never transplant an admission receipt. A present invalid origin must fail
 	// closed in the execution resolver rather than become autonomous work.

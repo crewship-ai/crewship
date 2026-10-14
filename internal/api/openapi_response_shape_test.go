@@ -46,6 +46,9 @@ var responseShapeContracts = []struct {
 	value any
 }{
 	{name: "RoutineOriginBinding", pointer: "/components/schemas/RoutineOriginBinding", value: routineOriginBindingResponse{}},
+	{name: "FailedIssueMutationJob", pointer: "/components/schemas/FailedIssueMutationJob", value: failedIssueMutationJob{}},
+	{name: "FailedIssueMutationPage", pointer: "/components/schemas/FailedIssueMutationPage", value: failedIssueMutationPage{}},
+	{name: "RoutineOriginDraftBinding", pointer: "/components/schemas/RoutineOriginDraftBinding", value: routineOriginDraftBinding{}},
 	{name: "RoutineOriginScheduleBinding", pointer: "/components/schemas/RoutineOriginScheduleBinding", value: routineOriginScheduleBinding{}},
 	{name: "ChatEntityReferencePage", pointer: "/components/schemas/ChatEntityReferencePage", value: EntityRefPage{}},
 	{name: "ChatEntityOperation", pointer: "/components/schemas/ChatEntityOperation", value: EntityOperationResponse{}},

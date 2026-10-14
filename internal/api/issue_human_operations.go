@@ -73,6 +73,8 @@ func (h *IssueHandler) beginHumanIssueOperation(w http.ResponseWriter, r *http.R
 			writeChatIssueError(w, chatentities.ErrKeyConflict)
 			return nil, true
 		}
+		_ = tx.Rollback() // Release the write lock before bounded durable delivery recovery.
+		h.drainCommittedIssueMutation(WorkspaceIDFromContext(r.Context()))
 		w.Header().Set("Idempotency-Replayed", "true")
 		w.Header().Set("Operation-ID", op.ID)
 		status := http.StatusOK

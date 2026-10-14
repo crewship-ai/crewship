@@ -243,7 +243,7 @@ func (h *AttachmentHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if created {
-		h.recordAttachmentEvent(r, missionID, wsID, "user", userID, actionAttachmentAdded, att)
+		h.publishAttachmentMutation(missionID, wsID)
 		writeJSON(w, http.StatusCreated, att)
 		return
 	}
@@ -298,7 +298,12 @@ func (h *AttachmentHandler) attachBytes(
 
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = h.db.ExecContext(r.Context(), `
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		return attachmentResponse{}, false, err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO attachments
 			(id, workspace_id, owner_type, mission_id, filename, content_type, size_bytes,
 			 sha256, storage_key, uploaded_by_user_id, uploaded_by_agent_id, created_at)
@@ -316,6 +321,7 @@ func (h *AttachmentHandler) attachBytes(
 			// returned 200 carrying the FIRST file's name and wrote no activity
 			// row: the user believed both were attached and the second name was
 			// never recorded anywhere.
+			_ = tx.Rollback()
 			existing, loadErr := h.loadByDigest(r, missionID, wsID, sha, filename)
 			if loadErr != nil {
 				return attachmentResponse{}, false, loadErr
@@ -325,8 +331,24 @@ func (h *AttachmentHandler) attachBytes(
 		return attachmentResponse{}, false, err
 	}
 
-	att, err := h.loadOne(r, id, wsID)
-	return att, true, err
+	att, err := scanAttachment(tx.QueryRowContext(r.Context(), attachmentSelect+` WHERE a.id=? AND a.workspace_id=?`, id, wsID))
+	if err != nil {
+		return attachmentResponse{}, false, err
+	}
+	actorType, actorID := "user", userID
+	if agentID != "" {
+		actorType, actorID = "agent", agentID
+	}
+	if actorID == "" {
+		actorType = "system"
+	}
+	if _, err = persistIssueActivityTx(r.Context(), tx, issueEvent{MissionID: missionID, ActorType: actorType, ActorID: actorID, Action: actionAttachmentAdded, Details: describeAttachment(att)}); err != nil {
+		return attachmentResponse{}, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return attachmentResponse{}, false, err
+	}
+	return att, true, nil
 }
 
 // ── Download — GET …/attachments/{attachmentId} ────────────────────────────
@@ -400,7 +422,13 @@ func (h *AttachmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.db.ExecContext(r.Context(),
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin attachment delete", err)
+		return
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(r.Context(),
 		`DELETE FROM attachments WHERE id = ? AND mission_id = ? AND workspace_id = ?`,
 		att.ID, missionID, wsID)
 	if err != nil {
@@ -412,8 +440,6 @@ func (h *AttachmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	unlinkAttachmentBlobIfUnreferenced(r.Context(), h.db, h.logger, h.storagePath, wsID, att.SHA256)
-
 	var userID string
 	if u := UserFromContext(r.Context()); u != nil {
 		userID = u.ID
@@ -422,7 +448,16 @@ func (h *AttachmentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if userID == "" {
 		actorType = "system"
 	}
-	h.recordAttachmentEvent(r, missionID, wsID, actorType, userID, actionAttachmentRemoved, att)
+	if _, err = persistIssueActivityTx(r.Context(), tx, issueEvent{MissionID: missionID, ActorType: actorType, ActorID: userID, Action: actionAttachmentRemoved, Details: describeAttachment(att)}); err != nil {
+		internalError(w, r, h.logger, "persist attachment removal", err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit attachment delete", err)
+		return
+	}
+	unlinkAttachmentBlobIfUnreferenced(r.Context(), h.db, h.logger, h.storagePath, wsID, att.SHA256)
+	h.publishAttachmentMutation(missionID, wsID)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -504,23 +539,12 @@ func (h *AttachmentHandler) replyAttachError(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// recordAttachmentEvent records an attach/detach on the issue timeline, in the
-// journal and on the hub, through the one shared emitter (issue_events.go).
-//
-// `details` is the filename and the size — never the content, for the reason
-// describeDescriptionChange spells out: an audit row is read back into the
-// timeline, exported by backup and truncated into a notification body, and file
-// content belongs in none of those.
-func (h *AttachmentHandler) recordAttachmentEvent(
-	r *http.Request, missionID, wsID, actorType, actorID string, action issueAction, att attachmentResponse,
-) {
-	h.events().record(r.Context(), wsID, map[string]string{"id": missionID}, issueEvent{
-		MissionID: missionID,
-		ActorType: actorType,
-		ActorID:   actorID,
-		Action:    action,
-		Details:   describeAttachment(att),
-	})
+// publishAttachmentMutation announces already-committed metadata and drains
+// durable audit intents for the verified workspace.
+func (h *AttachmentHandler) publishAttachmentMutation(missionID, wsID string) {
+	// Metadata and durable audit intent were committed together by the store.
+	h.events().mutationDelivery().drainCommittedIssueMutation(wsID)
+	broadcastWorkspaceEvent(h.hub, wsID, "issue.updated", map[string]string{"id": missionID})
 }
 
 // describeAttachment builds the `details` payload for an attachment event.

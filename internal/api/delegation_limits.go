@@ -512,6 +512,7 @@ func enforceDelegationCaps(
 // this struct, so the row's owner and the id the fan-out was counted against
 // are one value and cannot drift apart.
 type cappedAssignment struct {
+	ID           string // Optional host-only stable admission identity.
 	ChatOriginID string
 	WorkspaceID  string
 	ChatID       string
@@ -591,6 +592,12 @@ type cappedAssignment struct {
 // pass a transaction; Create (assignments_run.go) keeps passing h.db
 // directly since it never sets SessionID and has nothing to make atomic
 // with this insert.
+// Stable outbox retries acknowledge the first admission; they must not launch
+// the existing assignment again if a dispatch lease expired mid-admission.
+type assignmentAlreadyAdmittedError struct{ ID string }
+
+func (e *assignmentAlreadyAdmittedError) Error() string { return "assignment already admitted" }
+
 func insertCappedAssignment(
 	ctx context.Context,
 	db dbConn,
@@ -604,7 +611,7 @@ func insertCappedAssignment(
 	if a.ChatOriginID == "" {
 		a.ChatOriginID = runauthority.OriginIDFromContext(ctx)
 	}
-	if a.ChatOriginID != "" {
+	if a.ChatOriginID != "" || a.ID != "" {
 		if pooled, ok := db.(*sql.DB); ok {
 			tx, err := pooled.BeginTx(ctx, nil)
 			if err != nil {
@@ -620,11 +627,25 @@ func insertCappedAssignment(
 			}
 			return id, nil
 		}
-		if _, err := runauthority.ValidateOrigin(ctx, db, a.ChatOriginID, a.TargetID, a.WorkspaceID); err != nil {
-			return "", fmt.Errorf("assignment requester authority: %w", err)
+		if a.ChatOriginID != "" {
+			if _, err := runauthority.ValidateOrigin(ctx, db, a.ChatOriginID, a.TargetID, a.WorkspaceID); err != nil {
+				return "", fmt.Errorf("assignment requester authority: %w", err)
+			}
 		}
 	}
-	assignmentID := generateCUID()
+	assignmentID := a.ID
+	if assignmentID == "" {
+		assignmentID = generateCUID()
+	} else {
+		var existing string
+		err := db.QueryRowContext(ctx, `SELECT id FROM assignments WHERE id=? AND workspace_id=? AND mission_id=? AND assigned_to_id=?`, assignmentID, a.WorkspaceID, a.MissionID, a.TargetID).Scan(&existing)
+		if err == nil {
+			return existing, &assignmentAlreadyAdmittedError{ID: existing}
+		}
+		if err != sql.ErrNoRows {
+			return "", err
+		}
+	}
 	var parentVal any
 	if scope.ParentID != "" {
 		parentVal = scope.ParentID

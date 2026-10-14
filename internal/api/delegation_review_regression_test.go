@@ -262,3 +262,34 @@ func TestAutonomousDelegationWithoutExecutionChatCannotBorrowBootIssue(t *testin
 	}
 	chatIssueCount(t, f, "mission_comments", 0)
 }
+
+func TestExistingHumanAssignmentCannotAdoptFreshMissionOriginAtCompletion(t *testing.T) {
+	f := newChatIssueFixture(t)
+	issue := seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, "ENG-PINNED-RESULT", "TODO")
+	tx, err := f.h.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin, err := runauthority.CaptureWebOrigin(t.Context(), tx, "web_issue", issue, f.user, f.workspace)
+	if err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if _, err = tx.ExecContext(t.Context(), `UPDATE missions SET chat_origin_id=? WHERE id=?`, origin.ID, issue); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	execOrFatal(t, f.h.db, `INSERT INTO assignments(id,workspace_id,chat_id,group_id,assigned_by_id,assigned_to_id,task,status,created_at,created_by_user_id) VALUES('old-null-result',?,?,?,?,'agent-worker','old work','RUNNING',datetime('now'),?)`, f.workspace, f.chat, issue, f.agent, f.user)
+	h := NewAssignmentHandler(f.h.db, nil, nil, "host", newTestLogger())
+	if !h.finishAssignment(t.Context(), "old-null-result", "", f.chat, "worker", f.workspace, "Old unverified result", "", nil) {
+		t.Fatal("old assignment did not settle")
+	}
+	chatIssueCount(t, f, "mission_comments", 0)
+	var stillNull bool
+	if err := f.h.db.QueryRow(`SELECT chat_origin_id IS NULL FROM assignments WHERE id='old-null-result'`).Scan(&stillNull); err != nil || !stillNull {
+		t.Fatalf("old assignment rebound %v %v", stillNull, err)
+	}
+}

@@ -99,7 +99,7 @@ func (s *Store) SaveDraft(ctx context.Context, d Draft) (*Draft, error) {
 		d.ChatOriginID = o.ID
 	}
 	if d.ChatOriginID == "" && d.ID == "" {
-		e := tx.QueryRowContext(ctx, `SELECT COALESCE(chat_origin_id,'') FROM pipelines WHERE workspace_id=? AND slug=?`, d.WorkspaceID, d.Slug).Scan(&d.ChatOriginID)
+		e := tx.QueryRowContext(ctx, `SELECT COALESCE(chat_origin_id,'') FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, d.WorkspaceID, d.Slug).Scan(&d.ChatOriginID)
 		if e != nil && !errors.Is(e, sql.ErrNoRows) {
 			return nil, e
 		}

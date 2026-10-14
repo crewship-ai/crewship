@@ -29,7 +29,7 @@ type issueMCPArgs struct {
 
 func issueMCPTools() []memoryMCPToolDescriptor {
 	text := map[string]any{"type": "string"}
-	key := map[string]any{"type": "string", "minLength": 1, "maxLength": 200, "description": "Unique key for this intended operation. Reuse the same key and arguments when retrying. Use a new key only for new intended work."}
+	key := map[string]any{"type": "string", "minLength": 1, "description": "Unique key of 1–200 UTF-8 bytes for this intended operation. Reuse the same key and arguments when retrying. Use a new key only for new intended work."}
 	schema := func(properties map[string]any, required ...string) json.RawMessage {
 		if required == nil {
 			required = []string{}

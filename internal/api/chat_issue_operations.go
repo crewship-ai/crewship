@@ -296,6 +296,8 @@ func (h *InternalIssueHandler) checkChatIssueReplay(w http.ResponseWriter, r *ht
 		writeChatIssueError(w, err)
 		return true
 	}
+	_ = tx.Rollback()
+	h.mutationDelivery().drainCommittedIssueMutation(workspaceID)
 	writeChatIssueReplay(w, stored)
 	return true
 }
@@ -353,7 +355,7 @@ func completeChatIssueOperation(ctx context.Context, tx *sql.Tx, op *chatIssueOp
 	}); err != nil {
 		return err
 	}
-	if op.authority.HumanAuthority == nil {
+	if op.authority.HumanAuthority == nil || op.authority.ChatID == "" {
 		return nil
 	}
 	_, err = chatentities.AppendRef(ctx, tx, chatentities.RefSpec{

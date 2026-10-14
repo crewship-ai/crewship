@@ -4312,6 +4312,78 @@
         ],
         "type": "object"
       },
+      "FailedIssueMutationJob": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "error_code": {
+            "enum": [
+              "invalid_payload",
+              "delivery_exhausted",
+              "authority_revoked",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "failed_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "journal",
+              "mention"
+            ],
+            "type": "string"
+          },
+          "max_attempts": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "attempts",
+          "max_attempts",
+          "created_at",
+          "failed_at",
+          "error_code"
+        ],
+        "type": "object"
+      },
+      "FailedIssueMutationPage": {
+        "additionalProperties": false,
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/FailedIssueMutationJob"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobs",
+          "next_cursor",
+          "has_more"
+        ],
+        "type": "object"
+      },
       "FailureGroup": {
         "properties": {
           "count": {
@@ -12783,6 +12855,14 @@
       "RoutineOriginBinding": {
         "additionalProperties": false,
         "properties": {
+          "draft": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RoutineOriginDraftBinding"
+              }
+            ],
+            "nullable": true
+          },
           "origin_id": {
             "nullable": true,
             "type": "string"
@@ -12800,7 +12880,8 @@
         "required": [
           "pipeline_id",
           "origin_id",
-          "schedules"
+          "schedules",
+          "draft"
         ],
         "type": "object"
       },
@@ -12812,6 +12893,28 @@
               "clear"
             ],
             "type": "string"
+          },
+          "draft": {
+            "additionalProperties": false,
+            "properties": {
+              "expected_origin_id": {
+                "nullable": true,
+                "type": "string"
+              },
+              "expected_revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "expected_revision",
+              "expected_origin_id"
+            ],
+            "type": "object"
           },
           "expected_origin_id": {
             "nullable": true,
@@ -12851,6 +12954,28 @@
         ],
         "type": "object"
       },
+      "RoutineOriginDraftBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "origin_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "origin_id"
+        ],
+        "type": "object"
+      },
       "RoutineOriginScheduleBinding": {
         "additionalProperties": false,
         "properties": {
@@ -12860,11 +12985,21 @@
           "origin_id": {
             "nullable": true,
             "type": "string"
+          },
+          "pinned_version": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "version_origin_id": {
+            "nullable": true,
+            "type": "string"
           }
         },
         "required": [
           "id",
-          "origin_id"
+          "origin_id",
+          "pinned_version",
+          "version_origin_id"
         ],
         "type": "object"
       },
@@ -56145,6 +56280,42 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -73661,11 +73832,11 @@
             }
           },
           {
-            "description": "Stable UTF-8 key of at most 200 bytes, scoped to the authenticated user. Same key with changed intent returns 409.",
+            "description": "Stable key of 1–200 UTF-8 bytes (the server checks bytes, not Unicode character count), scoped to the authenticated user. Same key with changed intent returns 409.",
             "in": "header",
             "name": "Idempotency-Key",
             "schema": {
-              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -73702,11 +73873,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
+                  "anyOf": [
                     {
                       "properties": {
                         "error": {
                           "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -73747,11 +73923,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
+                  "anyOf": [
                     {
                       "properties": {
                         "error": {
                           "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -73792,11 +73973,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
+                  "anyOf": [
                     {
                       "properties": {
                         "error": {
                           "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -73837,11 +74023,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
+                  "anyOf": [
                     {
                       "properties": {
                         "error": {
                           "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -73882,11 +74073,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
+                  "anyOf": [
                     {
                       "properties": {
                         "error": {
                           "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -73927,11 +74123,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "oneOf": [
+                  "anyOf": [
                     {
                       "properties": {
                         "error": {
                           "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -76513,11 +76714,11 @@
             }
           },
           {
-            "description": "Stable UTF-8 key of at most 200 bytes, scoped to the authenticated user. Same key with changed intent returns 409.",
+            "description": "Stable key of 1–200 UTF-8 bytes (the server checks bytes, not Unicode character count), scoped to the authenticated user. Same key with changed intent returns 409.",
             "in": "header",
             "name": "Idempotency-Key",
             "schema": {
-              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -76608,27 +76809,47 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -76638,27 +76859,47 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -76668,27 +76909,47 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -76698,57 +76959,147 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "500": {
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "detail": {
-                      "type": "string"
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "description": "Current issue-field revision on a revision_conflict.",
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
                     },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
-                      "type": "string"
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -97084,6 +97435,42 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -108392,6 +108779,42 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -139170,6 +139593,165 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/workspaces/{workspaceId}/issue-mutation-outbox": {
+      "get": {
+        "description": "Get workspace issue mutation outbox (GET /api/v1/workspaces/{workspaceId}/issue-mutation-outbox).",
+        "operationId": "get_api_v1_workspaces_workspaceId_issue-mutation-outbox",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "enum": [
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FailedIssueMutationPage"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace issue mutation outbox",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/issues/{identifier}/revision": {
       "get": {
         "description": "Get workspace issue revision (GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision).",
@@ -139273,6 +139855,42 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [

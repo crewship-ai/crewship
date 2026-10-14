@@ -222,7 +222,7 @@ func pendingFollowUpsFor(ctx context.Context, db *sql.DB, missionID, agentID str
 		         ELSE ''
 		       END,
 		       COALESCE(c.body, ''),
-		       COALESCE(m.priority, 'normal'),c.id,COALESCE(c.author_id,''),COALESCE(c.chat_origin_id,'')
+		       COALESCE(m.priority, 'normal'),COALESCE(c.id,''),COALESCE(c.author_id,''),COALESCE(c.chat_origin_id,'')
 		  FROM mission_comment_mentions m
 		  LEFT JOIN mission_comments c ON c.id = m.comment_id
 		 WHERE m.mission_id = ? AND m.agent_id = ? AND m.state = 'pending'

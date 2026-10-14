@@ -25,6 +25,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,8 +62,11 @@ func setupMentionFixture(t *testing.T) *mentionFixture {
 	db := setupTestDB(t)
 	userID, wsID, crewID, leadID, workerID := seedIssueFixtures(t, db)
 	missionID := seedIssue(t, db, wsID, crewID, leadID, "ENG-1", "TODO")
+	writer := journal.NewWriter(db, newTestLogger(), journal.WriterOptions{})
+	t.Cleanup(func() { _ = writer.Close() })
 
 	assign := NewAssignmentHandler(db, nil, nil, "token", newTestLogger())
+	assign.SetJournal(writer)
 	t.Cleanup(assign.WaitDispatches)
 
 	issues := NewIssueHandler(db, nil, nil, newTestLogger())
@@ -105,8 +109,18 @@ func (f *mentionFixture) comment(t *testing.T, body string) *httptest.ResponseRe
 // commentAsAgent posts a comment as an AGENT through the internal handler.
 func (f *mentionFixture) commentAsAgent(t *testing.T, agentID, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	// Agent-delegation recovery requires positive host admission, never an
+	// inferred machine grant from a missing human receipt.
+	run := "mention-source-" + agentID
+	var exists bool
+	if err := f.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM journal_entries WHERE trace_id=? AND entry_type='run.started')`, run).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		seedAutonomousIssueRun(t, f.internal, f.wsID, agentID, run)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/", jsonBody(map[string]string{
-		"workspace_id": f.wsID, "agent_id": agentID, "body": body,
+		"workspace_id": f.wsID, "agent_id": agentID, "body": body, "author_run_id": run,
 	}))
 	req.SetPathValue("identifier", f.ident)
 	rr := httptest.NewRecorder()
@@ -479,11 +493,13 @@ func TestMentions_BothCommentPathsParse(t *testing.T) {
 	// prose, same wire format — a mention there is a mention.
 	t.Run("agent inline comment on PATCH", func(t *testing.T) {
 		f := setupMentionFixture(t)
+		seedAutonomousIssueRun(t, f.internal, f.wsID, f.author, "inline-mention-source")
 		req := httptest.NewRequest(http.MethodPatch, "/", jsonBody(map[string]any{
-			"workspace_id": f.wsID,
-			"agent_id":     f.author,
-			"status":       "IN_PROGRESS",
-			"comment":      "picking this up, " + mentionToken("lead", f.target) + " please review",
+			"workspace_id":  f.wsID,
+			"author_run_id": "inline-mention-source",
+			"agent_id":      f.author,
+			"status":        "IN_PROGRESS",
+			"comment":       "picking this up, " + mentionToken("lead", f.target) + " please review",
 		}))
 		req.SetPathValue("identifier", f.ident)
 		rr := httptest.NewRecorder()
@@ -913,6 +929,16 @@ func TestMentions_FailedDispatchDoesNotShowInternalErrorText(t *testing.T) {
 	}
 	if !strings.Contains(detail, "database is locked") {
 		t.Errorf("dispatch_detail = %q — the raw error must stay on the row for whoever debugs it", detail)
+	}
+
+	if n := f.countRows(t, `SELECT COUNT(*) FROM inbox_items WHERE source_id LIKE 'mention%'`); n != 0 {
+		t.Fatal("transient failure sent a terminal notice")
+	}
+	execOrFatal(t, f.db, `UPDATE issue_mutation_outbox SET max_attempts=attempts+1,next_attempt_at='2000-01-01T00:00:00.000Z' WHERE kind='mention'`)
+	_ = f.issues.DrainIssueMutationOutbox(t.Context(), 50)
+	var terminal string
+	if err := f.db.QueryRow(`SELECT state FROM issue_mutation_outbox WHERE kind='mention'`).Scan(&terminal); err != nil || terminal != "failed" {
+		t.Fatalf("dispatch did not exhaust: %s %v", terminal, err)
 	}
 
 	var title, body string

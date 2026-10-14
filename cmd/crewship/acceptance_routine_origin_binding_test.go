@@ -27,6 +27,11 @@ func TestAcceptance_RoutineOriginBindingUsesReviewedCAS(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Error(err)
 			}
+			if draft, ok := body["draft"].(map[string]any); ok {
+				if draft["id"] != "draft-1" || draft["expected_revision"] != float64(3) || draft["expected_origin_id"] != "origin-1" {
+					t.Errorf("draft CAS=%+v", draft)
+				}
+			}
 			if body["expected_origin_id"] != nil || body["reason"] != "Reviewed" || body["action"] != "clear" {
 				t.Errorf("CAS=%+v", body)
 			}
@@ -34,7 +39,7 @@ func TestAcceptance_RoutineOriginBindingUsesReviewedCAS(t *testing.T) {
 		w.Write([]byte(`{"pipeline_id":"pipeline","origin_id":null,"schedules":[]}`))
 	}))
 	defer server.Close()
-	for _, args := range [][]string{{"routine", "origin-binding", "get", "daily-report"}, {"routine", "origin-binding", "clear", "daily-report", "--expected-origin", "null", "--reason", "Reviewed", "--format", "yaml"}} {
+	for _, args := range [][]string{{"routine", "origin-binding", "get", "daily-report"}, {"routine", "origin-binding", "clear", "daily-report", "--expected-origin", "null", "--reason", "Reviewed", "--format", "yaml"}, {"routine", "origin-binding", "clear", "daily-report", "--expected-origin", "null", "--reason", "Reviewed", "--draft", "draft-1=3=origin-1"}} {
 		out, err := runChatListCLI(t, server.URL, args...)
 		if err != nil || !strings.Contains(out, "pipeline_id") {
 			t.Fatalf("%v %s", err, out)

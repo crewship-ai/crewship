@@ -253,6 +253,7 @@ var BackupTables = []string{
 	// restore. mission_activity is dumped further above too (see its own
 	// entry), so event_id's FK is satisfied by the same ordering.
 	"mission_comment_mentions",
+	"issue_mutation_outbox",
 	"mission_labels",
 	"mission_proposals",
 	"mission_relations",
@@ -1369,6 +1370,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		if err := hooks.PostInsert(ctx, tx); err != nil {
 			return stats, fmt.Errorf("backup: post-insert hook: %w", err)
 		}
+	}
+	if err := reconcileRestoredIssueOutbox(ctx, tx); err != nil {
+		return stats, fmt.Errorf("backup: reconcile durable issue audit delivery: %w", err)
 	}
 	if err := assertNoFKViolationsTx(ctx, tx); err != nil {
 		return stats, err

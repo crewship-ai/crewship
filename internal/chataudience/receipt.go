@@ -11,6 +11,9 @@ import (
 // host code may issue or carry it. A client-provided receipt grants no access.
 // Every use must compare it to a freshly authorized database snapshot.
 type Receipt struct {
+	Kind           string `json:"kind,omitempty"`
+	ResourceID     string `json:"resource_id,omitempty"`
+	CrewID         string `json:"crew_id,omitempty"`
 	UserID         string `json:"user_id"`
 	ChatID         string `json:"chat_id"`
 	WorkspaceID    string `json:"workspace_id"`

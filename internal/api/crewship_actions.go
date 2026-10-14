@@ -123,7 +123,7 @@ func newCrewshipActions(baseURL, internalToken string, pol *policy.Resolver, db 
 var crewshipInjected = []string{
 	"workspace_id", "crew_id", "author_agent_id", "author_run_id",
 	"agent_id", "actor_agent_id",
-	"source_run_id", "source_agent_id", "chat_origin_id", "human_authority", "trigger_message_id",
+	"source_run_id", "source_agent_id", "chat_origin_id", "human_authority", "trigger_message_id", "operation_key",
 }
 
 // crewshipTenantScopedArgs are author-supplied args that NAME A ROW in the
@@ -362,6 +362,10 @@ func crewshipBody(req pipeline.CrewshipRequest) map[string]any {
 	body["author_run_id"] = req.RunID
 	if req.ChatOriginID != "" {
 		body["operation_key"] = req.OperationKey
+	} else if key, present := req.Args["operation_key"]; present {
+		// Legacy autonomous callers may explicitly choose a stable key. Only
+		// its canonical spelling survives; folded aliases cannot replace it.
+		body["operation_key"] = key
 	}
 	// The same acting agent under the two names the internal routes read it by.
 	// Set unconditionally, including when empty: a conditional here would let an

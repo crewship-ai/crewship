@@ -61,8 +61,10 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
-	restrictedWorkflow *restrictedworkflow.Service
-	restrictedText     RestrictedTextExecutor
+	issueMutationHandler *IssueHandler
+	issueMutationWorker  *issueMutationWorker
+	restrictedWorkflow   *restrictedworkflow.Service
+	restrictedText       RestrictedTextExecutor
 	// mux is a recording wrapper around http.ServeMux (router_mux.go).
 	// Same Handle/HandleFunc surface, plus the registered route table —
 	// which the method guards and the spec-drift test both need.
@@ -977,6 +979,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // reference to the DB handle or the Docker client.
 
 func (r *Router) Shutdown() {
+	r.issueMutationWorker.stop()
 	if r.provisioning != nil {
 		r.provisioning.Stop()
 	}

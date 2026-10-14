@@ -314,10 +314,11 @@ func buildDocument(routes []route) map[string]any {
 	_, chatShareComponents := chatShareSchemaCatalog()
 	_, chatEntityComponents := chatEntitySchemaCatalog()
 	_, routineOriginComponents := routineOriginBindingSchemaCatalog()
+	_, issueOutboxComponents := issueOutboxFailedSchemaCatalog()
 	for _, catalog := range []map[string]any{
 		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
-		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, routineOriginComponents, restrictedContextComponents, restrictedWorkflowComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, routineOriginComponents, issueOutboxComponents, restrictedContextComponents, restrictedWorkflowComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -366,6 +367,9 @@ func buildDocument(routes []route) map[string]any {
 				}
 			}
 			info.statuses = success
+		}
+		for _, status := range routeSchemaCatalog()[rt.method+" "+rt.path].ErrorStatuses {
+			info.statuses[status] = true
 		}
 		var params []map[string]any
 		for _, name := range pathParams(rt.path) {
@@ -503,6 +507,10 @@ func buildDocument(routes []route) map[string]any {
 
 func routeSchemaCatalog() map[string]DomainSchema {
 	result := map[string]DomainSchema{}
+	outboxRoutes, _ := issueOutboxFailedSchemaCatalog()
+	for key, schema := range outboxRoutes {
+		result[key] = schema
+	}
 	for key, schema := range pageProjectSchemaCatalog() {
 		result[key] = schema
 	}
@@ -587,6 +595,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		}
 		if schema.SuccessStatuses != nil {
 			merged.SuccessStatuses = schema.SuccessStatuses
+		}
+		if schema.ErrorStatuses != nil {
+			merged.ErrorStatuses = schema.ErrorStatuses
 		}
 		result[key] = merged
 	}
@@ -707,6 +718,9 @@ func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
 	}
 	if incoming.SuccessStatuses != nil {
 		existing.SuccessStatuses = incoming.SuccessStatuses
+	}
+	if incoming.ErrorStatuses != nil {
+		existing.ErrorStatuses = incoming.ErrorStatuses
 	}
 	if incoming.ErrorMedia != nil {
 		existing.ErrorMedia = incoming.ErrorMedia

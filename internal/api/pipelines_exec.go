@@ -329,6 +329,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 
 	exec := h.newExecutor()
 	input := pipeline.RunInput{
+		ChatOriginID:          runauthority.OriginIDFromContext(r.Context()),
 		PinnedVersion:         body.PinnedVersion,
 		UseReviewedDefinition: body.ExpectedDefinitionHash != "",
 		PipelineID:            p.ID,

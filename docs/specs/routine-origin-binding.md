@@ -18,8 +18,9 @@ OWNER/ADMIN operators can inspect and explicitly clear bindings using:
 
 Both require a real user session or an unscoped user CLI token. Agent/internal
 credentials, scoped tokens and restricted accounts cannot use this surface.
-The GET returns `pipeline_id`, nullable `origin_id` and `schedules` containing
-`id` and nullable `origin_id`. These opaque binding identifiers are available
+The GET returns `pipeline_id`, nullable `origin_id`, nullable `draft`
+(`id`, `revision`, nullable `origin_id`) and `schedules` containing `id`, nullable
+`origin_id`, nullable `pinned_version` and nullable `version_origin_id`. These opaque binding identifiers are available
 only on this operator surface, not on ordinary routine responses.
 
 POST requires `action: "clear"`, an operator `reason`, and `expected_origin_id`
@@ -27,18 +28,25 @@ matching the current head exactly; explicit JSON `null` means unbound. Optional
 `schedules` lists at most 100 unique objects, each with its own `id` and
 `expected_origin_id`. Every selected schedule must belong to this routine.
 A stale head or schedule yields `409 origin_binding_conflict`; nothing changes.
+A bound draft additionally requires `draft: {id, expected_revision, expected_origin_id}`
+matching its current binding exactly. Omitting this review returns
+`409 draft_binding_review_required`; mismatches return `409 draft_binding_conflict`.
 
 The clear and user-attributed audit record commit in one transaction. It clears
-only the current head and enumerated schedules, restoring the existing standing
+only the current head, an explicitly reviewed draft and enumerated schedules, restoring the existing standing
 routine execution policy. Immutable versions and already pending/running work
-keep their original authority. Clearing a pinned schedule does not remove the
-immutable version's binding. Further schedules are unchanged. This endpoint
+keep their original authority. Selecting a pinned schedule whose immutable version retains an origin returns
+`409 pinned_version_authority_immutable` and clears nothing. The version must be
+changed deliberately through ordinary schedule editing; this API never erases
+immutable version authority. A cleared draft gets a new revision, so publication
+requests prepared before the clear conflict instead of restoring its old origin. Further schedules are unchanged. This endpoint
 never accepts a replacement receipt or a caller-selected source run.
 
 ```bash
 crewship routine origin-binding get daily-report
 crewship routine origin-binding clear daily-report --expected-origin ORIGIN_ID --reason "Operator reviewed standing automation"
 crewship routine origin-binding clear daily-report --expected-origin null --schedule SCHEDULE_ID=ORIGIN_ID --reason "Reviewed explicit schedule grant"
+crewship routine origin-binding clear daily-report --expected-origin ORIGIN_ID --draft DRAFT_ID=REVISION=ORIGIN_ID --reason "Reviewed draft and standing grant"
 ```
 
 ## Transport and child runs

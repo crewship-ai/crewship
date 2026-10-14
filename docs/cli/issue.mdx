@@ -771,3 +771,25 @@ crewship issue bulk update --ids ms_a,ms_b --labels lbl_bug,lbl_p0
 | `--labels` | string | | Comma-separated label IDs. **REPLACES** the existing label set on each issue; empty string clears all labels. |
 
 At least one of `--status` / `--priority` / `--assignee` / `--project` / `--labels` must be supplied. Response surfaces as `Bulk update applied to <updated>/<requested> issue(s).` — the two counts differ when some IDs were 404 or 403.
+
+### `crewship issue deliveries failed`
+
+List failed issue mutation delivery jobs in the selected workspace. Requires a
+current trusted OWNER/ADMIN membership and `workspace:admin` token scope when
+scoped. The response contains sanitized metadata and error codes, never the
+job payload, requester receipt or raw transport error. This command is read-only;
+it cannot retry or reauthorize work.
+
+```bash
+crewship issue deliveries failed --limit 50
+crewship issue deliveries failed --cursor NEXT_CURSOR --limit 50 --format json
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--limit` | `50` | Maximum failed jobs per page, from 1 to 100. |
+| `--cursor` | | Opaque `next_cursor` from the preceding page. |
+
+Pages are ordered by creation time and ID. Cursors are bound to the viewer and
+workspace. A page contains `jobs`, `has_more` and `next_cursor`; there is no
+workspace-wide total. Global output format and filter flags are supported.

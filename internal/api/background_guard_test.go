@@ -26,6 +26,7 @@ import (
 var unregisteredSpawnSites = map[string]string{
 	"provider_login_device.go:spawn": "device pollers are handler-owned: Stop cancels their context and joins h.wg; device fixtures register Stop before DB cleanup. A global drain would wait for human authorization in unrelated tests.",
 	// Daemons: started once, live for the process.
+	"issue_mutation_outbox.go:StartIssueMutationOutbox":          "router-owned boot daemon: cancellation stops its ticker and bounded drain; Router.Shutdown cancels and joins worker.wg before the DB closes. The explicit lifecycle is exercised by TestIssueOutboxWorkerRecoversJournalAndDeduplicatesLostACK, which replaces the handler, starts recovery and calls Shutdown before closing its journal writer. A global fixture drain would wait indefinitely for this periodic worker.",
 	"assignments_running_recovery.go:StartStuckRunningSweeper":   "boot daemon: ticker loop, stopped via ctx",
 	"assignments_stuck_sweeper.go:StartStuckQueueSweeper":        "boot daemon: ticker loop, stopped via ctx",
 	"credential_rotation.go:StartCredentialRotationExpiryWorker": "boot daemon: stop channel + caller's WaitGroup",

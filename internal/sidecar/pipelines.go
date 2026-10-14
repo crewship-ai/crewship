@@ -389,18 +389,9 @@ func (s *Server) handlePipelinesGet(w http.ResponseWriter, r *http.Request, slug
 	s.proxyIPCJSON(w, r, http.MethodGet, path, "pipeline-get", nil)
 }
 
-// handlePipelinesRun invokes a saved pipeline through the PUBLIC run
-// route with the internal token.
-//
-// It used to stamp X-Crewship-Invoking-{Crew,Agent} on the request so the
-// executor could record who triggered the run. That never carried
-// identity anywhere: proxyIPCJSON builds a fresh upstream request and
-// forwards only X-Internal-Token, and crewshipd no longer reads those
-// headers at all — on a JWT route they were only ever a way for a caller
-// to invent a crew. Agent-invoked runs that need attribution go through
-// the run_routine MCP tool (runPipeline → /api/v1/internal/pipelines/run),
-// where the identity travels in the body and is verified server-side
-// against the token's crew binding and the agents table.
+// handlePipelinesRun invokes the same attributed internal run path as the
+// run_routine MCP tool. Source run/agent identity is verified server-side.
+// Dry runs use the public read-only planning route through trusted sidecar IPC.
 //
 // POST /pipelines/{slug}/run
 func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug string) {
@@ -423,9 +414,7 @@ func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug
 	if body.DryRun {
 		suffix = "/dry_run"
 	}
-	// #812: a forged per-agent token is still refused here, even though this
-	// route has no channel to carry the acting agent upstream (see the doc
-	// comment) — the run_routine MCP tool is the attributed path.
+	// #812: refuse forged per-agent tokens before either execution or dry run.
 	agentID, ok := s.actingAgentID(r)
 	if !ok {
 		writeJSONResponse(w, 403, map[string]string{"error": "unrecognized agent token"})

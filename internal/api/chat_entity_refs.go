@@ -235,7 +235,7 @@ func (r *Router) chatEntityRefs(w http.ResponseWriter, req *http.Request) {
 	}
 	rows, err := tx.QueryContext(req.Context(), `SELECT cr.event_id,cr.chat_seq,cr.operation_id,cr.run_id,cr.trigger_message_id,cr.created_at,COALESCE(m.identifier,''),m.id IS NULL,
  op.kind,op.verb,op.entity_id,op.workspace_id,op.actor_type,op.actor_id,op.created_at,op.entity_revision,op.entity_aggregate_revision,
- COALESCE(m.title,''),COALESCE(m.status,''),COALESCE(m.priority,''),m.assignee_type,m.assignee_id,COALESCE(m.revision,0),COALESCE(m.aggregate_revision,0),`+issueCardBusySQL+`,
+ COALESCE(m.title,''),COALESCE(m.status,''),COALESCE(m.priority,'none'),m.assignee_type,m.assignee_id,COALESCE(m.revision,0),COALESCE(m.aggregate_revision,0),`+issueCardBusySQL+`,
  (SELECT j.entry_type FROM journal_entries j WHERE j.workspace_id=op.workspace_id AND j.trace_id=cr.run_id AND j.entry_type IN ('run.started','run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop') ORDER BY CASE WHEN j.entry_type='run.started' THEN 1 ELSE 0 END,j.ts DESC,j.id DESC LIMIT 1)
  FROM chat_entity_refs cr JOIN agent_operations op ON op.id=cr.operation_id LEFT JOIN missions m ON m.id=op.entity_id AND m.workspace_id=op.workspace_id WHERE cr.chat_id=? AND op.workspace_id=? AND op.kind='issue' AND op.status='completed' AND `+entityRefVisibilitySQL+` AND cr.chat_seq>? AND cr.chat_seq<=? ORDER BY cr.chat_seq LIMIT ?`, chat, audience.WorkspaceID, c.After, c.Upper, limit+1)
 	if err != nil {

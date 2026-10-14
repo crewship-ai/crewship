@@ -10,6 +10,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // Seed through host CreateRun after writing the real JSONL triggering message.
@@ -123,6 +124,14 @@ func TestChatIssueOperationsCreateReplayAndReadProjection(t *testing.T) {
 	f := newChatIssueFixture(t)
 	body := f.createBody("create-1", "Real issue")
 	first := chatIssueJSON(t, chatIssueCall(t, f.h.Create, "POST", "", body), 201)
+	var originID string
+	if err := f.h.db.QueryRow(`SELECT COALESCE(chat_origin_id,'') FROM missions WHERE id=?`, first["id"]).Scan(&originID); err != nil || originID == "" {
+		t.Fatalf("created issue lost human execution origin: %q %v", originID, err)
+	}
+	origin, err := runauthority.ValidateOriginReceipt(t.Context(), f.h.db, originID, f.workspace)
+	if err != nil || origin.HumanAuthority == nil || origin.HumanAuthority.UserID != f.user || origin.ChatID != f.chat {
+		t.Fatalf("created issue changed its requester: %+v %v", origin, err)
+	}
 	replay := chatIssueJSON(t, chatIssueCall(t, f.h.Create, "POST", "", body), 200)
 	if replay["replayed"] != true || replay["id"] != first["id"] || first["operation_id"] == nil || replay["operation_id"] != first["operation_id"] {
 		t.Fatalf("replay mismatch: first=%v replay=%v", first, replay)
