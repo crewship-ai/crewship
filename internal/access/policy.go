@@ -28,7 +28,7 @@ func (s Store) Policy(ctx context.Context, actor, user, workspace string) (Polic
 		return Policy{}, err
 	}
 	p := Policy{Membership: m, Rights: []Right{}}
-	rows, err := tx.QueryContext(ctx, `SELECT resource_kind,COALESCE(agent_id,project_id),operation FROM access_grants WHERE member_id=? ORDER BY resource_kind,COALESCE(agent_id,project_id),operation`, m.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT resource_kind,COALESCE(agent_id,project_id,routine_id),operation FROM access_grants WHERE member_id=? ORDER BY resource_kind,COALESCE(agent_id,project_id,routine_id),operation`, m.ID)
 	if err != nil {
 		return Policy{}, err
 	}

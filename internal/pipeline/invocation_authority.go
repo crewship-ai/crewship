@@ -32,11 +32,27 @@ func HumanInvocationAuthority(userID, authority string) string {
 // Empty means a legacy or not-yet-classified source: membership still applies.
 func NewInvocationAuthorityChecker(db *sql.DB) func(context.Context, RunInput) error {
 	return func(ctx context.Context, in RunInput) error {
+		// Unattended triggers retain the live human author's account ceiling.
+		// Crew/agent-authored routines (no human author) keep their own policy.
+		if in.InvokingUserID == "" && unattendedAccountTrigger(in.TriggeredVia) {
+			if db == nil {
+				return ErrInvocationAuthorityRevoked
+			}
+			var allowed bool
+			err := db.QueryRowContext(ctx, `SELECT p.author_user_id IS NULL OR p.author_user_id='' OR EXISTS(SELECT 1 FROM users u WHERE u.id=p.author_user_id AND u.suspended_at IS NULL AND NOT EXISTS(SELECT 1 FROM workspace_members wm WHERE wm.user_id=u.id AND wm.access_mode='restricted')) FROM pipelines p WHERE p.id=? AND p.workspace_id=? AND p.deleted_at IS NULL`, in.PipelineID, in.WorkspaceID).Scan(&allowed)
+			if err != nil {
+				return fmt.Errorf("routine trigger account authority: %w", err)
+			}
+			if !allowed {
+				return ErrInvocationAuthorityRevoked
+			}
+		}
+
 		if in.InvokingUserID != "" && db != nil {
 			// Persisted human work must retain a live account, including after
 			// waits or restarts. Autonomous triggers have no human identity.
 			var active bool
-			if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND (suspended_at IS NULL OR suspended_at=''))`, in.InvokingUserID).Scan(&active); err != nil {
+			if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND suspended_at IS NULL)`, in.InvokingUserID).Scan(&active); err != nil {
 				return fmt.Errorf("routine account authority: %w", err)
 			}
 			if !active {
@@ -90,4 +106,8 @@ func NewInvocationAuthorityChecker(db *sql.DB) func(context.Context, RunInput) e
 		}
 		return ErrInvocationAuthorityRevoked
 	}
+}
+
+func unattendedAccountTrigger(source TriggeredVia) bool {
+	return source == TriggeredViaSchedule || source == TriggeredViaWebhook || source == TriggeredViaWakeCheck || source == TriggeredViaCallPipeline
 }

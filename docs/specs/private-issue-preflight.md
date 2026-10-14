@@ -7,7 +7,7 @@ POST /api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight
 ```
 
 Authentication: the session actor must have current restricted membership,
-manual routine-run permission, exact agent.run and project.read. The issue must
+an exact root-routine run grant, exact agent.run and project.read. The issue must
 be a current project-backed TODO issue assigned to that agent and held for agent
 work. The host reads its current title and brief; the caller cannot replace them.
 

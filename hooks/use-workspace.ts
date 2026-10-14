@@ -75,10 +75,15 @@ function setSnapshot(next: Snapshot) {
   emit()
 }
 
+// Account-bound sessions never adopt another account’s browser selection.
+function storageKey(): string {
+  return sessionIdentity ? `${STORAGE_KEY}:${sessionIdentity}` : STORAGE_KEY
+}
+
 function readPersistedId(): string | null {
   if (typeof window === "undefined") return null
   try {
-    return window.localStorage.getItem(STORAGE_KEY)
+    return window.localStorage.getItem(storageKey())
   } catch {
     return null
   }
@@ -87,8 +92,8 @@ function readPersistedId(): string | null {
 function persistId(id: string | null) {
   if (typeof window === "undefined") return
   try {
-    if (id) window.localStorage.setItem(STORAGE_KEY, id)
-    else window.localStorage.removeItem(STORAGE_KEY)
+    if (id) window.localStorage.setItem(storageKey(), id)
+    else window.localStorage.removeItem(storageKey())
   } catch {
     /* swallow quota / disabled-storage errors */
   }
@@ -140,8 +145,13 @@ function loadWorkspaces(): Promise<void> {
       const persisted = readPersistedId()
       // A partial directory cannot distinguish outage from removal. Preserve
       // an explicit choice; absence requires retry or a guarded user selection.
-      const next = snapshot.currentId ?? persisted ?? list[0]?.id ?? null
-      if (next && !persisted) persistId(next)
+      const selected = snapshot.currentId ?? persisted
+      // On a fresh login there is no workspace draft to preserve. A stale
+      // account preference (e.g. removed membership) may safely recover.
+      const next = snapshot.loading && selected && !list.some(w => w.id === selected)
+        ? list[0]?.id ?? null
+        : selected ?? list[0]?.id ?? null
+      if (next && next !== persisted) persistId(next)
       if (!next) persistId(null)
       // A periodic re-check (useAccessModeWatcher) usually returns exactly
       // what is held. Keeping the old snapshot then keeps every consumer's

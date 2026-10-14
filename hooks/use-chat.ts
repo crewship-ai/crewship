@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
 import { checkChatMessageSize } from "@/components/features/chat/hooks/use-message-submit"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { apiFetch } from "@/lib/api-fetch"
 import { projectInputVersionIds } from "@/components/features/chat/files/project-input-metadata"
 import { randomUUIDv4 } from "@/lib/random-id"
@@ -1405,7 +1406,7 @@ export function useChat({ realtimeEnabled = true, wsUrl, getToken, sessionId, cu
         void (async () => {
           let done = false
           try {
-            const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/restricted-run?workspace_id=${encodeURIComponent(workspaceId)}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:content.trim(), ...(projectFileVersions.length ? {project_file_versions:projectFileVersions} : {})}),signal:controller.signal})
+            const response = await apiFetch(`/api/v1/chats/${requireApiPathSegment(sessionId)}/restricted-run?workspace_id=${encodeURIComponent(workspaceId)}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:content.trim(), ...(projectFileVersions.length ? {project_file_versions:projectFileVersions} : {})}),signal:controller.signal})
             if (!response.ok || !response.body) throw new Error("Restricted text run denied or unavailable")
             const reader = response.body.getReader()
             const decoder = new TextDecoder()

@@ -120,13 +120,14 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		UPDATE workspace_members
 		SET role = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ?
+		  AND (access_mode!='restricted' OR ? NOT IN ('ADMIN','OWNER'))
 		  AND NOT (
 		    role = 'OWNER'
 		    AND ? != 'OWNER'
 		    AND (SELECT COUNT(*) FROM workspace_members
 		         WHERE workspace_id = ? AND role = 'OWNER') <= 1
 		  )`,
-		req.Role, now, memberID, workspaceID, req.Role, workspaceID)
+		req.Role, now, memberID, workspaceID, req.Role, req.Role, workspaceID)
 	if err != nil {
 		h.logger.Error("update workspace member role", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
@@ -139,7 +140,7 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if affected == 0 {
-		writeProblem(w, r, http.StatusConflict, "Cannot demote the last owner of the workspace")
+		writeProblem(w, r, http.StatusConflict, "Cannot demote the last owner or promote a Guest to administrator; restore trusted access explicitly first")
 		return
 	}
 

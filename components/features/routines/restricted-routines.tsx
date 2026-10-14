@@ -4,13 +4,16 @@ import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Workflow, RotateCw } from "lucide-react"
+import { AccessNotice, type AccessContext } from "@/components/features/restricted/access-notice"
+import { SubBar, SubBarSecondary } from "@/components/layout/sub-bar"
 import { RESTRICTED_RUNTIME_MISSING_MESSAGE, restrictedCatalogFailure, type RestrictedCatalogState } from "@/lib/restricted-catalog"
 
 interface RoutineInput { name: string; type: string; required: boolean }
 interface Routine { slug: string; name: string; definition_hash: string; execution_hash: string; inputs: RoutineInput[] }
 interface Result { run_id: string; status: string; step_outputs: Record<string, string> }
 
-export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
+export function RestrictedRoutines({ workspaceId, access }: { workspaceId: string; access?: AccessContext }) {
   const [catalog, setCatalog] = useState<Routine[]>([])
   const [selected, setSelected] = useState("")
   const [values, setValues] = useState<Record<string, string>>({})
@@ -18,6 +21,8 @@ export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
   const [error, setError] = useState("")
   const [catalogState, setCatalogState] = useState<RestrictedCatalogState>("loading")
   const [submitting, setSubmitting] = useState(false)
+  // Bumped by "Check again" / "Try again" to re-read the catalog.
+  const [reload, setReload] = useState(0)
   const request = useRef<{ key: string; body: string; slug: string } | null>(null)
   const owner = useRef(workspaceId)
   owner.current = workspaceId
@@ -34,7 +39,7 @@ export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
       if (!controller.signal.aborted) { setCatalog(body); setCatalogState("ready") }
     }).catch(() => { if (!controller.signal.aborted) setCatalogState("unavailable") })
     return () => controller.abort()
-  }, [workspaceId])
+  }, [workspaceId, reload])
 
   useEffect(() => {
     if (!runId || !runState || !["SCHEDULED", "DEDUPED", "pending", "running"].includes(runState)) return
@@ -86,11 +91,14 @@ export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
     } finally { if (owner.current === workspace) setSubmitting(false) }
   }
   const active = submitting || !!run && ["SCHEDULED", "DEDUPED", "pending", "running"].includes(run.status)
-  return <div className="mx-auto w-full max-w-3xl space-y-5 overflow-auto p-4 md:p-6">
-    <h1 className="text-xl font-semibold">Private routines</h1>
-    <p className="text-sm text-muted-foreground">Run an allowed routine. Its results are visible to you.</p>
+  const notice = catalogState === "runtime_missing" || catalogState === "unavailable" || (catalogState === "ready" && catalog.length === 0)
+  return <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+    <SubBar icon={Workflow} title="Private routines" ariaLabel="Private routines" description={catalogState === "ready" ? `${catalog.length} available to you` : "Restricted access"} actions={<SubBarSecondary icon={RotateCw} disabled={catalogState === "loading" || active || !!request.current} onClick={() => setReload(n => n + 1)}>Check again</SubBarSecondary>} />
+    <div className="min-h-0 flex-1 overflow-auto p-4">
+    <div className={notice ? "space-y-5" : "mx-auto w-full max-w-3xl space-y-5"}>
+    {!notice && <p className="text-sm text-muted-foreground">Run an allowed routine. Its results are visible to you.</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {catalogState === "loading" ? <p>Loading routines…</p> : catalogState === "runtime_missing" ? <p role="status">{RESTRICTED_RUNTIME_MISSING_MESSAGE}</p> : catalogState === "unavailable" ? <p role="alert" className="text-sm text-destructive">Routine catalog unavailable.</p> : catalog.length === 0 ? <p>No routines are available with your current access.</p> : <>
+    {catalogState === "loading" ? <p>Loading routines…</p> : catalogState === "runtime_missing" ? <AccessNotice kind="not-installed" title="Private routines aren't set up here" description={RESTRICTED_RUNTIME_MISSING_MESSAGE} context={access} current="routines" /> : catalogState === "unavailable" ? <AccessNotice kind="unavailable" title="Routine catalog unavailable." description="The list of what you can run could not be loaded." context={access} current="routines" onRetry={() => setReload(n => n + 1)} /> : catalog.length === 0 ? <AccessNotice kind="no-access" title="No routines shared with you yet" description="No routines are available with your current access." context={access} current="routines" /> : <>
       <label className="block space-y-2"><span>Routine</span><select aria-label="Routine" className="min-h-10 w-full rounded-md border bg-background p-2 coarse:min-h-12" value={selected} disabled={active || !!request.current} onChange={event => { setSelected(event.target.value); setValues({}); setRun(null); setError("") }}><option value="">Choose a routine</option>{catalog.map(item => <option key={item.slug} value={item.slug}>{item.name}</option>)}</select></label>
       {routine && <form className="space-y-4" onSubmit={event => { event.preventDefault(); void submit() }}>
         {routine.inputs.map(field => <label key={field.name} className="block space-y-2"><span>{field.name}{field.required ? " (required)" : ""}</span><Input aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))} /></label>)}
@@ -98,5 +106,7 @@ export function RestrictedRoutines({ workspaceId }: { workspaceId: string }) {
       </form>}
     </>}
     {run && <section className="space-y-3" aria-live="polite"><p>Status: {run.status === "needs_reconciliation" ? "Needs review" : run.status}</p>{run.status === "needs_reconciliation" && <p className="text-sm text-muted-foreground">An administrator must review this run’s outcome. It will not run again automatically.</p>}{Object.entries(run.step_outputs).map(([step, output]) => <div key={step}><h2 className="text-sm font-medium">{step}</h2><pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-sm">{output}</pre></div>)}</section>}
+    </div>
+    </div>
   </div>
 }

@@ -17,6 +17,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 // connected because they are HTTP.
 // =============================================================================
 
+const access = vi.hoisted(()=>({restricted:false}))
 const sendMessage = vi.fn()
 const resubscribeSession = vi.fn()
 const socket = vi.hoisted(() => ({ outcome: "connected" as "connected" | "error" | "never", delayMs: 30 }))
@@ -45,7 +46,7 @@ vi.mock("@/hooks/use-chat", async () => {
 vi.mock("@/hooks/use-auth", () => ({
   useSessionSafe: () => ({ data: { user: { id: "user-1" } } }), useSession: () => ({ data: { user: { id: "user-1" } } }),
 }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test", loading: false }) }))
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test", loading: false, workspaces: access.restricted ? [{id:"ws-test",currentUserAccessMode:"restricted",restricted_session:true}] : [] }) }))
 vi.mock("../right-panel", () => ({ RightPanel: () => null }))
 vi.mock("../right-rail", () => ({ RightRail: () => null }))
 vi.mock("../right-drawer", () => ({ RightDrawer: () => null }))
@@ -104,6 +105,7 @@ async function typeAndSend(text: string) {
 
 describe("ChatPanel — the first send of a draft (#2898)", () => {
   beforeEach(() => {
+    access.restricted=false
     vi.clearAllMocks()
     rows = new Set()
     createdProfile = "trusted"
@@ -113,6 +115,15 @@ describe("ChatPanel — the first send of a draft (#2898)", () => {
     socket.outcome = "connected"
     socket.delayMs = 30
     installFetch()
+  })
+
+  it("offers no send or first-session mutation for a discover-only Guest", async () => {
+    access.restricted=true
+    render(<ChatPanel {...panelProps} agentMeta={{id:"agent-1",slug:"riley",name:"Riley",current_user_can_chat:false}} />)
+    await screen.findByText(/Ask your administrator for chat access/)
+    expect(screen.queryByRole("textbox")).toBeNull()
+    expect(creates).toEqual([])
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 
   it("offers Send on a draft and sends once the row exists and the socket is open", async () => {

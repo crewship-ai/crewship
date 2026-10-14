@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"log/slog"
 	"net/http"
@@ -17,6 +19,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -486,7 +489,7 @@ func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, to
 	// Compare parsed instants: RFC3339 TEXT and SQLite datetime TEXT sort
 	// differently within one date. julianday also handles offsets/fractions.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT i.id, i.workspace_id, i.role,i.token FROM workspace_invitations i
+		SELECT i.id, i.workspace_id, i.role,i.token,i.access_mode,i.rights_json,i.invited_by FROM workspace_invitations i
 		JOIN workspaces w ON w.id = i.workspace_id AND w.deleted_at IS NULL
 		WHERE LOWER(i.email) = LOWER(?) AND (i.token=? OR (i.token NOT LIKE 'sha256:%' AND i.token=?)) AND i.accepted_at IS NULL
 		  AND julianday(i.expires_at) > julianday('now')
@@ -498,11 +501,11 @@ func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, to
 	if err != nil {
 		return 0, err
 	}
-	type invite struct{ id, workspaceID, role, storedToken string }
+	type invite struct{ id, workspaceID, role, storedToken, mode, rights, issuer string }
 	var pending []invite
 	for rows.Next() {
 		var inv invite
-		if err := rows.Scan(&inv.id, &inv.workspaceID, &inv.role, &inv.storedToken); err != nil {
+		if err := rows.Scan(&inv.id, &inv.workspaceID, &inv.role, &inv.storedToken, &inv.mode, &inv.rights, &inv.issuer); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -520,7 +523,7 @@ func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, to
 		if err != nil && err != sql.ErrNoRows {
 			return 0, err
 		}
-		if err == nil && existingRole != inv.role {
+		if err == nil && (existingRole != inv.role || inv.mode == "restricted") {
 			return 0, errInvitationConflict
 		}
 		if err == sql.ErrNoRows {
@@ -544,10 +547,28 @@ func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, to
 			return 0, errInvitationConflict
 		}
 		if existingRole == "" {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(id,workspace_id,user_id,role,created_at) VALUES(?,?,?,?,?)`, generateCUID(), inv.workspaceID, userID, inv.role, now); err != nil {
+			memberID := generateCUID()
+			if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(id,workspace_id,user_id,role,created_at) VALUES(?,?,?,?,?)`, memberID, inv.workspaceID, userID, inv.role, now); err != nil {
 				return 0, err
 			}
 		}
+		if inv.mode == "restricted" {
+			var rights []access.Right
+			if json.Unmarshal([]byte(inv.rights), &rights) != nil || rights == nil {
+				return 0, errInvitationConflict
+			}
+			var membershipID string
+			if err := tx.QueryRowContext(ctx, `SELECT id FROM workspace_members WHERE user_id=? AND workspace_id=?`, userID, inv.workspaceID).Scan(&membershipID); err != nil {
+				return 0, err
+			}
+			if _, err := (access.Store{}).ReplaceIn(ctx, tx, inv.issuer, userID, inv.workspaceID, "restricted", access.Membership{ID: membershipID, Revision: 1}, rights); err != nil {
+				if errors.Is(err, access.ErrDenied) || errors.Is(err, access.ErrConflict) {
+					return 0, errInvitationConflict
+				}
+				return 0, err
+			}
+		}
+
 		if err := appendInvitationAudit(ctx, tx, journal.EntryInvitationAccepted, inv.workspaceID, userID, inv.id, inv.role, userID); err != nil {
 			return 0, err
 		}

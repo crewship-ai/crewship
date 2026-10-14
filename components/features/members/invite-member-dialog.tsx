@@ -3,6 +3,8 @@
 import { useRef, useState, type FormEvent } from "react"
 import { Check, Copy, TriangleAlert, UserPlus } from "lucide-react"
 
+import { InitialResourceGrants, type InitialRight } from "./initial-resource-grants"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { inviteMemberSchema } from "@/lib/validations"
 import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
@@ -63,6 +65,8 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
   const [email, setEmail] = useState("")
   const [fullName, setFullName] = useState("")
   const [role, setRole] = useState("MEMBER")
+  const [guest, setGuest] = useState(false)
+  const [rights, setRights] = useState<InitialRight[]>([])
   const [access, setAccess] = useState<Access>("")
   const [status, setStatus] = useState<"idle" | "saving" | "error">("idle")
   const [error, setError] = useState<string | null>(null)
@@ -93,6 +97,8 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
     setEmail("")
     setFullName("")
     setRole("MEMBER")
+    setGuest(false)
+    setRights([])
     setAccess("")
     setStatus("idle")
     setError(null)
@@ -114,7 +120,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
 
     try {
       const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/members/provision?workspace_id=${workspaceId}`,
+        `/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/members/provision?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -124,6 +130,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
           body: JSON.stringify({
             email: email.trim(),
             role,
+            ...(guest ? {access_mode:"restricted",rights} : {}),
             ...(fullName.trim() ? { full_name: fullName.trim() } : {}),
           }),
         },
@@ -138,7 +145,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
         return
       }
       const created = (await res.json()) as ProvisionResult
-      if (access && created.user_id) {
+      if (!guest && access && created.user_id) {
         const ws = encodeURIComponent(workspaceId)
         const set = await apiFetch(`/api/v1/workspaces/${ws}/members/${encodeURIComponent(created.user_id)}/capabilities?workspace_id=${ws}`, {
           method: "PATCH",
@@ -146,7 +153,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
           body: JSON.stringify({ set: [...CAPABILITY_BUNDLES[access]] }),
         }).then((r) => r.ok, () => false)
         created.access_applied = set
-      } else if (access) {
+      } else if (!guest && access) {
         created.access_applied = false
       }
       setResult(created)
@@ -290,7 +297,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
                   const Icon = ROLE_ICON[r]
                   const on = role === r
                   return (
-                    <button key={r} type="button" role="radio" aria-checked={on} onClick={() => setRole(r)} title={ROLE_SUMMARY_BY_ROLE[r]}
+                    <button key={r} type="button" role="radio" aria-checked={on} disabled={guest && r === "ADMIN"} onClick={() => setRole(r)} title={ROLE_SUMMARY_BY_ROLE[r]}
                       className={cn("flex flex-col items-start gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors coarse:min-h-[52px]",
                         on ? "border-primary bg-primary/[0.08] ring-1 ring-primary" : "border-border hover:bg-accent")}>
                       <Icon className={cn("h-3.5 w-3.5", on ? "text-primary-hover" : "text-muted-foreground")} aria-hidden />
@@ -302,7 +309,12 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
               <p className="text-label text-muted-foreground">{ROLE_SUMMARY_BY_ROLE[role]}.</p>
             </fieldset>
 
-            <fieldset className="space-y-2">
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" aria-label="Guest access" checked={guest} onChange={event=>{setGuest(event.target.checked); if(event.target.checked && role==="ADMIN")setRole("MEMBER")}} />
+              <span>Guest — only shared resources<span className="block text-xs text-muted-foreground">Restricts their entire account across all workspaces. Administrators cannot be guests.</span></span>
+            </label>
+            {guest && <InitialResourceGrants workspaceId={workspaceId} rights={rights} onChange={setRights} />}
+            {!guest && <fieldset className="space-y-2">
               <legend className="mb-2 text-sm font-medium">What they can do</legend>
               <div role="radiogroup" aria-label="What they can do" className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5">
                 {([{ key: "" as Access, label: "Role default" }, ...ACCESS_PROFILES.map((p) => ({ key: p.key as Access, label: p.label }))]).map((o) => (
@@ -324,7 +336,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
               ) : (
                 <p className="text-label text-muted-foreground">What a new {ROLE_LABEL[role]} gets on this server. Change single abilities later in their panel.</p>
               )}
-            </fieldset>
+            </fieldset>}
 
             {status === "error" && error && (
               <p className="text-body text-destructive">{error}</p>

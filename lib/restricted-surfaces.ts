@@ -8,10 +8,11 @@
 
 import type { WorkspaceData } from "@/hooks/use-workspace"
 
-export type RestrictedSurface = "chat" | "routines" | "pages" | "account_security"
+export type RestrictedSurface = "issues" | "chat" | "routines" | "pages" | "account_security"
 
 /** The screen each surface lives at. */
 export const RESTRICTED_SURFACE_PATHS: Record<RestrictedSurface, string> = {
+  issues: "/issues",
   chat: "/chat",
   routines: "/routines",
   pages: "/pages",

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { readTotalCount } from "@/hooks/use-paged-list"
+import { useAccessMode } from "@/hooks/use-access-mode"
 import { useWorkspace } from "@/hooks/use-workspace"
 
 import { httpError, scopeErrorMessage, useRetry } from "./scope-fetch"
@@ -46,6 +47,7 @@ export function parseKindCounts(raw: string | null): Record<string, number> | nu
 /* ------------------------------------------------------------------ types */
 
 export interface ChatTreeAgent {
+  current_user_can_chat?: boolean
   id: string
   name: string
   slug: string
@@ -218,6 +220,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
   kind,
 }: { ensureSlug?: string | null; kind?: string | null } = {}): ChatTreeData<A> {
   const { workspaceId, loading: wsLoading } = useWorkspace()
+  const restricted = useAccessMode() === "restricted"
 
   const [roster, setRoster] = useState<A[] | null>(null)
   const [threadsByAgent, setThreadsByAgent] = useState<Record<string, ChatTreeThread[]>>({})
@@ -232,6 +235,16 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
   const [error, setError] = useState<string | null>(null)
   const { nonce: threadsNonce, retry: retryThreads } = useRetry()
   const { nonce: rosterNonce, retry: retryRoster } = useRetry()
+
+  // Restricted sessions have no realtime channel. Re-read the existing
+  // directory so a chat-grant revoke also removes the composer in this tab.
+  useEffect(() => {
+    if (!restricted) return
+    const timer = setInterval(retryRoster, 15_000)
+    const focus = () => retryRoster()
+    window.addEventListener("focus", focus)
+    return () => { clearInterval(timer); window.removeEventListener("focus", focus) }
+  }, [restricted, retryRoster])
 
   // ── The roster ──
   useEffect(() => {
