@@ -109,8 +109,12 @@ func TestAgentChatTranscriptBackupRestoreAndFork(t *testing.T) {
 					t.Fatal(err)
 				}
 				opts.DryRun = true
-				if _, err := backup.RestoreBackup(ctx, target, opts); err == nil || !strings.Contains(err.Error(), "transcript differs") {
-					t.Fatalf("dry-run missed conflict: %v", err)
+				if _, err := backup.RestoreBackup(ctx, target, opts); err != nil {
+					t.Fatalf("dry-run of an existing chat must preserve its newer history: %v", err)
+				}
+				current, err := reader.Read(ctx, chat, 0, 0)
+				if err != nil || len(current) != 3 {
+					t.Fatalf("dry-run changed live history: %+v %v", current, err)
 				}
 				opts.DryRun = false
 				opts.Replace = true

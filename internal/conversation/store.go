@@ -259,25 +259,8 @@ func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error
 	}
 	data = append(data, '\n')
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	f, ok := s.files[sessionID]
-	if !ok {
-		dir := filepath.Join(s.basePath, "conversations")
-		if err := os.MkdirAll(dir, 0750); err != nil {
-			return fmt.Errorf("create conversation dir: %w", err)
-		}
-		path := filepath.Join(dir, sessionID+".jsonl")
-		f, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
-		if err != nil {
-			return fmt.Errorf("open conversation file: %w", err)
-		}
-		s.files[sessionID] = f
-	}
-
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("write message: %w", err)
+	if err := s.appendJSONL(sessionID, data); err != nil {
+		return err
 	}
 
 	// Dual-write the searchable mirror. The JSONL above is the durable
@@ -291,6 +274,35 @@ func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error
 				"error", err, "session_id", sessionID, "message_id", msg.ID)
 		}
 	}
+	return nil
+}
+
+// appendJSONL serializes file handles only. Never hold this mutex while
+// acquiring a database connection: restore publishes under its DB transaction
+// and must be able to fence JSONL writers without a Store-to-DB lock cycle.
+func (s *Store) appendJSONL(sessionID string, data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	f, ok := s.files[sessionID]
+	if !ok {
+		dir := filepath.Join(s.basePath, "conversations")
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			return fmt.Errorf("create conversation dir: %w", err)
+		}
+		path := filepath.Join(dir, sessionID+".jsonl")
+		var err error
+		f, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
+		if err != nil {
+			return fmt.Errorf("open conversation file: %w", err)
+		}
+		s.files[sessionID] = f
+	}
+
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write message: %w", err)
+	}
+
 	return nil
 }
 
@@ -500,8 +512,20 @@ func validateID(s string) error {
 	return nil
 }
 
-// LockTranscripts fences append writers before backup snapshot/restore DB
-// transactions. Closing cached append descriptors prevents restored files from
+// SnapshotTranscripts briefly fences file writes while backup pins read
+// descriptors and sizes. It leaves cached append descriptors open and does
+// not fsync: the snapshot reads the same page-cache bytes written by Append.
+func (s *Store) SnapshotTranscripts(ctx context.Context) (func(), error) {
+	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
+	return s.mu.Unlock, nil
+}
+
+// LockTranscripts fences append writers through restore publication and commit.
+// Closing cached append descriptors prevents restored files from
 // leaving subsequent messages on an unlinked inode. Call release exactly once.
 func (s *Store) LockTranscripts(ctx context.Context) (func(), error) {
 	s.mu.Lock()

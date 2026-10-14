@@ -61,9 +61,10 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
-	transcriptLock     func(context.Context) (func(), error)
-	restrictedWorkflow *restrictedworkflow.Service
-	restrictedText     RestrictedTextExecutor
+	transcriptLock         func(context.Context) (func(), error)
+	transcriptSnapshotLock func(context.Context) (func(), error)
+	restrictedWorkflow     *restrictedworkflow.Service
+	restrictedText         RestrictedTextExecutor
 	// mux is a recording wrapper around http.ServeMux (router_mux.go).
 	// Same Handle/HandleFunc surface, plus the registered route table —
 	// which the method guards and the spec-drift test both need.

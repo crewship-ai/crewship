@@ -294,13 +294,6 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil, fmt.Errorf("backup: RestoreOptions.Path required")
 	}
 	st := resolveStorage(opts.Storage)
-	if opts.LockTranscripts != nil {
-		release, err := opts.LockTranscripts(ctx)
-		if err != nil {
-			return nil, err
-		}
-		defer release()
-	}
 
 	// Manifest metadata captured as the restore progresses, so the
 	// webhook can report scope/workspace even on failure paths that
@@ -887,7 +880,13 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil
 	}
 	transcripts := &transcriptRestore{}
-	defer func() { retErr = errors.Join(retErr, transcripts.finish(serviceDatabaseCommitted)) }()
+	var transcriptRelease func()
+	defer func() {
+		retErr = errors.Join(retErr, transcripts.finish(serviceDatabaseCommitted))
+		if transcriptRelease != nil {
+			transcriptRelease()
+		}
+	}()
 	// memoryBlobsRestore lands the memory-blobs/ section (if any) onto
 	// opts.BlobRoot. Unlike dockerRestore this is NOT gated on
 	// skipDocker — memory_versions blobs are workspace-scoped content-
@@ -1012,11 +1011,18 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			if err != nil {
 				return nil, err
 			}
-			if extracted.DBDump.chatTranscriptRemap == nil {
-				extracted.DBDump.chatTranscriptRemap = map[string]map[string]string{}
+			reconcileTranscriptUsers(extracted.DBDump, users)
+			existing, err := checkedTranscriptChats(ctx, db, extracted.DBDump, false)
+			if err != nil {
+				return nil, err
 			}
-			extracted.DBDump.chatTranscriptRemap["users"] = users
-			transcripts, err = prepareAgentChatTranscripts(ctx, opts.ConversationRoot, extracted, true, opts.Replace)
+			if opts.Replace {
+				existing = nil
+			}
+			transcripts, err = stageAgentChatTranscripts(ctx, opts.ConversationRoot, extracted, true, existing)
+			if err == nil {
+				err = transcripts.reconcile(ctx, true, opts.Replace)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -1223,10 +1229,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			if err != nil {
 				return err
 			}
-			if extracted.DBDump.chatTranscriptRemap == nil {
-				extracted.DBDump.chatTranscriptRemap = map[string]map[string]string{}
-			}
-			extracted.DBDump.chatTranscriptRemap["users"] = remap
+			reconcileTranscriptUsers(extracted.DBDump, remap)
 			reconciledUsers = len(remap)
 			if opts.Logger != nil && len(remap) > 0 {
 				opts.Logger(fmt.Sprintf("user reconciliation: aligned %d bundle user(s) to target by email", len(remap)))
@@ -1234,6 +1237,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			return nil
 		})
 		var commitTx *sql.Tx
+		var existingTranscriptChats map[string]bool
 		hooks := &RestoreDumpHooks{
 			RejectNoOp: true,
 			// Provenance for the DR resume (#1716), written only for a
@@ -1243,7 +1247,10 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			// claim behind.
 			PostInsert: func(ctx context.Context, tx *sql.Tx) error {
 				var err error
-				transcripts, err = prepareAgentChatTranscripts(ctx, opts.ConversationRoot, extracted, false, opts.Replace)
+				if _, err := checkedTranscriptChats(ctx, tx, extracted.DBDump, true); err != nil {
+					return err
+				}
+				transcripts, err = stageAgentChatTranscripts(ctx, opts.ConversationRoot, extracted, false, existingTranscriptChats)
 				if err != nil {
 					return err
 				}
@@ -1277,6 +1284,16 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				if err := servicePlan.renewCommitFences(ctx, commitTx); err != nil {
 					return err
 				}
+				if len(transcripts.stages) > 0 && opts.LockTranscripts != nil {
+					var err error
+					transcriptRelease, err = opts.LockTranscripts(ctx)
+					if err != nil {
+						return err
+					}
+				}
+				if err := transcripts.reconcile(ctx, false, opts.Replace); err != nil {
+					return err
+				}
 				return transcripts.publish()
 			},
 			PreInsert: func(ctx context.Context, tx *sql.Tx) error {
@@ -1291,6 +1308,13 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 						return err
 					}
 				}
+				if !opts.Replace {
+					var err error
+					existingTranscriptChats, err = checkedTranscriptChats(ctx, tx, extracted.DBDump, false)
+					if err != nil {
+						return err
+					}
+				}
 				return nil
 			},
 		}
@@ -1299,6 +1323,17 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			return nil, err
 		}
 		serviceDatabaseCommitted = err == nil
+		// Rollback/publication cleanup must complete while writers are fenced, but
+		// schema backfills, reporting and slow post-commit work need no file lock.
+		finishErr := transcripts.finish(serviceDatabaseCommitted)
+		transcripts = &transcriptRestore{}
+		if transcriptRelease != nil {
+			transcriptRelease()
+			transcriptRelease = nil
+		}
+		if finishErr != nil {
+			return nil, finishErr
+		}
 		stats = s
 		warnSecurityLevelClamps(opts.Logger, stats.SecurityLevelClamps, stats.SecurityLevelClamped, false)
 		warnDroppedColumns(opts.Logger, stats.DroppedColumns, stats.ColumnsDropped, false)

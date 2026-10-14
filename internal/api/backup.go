@@ -62,9 +62,10 @@ type BackupHandler struct {
 	// and RestoreBackup can land them back + rewrite payload_ref.
 	// Empty disables both (matches the rest of the memory subsystem's
 	// "empty BlobRoot disables versioning" convention).
-	lockTranscripts  func(context.Context) (func(), error)
-	memoryBlobRoot   string
-	pageProjectsPath string
+	lockTranscripts     func(context.Context) (func(), error)
+	snapshotTranscripts func(context.Context) (func(), error)
+	memoryBlobRoot      string
+	pageProjectsPath    string
 	// attachmentRoot is the storage root attachment blobs live under
 	// (attachments/<workspace>/<sha[:2]>/<sha>) — the router's storagePath,
 	// the same root AttachmentHandler writes to. Create collects the blobs
@@ -313,7 +314,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		PageProjectsPath:          h.pageProjectsPath,
 		AttachmentRoot:            h.attachmentRoot,
 		ConversationRoot:          h.attachmentRoot,
-		LockTranscripts:           h.lockTranscripts,
+		LockTranscripts:           h.createTranscriptLock(),
 		ServiceSnapshots:          h.serviceSnapshots,
 		RecoverServiceMaintenance: req.RecoverServices,
 	})
@@ -1073,4 +1074,16 @@ func (h *BackupHandler) resolveCrewContainerName() func(id, slug string) string 
 // SetTranscriptLock coordinates host conversation files with snapshot/restore.
 func (h *BackupHandler) SetTranscriptLock(lock func(context.Context) (func(), error)) {
 	h.lockTranscripts = lock
+}
+
+// SetTranscriptSnapshotLock avoids flushing and closing live writers on create.
+func (h *BackupHandler) SetTranscriptSnapshotLock(lock func(context.Context) (func(), error)) {
+	h.snapshotTranscripts = lock
+}
+
+func (h *BackupHandler) createTranscriptLock() func(context.Context) (func(), error) {
+	if h.snapshotTranscripts != nil {
+		return h.snapshotTranscripts
+	}
+	return h.lockTranscripts
 }

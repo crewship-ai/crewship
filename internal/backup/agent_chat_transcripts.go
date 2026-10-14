@@ -20,68 +20,217 @@ import (
 
 const agentChatsPrefix = "agent-chats/"
 
-// Only chats selected by the database snapshot may contribute host files.
-// The caller holds LockTranscripts across the DB snapshot and collection.
-// Low-level callers must provide the same coordination or a stopped store.
-func writeAgentChatTranscripts(ctx context.Context, dst *TarZstWriter, storage string, dump *DBDump, now time.Time) (int, error) {
-	if dump == nil {
-		return 0, nil
+// Only chats selected by the completed database snapshot may contribute files.
+// Pin descriptors and byte lengths while append/replace is fenced; no DB reads,
+// content validation or compression takes place while holding that fence.
+type pinnedAgentTranscript struct {
+	id, workspace string
+	file          *os.File
+	size          int64
+}
+type pinnedAgentTranscripts struct {
+	files   []pinnedAgentTranscript
+	missing int
+}
+
+func (p *pinnedAgentTranscripts) Close() {
+	if p == nil {
+		return
 	}
-	dump.AgentChatTranscripts = map[string]string{}
+	for _, f := range p.files {
+		_ = f.file.Close()
+	}
+	p.files = nil
+}
+func pinAgentChatTranscripts(ctx context.Context, storage string, dump *DBDump, lock func(context.Context) (func(), error)) (_ *pinnedAgentTranscripts, retErr error) {
+	pinned := &pinnedAgentTranscripts{}
+	defer func() {
+		if retErr != nil {
+			pinned.Close()
+		}
+	}()
+	if dump == nil || len(dump.Tables["chats"]) == 0 {
+		return pinned, nil
+	}
+	if lock != nil {
+		release, err := lock(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
 	var root *os.Root
 	if storage != "" {
 		base, err := os.OpenRoot(storage)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return 0, err
+			return nil, err
 		}
 		if base != nil {
 			defer base.Close()
 			root, err = base.OpenRoot("conversations")
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				return 0, err
+				return nil, err
 			}
 		}
 	}
 	if root != nil {
 		defer root.Close()
 	}
-	missing := 0
 	for _, row := range dump.Tables["chats"] {
 		if err := ctx.Err(); err != nil {
-			return missing, err
+			return nil, err
 		}
 		id, _ := row["id"].(string)
+		workspace, _ := row["workspace_id"].(string)
 		if _, err := safepath.ValidateComponent(id); err != nil || id == "" {
-			return missing, fmt.Errorf("backup: invalid chat identity")
+			return nil, fmt.Errorf("backup: invalid chat identity")
 		}
 		var f *os.File
 		var err error
 		if root != nil {
 			f, err = openTranscript(root, id+".jsonl")
 		}
-		if f == nil || errors.Is(err, os.ErrNotExist) {
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		if f == nil {
 			if transcriptMessageCount(row) > 0 {
-				missing++
-			}
-			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				return missing, err
+				pinned.missing++
 			}
 			continue
 		}
 		info, err := f.Stat()
-		if err == nil {
-			err = validateAgentTranscript(io.NewSectionReader(f, 0, info.Size()), id)
-		}
-		if err == nil {
-			err = dst.WriteStream(agentChatsPrefix+id+".jsonl", 0o600, now, info.Size(), f)
-		}
-		_ = f.Close()
 		if err != nil {
-			return missing, err
+			_ = f.Close()
+			return nil, err
 		}
-		dump.AgentChatTranscripts[id] = id
+		pinned.files = append(pinned.files, pinnedAgentTranscript{id: id, workspace: workspace, file: f, size: info.Size()})
 	}
-	return missing, nil
+	return pinned, nil
+}
+
+func (p *pinnedAgentTranscripts) write(ctx context.Context, dst *TarZstWriter, dump *DBDump, now time.Time) ([]IncompleteItem, error) {
+	incomplete := []IncompleteItem{}
+	if dump == nil {
+		return incomplete, nil
+	}
+	dump.AgentChatTranscripts = map[string]string{}
+	for _, f := range p.files {
+		if err := ctx.Err(); err != nil {
+			return incomplete, err
+		}
+		validSize, skipped, err := measurePinnedTranscript(ctx, io.NewSectionReader(f.file, 0, f.size), f.id)
+		if err != nil {
+			return incomplete, fmt.Errorf("backup: read chat %s transcript: %w", f.id, err)
+		}
+		var src io.Reader = io.NewSectionReader(f.file, 0, f.size)
+		if skipped > 0 {
+			incomplete = append(incomplete, IncompleteItem{Kind: "agent_chat_transcript_invalid_lines", Count: skipped, Workspace: f.workspace, Detail: fmt.Sprintf("Chat %s: skipped %d malformed or foreign-session transcript lines", f.id, skipped)})
+			src = &validTranscriptReader{ctx: ctx, reader: bufio.NewReader(src), chatID: f.id}
+		}
+		if err = dst.WriteStream(agentChatsPrefix+f.id+".jsonl", 0o600, now, validSize, src); err != nil {
+			return incomplete, err
+		}
+		dump.AgentChatTranscripts[f.id] = f.id
+	}
+	return incomplete, nil
+}
+
+// Low-level compatibility helper. Production uses the explicit pin/write split
+// so the transcript fence ends before validation and streaming begin.
+func writeAgentChatTranscripts(ctx context.Context, dst *TarZstWriter, storage string, dump *DBDump, now time.Time) (int, error) {
+	pinned, err := pinAgentChatTranscripts(ctx, storage, dump, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer pinned.Close()
+	_, err = pinned.write(ctx, dst, dump, now)
+	return pinned.missing, err
+}
+
+const maxBackupTranscriptLine = 64 << 20
+
+// ReadSlice drains oversized/corrupt lines with bounded memory, so one damaged
+// tail cannot either abort every future backup or allocate the entire file.
+func readPinnedTranscriptLine(ctx context.Context, r *bufio.Reader) ([]byte, bool, error) {
+	var line []byte
+	oversized := false
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		fragment, err := r.ReadSlice('\n')
+		if !oversized {
+			if len(line)+len(fragment) > maxBackupTranscriptLine {
+				line = nil
+				oversized = true
+			} else {
+				line = append(line, fragment...)
+			}
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			if len(line) > 0 || oversized {
+				return line, oversized, nil
+			}
+			return nil, false, io.EOF
+		}
+		return line, oversized, err
+	}
+}
+func validPinnedTranscriptLine(line []byte, id string) bool {
+	if len(bytes.TrimSpace(line)) == 0 {
+		return true
+	}
+	var message struct {
+		SessionID string `json:"session_id"`
+	}
+	return json.Unmarshal(line, &message) == nil && message.SessionID == id
+}
+func measurePinnedTranscript(ctx context.Context, src io.Reader, id string) (size int64, skipped int, err error) {
+	reader := bufio.NewReader(src)
+	for {
+		line, oversized, readErr := readPinnedTranscriptLine(ctx, reader)
+		if errors.Is(readErr, io.EOF) {
+			return size, skipped, nil
+		}
+		if readErr != nil {
+			return size, skipped, readErr
+		}
+		if oversized || !validPinnedTranscriptLine(line, id) {
+			skipped++
+			continue
+		}
+		size += int64(len(line))
+	}
+}
+
+type validTranscriptReader struct {
+	ctx     context.Context
+	reader  *bufio.Reader
+	chatID  string
+	pending []byte
+}
+
+func (r *validTranscriptReader) Read(dst []byte) (int, error) {
+	if len(dst) == 0 {
+		return 0, nil
+	}
+	for len(r.pending) == 0 {
+		line, oversized, err := readPinnedTranscriptLine(r.ctx, r.reader)
+		if err != nil {
+			return 0, err
+		}
+		if oversized || !validPinnedTranscriptLine(line, r.chatID) {
+			continue
+		}
+		r.pending = line
+	}
+	n := copy(dst, r.pending)
+	r.pending = r.pending[n:]
+	return n, nil
 }
 
 // Root prevents escapes; comparing lstat with the opened inode also rejects
@@ -109,6 +258,7 @@ func openTranscript(root *os.Root, name string) (*os.File, error) {
 type transcriptStage struct {
 	target, temp, previous string
 	published              bool
+	digest                 []byte
 	inode                  os.FileInfo
 }
 
@@ -119,7 +269,20 @@ type transcriptRestore struct {
 
 // Preparation validates every scoped message before any file is published.
 // Files are published only at PreCommit's end, with rollback until DB commit.
-func prepareAgentChatTranscripts(ctx context.Context, storage string, payload *ExtractedPayload, dryRun, replace bool) (_ *transcriptRestore, retErr error) {
+func prepareAgentChatTranscripts(ctx context.Context, storage string, payload *ExtractedPayload, dryRun, replace bool) (*transcriptRestore, error) {
+	state, err := stageAgentChatTranscripts(ctx, storage, payload, dryRun, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := state.reconcile(ctx, dryRun, replace); err != nil {
+		return nil, errors.Join(err, state.finish(false))
+	}
+	return state, nil
+}
+
+// Staging only touches private temporary files. Reconcile must run under the
+// live writer fence immediately before publication, after slow restore work.
+func stageAgentChatTranscripts(ctx context.Context, storage string, payload *ExtractedPayload, dryRun bool, skip map[string]bool) (_ *transcriptRestore, retErr error) {
 	state := &transcriptRestore{}
 	defer func() {
 		if retErr != nil {
@@ -182,7 +345,7 @@ func prepareAgentChatTranscripts(ctx context.Context, storage string, payload *E
 			return nil, fmt.Errorf("backup: invalid restored chat identity")
 		}
 		seen[source] = true
-		if err := state.prepareOne(ctx, target, source, tr, payload.DBDump.chatTranscriptRemap, dryRun, replace); err != nil {
+		if err := state.prepareOne(ctx, target, source, tr, payload.DBDump.chatTranscriptRemap, dryRun, skip[target]); err != nil {
 			return nil, err
 		}
 	}
@@ -192,12 +355,14 @@ func prepareAgentChatTranscripts(ctx context.Context, storage string, payload *E
 	return state, nil
 }
 
-func (state *transcriptRestore) prepareOne(ctx context.Context, target, source string, src io.Reader, remap map[string]map[string]string, dryRun, replace bool) error {
+func (state *transcriptRestore) prepareOne(ctx context.Context, target, source string, src io.Reader, remap map[string]map[string]string, dryRun, skip bool) error {
 	stage := &transcriptStage{target: target + ".jsonl"}
-	state.stages = append(state.stages, stage)
+	if !skip {
+		state.stages = append(state.stages, stage)
+	}
 	var dst io.Writer = io.Discard
 	var temp *os.File
-	if !dryRun {
+	if !dryRun && !skip {
 		stage.temp = ".restore-" + newRemapCUID()
 		var err error
 		temp, err = state.root.OpenFile(stage.temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -208,7 +373,6 @@ func (state *transcriptRestore) prepareOne(ctx context.Context, target, source s
 		dst = temp
 	}
 	hash := sha256.New()
-	dst = io.MultiWriter(dst, hash)
 	scanner := bufio.NewScanner(src)
 	scanner.Buffer(make([]byte, 64<<10), 64<<20)
 	for scanner.Scan() {
@@ -230,20 +394,32 @@ func (state *transcriptRestore) prepareOne(ctx context.Context, target, source s
 			return fmt.Errorf("backup: transcript message belongs to another chat")
 		}
 		line := scanner.Bytes()
-		if target != source || len(remap["users"]) > 0 || len(remap["agents"]) > 0 {
+		changed := target != source
+		if changed {
 			message["session_id"], _ = json.Marshal(target)
-			for field, table := range map[string]string{"agent_id": "agents", "author_user_id": "users"} {
-				var id string
-				_ = json.Unmarshal(message[field], &id)
-				if mapped := remap[table][id]; mapped != "" {
-					message[field], _ = json.Marshal(mapped)
-				}
+		}
+		for field, table := range map[string]string{"agent_id": "agents", "author_user_id": "users"} {
+			var id string
+			_ = json.Unmarshal(message[field], &id)
+			if mapped := remap[table][id]; mapped != "" && mapped != id {
+				message[field], _ = json.Marshal(mapped)
+				changed = true
 			}
+		}
+		beforeMetadata := message["metadata"]
+		if err := remapTranscriptPageContext(message, remap); err != nil {
+			return err
+		}
+		changed = changed || !bytes.Equal(beforeMetadata, message["metadata"])
+		if changed {
 			var err error
 			line, err = json.Marshal(message)
 			if err != nil {
 				return err
 			}
+		}
+		if err := hashTranscriptLine(hash, line); err != nil {
+			return err
 		}
 		if _, err := dst.Write(append(append([]byte(nil), line...), '\n')); err != nil {
 			return err
@@ -262,37 +438,44 @@ func (state *transcriptRestore) prepareOne(ctx context.Context, target, source s
 			return err
 		}
 	}
+	stage.digest = hash.Sum(nil)
+	return nil
+}
+
+func (state *transcriptRestore) reconcile(ctx context.Context, dryRun, replace bool) error {
 	if state.root == nil {
 		return nil
 	}
-	existing, err := openTranscript(state.root, stage.target)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	defer existing.Close()
-	other := sha256.New()
-	if _, err := io.Copy(other, existing); err != nil {
-		return err
-	}
-	if bytes.Equal(hash.Sum(nil), other.Sum(nil)) {
-		if stage.temp != "" {
-			if err := state.root.Remove(stage.temp); err != nil {
+	for _, stage := range state.stages {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		existing, err := openTranscript(state.root, stage.target)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		other, digestErr := transcriptDigest(existing)
+		_ = existing.Close()
+		if digestErr == nil && bytes.Equal(stage.digest, other) {
+			if stage.temp != "" {
+				if err := state.root.Remove(stage.temp); err != nil {
+					return err
+				}
+				stage.temp = ""
+			}
+			continue
+		}
+		if !replace {
+			return fmt.Errorf("backup: existing agent chat transcript %s differs; left untouched", stage.target)
+		}
+		if !dryRun {
+			stage.previous = ".restore-original-" + newRemapCUID()
+			if err := state.root.Link(stage.target, stage.previous); err != nil {
 				return err
 			}
-			stage.temp = ""
-		}
-		return nil
-	}
-	if !replace {
-		return fmt.Errorf("backup: existing agent chat transcript differs; left untouched")
-	}
-	if !dryRun {
-		stage.previous = ".restore-original-" + newRemapCUID()
-		if err := state.root.Link(stage.target, stage.previous); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -375,23 +558,6 @@ func missingAgentTranscripts(dump *DBDump) int {
 		}
 	}
 	return missing
-}
-
-func validateAgentTranscript(src io.Reader, id string) error {
-	scanner := bufio.NewScanner(src)
-	scanner.Buffer(make([]byte, 64<<10), 64<<20)
-	for scanner.Scan() {
-		if len(bytes.TrimSpace(scanner.Bytes())) == 0 {
-			continue
-		}
-		var msg struct {
-			SessionID string `json:"session_id"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil || msg.SessionID != id {
-			return fmt.Errorf("backup: invalid or mismatched agent chat transcript")
-		}
-	}
-	return scanner.Err()
 }
 
 func (state *transcriptRestore) syncDirectory() error {

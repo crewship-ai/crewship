@@ -422,6 +422,7 @@ func (r *Router) registerAdminRoutes() {
 	// writes to (attachments/<workspace>/<sha[:2]>/<sha>).
 	backupH.SetAttachmentRoot(r.storagePath)
 	backupH.SetTranscriptLock(r.transcriptLock)
+	backupH.SetTranscriptSnapshotLock(r.transcriptSnapshotLock)
 	backupH.pageProjectsPath = r.pageProjectsPath
 	// Wire the slug→container-name mapping from the active container
 	// provider so the backup runner uses the per-instance prefix
@@ -448,7 +449,7 @@ func (r *Router) registerAdminRoutes() {
 	svc := backupplan.New(r.db, r.logger)
 	svc.Workspace = &backupplan.WorkspaceExecutor{
 		DB: r.db, DockerOps: backupDockerOps, CrewContainerName: backupH.resolveCrewContainerName(),
-		LockTranscripts:  r.transcriptLock,
+		LockTranscripts:  backupH.createTranscriptLock(),
 		ServiceSnapshots: r.instanceRecoveryConfig().ServiceSnapshots,
 		BlobRoot:         r.memoryVersionsBlobRoot, AttachmentRoot: r.storagePath, PageProjectsPath: r.pageProjectsPath,
 		CrewshipVersion: os.Getenv("CREWSHIP_VERSION"),

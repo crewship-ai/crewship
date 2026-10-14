@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Agent chat transcripts survive workspace and crew backups (#3109).** Encrypted bundles now carry scoped structured JSONL history, including additive run/message fields. Forks remap chat and agent identities; restore coordinates cached append writers, validates dry-run conflicts and rolls transcript publication back on transaction failure. Older bundles explicitly report missing transcripts. The search/feedback mirror and hard-crash recovery across filesystem/DB publication remain separate limitations.
+- **Agent chat transcripts survive workspace and crew backups (#3109).** Encrypted bundles include scoped structured history, remapped fork identities and stable message/run anchors. Damaged lines produce per-chat completeness warnings instead of blocking all backups. Collection only fences file pinning; restore fences publication and commit, preserving existing histories unless replacement is explicit. Cross-workspace chat collisions are refused. The search/feedback mirror and atomic hard-crash recovery across filesystem/DB publication remain separate limitations.
 
 - Guest accounts cannot acquire ADMIN or OWNER in any workspace; a database invariant protects both directions of the account-wide restriction. Guest Page actions retain Pages ACL checks and also require explicit routine Run and agent grants; existing capabilities are not backfilled.
 

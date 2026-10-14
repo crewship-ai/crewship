@@ -476,3 +476,9 @@ func WithAgentRunStopper(f AgentRunStopper) RouterOption {
 func WithTranscriptLock(lock func(context.Context) (func(), error)) RouterOption {
 	return func(r *Router) { r.transcriptLock = lock }
 }
+
+// WithTranscriptSnapshotLock supplies the lightweight create-only file fence.
+// WithTranscriptLock remains the restore fence and create compatibility fallback.
+func WithTranscriptSnapshotLock(lock func(context.Context) (func(), error)) RouterOption {
+	return func(r *Router) { r.transcriptSnapshotLock = lock }
+}
