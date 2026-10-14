@@ -2,9 +2,113 @@ package api
 
 import (
 	"encoding/json"
+	"io"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
+
+type custodyAdmissionChangeReader struct {
+	io.Reader
+	onRead func()
+	once   sync.Once
+}
+
+func (r *custodyAdmissionChangeReader) Read(p []byte) (int, error) {
+	r.once.Do(r.onRead)
+	return r.Reader.Read(p)
+}
+
+func TestOutputCustodyGDPRConflictUsesLiveWorkspaceVisibility(t *testing.T) {
+	for _, kind := range []string{"artifact", "board"} {
+		for _, role := range []string{"nonmember", "MEMBER", "ADMIN", "OWNER", "demoted after admission"} {
+			t.Run(kind+"/"+role, func(t *testing.T) {
+				f := custodyRouterFixture(t, kind)
+				t.Cleanup(f.r.Shutdown)
+				if role == "nonmember" {
+					mustExec(t, f.db, `DELETE FROM workspace_members WHERE user_id='boss' AND workspace_id='ws-old'`)
+				} else if role != "demoted after admission" {
+					mustExec(t, f.db, `UPDATE workspace_members SET role=? WHERE user_id='boss' AND workspace_id='ws-old'`, role)
+				}
+				mustExec(t, f.db, `UPDATE pages SET slug='private-slug-canary',name='Private title canary' WHERE id='private-output'`)
+				mustExec(t, f.db, `UPDATE pages SET slug='ordinary-private-slug-canary',name='Private ordinary title canary' WHERE id='regular-page'`)
+				before := custodySnapshot(t, f.db, custodyProtectedTables...)
+				path, body := "/api/v1/admin/users/departing/data?workspace_id=ws-old", `{"reason":"custody privacy regression"}`
+				request := httptest.NewRequest("DELETE", path, strings.NewReader(body))
+				if role == "demoted after admission" {
+					// Middleware and adminContext admitted the OWNER. The body
+					// read changes current membership before the custody conflict.
+					request = httptest.NewRequest("DELETE", path, &custodyAdmissionChangeReader{Reader: strings.NewReader(body), onRead: func() {
+						mustExec(t, f.db, `UPDATE workspace_members SET role='MEMBER' WHERE user_id='boss' AND workspace_id='ws-old'`)
+						before = custodySnapshot(t, f.db, custodyProtectedTables...)
+					}})
+				}
+				request.Header.Set("Authorization", "Bearer "+f.boss)
+				request.Header.Set("Content-Type", "application/json")
+				w := httptest.NewRecorder()
+				f.r.ServeHTTP(w, request)
+				wantCode(t, w, 409, "instance administrator reaches GDPR custody conflict")
+				var response struct {
+					ActionID  string           `json:"action_id"`
+					SubjectID string           `json:"data_subject"`
+					Workspace string           `json:"workspace_id"`
+					Code      string           `json:"code"`
+					Error     string           `json:"error"`
+					Pages     []map[string]any `json:"pages"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				if response.ActionID == "" || response.SubjectID != "departing" || response.Workspace != "ws-old" || response.Code != "page_ownership_transfer_required" || !strings.HasPrefix(response.Error, "cannot erase this user: ") || !strings.Contains(response.Error, "workspace administrator") {
+					t.Errorf("lost GDPR receipt or actionable conflict: %s", w.Body.String())
+				}
+				private := []string{"private-slug-canary", "Private title canary", "ordinary-private-slug-canary", "Private ordinary title canary", "departing@ex.com"}
+				if role == "ADMIN" || role == "OWNER" {
+					if len(response.Pages) != 1 || response.Pages[0]["id"] != "private-output" || response.Pages[0]["slug"] != "private-slug-canary" || response.Pages[0]["type"] != kind || !strings.Contains(response.Error, "ordinary-private-slug-canary") {
+						t.Errorf("authorized workspace administrator lost metadata: %s", w.Body.String())
+					}
+				} else {
+					for _, canary := range append(private, "owner_name", "owner_user_id", "eligible_successors", "slug", "name", "type") {
+						if strings.Contains(w.Body.String(), canary) {
+							t.Errorf("instance-only GDPR conflict exposes %q: %s", canary, w.Body.String())
+						}
+					}
+					ids := map[string]bool{}
+					for _, page := range response.Pages {
+						id, ok := page["id"].(string)
+						if len(page) != 1 || !ok || id == "" {
+							t.Errorf("expected opaque unresolved Page ID only: %+v", page)
+						}
+						ids[id] = true
+					}
+					if len(ids) != 2 || !ids["private-output"] || !ids["regular-page"] {
+						t.Errorf("missing unresolved Page IDs: %v", ids)
+					}
+				}
+				if after := custodySnapshot(t, f.db, custodyProtectedTables...); after != before {
+					t.Error("refused GDPR operation mutated protected content or membership")
+				}
+				var status, actor, subject, workspace, scope, auditError, completed string
+				if err := f.db.QueryRow(`SELECT status,actor_user_id,data_subject_id,workspace_id,scope_json,COALESCE(error,''),COALESCE(completed_at,'') FROM gdpr_actions WHERE id=?`, response.ActionID).Scan(&status, &actor, &subject, &workspace, &scope, &auditError, &completed); err != nil {
+					t.Fatal(err)
+				}
+				if status != "failed" || actor != "boss" || subject != "departing" || workspace != "ws-old" || completed == "" || !strings.Contains(auditError, "private-output") || !strings.Contains(auditError, "regular-page") {
+					t.Errorf("lost failed GDPR audit attribution/opaque Page IDs: %s %s %s %s %s", status, actor, subject, workspace, auditError)
+				}
+				for _, canary := range private {
+					if strings.Contains(auditError+scope, canary) {
+						t.Errorf("persisted GDPR audit exposes private metadata %q", canary)
+					}
+				}
+				var actions int
+				if err := f.db.QueryRow(`SELECT COUNT(*) FROM gdpr_actions`).Scan(&actions); err != nil || actions != 1 {
+					t.Errorf("failed attempt must retain exactly one audit row: %d %v", actions, err)
+				}
+			})
+		}
+	}
+}
 
 func TestOutputCustodyInstanceConflictOnlyReturnsOpaqueIDs(t *testing.T) {
 	for _, kind := range []string{"artifact", "board"} {
