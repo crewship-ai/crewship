@@ -174,23 +174,46 @@ func (b *artifactRevokingBody) Close() error { return nil }
 func TestPageArtifacts_ConcurrentCASAndPageTypeBoundary(t *testing.T) {
 	h, _, _, ws, user, pageID := artifactFixture(t)
 	h.journal = nil
-	var wg sync.WaitGroup
-	codes := make(chan int, 2)
-	for i := range 2 {
+	pagesSeedUser(t, h, ws, "cas-editor", "cas-editor@example.test", "MEMBER")
+	pagesGrant(t, h, ws, user, "report", `{"subject_type":"user","subject":"cas-editor@example.test","level":"write"}`)
+	var wg, ready sync.WaitGroup
+	type outcome struct {
+		status int
+		author string
+	}
+	codes := make(chan outcome, 2)
+	start := make(chan struct{})
+	for _, author := range []struct{ id, role string }{{user, "OWNER"}, {"cas-editor", "MEMBER"}} {
 		wg.Add(1)
+		ready.Add(1)
 		go func() {
 			defer wg.Done()
-			codes <- artifactSave(t, h, ws, user, fmt.Sprintf("<h1>%d</h1>", i), fmt.Sprint(i), 0).Code
+			ready.Done()
+			<-start
+			body, _ := json.Marshal(map[string]any{"html": "<h1>" + author.id + "</h1>", "mutation_id": author.id, "base_rev": 0})
+			response := artifactCall(t, h, ws, author.id, author.role, "POST", "/revisions", string(body))
+			codes <- outcome{status: response.Code, author: author.id}
 		}()
 	}
+	ready.Wait()
+	close(start)
 	wg.Wait()
 	close(codes)
 	seen := map[int]int{}
-	for code := range codes {
-		seen[code]++
+	winner := ""
+	for result := range codes {
+		seen[result.status]++
+		if result.status == 201 {
+			winner = result.author
+		}
 	}
 	if seen[201] != 1 || seen[409] != 1 {
 		t.Fatalf("concurrent publications=%v", seen)
+	}
+	var head int
+	var persistedAuthor string
+	if err := h.db.QueryRow(`SELECT a.head_rev,r.author_user_id FROM page_artifacts a JOIN page_artifact_revisions r ON r.page_id=a.page_id AND r.revision=a.head_rev WHERE a.page_id=?`, pageID).Scan(&head, &persistedAuthor); err != nil || head != 1 || persistedAuthor != winner {
+		t.Fatalf("concurrent publication attributed wrong winner: head=%d author=%s winner=%s err=%v", head, persistedAuthor, winner, err)
 	}
 	req := pagesGrantRequest(t, "PATCH", "/", ws, user, "OWNER", pagesSpecBody("report"))
 	req.SetPathValue("slug", "report")
