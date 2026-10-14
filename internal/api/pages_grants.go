@@ -616,15 +616,24 @@ func (h *PageHandler) journalGrantChange(ctx context.Context, entryType journal.
 	if len(panels) > 0 {
 		payload["panels"] = panels
 	}
+	summary := fmt.Sprintf("%s %s %s on page %s %s %s/%s",
+		actor.Email, verb, level, rec.Slug, preposition, subjectType, subjectRef)
+	if h.hasPrivateOutputMetadata(ctx, rec) {
+		// Workspace journal readers need the authority change and its opaque
+		// principals, not names from a Page they cannot read.
+		delete(payload, "page")
+		delete(payload, "subject")
+		delete(payload, "panels")
+		summary = fmt.Sprintf("Page %s grant %s", level, verb)
+	}
 	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: wsID,
 		Type:        entryType,
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorUser,
 		ActorID:     actor.ID,
-		Summary: fmt.Sprintf("%s %s %s on page %s %s %s/%s",
-			actor.Email, verb, level, rec.Slug, preposition, subjectType, subjectRef),
-		Payload: payload,
+		Summary:     summary,
+		Payload:     payload,
 	}); err != nil && h.logger != nil {
 		h.logger.Warn("pages: grant change was not journalled",
 			"page", rec.Slug, "type", string(entryType), "subject", subjectType+"/"+subjectRef, "error", err)
