@@ -89,7 +89,7 @@ func TestBoardMermaidWorkflowBrowser(t *testing.T) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		http.ServeFile(w, r, filepath.Join(repo, "out", "board-converter", "runner.js"))
 	})
-	fixture, err := json.Marshal(map[string]any{"server": studio.URL, "runtime": runtime.URL, "workspace": workspace, "slug": "report", "request_id": job, "source": source, "tokens": tokens})
+	fixture, err := json.Marshal(map[string]any{"server": studio.URL, "runtime": runtime.URL, "workspace": workspace, "user_id": owner, "slug": "report", "request_id": job, "source": source, "tokens": tokens})
 	if err != nil {
 		t.Fatal(err)
 	}

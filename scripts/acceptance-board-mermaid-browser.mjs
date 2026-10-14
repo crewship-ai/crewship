@@ -29,7 +29,13 @@ try {
   for (const token of fixture.tokens) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, ignoreHTTPSErrors: true })
     contexts.push(context)
-    await context.addCookies([{ name: 'authjs.session-token', value: token, url: fixture.server, httpOnly: true, secure: true, sameSite: 'Lax' }])
+    // The HTTPS session endpoint reads the canonical __Secure- cookie name;
+    // seeding the HTTP name authenticates API middleware but leaves the UI's
+    // /api/auth/session probe unauthenticated.
+    await context.addCookies([{ name: '__Secure-authjs.session-token', value: token, url: fixture.server, httpOnly: true, secure: true, sameSite: 'Lax' }])
+    const session = await context.request.get(`${fixture.server}/api/auth/session`)
+    const identity = await session.json()
+    await check(`HTTPS browser session ${contexts.length} authenticates the synthetic owner`, session.status() === 200 && identity.user?.id === fixture.user_id)
     await context.addInitScript(id => localStorage.setItem('crewship.workspaceId', id), fixture.workspace)
     const page = await context.newPage(); pages.push(page)
     page.on('response', response => { if (response.url().startsWith(fixture.runtime) && response.url().endsWith('/board-converter/runner.js')) converterLoads.push(response.status()) })
