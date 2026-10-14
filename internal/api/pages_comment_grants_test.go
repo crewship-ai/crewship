@@ -103,7 +103,7 @@ func TestPageCommentGrantMigrationPreservesExistingRows(t *testing.T) {
 	if err := h.db.QueryRow(`SELECT group_concat(level||':'||granted_by_user_id||':'||granted_at) FROM (SELECT * FROM page_grants WHERE page_id=? ORDER BY level)`, pageID).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile("../database/migrations/20261013183111_page_comment_grants.sql")
+	raw, err := os.ReadFile("../database/migrations/20261014114745_page_comment_grants.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
