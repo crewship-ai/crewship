@@ -9,12 +9,14 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 var ErrDenied = errors.New("resource authority denied")
+var ErrIssuerDenied = fmt.Errorf("grant issuer authority unavailable: %w", ErrDenied)
 var ErrConflict = errors.New("resource authority revision changed")
 
 type Store struct{ DB *sql.DB }
@@ -125,9 +127,23 @@ func check(ctx context.Context, q queryer, user, workspace string, r Right) (Mem
 		return m, ErrDenied
 	}
 	var one int
-	err = q.QueryRowContext(ctx, `SELECT 1 FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&one)
+	err = q.QueryRowContext(ctx, `SELECT 1 FROM live_access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = ErrDenied
+		// Retained inert rows explain denial without treating them as authority.
+		var issuer string
+		err = q.QueryRowContext(ctx, `SELECT created_by FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&issuer)
+		if errors.Is(err, sql.ErrNoRows) {
+			return m, ErrDenied
+		}
+		if err != nil {
+			return m, err
+		}
+		if err = operator(ctx, q, issuer, workspace); errors.Is(err, ErrDenied) {
+			return m, ErrIssuerDenied
+		} else if err != nil {
+			return m, err
+		}
+		return m, ErrDenied
 	}
 	return m, err
 }
@@ -144,8 +160,10 @@ func (s Store) Check(ctx context.Context, user, workspace string, r Right) error
 func operator(ctx context.Context, q queryer, user, workspace string) error {
 	var one int
 	err := q.QueryRowContext(ctx, `SELECT 1 FROM workspace_members wm JOIN workspaces w ON w.id=wm.workspace_id
+        JOIN users actor ON actor.id=wm.user_id AND actor.suspended_at IS NULL
         WHERE wm.user_id=? AND wm.workspace_id=? AND wm.access_mode='trusted'
-        AND wm.role IN ('OWNER','ADMIN') AND w.deleted_at IS NULL`, user, workspace).Scan(&one)
+        AND wm.role IN ('OWNER','ADMIN') AND w.deleted_at IS NULL
+        AND NOT EXISTS(SELECT 1 FROM workspace_members ceiling WHERE ceiling.user_id=wm.user_id AND ceiling.access_mode='restricted')`, user, workspace).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrDenied
 	}

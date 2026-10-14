@@ -62,7 +62,7 @@ func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
 	if id == "" {
 		err = r.db.QueryRowContext(req.Context(), `SELECT COUNT(*)
             FROM missions m JOIN projects p ON p.id=m.project_id AND p.workspace_id=m.workspace_id
-            JOIN access_grants g ON g.project_id=p.id AND g.resource_kind='project' AND g.member_id=? AND g.operation='list'
+            JOIN live_access_grants g ON g.project_id=p.id AND g.resource_kind='project' AND g.member_id=? AND g.operation='list'
             WHERE m.workspace_id=? AND m.mission_type='issue' AND (?='' OR p.id=?)`, member.ID, workspace, project, project).Scan(&total)
 		if err != nil {
 			replyError(w, 500, "Issues unavailable")
@@ -70,10 +70,10 @@ func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	rows, err := r.db.QueryContext(req.Context(), `SELECT m.id,COALESCE(m.identifier,m.id),m.title,m.status,p.id,p.name,
- EXISTS(SELECT 1 FROM access_grants read_grant WHERE read_grant.member_id=? AND read_grant.resource_kind='project' AND read_grant.project_id=p.id AND read_grant.operation='read'),
+ EXISTS(SELECT 1 FROM live_access_grants read_grant WHERE read_grant.member_id=? AND read_grant.resource_kind='project' AND read_grant.project_id=p.id AND read_grant.operation='read'),
  CASE WHEN ?='read' THEN m.description ELSE NULL END
  FROM missions m JOIN projects p ON p.id=m.project_id AND p.workspace_id=m.workspace_id
- JOIN access_grants g ON g.project_id=p.id AND g.resource_kind='project' AND g.member_id=? AND g.operation=?
+ JOIN live_access_grants g ON g.project_id=p.id AND g.resource_kind='project' AND g.member_id=? AND g.operation=?
  WHERE m.workspace_id=? AND m.mission_type='issue' AND (?='' OR m.id=? OR m.identifier=?) AND (?='' OR p.id=?)
  ORDER BY m.created_at DESC,m.id LIMIT ? OFFSET ?`, member.ID, operation, member.ID, operation, workspace, id, id, id, project, project, limit, offset)
 	if err != nil {

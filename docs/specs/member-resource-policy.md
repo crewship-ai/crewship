@@ -99,6 +99,19 @@ never includes the member's private conversation or run contents. An execution
 grant can be conditional or unavailable: provider/profile dependencies, inputs,
 budgets and installed runtime still matter. Unshared resources remain denied.
 
+Resource grants recheck their issuer at use time. The issuer must remain an
+active, trusted OWNER/ADMIN in the resource's workspace and must not have an
+account-wide Guest ceiling. This applies to discovery, Issues projections,
+project inputs, chat audiences, private preflight, routine catalogs, admission,
+recovery and dispatch. Stored grants remain visible in the saved policy but are
+inert while the issuer lacks authority, following the existing Pages model.
+Role loss, removal, suspension or a Guest ceiling advances affected recipient
+revisions transactionally. Restoring the issuer can authorize a new use of the
+preserved grant; previously admitted work remains fenced and requires a fresh
+admission. Changes in an unrelated workspace do not revoke valid local shares.
+The upgrade preserves valid and inert grant metadata and fences work whose
+issuer was already unavailable. Effective access explains an unavailable issuer.
+
 Supported operations:
 
 | Resource | Operations | Current scope |
