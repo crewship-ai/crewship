@@ -8,7 +8,7 @@ denied; the policy does not bypass roles, token scopes or conversation audience.
 Only a **current trusted OWNER/ADMIN** of the target workspace may read or replace
 these policies. Scoped CLI tokens additionally require `workspace:admin` (or its
 wildcard). Restricted administrators cannot administer policy. OWNER/ADMIN members
-cannot be changed to restricted mode by this endpoint. The current global
+cannot be changed to restricted mode, and an account restricted anywhere cannot acquire OWNER/ADMIN in another workspace. An append-only database migration enforces both directions on membership insertion and role, identity or access-mode updates; handler checks return friendly conflicts. The current global
 restricted-user boundary also applies to users with mixed trusted/restricted
 memberships: adding a restricted membership closes unintegrated routes across
 their session, including administration of another workspace.
