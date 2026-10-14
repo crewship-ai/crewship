@@ -36,7 +36,7 @@ export function RestrictedIssues({identifier}:{identifier?:string|null}) {
     <div className="flex items-center justify-between"><h1 className="text-lg font-semibold">{identifier?"Issue":"Issues shared with you"}</h1>{identifier?<Link href="/issues" className="text-sm text-primary">Back to issues</Link>:<Button variant="outline" onClick={()=>void query.refetch()}>Refresh</Button>}</div>
     <p className="text-sm text-muted-foreground">Your project grants decide which issues you can list and read.</p>
     {query.isPending && <p role="status">Loading shared issues…</p>}
-    {query.isError && <AccessNotice kind="unavailable" title="Issues unavailable" description="Your access may have changed. Retry to check your current project grants." context={context} current="issues" onRetry={()=>void query.refetch()} />}
+    {query.isError && <AccessNotice kind={query.error?.message === "Access unavailable" ? "no-access" : "unavailable"} title="Issues unavailable" description="Your access may have changed. Retry to check your current project grants." context={context} current="issues" onRetry={()=>void query.refetch()} />}
     {!query.isError && query.data?.length===0 && <AccessNotice kind="no-access" title="No issues shared here" description="There are no issues in the projects shared with you on this page." context={context} current="issues" />}
     {!query.isError && query.data?.map(issue=><IssueCard key={issue.id} issue={issue} detail={!!identifier} />)}
     {!identifier && !query.isError && <div className="flex gap-2">

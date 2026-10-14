@@ -51,12 +51,14 @@ func (h *WorkspaceHandler) GetMemberEffectiveAccess(w http.ResponseWriter, r *ht
 		result.Explanation = "Guest restrictions apply across this account. Unshared resources and unintegrated routes are denied. A routine requires its own run grant and every agent dependency; a grant does not install an execution runtime."
 	}
 	authorized := map[string]bool{}
+	catalogDenied := false
 	if p.Mode == "restricted" {
 		catalog, e := restrictedworkflow.AuthorizedCatalog(r.Context(), h.db, user, workspace)
 		if e != nil && !errors.Is(e, restrictedworkflow.ErrDenied) {
 			h.memberAccessError(w, e)
 			return
 		}
+		catalogDenied = errors.Is(e, restrictedworkflow.ErrDenied)
 		for _, item := range catalog {
 			authorized[item.ID] = true
 		}
@@ -78,6 +80,9 @@ func (h *WorkspaceHandler) GetMemberEffectiveAccess(w http.ResponseWriter, r *ht
 		} else if right.Kind == "routine" && !authorized[right.ID] {
 			decision.State = "denied"
 			decision.Reason = "Requires current agent run/delegate grants, provider authority and a supported active definition."
+			if catalogDenied {
+				decision.Reason = "Current account or invocation authority is unavailable or changed; reload the policy and account status."
+			}
 		} else if right.Kind == "routine" && (h.restrictedWorkflow == nil || h.restrictedWorkflow() == nil) {
 			decision.State = "unavailable"
 			decision.Reason = "Authorized; private execution is not installed on this server."

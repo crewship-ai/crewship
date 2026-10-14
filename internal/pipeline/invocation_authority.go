@@ -52,11 +52,12 @@ func NewInvocationAuthorityChecker(db *sql.DB) func(context.Context, RunInput) e
 				if !active {
 					return ErrInvocationAuthorityRevoked
 				}
-				restricted, err := (access.Store{DB: db}).HasRestrictedMembership(ctx, author.String)
+				var member bool
+				err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=? AND workspace_id=? AND access_mode='trusted')`, author.String, in.WorkspaceID).Scan(&member)
 				if err != nil {
-					return fmt.Errorf("routine trigger resource authority: %w", err)
+					return fmt.Errorf("routine trigger author membership: %w", err)
 				}
-				if restricted {
+				if !member {
 					return ErrInvocationAuthorityRevoked
 				}
 			}
@@ -123,5 +124,5 @@ func NewInvocationAuthorityChecker(db *sql.DB) func(context.Context, RunInput) e
 }
 
 func unattendedAccountTrigger(source TriggeredVia) bool {
-	return source == TriggeredViaSchedule || source == TriggeredViaWebhook || source == TriggeredViaWakeCheck || source == TriggeredViaCallPipeline
+	return source == TriggeredViaAutomation || source == TriggeredViaSchedule || source == TriggeredViaWebhook || source == TriggeredViaWakeCheck || source == TriggeredViaCallPipeline
 }

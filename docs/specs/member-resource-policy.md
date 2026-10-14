@@ -66,6 +66,31 @@ projects and routines; the backend checks it on every integrated operation.
 Changing a Guest's role to ADMIN/OWNER requires explicitly restoring trusted
 access first. A role change cannot silently remove or bypass the restriction.
 
+| Original PRD choice | Decision | Reason |
+| --- | --- | --- |
+| New GUEST workspace role | Changed: restricted access mode, Guest in UI, account-wide | The current global route fence has no mixed-mode bypass. Keeping one account ceiling avoids granting trusted routes through another workspace while per-resource integration is incomplete. Separate workspace-scoped guest accounts remain a future migration. |
+| New resource_grants registry | Changed: extend versioned access_grants | Reuse the shipped membership revision, resource foreign keys and execution revocation fences rather than introduce two authorities. Pages moves last as originally planned. |
+| Per-object sharing and meaningful type levels | Kept as target; only agent operations, routine run and project projection delivered | View/Edit, crew/credential subjects and Share dialogs need separate enforcement and UI work. |
+| Pages model migration | Deferred, as in original phases | Preserve current Pages ACL, issuer checks and data during the first routine/project slice. |
+
+Guest invitation acceptance and restricted provisioning refuse accounts that are
+OWNER or ADMIN anywhere, including unclaimed accounts. Consent cannot override
+this protection. A matching stale Guest invitation returns typed 409 and rolls
+back signup or membership changes.
+
+PRD Q2: an explicit administrator-issued routine grant authorizes invocation;
+there is no second per-run administrator confirmation in this slice. Agent/provider
+authority, inputs and budgets remain checked at invocation. Q3: no default grant
+expiry is introduced; invitation proofs still expire after seven days, while
+grant expiry is deferred pending its execution/revocation contract. Q4: Guest
+members count under the existing member licensing limits; no billing exception
+is introduced.
+
+Unattended schedule, webhook, wake, nested-call and automation-rule runs require
+the human author to remain active and a trusted member of the routine's own
+workspace. Guest membership elsewhere does not revoke that workspace's unattended
+routines. Agent/crew-authored routines retain their existing execution policy.
+
 Settings › Members edits this policy and offers a server-derived explanation
 of the **saved** policy. `access/effective` is administration-only, returns the
 membership revision, account restriction scope and per-grant state/reason, and

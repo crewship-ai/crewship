@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Fix Settings reloads while account access loads, Guest chat regeneration controls and restricted resource path segments. Add CLI Guest invitation policy/consent flags and binary acceptance coverage.
+- ⚠️ **Behaviour change:** Guest invitations and provisioning refuse accounts that own or administer any workspace. Stale Guest invitation signup returns a typed conflict. Automation rules recheck the active routine author's membership in that workspace, and any non-NULL suspension blocks instance administration.
+
+
 - ⚠️ **Behaviour change: guests run only routines explicitly shared with them.** Routine run grants now combine with every required agent grant, without a workspace-wide routine capability. Existing restricted members need routine grants added; pending private work is invalidated on upgrade. Settings › Members can select individual routines.
 - **Guests can be added with initial shares and inspect project Issues.** Guest invitations install initial shares atomically with acceptance, including signup redemption. Existing accounts explicitly accept the account-wide restriction; direct provisioning cannot silently restrict a claimed account. Project list/read grants expose a filtered, read-only Issues catalog and detail without shared activity or related-resource data. Settings and `workspace member access explain` describe saved grants and blocked execution prerequisites.
 - **Suspending a human routine author stops unattended triggers.** Schedule, webhook and wake-check execution rechecks the author’s live account; promoting a Guest to administrator requires explicitly restoring trusted access.

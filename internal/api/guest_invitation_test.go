@@ -157,3 +157,70 @@ func TestGuestProvisionCannotRestrictAnExistingAccountWithoutConsent(t *testing.
 		t.Fatalf("failed provisioning changed memberships: %d %v", n, err)
 	}
 }
+
+func TestGuestInvitationAndProvisionPreserveOtherWorkspaceAdministrators(t *testing.T) {
+	for _, role := range []string{"OWNER", "ADMIN"} {
+		for _, route := range []string{"accept", "provision"} {
+			t.Run(role+"/"+route, func(t *testing.T) {
+				db := setupTestDB(t)
+				owner, ws := seedInviter(t, db)
+				execOrFatal(t, db, `INSERT INTO users(id,email) VALUES('protected-admin','protected@example.test')`)
+				execOrFatal(t, db, `INSERT INTO workspaces(id,name,slug) VALUES('protected-workspace','Protected','protected-workspace')`)
+				execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('protected-member','protected-workspace','protected-admin',?)`, role)
+				seedInvitation(t, db, "protected-invite", ws, owner, "protected@example.test", "VIEWER", time.Now().Add(time.Hour), nil)
+				execOrFatal(t, db, `UPDATE workspace_invitations SET access_mode='restricted' WHERE id='protected-invite'`)
+				router, err := NewRouter(db, "protected-admin-test-secret-long-enough", newTestLogger())
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(router.Shutdown)
+				actor, path, body := "protected-admin", "/api/v1/auth/invitation/accept", `{"token":"tok-protected-invite","confirm_account_restriction":true}`
+				if route == "provision" {
+					actor = owner
+					path = "/api/v1/workspaces/" + ws + "/members/provision"
+					body = `{"email":"protected@example.test","role":"VIEWER","access_mode":"restricted","rights":[]}`
+				}
+				req := httptest.NewRequest("POST", path, strings.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("X-Workspace-ID", ws)
+				req.Header.Set("Authorization", "Bearer "+mintTokenFor(t, db, actor, "protected-"+strings.Repeat("0", 40)))
+				rr := httptest.NewRecorder()
+				router.ServeHTTP(rr, req)
+				if rr.Code != 409 || !strings.Contains(rr.Body.String(), "guest_administrator_conflict") {
+					t.Fatalf("protected admin=%d %s", rr.Code, rr.Body.String())
+				}
+				var count int
+				if err = db.QueryRow(`SELECT COUNT(*) FROM workspace_members WHERE user_id='protected-admin' AND access_mode='trusted' AND role=?`, role).Scan(&count); err != nil || count != 1 {
+					t.Fatal("administrator changed", count, err)
+				}
+				if err = db.QueryRow(`SELECT COUNT(*) FROM workspace_members WHERE user_id='protected-admin'`).Scan(&count); err != nil || count != 1 {
+					t.Fatal("partial membership", count, err)
+				}
+			})
+		}
+	}
+}
+
+func TestGuestSignupStaleGrantReturnsConflictWithoutAccount(t *testing.T) {
+	for _, change := range []string{"resource-removed", "issuer-demoted"} {
+		t.Run(change, func(t *testing.T) {
+			db := setupTestDB(t)
+			owner, ws := seedInviter(t, db)
+			seedInvitation(t, db, "stale-guest", ws, owner, "stale@example.test", "VIEWER", time.Now().Add(time.Hour), nil)
+			execOrFatal(t, db, `UPDATE workspace_invitations SET access_mode='restricted',rights_json='[{"kind":"agent","id":"missing-agent","operation":"chat"}]' WHERE id='stale-guest'`)
+			if change == "issuer-demoted" {
+				execOrFatal(t, db, `UPDATE workspace_members SET role='MEMBER' WHERE user_id=?`, owner)
+			}
+			h := NewAuthHandler(db, newTestLogger(), newTestJWTValidator(t), sessions.NewDBStore(db), true)
+			rr := httptest.NewRecorder()
+			h.Signup(rr, httptest.NewRequest("POST", "/signup", strings.NewReader(`{"email":"stale@example.test","password":"test-password-long","full_name":"Stale","invitation_token":"tok-stale-guest"}`)))
+			if rr.Code != 409 || !strings.Contains(rr.Body.String(), "invitation_changed") {
+				t.Fatalf("stale Guest signup=%d %s", rr.Code, rr.Body.String())
+			}
+			var count int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE email='stale@example.test'`).Scan(&count); err != nil || count != 0 {
+				t.Fatal("partial account", count, err)
+			}
+		})
+	}
+}

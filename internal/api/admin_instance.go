@@ -468,7 +468,7 @@ func (h *InstanceAdminHandler) GrantAdmin(w http.ResponseWriter, r *http.Request
 		replyInternalError(w, h.logger, "grant admin: lookup", err)
 		return
 	}
-	if suspended.Valid && suspended.String != "" {
+	if suspended.Valid {
 		replyError(w, http.StatusConflict, "reactivate this account before making it an instance admin")
 		return
 	}
@@ -727,7 +727,7 @@ func (h *InstanceAdminHandler) CreateWorkspace(w http.ResponseWriter, r *http.Re
 	case err != nil:
 		replyInternalError(w, h.logger, "create workspace: owner", err)
 		return
-	case suspended.Valid && suspended.String != "":
+	case suspended.Valid:
 		replyError(w, http.StatusConflict, "the chosen owner is suspended")
 		return
 	}

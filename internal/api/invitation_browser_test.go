@@ -43,7 +43,7 @@ func TestInvitationBrowser(t *testing.T) {
 	seedAgentRow(t, db, "invitation-browser-agent", workspace, "invitation-browser-crew", "Shared agent", "invitation-browser-agent", "AGENT")
 	execOrFatal(t, db, `UPDATE workspace_invitations SET access_mode='restricted',rights_json='[{"kind":"agent","id":"invitation-browser-agent","operation":"discover"}]' WHERE id IN ('browser-new','browser-existing')`)
 	execOrFatal(t, db, `INSERT INTO workspaces(id,name,slug) VALUES('existing-own-workspace','Existing own','existing-own-workspace')`)
-	execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('existing-own-membership','existing-own-workspace','browser-existing','OWNER')`)
+	execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('existing-own-membership','existing-own-workspace','browser-existing','MEMBER')`)
 	router, err := NewRouter(db, "synthetic-invitation-browser-secret", newTestLogger(), WithAllowSignup(true))
 	if err != nil {
 		t.Fatal(err)

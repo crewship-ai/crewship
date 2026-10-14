@@ -30,7 +30,7 @@ export function InitialResourceGrants({workspaceId, rights, onChange}: {
   })
   return <fieldset className="space-y-2 text-sm">
     <legend>Share now</legend>
-    <p className="text-xs text-muted-foreground">Guests see only shared resources. A routine also needs run access to every agent it uses. Add discover and chat separately to offer agent conversations.</p>
+    <p className="text-xs text-muted-foreground">Guests see only shared resources. A routine also needs run access to every agent it uses. Runs use those agents’ configured provider credentials and budget. Add discover and chat separately to offer agent conversations.</p>
     <div className="flex flex-wrap gap-2">
       <select aria-label="Initial resource kind" className={nativeSelect} value={kind} onChange={event=>{
         const next=event.target.value as InitialRight["kind"];setKind(next);setId("");setOperation(operations[next][0])

@@ -57,8 +57,8 @@ func (h *AuthHandler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	joined, err := redeemPendingInvitations(r.Context(), tx, user.ID, email, request.Token, time.Now().UTC().Format(time.RFC3339), h.checkInvitationAdmission)
-	if errors.Is(err, errInvitationConflict) {
-		replyError(w, 409, "Invitation conflicts with current membership or was changed")
+	if errors.Is(err, errInvitationConflict) || errors.Is(err, errGuestAdministrator) {
+		writeInvitationConflict(w, err)
 		return
 	}
 	if err != nil {

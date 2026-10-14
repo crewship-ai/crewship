@@ -239,6 +239,22 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     expect(screen.queryByTestId("page")).toBeNull()
   })
 
+  it("does not mount trusted Settings while account access is loading or failed", async () => {
+    nav.pathname = "/settings"
+    workspacesPayload = []
+    workspacesStatus = 503
+    mount(<SettingsLayout />)
+    await settle(300)
+    expect(screen.queryByRole("textbox", {name: "Full name"})).toBeNull()
+    expect(screen.queryByText("Failed to load settings")).toBeNull()
+    expect(requests.filter(path => /workspaces\/[^?]+/.test(path))).toEqual([])
+    workspacesStatus = 200
+    workspacesPayload = [RESTRICTED_A]
+    await act(async () => { await refreshWorkspaceSettings() })
+    expect(await screen.findByText("Account security")).toBeInTheDocument()
+    expect(forbidden()).toEqual([])
+  })
+
   it("restricts Settings to account security without forbidden requests", async () => {
     nav.pathname = "/settings"
     mount(<SettingsLayout />)

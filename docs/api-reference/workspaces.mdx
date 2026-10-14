@@ -392,7 +392,16 @@ URL must be configured or discoverable by the server.
 **Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
 
 **Request body:** `email` (required), `role` (optional; defaults to `MEMBER`;
-one of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`), and `full_name` (optional).
+one of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`), `full_name` (optional),
+`create_only` (optional boolean, defaults to false), `access_mode` (optional,
+`trusted` by default or `restricted` for Guest), and `rights` (optional array of
+`{kind,id,operation}` initial resource grants; empty by default).
+
+Restricted provisioning and initial grants commit together. Restricted ADMIN
+is invalid. A claimed account must accept a Guest invitation instead (409).
+An account that is OWNER or ADMIN in any workspace is refused (409), even if
+unclaimed. Trusted mode requires empty rights. Routine run rights also require
+the appropriate agent grants; project list and read are independent.
 
 **Response:** `201 Created`
 
@@ -708,6 +717,17 @@ POST /api/v1/workspaces/{workspaceId}/invitations
 |---|---|---|---|---|
 | `email` | string | yes | -- | Recipient email |
 | `role` | string | no | `MEMBER` | One of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER` |
+
+`access_mode` is optional: `trusted` (default) or `restricted` (Guest).
+`rights` is an optional array of `{kind,id,operation}` resource grants, empty
+by default. Supported kinds are agent, routine and project; a routine supports
+run, agents support discover/chat/run/delegate, and projects list/read/write/delete.
+Trusted invitations require empty rights; Guest invitations cannot grant ADMIN.
+The server revalidates resources and issuer authority during redemption and
+installs membership and grants atomically. Existing accounts must explicitly
+confirm the account-wide restriction. Accounts that own or administer any
+workspace cannot become Guests. A stale matching Guest invitation returns
+409 with `code: invitation_changed`; no partial account/membership is committed.
 
 **Response:** `201 Created` -- invitation object with the freshly minted `wi1_` plus 64 lowercase hex proof (returned only by creation or explicit reissue). New stored values are `sha256:v1:` plus the SHA256 hex digest of the entire proof.
 

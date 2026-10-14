@@ -434,6 +434,10 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	// joins those workspaces and gets no empty workspace of their own
 	// (#3006). Only a signup with nothing to redeem gets one to work in.
 	joined, err := redeemPendingInvitations(r.Context(), tx, userID, req.Email, req.InvitationToken, now, h.checkInvitationAdmission)
+	if errors.Is(err, errInvitationConflict) || errors.Is(err, errGuestAdministrator) {
+		writeInvitationConflict(w, err)
+		return
+	}
 	if err != nil {
 		replyInternalError(w, h.logger, "redeem invitations", err)
 		return
@@ -517,7 +521,21 @@ func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, to
 	}
 	rows.Close()
 
+	if len(pending) == 0 {
+		var stale bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_invitations WHERE LOWER(email)=LOWER(?) AND (token=? OR token=?) AND accepted_at IS NULL AND access_mode='restricted')`, email, invitationTokenHash(token), token).Scan(&stale); err != nil {
+			return 0, err
+		}
+		if stale {
+			return 0, errInvitationConflict
+		}
+	}
 	for _, inv := range pending {
+		if inv.mode == "restricted" {
+			if err := guestAccountEligible(ctx, tx, userID); err != nil {
+				return 0, err
+			}
+		}
 		var existingRole string
 		err := tx.QueryRowContext(ctx, `SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, inv.workspaceID, userID).Scan(&existingRole)
 		if err != nil && err != sql.ErrNoRows {

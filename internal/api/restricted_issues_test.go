@@ -24,6 +24,10 @@ func TestGuestProjectIssuesAndResponseBodyLeakWalk(t *testing.T) {
 	} {
 		execOrFatal(t, db, `INSERT INTO missions(id,workspace_id,crew_id,lead_agent_id,trace_id,identifier,title,description,status,mission_type,project_id) VALUES(?,?,'ISSUE_HIDDEN_CREW_ID','ISSUE_HIDDEN_AGENT_ID',?,?,?,?,'TODO','issue',?)`, row.id, ws, row.id+"-trace", row.id, row.title, row.description, row.project)
 	}
+	execOrFatal(t, db, `UPDATE users SET email='OTHER_MEMBER_EMAIL_CANARY@example.test' WHERE id=?`, owner)
+	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,status) VALUES('HIDDEN_ROUTINE_ID',?,'hidden-routine','HIDDEN_ROUTINE_TITLE','{}','hidden','active')`, ws)
+	execOrFatal(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('HIDDEN_PAGE_ID',?,'hidden-page','HIDDEN_PAGE_TITLE',?,'{}')`, ws, owner)
+	execOrFatal(t, db, `INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,created_by) VALUES('HIDDEN_CREDENTIAL_ID',?,'HIDDEN_CREDENTIAL_TITLE','synthetic-unreadable-cipher','API_KEY','OPENAI',?)`, ws, owner)
 	store := access.Store{DB: db}
 	replace := func(user, project string) {
 		t.Helper()
@@ -75,37 +79,77 @@ func TestGuestProjectIssuesAndResponseBodyLeakWalk(t *testing.T) {
 		t.Fatal("second client received first client's issue")
 	}
 	placeholders := regexp.MustCompile(`\{([^}]+)\}`)
-	walked := 0
-	for _, pattern := range registeredPatterns(router) {
-		method, path := splitPattern(pattern)
-		if method != "GET" {
-			continue
-		}
-		path = placeholders.ReplaceAllStringFunc(path, func(value string) string {
-			switch value {
-			case "{workspaceId}":
-				return ws
-			case "{issueId}", "{identifier}", "{missionId}":
-				return "shared-issue"
-			case "{projectId}":
-				return "shared-project"
-			default:
-				return "probe"
+	for _, actor := range []string{"project-guest", "second-guest"} {
+		walked := 0
+		for _, foreignPath := range []bool{false, true} {
+			for _, pattern := range registeredPatterns(router) {
+				method, path := splitPattern(pattern)
+				if method != "GET" {
+					continue
+				}
+				path = placeholders.ReplaceAllStringFunc(path, func(value string) string {
+					switch value {
+					case "{workspaceId}":
+						return ws
+					case "{issueId}", "{identifier}", "{missionId}":
+						if foreignPath {
+							return "UNSHARED_ISSUE_CANARY"
+						}
+						return "shared-issue"
+					case "{projectId}":
+						if foreignPath {
+							return "UNSHARED_PROJECT_CANARY"
+						}
+						return "shared-project"
+					case "{agentId}":
+						return "ISSUE_HIDDEN_AGENT_ID"
+					case "{credentialId}":
+						return "HIDDEN_CREDENTIAL_ID"
+					case "{pipelineId}", "{routineId}":
+						return "HIDDEN_ROUTINE_ID"
+					case "{slug}":
+						return "hidden-page"
+					default:
+						return "probe"
+					}
+				})
+				if !strings.HasPrefix(path, "/") {
+					continue
+				}
+				rr := request(actor, path, 0)
+				walked++
+				if path == "/api/auth/signin" {
+					if rr.Code != 302 {
+						t.Errorf("signin redirect status=%d", rr.Code)
+					}
+				} else {
+					switch rr.Code {
+					case 200, 204, 400, 401, 403, 404, 405, 422, 503:
+					default:
+						t.Errorf("unexpected GET status %s %s: %d", actor, path, rr.Code)
+					}
+				}
+				canaries := []string{"OTHER_MEMBER_EMAIL_CANARY", "HIDDEN_ROUTINE_TITLE", "HIDDEN_PAGE_TITLE", "HIDDEN_CREDENTIAL_TITLE", "ISSUE_HIDDEN_CREW_ID", "ISSUE_HIDDEN_AGENT_ID"}
+				if actor == "project-guest" {
+					canaries = append(canaries, "UNSHARED_PROJECT_CANARY", "UNSHARED_PROJECT_TITLE", "UNSHARED_ISSUE_CANARY", "UNSHARED_ISSUE_TITLE", "UNSHARED_DESCRIPTION_CANARY")
+				} else {
+					canaries = append(canaries, "shared-issue", "Shared description")
+				}
+				for _, canary := range canaries {
+					if strings.Contains(rr.Body.String(), canary) {
+						t.Errorf("GET %s %s leaked %s in response body", actor, path, canary)
+					}
+				}
 			}
-		})
-		if !strings.HasPrefix(path, "/") {
-			continue
 		}
-		rr := request("project-guest", path, 0)
-		walked++
-		for _, canary := range []string{"UNSHARED_PROJECT_CANARY", "UNSHARED_PROJECT_TITLE", "UNSHARED_ISSUE_CANARY", "UNSHARED_ISSUE_TITLE", "UNSHARED_DESCRIPTION_CANARY", "ISSUE_HIDDEN_CREW_ID", "ISSUE_HIDDEN_AGENT_ID"} {
-			if strings.Contains(rr.Body.String(), canary) {
-				t.Errorf("GET %s leaked %s in response body", path, canary)
-			}
+		if walked < 200 {
+			t.Fatalf("GET inventory walk incomplete for %s: %d", actor, walked)
 		}
 	}
-	if walked < 100 {
-		t.Fatalf("GET inventory walk incomplete: %d routes", walked)
+	execOrFatal(t, db, `INSERT INTO missions(id,workspace_id,crew_id,lead_agent_id,trace_id,identifier,title,description,status,mission_type,project_id) VALUES('second-shared-issue',?,'ISSUE_HIDDEN_CREW_ID','ISSUE_HIDDEN_AGENT_ID','second-trace','SECOND-1','Another shared issue','Brief','TODO','issue','shared-project')`, ws)
+	page := request("project-guest", base+"?limit=1", 200)
+	if page.Header().Get("X-Total-Count") != "2" {
+		t.Fatalf("total count is page length: %s", page.Header().Get("X-Total-Count"))
 	}
 	// Revocation affects the same bearer identity immediately.
 	m, err := store.Membership(t.Context(), "project-guest", ws)

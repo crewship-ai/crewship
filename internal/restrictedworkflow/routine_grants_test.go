@@ -62,6 +62,12 @@ func TestRoutineGrantsSelectThreeOfTenAndFenceRevocation(t *testing.T) {
 	if _, err := s.AdmitManual(t.Context(), "h1", "w", "selected-9", map[string]any{"task": "denied"}, "", 0); err == nil {
 		t.Fatal("agent grant admitted an unshared routine")
 	}
+	if _, err := s.AdmitManual(t.Context(), "h2", "w", "selected-0", map[string]any{"task": "denied"}, "", 0); err == nil {
+		t.Fatal("second client admitted first client's routine")
+	}
+	if _, err := s.AdmitManual(t.Context(), "h2", "w", "selected-9", map[string]any{"task": "allowed"}, "", 0); err != nil {
+		t.Fatal("second client's own routine denied", err)
+	}
 	receipt, err := s.AdmitManual(t.Context(), "h1", "w", "selected-0", map[string]any{"task": "allowed"}, "", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +82,9 @@ func TestRoutineGrantsSelectThreeOfTenAndFenceRevocation(t *testing.T) {
 	}
 	// Routine alone cannot borrow an ungranted agent.
 	replace("h1", []access.Right{{Kind: "routine", ID: "selected-0", Operation: "run"}})
+	if _, err := s.AdmitManual(t.Context(), "h1", "w", "selected-0", map[string]any{"task": "denied"}, "", 0); err == nil {
+		t.Fatal("routine-only grant admitted without agent authority")
+	}
 	list, err := s.Catalog(t.Context(), "h1", "w")
 	if err != nil || len(list) != 0 {
 		t.Fatalf("routine bypassed agent ceiling: %+v %v", list, err)

@@ -165,6 +165,16 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if req.AccessMode == "restricted" {
+		if err := guestAccountEligible(r.Context(), tx, userID); err != nil {
+			if errors.Is(err, errGuestAdministrator) {
+				writeInvitationConflict(w, err)
+			} else {
+				replyInternalError(w, h.logger, "Guest account eligibility", err)
+			}
+			return
+		}
+	}
 	if req.CreateOnly && !createdUser {
 		replyError(w, http.StatusConflict, "cannot provision a new account for this address")
 		return

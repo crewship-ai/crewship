@@ -59,6 +59,7 @@ interface Snapshot {
 const INITIAL: Snapshot = { workspaces: [], currentId: null, loading: true, error: false }
 let snapshot: Snapshot = INITIAL
 let fetched = false
+let directoryLoaded = false
 let inflight: Promise<void> | null = null
 
 const ssrSnapshot: Snapshot = INITIAL
@@ -118,6 +119,7 @@ let storeGeneration = 0
 export function bindWorkspaceSession(userId: string | null) {
   if (sessionIdentity === userId) return
   sessionIdentity = userId
+  directoryLoaded = false
   storeGeneration++
   inflight = null
   fetched = false
@@ -145,13 +147,22 @@ function loadWorkspaces(): Promise<void> {
       const persisted = readPersistedId()
       // A partial directory cannot distinguish outage from removal. Preserve
       // an explicit choice; absence requires retry or a guarded user selection.
-      const selected = snapshot.currentId ?? persisted
+      let legacy: string | null = null
+      if (sessionIdentity && !persisted) {
+        try { legacy = window.localStorage.getItem(STORAGE_KEY) } catch { /* unavailable storage */ }
+      }
+      // Migrate only a value in this authenticated account's fresh directory.
+      const selected = snapshot.currentId ?? persisted ?? (list.some(w => w.id === legacy) ? legacy : null)
       // On a fresh login there is no workspace draft to preserve. A stale
       // account preference (e.g. removed membership) may safely recover.
-      const next = snapshot.loading && res.headers?.get("X-Workspace-Directory-Complete") === "true" && selected && !list.some(w => w.id === selected)
+      const next = !directoryLoaded && res.headers?.get("X-Workspace-Directory-Complete") === "true" && selected && !list.some(w => w.id === selected)
         ? list[0]?.id ?? null
         : selected ?? list[0]?.id ?? null
+      directoryLoaded = true
       if (next && next !== persisted) persistId(next)
+      if (legacy && next === legacy) {
+        try { window.localStorage.removeItem(STORAGE_KEY) } catch { /* unavailable storage */ }
+      }
       if (!next) persistId(null)
       // A periodic re-check (useAccessModeWatcher) usually returns exactly
       // what is held. Keeping the old snapshot then keeps every consumer's
@@ -260,6 +271,7 @@ export function useWorkspace(): UseWorkspaceReturn {
 
 export function _resetWorkspaceStoreForTests() {
   sessionIdentity = undefined
+  directoryLoaded = false
   storeGeneration++
   setWorkspaceRequestSession(null)
   setWorkspaceRequestAvailability(null, true)

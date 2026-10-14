@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Workflow, RotateCw } from "lucide-react"
@@ -33,7 +34,7 @@ export function RestrictedRoutines({ workspaceId, access }: { workspaceId: strin
   useEffect(() => {
     const controller = new AbortController()
     setCatalog([]); setSelected(""); setValues({}); setRun(null); setError(""); setCatalogState("loading"); request.current = null
-    void apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/restricted-routines`, { signal: controller.signal }).then(async response => {
+    void Promise.resolve().then(() => apiFetch(`/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/restricted-routines`, { signal: controller.signal })).then(async response => {
       if (!response.ok) { const failure = await restrictedCatalogFailure(response); if (!controller.signal.aborted) setCatalogState(failure); return }
       const body = await response.json() as Routine[]
       if (!controller.signal.aborted) { setCatalog(body); setCatalogState("ready") }
@@ -47,7 +48,7 @@ export function RestrictedRoutines({ workspaceId, access }: { workspaceId: strin
     let timer: ReturnType<typeof setTimeout> | undefined
     const poll = async () => {
       try {
-        const response = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/restricted-routine-runs/${encodeURIComponent(runId)}`, { signal: controller.signal })
+        const response = await apiFetch(`/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/restricted-routine-runs/${requireApiPathSegment(runId)}`, { signal: controller.signal })
         if (!response.ok) throw new Error("This run is no longer available.")
         const body = await response.json() as Result
         if (controller.signal.aborted) return
@@ -80,7 +81,7 @@ export function RestrictedRoutines({ workspaceId, access }: { workspaceId: strin
         request.current = { key: crypto.randomUUID(), slug: routine.slug, body: JSON.stringify({ inputs, expected_definition_hash: routine.definition_hash, expected_execution_hash: routine.execution_hash }) }
       }
       const attempt = request.current
-      const response = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspace)}/pipelines/${encodeURIComponent(attempt.slug)}/run`, { method: "POST", headers: { "Content-Type": "application/json", Prefer: "respond-async", "Idempotency-Key": attempt.key }, body: attempt.body })
+      const response = await apiFetch(`/api/v1/workspaces/${requireApiPathSegment(workspace)}/pipelines/${requireApiPathSegment(attempt.slug)}/run`, { method: "POST", headers: { "Content-Type": "application/json", Prefer: "respond-async", "Idempotency-Key": attempt.key }, body: attempt.body })
       const body = await response.json()
       if (owner.current !== workspace) return
       if (!response.ok) { request.current = null; throw new Error(body.error ?? "Routine unavailable.") }

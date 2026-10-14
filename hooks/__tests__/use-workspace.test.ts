@@ -363,6 +363,28 @@ describe("useWorkspace", () => {
     expect(result.current.workspaceUnavailable).toBe(false)
   })
 
+  it("recovers a removed cold preference on Retry after the first request fails",async()=>{
+    storage.set("crewship.workspaceId","ws-gone")
+    mockFetch.mockResolvedValueOnce({ok:false,status:503})
+    const {result}=renderHook(()=>useWorkspace())
+    await waitFor(()=>expect(result.current.error).toBe(true))
+    mockFetch.mockResolvedValueOnce({ok:true,headers:new Headers({"X-Workspace-Directory-Complete":"true"}),json:async()=>[WS_A]})
+    await act(async()=>{await result.current.refresh()})
+    expect(result.current.workspaceId).toBe("ws-a")
+    expect(result.current.workspaceUnavailable).toBe(false)
+  })
+
+  it("migrates a legacy preference only after this account's directory authorizes it",async()=>{
+    storage.set("crewship.workspaceId","ws-b")
+    mockFetch.mockResolvedValue({ok:true,json:async()=>[WS_A,WS_B]})
+    act(()=>bindWorkspaceSession("new-account"))
+    const {result}=renderHook(()=>useWorkspace())
+    await waitFor(()=>expect(result.current.loading).toBe(false))
+    expect(result.current.workspaceId).toBe("ws-b")
+    expect(storage.get("crewship.workspaceId:new-account")).toBe("ws-b")
+    expect(storage.has("crewship.workspaceId")).toBe(false)
+  })
+
   it("preserves a cold persisted selection when the server reports a partial directory",async()=>{
     storage.set("crewship.workspaceId","ws-b")
     mockFetch.mockResolvedValue({ok:true,headers:new Headers({"X-Workspace-Directory-Complete":"false"}),json:async()=>[WS_A]})

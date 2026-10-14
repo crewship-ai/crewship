@@ -40,7 +40,9 @@ try {
     await contexts[actor].addInitScript(({id,user}) => localStorage.setItem(`crewship.workspaceId:${user}`, id), {id:fixture.workspace,user})
     await contexts[actor].addInitScript(() => {
       window.__navigationUnavailableShown = false
+      window.__trustedSettingsShown = false
       new MutationObserver(() => {
+        if (document.querySelector('input[aria-label="Full name"],nav[aria-label="Settings sections"]')) window.__trustedSettingsShown = true
         if ([...document.querySelectorAll('h1,h2')].some(node => node.textContent === 'Not available with your access')) window.__navigationUnavailableShown = true
       }).observe(document, { childList: true, subtree: true, characterData: true })
     })
@@ -58,6 +60,27 @@ try {
     await check(`real directory ${omit?'omits':'restores'} selected workspace and retains sibling`,
       directory.status()===200 && rows.some(row=>row.id===fixture.workspace)===!omit && rows.some(row=>row.id===fixture.empty_workspace))
   }
+  await open('owner','/settings?tab=members')
+  await pages.owner.reload()
+  await expect(pages.owner.getByRole('heading', { name: 'Members', exact: true }).first()).toBeVisible()
+  await expect(pages.owner.getByText('Failed to load settings', {exact:true})).toHaveCount(0)
+  await expect(pages.owner.getByText('nav-client-a@example.test', {exact:true}).first()).toBeVisible()
+  await check('F5 Settings members deep link loads real member data', true)
+  await open('owner','/settings')
+  await pages.owner.reload()
+  await expect(pages.owner.getByText('Failed to load settings', {exact:true})).toHaveCount(0)
+  await expect(pages.owner.getByLabel(/full name/i)).toBeVisible()
+  await check('F5 Settings profile waits for workspace fence before metadata fetch', true)
+  const guestSettingsRequests=[]
+  const observeSettings=request=>{if(new URL(request.url()).pathname.startsWith('/api/v1/workspaces/'+fixture.workspace+'/')) guestSettingsRequests.push(request.url())}
+  pages.desktop.on('request',observeSettings)
+  await open('desktop','/settings?tab=members')
+  await pages.desktop.reload()
+  await expect(pages.desktop.getByRole('heading',{name:'Account security',exact:true})).toBeVisible()
+  await expect(pages.desktop.getByRole('textbox',{name:'Full name'})).toHaveCount(0)
+  await check('Guest Settings reload never flashes trusted settings', !(await pages.desktop.evaluate(()=>window.__trustedSettingsShown)))
+  await check('Guest Settings reload sends no workspace metadata or roster request',guestSettingsRequests.length===0)
+  pages.desktop.off('request',observeSettings)
   await open('owner','/pages')
   await pages.owner.getByRole('button',{name:'New page',exact:true}).first().click()
   let editor=pages.owner.getByRole('dialog',{name:/New page/})

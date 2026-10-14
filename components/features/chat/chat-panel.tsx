@@ -358,6 +358,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   }, [sessionId,workspaceId])
 
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
+    canSend: canChat,
     realtimeEnabled: sessionRealtime,
     executionProfile,
     getExecutionProfile: () => executionProfileRef.current,
@@ -857,14 +858,16 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   // Regenerate/edit also stream a fresh reply, so they re-arm the pin just
   // like a plain send — otherwise the scroll behavior is inconsistent.
   const regenerateWithPin = useCallback(() => {
+    if (!canChat) return
     regenerateLastTurn()
     setPinNonce((n) => n + 1)
-  }, [regenerateLastTurn])
+  }, [canChat, regenerateLastTurn])
 
   const editAndResendWithPin = useCallback((turnId: string, newContent: string) => {
+    if (!canChat) return
     editAndResend(turnId, newContent)
     setPinNonce((n) => n + 1)
-  }, [editAndResend])
+  }, [canChat, editAndResend])
 
   // ── The slash palette's delegated commands ────────────────────────────────
   //
@@ -963,6 +966,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       sessionId={sessionId}
       agentId={agentId}
       agentName={agentName}
+      canChat={canChat}
       historyLoading={historyLoading}
       isStreaming={isStreaming}
       animateAfter={animateAfter}
@@ -978,7 +982,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     <Conversation>
       <ConversationContent className="mx-auto w-full max-w-3xl">
         {turns.length === 0 && !historyLoading && (
-          agentMeta ? (
+          agentMeta && canChat ? (
             // The agent card and "what this agent can do" — who you are
             // about to talk to, from the roster row and its skills. A routine
             // step or an issue chat gets one line: it is a transcript, and
@@ -999,8 +1003,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                   <Bot className="h-12 w-12" />
                 )
               }
-              title="Start a conversation"
-              description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
+              title={canChat ? "Start a conversation" : "Agent shared for discovery"}
+              description={canChat ? (agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below") : "Chat has not been shared with you."}
             />
           )
         )}
@@ -1012,7 +1016,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               onCopy={handleCopy}
               onFileClick={openFilePreview}
               isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-              onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateWithPin : undefined}
+              onRegenerate={canChat && turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateWithPin : undefined}
               onEditUserMessage={canChat && !isStreaming ? editAndResendWithPin : undefined}
               animateAfter={animateAfter}
               agentId={agentId}
@@ -1171,7 +1175,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
             The session id left the header: it is the URL, and "Copy link"
             hands it over in the form a person can use. */}
         <div className="flex min-h-[52px] items-center gap-3 border-b px-4 py-1.5 md:px-6 shrink-0">
-          {agentMeta ? (
+          {agentMeta && canChat ? (
             <AgentStrip
               agent={agentMeta}
               className="min-w-0 flex-1"

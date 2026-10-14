@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { LayoutGrid, RotateCw } from "lucide-react"
@@ -35,7 +36,7 @@ export function RestrictedPages({ workspaceId, access }: { workspaceId: string; 
   useEffect(() => {
     const controller = new AbortController()
     setCatalog([]); setSelected(""); setValues({}); setRun(null); setError(""); setCatalogState("loading"); request.current = null
-    void apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/restricted-pages`, { signal: controller.signal }).then(async response => {
+    void Promise.resolve().then(() => apiFetch(`/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/restricted-pages`, { signal: controller.signal })).then(async response => {
       if (!response.ok) { const failure = await restrictedCatalogFailure(response); if (!controller.signal.aborted) setCatalogState(failure); return }
       const body = await response.json() as Page[]
       if (!controller.signal.aborted) { setCatalog(body.flatMap(page => page.actions.map(action => ({ ...action, page, key: JSON.stringify([page.slug, action.panel_id, action.id]) })))); setCatalogState("ready") }
@@ -49,7 +50,7 @@ export function RestrictedPages({ workspaceId, access }: { workspaceId: string; 
     let timer: ReturnType<typeof setTimeout> | undefined
     const poll = async () => {
       try {
-        const response = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/restricted-routine-runs/${encodeURIComponent(runId)}`, { signal: controller.signal })
+        const response = await apiFetch(`/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/restricted-routine-runs/${requireApiPathSegment(runId)}`, { signal: controller.signal })
         if (!response.ok) throw new Error("This run is no longer available.")
         const body = await response.json() as Result
         if (controller.signal.aborted) return
@@ -80,10 +81,10 @@ export function RestrictedPages({ workspaceId, access }: { workspaceId: string; 
           else if (field.type === "boolean") { if (!["true", "false"].includes(value)) throw new Error(`${field.name} requires true or false.`); inputs[field.name] = value === "true" }
           else { if (!value && field.required) throw new Error(`${field.name} is required.`); inputs[field.name] = value }
         }
-        const path = `/api/v1/pages/${encodeURIComponent(action.page.slug)}`
-        const target = `${encodeURIComponent(action.panel_id)}/${encodeURIComponent(action.id)}`
+        const path = `/api/v1/pages/${requireApiPathSegment(action.page.slug)}`
+        const target = `${requireApiPathSegment(action.panel_id)}/${requireApiPathSegment(action.id)}`
         const published = !!action.page.publication
-        request.current = { key: crypto.randomUUID(), url: (published ? `${path}/application/actions/${target}` : `${path}/panels/${encodeURIComponent(action.panel_id)}/actions/${encodeURIComponent(action.id)}`) + `?workspace_id=${encodeURIComponent(workspace)}`, body: JSON.stringify(published ? { inputs, publication: action.page.publication, expected_intent_hash: action.intent_hash } : { inputs, expected_intent_hash: action.intent_hash }) }
+        request.current = { key: crypto.randomUUID(), url: (published ? `${path}/application/actions/${target}` : `${path}/panels/${requireApiPathSegment(action.panel_id)}/actions/${requireApiPathSegment(action.id)}`) + `?workspace_id=${encodeURIComponent(workspace)}`, body: JSON.stringify(published ? { inputs, publication: action.page.publication, expected_intent_hash: action.intent_hash } : { inputs, expected_intent_hash: action.intent_hash }) }
       }
       const attempt = request.current
       const response = await apiFetch(attempt.url, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": attempt.key }, body: attempt.body })

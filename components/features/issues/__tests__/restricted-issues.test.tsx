@@ -21,6 +21,8 @@ it("uses the project-filtered projection and clears rendered data on a rejected 
  expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/workspaces/w/restricted-issues?limit=100&offset=0")
  fireEvent.click(screen.getByRole("button",{name:"Refresh"}))
  await screen.findByText("Issues unavailable")
+ expect(screen.queryByText(/this is not about your access/)).toBeNull()
+ expect(screen.getByText(/Your workspace administrator decides/)).toBeInTheDocument()
  expect(screen.queryByRole("link",{name:"Shared issue"})).toBeNull()
  expect(fetchMock.mock.calls).toHaveLength(2)
 })
