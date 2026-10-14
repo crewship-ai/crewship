@@ -164,4 +164,28 @@ func TestGuestProjectIssuesAndResponseBodyLeakWalk(t *testing.T) {
 	if strings.Contains(list.Body.String(), "shared-issue") {
 		t.Fatal("revoked issue remained in catalog")
 	}
+	// The same authenticated Guest loses both direct and bulk projections when
+	// the grant issuer is demoted. Stored shares follow current issuer authority.
+	replace("project-guest", "shared-project")
+	p, err := store.Policy(t.Context(), owner, "project-guest", ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Rights = append(p.Rights, access.Right{Kind: "agent", ID: "ISSUE_HIDDEN_AGENT_ID", Operation: "discover"})
+	if _, err = store.Replace(t.Context(), owner, "project-guest", ws, "restricted", p.Membership, p.Rights); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(request("project-guest", "/api/v1/agents", 200).Body.String(), "ISSUE_HIDDEN_AGENT_ID") {
+		t.Fatal("authorized agent absent before issuer demotion")
+	}
+	execOrFatal(t, db, `UPDATE workspace_members SET role='MEMBER' WHERE user_id=? AND workspace_id=?`, owner, ws)
+	request("project-guest", base+"/shared-issue", 404)
+	for _, path := range []string{base, "/api/v1/agents"} {
+		body := request("project-guest", path, 200).Body.String()
+		if strings.Contains(body, "shared-issue") || strings.Contains(body, "ISSUE_HIDDEN_AGENT_ID") {
+			t.Fatalf("demoted issuer still grants projection %s", path)
+		}
+	}
+	execOrFatal(t, db, `UPDATE workspace_members SET role='OWNER' WHERE user_id=? AND workspace_id=?`, owner, ws)
+	request("project-guest", base+"/shared-issue", 200)
 }

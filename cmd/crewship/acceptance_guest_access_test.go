@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -159,4 +160,53 @@ func runGuestCLI(t *testing.T, serverURL, input string, args ...string) (string,
 	command.Stdin = strings.NewReader(input)
 	output, err := command.CombinedOutput()
 	return string(output), err
+}
+
+func TestAcceptanceMemberAccessReissueCLI(t *testing.T) {
+	policy := `{"membership_id":"member-1","revision":3,"mode":"restricted","rights":[{"kind":"routine","id":"routine-1","operation":"run"}],"grant_details":[{"kind":"routine","id":"routine-1","operation":"run","issuer_id":"old-admin","created_at":"2026-10-14T00:00:00Z","live":false}]}`
+	var puts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/workspaces":
+			io.WriteString(w, `[{"id":"ws_test","slug":"ws_test","name":"Test"}]`)
+		case "/api/v1/workspaces/ws_test/members":
+			io.WriteString(w, `[{"id":"member-1","user_id":"user-1"}]`)
+		case "/api/v1/workspaces/ws_test/members/member-1/access":
+			if r.Method == "PUT" {
+				var body struct {
+					Reissue      []struct{ Kind, ID, Operation string }
+					GrantDetails []any `json:"grant_details"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				if len(body.Reissue) != 1 || body.Reissue[0].Kind != "routine" || body.Reissue[0].ID != "routine-1" || body.Reissue[0].Operation != "run" {
+					t.Errorf("lost reissue instruction: %+v", body)
+				}
+				puts.Add(1)
+			}
+			io.WriteString(w, policy)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	out, err := runGuestCLI(t, server.URL, "", "workspace", "member", "access", "get", "user-1")
+	if err != nil {
+		t.Fatalf("get: %v %s", err, out)
+	}
+	for _, column := range []string{"ISSUER", "STATE", "old-admin", "inactive", "routine-1", "run"} {
+		if !strings.Contains(out, column) {
+			t.Fatalf("missing %s: %s", column, out)
+		}
+	}
+	out, err = runGuestCLI(t, server.URL, policy, "workspace", "member", "access", "set", "user-1", "--file", "-", "--reissue", "routine:routine-1:run")
+	if err != nil || puts.Load() != 1 {
+		t.Fatalf("reissue: %v puts=%d %s", err, puts.Load(), out)
+	}
+	out, err = runGuestCLI(t, server.URL, policy, "workspace", "member", "access", "set", "user-1", "--file", "-", "--reissue", "routine:unshared:run")
+	if err == nil || puts.Load() != 1 {
+		t.Fatalf("invalid reissue reached API: %v puts=%d %s", err, puts.Load(), out)
+	}
 }

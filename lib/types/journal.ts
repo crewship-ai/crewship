@@ -155,6 +155,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "invitation.reissued",
   "invitation.revoked",
   "invitation.accepted",
+    "member.access_changed",
   // Memory (extended)
   "memory.write_rejected",
   "memory.consolidation_proposed",
