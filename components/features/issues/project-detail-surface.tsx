@@ -9,6 +9,7 @@
 // and a title that all said the project's name.
 
 import * as React from "react"
+import { ResourceShareDialog } from "@/components/features/settings/resource-share-dialog"
 
 import { ProjectMilestonesCard } from "./project-milestones-card"
 import { apiFetch } from "@/lib/api-fetch"
@@ -188,7 +189,7 @@ function ProjectDetailDraft({
       project={shown}
       stats={stats}
       issues={projectIssues}
-      actions={actions}
+      actions={<><ResourceShareDialog workspaceId={workspaceId} resource={{ kind: "project", id: project.id, name: project.name }} />{actions}</>}
       edit={edit}
     />
     <div className="px-4 pb-4"><ProjectMilestonesCard key={project.id} projectId={project.id} workspaceId={workspaceId} editable={editable} /></div>
