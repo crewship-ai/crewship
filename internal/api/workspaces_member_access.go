@@ -81,17 +81,21 @@ func (h *WorkspaceHandler) PutMemberAccess(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var p access.Policy
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10))
 	d.DisallowUnknownFields()
 	if d.Decode(&p) != nil || d.Decode(new(any)) != io.EOF || p.ID != r.PathValue("memberId") || p.Revision < 1 || p.Rights == nil || (p.Mode != "trusted" && p.Mode != "restricted") {
 		replyError(w, http.StatusBadRequest, "Provide membership_id, revision, mode and an explicit rights array")
 		return
 	}
-	m, err := (access.Store{DB: h.db}).Replace(r.Context(), actor, user, workspace, p.Mode, p.Membership, p.Rights)
+	_, err := (access.Store{DB: h.db}).Replace(r.Context(), actor, user, workspace, p.Mode, p.Membership, p.Rights, p.Reissue...)
 	if err != nil {
 		h.memberAccessError(w, err)
 		return
 	}
-	p.Membership = m
+	p, err = (access.Store{DB: h.db}).Policy(r.Context(), actor, user, workspace)
+	if err != nil {
+		h.memberAccessError(w, err)
+		return
+	}
 	h.writeMemberAccessPolicy(w, r, p)
 }
