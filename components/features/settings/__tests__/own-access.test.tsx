@@ -13,6 +13,8 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: mocks.fetch }))
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => mocks.workspace }))
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ session: { user: mocks.user } }) }))
 
+const accessMetadata = {membership_id:"m1",revision:1,mode:"restricted",account_restricted:true,restriction_scope:"account"}
+
 function view() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   const result = render(<QueryClientProvider client={client}><OwnAccessCard /></QueryClientProvider>)
@@ -28,7 +30,7 @@ beforeEach(() => {
 
 describe("your access", () => {
   it("shows only server-derived decisions and supports error recovery", async () => {
-    mocks.fetch.mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true, json: async () => ({ explanation: "Guest access", decisions: [{ kind: "routine", id: "r1", name: "Shared routine", operation: "run", state: "unavailable", reason: "Runtime not installed" }] }) })
+    mocks.fetch.mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true, json: async () => ({ ...accessMetadata, explanation: "Guest access", decisions: [{ kind: "routine", id: "r1", name: "Shared routine", operation: "run", state: "unavailable", reason: "Runtime not installed" }] }) })
     view()
     expect(await screen.findByRole("alert")).toHaveTextContent("Access details unavailable")
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
@@ -45,11 +47,11 @@ describe("your access", () => {
   })
 
   it("does not reuse another account's access in the same workspace", async () => {
-    mocks.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ explanation: "First account policy", decisions: [] }) })
+    mocks.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ...accessMetadata, explanation: "First account policy", decisions: [] }) })
     const { client, rerender } = view()
     expect(await screen.findByText("First account policy")).toBeVisible()
     mocks.user = { id: "h2" }
-    mocks.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ explanation: "Second account policy", decisions: [] }) })
+    mocks.fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ...accessMetadata, explanation: "Second account policy", decisions: [] }) })
     rerender(<QueryClientProvider client={client}><OwnAccessCard /></QueryClientProvider>)
     expect(screen.queryByText("First account policy")).not.toBeInTheDocument()
     expect(await screen.findByText("Second account policy")).toBeVisible()
@@ -58,7 +60,7 @@ describe("your access", () => {
 })
 
 it.each([409, 500])("keeps the last successful access visible on refetch failure %s", async (status) => {
-  mocks.fetch.mockResolvedValueOnce({ok:true,json:async()=>({explanation:"Saved access",decisions:[{kind:"agent",id:"a",name:"Shared",operation:"chat",state:"conditional",reason:"Private audience"},{kind:"routine",id:"r",name:"Shared",operation:"run",state:"denied",reason:"Missing agent grant"}]})})
+  mocks.fetch.mockResolvedValueOnce({ok:true,json:async()=>({...accessMetadata,explanation:"Saved access",decisions:[{kind:"agent",id:"a",name:"Shared",operation:"chat",state:"conditional",reason:"Private audience"},{kind:"routine",id:"r",name:"Shared",operation:"run",state:"denied",reason:"Missing agent grant"}]})})
   const {client}=view()
   expect(await screen.findByText("Agent · Shared · chat · Subject to execution checks")).toBeVisible()
   expect(screen.getByText("Routine · Shared · run · No access")).toBeVisible()
@@ -70,8 +72,8 @@ it.each([409, 500])("keeps the last successful access visible on refetch failure
 })
 
 it("rejects an invalid access response before rendering its rows", async () => {
-  mocks.fetch.mockResolvedValueOnce({ok:true,json:async()=>({explanation:"Invalid",decisions:[{kind:"credential",id:"c",state:"allowed"}]})})
+  mocks.fetch.mockResolvedValueOnce({ok:true,json:async()=>({...accessMetadata,explanation:"Invalid",decisions:[{kind:"credential",id:"c",state:"allowed"}]})})
   view()
-  expect(await screen.findByRole("alert")).toBeVisible()
+  expect(await screen.findByRole("alert")).toHaveTextContent("Access details unavailable")
   expect(screen.queryByText("Invalid")).not.toBeInTheDocument()
 })
