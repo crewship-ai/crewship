@@ -51,7 +51,7 @@ func TestRestrictedIssuePreflightAuthenticatedRouter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = store.Replace(t.Context(), owner, u, workspace, "restricted", m, []access.Right{{Kind: "agent", ID: "f-agent", Operation: "run"}, {Kind: "project", ID: project, Operation: "read"}}); err != nil {
+		if _, err = store.Replace(t.Context(), owner, u, workspace, "restricted", m, []access.Right{{Kind: "routine", ID: "f-routine", Operation: "run"}, {Kind: "agent", ID: "f-agent", Operation: "run"}, {Kind: "project", ID: project, Operation: "read"}}); err != nil {
 			t.Fatal(err)
 		}
 		session, err := sessions.NewDBStore(db).Create(t.Context(), u, "test", "127.0.0.1", auth.RefreshTokenTTL)

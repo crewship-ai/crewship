@@ -44,6 +44,11 @@ function setup(overrides: Partial<Parameters<typeof useRestrictedChatPoll>[0]> =
 const tick = () => act(async () => { await vi.advanceTimersByTimeAsync(RESTRICTED_CHAT_POLL_MS) })
 
 describe("useRestrictedChatPoll", () => {
+  it("never dispatches a URL dot-segment as a chat identifier", async () => {
+    setup({sessionId:".."})
+    await tick()
+    expect(requests).toHaveLength(0)
+  })
   it("shows a message another participant wrote, without a WebSocket", async () => {
     const { onChange } = setup()
     await tick()

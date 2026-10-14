@@ -18,7 +18,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import { encodeApiPathSegment } from "@/lib/api-path-segment"
+import { encodeApiPathSegment, requireApiPathSegment } from "@/lib/api-path-segment"
 
 import {
   Conversation,
@@ -178,8 +178,10 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     setPageContext(null)
     setPageContextError(false)
     if (!pageContextSlug || !workspaceId) return
+    const pageSegment = encodeApiPathSegment(pageContextSlug)
+    if (pageSegment === null) { setPageContextError(true); return }
     const controller = new AbortController()
-    apiFetch(`/api/v1/pages/${encodeURIComponent(pageContextSlug)}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal: controller.signal })
+    apiFetch(`/api/v1/pages/${pageSegment}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal: controller.signal })
       .then((r) => r.ok ? r.json() : Promise.reject(new Error(`Page ${r.status}`)))
       .then((page: { name?: string; slug?: string }) => {
         if (controller.signal.aborted) return
@@ -294,6 +296,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const currentUserId = session.data?.user?.id ?? null
   // A restricted account has no WebSocket in any workspace (#2861).
   const sessionRealtime = useAccessMode() === "trusted"
+  const canChat = sessionRealtime || agentMeta?.current_user_can_chat === true
 
   // Bumped to force a history refetch when the server can't replay an in-flight
   // run (resume_reset — the replay buffer overflowed). Rare; a safety net.
@@ -355,6 +358,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   }, [sessionId,workspaceId])
 
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
+    canSend: canChat,
     realtimeEnabled: sessionRealtime,
     executionProfile,
     getExecutionProfile: () => executionProfileRef.current,
@@ -408,6 +412,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   }, [projectInputScope])
   useEffect(() => { setProjectInputSelection({ scope: projectInputScope, ids: [] }) }, [projectInputScope])
   const sendMessageWithPage = useCallback((text: string, metadata?: Record<string, unknown>) => {
+    if (!canChat) return false
     if (executionProfileRef.current === "restricted" && selectedProjectInputs.length) { metadata = { ...metadata, project_file_versions: [...selectedProjectInputs] } }
     if (pageContextSlug && !pageContextRemoved && !pageContextError) {
       const withPage = { ...metadata, page_context: { slug: pageContextSlug } }
@@ -427,7 +432,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       if (sent === false) toast.error("Not connected — your message is still here. Try again when chat reconnects.")
       return sent
     }
-  }, [sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs])
+  }, [canChat, sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs])
 
   // Reply-settled hook: when a stream the user watched in THIS session
   // finishes (isStreaming true→false), tell the parent so it can re-fire
@@ -638,7 +643,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     const attempt = (async (): Promise<boolean> => {
       try {
         const res = await apiFetch(
-          `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
+          `/api/v1/agents/${requireApiPathSegment(agentId)}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
           { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sid, origin: "UI" }) },
         )
         if (!res.ok) return false
@@ -690,11 +695,12 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
    *  (toastUploadFailure), and the send path leaves the draft in the box where
    *  the user can see it. */
   const ensureSessionForSend = useCallback(async (): Promise<boolean> => {
+    if (!canChat) return false
     const sid = sessionId
     let ok = await ensureSession()
     if (ok) {
       try {
-        const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(sid)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId ?? "")}`)
+        const response = await apiFetch(`/api/v1/chats/${requireApiPathSegment(sid)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId ?? "")}`)
         if (!response.ok) ok = false
         else {
           const profile = await response.json() as {mode:string;audience?:string}
@@ -716,7 +722,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       toast.error("Couldn't start this conversation. Check your connection and try again.")
     }
     return ok
-  }, [ensureSession,sessionId,workspaceId,waitForConnection])
+  }, [canChat,ensureSession,sessionId,workspaceId,waitForConnection])
 
   // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
   // on a draft session `ensureSessionForSend` awaits a real POST. `isStreaming`
@@ -732,7 +738,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
   // A draft whose profile probe has answered without a profile can still be
   // sent: the send creates the row and resolves the profile first.
-  const draftSendable = executionProfile === "pending" && profileProbeSettled
+  const draftSendable = canChat && executionProfile === "pending" && profileProbeSettled
 
   // Bumped on every locally-sent message; arms the pin-to-top spacer so the
   // just-sent question anchors at the viewport top while the reply streams
@@ -852,14 +858,16 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   // Regenerate/edit also stream a fresh reply, so they re-arm the pin just
   // like a plain send — otherwise the scroll behavior is inconsistent.
   const regenerateWithPin = useCallback(() => {
+    if (!canChat) return
     regenerateLastTurn()
     setPinNonce((n) => n + 1)
-  }, [regenerateLastTurn])
+  }, [canChat, regenerateLastTurn])
 
   const editAndResendWithPin = useCallback((turnId: string, newContent: string) => {
+    if (!canChat) return
     editAndResend(turnId, newContent)
     setPinNonce((n) => n + 1)
-  }, [editAndResend])
+  }, [canChat, editAndResend])
 
   // ── The slash palette's delegated commands ────────────────────────────────
   //
@@ -958,13 +966,14 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       sessionId={sessionId}
       agentId={agentId}
       agentName={agentName}
+      canChat={canChat}
       historyLoading={historyLoading}
       isStreaming={isStreaming}
       animateAfter={animateAfter}
       onCopy={handleCopy}
       onFileClick={openFilePreview}
-      onRegenerate={!isStreaming ? regenerateWithPin : undefined}
-      onEditUserMessage={!isStreaming ? editAndResendWithPin : undefined}
+      onRegenerate={canChat && !isStreaming ? regenerateWithPin : undefined}
+      onEditUserMessage={canChat && !isStreaming ? editAndResendWithPin : undefined}
       resolveAuthorName={resolveAuthorName}
       resolveAskProvenance={resolveAskProvenance}
       footer={<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />}
@@ -973,7 +982,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     <Conversation>
       <ConversationContent className="mx-auto w-full max-w-3xl">
         {turns.length === 0 && !historyLoading && (
-          agentMeta ? (
+          agentMeta && canChat ? (
             // The agent card and "what this agent can do" — who you are
             // about to talk to, from the roster row and its skills. A routine
             // step or an issue chat gets one line: it is a transcript, and
@@ -994,8 +1003,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                   <Bot className="h-12 w-12" />
                 )
               }
-              title="Start a conversation"
-              description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
+              title={canChat ? "Start a conversation" : "Agent shared for discovery"}
+              description={canChat ? (agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below") : "Chat has not been shared with you."}
             />
           )
         )}
@@ -1007,8 +1016,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               onCopy={handleCopy}
               onFileClick={openFilePreview}
               isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-              onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateWithPin : undefined}
-              onEditUserMessage={!isStreaming ? editAndResendWithPin : undefined}
+              onRegenerate={canChat && turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateWithPin : undefined}
+              onEditUserMessage={canChat && !isStreaming ? editAndResendWithPin : undefined}
               animateAfter={animateAfter}
               agentId={agentId}
               chatId={sessionId}
@@ -1092,7 +1101,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         </div>
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {executionProfile === "restricted" && sessionId && workspaceId && <RestrictedMemory key={`memory:${sessionId}`} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />}
-        {turns.length === 0 && !historyLoading && sessionKind === "direct" && (
+        {canChat && turns.length === 0 && !historyLoading && sessionKind === "direct" && (
           <div className="px-4 pb-2 shrink-0">
             <AskRail
               questions={defaultSuggestions}
@@ -1107,7 +1116,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
-        <ChatComposer
+        {canChat ? <ChatComposer
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
@@ -1125,7 +1134,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           askForm={activeAskForm}
           onCloseAskForm={closeAskForm}
           renderAskTemplate={renderAskTemplate}
-        />
+        /> : <p role="status" className="border-t px-4 py-4 text-sm text-muted-foreground">You can discover this agent. Ask your administrator for chat access to send messages.</p>}
 
         <SlashPalette
           agentSlug={agentSlug}
@@ -1166,7 +1175,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
             The session id left the header: it is the URL, and "Copy link"
             hands it over in the form a person can use. */}
         <div className="flex min-h-[52px] items-center gap-3 border-b px-4 py-1.5 md:px-6 shrink-0">
-          {agentMeta ? (
+          {agentMeta && canChat ? (
             <AgentStrip
               agent={agentMeta}
               className="min-w-0 flex-1"
@@ -1174,7 +1183,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                 <>
                   <ConnectionBadge status={connectionStatus} />
                   <OriginChip origin={sessionOrigin} kind={sessionKind} /><ChatSessionSource agentId={agentId} sessionId={sessionId} workspaceId={workspaceId} onOpenWork={() => onMobilePanelChange?.("work")} />
-                  {onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
+                  {canChat && onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
                   <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
                   <CopyLinkButton />
                 </>
@@ -1185,7 +1194,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               <ConnectionBadge status={connectionStatus} />
               <OriginChip origin={sessionOrigin} kind={sessionKind} /><ChatSessionSource agentId={agentId} sessionId={sessionId} workspaceId={workspaceId} onOpenWork={() => onMobilePanelChange?.("work")} />
               <div className="ml-auto flex items-center gap-2">
-                {onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
+                {canChat && onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
                 <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
                 <CopyLinkButton />
               </div>
@@ -1200,7 +1209,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         {/* Starter chips are for a conversation; a routine step or an issue
             chat is a transcript, and "Help me get started" under one is
             noise. */}
-        {turns.length === 0 && !historyLoading && sessionKind === "direct" && (
+        {canChat && turns.length === 0 && !historyLoading && sessionKind === "direct" && (
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 pb-2 shrink-0">
             <AskRail
               questions={defaultSuggestions}
@@ -1225,7 +1234,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           // silently consumes the attachment the reader was still composing
           // around. They come back the moment the attachment clears.
           show={
-            !isStreaming &&
+            canChat && !isStreaming &&
             !hasStagedAttachment &&
             turns.length > 0 &&
             turns[turns.length - 1].role === "assistant"
@@ -1235,7 +1244,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
-        <ChatComposer
+        {canChat ? <ChatComposer
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
@@ -1253,7 +1262,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           askForm={activeAskForm}
           onCloseAskForm={closeAskForm}
           renderAskTemplate={renderAskTemplate}
-        />
+        /> : <p role="status" className="border-t px-4 py-4 text-sm text-muted-foreground">You can discover this agent. Ask your administrator for chat access to send messages.</p>}
       </div>
 
       {executionProfile === "trusted" && <ArtifactPane agentId={agentId} expanded={artifactFocus} />}

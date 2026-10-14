@@ -5472,6 +5472,9 @@
       },
       "FinalAuthInvitationAcceptRequest": {
         "properties": {
+          "confirm_account_restriction": {
+            "type": "boolean"
+          },
           "token": {
             "type": "string"
           }
@@ -6074,8 +6077,111 @@
       },
       "FinalCoreInvitationRequest": {
         "properties": {
+          "access_mode": {
+            "enum": [
+              "trusted",
+              "restricted"
+            ],
+            "type": "string"
+          },
           "email": {
             "type": "string"
+          },
+          "rights": {
+            "items": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "agent"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "discover",
+                        "chat",
+                        "run",
+                        "delegate"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "project"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "list",
+                        "read",
+                        "write",
+                        "delete"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "routine"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "run"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "maxItems": 256,
+            "type": "array",
+            "uniqueItems": true
           },
           "role": {
             "type": "string"
@@ -6156,6 +6262,13 @@
       },
       "FinalCoreProvisionMemberRequest": {
         "properties": {
+          "access_mode": {
+            "enum": [
+              "trusted",
+              "restricted"
+            ],
+            "type": "string"
+          },
           "create_only": {
             "description": "Reject existing accounts without changing membership or setup tokens.",
             "type": "boolean"
@@ -6165,6 +6278,102 @@
           },
           "full_name": {
             "type": "string"
+          },
+          "rights": {
+            "items": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "agent"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "discover",
+                        "chat",
+                        "run",
+                        "delegate"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "project"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "list",
+                        "read",
+                        "write",
+                        "delete"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "routine"
+                      ],
+                      "type": "string"
+                    },
+                    "operation": {
+                      "enum": [
+                        "run"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id",
+                    "operation"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "maxItems": 256,
+            "type": "array",
+            "uniqueItems": true
           },
           "role": {
             "type": "string"
@@ -52703,6 +52912,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -52721,6 +52933,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -52739,6 +52954,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -52757,6 +52975,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -52775,6 +52996,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -52793,6 +53017,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -53414,6 +53641,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -53432,6 +53662,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -53445,11 +53678,35 @@
             },
             "description": "Forbidden"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "500": {
             "content": {
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139144,6 +139401,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139162,6 +139422,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139180,6 +139443,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139198,6 +139464,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139216,6 +139485,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139234,6 +139506,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "code": {
+                      "type": "string"
+                    },
                     "error": {
                       "type": "string"
                     }
@@ -139781,6 +140056,33 @@
                               "operation"
                             ],
                             "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "run"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "operation"
+                            ],
+                            "type": "object"
                           }
                         ]
                       },
@@ -140014,6 +140316,33 @@
                             "operation"
                           ],
                           "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "routine"
+                              ],
+                              "type": "string"
+                            },
+                            "operation": {
+                              "enum": [
+                                "run"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id",
+                            "operation"
+                          ],
+                          "type": "object"
                         }
                       ]
                     },
@@ -140109,6 +140438,33 @@
                                   "read",
                                   "write",
                                   "delete"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "id",
+                              "operation"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "routine"
+                                ],
+                                "type": "string"
+                              },
+                              "operation": {
+                                "enum": [
+                                  "run"
                                 ],
                                 "type": "string"
                               }
@@ -140264,6 +140620,203 @@
           "workspaces"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/members/{memberId}/access/effective": {
+      "get": {
+        "description": "Get workspace member access effective (GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access/effective).",
+        "operationId": "get_api_v1_workspaces_workspaceId_members_memberId_access_effective",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "memberId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "account_restricted": {
+                      "type": "boolean"
+                    },
+                    "decisions": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "agent",
+                              "project",
+                              "routine"
+                            ],
+                            "type": "string"
+                          },
+                          "operation": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "enum": [
+                              "allowed",
+                              "denied",
+                              "conditional",
+                              "unavailable"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "id",
+                          "operation",
+                          "state",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "explanation": {
+                      "type": "string"
+                    },
+                    "membership_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "mode": {
+                      "enum": [
+                        "trusted",
+                        "restricted"
+                      ],
+                      "type": "string"
+                    },
+                    "restriction_scope": {
+                      "enum": [
+                        "account"
+                      ],
+                      "type": "string"
+                    },
+                    "revision": {
+                      "format": "int64",
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "membership_id",
+                    "mode",
+                    "revision",
+                    "account_restricted",
+                    "restriction_scope",
+                    "explanation",
+                    "decisions"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace member access effective",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities": {
@@ -153478,6 +154031,303 @@
           }
         ],
         "summary": "Get workspace project file download",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/restricted-issues": {
+      "get": {
+        "description": "List workspace restricted issues (GET /api/v1/workspaces/{workspaceId}/restricted-issues).",
+        "operationId": "get_api_v1_workspaces_workspaceId_restricted-issues",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "can_read": {
+                        "type": "boolean"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "identifier": {
+                        "type": "string"
+                      },
+                      "project_id": {
+                        "type": "string"
+                      },
+                      "project_name": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "identifier",
+                      "title",
+                      "status",
+                      "project_id",
+                      "project_name",
+                      "can_read"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List workspace restricted issues",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}": {
+      "get": {
+        "description": "Get workspace restricted issue (GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}).",
+        "operationId": "get_api_v1_workspaces_workspaceId_restricted-issues_issueId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issueId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "can_read": {
+                      "type": "boolean"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "identifier": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "project_name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "identifier",
+                    "title",
+                    "status",
+                    "project_id",
+                    "project_name",
+                    "can_read"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace restricted issue",
         "tags": [
           "workspaces"
         ],

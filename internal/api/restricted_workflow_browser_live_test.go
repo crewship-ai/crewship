@@ -81,6 +81,15 @@ func TestLiveRestrictedWorkflowBrowser(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO crew_members(crew_id,user_id,role) VALUES('browser-crew','browser-h1','MANAGER')`)
 	declaration := `{"dsl_version":"1.0","name":"private-work","inputs":[{"name":"task","type":"string","required":true},{"name":"fixed","type":"string"}],"steps":[{"id":"answer","type":"agent_run","agent_slug":"browser-agent","prompt":"{{ inputs.task }}"}]}`
 	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('browser-routine',?,'private-work','Allowed routine',?,'fixture','browser-crew','active')`, workspace, declaration)
+	for _, actor := range []string{"browser-h1", "browser-h2"} {
+		member, e := store.Membership(t.Context(), actor, workspace)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = store.Replace(t.Context(), owner, actor, workspace, "restricted", member, []access.Right{{Kind: "routine", ID: "browser-routine", Operation: "run"}, {Kind: "agent", ID: "browser-agent", Operation: "run"}, {Kind: "agent", ID: "browser-agent", Operation: "discover"}}); e != nil {
+			t.Fatal(e)
+		}
+	}
 	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,status) VALUES('browser-denied',?,'denied','DENIED_ROUTINE_CANARY','{"dsl_version":"1.0","name":"denied","steps":[{"id":"work","type":"agent_run","agent_slug":"ungranted-agent","prompt":"HIDDEN_PROMPT"}]}','fixture','active')`, workspace)
 	spec := `{"apiVersion":"crewship/v1","kind":"Page","metadata":{"slug":"allowed-page"},"spec":{"panels":[{"id":"panel","schema":"status.v1","owner":"crew/browser-crew","producer":"script/status.sh","sla_seconds":30,"span":8,"actions":[{"id":"work","kind":"call","label":"Allowed work","routine":"private-work","params":{"fixed":"FIXED_PRIVATE_CANARY"},"inputs":[{"name":"task","type":"text","required":true}],"confirm":{"title":"Confirm declared work","body":"Run the allowed Page action?"}}]}]}}`
 	for _, page := range []struct{ id, slug, name, spec string }{{"browser-page", "allowed-page", "Allowed Page", spec}, {"browser-denied-page", "denied-page", "DENIED_PAGE_CANARY", strings.Replace(spec, `"routine":"private-work"`, `"routine":"denied"`, 1)}} {

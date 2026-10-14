@@ -22,7 +22,7 @@ func (s *Service) checkJob(ctx context.Context, q pipeline.PageActionQuery, j jo
 	var one int
 	err = q.QueryRowContext(ctx, `SELECT 1 FROM access_attempts a
  JOIN workspace_members wm ON wm.id=a.member_id AND wm.workspace_id=a.workspace_id AND wm.user_id=a.principal_id AND wm.access_revision=a.member_revision AND wm.access_mode='restricted'
- JOIN users principal ON principal.id=a.principal_id AND (principal.suspended_at IS NULL OR principal.suspended_at='')
+ JOIN users principal ON principal.id=a.principal_id AND principal.suspended_at IS NULL
  JOIN workspaces w ON w.id=a.workspace_id AND w.deleted_at IS NULL
  JOIN chats c ON c.id=a.chat_id AND c.workspace_id=a.workspace_id AND c.agent_id=a.agent_id AND c.created_by=a.principal_id AND c.visibility='private' AND c.authority_generation=a.chat_generation AND c.authority_revision=a.chat_revision
  JOIN agents ag ON ag.id=a.agent_id AND ag.workspace_id=a.workspace_id AND ag.deleted_at IS NULL AND ag.restricted_execution_profile=?
@@ -48,6 +48,13 @@ func (s *Service) checkJob(ctx context.Context, q pipeline.PageActionQuery, j jo
 		if right.Kind == "agent" && (right.Operation == "run" || right.Operation == "delegate") {
 			var allowed int
 			if q.QueryRowContext(ctx, `SELECT 1 FROM access_grants g JOIN agents a ON a.id=g.agent_id AND a.workspace_id=? AND a.deleted_at IS NULL WHERE g.member_id=? AND g.resource_kind='agent' AND g.agent_id=? AND g.operation=?`, j.Workspace, j.Member, right.ID, right.Operation).Scan(&allowed) != nil {
+				return ErrDenied
+			}
+			continue
+		}
+		if right.Kind == "routine" && right.Operation == "run" {
+			var allowed int
+			if q.QueryRowContext(ctx, `SELECT 1 FROM access_grants g JOIN pipelines p ON p.id=g.routine_id AND p.workspace_id=? AND p.deleted_at IS NULL AND p.status='active' WHERE g.member_id=? AND g.resource_kind='routine' AND g.routine_id=? AND g.operation='run'`, j.Workspace, j.Member, right.ID).Scan(&allowed) != nil {
 				return ErrDenied
 			}
 			continue

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
 
 /** How often an open restricted chat checks for messages it did not send. */
 export const RESTRICTED_CHAT_POLL_MS = 10_000
@@ -73,7 +74,7 @@ export function useRestrictedChatPoll({ enabled, sessionId, workspaceId, paused,
       inFlight = true
       try {
         const res = await apiFetch(
-          `/api/v1/chats/${encodeURIComponent(sessionId)}/messages?workspace_id=${encodeURIComponent(workspaceId)}`,
+          `/api/v1/chats/${requireApiPathSegment(sessionId)}/messages?workspace_id=${encodeURIComponent(workspaceId)}`,
           { signal: controller.signal },
         )
         if (res.status === 404) { stop(); return }

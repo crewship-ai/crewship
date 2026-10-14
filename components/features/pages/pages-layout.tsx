@@ -1,6 +1,6 @@
 "use client"
 
-import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
+import { usePageCreationAccess, usePageFolderCreationAccess } from "@/hooks/use-page-creation-access"
 
 import { PageApplicationView } from "./page-application"
 
@@ -111,6 +111,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   }, [isMobile])
 
   const canCreatePage = usePageCreationAccess(workspaceId)
+  const canCreateFolder = usePageFolderCreationAccess(workspaceId)
   const [importing, setImporting] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
   const [search, setSearch] = React.useState("")
@@ -411,7 +412,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onToggleCollapse={() => setCollapsed(true)}
               onMovePage={(page) => setFolderDialog({ kind: "move", slug: page.slug })}
               onRemoveFromFolder={(page) => void removeFromFolder(page)}
-              onCreateFolder={() => setFolderDialog({ kind: "create" })}
+              onCreateFolder={canCreateFolder ? () => setFolderDialog({ kind: "create" }) : undefined}
               onEditFolder={(slug) => setFolderDialog({ kind: "edit", slug })}
               onShareFolder={(slug) => setFolderDialog({ kind: "share", slug })}
               onDeleteFolder={(slug) => setFolderDialog({ kind: "delete", slug })}

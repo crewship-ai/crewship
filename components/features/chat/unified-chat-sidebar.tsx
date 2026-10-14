@@ -144,6 +144,7 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
   const sectionState = (name: string) => ({ open: !closed[name], onToggle: () => setClosed((old) => ({ ...old, [name]: !old[name] })) })
 
   function start(agent: ChatTreeAgent) {
+    if (agent.current_user_can_chat === false) return
     setPicking(false)
     setQuery("")
     setExpanded({ [agent.id]: true })
@@ -171,9 +172,9 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
               {isDraft && <div role="status" aria-current="page" className="rounded-md bg-primary/10 px-2 py-2 text-xs">{agent.name} · Draft</div>}
               {props.threadErrors?.[agent.id] && <p role="alert" className="p-2 text-xs">Sessions unavailable. <button type="button" className="underline" onClick={props.onRetryThreads}>Retry</button></p>}
               {visibleSessions.map(({ thread }) => <button type="button" key={thread.id} aria-current={thread.id === activeThreadId ? "page" : undefined} onClick={() => onSelectThread(agent, thread)} className={cn("kit-tap block min-h-8 w-full truncate rounded-md px-2 text-left text-xs transition-colors hover:bg-accent", thread.id === activeThreadId && "bg-primary/10 text-primary")}>{classifyThread(thread) !== "direct" && <span className="mr-1 text-[9px] text-muted-foreground">{KIND_META[classifyThread(thread)].label} ·</span>}{thread.title || "Untitled session"}{!!thread.unread_count && <span className="ml-2">{thread.unread_count}</span>}</button>)}
-              {!q && !sessions.length && known && props.threadsLoaded && !props.threadErrors?.[agent.id] && !isDraft && <p className="px-2 py-2 text-xs text-muted-foreground">{unread || live || scope === "routine" || scope === "issue" ? "No matching sessions." : "Start a conversation with this agent."}</p>}
+              {!q && !sessions.length && known && props.threadsLoaded && !props.threadErrors?.[agent.id] && !isDraft && <p className="px-2 py-2 text-xs text-muted-foreground">{unread || live || scope === "routine" || scope === "issue" ? "No matching sessions." : agent.current_user_can_chat === false ? "Ask your administrator for chat access." : "Start a conversation with this agent."}</p>}
               {shortHistory && <button type="button" className="kit-tap px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground" onClick={() => setFullHistory(agent.id)}>Show all {sessions.length} loaded sessions</button>}
-              <Button variant="ghost" size="sm" aria-label={`New session with ${agent.name}`} onClick={() => start(agent)} className="h-8 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"><Plus className="size-3" />New session</Button>
+              {agent.current_user_can_chat !== false && <Button variant="ghost" size="sm" aria-label={`New session with ${agent.name}`} onClick={() => start(agent)} className="h-8 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"><Plus className="size-3" />New session</Button>}
               {onShowAll && !q && (!known || total > (threadsByAgent[agent.id]?.length ?? 0)) && <Button variant="ghost" size="sm" disabled={loading === agent.id} onClick={async () => { setLoading(agent.id); setLoadError(null); try { await onShowAll(agent.id) } catch { setLoadError(agent.id) } finally { setLoading(null) } }}>{known ? "Load older sessions" : "Load sessions"}</Button>}
               {loadError === agent.id && <p role="alert" className="text-xs">Unable to load older sessions. Try again.</p>}
             </motion.div>}

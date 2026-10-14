@@ -39,7 +39,11 @@ func (h *WorkspaceHandler) memberRestrictedSurfaces(ctx context.Context, user, w
 			return nil, err
 		}
 	}
-	available := map[string]bool{"chat": chat, "routines": routines, "pages": len(pages) > 0, "account_security": true}
+	var issues bool
+	if err = h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM access_grants g JOIN workspace_members wm ON wm.id=g.member_id JOIN projects p ON p.id=g.project_id AND p.workspace_id=wm.workspace_id WHERE wm.user_id=? AND wm.workspace_id=? AND g.resource_kind='project' AND g.operation='list')`, user, workspace).Scan(&issues); err != nil {
+		return nil, err
+	}
+	available := map[string]bool{"issues": issues, "chat": chat, "routines": routines, "pages": len(pages) > 0, "account_security": true}
 	result := []string{}
 	for _, surface := range allowedRestrictedSurfaces() {
 		if available[surface] {

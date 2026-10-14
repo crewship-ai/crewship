@@ -10,12 +10,14 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/license"
 )
@@ -376,8 +378,10 @@ func (h *WorkspaceHandler) ListInvitations(w http.ResponseWriter, r *http.Reques
 }
 
 type createInvitationRequest struct {
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	AccessMode string         `json:"access_mode"`
+	Rights     []access.Right `json:"rights"`
+	Email      string         `json:"email"`
+	Role       string         `json:"role"`
 }
 
 func generateToken() (string, error) {
@@ -426,6 +430,17 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if req.AccessMode == "" {
+		req.AccessMode = "trusted"
+	}
+	if req.AccessMode != "trusted" && req.AccessMode != "restricted" || req.AccessMode == "trusted" && len(req.Rights) > 0 || req.AccessMode == "restricted" && req.Role == "ADMIN" {
+		replyError(w, 400, "Guest invitations require a non-administrator role")
+		return
+	}
+	if req.Rights == nil {
+		req.Rights = []access.Right{}
+	}
+
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Authentication required")
 		return
@@ -451,6 +466,11 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		replyError(w, http.StatusForbidden, "Only workspace owner can invite with ADMIN role")
 		return
 	}
+	if err = access.ValidateRights(r.Context(), tx, workspaceID, req.Rights); err != nil {
+		h.memberAccessError(w, err)
+		return
+	}
+
 	if h.license != nil {
 		if err := h.license.CheckMemberLimit(r.Context(), tx, workspaceID); err != nil {
 			if license.IsLimitError(err) {
@@ -502,10 +522,10 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	}
 
 	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO workspace_invitations (id, workspace_id, email, role, invited_by, token, expires_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO workspace_invitations (id, workspace_id, email, role, invited_by, token, expires_at, created_at,access_mode,rights_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		invID, workspaceID, req.Email, req.Role, user.ID, invitationTokenHash(token),
-		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339))
+		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339), req.AccessMode, marshalInvitationRights(req.Rights))
 	if err != nil {
 		replyInternalError(w, h.logger, "insert invitation", err)
 		return
@@ -619,4 +639,9 @@ func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID
 	}
 	emitPageOwnerTransferJournals(ctx, j, workspaceID, actorID, memberUserID, transferred)
 	return nil
+}
+
+func marshalInvitationRights(rights []access.Right) string {
+	raw, _ := json.Marshal(rights)
+	return string(raw)
 }

@@ -53,9 +53,9 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 		"FinalCoreInboxBulkRequest": object(map[string]any{
 			"ids": array(str()), "state": enum("unread", "read", "resolved"), "resolved_action": str(),
 		}, "ids", "state"),
-		"FinalCoreInvitationRequest": object(map[string]any{"email": str(), "role": str()}, "email"),
+		"FinalCoreInvitationRequest": object(map[string]any{"email": str(), "role": str(), "access_mode": enum("trusted", "restricted"), "rights": memberAccessPolicySchema()["properties"].(map[string]any)["rights"]}, "email"),
 		"FinalCoreProvisionMemberRequest": object(map[string]any{
-			"email": str(), "role": str(), "full_name": str(), "create_only": map[string]any{"type": "boolean", "description": "Reject existing accounts without changing membership or setup tokens."},
+			"email": str(), "role": str(), "full_name": str(), "access_mode": enum("trusted", "restricted"), "rights": memberAccessPolicySchema()["properties"].(map[string]any)["rights"], "create_only": map[string]any{"type": "boolean", "description": "Reject existing accounts without changing membership or setup tokens."},
 		}, "email"),
 		"FinalCoreAgentAvatarRequest": object(map[string]any{"svg": str()}, "svg"),
 	}
@@ -104,6 +104,10 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 	add("POST", "/api/v1/onboarding/complete", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/workspaces/{workspaceId}/invitations", "FinalCoreInvitationRequest")
 	add("POST", "/api/v1/workspaces/{workspaceId}/members/provision", "FinalCoreProvisionMemberRequest")
+	provision := routes["POST /api/v1/workspaces/{workspaceId}/members/provision"]
+	provision.ErrorMedia = []string{"application/json"}
+	provision.ErrorResponse = object(map[string]any{"error": str(), "code": str()}, "error")
+	routes["POST /api/v1/workspaces/{workspaceId}/members/provision"] = provision
 	add("PUT", "/api/v1/agents/{agentId}/avatar", "FinalCoreAgentAvatarRequest")
 	add("PUT", "/api/v1/agents/{agentId}/chats/{chatId}/read", "FinalCoreEmptyRequest")
 	return routes, components

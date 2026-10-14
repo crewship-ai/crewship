@@ -50,6 +50,8 @@ func validRight(r Right) bool {
 		case "discover", "chat", "run", "delegate":
 			return true
 		}
+	case "routine":
+		return r.Operation == "run"
 	case "project":
 		switch r.Operation {
 		case "list", "read", "write", "delete":
@@ -97,6 +99,9 @@ func resourceExists(ctx context.Context, q queryer, workspace string, r Right) e
 	if r.Kind == "agent" {
 		query = `SELECT 1 FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
 	}
+	if r.Kind == "routine" {
+		query = `SELECT 1 FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
+	}
 	var one int
 	err := q.QueryRowContext(ctx, query, r.ID, workspace).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -120,7 +125,7 @@ func check(ctx context.Context, q queryer, user, workspace string, r Right) (Mem
 		return m, ErrDenied
 	}
 	var one int
-	err = q.QueryRowContext(ctx, `SELECT 1 FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&one)
+	err = q.QueryRowContext(ctx, `SELECT 1 FROM access_grants WHERE member_id=? AND resource_kind=? AND COALESCE(agent_id,project_id,routine_id)=? AND operation=?`, m.ID, r.Kind, r.ID, r.Operation).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrDenied
 	}
@@ -154,14 +159,28 @@ func (s Store) Replace(ctx context.Context, actor, user, workspace, mode string,
 	if s.DB == nil {
 		return Membership{}, ErrDenied
 	}
-	if mode != "trusted" && mode != "restricted" || len(rights) > 256 || (mode == "trusted" && len(rights) > 0) {
-		return Membership{}, ErrDenied
-	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Membership{}, err
 	}
 	defer tx.Rollback()
+	m, err := s.ReplaceIn(ctx, tx, actor, user, workspace, mode, expected, rights)
+	if err != nil {
+		return m, err
+	}
+	return m, tx.Commit()
+}
+
+// ReplaceIn applies the same complete policy inside a caller-owned transaction.
+// The caller must commit membership creation, grants and its audit atomically.
+func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace, mode string, expected Membership, rights []Right) (Membership, error) {
+	if tx == nil {
+		return Membership{}, ErrDenied
+	}
+	if mode != "trusted" && mode != "restricted" || len(rights) > 256 || (mode == "trusted" && len(rights) > 0) {
+		return Membership{}, ErrDenied
+	}
+	var err error
 	if err = operator(ctx, tx, actor, workspace); err != nil {
 		return Membership{}, err
 	}
@@ -172,12 +191,16 @@ func (s Store) Replace(ctx context.Context, actor, user, workspace, mode string,
 	if expected.ID != m.ID || expected.Revision != m.Revision {
 		return m, ErrConflict
 	}
-	var role string
-	if err = tx.QueryRowContext(ctx, `SELECT role FROM workspace_members WHERE id=?`, m.ID).Scan(&role); err != nil {
-		return m, err
-	}
-	if mode == "restricted" && (role == "OWNER" || role == "ADMIN") {
-		return m, ErrDenied
+	if mode == "restricted" {
+		// The restriction applies to the account, so protecting only this
+		// membership would let another workspace lock out an administrator.
+		var administrator bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=? AND role IN ('OWNER','ADMIN'))`, user).Scan(&administrator); err != nil {
+			return m, err
+		}
+		if administrator {
+			return m, ErrDenied
+		}
 	}
 	seen := map[Right]bool{}
 	for _, r := range rights {
@@ -196,13 +219,15 @@ func (s Store) Replace(ctx context.Context, actor, user, workspace, mode string,
 		return m, err
 	}
 	for _, r := range rights {
-		var agentID, projectID any
+		var agentID, projectID, routineID any
 		if r.Kind == "agent" {
 			agentID = r.ID
+		} else if r.Kind == "routine" {
+			routineID = r.ID
 		} else {
 			projectID = r.ID
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO access_grants(id,member_id,resource_kind,agent_id,project_id,operation,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)`, randomID(), m.ID, r.Kind, agentID, projectID, r.Operation, actor, tsformat.Format(time.Now())); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO access_grants(id,member_id,resource_kind,agent_id,project_id,routine_id,operation,created_by,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, randomID(), m.ID, r.Kind, agentID, projectID, routineID, r.Operation, actor, tsformat.Format(time.Now())); err != nil {
 			return m, err
 		}
 	}
@@ -210,5 +235,24 @@ func (s Store) Replace(ctx context.Context, actor, user, workspace, mode string,
 	if err != nil {
 		return m, err
 	}
-	return m, tx.Commit()
+	return m, nil
+}
+
+// ValidateRights checks an invitation's future grants against current resources.
+// It confers no authority; redemption revalidates in its membership transaction.
+func ValidateRights(ctx context.Context, q queryer, workspace string, rights []Right) error {
+	if len(rights) > 256 {
+		return ErrDenied
+	}
+	seen := map[Right]bool{}
+	for _, right := range rights {
+		if seen[right] {
+			return ErrDenied
+		}
+		seen[right] = true
+		if err := resourceExists(ctx, q, workspace, right); err != nil {
+			return err
+		}
+	}
+	return nil
 }
