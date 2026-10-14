@@ -70,7 +70,7 @@ access first. A role change cannot silently remove or bypass the restriction.
 | --- | --- | --- |
 | New GUEST workspace role | Changed: restricted access mode, Guest in UI, account-wide | The current global route fence has no mixed-mode bypass. Keeping one account ceiling avoids granting trusted routes through another workspace while per-resource integration is incomplete. Separate workspace-scoped guest accounts remain a future migration. |
 | New resource_grants registry | Changed: extend versioned access_grants | Reuse the shipped membership revision, resource foreign keys and execution revocation fences rather than introduce two authorities. Pages moves last as originally planned. |
-| Per-object sharing and meaningful type levels | Kept as target; only agent operations, routine run and project projection delivered | View/Edit, crew/credential subjects and Share dialogs need separate enforcement and UI work. |
+| Per-object sharing and meaningful type levels | Kept as target; only agent operations, routine run and project projection delivered | View/Edit and crew/credential subjects need separate enforcement and UI work. Routine/project Share dialogs reuse the versioned member policy. |
 | Pages model migration | Deferred, as in original phases | Preserve current Pages ACL, issuer checks and data during the first routine/project slice. |
 
 Guest invitation acceptance, restricted provisioning and direct member policy
@@ -221,3 +221,19 @@ grants are deleted to satisfy the user foreign key.
 
 Policy replacement and deliberate reissue append `member.access_changed` atomically with the policy, recording previous/current rights, issuers, revisions and mode. API and CLI may explicitly reissue live shares; Settings offers reissue for inactive shares.
 Guest Page actions retain the Pages ACL checks and additionally require an explicit `routine:run` grant and the routine’s agent grants. Existing `routine.run` capabilities are not backfilled into routine grants.
+
+## Sharing from a routine or project
+
+Trusted workspace OWNER/ADMIN members can open **Share** on the routine or project
+identity card. The dialog lists trusted role-based members and each Guest's
+explicit shares on that object, including inactive issuer state. Routine sharing
+currently offers Run; project sharing offers independent List and Read. It does
+not introduce routine View/Edit or project Contribute/Manage.
+
+Each Guest save retains their membership ID, access mode and revision, preserves
+all other resources and unsupported future operations, and sends only writable
+policy fields. The backend preserves unchanged issuer provenance. An inactive
+share remains inactive unless explicitly selected for **Reissue as me**. A 409
+blocks further saves until the administrator reloads and reviews current shares;
+there is no automatic retry or account conversion. Existing member-policy API and
+CLI commands remain the transport; object-oriented CLI aliases are still pending.

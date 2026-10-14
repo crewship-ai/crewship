@@ -48,6 +48,47 @@ try {
     })
     pages[actor] = await contexts[actor].newPage()
   }
+  // Object sharing uses the real versioned policy and transactional audit.
+  const projectResponse = await contexts.owner.request.post(`${fixture.server}/api/v1/projects?workspace_id=${fixture.workspace}`, {data:{name:'Client sharing project'}})
+  if(projectResponse.status()!==201) throw new Error(`project fixture create ${projectResponse.status()}`)
+  const sharedProject = await projectResponse.json()
+  const sharePath = `${fixture.server}/api/v1/workspaces/${fixture.workspace}/members/${fixture.members['nav-client-b']}/access?workspace_id=${fixture.workspace}`
+  let shareSnapshot = await (await contexts.owner.request.get(sharePath)).json()
+  const unrelatedRight = {kind:'agent',id:'nav-alex',operation:'discover'}
+  let shareResponse = await contexts.owner.request.put(sharePath,{data:{membership_id:shareSnapshot.membership_id,revision:shareSnapshot.revision,mode:'restricted',rights:[unrelatedRight]}})
+  if(shareResponse.status()!==200) throw new Error('share unrelated grant setup')
+  await open('owner', `/issues?project=${sharedProject.id}`)
+  await pages.owner.getByRole('button',{name:'Share',exact:true}).click()
+  const shareDialog = pages.owner.getByRole('dialog',{name:'Share Client sharing project'})
+  const clientShares = shareDialog.getByRole('group',{name:'nav-client-b',exact:true})
+  await expect(clientShares.getByLabel('List in Issues',{exact:true})).toBeVisible()
+  await clientShares.getByLabel('List in Issues',{exact:true}).check()
+  await clientShares.getByLabel('Read issues',{exact:true}).check()
+  const savedShare = pages.owner.waitForResponse(response=>response.url().includes('/members/nav-client-b/access') && response.request().method()==='PUT')
+  await clientShares.getByRole('button',{name:'Save access for nav-client-b',exact:true}).click()
+  await check('project Share saves through real policy handler',(await savedShare).status()===200)
+  shareSnapshot = await (await contexts.owner.request.get(sharePath)).json()
+  await check('project Share preserves unrelated agent grant and grants both requested operations',
+    shareSnapshot.rights.some(right=>right.kind==='agent' && right.id==='nav-alex' && right.operation==='discover') &&
+    ['list','read'].every(operation=>shareSnapshot.rights.some(right=>right.kind==='project' && right.id===sharedProject.id && right.operation===operation)))
+  // A concurrent administrator update must not be overwritten by the dialog.
+  shareResponse=await contexts.owner.request.put(sharePath,{data:{membership_id:shareSnapshot.membership_id,revision:shareSnapshot.revision,mode:'restricted',rights:shareSnapshot.rights}})
+  if(shareResponse.status()!==200) throw new Error('concurrent share fixture update')
+  await expect(clientShares.getByRole('button',{name:'Save access for nav-client-b',exact:true})).toBeDisabled()
+  await clientShares.getByLabel('Read issues',{exact:true}).uncheck()
+  const staleShare=pages.owner.waitForResponse(response=>response.url().includes('/members/nav-client-b/access') && response.request().method()==='PUT')
+  await clientShares.getByRole('button',{name:'Save access for nav-client-b',exact:true}).click()
+  await check('project Share stale snapshot fails closed',(await staleShare).status()===409)
+  await expect(clientShares.getByRole('alert')).toContainText('Access changed')
+  await shareDialog.getByRole('button',{name:'Reload shares',exact:true}).click()
+  await expect(clientShares.getByLabel('Read issues',{exact:true})).toBeChecked()
+  await shareDialog.getByRole('button',{name:'Close',exact:true}).click()
+  await open('other','/issues')
+  await expect(pages.other.getByRole('button',{name:'Share',exact:true})).toHaveCount(0)
+  await check('Guest project screen never offers administration Share',true)
+  shareSnapshot=await (await contexts.owner.request.get(sharePath)).json()
+  shareResponse=await contexts.owner.request.put(sharePath,{data:{membership_id:shareSnapshot.membership_id,revision:shareSnapshot.revision,mode:'restricted',rights:[]}})
+  if(shareResponse.status()!==200) throw new Error('restore independent navigation fixture grants')
   // A real directory omission must preserve selection and a mounted portal draft.
   // Soft-delete is fixture-only; transient catalog errors are covered separately.
   async function availability(omit) {
