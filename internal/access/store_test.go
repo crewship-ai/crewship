@@ -2,15 +2,21 @@ package access
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
-func fixture(t testing.TB) Store {
+func fixture(t testing.TB, existing ...*sql.DB) Store {
 	t.Helper()
-	db := testutil.MigratedSQLDB(t)
+	var db *sql.DB
+	if len(existing) > 0 {
+		db = existing[0]
+	} else {
+		db = testutil.MigratedSQLDB(t)
+	}
 	statements := []string{
 		`INSERT INTO users(id,email) VALUES ('owner','owner@access.test'),('h1','h1@access.test'),('h2','h2@access.test')`,
 		`INSERT INTO workspaces(id,name,slug) VALUES ('w','Workspace','access-w'),('other','Other','access-other')`,

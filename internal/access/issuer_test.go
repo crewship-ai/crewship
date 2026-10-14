@@ -3,6 +3,10 @@ package access
 import (
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
+	"io"
+	"log/slog"
 	"testing"
 )
 
@@ -16,7 +20,20 @@ func TestGrantIssuerMustRetainLiveWorkspaceAuthority(t *testing.T) {
 		{"restricted elsewhere", `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('mo-other','other','owner','VIEWER','restricted')`, `DELETE FROM workspace_members WHERE id='mo-other'`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := fixture(t)
+			var s Store
+			legacy := tc.name == "restricted elsewhere"
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			if legacy {
+				// This administrator/Guest combination can only predate the
+				// invariant. Upgrade the genuine legacy state before assertions.
+				db := testutil.NewMemDB(t)
+				if err := database.MigrateSkipping(t.Context(), db, logger, "guest_administrator_invariant"); err != nil {
+					t.Fatal(err)
+				}
+				s = fixture(t, db)
+			} else {
+				s = fixture(t)
+			}
 			right := Right{"agent", "a", "run"}
 			before := policy(t, s, "h1", right)
 			handle, _, err := s.Admit(t.Context(), "h1", "w", "a", "c1", "", nil)
@@ -25,6 +42,14 @@ func TestGrantIssuerMustRetainLiveWorkspaceAuthority(t *testing.T) {
 			}
 			if _, err = s.DB.ExecContext(t.Context(), tc.revoke); err != nil {
 				t.Fatal(err)
+			}
+			if legacy {
+				if err := database.Migrate(t.Context(), s.DB, logger); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.DB.Exec(`UPDATE workspace_members SET role='OWNER' WHERE id='mo'`); err == nil {
+					t.Fatal("legacy fixture did not activate invariant")
+				}
 			}
 			if err = s.Check(t.Context(), "h1", "w", right); !errors.Is(err, ErrIssuerDenied) || !errors.Is(err, ErrDenied) {
 				t.Fatalf("grant issued by unavailable administrator remains usable: %v", err)
