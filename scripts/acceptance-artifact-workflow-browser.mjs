@@ -17,6 +17,14 @@ async function check(name, condition, detail = {}) {
 }
 const contexts = {}, pages = {}
 const endpoint = path => `${fixture.server}/api/v1/pages/browser-report${path}?workspace_id=${encodeURIComponent(fixture.workspace)}`
+async function captureBoardDraft(page) {
+  const button = page.getByRole('button', { name: 'Export unsaved draft', exact: true })
+  if (!await button.isVisible()) return false
+  const pending = page.waitForEvent('download', { timeout: 5000 })
+  await button.click()
+  await (await pending).saveAs(join(output, 'owner-board-draft.json'))
+  return true
+}
 try {
   for (const actor of ['owner', 'commenter']) {
     contexts[actor] = await browser.newContext({ viewport: { width: 1280, height: 900 } })
@@ -208,11 +216,23 @@ try {
   await expect(owner.getByText('Board · Saved sequence 3', { exact: true })).toBeVisible()
   await moveSavedDrawings()
   await expect(owner.getByText('Board · Saved sequence 4', { exact: true })).toBeVisible()
+  const dirtyNotice = owner.getByText('Unsaved drawing changes. Save preserves the revisions you started from.', { exact: true })
+  const assertCleanBoard = async name => {
+    const canvas = owner.locator('.excalidraw__canvas.interactive')
+    await expect(canvas).toBeVisible()
+    // Let the remounted real editor deliver initialization callbacks before
+    // asserting that accepted local inverses did not become unsaved drafts.
+    await canvas.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await expect(owner.getByRole('button', { name: 'Save board', exact: true })).toBeDisabled()
+    await expect(dirtyNotice).toHaveCount(0)
+    await check(name, true)
+  }
   for (const sequence of [5, 6]) {
     const committed = owner.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/board/batches'))
     await owner.getByRole('button', { name: 'Undo last saved change', exact: true }).click()
     await check('consecutive saved undo commits with current server revisions', (await committed).status() === 201)
     await expect(owner.getByText(`Board · Saved sequence ${sequence}`, { exact: true })).toBeVisible()
+    await assertCleanBoard(`saved undo at sequence ${sequence} settles without an unsaved drawing`)
   }
   response = await contexts.owner.request.get(boardEndpoint('/board'))
   const afterUndos = await response.json()
@@ -220,15 +240,46 @@ try {
   await check('two saved undos restore real server geometry to the original baseline', JSON.stringify(geometry(afterUndos)) === JSON.stringify(geometry(beforeMoves)))
   const foreignTarget = afterUndos.records.find(record => record.element_id !== savedBoard.records[0].element_id && !record.deleted && record.element)
   if (!foreignTarget) throw new Error('Second saved drawing unavailable for foreign-edit regression')
+  await assertCleanBoard('Board remains clean immediately before the independent foreign edit')
   const foreignX = foreignTarget.element.x + 30
   response = await contexts.owner.request.post(boardEndpoint('/board/batches'), { data: { mutation_id: 'other-tab-change', base_seq: afterUndos.seq, upserts: [{ element: { ...foreignTarget.element, x: foreignX }, expected_rev: foreignTarget.element_rev }] } })
   await check('independent real server edit changes the older undo target', response.status() === 201)
+  response = await contexts.owner.request.get(boardEndpoint('/board'))
+  const foreignScene = await response.json()
   await expect(owner.getByText('Board · Saved sequence 7', { exact: true })).toBeVisible()
-  await owner.getByRole('button', { name: 'Undo last saved change', exact: true }).click()
-  await expect(owner.getByText('This saved change can no longer be undone because connected content changed remotely.', { exact: true })).toBeVisible()
+  const undo = owner.getByRole('button', { name: 'Undo last saved change', exact: true })
+  const conflict = owner.getByText('This saved change can no longer be undone because connected content changed remotely.', { exact: true })
+  const undoStatuses = []
+  const observeUndo = response => {
+    if (response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/board/batches')) undoStatuses.push(response.status())
+  }
+  owner.on('response', observeUndo)
+  let undoOutcome
+  try {
+    // A refresh can leave an unsaved editor draft and disable saved undo.
+    // The clean checkpoints above fence this from own-undo hydration. Preserve
+    // evidence of a refresh-created draft as a UX gap, while checking safety.
+    // Inspect and invoke atomically to avoid a race with that canonical refresh.
+    const invoked = await undo.evaluate(button => {
+      if (button.disabled) return false
+      button.click()
+      return true
+    })
+    if (invoked) {
+      await expect.poll(async () => await conflict.isVisible() || undoStatuses.includes(409)).toBe(true)
+      undoOutcome = undoStatuses.includes(409) ? 'server_conflict' : 'local_conflict'
+    } else {
+      await expect(undo).toBeDisabled()
+      undoOutcome = 'disabled_guard'
+      if (await dirtyNotice.isVisible()) {
+        await captureBoardDraft(owner)
+        await writeFile(join(output, 'owner-board-canonical.json'), JSON.stringify(foreignScene, null, 2))
+      }
+    }
+  } finally { owner.off('response', observeUndo) }
   response = await contexts.owner.request.get(boardEndpoint('/board'))
   const afterRefusal = await response.json()
-  await check('older saved undo refuses a foreign edit and preserves canonical content', afterRefusal.seq === 7 && afterRefusal.records.find(record => record.element_id === foreignTarget.element_id)?.element?.x === foreignX)
+  await check('older saved undo refuses a foreign edit and preserves canonical content', response.status() === 200 && afterRefusal.seq === 7 && afterRefusal.seq === foreignScene.seq && JSON.stringify(afterRefusal.records) === JSON.stringify(foreignScene.records) && afterRefusal.records.find(record => record.element_id === foreignTarget.element_id)?.element?.x === foreignX && undoStatuses.every(status => status === 409), { undo_outcome: undoOutcome, undo_http_statuses: undoStatuses, unsaved_draft_after_foreign_refresh: await dirtyNotice.isVisible() })
   const imageURL = `${boardEndpoint('/board/files')}&base_seq=7&mutation_id=browser-raster-upload`
   const imageBody = Buffer.from(fixture.image_png, 'base64')
   response = await contexts.owner.request.post(imageURL, { data: imageBody, headers: { 'Content-Type': 'image/png' } })
@@ -244,6 +295,9 @@ try {
   console.log(`Artifact workflow browser passed ${results.length} checks; evidence: ${output}`)
 } catch (error) {
   await writeFile(join(output, 'failure.txt'), String(error))
+  await captureBoardDraft(pages.owner).catch(() => {})
+  const canonical = contexts.owner ? await contexts.owner.request.get(`${fixture.server}/api/v1/pages/browser-board/board?workspace_id=${encodeURIComponent(fixture.workspace)}`, { timeout: 5000 }).catch(() => null) : null
+  if (canonical?.ok()) await writeFile(join(output, 'owner-board-canonical.json'), JSON.stringify(await canonical.json(), null, 2))
   for (const [actor, page] of Object.entries(pages)) await page.screenshot({ path: join(output, `${actor}-failure.png`) }).catch(() => {})
   throw error
 } finally { await browser.close() }
