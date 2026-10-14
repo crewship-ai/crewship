@@ -19,6 +19,45 @@ type pageBuildCoordinator struct {
 	slot   chan struct{}
 }
 
+// pageAppsNotEnabledMessage is the refusal clients show; the code beside it
+// (pagebuild.CodeNotEnabled) is what they branch on.
+const pageAppsNotEnabledMessage = "Pages Apps are not enabled. Run `" + pagebuild.EnableCommand + "` on the server host."
+
+// replyBuildWorkerMissing answers for a handler with no build coordinator:
+// either no project storage, or a worker the server refused to wire (an
+// invalid CREWSHIP_PAGE_BUILD_IMAGE, or failed build recovery, both logged at
+// startup). The leading sentence is kept for clients that matched it.
+func (h *PageHandler) replyBuildWorkerMissing(w http.ResponseWriter) {
+	msg := "Page build worker is not configured: see the server log for the Page build configuration error"
+	if h.projectStore == nil {
+		msg = "Page build worker is not configured: Page project storage (CREWSHIP_PAGE_PROJECTS_PATH) is not configured"
+	}
+	replyErrorCode(w, 503, msg, pagebuild.CodeNotEnabled, "")
+}
+
+// replyIfBuildsNotEnabled asks the worker whether a build could start now
+// (for Docker: is a tools image installed) and answers 503 when not. It reports
+// whether the caller may proceed. Workers without the check are always ready.
+func (h *PageHandler) replyIfBuildsNotEnabled(w http.ResponseWriter, r *http.Request) bool {
+	available, ok := h.builds.worker.(pagebuild.Availability)
+	if !ok {
+		return true
+	}
+	err := available.Available(r.Context())
+	if err == nil {
+		return true
+	}
+	msg := pageAppsNotEnabledMessage
+	if errors.Is(err, pagebuild.ErrNotEnabled) {
+		h.logger.Info("Page build refused: Pages Apps are not enabled", "error", err)
+	} else {
+		h.logger.Warn("Page build worker unavailable", "error", err)
+		msg = "Page build worker is unavailable: " + err.Error()
+	}
+	replyErrorCode(w, 503, msg, pagebuild.CodeNotEnabled, "")
+	return false
+}
+
 func (h *PageHandler) SetBuildWorker(worker pagebuild.Builder, store *pagebuild.Store) *PageHandler {
 	h.pageArtifacts = store
 	h.builds = &pageBuildCoordinator{worker: worker, store: store, slot: make(chan struct{}, 1)}
@@ -57,7 +96,12 @@ func (h *PageHandler) BuildProject(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 	if h.builds == nil {
-		replyError(w, 503, "Page build worker is not configured")
+		h.replyBuildWorkerMissing(w)
+		return
+	}
+	// Before reading the request or recording a row: a server that is not
+	// enabled refuses without leaving a failed build behind.
+	if !h.replyIfBuildsNotEnabled(w, r) {
 		return
 	}
 	body, ok := readCapped(w, r, 1024, "Page build request")
@@ -180,12 +224,18 @@ func (h *PageHandler) GetProjectPreview(w http.ResponseWriter, r *http.Request) 
 	}
 	defer release()
 	if h.builds == nil {
-		replyError(w, 503, "Page build worker is not configured")
+		h.replyBuildWorkerMissing(w)
 		return
 	}
 	var revision int64
 	err := h.db.QueryRowContext(r.Context(), `SELECT revision FROM page_project_drafts WHERE page_id=?`, rec.ID).Scan(&revision)
 	if errors.Is(err, sql.ErrNoRows) {
+		// Studio reads this 404 as "an application can be added here", so it
+		// must not be given while builds are not enabled. A Page that already
+		// has a draft keeps reading its builds below either way.
+		if !h.replyIfBuildsNotEnabled(w, r) {
+			return
+		}
 		replyError(w, 404, "page has no project draft")
 		return
 	}

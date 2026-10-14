@@ -152,6 +152,32 @@ func TestPageProjectPublicationAtomicCASRollbackAndReach(t *testing.T) {
 	if w.Code != 404 {
 		t.Fatal("cross workspace application")
 	}
+	// A published application on a server that lost a setting names the one
+	// it lost, with the code a client branches on (#3108).
+	for _, tc := range []struct {
+		strip func() func()
+		code  string
+	}{
+		{func() func() { a := h.pageArtifacts; h.pageArtifacts = nil; return func() { h.pageArtifacts = a } }, pagebuild.CodeNotEnabled},
+		{func() func() {
+			o := h.pageRuntimeOrigin
+			h.pageRuntimeOrigin = ""
+			return func() { h.pageRuntimeOrigin = o }
+		}, pagebuild.CodeRuntimeOriginMissing},
+	} {
+		restore := tc.strip()
+		r = pagesRequest(t, "GET", "/", ws, user, "OWNER", "")
+		r.SetPathValue("slug", "health")
+		w = httptest.NewRecorder()
+		h.PageApplication(w, r)
+		restore()
+		var refusal struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &refusal); err != nil || w.Code != 503 || refusal.Code != tc.code {
+			t.Fatalf("application without configuration: %d %s", w.Code, w.Body.String())
+		}
+	}
 	testApplicationDevelopmentOrigin(t, h, ws, user)
 	// Withdrawal retains the version counter and prevents stale retries reactivating code.
 	withdraw := func(actor, role string, version int64) *httptest.ResponseRecorder {

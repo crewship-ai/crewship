@@ -417,7 +417,9 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// leak the actual API surface to a probing attacker.
 	mainHandler = pathTraversalRejectMiddleware(mainHandler)
 	// V-10: Wrap with security headers middleware
-	mainHandler = securityHeadersMiddleware(mainHandler, cfg.Storage.PageRuntimeOrigin)
+	// The same origin the API serves the runtime on, derived or configured,
+	// or Studio could not frame it.
+	mainHandler = securityHeadersMiddleware(mainHandler, cfg.PageRuntimeOrigin())
 	// Panic recovery is the OUTERMOST wrapper so it also catches panics
 	// inside securityHeadersMiddleware itself (rare but possible if a
 	// future header derivation path-traverses a nil request). Forwards
@@ -710,7 +712,13 @@ func (s *Server) mountAPIRouter(
 	if cfg.Auth.GoogleClientID != "" {
 		opts = append(opts, goapi.WithGoogleOAuth(cfg.Auth.GoogleClientID, cfg.Auth.GoogleSecret, cfg.Auth.NextjsURL))
 	}
-	opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath), goapi.WithPageProjectsPath(cfg.Storage.PageProjectsPath), goapi.WithPageBuildImage(cfg.Storage.PageBuildImage), goapi.WithPageRuntime(cfg.Storage.PageRuntimeOrigin, cfg.PageStudioOrigin(), cfg.Storage.PageRuntimeDevelopmentSameOrigin))
+	// A localhost Studio gets a derived 127.0.0.1 runtime origin (#3108);
+	// say so once, since nothing in the configuration shows it.
+	pageRuntimeOrigin := cfg.PageRuntimeOrigin()
+	if pageRuntimeOrigin != "" && cfg.Storage.PageRuntimeOrigin == "" {
+		logger.Info("pages: runtime origin derived for a localhost Studio; set CREWSHIP_PAGE_RUNTIME_ORIGIN to override", "origin", pageRuntimeOrigin)
+	}
+	opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath), goapi.WithPageProjectsPath(cfg.Storage.PageProjectsPath), goapi.WithPageBuildImage(cfg.Storage.PageBuildImage), goapi.WithPageRuntime(pageRuntimeOrigin, cfg.PageStudioOrigin(), cfg.Storage.PageRuntimeDevelopmentSameOrigin))
 
 	// Dynamic catalog fetchers (devcontainer features + mise runtimes).
 	// They default to cached / embedded data; a background goroutine
