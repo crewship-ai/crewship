@@ -29,6 +29,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Audit chart selections clear when the same bar is selected again (#3094).** The chart and table retain the chosen time-window anchor while activity loads or filters change, so incoming samples no longer shift a relative bucket beneath the selection.
 
 - **A temporarily missing workspace no longer silently switches context or discards a draft (#3083).** Retry preserves the selected workspace and local draft while content and workspace requests remain unavailable; choosing another workspace uses the existing unsaved-change confirmation.
+- **Memory file access remains inside its configured storage root during directory replacement.** Sidecar fallback reads and writes, indexing, restores and proposed-skill reads use pinned directory handles and reject symlinked path components. Local sidecar fallback requires an explicit trusted storage root; ordinary crew launches configure it automatically. Custom sidecars without one retain the host bridge but refuse unsafe local fallback.
 
 - Invitation creation, reissue, withdrawal and acceptance record non-secret workspace activity atomically with their state changes (#3084).
 - **Private workflow dispatch follows current account status.** Queued and recovered work retains its existing resource, role and execution safety checks.
