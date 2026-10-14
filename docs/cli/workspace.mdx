@@ -516,3 +516,9 @@ Resource policy JSON includes read-only `grant_details` with each grant’s
 their provenance. To deliberately reissue a share as the authenticated admin,
 include its exact `{kind,id,operation}` in both `rights` and optional `reissue`.
 Unrelated edits do not reactivate shares from an inactive issuer.
+
+## Object sharing
+
+Use [`share`](./share) and [`unshare`](./unshare) to change an existing Guest's
+individual routine or project operations without replacing unrelated rights.
+The versioned member-policy commands remain available for complete policies.

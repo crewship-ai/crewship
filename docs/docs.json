@@ -321,7 +321,9 @@
               "cli/capacity",
               "cli/crew",
               "cli/project",
-              "cli/workspace"
+              "cli/workspace",
+              "cli/share",
+              "cli/unshare"
             ]
           },
           {
