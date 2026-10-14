@@ -115,8 +115,8 @@ func (h *WorkspaceHandler) PutMemberAccess(w http.ResponseWriter, r *http.Reques
 		"previous_grants": auditGrantDetails(before.GrantDetails), "grants": auditGrantDetails(after.GrantDetails), "reissued_rights": p.Reissue,
 	}}
 	appendTx := journal.AppendTx
-	if h.journal != nil {
-		emitter, ok := h.journal.(journal.TransactionEmitter)
+	if h.policyJournal != nil {
+		emitter, ok := h.policyJournal.(journal.TransactionEmitter)
 		if !ok {
 			h.memberAccessError(w, errors.New("member access journal does not support atomic writes"))
 			return

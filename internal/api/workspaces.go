@@ -118,6 +118,7 @@ type WorkspaceHandler struct {
 	// emitter on its own, matching every other SetJournal in this package.
 	journal           journal.Emitter
 	invitationJournal journal.Emitter
+	policyJournal     journal.Emitter
 	// storageRoot keeps uploaded workspace logos (#3005); the router's
 	// storagePath, set by SetStorageRoot.
 	storageRoot        string
@@ -143,6 +144,7 @@ func (h *WorkspaceHandler) SetHub(hub *wshub.Hub) { h.hub = hub }
 func (h *WorkspaceHandler) SetJournal(j journal.Emitter) {
 	h.journal = j
 	h.invitationJournal = j
+	h.policyJournal = j
 }
 
 // workspaceCounts is the nested `_count` object the settings UI reads
