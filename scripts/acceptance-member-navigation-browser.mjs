@@ -203,6 +203,7 @@ try {
   // The workspace switch leaves the pointer over the rail's hover overlay.
   // Move into content so the captured notice and Crewship mark remain readable.
   await desktop.mouse.move(1100, 700)
+  await expect(desktop.locator('[data-slot="sidebar"][data-hover="true"]')).toHaveCount(0)
   await desktop.screenshot({ path: join(output, 'revoked-navigation.png'), animations: 'disabled' })
 } catch (error) {
   results.push({ name: 'browser harness', status: 'ERROR', error: String(error) })
