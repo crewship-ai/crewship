@@ -30,6 +30,8 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `POST` | [`/api/v1/workspaces/{workspaceId}/logo`](#workspace-logo) | Upload or replace the workspace logo (`ADMIN+`) |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/logo`](#workspace-logo) | Remove the workspace logo (`ADMIN+`) |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/logo`](#workspace-logo) | Fetch the uploaded logo (any signed-in user) |
+| `GET` | [`/api/v1/workspaces/{workspaceId}/page-ownership`](#list-output-ownership) | Paginated Artifact/Board custody metadata and eligible human successors |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/page-ownership/{pageID}`](#transfer-output-ownership) | Explicitly transfer one output to an authorized human |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/members`](#list-members) | All members of the workspace |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/members`](#add-member) | Add an existing user by user ID |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/members/provision`](#provision-member) | Create or add a member by email |
@@ -300,6 +302,131 @@ workspace `OWNER`.
 | `409` | This is the caller's only workspace — refused so the owner is not orphaned |
 
 Drive it from the CLI with [`crewship workspace delete`](/cli/workspace).
+
+---
+
+## Artifact and Board ownership
+
+Artifacts and Boards are human-owned private outputs. Removing a workspace
+member, including through instance administration, or erasing their workspace
+user data never assigns another administrator automatically. While the subject
+owns an output, departure returns `409` with
+`code: "page_ownership_transfer_required"` and a `pages` array of output metadata.
+The array includes `id`, `slug`, `name`, `type`, `owner_user_id`, `owner_name` and
+empty `eligible_successors`; use the listing below to discover current candidates.
+The blocked request preserves subject data, ownership, memberships, content,
+history, grant rows and notices. GDPR retains its existing failed-attempt audit.
+Regular panel Pages continue to use their crew transfer rule when no output
+blocks departure.
+
+### List output ownership
+
+```
+GET /api/v1/workspaces/{workspaceId}/page-ownership
+```
+
+**Auth:** An authenticated human with current active, unrestricted workspace
+`OWNER` or `ADMIN` membership. An agent or delegated run cannot use this endpoint.
+Administrator access follows the existing canonical Page permission rules; the
+listing does not grant access or return HTML, scene JSON, specs or history.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `owner_user_id` | string | All owners | Filter by the output's current human owner |
+| `limit` | integer | `25` | Number of output summaries, from `1` through `100` |
+| `cursor` | string | First page | Opaque `next_cursor` returned for the same workspace and owner filter |
+
+**Response:** `200 OK`, `application/json`, with `Cache-Control: no-store`.
+
+```json
+{
+  "pages": [
+    {
+      "id": "page_report",
+      "slug": "report",
+      "name": "Report",
+      "type": "artifact",
+      "owner_user_id": "user_departing",
+      "owner_name": "Previous Owner",
+      "eligible_successors": [
+        {"user_id": "user_reader", "name": "Next Owner", "email": "reader@example.test"}
+      ]
+    }
+  ],
+  "next_cursor": "opaque-server-cursor"
+}
+```
+
+`type` is `artifact` or `board`. `pages` and `eligible_successors` are always
+arrays, including when empty. `next_cursor` is omitted on the last page. Follow
+it to discover older outputs; one page is not the whole ownership list. The
+server evaluates successor eligibility for at most 100 returned outputs per
+request, scanning current workspace membership for each output. Candidates
+must already have current canonical Page read access; intrinsic administrator,
+live grant and folder access all qualify. The current owner is excluded.
+
+| Status | Condition |
+|---|---|
+| `200` | Metadata page returned, including an empty result |
+| `400` | Invalid limit or malformed/workspace/filter-mismatched cursor |
+| `401` | Missing human authentication |
+| `403` | Caller lacks current active unrestricted workspace administrator membership |
+| `404` | Workspace is unavailable to the authenticated caller |
+| `500` | Database or metadata authorization lookup failed |
+
+### Transfer output ownership
+
+```
+POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID}
+```
+
+**Auth:** An authenticated human with current active, unrestricted workspace
+`OWNER` or `ADMIN` membership. This is an immediate, explicit human decision,
+not a departure plan or an agent capability.
+
+**Request body:** One JSON object, at most 4 KiB; unknown fields, additional
+JSON values and blank IDs are rejected.
+
+```json
+{
+  "expected_owner_user_id": "user_departing",
+  "successor_user_id": "user_reader"
+}
+```
+
+Both fields are required strings. The successor must be another active,
+unrestricted human member of this workspace with existing current read access
+to this exact output. Foreign, suspended, restricted, removed and unauthorized
+users cannot receive custody. Actor role, successor access, live grant issuer
+standing and expected owner are rechecked inside the database writer transaction.
+
+**Response:** `200 OK`, `application/json`, with `Cache-Control: no-store`.
+Returns the refreshed single output summary directly, with the same fields as a
+listing entry and `owner_user_id` naming the chosen successor. It is not wrapped
+in `pages`. Ownership and the administrator Inbox notice commit together; the
+existing journal records the acting human and both owners after commit.
+
+Stored content, revisions and grant rows remain unchanged. A former MEMBER
+owner's grants become inert when their issuer no longer owns or administers the
+Page; the transfer neither adds nor reissues grants. The successor gains owner
+authority. Review current access after transfer rather than assuming former
+grantees retain it. Transfer each output explicitly, then retry departure.
+
+| Status | Condition |
+|---|---|
+| `200` | Explicit ownership transfer committed |
+| `400` | Missing/blank IDs, invalid or oversized JSON, unknown fields or extra values |
+| `401` | Missing human authentication |
+| `403` | Inactive/restricted/non-admin actor or ineligible successor |
+| `404` | Page belongs to another workspace, does not exist, or is an ordinary panel Page; workspace unavailable to caller |
+| `409` | Expected owner changed; `{"error":"...","code":"owner_changed"}`. Refresh and confirm a new choice; do not retry blindly |
+| `500` | Transfer or transactional notice failed; ownership changes roll back |
+
+Other errors use the existing `{"error":"..."}` JSON envelope. A transport
+failure after commit may be followed by an owner conflict on retry: refresh the
+current owner before making another explicit selection.
 
 ---
 

@@ -29,6 +29,23 @@ type pageOwnershipSummary struct {
 	EligibleSuccessors []pageOwnershipSuccessor `json:"eligible_successors"`
 }
 
+// Named wire DTOs keep the metadata-only contract explicit for callers and the
+// audited OpenAPI catalog. Empty next_cursor is omitted at the end of a listing.
+type WorkspacePageOwnershipSummary = pageOwnershipSummary
+type WorkspacePageOwnershipSuccessor = pageOwnershipSuccessor
+type WorkspacePageOwnershipListResponse struct {
+	NextCursor string                          `json:"next_cursor,omitempty"`
+	Pages      []WorkspacePageOwnershipSummary `json:"pages"`
+}
+type WorkspacePageOwnershipTransferRequest struct {
+	ExpectedOwnerUserID string `json:"expected_owner_user_id"`
+	SuccessorUserID     string `json:"successor_user_id"`
+}
+type WorkspacePageOwnershipError struct {
+	Code  string `json:"code,omitempty"`
+	Error string `json:"error"`
+}
+
 func pageOwnershipRows(ctx context.Context, q pageAuthQueryer, ws, owner, page string) ([]pageOwnershipSummary, error) {
 	return pageOwnershipRowsAfter(ctx, q, ws, owner, page, "", -1)
 }
@@ -197,21 +214,14 @@ func (h *WorkspaceHandler) ListPageOwnership(w http.ResponseWriter, r *http.Requ
 		replyInternalError(w, h.logger, "list output custody", err)
 		return
 	}
-	response := map[string]any{"pages": pages}
-	if nextCursor != "" {
-		response["next_cursor"] = nextCursor
-	}
-	writeJSON(w, 200, response)
+	writeJSON(w, 200, WorkspacePageOwnershipListResponse{Pages: pages, NextCursor: nextCursor})
 }
 
 // TransferPageOwnership immediately transfers one output after explicit human
 // selection. A writer fence orders all live authority checks with revocation.
 func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	var body struct {
-		ExpectedOwnerUserID string `json:"expected_owner_user_id"`
-		SuccessorUserID     string `json:"successor_user_id"`
-	}
+	var body WorkspacePageOwnershipTransferRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&body); err != nil || strings.TrimSpace(body.ExpectedOwnerUserID) == "" || strings.TrimSpace(body.SuccessorUserID) == "" {
@@ -254,7 +264,7 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 	}
 	p := pages[0]
 	if p.OwnerUserID != body.ExpectedOwnerUserID {
-		writeJSON(w, 409, map[string]any{"error": "page ownership changed; refresh before transferring", "code": "owner_changed"})
+		writeJSON(w, 409, WorkspacePageOwnershipError{Error: "page ownership changed; refresh before transferring", Code: "owner_changed"})
 		return
 	}
 	p.EligibleSuccessors, err = pageOwnershipCandidates(ctx, ph, ws, p)
@@ -281,7 +291,7 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 	}
 	n, err := result.RowsAffected()
 	if err != nil || n != 1 {
-		writeJSON(w, 409, map[string]any{"error": "page ownership changed; refresh before transferring", "code": "owner_changed"})
+		writeJSON(w, 409, WorkspacePageOwnershipError{Error: "page ownership changed; refresh before transferring", Code: "owner_changed"})
 		return
 	}
 	payload, _ := json.Marshal(map[string]any{"page_id": id, "page_slug": p.Slug, "from_user_id": p.OwnerUserID, "to_user_id": body.SuccessorUserID, "actor_user_id": actor.ID, "reason": "explicit_human_transfer"})
@@ -304,7 +314,8 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 		return
 	}
 	emitPageOwnerTransferJournals(ctx, h.journal, ws, actor.ID, p.OwnerUserID, []pageOwnerTransferResult{{PageID: id, PageSlug: p.Slug, PageName: p.Name, ToUserID: body.SuccessorUserID, Reason: "explicit_human_transfer"}})
-	writeJSON(w, 200, refreshed[0])
+	response := WorkspacePageOwnershipSummary(refreshed[0])
+	writeJSON(w, 200, response)
 }
 
 func replyPageOwnershipConflict(w http.ResponseWriter, prefix string, e *ErrPagesNeedManualTransfer) {
