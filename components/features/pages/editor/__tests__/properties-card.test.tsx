@@ -47,7 +47,7 @@ function mount(page: WirePageDetail = PAGE) {
       calls.push({ method, url })
       if (method === "GET" && url.startsWith("/api/v1/page-folders?")) {
         return jsonResponse(200, {
-          folders: [{ id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", page_count: 1, acl_version: 2 }],
+          folders: [{ id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", page_count: 1, acl_version: 2, can_accept_pages: true, can_rename: true, can_share: true, can_delete: true }],
         })
       }
       return jsonResponse(404, { error: `unrouted ${method} ${url}` })

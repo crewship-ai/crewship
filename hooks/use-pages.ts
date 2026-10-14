@@ -187,6 +187,8 @@ export interface WirePage {
    * 409, so two people cannot both file the same page on the strength of a
    * list neither has refreshed.
    */
+  can_move?: boolean
+  can_remove_from_folder?: boolean
   pages_version?: number | null
   /**
    * The page's own avatar (#2563): a crew icon name and a crew palette key,
@@ -492,6 +494,8 @@ export interface PageView {
    */
   folder: PageFolderRef | null | undefined
   /** The membership version a move must send back, or null when unknown. */
+  canMove?: boolean
+  canRemoveFromFolder?: boolean
   pagesVersion: number | null
   /** The page's avatar (#2563): a crew icon name, or null for the default glyph. */
   icon: string | null
@@ -622,6 +626,8 @@ export function toPageView(raw: WirePage): PageView {
     lastProducedAt: newest,
     updatedAt: toDate(raw.updated_at),
     folder: raw.folder === undefined ? undefined : toPageFolderRef(raw.folder),
+    ...(raw.can_move === undefined ? {} : { canMove: raw.can_move === true }),
+    ...(raw.can_remove_from_folder === undefined ? {} : { canRemoveFromFolder: raw.can_remove_from_folder === true }),
     pagesVersion:
       typeof raw.pages_version === "number" && Number.isFinite(raw.pages_version)
         ? raw.pages_version

@@ -47,8 +47,8 @@ export interface PageRowMenuProps {
   inFolder: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
-  onMove: () => void
-  onRemoveFromFolder: () => void
+  onMove?: () => void
+  onRemoveFromFolder?: () => void
 }
 
 export function PageRowMenu({
@@ -86,11 +86,11 @@ export function PageRowMenu({
         onClick={stop}
         onPointerDown={stop}
       >
-        <DropdownMenuItem onSelect={onMove}>
+        {onMove && <DropdownMenuItem onSelect={onMove}>
           <FolderInput aria-hidden />
           Move to folder…
-        </DropdownMenuItem>
-        {inFolder && (
+        </DropdownMenuItem>}
+        {inFolder && onRemoveFromFolder && (
           <DropdownMenuItem onSelect={onRemoveFromFolder}>
             <FolderMinus aria-hidden />
             Remove from folder
@@ -103,10 +103,10 @@ export function PageRowMenu({
 
 export interface FolderHeaderMenuProps {
   folderName: string
-  onRename: () => void
+  onRename?: () => void
   /** Absent, the item is not drawn — a server without folder permissions. */
   onShare?: () => void
-  onDelete: () => void
+  onDelete?: () => void
 }
 
 export function FolderHeaderMenu({ folderName, onRename, onShare, onDelete }: FolderHeaderMenuProps) {
@@ -130,20 +130,20 @@ export function FolderHeaderMenu({ folderName, onRename, onShare, onDelete }: Fo
         onClick={stop}
         onPointerDown={stop}
       >
-        <DropdownMenuItem onSelect={onRename}>
+        {onRename && <DropdownMenuItem onSelect={onRename}>
           <Pencil aria-hidden />
           Rename or change icon…
-        </DropdownMenuItem>
+        </DropdownMenuItem>}
         {onShare && (
           <DropdownMenuItem onSelect={onShare}>
             <Users aria-hidden />
             Sharing…
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+        {onDelete && <DropdownMenuItem variant="destructive" onSelect={onDelete}>
           <Trash2 aria-hidden />
           Delete folder…
-        </DropdownMenuItem>
+        </DropdownMenuItem>}
       </DropdownMenuContent>
     </DropdownMenu>
   )

@@ -167,15 +167,17 @@ type pageJSON struct {
 // `panels` is read as a number too, because a list that carries a count under
 // the plural noun is the other reasonable shape and reading both costs a line.
 type pageListRowJSON struct {
-	Slug           string         `json:"slug" yaml:"slug"`
-	Name           string         `json:"name" yaml:"name"`
-	Owner          string         `json:"owner" yaml:"owner"`
-	PanelCount     int            `json:"panel_count" yaml:"panel_count"`
-	Panels         json.Number    `json:"panels" yaml:"panels"`
-	PanelStates    map[string]int `json:"panel_states" yaml:"panel_states"`
-	State          string         `json:"state" yaml:"state"`
-	LastProducedAt string         `json:"last_produced_at" yaml:"last_produced_at"`
-	UpdatedAt      string         `json:"updated_at" yaml:"updated_at"`
+	CanMove             bool           `json:"can_move" yaml:"can_move"`
+	CanRemoveFromFolder bool           `json:"can_remove_from_folder" yaml:"can_remove_from_folder"`
+	Slug                string         `json:"slug" yaml:"slug"`
+	Name                string         `json:"name" yaml:"name"`
+	Owner               string         `json:"owner" yaml:"owner"`
+	PanelCount          int            `json:"panel_count" yaml:"panel_count"`
+	Panels              json.Number    `json:"panels" yaml:"panels"`
+	PanelStates         map[string]int `json:"panel_states" yaml:"panel_states"`
+	State               string         `json:"state" yaml:"state"`
+	LastProducedAt      string         `json:"last_produced_at" yaml:"last_produced_at"`
+	UpdatedAt           string         `json:"updated_at" yaml:"updated_at"`
 	// Reach is how the caller reaches the page (owner, role, crew:<slug>,
 	// panel_crew:<slug>, grant) — the server's answer about the caller,
 	// repeated, never derived here from the owner column.

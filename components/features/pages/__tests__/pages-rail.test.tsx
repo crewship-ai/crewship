@@ -478,7 +478,7 @@ describe("PagesRail 'Shared with me' facet", () => {
 import { toPageFolderView, type PageFolderView } from "@/hooks/use-page-folders"
 
 const folder = (over: Partial<Parameters<typeof toPageFolderView>[0]>): PageFolderView =>
-  toPageFolderView({ id: `f-${over.slug}`, owner: "crew/lookout", acl_version: 5, page_count: 0, ...over })!
+  toPageFolderView({ id: `f-${over.slug}`, owner: "crew/lookout", acl_version: 5, page_count: 0, can_rename: true, can_share: true, can_delete: true, can_accept_pages: true, ...over })!
 
 const LONG_NAME = "Finance quarterly reports and audits of the year 2026, including the appendices"
 
@@ -491,10 +491,10 @@ const FOLDERS: PageFolderView[] = [
 const OPS = { slug: "ops", name: "Ops", icon: "rocket", color: "amber" }
 
 const FILED = [
-  toPageView({ id: "f1", slug: "fleet-201", name: "Flotila .201", owner: "crew/lookout", reach: ["crew:lookout"], folder: OPS, pages_version: 3, panels: [] }),
-  toPageView({ id: "f2", slug: "nightly-close", name: "Nightly close", owner: "crew/finance", reach: ["role"], folder: OPS, pages_version: 1, panels: [] }),
-  toPageView({ id: "f3", slug: "q-report", name: "Quarter report", owner: "crew/finance", reach: ["role"], folder: { slug: "finance-2026", name: LONG_NAME, icon: "banknote", color: "emerald" }, pages_version: 2, panels: [] }),
-  toPageView({ id: "f4", slug: "my-notes", name: "My notes", owner: `user/${ME}`, reach: ["owner"], folder: null, pages_version: 0, panels: [] }),
+  toPageView({ id: "f1", slug: "fleet-201", name: "Flotila .201", owner: "crew/lookout", reach: ["crew:lookout"], folder: OPS, can_move: true, can_remove_from_folder: true, pages_version: 3, panels: [] }),
+  toPageView({ id: "f2", slug: "nightly-close", name: "Nightly close", owner: "crew/finance", reach: ["role"], folder: OPS, can_move: true, can_remove_from_folder: true, pages_version: 1, panels: [] }),
+  toPageView({ id: "f3", slug: "q-report", name: "Quarter report", owner: "crew/finance", reach: ["role"], folder: { slug: "finance-2026", name: LONG_NAME, icon: "banknote", color: "emerald" }, can_move: true, can_remove_from_folder: true, pages_version: 2, panels: [] }),
+  toPageView({ id: "f4", slug: "my-notes", name: "My notes", owner: `user/${ME}`, reach: ["owner"], folder: null, can_move: true, can_remove_from_folder: true, pages_version: 0, panels: [] }),
 ]
 
 describe("PagesRail folders", () => {
