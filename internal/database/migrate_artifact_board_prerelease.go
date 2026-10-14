@@ -169,6 +169,7 @@ func preflightArtifactBoardConsolidation(ctx context.Context, db *sql.DB) error 
 }
 
 func artifactBoardFeatureNamespace(name string) bool {
+	name = strings.ToLower(name) // SQLite identifiers are case-insensitive.
 	for _, prefix := range []string{"page_artifact", "page_board", "artifact_", "workspace_artifact", "board_", "idx_artifact", "idx_page_artifact", "idx_board", "idx_page_board", "page_grants_with_"} {
 		if strings.HasPrefix(name, prefix) {
 			return true

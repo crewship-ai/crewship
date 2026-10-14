@@ -305,21 +305,25 @@ func TestArtifactBoardPrereleaseMismatchRefusesAllWrites(t *testing.T) {
 }
 
 func TestArtifactBoardUntrackedSchemaDoesNotCreateLedger(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "impostor.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err = db.Exec(`CREATE TABLE page_boards(page_id TEXT)`); err != nil {
-		t.Fatal(err)
-	}
-	err = Migrate(t.Context(), db.DB, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err == nil || !strings.Contains(err.Error(), "refusing") {
-		t.Fatalf("untracked schema accepted: %v", err)
-	}
-	var ledger int
-	if err = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='_migrations'`).Scan(&ledger); err != nil || ledger != 0 {
-		t.Fatalf("preflight wrote a ledger before refusing: ledger=%d err=%v", ledger, err)
+	for _, table := range []string{"page_boards", "PAGE_BOARDS"} {
+		t.Run(table, func(t *testing.T) {
+			db, err := Open(filepath.Join(t.TempDir(), "impostor.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if _, err = db.Exec(`CREATE TABLE ` + table + `(page_id TEXT)`); err != nil {
+				t.Fatal(err)
+			}
+			err = Migrate(t.Context(), db.DB, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err == nil || !strings.Contains(err.Error(), "refusing") {
+				t.Fatalf("untracked schema accepted: %v", err)
+			}
+			var ledger int
+			if err = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='_migrations'`).Scan(&ledger); err != nil || ledger != 0 {
+				t.Fatalf("preflight wrote a ledger before refusing: ledger=%d err=%v", ledger, err)
+			}
+		})
 	}
 }
 
