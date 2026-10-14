@@ -217,3 +217,15 @@ func TestArtifactAgentCommentsRequireDelegationBeforeReplyAndRetry(t *testing.T)
 		})
 	}
 }
+
+func TestArtifactAgentCommentPolicyRevocationBlocksReplyAndExactRetry(t *testing.T) {
+	h, workspace, user, _, token, thread := agentCommentFixture(t)
+	body := `{"body":"delegated reply","base_version":1,"mutation_id":"policy-reply"}`
+	artifactExpect(t, agentCommentCall(t, h, workspace, token, thread, body, false), 201)
+	artifactExpect(t, artifactPolicyCall(t, h, workspace, user, "OWNER", "PUT", `{"enabled":false,"crew_ids":[],"base_version":1}`), 200)
+	artifactExpect(t, agentCommentCall(t, h, workspace, token, thread, body, false), 403)
+	artifactExpect(t, agentCommentCall(t, h, workspace, token, thread, `{"body":"new reply","base_version":2,"mutation_id":"new-policy-reply"}`, false), 403)
+	// The administrative publication ceiling does not withdraw a separate read
+	// grant: authorized source/discussion reads follow the existing read contract.
+	artifactExpect(t, agentCommentCall(t, h, workspace, token, thread, "", true), 200)
+}

@@ -56,7 +56,7 @@ type artifactThreadWire struct {
 
 func (h *PageHandler) artifactCommentsPage(w http.ResponseWriter, r *http.Request, write bool) (*pageRecord, bool) {
 	if a, ok := r.Context().Value(artifactCommentAuthorityKey{}).(*artifactRunAuthority); ok {
-		return h.artifactAgentCommentsPage(w, r, a)
+		return h.artifactAgentCommentsPage(w, r, a, write)
 	}
 	if agent, _ := pageGrantCallerIsAgent(r); agent {
 		replyError(w, 401, "human authentication required")

@@ -95,7 +95,10 @@ same scoped sidecar HTTP route for larger HTML or image data.
 Read `GET /artifacts/<slug>/threads?limit=5` with the current run's sidecar
 identity. The response is paginated: follow `next_cursor` as `cursor` when more
 threads are needed. An explicit agent `comment` or `write` grant, a live verified
-human run and that human's current comment permission are all required.
+human run, explicit current Page/run delegation and that human's current
+comment permission are all required. A chat message alone never delegates Page
+work. Request-backed delegation also requires the initiator's current editor
+authority, so a commenter cannot dispatch a stronger agent by opening a chat.
 
 Reply to an open thread with
 `POST /artifacts/<slug>/threads/<thread_id>/comments`, sending `body`, the

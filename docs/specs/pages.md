@@ -1569,7 +1569,9 @@ run credential, a live verified human principal, explicit unexpired and unrevoke
 Page/run delegation, that human's current comment permission and the agent's own
 live `comment` or `write` Page grant. A chat message alone is not delegation.
 Request-backed delegations additionally retain the initiator's current editor
-authority. A crew grant
+authority. Replies and their exact retries also obey the workspace/crew
+artifact publication policy; that ceiling does not withdraw separately granted
+source/discussion read access. A crew grant
 never substitutes for it. Reads paginate with `limit` (default 5, maximum 10),
 optional positive `revision`, and the returned `next_cursor` as `cursor`.
 
