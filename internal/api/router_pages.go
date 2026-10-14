@@ -50,6 +50,15 @@ import (
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 )
 
+// validateExplicitPageBuildImage accepts an unset image (resolve by label) or
+// a pinned one; a mutable tag leaves the worker unwired, as before.
+func validateExplicitPageBuildImage(image string) error {
+	if image == "" {
+		return nil
+	}
+	return pagebuild.ValidateImage(image)
+}
+
 func (r *Router) registerPageRoutes() {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
 	p.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
@@ -61,11 +70,16 @@ func (r *Router) registerPageRoutes() {
 		p.SetProjectStore(&pages.ProjectStore{Directory: r.pageProjectsPath})
 	}
 
-	if r.pageBuildImage != "" && r.pageProjectsPath != "" {
-		if err := pagebuild.ValidateImage(r.pageBuildImage); err != nil {
+	// The worker is always wired with project storage. Whether it may build is
+	// decided per request: an explicit CREWSHIP_PAGE_BUILD_IMAGE, or else the
+	// image `crewship page enable` labelled for this release. Without either,
+	// only `docker image ls` ever runs — no Pages container (#3108).
+	if r.pageProjectsPath != "" {
+		if err := validateExplicitPageBuildImage(r.pageBuildImage); err != nil {
 			r.logger.Error("Page build configuration", "error", err)
 		} else {
-			p.SetBuildWorker(&pagebuild.DockerBuilder{Image: r.pageBuildImage}, &pagebuild.Store{Directory: filepath.Join(r.pageProjectsPath, "artifacts")})
+			builder := &pagebuild.DockerBuilder{Resolver: &pagebuild.ImageResolver{Explicit: r.pageBuildImage, Lookup: r.pageBuildImageLookup}}
+			p.SetBuildWorker(builder, &pagebuild.Store{Directory: filepath.Join(r.pageProjectsPath, "artifacts")})
 			if err := p.recoverPageBuilds(context.Background()); err != nil {
 				r.logger.Error("recover Page builds", "error", err)
 				p.builds = nil
@@ -167,8 +181,10 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/pages/{slug}/project/history/{revision}/source", authed(wsCtx(http.HandlerFunc(p.GetProjectRevisionSource))))
 	// openapi: responses 200,400,401,403,404,409,413,422,500,503,507
 	r.authedMut("PUT", "/api/v1/pages/{slug}/project", roleSelf, p.PutProject)
+	// 503 carries code page_apps_not_enabled when no tools image is installed (#3108).
 	// openapi: responses 202,400,401,403,404,409,413,429,500,503,507
 	r.authedMut("POST", "/api/v1/pages/{slug}/project/build", roleSelf, p.BuildProject)
+	// 503 page_apps_not_enabled replaces the "no draft" 404 while not enabled (#3108).
 	// openapi: responses 200,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/project/preview", authed(wsCtx(http.HandlerFunc(p.GetProjectPreview))))
 	// openapi: responses 200,400,401,403,404,500,503
@@ -182,6 +198,8 @@ func (r *Router) registerPageRoutes() {
 	// openapi: responses 200,400,401,403,404,409,413,422,500,503,507
 	r.authedMut("POST", "/api/v1/pages/{slug}/project/restore", roleSelf, p.RestoreProject)
 
+	// Check, publish and application 503s carry code page_apps_not_enabled
+	// (no project storage) or page_runtime_origin_missing (#3108).
 	// openapi: responses 200,400,401,403,404,409,413,422,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/project/check", roleSelf, p.CheckProject)
 	// openapi: responses 200,400,401,403,404,409,413,422,500,503,507

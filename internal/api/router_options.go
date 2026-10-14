@@ -445,6 +445,14 @@ func WithPageBuildImage(image string) RouterOption {
 	return func(r *Router) { r.pageBuildImage = image }
 }
 
+// WithPageBuildImageLookup replaces how the server finds the image labelled by
+// `crewship page enable` when no explicit image is set. Tests use it so the
+// result does not depend on the images installed on the machine running them;
+// nil keeps the `docker image ls` lookup.
+func WithPageBuildImageLookup(lookup func(context.Context) ([]string, error)) RouterOption {
+	return func(r *Router) { r.pageBuildImageLookup = lookup }
+}
+
 // WithPageRuntime configures the separate-site bootstrap and its allowed Studio parent.
 func WithPageRuntime(runtime, studio string, developmentSameOrigin ...bool) RouterOption {
 	return func(r *Router) {
