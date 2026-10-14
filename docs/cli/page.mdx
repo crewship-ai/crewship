@@ -94,6 +94,8 @@ exception in the other direction: it prints YAML unless you ask for
 | `project panel-history <slug> <panel> --publication <v>` | Read a panel's payload ring through the published application |
 | `project fsck <slug>` | Verify a Page's source, checkpoint and artifact integrity |
 | `project compact` | Reclaim Page storage across the workspace |
+| `enable` | Build the Pages Apps compiler image on this Docker host (turns Pages Apps on) |
+| `disable --yes` | Remove every Pages Apps compiler image from this Docker host (turns Pages Apps off) |
 
 ---
 
@@ -1303,9 +1305,92 @@ unknown `--level`, both of which are checked there and not here.
 
 The opt-in Pages application profile uses React, TypeScript and Vite. Projects
 are source drafts; saving/importing one does not execute or publish its code.
-The operator must configure protected source storage, a pinned build image and
-a separate-site runtime origin. The current profile accepts its fixed dependency
+The operator turns Pages Apps on with [`crewship page enable`](#crewship-page-enable)
+on the Docker host, and configures protected source storage
+(`CREWSHIP_PAGE_PROJECTS_PATH`) and, unless Studio is served on
+`http://localhost`, a separate-site runtime origin
+(`CREWSHIP_PAGE_RUNTIME_ORIGIN`). While Pages Apps are not enabled, builds,
+reviews and publications answer `503` with `"code": "page_apps_not_enabled"`.
+The current profile accepts its fixed dependency
 set and lockfile, with custom React and CSS. It does not install arbitrary packages.
+
+### `crewship page enable`
+
+```bash
+crewship page enable
+image=$(crewship page enable)          # stdout is only the image ID
+crewship page enable --config /etc/crewship/config.yaml
+```
+
+Builds the isolated compiler image Pages Apps use on the **local Docker
+daemon**, labelled `ai.crewship.pages.profile=<profile fingerprint>` for this
+crewship version. The server resolves its build image by that label, so the
+image's existence *is* the opt-in: a running server picks it up within about
+10 seconds, with no restart and no configuration change. The command does not
+talk to the Crewship API and writes no configuration — Docker access is all it
+needs.
+
+1. Checks that the `docker` CLI exists and its daemon answers; otherwise it
+   exits `1` and writes nothing.
+2. If an image for this version already exists, prints `Pages Apps already
+   enabled` to stderr and its ID to stdout, and builds nothing.
+3. Otherwise writes the build context embedded in this binary to a temporary
+   directory, runs `docker build --label ai.crewship.pages.profile=<fingerprint>
+   --tag crewship-pages-build:<fingerprint prefix> --iidfile …` (build output
+   streams to stderr), checks the result is an
+   immutable `sha256:` ID carrying the label, and removes the temporary
+   directory. This build needs network access once — the pinned base image and
+   npm packages; Page builds themselves always run with `--network=none`.
+   The server finds the image by its label, not the tag; the tag keeps the
+   image from being "dangling", which `docker image prune` would delete and
+   which the containerd image store hides from `docker image ls`.
+4. Lists older Pages compiler images (other versions), keeps them for
+   rollback and prints the `docker image rm` command that removes them.
+5. Reports what is still missing for Pages Apps to work end to end: project
+   storage (`CREWSHIP_PAGE_PROJECTS_PATH`, an absolute directory outside
+   `storage.base_path`) and the effective runtime origin (or that
+   `CREWSHIP_PAGE_RUNTIME_ORIGIN` must be set to a separate site). These are
+   read from the environment, plus `--config` when given; they are advice and do
+   not change the exit code.
+
+stdout carries **only** the image ID followed by a newline; everything else
+goes to stderr. Exit `0` when the image exists afterwards (built or already
+there), `1` when Docker is unreachable or the build fails.
+
+**Docker Compose deployments.** The bundled `docker-socket-proxy` runs with
+`BUILD=0`, so a build through it is refused (`403 Forbidden`). The command
+recognises that and tells you to run `crewship page enable` on the Docker host
+itself, with the **same crewship version** as the server — the label is the
+version's profile fingerprint, so an image built by another version is ignored.
+For an offline host, `docker save` the image on a machine with the same version
+and `docker load` it on the target; no further step is needed.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--config <file>` | | Server configuration file (YAML), as passed to `crewship start --config`, used only to report project storage and the runtime origin. |
+
+### `crewship page disable`
+
+```bash
+crewship page disable --yes
+```
+
+Removes every local image labelled `ai.crewship.pages.profile` — for this and
+every other crewship version — with `docker image rm`. Prints each removed ID
+on stdout and the explanation on stderr. Within about 10 seconds the server
+stops finding a compiler and refuses new Page application builds with
+`page_apps_not_enabled`; **published applications keep serving**, because they
+are static artifacts that need no compiler. Turn Pages Apps back on with
+`crewship page enable`.
+
+Asks for confirmation unless `--yes` is given. With no Pages images it says
+Pages Apps are not enabled and exits `0` without asking. An image used by a
+running build cannot be removed: it is reported, the others are still removed,
+and the command exits `1` — retry when the build finishes.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--yes`, `-y` | | Skip the interactive confirmation prompt. |
 
 Every `page project` subcommand prints the server's document — JSON unless
 `--format yaml` or `ndjson` asks otherwise; there is no table form — except
