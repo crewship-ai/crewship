@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Pages Apps are enabled with one command (#3108).** `crewship page enable` builds the Page compiler image from the binary itself (no source checkout) and labels it for this release; the server finds it within seconds, without a restart or a configuration edit, and `crewship page disable` turns Pages Apps off again. `CREWSHIP_PAGE_BUILD_IMAGE` becomes an optional override that still wins when set. A local installation with Studio on `http://localhost:<port>` no longer needs `CREWSHIP_PAGE_RUNTIME_ORIGIN`: the server derives `http://127.0.0.1:<server port>`, a separate browser site. After upgrading the binary, run `crewship page enable` again; older images are kept for rollback. Air-gapped hosts move the image with `docker save`/`docker load`, and Docker Compose deployments run `enable` on the host. `./dev.sh start` enables Pages Apps when Docker is available (`CREWSHIP_DEV_PAGES=0` skips it). See [Operate Pages applications](docs/guides/pages-apps-operations.mdx).
+
 - **Audit chart selections clear when the same bar is selected again (#3094).** The chart and table retain the chosen time-window anchor while activity loads or filters change, so incoming samples no longer shift a relative bucket beneath the selection.
 
 - **A temporarily missing workspace no longer silently switches context or discards a draft (#3083).** Retry preserves the selected workspace and local draft while content and workspace requests remain unavailable; choosing another workspace uses the existing unsaved-change confirmation.
