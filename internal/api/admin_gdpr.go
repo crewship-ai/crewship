@@ -517,7 +517,13 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 			// middleware's role snapshot may have changed during body upload.
 			ph := NewPageHandler(h.db, nil, h.logger)
 			role, roleErr := ph.liveContentHumanRole(r.Context(), wsID, actorID)
-			for key, value := range pageOwnershipConflictPayload("cannot erase this user: ", needsManual, roleErr == nil && canRole(role, "manage")) {
+			detailed := roleErr == nil && canRole(role, "manage")
+			if !detailed && !isInstanceAdmin(r, h.db) {
+				response["error"] = "active trusted administrator required"
+				writeJSON(w, http.StatusForbidden, response)
+				return
+			}
+			for key, value := range pageOwnershipConflictPayload("cannot erase this user: ", needsManual, detailed) {
 				response[key] = value
 			}
 		}
