@@ -3,8 +3,12 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/access"
@@ -146,6 +150,25 @@ func TestMemberAccessPolicyAuthenticatedRoutes(t *testing.T) {
 	} {
 		request(owner, "PUT", path, bad, 400)
 	}
+
+	// A routine grant alone does not grant its agent dependency. The own endpoint
+	// must explain this even though the saved routine right itself is valid.
+	definition := `{"dsl_version":"1.0","name":"Client routine","steps":[{"id":"first","type":"agent_run","agent_slug":"policy-agent","prompt":"Hello"}]}`
+	sum := sha256.Sum256([]byte(definition))
+	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('policy-routine',?,'client-routine','Client routine',?,?,'policy-crew','active')`, workspace, definition, hex.EncodeToString(sum[:]))
+	p.Rights = []access.Right{{Kind: "routine", ID: "policy-routine", Operation: "run"}}
+	body, _ = json.Marshal(p)
+	saved := request(owner, "PUT", path, string(body), 200)
+	if err = json.Unmarshal(saved.Body.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	own = request("policy-user", "GET", ownPath, "", 200)
+	if err = json.Unmarshal(own.Body.Bytes(), &ownEffective); err != nil {
+		t.Fatal(err)
+	}
+	if len(ownEffective.Decisions) != 1 || ownEffective.Decisions[0].State != "denied" || !strings.Contains(ownEffective.Decisions[0].Reason, "agent run/delegate grants") {
+		t.Fatalf("routine without agent grant not explained: %s", own.Body.String())
+	}
 	p.Rights = []access.Right{}
 	body, _ = json.Marshal(p)
 	request(owner, "PUT", path, string(body), 200)
@@ -161,5 +184,33 @@ func TestMemberAccessPolicyAuthenticatedRoutes(t *testing.T) {
 	// The handler uses the path only to reject, never to scope a DB query.
 	for _, method := range []string{"GET", "PUT"} {
 		request(owner, method, "/api/v1/workspaces/foreign/members/policy-member/access?workspace_id="+workspace, string(body), 404)
+	}
+}
+
+// Deterministically reproduce deletion after authorization but before the
+// separate name read. Soft deletion does not change the membership revision.
+func TestEffectiveAccessNameDeletionAfterCheck(t *testing.T) {
+	db := setupTestDB(t)
+	owner := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, owner)
+	execOrFatal(t, db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('name-crew',?,'Crew','name-crew')`, ws)
+	seedAgentRow(t, db, "name-agent", ws, "name-crew", "Before deletion", "name-agent", "AGENT")
+	right := access.Right{Kind: "agent", ID: "name-agent", Operation: "chat"}
+	store := access.Store{DB: db}
+	if err := store.Check(t.Context(), owner, ws, right); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.Membership(t.Context(), owner, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execOrFatal(t, db, `UPDATE agents SET deleted_at='deleted' WHERE id='name-agent'`)
+	name, err := effectiveAccessResourceName(t.Context(), db, ws, right)
+	if !errors.Is(err, access.ErrDenied) || name != "" {
+		t.Fatalf("name deletion should become denied row: %q %v", name, err)
+	}
+	after, err := store.Membership(t.Context(), owner, ws)
+	if err != nil || before != after {
+		t.Fatalf("test no longer reproduces race without epoch change: %+v %+v %v", before, after, err)
 	}
 }

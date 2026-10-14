@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Your access remains readable during a temporary refresh failure.** Settings distinguishes agents, routines and projects, labels access states, and keeps the last successful explanation with a refresh notice. A concurrently deleted resource becomes a denied row instead of failing the entire explanation.
+
 - **Guests can understand their own access.** Settings shows saved resource grants and execution prerequisites. Members can also inspect their own explanation through `workspace access me` and the workspace `access/me` API without administrator access.
 
 - ⚠️ **Behaviour change: resource shares follow current administrator authority.** Guest discovery, Issues, chat and routine execution stop using a grant when its issuer leaves, is demoted or suspended, or becomes a Guest. Stored shares are preserved; restoring the issuer does not revive previously admitted runs.
