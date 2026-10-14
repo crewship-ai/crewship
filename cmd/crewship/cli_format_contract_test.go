@@ -188,6 +188,10 @@ var formatContractExempt = map[string]string{
 	// Local-filesystem path lookups: stdout is one path, for `cd $(…)`.
 	// Wrapping a single string in a JSON object would break the only use.
 	"crewship prompt path": "prints one filesystem path for command substitution; a JSON envelope would break `cd $(crewship prompt path x)`",
+	// Pages Apps image IDs, same reasoning: stdout is bare IDs, every other
+	// line goes to stderr (#3108).
+	"crewship page enable":  "prints only the compiler image ID for `image=$(crewship page enable)`; progress and hints go to stderr",
+	"crewship page disable": "prints only the removed image IDs, one per line; the explanation goes to stderr",
 
 	// DOWNLOADS. stdout is the file's bytes, streamed with io.Copy, and the
 	// point of the command is to be redirected or piped. `-f json` cannot
