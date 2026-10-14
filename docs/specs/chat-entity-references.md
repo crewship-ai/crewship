@@ -160,6 +160,11 @@ same workspace middleware as chat history. Supply the workspace in
 
 Only ordinary trusted sessions are supported. Restricted sessions receive an
 opaque `404`; these routes are absent from the restricted route allowlist.
+This includes restricted Guest viewers even when ordinary issue access permits
+them to read a shared project. The E1 frontend must project this unsupported
+card capability as a generic "Unavailable" state, without exposing an object
+ID, title, kind, action or count. It must not infer card visibility from ordinary
+issue access, fetch through another identity, or display cached protected data.
 The list requires current chat access, a live workspace and a live chat agent.
 Each returned issue must belong to the selected workspace, matching the current
 ordinary issue GET read predicate. A readable chat alone does not make a

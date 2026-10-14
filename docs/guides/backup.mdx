@@ -270,7 +270,7 @@ instance bundle, and each download is recorded in the instance audit log.
 
 ## Restore
 
-Restoring workspace memberships invalidates previously captured web execution approvals, including those used by recurring issue templates. At their next scheduled firing, affected templates pause and notify an eligible workspace member. Review each definition and save/re-enable it with a full authenticated session to admit future work; restoring old data does not restore revoked execution authority.
+Restoring workspace memberships invalidates previously captured web execution approvals, including those used by recurring issue templates. At their next scheduled firing, affected templates pause and notify an eligible workspace member. Review each definition and save/re-enable it with a fresh full authenticated session to admit future work; a scoped token cannot reauthorize it. Restoring old data does not restore revoked execution authority. For an upgrade accompanying recovery, follow the [execution-authority rollout](../../RELEASING.md#execution-authority-rollout-3068): audit the exact target database before upgrading and recycle retained agent containers only in a coordinated idle window afterward.
 
 ```bash
 crewship backup restore ~/.crewship/backups/crewship-workspace-acme-…tar.zst
