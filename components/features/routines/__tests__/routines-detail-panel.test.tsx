@@ -33,6 +33,11 @@ vi.mock("@/hooks/use-realtime", () => ({
   useRealtimeEvent: () => {},
 }))
 
+vi.mock("@/hooks/use-access-mode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/use-access-mode")>()),
+  useAccessMode: () => "trusted",
+}))
+
 vi.mock("@/hooks/use-abilities", () => ({
   useAbilities: () => ({ abilities: {}, ...h.access, loading: false }),
 }))
