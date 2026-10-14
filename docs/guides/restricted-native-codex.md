@@ -81,3 +81,5 @@ remains a separate infrastructure action through the supported Ansible process.
 Adding this producer does not establish that an approved image or qualified host
 exists. Publication must be dispatched separately by an authorized operator,
 and the released-image acceptance receipt is still required for #2952.
+
+`Native Worker Candidate Check` builds affected pull-request recipes and scans the final image without registry publication, signing permissions, secrets or host policy installation. Its receipt binds the tested PR head to the local image identity. Successful PR verification supplements, and does not replace, the main-only publisher and released-image live acceptance.
