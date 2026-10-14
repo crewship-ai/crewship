@@ -1,6 +1,9 @@
 package api
 
 import (
+	"database/sql"
+	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -93,5 +96,23 @@ func TestGuestAdministratorDatabaseInvariant(t *testing.T) {
 	// Moving an administrative membership to a restricted identity is guarded too.
 	if _, err := db.Exec(`UPDATE workspace_members SET user_id='invariant-user' WHERE user_id=? AND workspace_id=?`, owner, ws); err == nil {
 		t.Fatal("user reassignment bypassed invariant")
+	}
+}
+
+// Build a pre-invariant fixture and apply the genuine migration after seeding
+// legacy conflicts. Tests never disable constraints on an upgraded database.
+func setupGuestAdministratorUpgradeDB(t *testing.T) (*sql.DB, func()) {
+	t.Helper()
+	resetCapabilityCache()
+	db := testutil.NewMemDB(t)
+	drainBackgroundWork(t)
+	if err := database.MigrateSkipping(t.Context(), db, newTestLogger(), "guest_administrator_invariant"); err != nil {
+		t.Fatal(err)
+	}
+	return db, func() {
+		t.Helper()
+		if err := database.Migrate(t.Context(), db, newTestLogger()); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
