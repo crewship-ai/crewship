@@ -88,3 +88,33 @@ func TestPageStudioOriginDoesNotChangeInternalTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPageRuntimeOriginDerivation(t *testing.T) {
+	for _, tc := range []struct {
+		name, studio, host, explicit string
+		sameOrigin                   bool
+		want                         string
+	}{
+		{name: "localhost studio derives loopback IP", studio: "http://localhost:8080", host: "0.0.0.0", want: "http://127.0.0.1:8080"},
+		{name: "dev studio on another port", studio: "http://localhost:3011", host: "", want: "http://127.0.0.1:8080"},
+		{name: "loopback listener", studio: "http://localhost:8080", host: "127.0.0.1", want: "http://127.0.0.1:8080"},
+		{name: "explicit wins", studio: "http://localhost:8080", host: "0.0.0.0", explicit: "https://apps.example.net", want: "https://apps.example.net"},
+		{name: "same-origin mode stays explicit", studio: "http://localhost:8080", host: "0.0.0.0", sameOrigin: true, want: ""},
+		{name: "studio on 127.0.0.1 is the same site", studio: "http://127.0.0.1:8080", host: "0.0.0.0", want: ""},
+		{name: "https studio", studio: "https://localhost:8080", host: "0.0.0.0", want: ""},
+		{name: "custom domain", studio: "https://studio.example.com", host: "0.0.0.0", want: ""},
+		{name: "LAN-only listener", studio: "http://localhost:8080", host: "192.168.1.10", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Default()
+			c.Auth.NextjsURL = tc.studio
+			c.Server.Host = tc.host
+			c.Server.Port = 8080
+			c.Storage.PageRuntimeOrigin = tc.explicit
+			c.Storage.PageRuntimeDevelopmentSameOrigin = tc.sameOrigin
+			if got := c.PageRuntimeOrigin(); got != tc.want {
+				t.Fatalf("PageRuntimeOrigin() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

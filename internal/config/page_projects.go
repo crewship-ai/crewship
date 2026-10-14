@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,6 +81,33 @@ func validatePageRuntime(runtime, studio string, development ...bool) error {
 		return nil
 	}
 	return pagebuild.ValidateRuntimeOriginForDevelopment(runtime, studio, len(development) > 0 && development[0])
+}
+
+// PageRuntimeOrigin is the configured runtime origin. When none is configured
+// and Studio is served on http://localhost, it derives http://127.0.0.1 on the
+// server's own port: a literal loopback IP is a different browser site from
+// localhost, so this is real site isolation, not the same-origin exception
+// (#3108). Remote, HTTPS or custom-domain installations still configure it.
+func (c *Config) PageRuntimeOrigin() string {
+	if c.Storage.PageRuntimeOrigin != "" || c.Storage.PageRuntimeDevelopmentSameOrigin {
+		return c.Storage.PageRuntimeOrigin
+	}
+	studio := c.PageStudioOrigin()
+	u, err := url.Parse(studio)
+	if err != nil || u.Scheme != "http" || !strings.EqualFold(u.Hostname(), "localhost") {
+		return ""
+	}
+	// The derived origin is served by this listener, so it must accept 127.0.0.1.
+	switch c.Server.Host {
+	case "", "0.0.0.0", "::", "127.0.0.1", "localhost":
+	default:
+		return ""
+	}
+	origin := fmt.Sprintf("http://127.0.0.1:%d", c.Server.Port)
+	if pagebuild.ValidateRuntimeOrigin(origin, studio) != nil {
+		return ""
+	}
+	return origin
 }
 
 // PageStudioOrigin is the browser parent allowed to initialize a Page iframe.
