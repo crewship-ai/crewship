@@ -215,7 +215,9 @@ func TestBoardCommentChangesReceiptBudgetAndLiveRetry(t *testing.T) {
 	id := th.Comments[0].ID
 	edit := map[string]any{"base_version": 1, "body": "saved", "mutation_id": "saved-edit"}
 	artifactExpect(t, boardCommentChangeCall(t, h, ws, user, "edit", th.ID, id, "", edit), 200)
-	execOrFatal(t, h.db, `WITH RECURSIVE n(v) AS(SELECT 1 UNION ALL SELECT v+1 FROM n WHERE v<9998) INSERT INTO page_board_comment_mutations(id,page_id,thread_id,comment_id,mutation_id,request_digest,actor_user_id,operation,result_version,created_at) SELECT 'budget-'||v,?,?,?,'budget-'||v,'digest',?,'react',2,? FROM n`, page, th.ID, id, user, tsformat.Format(h.clock.Now().Add(-2*time.Hour)))
+	// Fill 10,000 transient receipts: the edit plus 9,999 reactions. The
+	// preserved thread-creation receipt is outside this quota.
+	execOrFatal(t, h.db, `WITH RECURSIVE n(v) AS(SELECT 1 UNION ALL SELECT v+1 FROM n WHERE v<9999) INSERT INTO page_board_comment_mutations(id,page_id,thread_id,comment_id,mutation_id,request_digest,actor_user_id,operation,result_version,created_at) SELECT 'budget-'||v,?,?,?,'budget-'||v,'digest',?,'react',2,? FROM n`, page, th.ID, id, user, tsformat.Format(h.clock.Now().Add(-2*time.Hour)))
 	artifactExpect(t, boardCommentChangeCall(t, h, ws, user, "edit", th.ID, id, "", edit), 200)
 	artifactExpect(t, boardCommentChangeCall(t, h, ws, user, "edit", th.ID, id, "", map[string]any{"base_version": 2, "body": "over", "mutation_id": "over"}), 409)
 	execOrFatal(t, h.db, `UPDATE users SET suspended_at='suspended' WHERE id=?`, user)
