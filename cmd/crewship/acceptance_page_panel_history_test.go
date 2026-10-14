@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http/httptest"
@@ -43,7 +44,9 @@ func TestAcceptance_PagePanelHistoryAndPublicationFence(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO cli_tokens(id,user_id,name,token_hash,created_at) VALUES('panel-history-token','panel-history-owner','test',?,datetime('now'))`, sha256HexToken(token)); err != nil {
 		t.Fatal(err)
 	}
-	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.Default(), api.WithPageProjectsPath(t.TempDir()))
+	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.Default(), api.WithPageProjectsPath(t.TempDir()),
+		// Pin "not enabled" so an installed Pages image cannot start real builds.
+		api.WithPageBuildImageLookup(func(context.Context) ([]string, error) { return nil, nil }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,8 +248,9 @@ func TestAcceptance_PagePanelHistoryAndPublicationFence(t *testing.T) {
 	// The acknowledgement stop. The CLI reads the snapshot, says what is
 	// missing and what the flag would mean, and does not set the flag on the
 	// caller's behalf; with the flag it says it is publishing anyway. Either
-	// way the request is then sent — here the build worker is not configured,
-	// so the server's answer is a 503, which is past the fence.
+	// way the request is then sent — here no Page runtime origin is
+	// configured, so the server's answer is a 503 page_runtime_origin_missing,
+	// which is past the fence.
 	publish := []string{"page", "project", "publish", "health", "--build", "panel-history-build", "--revision", "2", "--expected-publication", "1", "--reviewed-code"}
 	out, err = run(publish...)
 	if err == nil || !strings.Contains(out, "retained source is unavailable") || !strings.Contains(out, "refuses this publication unless you pass --acknowledge-unavailable-baseline") || !strings.Contains(out, "Fencing on routine health-check sha256") {
@@ -256,7 +260,7 @@ func TestAcceptance_PagePanelHistoryAndPublicationFence(t *testing.T) {
 		t.Fatalf("the CLI acknowledged the baseline on the caller's behalf: %s", out)
 	}
 	out, err = run(append(publish, "--acknowledge-unavailable-baseline")...)
-	if err == nil || !strings.Contains(out, "Publishing anyway, as --acknowledge-unavailable-baseline was given") || !strings.Contains(out, "build worker") {
+	if err == nil || !strings.Contains(out, "Publishing anyway, as --acknowledge-unavailable-baseline was given") || !strings.Contains(out, "Page runtime origin is not configured") {
 		t.Fatalf("acknowledged publish: %v %s", err, out)
 	}
 	// A rollback fences on the retained version's own source, and says so.
