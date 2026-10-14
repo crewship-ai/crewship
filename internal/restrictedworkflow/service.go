@@ -150,12 +150,14 @@ func (s *Service) notify() { s.dispatcher.Hint("") }
 func manualPolicy(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, user, workspace string) error {
-	var role string
+	var role, mode string
 	var caps sql.NullString
-	if err := q.QueryRowContext(ctx, `SELECT role,capabilities FROM workspace_members WHERE user_id=? AND workspace_id=?`, user, workspace).Scan(&role, &caps); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT wm.role,wm.capabilities,wm.access_mode FROM workspace_members wm JOIN users u ON u.id=wm.user_id AND u.suspended_at IS NULL WHERE wm.user_id=? AND wm.workspace_id=?`, user, workspace).Scan(&role, &caps, &mode); err != nil {
 		return ErrDenied
 	}
-	if role == "OWNER" || role == "ADMIN" || role == "MANAGER" {
+	// Guests receive invocation authority from the exact routine grant and
+	// its agent dependencies, rather than a workspace-wide capability.
+	if mode == "restricted" || role == "OWNER" || role == "ADMIN" || role == "MANAGER" {
 		return nil
 	}
 	var list []string
@@ -259,8 +261,10 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 	if len(expectedExecutions) == 1 && expectedExecutions[0] != "" && expectedExecutions[0] != intentHash {
 		return receipt, ErrDenied
 	}
-	if err = store.Check(ctx, user, workspace, access.Right{Kind: "agent", ID: agent, Operation: "run"}); err != nil {
-		return receipt, ErrDenied
+	for _, right := range graph.Rights {
+		if store.Check(ctx, user, workspace, right) != nil {
+			return receipt, ErrDenied
+		}
 	}
 	pageID := sql.NullString{}
 	pageAction, pageHash, source := "", "", "manual"

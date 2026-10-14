@@ -6,6 +6,7 @@ import Link from "next/link"
 import { Check, ChevronDown, Plus, Settings, UserPlus } from "lucide-react"
 import { toast } from "sonner"
 import { useWorkspace, type WorkspaceData } from "@/hooks/use-workspace"
+import { deriveAccessMode } from "@/hooks/use-access-mode"
 import { useSessionSafe } from "@/hooks/use-auth"
 import {
   DropdownMenu,
@@ -152,7 +153,8 @@ export function WorkspaceSwitcher() {
  * through the profile menu, which is about the person, not the workspace.
  */
 function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; onNavigate?: () => void }) {
-  const { workspace, workspaces, role, loading, setWorkspaceId } = useWorkspace()
+  const { workspace, workspaces, role, loading, error, setWorkspaceId } = useWorkspace()
+  const trusted = deriveAccessMode(workspaces, loading, error) === "trusted"
   const { data } = useSessionSafe()
   const mine = (ws: WorkspaceData) => isOwnPersonal(ws, data?.user.id)
   const own = workspaces.filter(mine)
@@ -187,7 +189,7 @@ function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; on
         />
       ))}
       <DropdownMenuSeparator />
-      {workspace && (
+      {workspace && trusted && (
         <>
           <DropdownMenuItem asChild className="text-xs gap-2">
             <Link href="/settings?tab=general" onClick={onNavigate}>
@@ -206,7 +208,7 @@ function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; on
           </DropdownMenuItem>
         </>
       )}
-      <DropdownMenuItem
+      {trusted && <DropdownMenuItem
         className="text-xs gap-2"
         onSelect={(e) => {
           e.preventDefault()
@@ -215,7 +217,7 @@ function WorkspaceMenuItems({ onCreate, onNavigate }: { onCreate: () => void; on
       >
         <Plus className="h-3.5 w-3.5" />
         Create workspace
-      </DropdownMenuItem>
+      </DropdownMenuItem>}
     </>
   )
 }

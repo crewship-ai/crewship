@@ -23,6 +23,7 @@ import (
 // MCP handler, orchestrator adapter wrapper) build this from the run
 // request before invoking Dispatch.
 type AgentContext struct {
+	StorageRoot    string // trusted ancestor of configured tier roots, set by external sidecars
 	AgentID        string
 	CrewID         string
 	WorkspaceID    string
@@ -508,7 +509,11 @@ func (d *Dispatcher) handleRead(ctx context.Context, raw json.RawMessage) (ToolR
 	// TOCTOU window before this read (#1043). O_NOFOLLOW refuses the swapped
 	// link and the regular-file check refuses FIFOs/devices — the same
 	// primitive the indexer uses.
-	data, err := readRegularNoFollow(path)
+	root, err := d.rootForMemoryPath(path)
+	if err != nil {
+		return ToolResult{IsError: true, Content: "memory.read: " + err.Error()}, nil
+	}
+	data, err := ReadFileNoFollowRoot(root, path)
 	if errors.Is(err, os.ErrNotExist) {
 		return ToolResult{Content: ""}, nil
 	}
@@ -714,7 +719,11 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 	if err != nil {
 		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	storageRoot, err := d.rootForMemoryPath(path)
+	if err != nil {
+		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
+	}
+	if err := EnsureDirNoFollow(storageRoot, filepath.Dir(path)); err != nil {
 		return ToolResult{IsError: true, Content: "memory.write: mkdir: " + err.Error()}, nil
 	}
 	// Reject if the resolved path is a symlink or escapes the memory
@@ -746,6 +755,7 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 	var scanMessage string
 
 	mreq := MutateRequest{
+		StorageRoot: storageRoot,
 		OperationID: a.OperationID,
 		WorkspaceID: d.ctx.WorkspaceID,
 		ActorType:   "agent",
@@ -834,7 +844,7 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 	}
 
 	mreq.Profile = d.profile
-	mres, mErr := Mutate(ctx, d.ledger, mreq)
+	mres, mErr := MutateRooted(ctx, d.ledger, mreq)
 	if mErr != nil {
 		// Cancellation keeps its own wording: the model treats "cancelled"
 		// as "the run is going away, stop", and a generic write failure as
@@ -1208,7 +1218,7 @@ func (d *Dispatcher) readForSearch(root, rel string) (st searchFileState) {
 	if err := d.assertMemoryFile(p); err != nil {
 		return st
 	}
-	data, err := readRegularNoFollow(p)
+	data, err := ReadFileNoFollowRoot(root, p)
 	if err != nil {
 		return st
 	}
@@ -1629,4 +1639,30 @@ func (d *Dispatcher) candidateFiles(tier string) []string {
 	}
 	sort.Strings(paths)
 	return paths
+}
+
+// rootForMemoryPath chooses only an explicitly configured tier root; model
+// paths cannot choose a new filesystem capability.
+func (d *Dispatcher) rootForMemoryPath(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	for _, root := range []string{d.ctx.AgentMemoryDir, d.ctx.CrewMemoryDir} {
+		if root == "" {
+			continue
+		}
+		base, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(base, absolute)
+		if err == nil && filepath.IsLocal(rel) && rel != "." {
+			if d.ctx.StorageRoot != "" {
+				return d.ctx.StorageRoot, nil
+			}
+			return root, nil
+		}
+	}
+	return "", os.ErrPermission
 }

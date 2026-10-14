@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { encodeApiPathSegment, requireApiPathSegment } from "@/lib/api-path-segment"
 
 type Entry = { id: string; kind: string; content: string; created_at: string; created_by?: string; sources?: string[] }
 
@@ -12,11 +13,13 @@ export function RestrictedMemory({ chatId, workspaceId, userId, refreshKey }: { 
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [refresh, setRefresh] = useState(0)
-  const base = `/api/v1/chats/${encodeURIComponent(chatId)}`
+  const segment = encodeApiPathSegment(chatId)
+  const base = segment ? `/api/v1/chats/${segment}` : null
   const query = `?workspace_id=${encodeURIComponent(workspaceId)}`
 
   useEffect(() => {
     const controller = new AbortController()
+    if (!base) { setEntries([]); setError("Memory is unavailable."); return }
     void apiFetch(`${base}/restricted-context${query}&kind=memory&search=${encodeURIComponent(search)}`, { signal: controller.signal }).then(async response => {
       if (!response.ok) throw new Error("Memory is unavailable. Your access may have changed.")
       const result = await response.json() as { entries: Entry[] }
@@ -30,7 +33,8 @@ export function RestrictedMemory({ chatId, workspaceId, userId, refreshKey }: { 
   async function change(id?: string) {
     setBusy(true)
     try {
-      const response = await apiFetch(`${base}/restricted-memory${id ? `/${encodeURIComponent(id)}` : ""}${query}`, {
+      if (!base) throw new Error("Memory is unavailable.")
+      const response = await apiFetch(`${base}/restricted-memory${id ? `/${requireApiPathSegment(id)}` : ""}${query}`, {
         method: id ? "DELETE" : "POST",
         ...(id ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: draft }) }),
       })

@@ -87,3 +87,21 @@ func TestInvitationHandoffSchemasAreExplicit(t *testing.T) {
 		t.Fatal("signup omits invitation_token")
 	}
 }
+
+func TestGuestInvitationConflictsExposeTypedErrorContract(t *testing.T) {
+	routes := []route{
+		{method: "POST", path: "/api/v1/auth/invitation/accept"},
+		{method: "POST", path: "/api/v1/auth/signup"},
+		{method: "POST", path: "/api/v1/workspaces/{workspaceId}/members/provision"},
+	}
+	for _, rt := range routes {
+		contract := routeSchemaCatalog()[rt.method+" "+rt.path]
+		if len(contract.ErrorMedia) != 1 || contract.ErrorMedia[0] != "application/json" {
+			t.Fatalf("%s lacks JSON error media", rt.path)
+		}
+		props, ok := contract.ErrorResponse["properties"].(map[string]any)
+		if !ok || props["error"] == nil || props["code"] == nil {
+			t.Fatalf("%s lacks typed conflict code: %+v", rt.path, contract.ErrorResponse)
+		}
+	}
+}

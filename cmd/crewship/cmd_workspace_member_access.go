@@ -37,6 +37,61 @@ var workspaceMemberAccessSetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error { return memberAccessCommand(cmd, args[0], true) },
 }
 
+type memberEffectiveExplanation struct {
+	MembershipID      string                            `json:"membership_id" yaml:"membership_id"`
+	Mode              string                            `json:"mode" yaml:"mode"`
+	Revision          int64                             `json:"revision" yaml:"revision"`
+	Explanation       string                            `json:"explanation" yaml:"explanation"`
+	AccountRestricted bool                              `json:"account_restricted" yaml:"account_restricted"`
+	RestrictionScope  string                            `json:"restriction_scope" yaml:"restriction_scope"`
+	Decisions         []memberAccessExplanationDecision `json:"decisions" yaml:"decisions"`
+}
+type memberAccessExplanationDecision struct {
+	Kind      string `json:"kind" yaml:"kind"`
+	ID        string `json:"id" yaml:"id"`
+	Operation string `json:"operation" yaml:"operation"`
+	State     string `json:"state" yaml:"state"`
+	Reason    string `json:"reason" yaml:"reason"`
+}
+
+var workspaceMemberAccessExplainCmd = &cobra.Command{
+	Use: "explain <member-id-or-user-id>", Short: "Explain a member's current grants and execution prerequisites", Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		workspace := client.GetWorkspaceID()
+		member, err := resolveWorkspaceMemberID(client, workspace, args[0])
+		if err != nil {
+			return err
+		}
+		response, err := client.Get("/api/v1/workspaces/" + url.PathEscape(workspace) + "/members/" + url.PathEscape(member) + "/access/effective")
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+		if err = cli.CheckError(response); err != nil {
+			return err
+		}
+		var result memberEffectiveExplanation
+		if err = cli.ReadJSON(response, &result); err != nil {
+			return err
+		}
+		rows := [][]string{}
+		for _, decision := range result.Decisions {
+			rows = append(rows, []string{decision.Kind, decision.ID, decision.Operation, decision.State, decision.Reason})
+		}
+		if len(rows) == 0 {
+			rows = append(rows, []string{"", "", "", "", result.Explanation})
+		}
+		return newFormatter().Auto(result, []string{"KIND", "RESOURCE", "OPERATION", "STATE", "REASON"}, rows)
+	},
+}
+
 func memberAccessCommand(cmd *cobra.Command, target string, replace bool) error {
 	if err := requireAuth(); err != nil {
 		return err
@@ -104,6 +159,6 @@ func memberAccessCommand(cmd *cobra.Command, target string, replace bool) error 
 
 func init() {
 	workspaceMemberAccessSetCmd.Flags().String("file", "", "Complete policy JSON file, or - for stdin")
-	workspaceMemberAccessCmd.AddCommand(workspaceMemberAccessGetCmd, workspaceMemberAccessSetCmd)
+	workspaceMemberAccessCmd.AddCommand(workspaceMemberAccessGetCmd, workspaceMemberAccessSetCmd, workspaceMemberAccessExplainCmd)
 	workspaceMemberCmd.AddCommand(workspaceMemberAccessCmd)
 }

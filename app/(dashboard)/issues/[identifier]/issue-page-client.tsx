@@ -11,6 +11,8 @@
 // Back goes, and the link you copy. The issue itself is IssueDetailSurface,
 // the same component the centre pane of /issues renders.
 
+import { useAccessMode } from "@/hooks/use-access-mode"
+import { RestrictedIssues } from "@/components/features/issues/restricted-issues"
 import { useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, ChevronRight, Link2 } from "lucide-react"
@@ -33,6 +35,10 @@ import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui
 const ISSUE_PATH_RE = /^\/issues\/([^/]+)\/?$/
 
 export function IssuePageClient() {
+  const mode = useAccessMode()
+  const identifier = useUrlSegment(ISSUE_PATH_RE)
+  if (mode === "loading") return null
+  if (mode === "restricted") return identifier ? <RestrictedIssues identifier={identifier} /> : null
   // The issue's edits wait for one Save bar; Back asks while any wait.
   return (
     <PageSaveProvider>

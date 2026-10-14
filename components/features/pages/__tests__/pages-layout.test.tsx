@@ -140,6 +140,7 @@ describe("PagesLayout", () => {
     await waitFor(() => expect(screen.getByText("Flotila .201")).toBeTruthy())
     expect(screen.queryByRole("button", {name:/^New page$/})).toBeNull()
     expect(screen.queryByRole("button", {name:/^Import$/})).toBeNull()
+    expect(screen.queryByRole("button",{name:"New folder"})).toBeNull()
   })
 
   it("offers no creation shortcut in an empty VIEWER catalog", () => {
@@ -160,6 +161,7 @@ describe("PagesLayout", () => {
     renderLayout([])
     expect(screen.getAllByRole("button", {name:/^New page$/}).length).toBeGreaterThan(0)
     expect(screen.getAllByRole("button", {name:/^Import$/}).length).toBeGreaterThan(0)
+    expect(screen.queryByRole("button",{name:"New folder"})).toBeNull()
   })
 
   it("writes the header line as '<n> pages · <n> stale'", async () => {

@@ -75,7 +75,7 @@ func TestScheduledFire_DistinctOccurrences_BothRun(t *testing.T) {
 		o := occ
 		return &Schedule{
 			ID:               "psched_idem2",
-			WorkspaceID:      "ws_test2",
+			WorkspaceID:      "ws_test",
 			TargetPipelineID: p.ID,
 			CronExpr:         "0 8 * * *",
 			Timezone:         "UTC",
@@ -87,7 +87,7 @@ func TestScheduledFire_DistinctOccurrences_BothRun(t *testing.T) {
 	scheduler.fireOne(ctx, mk(time.Date(2026, 1, 2, 8, 0, 0, 0, time.UTC)))
 
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pipeline_runs WHERE workspace_id = ?`, "ws_test2").Scan(&n); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pipeline_runs WHERE workspace_id = ?`, "ws_test").Scan(&n); err != nil {
 		t.Fatalf("count runs: %v", err)
 	}
 	if n != 2 {

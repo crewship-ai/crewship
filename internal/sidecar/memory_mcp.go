@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
@@ -335,6 +334,10 @@ func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Reques
 	// Compatible serial deployments keep the local legacy dispatcher. R6's
 	// host bridge must preserve its path checks, injection screen, quarantine
 	// and cap guidance before this path can offer guaranteed writes.
+	if s.memoryStorageRoot == "" {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "trusted memory storage root unavailable"})
+		return
+	}
 	dispatcher := memory.NewDispatcher(ac,
 		memory.WithSearchIndex(s.memoryIndexFor(r, ac, slug)),
 		memory.WithMutationProfile(memory.ProfileLegacy))
@@ -409,6 +412,7 @@ func (s *Server) memoryIndexFor(r *http.Request, ac memory.AgentContext, slug st
 // can never diverge in their tier resolution.
 func (s *Server) memoryAgentContext() memory.AgentContext {
 	ac := memory.AgentContext{
+		StorageRoot:    s.memoryStorageRoot,
 		AgentMemoryDir: s.agentMemoryBase,
 		CrewMemoryDir:  s.crewMemoryBase,
 	}
@@ -529,6 +533,9 @@ func (s *Server) peerMemoryEngineFor(ctx context.Context, slug string) (engine *
 		return nil, "", err
 	}
 
+	if s.memoryStorageRoot == "" {
+		return nil, dir, nil
+	}
 	s.peerMemoryEnginesMu.Lock()
 	if eng, ok := s.peerMemoryEngines[slug]; ok {
 		s.peerMemoryEnginesMu.Unlock()
@@ -559,10 +566,10 @@ func (s *Server) peerMemoryEngineFor(ctx context.Context, slug string) (engine *
 	// Mirrors NewServer's own boot-time engine init (server.go): the
 	// directory may not exist yet on a freshly provisioned crew, and
 	// SQLite errors SQLITE_CANTOPEN rather than creating parents.
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := memory.EnsureDirNoFollow(s.memoryStorageRoot, dir); err != nil {
 		return nil, "", fmt.Errorf("memory: create peer memory dir for %q: %w", slug, err)
 	}
-	eng, err := memory.New(dir, memory.DefaultConfig())
+	eng, err := s.newMemoryEngine(dir)
 	if err != nil {
 		return nil, "", fmt.Errorf("memory: init peer engine for %q: %w", slug, err)
 	}

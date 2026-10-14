@@ -2,13 +2,13 @@
 
 This is an administration surface for the authority introduced in #2717, not
 activation of restricted model execution. An operator can explicitly restrict a
-member and edit individual agent/project operations. Unintegrated routes remain
+member and edit individual agent, project and routine operations. Unintegrated routes remain
 denied; the policy does not bypass roles, token scopes or conversation audience.
 
 Only a **current trusted OWNER/ADMIN** of the target workspace may read or replace
 these policies. Scoped CLI tokens additionally require `workspace:admin` (or its
 wildcard). Restricted administrators cannot administer policy. OWNER/ADMIN members
-cannot be changed to restricted mode by this endpoint. The current global
+cannot be changed to restricted mode, and an account restricted anywhere cannot acquire OWNER/ADMIN in another workspace. An append-only database migration enforces both directions on membership insertion and role, identity or access-mode updates; handler checks return friendly conflicts. The current global
 restricted-user boundary also applies to users with mixed trusted/restricted
 memberships: adding a restricted membership closes unintegrated routes across
 their session, including administration of another workspace.
@@ -17,6 +17,7 @@ Routes:
 
 - `GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access`
 - `PUT /api/v1/workspaces/{workspaceId}/members/{memberId}/access`
+- `GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access/effective`
 
 The path uses the membership row ID. CLI commands accept either that ID or the
 user ID and resolve it through the workspace roster:
@@ -26,6 +27,7 @@ crewship --workspace WORKSPACE --format json workspace member access get MEMBER 
 # Edit only mode and rights, retaining membership_id and revision.
 crewship --workspace WORKSPACE --format json workspace member access set MEMBER --file policy.json
 # --file - reads the complete replacement from stdin.
+crewship --workspace WORKSPACE --format json workspace member access explain MEMBER
 ```
 
 The replacement body is the same shape as the GET response:
@@ -54,10 +56,94 @@ reused for the new membership. Membership, grants and administration authority
 are checked transactionally by `access.Store`; old attempts do not regain rights
 when the same grants are later restored.
 
-This does not yet supply a Settings editor, a production provider, scoped
-prompt/recall, persistent quotas, or restricted chat/CLI/routine dispatch. Granting
-`run` does not make those unintegrated execution routes available. Release 1.0
-acceptance remains open.
+## Model decision (2026-10-14, #3067)
+
+Restricted access is presented as **Guest**, an access mode rather than a new
+workspace role. One restricted membership places the entire account behind the
+restricted route ceiling. Existing trusted memberships retain their defaults.
+The resource policy is the same versioned `access_grants` model for agents,
+projects and routines; the backend checks it on every integrated operation.
+Changing a Guest's role to ADMIN/OWNER requires explicitly restoring trusted
+access first. A role change cannot silently remove or bypass the restriction.
+
+| Original PRD choice | Decision | Reason |
+| --- | --- | --- |
+| New GUEST workspace role | Changed: restricted access mode, Guest in UI, account-wide | The current global route fence has no mixed-mode bypass. Keeping one account ceiling avoids granting trusted routes through another workspace while per-resource integration is incomplete. Separate workspace-scoped guest accounts remain a future migration. |
+| New resource_grants registry | Changed: extend versioned access_grants | Reuse the shipped membership revision, resource foreign keys and execution revocation fences rather than introduce two authorities. Pages moves last as originally planned. |
+| Per-object sharing and meaningful type levels | Kept as target; only agent operations, routine run and project projection delivered | View/Edit, crew/credential subjects and Share dialogs need separate enforcement and UI work. |
+| Pages model migration | Deferred, as in original phases | Preserve current Pages ACL, issuer checks and data during the first routine/project slice. |
+
+Guest invitation acceptance, restricted provisioning and direct member policy
+replacement refuse accounts that are OWNER or ADMIN anywhere, including
+unclaimed accounts. Consent cannot override
+this protection. A matching stale Guest invitation returns typed 409 and rolls
+back signup or membership changes.
+
+PRD Q2: an explicit administrator-issued routine grant authorizes invocation;
+there is no second per-run administrator confirmation in this slice. Agent/provider
+authority, inputs and budgets remain checked at invocation. Q3: no default grant
+expiry is introduced; invitation proofs still expire after seven days, while
+grant expiry is deferred pending its execution/revocation contract. Q4: Guest
+members count under the existing member licensing limits; no billing exception
+is introduced.
+
+Unattended schedule, webhook, wake, nested-call and automation-rule runs require
+the human author to remain active and a trusted member of the routine's own
+workspace. Guest membership elsewhere does not revoke that workspace's unattended
+routines. Agent/crew-authored routines retain their existing execution policy.
+
+Settings › Members edits this policy and offers a server-derived explanation
+of the **saved** policy. `access/effective` is administration-only, returns the
+membership revision, account restriction scope and per-grant state/reason, and
+never includes the member's private conversation or run contents. An execution
+grant can be conditional or unavailable: provider/profile dependencies, inputs,
+budgets and installed runtime still matter. Unshared resources remain denied.
+
+Supported operations:
+
+| Resource | Operations | Current scope |
+| --- | --- | --- |
+| Agent | discover, chat, run, delegate | Discovery is separate from conversation and execution authority. |
+| Routine | run | Explicit root-routine grant **and** run on every resolved agent; cross-agent delegation additionally needs delegate. Nested definitions are frozen dependencies. |
+| Project | list, read, write, delete | List exposes issue metadata, read exposes issue detail and project source files. Write/delete apply to project files with their existing role floor; guest issue mutations are not integrated. |
+
+Routine grants replace the workspace-wide `routine.run` requirement for Guests.
+They do not grant edit access to definitions. A new migration preserves existing
+agent/project grants and trusted memberships, while advancing restricted member
+revisions to fence jobs admitted before routine authority was bound. Operators
+must explicitly add routine grants to existing Guests; no automatic broad grant
+is created.
+
+Both invitation creation and account provisioning accept `access_mode` and
+`rights`. Omitted mode retains trusted compatibility; restricted mode may start
+with an empty rights array. Initial grants, membership and invitation redemption
+commit together, including signup redemption. Removed/cross-workspace resources
+refuse redemption; an existing membership is not silently converted or regranted.
+The Add member dialog can select Guest and initial resources before creating an invitation. Existing accounts explicitly accept the account-wide restriction; direct provisioning refuses to restrict an existing claimed account.
+Invitation acceptance remains available to an already restricted account, but
+still requires the matching token, live email and an unrestricted authentication
+credential. Accepting another workspace does not remove its account ceiling.
+
+Guest Issues use dedicated projections:
+
+- `GET /api/v1/workspaces/{workspaceId}/restricted-issues`
+- `GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}`
+
+CLI: `crewship issue shared --project PROJECT_ID` lists a shared project;
+`crewship issue shared ISSUE_ID` reads its current detail. `--limit` and
+`--offset` page the catalog without using shared workspace issue endpoints.
+
+The list accepts `project_id`, `limit` and `offset`, filters by project.list in
+one SQL query and returns identifiers, titles, status and project identity. The
+detail accepts an issue ID or identifier, requires project.read and adds its
+description. Neither returns crew/agent references, comments, activity, relations
+or run history. Foreign and revoked details return 404. The shared issue board,
+search, statistics and mutation routes remain closed to Guests. Collection
+`X-Total-Count` counts the filtered total before pagination; the next-offset header supports pagination.
+
+Crews, credentials, routine View/Edit levels, guest issue contribution, explicit
+Page-action selection and a Pages grant migration remain separate work. This
+contract does not claim complete resource-access PRD or release-1.0 acceptance.
 
 ## What a restricted session's shell offers
 
@@ -66,7 +152,8 @@ carries `restricted_session: true` and `restricted_surfaces`: the screens the
 selected workspace membership may open, narrowed within the server route allowlist
 (`internal/api/restricted_surfaces.go`). A surface is listed only when **every**
 route it needs is allowlisted. Chat navigation requires a discover grant on a live
-agent. Routines and Pages require an authorized recipe or declared action, using
+agent; only a chat grant offers the composer. Issues navigation requires list
+on a local project. Routines and Pages require an authorized recipe or declared action, using
 the same graph, provider and Page policies as their catalogs. Runtime installation
 is independent: an unavailable executor does not revoke otherwise authorized
 navigation. Account security remains available without resource grants. A trusted
@@ -85,10 +172,14 @@ Navigation is an existence projection: it stops after the first authorized
 routine or Page action rather than constructing every frozen execution contract.
 Denied candidates may still require a scan; this is not a constant-cost promise.
 A workspace-local catalog failure omits that workspace row, while healthy rows
-remain usable. Failure of every workspace projection returns an error, never an
+remain usable. `X-Workspace-Directory-Complete` is false for such a partial
+projection. Only a complete directory permits automatic recovery from a missing
+preference during a fresh login; active drafts still require a guarded selection. Failure of every workspace projection returns an error, never an
 empty grant projection. Logs contain no resource names or session credentials.
 A chat grant alone still permits direct access to a known agent's private chat;
 it does not grant directory discovery. Assign discover and chat for navigable chat.
 Installed adapters' static profile declarations constrain navigation. Missing
 runtime installation preserves known declaration authority; unknown profiles
 remain denied. Operational readiness checks stay at execution time.
+
+Guest Page actions retain the Pages ACL checks and additionally require an explicit `routine:run` grant and the routine’s agent grants. Existing `routine.run` capabilities are not backfilled into routine grants.

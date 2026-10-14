@@ -293,6 +293,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = []workspaceResponse{}
 	}
 
+	w.Header().Set("X-Workspace-Directory-Complete", "true")
 	writeJSON(w, http.StatusOK, result)
 }
 

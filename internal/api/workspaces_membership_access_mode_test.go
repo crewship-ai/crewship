@@ -18,7 +18,7 @@ func TestListMembersAccessModeFollowsPolicyReadGate(t *testing.T) {
 	covWMSeedMember(t, h, "am-admin", "am-admin@example.com", wsID, "am-m-admin", "ADMIN")
 	covWMSeedMember(t, h, "am-member", "am-member@example.com", wsID, "am-m-member", "MEMBER")
 	covWMSeedMember(t, h, "am-restricted", "am-restricted@example.com", wsID, "am-m-restricted", "MEMBER")
-	covWMSeedMember(t, h, "am-radmin", "am-radmin@example.com", wsID, "am-m-radmin", "ADMIN")
+	covWMSeedMember(t, h, "am-radmin", "am-radmin@example.com", wsID, "am-m-radmin", "MEMBER")
 	for _, id := range []string{"am-m-restricted", "am-m-radmin"} {
 		execOrFatal(t, h.db, `UPDATE workspace_members SET access_mode = 'restricted' WHERE id = ?`, id)
 	}
@@ -35,7 +35,7 @@ func TestListMembersAccessModeFollowsPolicyReadGate(t *testing.T) {
 		{name: "owner token with workspace admin scope", caller: ownerID, role: "OWNER", scopes: stringSet{"workspace:admin": {}}, sees: true},
 		{name: "owner token without workspace admin scope", caller: ownerID, role: "OWNER", scopes: stringSet{"agents:read": {}}},
 		{name: "member", caller: "am-member", role: "MEMBER"},
-		{name: "restricted admin", caller: "am-radmin", role: "ADMIN"},
+		{name: "Guest with stale admin session", caller: "am-radmin", role: "ADMIN"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

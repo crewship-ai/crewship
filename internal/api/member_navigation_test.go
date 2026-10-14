@@ -161,7 +161,7 @@ func TestMemberNavigationFollowsGrantsAndWorkspace(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO credentials(id,workspace_id,name,encrypted_value,type,provider,created_by) VALUES('nav-key',?,'Synthetic',?,'API_KEY','OPENAI',?)`, ws, cipher, owner)
 	execOrFatal(t, db, `INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('nav-key-bind',?,'nav-key','OPENAI_API_KEY')`, agent)
 	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,author_crew_id,status) VALUES('nav-recipe',?,'nav-work','Navigation recipe',?,'fixture',?,'active')`, ws, `{"dsl_version":"1.0","name":"nav-work","inputs":[{"name":"task","type":"string","required":true}],"steps":[{"id":"answer","type":"agent_run","agent_slug":"alex","prompt":"{{ inputs.task }}"}]}`, "crew_test_"+ws)
-	replace([]access.Right{{Kind: "agent", ID: agent, Operation: "run"}})
+	replace([]access.Right{{Kind: "routine", ID: "nav-recipe", Operation: "run"}, {Kind: "agent", ID: agent, Operation: "run"}})
 	if got := surfaces("nav-a"); !reflect.DeepEqual(got, []any{"routines", "account_security"}) {
 		t.Fatalf("authorized navigation disappeared with absent runtime: %v", got)
 	}

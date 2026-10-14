@@ -15,6 +15,15 @@ describe("workspace availability transport",()=>{
   }
   expect(network).toHaveBeenCalledTimes(3)
  })
+ it("keeps account and instance administration available during a directory outage",async()=>{
+  setWorkspaceRequestAvailability("ws-a",false)
+  network.mockResolvedValue(new Response("{}"))
+  for (const path of ["/api/v1/admin/stats", "/api/v1/admin/instance/people", "/api/v1/users/me/preferences", "/api/v1/users/me/notifications"]) {
+   await workspaceFetch(path)
+  }
+  await expect(workspaceFetch("/api/v1/admin/keeper/requests?workspace_id=ws-a")).rejects.toBeInstanceOf(WorkspaceUnavailableError)
+  expect(network).toHaveBeenCalledTimes(4)
+ })
  it("aborts in-flight domain requests and rejects late replies",async()=>{
   let resolve!: (response:Response)=>void
   network.mockImplementation(()=>new Promise<Response>(done=>{resolve=done}))
