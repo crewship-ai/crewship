@@ -1,12 +1,13 @@
 # Pages Apps — zapnutí jedním příkazem
 
 Stav: veřejný návrh z 2026-10-14, revize `main` @ `612908edc`. Řeší
-[#3108](https://github.com/crewship-ai/crewship/issues/3108). Nic není
-implementováno. Platný kontrakt je [docs/specs/pages-apps.md](../specs/pages-apps.md),
-dnešní provozní postup [docs/guides/pages-apps-operations.mdx](../guides/pages-apps-operations.mdx).
-Návrh mění jedno pravidlo dnešní dokumentace (digest image v konfiguraci, viz
-§4.1); před implementací je potřeba souhlas maintainera a záznam v
-[docs/decisions/](../decisions/README.md).
+[#3108](https://github.com/crewship-ai/crewship/issues/3108). Implementace
+probíhá na větvi `docs/pages-builder-install-prd`; kontrakt je
+[docs/specs/pages-apps.md](../specs/pages-apps.md), provozní postup
+[docs/guides/pages-apps-operations.mdx](../guides/pages-apps-operations.mdx).
+Změna pravidla „digest image v konfiguraci“ (§4.1) je zapsaná jako navržené
+rozhodnutí [ADR-PAGES-IMAGE-BY-LABEL-2026-10-14](../decisions/ADR-PAGES-IMAGE-BY-LABEL-2026-10-14.md)
+a čeká na souhlas maintainera.
 
 ## 1. Shrnutí
 

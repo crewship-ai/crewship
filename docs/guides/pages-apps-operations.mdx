@@ -1,6 +1,6 @@
 ---
 title: "Operate Pages applications"
-description: "Install, verify, back up and upgrade the offline Pages runtime."
+description: "Enable, verify, back up and upgrade the offline Pages runtime."
 stability: experimental
 tag: Experimental
 ---
@@ -9,19 +9,75 @@ Pages applications are optional. Ordinary panel Pages do not need a build image 
 application runtime. The supported application browser is desktop Chrome or Edge;
 other browsers can use the Page panels.
 
-## Install the matching compiler
+## Enable Pages applications
 
-Use the server release's `tools/pages-build` directory:
+On the server host, with the Crewship binary of the release you run:
 
 ```bash
-docker build -t crewship-pages-build:local tools/pages-build
-docker image inspect crewship-pages-build:local --format '{{.Id}}'
+crewship page enable
 ```
 
-Configure the reported immutable `sha256:…` ID, not a mutable tag. The compiler never
-pulls an image or installs project dependencies during a Page build. New builds
-verify that the image's SDK/compiler/dependency fingerprint matches the server.
-A mismatch is an installation error with an instruction to rebuild the image.
+The binary carries the compiler's build context. `enable` builds the Pages tools
+image from it and labels it `ai.crewship.pages.profile=<profile fingerprint>`. It
+needs Docker access, and network access only during this step (base image and
+compiler dependencies). It prints only the immutable `sha256:…` image ID on stdout;
+progress and hints go to stderr. Running it again with the same release does
+nothing, and it exits nonzero when Docker is unavailable.
+
+The server finds the labelled image for its own release by itself and notices it
+within seconds, so no restart and no configuration edit is needed. Until such an
+image exists Pages applications are disabled: the server starts no Pages container
+and the build, review and publish endpoints answer `503` with
+`code: page_apps_not_enabled`. `crewship doctor` reports the state.
+
+The compiler never pulls an image or installs project dependencies during a Page
+build (`--pull=never`, `--network=none`) and always runs from the immutable image
+ID. After each build the server verifies that the image's SDK/compiler/dependency
+fingerprint matches its own; a mismatch is an installation error that asks you to
+run `crewship page enable`.
+
+To turn Pages applications off again, remove every Pages-labelled image:
+
+```bash
+crewship page disable
+```
+
+### Pin an image explicitly
+
+`CREWSHIP_PAGE_BUILD_IMAGE` overrides discovery. When it is set, the server uses
+exactly that image and never looks for a labelled one. It must be an immutable
+`sha256:…` ID or digest, never a mutable tag, and the image must be built for this
+release (the post-build fingerprint check still applies). Use it to pin one
+specific image or when change control requires the ID in configuration:
+
+```bash
+CREWSHIP_PAGE_BUILD_IMAGE="$(crewship page enable)"
+```
+
+### Hosts without internet access
+
+Run `crewship page enable` on a connected machine with the **same Crewship
+version**, then move the image:
+
+```bash
+image="$(crewship page enable)"
+docker save "$image" -o crewship-pages-build.tar
+# on the target host:
+docker load -i crewship-pages-build.tar
+```
+
+The label travels with the image, so the target server enables Pages applications
+without further configuration.
+
+### Docker Compose
+
+The production Compose stack (`docker/docker-compose.prod.yml`) reaches Docker
+through a socket proxy with `BUILD=0`, so `crewship page enable` cannot build from
+inside the Crewship container. Run it on the Docker host with a `crewship` binary of
+the same version; the server container sees the image on the shared daemon. Do not
+grant the proxy `BUILD` only for this step.
+
+### Host requirements
 
 The Go service needs `git` in PATH, access to Docker, and a protected absolute
 `CREWSHIP_PAGE_PROJECTS_PATH` outside agent/crew mounts. The service account must
@@ -30,11 +86,21 @@ The build container uses UID 1001 and receives no crew mounts or credentials.
 
 ## Configure the browser-facing origins
 
-Example configuration for an existing Go service:
+A local installation whose Studio is `http://localhost:<port>` and whose server
+listens on loopback or all interfaces needs no origin setting: when
+`CREWSHIP_PAGE_RUNTIME_ORIGIN` is unset, the server derives
+`http://127.0.0.1:<server port>`. A literal loopback IP is a different browser site
+from `localhost`, so this is real site isolation, not the development same-origin
+exception.
+
+Every other installation (remote viewers, HTTPS, a custom domain) sets the runtime
+origin; without it publication answers `503` with
+`code: page_runtime_origin_missing`. Example configuration for an existing Go
+service (the projects path must lie outside the storage base path, which defaults
+to `/var/lib/crewship`):
 
 ```bash
-CREWSHIP_PAGE_PROJECTS_PATH=/var/lib/crewship/page-projects
-CREWSHIP_PAGE_BUILD_IMAGE=sha256:REPLACE_WITH_LOCALLY_INSTALLED_IMAGE_ID
+CREWSHIP_PAGE_PROJECTS_PATH=/var/lib/crewship-page-projects
 CREWSHIP_PAGE_STUDIO_ORIGIN=https://studio.example.com
 CREWSHIP_PAGE_RUNTIME_ORIGIN=https://apps.example.net
 ```
@@ -87,8 +153,8 @@ and confirm the draft/publication/receipt identities survive. Repeat with a fres
 restore target using the existing Crewship workspace backup/restore workflow;
 source SQL without the Page project archive is intentionally rejected as incomplete.
 
-For repository verification, `bash scripts/test-pages-apps.sh` rebuilds the tools
-image, runs real Docker/API/MCP/seed checks and exercises the Go bootstrap in
+For repository verification, `bash scripts/test-pages-apps.sh` installs the tools
+image with `crewship page enable` built from the checkout, runs real Docker/API/MCP/seed checks and exercises the Go bootstrap in
 Chromium. It fails when required tests are skipped. It does not replace a real
 chat-agent authoring test or your deployment's DNS/TLS verification.
 
@@ -127,14 +193,22 @@ investigate the named root. Temporary build persistence failure is reported as
 ## Upgrade and rollback
 
 Before upgrade, take a complete workspace backup and preserve the current server
-binary/version and tools-image digest. Install the new server and its matching
-pinned compiler image as one release. Existing published artifacts continue to run;
+binary/version. After installing the new binary, run `crewship page enable` again:
+a release with a changed compiler profile ignores the previous image, and until the
+new one exists Pages builds answer `page_apps_not_enabled` and `crewship doctor`
+reports the image as outdated. Existing published artifacts continue to run;
 upgrade does not automatically rebuild or republish customer applications.
 
 Use an unpublished draft for a rebuild with the new profile. Compare the preview,
 SDK interactions and action declarations, then explicitly publish. If compilation
 fails, the previous publication stays live. Image fingerprint mismatch requires a
 matching image; do not disable the check or change the lockfile to work around it.
+
+`enable` keeps older Pages images, so rolling back to the previous binary finds its
+own image again without a rebuild. Remove images you no longer need with
+`docker rmi`, or all of them with `crewship page disable`, which also turns Pages
+applications off until the next `enable`. If you pin `CREWSHIP_PAGE_BUILD_IMAGE`,
+update it together with the binary.
 
 V1 profile/SDK maintenance must keep existing source contracts compatible; a breaking
 change requires a new explicit profile and migration instructions. A portable source

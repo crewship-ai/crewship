@@ -96,6 +96,9 @@ instance_id() { # data dir
 # names this dir — exactly the leak the teardown contract exists to prevent.
 # Keep this list to optional feature configuration only.
 THROWAWAY_ENV_ALLOWLIST=(
+  # Only to pin a specific image: without it the server finds the image
+  # `crewship page enable` labelled on the shared daemon. Teardown never
+  # removes that image — it is not this instance's.
   CREWSHIP_PAGE_BUILD_IMAGE
   CREWSHIP_PAGE_RUNTIME_ORIGIN
   CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN

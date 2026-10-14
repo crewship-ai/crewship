@@ -15,27 +15,37 @@ or a container alias does not configure remote viewers; localhost is their machi
 
 ## Operator setup
 
-Build the trusted profile from this directory (network access is needed during
-image installation, never during a Page build):
+Enable Pages Apps on the server host with the binary of the release you run
+(network access is needed during image installation, never during a Page build):
 
 ```sh
-docker build -t crewship-pages-build:local tools/pages-build
-docker image inspect crewship-pages-build:local --format '{{.Id}}'
+crewship page enable
 ```
 
-Set `CREWSHIP_PAGE_BUILD_IMAGE` to the resulting `sha256:…` image ID, or to a
-locally available `repository@sha256:…` digest. Mutable tags are rejected and
-the worker never pulls. The image and server must come from the same release:
-the CLI embeds the same dependency lock and SDK profile.
+The binary embeds this directory's build context (`profile.go`,
+`WriteBuildContext`). `enable` builds the image from it, labels it
+`ai.crewship.pages.profile=<profile fingerprint>` and prints only the `sha256:…`
+image ID on stdout. The server picks up the labelled image for its own
+fingerprint within seconds, without a restart; with no such image, Pages Apps
+are disabled and no Pages container starts. `crewship page disable` removes all
+Pages-labelled images. Mutable tags are rejected and the worker never pulls. The
+image and server must come from the same release: a post-build fingerprint check
+refuses a mismatch. Air-gapped hosts and Docker Compose deployments are covered in
+the [operations guide](../../docs/guides/pages-apps-operations.mdx).
 
 Configuration:
 
 - `CREWSHIP_PAGE_PROJECTS_PATH`: absolute protected directory outside crew storage;
   do not mount it into agent containers.
-- `CREWSHIP_PAGE_BUILD_IMAGE`: pinned, locally installed tools image.
+- `CREWSHIP_PAGE_BUILD_IMAGE` (optional): explicit override of the labelled image,
+  a locally installed `sha256:…` image ID or `repository@sha256:…` digest. When
+  set, discovery is skipped.
 - `CREWSHIP_PAGE_RUNTIME_ORIGIN`: dedicated HTTP(S) origin on a **different site**
   from Studio; e.g. Studio `https://studio.example.com`, runtime
   `https://apps.example.net`. `apps.example.com` or another port is insufficient.
+  When unset and Studio is `http://localhost:<port>` on a loopback or all-interface
+  listener, the server derives `http://127.0.0.1:<server port>`, a different site
+  from `localhost`.
 - `CREWSHIP_PAGE_STUDIO_ORIGIN`: the exact public browser Studio origin. Defaults
   to `auth.nextjs_url` / `CREWSHIP_NEXTJS_URL` for compatibility. Set explicitly
   when internal IPC/token sync needs a loopback URL: do not send internal-token
@@ -185,7 +195,7 @@ permission before every 304, and no public artifact cache bypasses that check.
 ## Reproduce verification
 
 ```sh
-CREWSHIP_TEST_PAGE_BUILD_IMAGE="$(docker image inspect crewship-pages-build:local --format '{{.Id}}')" \
+CREWSHIP_TEST_PAGE_BUILD_IMAGE="$(go run ./cmd/crewship page enable)" \
   CREWSHIP_TEST_PAGE_ARTIFACT_OUT=/tmp/pages-artifact.json \
   go test ./internal/pagebuild -run TestDockerPreviewBuildIntegration -count=1 -v
 node e2e/pages-preview-smoke.mjs /tmp/pages-artifact.json
