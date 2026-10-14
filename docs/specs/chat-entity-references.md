@@ -95,7 +95,12 @@ is intentionally global across workspaces, consistently with chat admissions.
 Permanent invalid recurring receipts disable the template, advance its due
 bucket and notify a current eligible member. Transient database failures retry.
 Legacy/scoped NULL-origin templates may generate ordinary issue records, but
-do not authorize agent execution.
+do not authorize agent execution. Each such occurrence receives an immutable
+unavailable origin (`unverified-recurring:<issueID>`, empty chat/message and
+`human_authority={}`), including templates without creator attribution. This
+prevents later assignment dispatch from classifying unknown provenance as
+autonomous. The template remains NULL-origin and its schedule advances;
+a fresh authenticated Start can authorize the occurrence explicitly.
 
 Channel jobs without a verified authenticated admission may answer,
 but their runs carry a host-derived missing-requester marker. Issue mutations

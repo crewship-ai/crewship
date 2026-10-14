@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -16,8 +17,11 @@ func TestLegacyRecurringRequiresAuthenticatedSaveForFutureExecutionAuthority(t *
 	row := recurringDueRow{id: "legacy-web-template", workspaceID: workspace, crewID: crew, title: "Legacy", cronExpr: "0 9 * * *", createdBy: sql.NullString{String: user, Valid: true}}
 	dispatcher.fireOne(t.Context(), row)
 	var legacyOrigin string
-	if err := h.db.QueryRow(`SELECT COALESCE(chat_origin_id,'') FROM missions WHERE workspace_id=?`, workspace).Scan(&legacyOrigin); err != nil || legacyOrigin != "" {
+	if err := h.db.QueryRow(`SELECT COALESCE(chat_origin_id,'') FROM missions WHERE workspace_id=?`, workspace).Scan(&legacyOrigin); err != nil || legacyOrigin == "" {
 		t.Fatalf("legacy creator fabricated authority %q %v", legacyOrigin, err)
+	}
+	if _, err := runauthority.ValidateOriginReceipt(t.Context(), h.db, legacyOrigin, workspace); err == nil {
+		t.Fatal("legacy creator inferred a human execution grant")
 	}
 	// Saving an unchanged valid field is an explicit new authenticated admission.
 	req := httptest.NewRequest("PATCH", "/", strings.NewReader(`{"title":"Legacy"}`))
@@ -39,7 +43,7 @@ func TestLegacyRecurringRequiresAuthenticatedSaveForFutureExecutionAuthority(t *
 	execOrFatal(t, h.db, `UPDATE recurring_issues SET next_run='2020-01-02T00:00:00Z' WHERE id=?`, row.id)
 	dispatcher.fireOne(t.Context(), row)
 	var copied string
-	if err := h.db.QueryRow(`SELECT chat_origin_id FROM missions WHERE chat_origin_id IS NOT NULL AND chat_origin_id<>? AND workspace_id=?`, origin, workspace).Scan(&copied); err != nil || copied == "" || copied == origin {
+	if err := h.db.QueryRow(`SELECT chat_origin_id FROM missions WHERE chat_origin_id IS NOT NULL AND chat_origin_id<>? AND chat_origin_id<>? AND workspace_id=?`, origin, legacyOrigin, workspace).Scan(&copied); err != nil || copied == "" || copied == origin {
 		t.Fatalf("future occurrence origin %q %v", copied, err)
 	}
 	occurrence, err := runauthority.ValidateOriginReceipt(t.Context(), h.db, copied, workspace)
@@ -48,7 +52,7 @@ func TestLegacyRecurringRequiresAuthenticatedSaveForFutureExecutionAuthority(t *
 	}
 	// Already created occurrences are not retroactively reauthorized.
 	var unchanged string
-	if err := h.db.QueryRow(`SELECT COALESCE(chat_origin_id,'') FROM missions WHERE chat_origin_id IS NULL AND workspace_id=?`, workspace).Scan(&unchanged); err != nil || unchanged != "" {
+	if err := h.db.QueryRow(`SELECT COALESCE(chat_origin_id,'') FROM missions WHERE chat_origin_id=? AND workspace_id=?`, legacyOrigin, workspace).Scan(&unchanged); err != nil || unchanged != legacyOrigin {
 		t.Fatalf("historical occurrence rebound %q %v", unchanged, err)
 	}
 	execOrFatal(t, h.db, `UPDATE workspace_members SET role='VIEWER' WHERE workspace_id=? AND user_id=?`, workspace, user)
@@ -96,5 +100,51 @@ func TestRecurringStaleTickUsesCurrentAuthenticatedDefinitionAndGrant(t *testing
 	var count int
 	if err := h.db.QueryRow(`SELECT COUNT(*) FROM missions WHERE workspace_id=?`, workspace).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("stale/disabled work executed count%d %v", count, err)
+	}
+}
+
+func TestLegacyRecurringWithoutCreatorCannotBecomeAutonomousAssignment(t *testing.T) {
+	h, _, workspace, crew := newRecurringHandler(t)
+	execOrFatal(t, h.db, `INSERT INTO recurring_issues(id,workspace_id,crew_id,title,cron_expression,enabled,next_run) VALUES('unattributed-template',?,?,'Unknown admission','0 9 * * *',1,'2020-01-01T00:00:00Z')`, workspace, crew)
+	NewRecurringIssueDispatcher(h.db, nil, newTestLogger()).fireOne(t.Context(), recurringDueRow{id: "unattributed-template", workspaceID: workspace})
+	var issueID, originID, agentID, raw, rootRun, chat, trigger string
+	var creator sql.NullString
+	if err := h.db.QueryRow(`SELECT id,chat_origin_id,lead_agent_id,created_by_user_id FROM missions WHERE workspace_id=?`, workspace).Scan(&issueID, &originID, &agentID, &creator); err != nil {
+		t.Fatal(err)
+	}
+	if originID == "" || creator.Valid {
+		t.Fatalf("unverified occurrence origin=%q creator=%+v", originID, creator)
+	}
+	if err := h.db.QueryRow(`SELECT human_authority,root_run_id,chat_id,trigger_message_id FROM execution_origins WHERE id=?`, originID).Scan(&raw, &rootRun, &chat, &trigger); err != nil {
+		t.Fatal(err)
+	}
+	if raw != "{}" || rootRun != "unverified-recurring:"+issueID || chat != "" || trigger != "" {
+		t.Fatalf("fabricated principal: %s %s %s %s", raw, rootRun, chat, trigger)
+	}
+	if _, err := runauthority.ValidateOriginReceipt(t.Context(), h.db, originID, workspace); err == nil {
+		t.Fatal("unknown admission validated")
+	}
+	// Copy the durable origin exactly as the planning/task insertion does.
+	execOrFatal(t, h.db, `INSERT INTO chats(id,workspace_id,agent_id,title) VALUES(?,?,?,'Issue chat')`, issueID, workspace, agentID)
+	execOrFatal(t, h.db, `INSERT INTO assignments(id,workspace_id,chat_id,assigned_by_id,assigned_to_id,task,status,created_at,mission_id,chat_origin_id) SELECT 'unknown-recurring-assignment',workspace_id,id,lead_agent_id,lead_agent_id,'Planning','PENDING',datetime('now'),id,chat_origin_id FROM missions WHERE id=?`, issueID)
+	var copied string
+	if err := h.db.QueryRow(`SELECT chat_origin_id FROM assignments WHERE id='unknown-recurring-assignment'`).Scan(&copied); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]any{"host_admitted": true, "trigger_type": "ASSIGNMENT", "chat_id": issueID, "chat_origin_id": copied})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execOrFatal(t, h.db, `INSERT INTO journal_entries(id,workspace_id,agent_id,trace_id,entry_type,actor_type,summary,payload) VALUES('unknown-recurring-start',?,?,'unknown-recurring-run','run.started','orchestrator','Planning',?)`, workspace, agentID, string(payload))
+	if _, err := runauthority.Resolve(t.Context(), h.db, "unknown-recurring-run", agentID, workspace); err == nil {
+		t.Fatal("unknown recurring assignment classified autonomous")
+	}
+	var enabled, count int
+	var templateOrigin sql.NullString
+	if err := h.db.QueryRow(`SELECT enabled,run_count,chat_origin_id FROM recurring_issues WHERE id='unattributed-template'`).Scan(&enabled, &count, &templateOrigin); err != nil {
+		t.Fatal(err)
+	}
+	if enabled != 1 || count != 1 || templateOrigin.Valid {
+		t.Fatalf("record generation changed: enabled=%d count=%d origin=%+v", enabled, count, templateOrigin)
 	}
 }

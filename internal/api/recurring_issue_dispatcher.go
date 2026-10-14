@@ -311,8 +311,8 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 		return
 	}
 
+	issueOriginID := originID
 	if originID != "" {
-		issueOriginID := originID
 		if sourceOrigin.HumanAuthority.Kind == "web_recurring" {
 			occurrence, deriveErr := runauthority.DeriveWebIssueOrigin(ctx, tx, originID, issueID, row.workspaceID)
 			if deriveErr != nil {
@@ -323,11 +323,21 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 			}
 			issueOriginID = occurrence.ID
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE missions SET chat_origin_id=? WHERE id=? AND workspace_id=?`, issueOriginID, issueID, row.workspaceID); err != nil {
+	} else {
+		// An unknown template admission may generate records, but it must not
+		// become an autonomous grant when legacy creator attribution is absent.
+		// This is deliberately unavailable provenance, not a synthetic human.
+		issueOriginID = generateCUID()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO execution_origins(id,workspace_id,root_run_id,chat_id,trigger_message_id,human_authority,created_at) VALUES(?,?,?,'','','{}',?)`, issueOriginID, row.workspaceID, "unverified-recurring:"+issueID, nowStr); err != nil {
 			_ = tx.Rollback()
 			releaseReservation()
 			return
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE missions SET chat_origin_id=? WHERE id=? AND workspace_id=?`, issueOriginID, issueID, row.workspaceID); err != nil {
+		_ = tx.Rollback()
+		releaseReservation()
+		return
 	}
 
 	// Advance the schedule in the SAME tx as the issue insert, so a crash can't
