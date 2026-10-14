@@ -572,6 +572,14 @@ func (h *InstanceAdminHandler) SetMembership(w http.ResponseWriter, r *http.Requ
 		replyError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
+	if err := administratorAccountEligible(ctx, tx, userID, role); err != nil {
+		if errors.Is(err, errGuestAdministrator) {
+			writeJSON(w, http.StatusConflict, invitationConflict(err))
+		} else {
+			replyInternalError(w, h.logger, "administrator eligibility", err)
+		}
+		return
+	}
 	var current, mode string
 	now := time.Now().UTC().Format(time.RFC3339)
 	created := false
@@ -737,6 +745,14 @@ func (h *InstanceAdminHandler) CreateWorkspace(w http.ResponseWriter, r *http.Re
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if err := administratorAccountEligible(ctx, tx, req.OwnerUserID, "OWNER"); err != nil {
+		if errors.Is(err, errGuestAdministrator) {
+			writeJSON(w, http.StatusConflict, invitationConflict(err))
+		} else {
+			replyInternalError(w, h.logger, "owner eligibility", err)
+		}
+		return
+	}
 	var taken string
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM workspaces WHERE slug = ?`, req.Slug).Scan(&taken); err == nil {
 		replyError(w, http.StatusConflict, "Workspace slug already taken")
@@ -809,6 +825,14 @@ func (h *InstanceAdminHandler) TransferOwnership(w http.ResponseWriter, r *http.
 		return
 	} else if !live {
 		replyError(w, http.StatusNotFound, "workspace not found")
+		return
+	}
+	if err := administratorAccountEligible(ctx, tx, req.UserID, "OWNER"); err != nil {
+		if errors.Is(err, errGuestAdministrator) {
+			writeJSON(w, http.StatusConflict, invitationConflict(err))
+		} else {
+			replyInternalError(w, h.logger, "owner eligibility", err)
+		}
 		return
 	}
 	var role, mode string

@@ -139,7 +139,7 @@ detail accepts an issue ID or identifier, requires project.read and adds its
 description. Neither returns crew/agent references, comments, activity, relations
 or run history. Foreign and revoked details return 404. The shared issue board,
 search, statistics and mutation routes remain closed to Guests. Collection
-`X-Total-Count` counts returned rows; the next-offset header supports pagination.
+`X-Total-Count` counts the filtered total before pagination; the next-offset header supports pagination.
 
 Crews, credentials, routine View/Edit levels, guest issue contribution, explicit
 Page-action selection and a Pages grant migration remain separate work. This
@@ -181,3 +181,5 @@ it does not grant directory discovery. Assign discover and chat for navigable ch
 Installed adapters' static profile declarations constrain navigation. Missing
 runtime installation preserves known declaration authority; unknown profiles
 remain denied. Operational readiness checks stay at execution time.
+
+Guest Page actions retain the Pages ACL checks and additionally require an explicit `routine:run` grant and the routine’s agent grants. Existing `routine.run` capabilities are not backfilled into routine grants.

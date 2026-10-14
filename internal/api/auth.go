@@ -531,6 +531,9 @@ func redeemPendingInvitations(ctx context.Context, tx *sql.Tx, userID, email, to
 		}
 	}
 	for _, inv := range pending {
+		if err := administratorAccountEligible(ctx, tx, userID, inv.role); err != nil {
+			return 0, err
+		}
 		if inv.mode == "restricted" {
 			if err := guestAccountEligible(ctx, tx, userID); err != nil {
 				return 0, err
