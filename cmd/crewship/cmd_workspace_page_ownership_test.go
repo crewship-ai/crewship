@@ -18,6 +18,7 @@ func resetWorkspacePageOwnershipCommand(t *testing.T) {
 }
 
 func TestWorkspacePageOwnershipCLIRequiresReviewedIdentities(t *testing.T) {
+	guardCLIState(t)
 	for _, args := range [][]string{
 		{"transfer", "page"}, {"transfer", "page", "--expected-owner", "old"},
 		{"transfer", "page", "--successor", "new"},
@@ -71,6 +72,7 @@ func TestWorkspacePageOwnershipCLIListsFilteredMetadataAsJSON(t *testing.T) {
 }
 
 func TestWorkspacePageOwnershipCLITransfersExactOwnerAndNeverRetriesConflict(t *testing.T) {
+	guardCLIState(t)
 	for _, status := range []int{200, 409, 403} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			stub := pageStub(t)
