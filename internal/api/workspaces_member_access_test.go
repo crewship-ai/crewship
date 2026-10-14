@@ -124,6 +124,20 @@ func TestMemberAccessPolicyAuthenticatedRoutes(t *testing.T) {
 		t.Fatalf("effective=%+v %v", effective, err)
 	}
 	request("policy-user", "GET", path+"/effective", "", 404)
+	ownPath := "/api/v1/workspaces/" + workspace + "/access/me"
+	own := request("policy-user", "GET", ownPath+"?user_id="+owner+"&member_id=forged", "", 200)
+	var ownEffective memberEffectiveAccess
+	if err = json.Unmarshal(own.Body.Bytes(), &ownEffective); err != nil || ownEffective.ID != "policy-member" || len(ownEffective.Decisions) != 1 || ownEffective.Decisions[0].ID != "policy-agent" || ownEffective.Decisions[0].Name != "A" {
+		t.Fatalf("own access=%+v err=%v", ownEffective, err)
+	}
+	if own.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("own policy must not be cached by intermediaries")
+	}
+	ownerAccess := request(owner, "GET", ownPath, "", 200)
+	if err = json.Unmarshal(ownerAccess.Body.Bytes(), &ownEffective); err != nil || ownEffective.ID == "policy-member" || len(ownEffective.Decisions) != 0 {
+		t.Fatalf("owner received guest policy: %+v %v", ownEffective, err)
+	}
+	request("policy-user", "GET", "/api/v1/workspaces/foreign/access/me?workspace_id="+workspace, "", 404)
 	for _, bad := range []string{
 		`{"membership_id":"policy-member","revision":2,"mode":"restricted"}`,
 		`{"membership_id":"policy-member","revision":2,"mode":"restricted","rights":null}`,
@@ -135,6 +149,10 @@ func TestMemberAccessPolicyAuthenticatedRoutes(t *testing.T) {
 	p.Rights = []access.Right{}
 	body, _ = json.Marshal(p)
 	request(owner, "PUT", path, string(body), 200)
+	own = request("policy-user", "GET", ownPath, "", 200)
+	if err = json.Unmarshal(own.Body.Bytes(), &ownEffective); err != nil || len(ownEffective.Decisions) != 0 {
+		t.Fatalf("revoked grants still explained: %+v %v", ownEffective, err)
+	}
 	if err = (access.Store{DB: db}).Check(t.Context(), "policy-user", workspace, access.Right{Kind: "agent", ID: "policy-agent", Operation: "chat"}); err == nil {
 		t.Fatal("empty policy did not revoke grant")
 	}

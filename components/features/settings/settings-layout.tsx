@@ -11,6 +11,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode, useRestrictedSurfaces } from "@/hooks/use-access-mode"
+import { OwnAccessCard } from "@/components/features/settings/own-access"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { apiFetch } from "@/lib/api-fetch"
 import { SubBar } from "@/components/layout/sub-bar"
@@ -160,6 +161,7 @@ function RestrictedAccountSettings() {
           ignored here — /settings?tab=sessions from the user menu lands on
           this same page, which already shows sessions. */}
       <div className="space-y-5">
+        <OwnAccessCard />
         <ProfileSection restricted userName={session?.user?.name} userEmail={session?.user?.email} />
         <SessionsSection
           restricted
