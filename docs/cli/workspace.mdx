@@ -501,22 +501,42 @@ human workspace `ADMIN` or `OWNER` may list or transfer these outputs. The list
 contains Artifact and Board metadata and eligible human successors who already
 have current read access; it does not include HTML source or Board scenes.
 
+### `workspace page-ownership list`
+
 ```bash
 crewship workspace page-ownership list --owner departing-user-id --format json
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--owner <user-id>` | (all owners) | Filter by the current owner's user ID. |
+| `--limit <number>` | `25` | Maximum outputs per response, from `1` to `100`. |
+| `--cursor <token>` | (first page) | Opaque `next_cursor` returned by the preceding response. |
+
+Follow `next_cursor` until it is absent to review every owned output. Keep the
+same workspace and owner filter while following a cursor; changing either starts
+a new list without a cursor. Studio provides **Load more outputs** for the same
+bounded traversal.
+
+The JSON envelope is `{ "pages": [...], "next_cursor": "..." }`; the cursor is
+omitted at the end. Each page includes `id`, `slug`, `name`, `type`,
+`owner_user_id`, `owner_name` and `eligible_successors` (`user_id`, `name`,
+`email`).
+
+### `workspace page-ownership transfer`
+
+```bash
 crewship workspace page-ownership transfer page-id \
   --expected-owner departing-user-id --successor existing-reader-id --format json
 ```
 
-`list` accepts the optional `--owner <user-id>` filter, `--limit <1–100>`
-(default 25), and `--cursor <token>` returned by the preceding response. Follow
-`next_cursor` until it is absent to review every owned output. Keep the same
-workspace and owner filter while following a cursor; changing either starts a
-new list without a cursor. Studio provides **Load more outputs** for the same
-bounded traversal. Its JSON envelope is
-`{ "pages": [...], "next_cursor": "..." }` (the cursor is omitted at the end); each page includes `id`, `slug`, `name`, `type`,
-`owner_user_id`, `owner_name` and `eligible_successors` (`user_id`, `name`,
-`email`). `transfer` requires the Page ID and both explicit user IDs and returns
-the transferred page summary.
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--expected-owner <user-id>` | (required) | Reviewed current owner. A changed owner causes a conflict. |
+| `--successor <user-id>` | (required) | Eligible successor returned by `list`, with current read access. |
+
+The positional Page ID and both explicit user IDs are required. The command
+returns the transferred page summary.
 
 **Privacy consequence:** transfer takes effect immediately and gives the new
 owner control of the private output and its retained history. Content and history
