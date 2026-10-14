@@ -24,10 +24,11 @@ func setupCovMemoryServer(t *testing.T, ipc *IPCConfig) *Server {
 		Logger: covLogger(),
 		IPC:    ipc,
 		Memory: &MemoryConfig{
-			Enabled:        true,
-			BasePath:       agentDir,
-			AgentRole:      "lead",
-			CrewMemoryPath: crewDir,
+			Enabled:            true,
+			BasePath:           agentDir,
+			TrustedStorageRoot: filepath.Dir(t.TempDir()),
+			AgentRole:          "lead",
+			CrewMemoryPath:     crewDir,
 		},
 	})
 	if srv.memoryEngine == nil || srv.crewMemoryEngine == nil {

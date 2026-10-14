@@ -103,7 +103,7 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		data, err := readRegularNoFollow(fpath)
+		data, err := ReadFileNoFollowRoot(e.indexStorageRoot(), fpath)
 		if err != nil {
 			// O_NOFOLLOW returns ELOOP (or "too many levels of
 			// symbolic links") if the agent raced us between Walk and
@@ -213,7 +213,7 @@ func (e *Engine) ReindexPath(ctx context.Context, relPath string) (int, error) {
 		fileKey = filepath.Base(fpath)
 	}
 
-	data, readErr := readRegularNoFollow(fpath)
+	data, readErr := ReadFileNoFollowRoot(e.indexStorageRoot(), fpath)
 	if readErr != nil {
 		// File is gone / unreadable / a symlink we refuse to follow. Drop any
 		// chunks it had and forget its hash so a later recreate re-indexes it.
@@ -335,4 +335,11 @@ func readRegularNoFollow(path string) ([]byte, error) {
 		return nil, fmt.Errorf("not a regular file: %s", path)
 	}
 	return io.ReadAll(f)
+}
+
+func (e *Engine) indexStorageRoot() string {
+	if e.config.StorageRoot != "" {
+		return e.config.StorageRoot
+	}
+	return e.basePath
 }
