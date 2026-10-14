@@ -5,7 +5,16 @@ import (
 	"github.com/crewship-ai/crewship/internal/tsformat"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/pages"
 )
+
+func seedStorageBoardPin(t *testing.T, h *PageHandler, ws, user, source string, revision int) {
+	t.Helper()
+	execOrFatal(t, h.db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('storage-board',?,'storage-board','Storage board',?,'{}')`, ws, user)
+	execOrFatal(t, h.db, `INSERT INTO page_boards(page_id,seq,format) VALUES('storage-board',1,?)`, pages.BoardFormat)
+	execOrFatal(t, h.db, `INSERT INTO page_board_artifact_placements(id,board_page_id,source_page_id,source_revision,x,y,width,height,updated_seq,author_user_id) VALUES('storage-placement','storage-board',?,?,0,0,300,200,1,?)`, source, revision, user)
+}
 
 func TestBoardArtifactPinProtectsRevisionUntilBoardDeleted(t *testing.T) {
 	testBoardStoredPinRetention(t, "fixed")

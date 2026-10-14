@@ -15,6 +15,7 @@
 /api/v1/system/setup-status                        public browser setup/signup discovery; CLI seed authenticates its explicit target and does not alter signup policy
 /api/v1/oauth/callback                             provider redirect target; the browser lands here, `crewship oauth` only names it
 /api/v1/pages/runtime/bootstrap                    serves the page-runtime iframe HTML (#2472)
+/api/v1/pages/runtime/board-converter              constant public iframe bootstrap for the isolated browser Mermaid converter; job creation and insertion have CLI commands
 /api/v1/public/pages/{token}                       anonymous share-link viewer, authenticated by the URL token
 /api/v1/public/pages/{token}/unlock                anonymous share-link viewer, password step
 /api/v1/waitpoint-tokens/{token}                   one-click approve/reject link sent by notifications; `crewship routine waitpoints` covers the authenticated path

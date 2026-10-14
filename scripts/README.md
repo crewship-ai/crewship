@@ -36,6 +36,8 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 | [build-stamp.sh](build-stamp.sh) | Reads Git identity correctly in worktrees; supplies build metadata |
 | [embed-web-out.sh](embed-web-out.sh) | Stages/verifies the static export in `web/out/`; preserves the placeholder |
 | [prepare-pdf-assets.mjs](prepare-pdf-assets.mjs) | Prepares browser PDF assets; invoked by frontend dev/build commands |
+| [prepare-board-assets.mjs](prepare-board-assets.mjs) | Copies pinned Excalidraw fonts and license notices for Board fixtures; `--production` prepares local assets for dev/build |
+| [prepare-board-converter.mjs](prepare-board-converter.mjs) | Builds the pinned Mermaid converter into a local browser IIFE; called by Board asset preparation for fixtures and production. Generated `public/board-converter/runner.js` is ignored; production needs no Node process. |
 | [gen-avatar-fixtures.mjs](gen-avatar-fixtures.mjs) | Regenerates avatar validator test fixtures |
 | [generate-team-avatars.mjs](generate-team-avatars.mjs) | Generates demo team portraits; distinct from validator fixtures |
 | [gen-notices.sh](gen-notices.sh) | Regenerates third-party notices from Go dependencies; invoked by `make notices` |

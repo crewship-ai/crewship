@@ -24,7 +24,7 @@ func lifecycleFixture(t *testing.T, kind string) (*PageHandler, string, string, 
 		h, workspace, user, _ = requestFixture(t)
 		id = createArtifactRequestForTest(t, h, workspace, user, requestBody, 202)
 	} else {
-		t.Fatal("unsupported test request kind")
+		h, workspace, user, _, _, id = boardJobFixture(t)
 	}
 	execOrFatal(t, h.db, `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) SELECT 'lifecycle-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
 	execOrFatal(t, h.db, `INSERT INTO journal_entries(id,workspace_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('lifecycle-start',?,'artifact-agent','run.started','system','fixture','lifecycle-run')`, workspace)
@@ -40,7 +40,7 @@ func lifecycleBindDuringDispatch(t *testing.T, h *PageHandler, kind, id string, 
 		if kind == "artifact" {
 			err = bindArtifactRequestRun(req, h.db, id, "lifecycle-run", opts.HumanAuthority)
 		} else {
-			t.Fatal("unsupported test request kind")
+			err = bindBoardRequestRun(req, h.db, id, "lifecycle-run", opts.HumanAuthority)
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -59,7 +59,7 @@ func lifecycleBindDuringDispatch(t *testing.T, h *PageHandler, kind, id string, 
 	if kind == "artifact" {
 		h.dispatchNextArtifactRequest(t.Context())
 	} else {
-		t.Fatal("unsupported test request kind")
+		h.dispatchNextBoardRequest(t.Context())
 	}
 }
 
@@ -76,7 +76,7 @@ func lifecycleJobState(t *testing.T, h *PageHandler, kind, id, want string) page
 }
 
 func TestPageRequestLifecycleObserverLossAndRestartPreserveBoundRun(t *testing.T) {
-	for _, kind := range []string{"artifact"} {
+	for _, kind := range []string{"artifact", "board"} {
 		for _, returned := range []error{nil, fmt.Errorf("observer: %w", orchestrator.ErrHostCaptureUnconfirmed)} {
 			t.Run(fmt.Sprintf("%s/%v", kind, returned), func(t *testing.T) {
 				h, _, _, id, _ := lifecycleFixture(t, kind)
@@ -105,7 +105,7 @@ func TestPageRequestLifecycleObserverLossAndRestartPreserveBoundRun(t *testing.T
 }
 
 func TestPageRequestLifecycleConfirmedTerminalNeverInventsResult(t *testing.T) {
-	for _, kind := range []string{"artifact"} {
+	for _, kind := range []string{"artifact", "board"} {
 		for _, event := range []string{"run.completed", "run.failed", "run.cancelled", "run.timeout"} {
 			t.Run(kind+"/"+event, func(t *testing.T) {
 				h, workspace, _, id, _ := lifecycleFixture(t, kind)
@@ -139,7 +139,7 @@ func TestPageRequestLifecycleIgnoresHistoricalObserverFailure(t *testing.T) {
 }
 
 func TestPageRequestLifecycleDeadlineOnlySettlesJobAndPublicationIsFenced(t *testing.T) {
-	for _, kind := range []string{"artifact"} {
+	for _, kind := range []string{"artifact", "board"} {
 		t.Run(kind, func(t *testing.T) {
 			h, workspace, _, id, token := lifecycleFixture(t, kind)
 			lifecycleBindDuringDispatch(t, h, kind, id, nil)
@@ -150,6 +150,8 @@ func TestPageRequestLifecycleDeadlineOnlySettlesJobAndPublicationIsFenced(t *tes
 			if kind == "artifact" {
 				body := fmt.Sprintf(`{"html":"<h1>Too late</h1>","base_rev":1,"mutation_id":"late","request_id":%q}`, id)
 				artifactExpect(t, artifactAgentSave(t, h, workspace, token, body), 403)
+			} else {
+				artifactExpect(t, boardJobAgentCall(t, h, workspace, token, id, `{"source":"flowchart TD\nA[Late]","mutation_id":"late","dialect":"flowchart-v1","converter_version":"2.2.2"}`, h.PublishBoardRequestMermaid), 403)
 			}
 			lifecycleJobState(t, h, kind, id, "running")
 			if err := h.settlePageRequest(t.Context(), kind, id, "", time.Now()); err != nil {
@@ -227,6 +229,21 @@ func TestPageRequestLifecycleWorkEvidenceIsTypedScopedAndDeadlineBounded(t *test
 			lifecycleJobState(t, h, "artifact", id, "failed")
 		})
 	}
+}
+
+func TestPageRequestLifecycleExpiredBoardCreationCannotCommit(t *testing.T) {
+	h, workspace, _, id, token := lifecycleFixture(t, "board")
+	// Exercise the existing job-scoped capability path; selection validation is
+	// covered by CreateBoardRequest tests, independently of this expiry fence.
+	execOrFatal(t, h.db, `UPDATE page_board_requests SET kind='artifact' WHERE id=?`, id)
+	lifecycleBindDuringDispatch(t, h, "board", id, nil)
+	execOrFatal(t, h.db, `UPDATE page_board_requests SET deadline_at=? WHERE id=?`, tsformat.Format(time.Now().Add(-time.Second)), id)
+	artifactExpect(t, artifactCreateAgent(t, h, workspace, token, creationBody), 403)
+	var n int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM pages WHERE slug='agent-created'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("expired job created artifact: %d %v", n, err)
+	}
+	lifecycleJobState(t, h, "board", id, "running")
 }
 
 func TestPageRequestLifecycleBadEvidenceDoesNotStarveOtherJobs(t *testing.T) {

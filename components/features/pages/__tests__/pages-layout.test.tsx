@@ -158,7 +158,7 @@ describe("PagesLayout", () => {
     renderLayout([])
     expect(screen.getAllByRole("button", {name:/^New page$/}).length).toBeGreaterThan(0)
     expect(screen.getAllByRole("button", {name:/^Import$/}).length).toBeGreaterThan(0)
-    expect(screen.queryByRole("button", {name:/^New board$/})).toBeNull()
+    expect(screen.getByRole("button", {name:/^New board$/})).toBeTruthy()
     expect(screen.getByRole("button", {name:/^New artifact$/})).toBeTruthy()
   })
   it("preserves an explicit VIEWER page.create grant", () => {
@@ -166,7 +166,7 @@ describe("PagesLayout", () => {
     renderLayout([])
     expect(screen.getAllByRole("button", {name:/^New page$/}).length).toBeGreaterThan(0)
     expect(screen.getAllByRole("button", {name:/^Import$/}).length).toBeGreaterThan(0)
-    expect(screen.queryByRole("button", {name:/^New board$/})).toBeNull()
+    expect(screen.getByRole("button", {name:/^New board$/})).toBeTruthy()
     expect(screen.getByRole("button", {name:/^New artifact$/})).toBeTruthy()
   })
 

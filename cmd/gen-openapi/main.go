@@ -597,8 +597,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range hookSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
-	result["GET /api/v1/page-request-results/{kind}/{requestId}"] = pageRequestResultSchema()
 	for key, schema := range pagesSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range boardSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, name := range executionResponseSchemas() {

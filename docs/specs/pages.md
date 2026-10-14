@@ -9,28 +9,157 @@ that every feature shipped. The current custom-application contract is
 Internal research, work allocation and session evidence are maintained in
 [private context](../development/private-context.md).
 
-## Delivery boundary
+## Boards: drawings, discussion and scoped agent work
 
-This delivery exposes HTML artifacts, comments and agent requests. Board editors,
-Board HTTP/CLI/MCP operations and Board job admission are delivered separately.
-The immutable migration chain includes dormant Board tables because later
-Artifact migrations depend on them. Existing Board blobs, pins, history and
-backups remain protected; they do not expose a drawing editor or authorize a
-Board job in this version. Interactive artifact execution remains disabled.
+**New board** opens a client-loaded Excalidraw 0.18.1 editor inside Pages.
+A Board belongs to a human and is mutually exclusive with panels, Apps and
+artifact source. Shapes, arrows, freehand, text, frames, private PNG/JPEG images
+and a local library of original Crewship drawings are supported. Arbitrary
+embeds, external links and imported scenes are excluded. Scripted artifact
+previews remain disabled pending the separate runtime acceptance gate.
+
+The authenticated Board API is `/api/v1/pages/{slug}/board`: GET reads the
+snapshot; POST initializes an empty Page with `mutation_id`. `POST /batches`
+commits drawing and pin changes atomically. `POST /placements` pins an exact
+artifact revision; DELETE removes a pin. Writes require current Page write,
+workspace membership, a stable mutation identity and `base_seq`. Per-element
+and per-placement server revisions are authoritative; Excalidraw client
+versions never authorize overwriting another writer.
+
+The reader accepts the persisted `crewship-board-excalidraw-0.18.1-v1` profile.
+An unknown profile fails without migration or writeback. If discovered during
+refresh, the last supported cached scene remains read-only and mutations are
+blocked. Compatibility tests cover the pinned browser scene, bindings, server
+revisions and serialized undo receipts; they do not substitute for testing an
+actual dependency upgrade and rollback.
+
+Saving is explicit. Disjoint remote changes merge when the editor is idle;
+overlapping graph changes preserve the draft for review. An uncertain save
+must be retried with its original identity before rebasing. Local native undo
+covers unsaved changes. **Undo last saved change** submits a new conditional
+batch for the user's saved command and refuses if connected content changed.
+Remote edits never become local undo commands. Retained pin tombstones allow
+conditional restore without reusing a stale pin identity; restored sources
+still require independent access.
+
+Pins default to an exact revision. An explicit `placement_modes` batch switches
+between `fixed` and `follow_latest` with the observed placement revision, Board
+sequence, stable mutation ID and retained `source_revision` baseline. In follow
+mode, an authorized read resolves the current artifact head without pretending
+the Board geometry changed. The response distinguishes effective `revision` from
+`pinned_revision`. Jobs freeze the effective revision at admission; changes made
+later do not silently update their input. Switching back to fixed pins the
+explicitly selected retained revision. Saved undo restores the prior mode and
+baseline under the same conditional-write rules.
+
+A pin grants no access to its source: its title, slug, revision and bytes
+require both Board and artifact read access. Otherwise it remains an anonymous
+geometry placeholder that editors may move or remove. Exact pinned revisions
+are retained. Workspace backup includes Board content, images, pins and
+comment history and reactions, remaps typed identities on fork and restores no
+live agent authority. Historical discussion authors are included even after
+membership removal; this does not include discussions from other workspaces.
+
+Image uploads are bounded PNG/JPEG rasters, fully decoded and re-encoded into
+private content-addressed storage. Scenes persist opaque Board file IDs;
+base64 image data exists only in the viewer's transient editor state. Reads
+recheck Board ACL and stored digest, MIME and dimensions, including restored
+files. Board limits include 100 files/50 MiB; workspace limits include 1,000
+files/500 MiB. Upload retries keep their original sequence and mutation ID.
+
+Board threads accept a whole-Board anchor or a saved drawing ID with exact
+Board sequence and element revision. The server captures immutable geometry
+without source titles, text, file IDs or hidden pin metadata. Deleted or moved
+elements do not reanchor discussions. Commenters may create/reply; editors
+may resolve. Posting text never dispatches or authorizes an agent. Retry
+receipts are scoped to the human and Board, and thread replies use a version
+precondition. The UI retains a draft across conflicts and hides it on denied
+access.
+
+Human authors with current comment access may edit or tombstone their own
+comments and read their immutable private history. Other commenters may react
+with the supported emoji set; neither reactions nor history grant edit or agent
+authority. Edits, deletion and reactions use the observed thread version and a
+stable mutation ID. A deleted comment keeps its place in the thread but exposes
+no body or reactions. History is bounded to 50 versions per comment, reserving
+the last slot for deletion; the existing Board discussion rate and receipt
+limits apply to all these mutations. New revisions or moved drawings never
+rewrite the original comment anchor.
+
+Agent access is explicit: a live trusted human-initiated run needs its own
+credential, an agent Page write grant, and a human delegation to that run.
+Crew grants do not transfer. The sidecar exposes `GET /boards/{slug}` and
+`POST /boards/{slug}/batches`; default scope is **own-elements**. A human edit
+removes ordinary agent ownership. Graph checks protect other people's elements
+against indirect changes through groups, bindings and frames.
+
+**Agent editing permissions** lets a human editor authorize one batch against
+selected human drawings and exact server revisions, for a stated purpose,
+methods and bounded expiry. The UI chooses from server-verified running agents,
+not a manually entered run ID. A separate Page grant is still required. The
+agent's authenticated Board GET includes only its current eligible
+`element_permissions`; a batch must name `element_permission_id`. Permission
+use and the batch commit are atomic. Retrying the same mutation returns the
+same receipt; later use, stale versions, revocation or lost issuer authority
+cannot modify the drawings. Human ownership stays protected after the agent's
+change. Runtime permission tables are excluded from backup restoration.
+
+Board generation requests capture an immutable authorized selection and a
+private chat. They authorize that job's source/result operations, not general
+Board access. Mermaid results wait in `ready_to_insert` for human confirmation;
+conversion uses the pinned package in an opaque, separately hosted converter
+with a bounded MessagePort. The program receives no platform credentials.
+Missing separate-site configuration or an unsupported browser disables local
+conversion without losing the prepared result. Wireframe jobs create one
+private artifact; pinning requires current Board authority and a matching
+sequence, otherwise the result remains available without a pin. Deleting a
+Board does not delete its already authorized output job or private artifact.
+Automatic pin placement searches at most 20 positions, avoiding existing pins
+and conservative rotated drawing bounds, including freehand points. An occupied
+or unreadable target leaves the private result unpinned without changing drawings.
+Diagram requests expose their saved Mermaid source through an explicit private
+read. The UI renders it as escaped text and reports changes since insertion;
+changing the Board invalidates that assessment until refreshed. This source is
+not a reconstruction of later manual edits or proof of server-verified conversion.
+
+Current scene bounds are 500 live elements, 1,000 retained element IDs,
+100 pins, 500 operations/batch, 2 MiB scene/request, 200 Board writes/hour,
+two concurrent write decoders and a 24-hour replay/undo history window.
+Successful writes compact expired receipts and deletion tombstones; reads never
+change a scene. New or recreated drawing IDs receive a revision based on the
+monotonic Board sequence, so old permissions and undo cannot match a reused ID.
+Mutation receipts supply exact revision maps and the original undo deadline.
+Recent deletion history may temporarily fill the retained-ID bound; a structured
+`history_capacity` response reports its earliest expiry instead of removing live
+content. Minimal actor/run, digest, sequence and timestamp audit metadata remains
+for the Board's lifetime and survives backup; old mutation IDs cannot be reused
+after replay content expires. This ledger is separate from the journal and
+contains no drawing contents. An automatic save loop would conflict with the
+explicit hourly quota and is not enabled.
+
+Fonts, notices and the generated converter program are hosted locally.
+[Browser regressions](../../e2e/README.md) test actual editor integration,
+image placement, conflict preservation, local library output and source ACL
+redaction. SVG/PNG selection previews must label embedded artifact placeholders;
+they are never described as screenshots of cross-origin iframe content.
 
 ## Private content presence
 
-Authenticated humans subscribe to dedicated `artifact:{page_id}` WebSocket rooms. The ordinary `page:` channel still carries
+Authenticated humans subscribe to dedicated `artifact:{page_id}` or
+`board:{page_id}` WebSocket rooms. The ordinary `page:` channel still carries
 identifiers only. A central Page resolver checks current workspace membership,
 Page type and live read grants at subscription and before every delivered
 frame; the existing reauthorization sweep removes revoked subscriptions within
 30 seconds. An agent context cannot mint a human WebSocket ticket.
 
-Clients send `presence` with `schema_version: 1` and the artifact `revision`.
-The server supplies connection/user identities and emits bounded
-`presence.snapshot` lists; client identity fields, content and arbitrary payload
-keys are rejected. Artifact presence shows viewers and their revision, without
-claiming cursor access inside a sandboxed iframe.
+Clients send `presence` with `schema_version: 1` and either an artifact
+`revision` or a `board_seq`. Optional cursor coordinates are explicitly in the
+Board scene or an artifact viewport. The server supplies connection/user
+identities and emits bounded `presence.snapshot` lists; client identity fields,
+content and arbitrary payload keys are rejected. The UI only renders Board
+cursors at the same saved sequence and clears disconnected/stale presence.
+Artifact presence currently shows viewers and their revision, without claiming
+cursor access inside a sandboxed iframe.
 
 Presence is ephemeral process memory: heartbeat every 5 seconds, expiry after
 15 seconds, at most 64 room members, four connections per user/room, eight

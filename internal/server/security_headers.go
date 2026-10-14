@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/pagebuild"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
 
@@ -85,6 +86,13 @@ func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) h
 			// <img>, <script>, <iframe> targeting our UI/API). Pairs
 			// with frame-ancestors 'none' in strict CSP + COOP above.
 			w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+			// The constant converter program is public build output. An opaque
+			// sandbox has no same-origin relationship even to its own script URL.
+			// This exact resource exception never applies to APIs or user data.
+			if path == pagebuild.BoardConverterScriptPath {
+				w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			}
 		}
 
 		switch {

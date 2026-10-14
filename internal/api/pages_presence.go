@@ -9,7 +9,7 @@ import (
 // CanReadPageContent is the live human ACL for dedicated private WS rooms.
 // The WS transport derives userID from its authenticated ticket, never payload.
 func (h *PageHandler) CanReadPageContent(ctx context.Context, userID, kind, pageID string) (bool, error) {
-	if userID == "" || kind != "artifact" {
+	if userID == "" || (kind != "artifact" && kind != "board") {
 		return false, nil
 	}
 	tx, err := h.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})

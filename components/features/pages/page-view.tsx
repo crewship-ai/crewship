@@ -69,6 +69,7 @@
  */
 
 import * as React from "react"
+import { PageBoardView } from "./page-board-view"
 import { PageArtifactView } from "./page-artifact"
 import Link from "next/link"
 import { refHref, refLabel } from "@/lib/entity-refs"
@@ -529,7 +530,7 @@ function PageBody({
         )}
       </div>
 
-      {page.hasBoard ? <p className="p-6 text-sm text-muted-foreground">This drawing is unavailable in this version.</p> : workspaceId && (page.hasArtifact || page.artifactEligible) ? <PageArtifactView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} pageId={page.id} onDirtyChange={onArtifactDirtyChange} /> : panels.length === 0 ? (
+      {workspaceId && page.hasBoard ? <PageBoardView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} pageId={page.id} onDirtyChange={onArtifactDirtyChange} /> : workspaceId && (page.hasArtifact || page.artifactEligible) ? <PageArtifactView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} pageId={page.id} onDirtyChange={onArtifactDirtyChange} /> : panels.length === 0 ? (
         <EmptyState
           icon={CONCEPT_ICON.pages}
           title="This page declares no panels"
