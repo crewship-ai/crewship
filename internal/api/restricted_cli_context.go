@@ -56,7 +56,7 @@ func (r *Router) createRestrictedCLIContext(w http.ResponseWriter, req *http.Req
  SELECT ?,a.workspace_id,a.id,wm.user_id,'private','CLI' FROM agents a
  JOIN workspace_members wm ON wm.workspace_id=a.workspace_id AND wm.user_id=? AND wm.access_mode='restricted'
  JOIN workspaces w ON w.id=a.workspace_id AND w.deleted_at IS NULL
- JOIN access_grants g ON g.member_id=wm.id AND g.resource_kind='agent' AND g.agent_id=a.id AND g.operation='run'
+ JOIN live_access_grants g ON g.member_id=wm.id AND g.resource_kind='agent' AND g.agent_id=a.id AND g.operation='run'
  WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL`, id, user.ID, agent, workspace)
 	if err != nil {
 		replyError(w, http.StatusServiceUnavailable, "execution unavailable")

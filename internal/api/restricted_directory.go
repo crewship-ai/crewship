@@ -26,7 +26,7 @@ func restrictedDirectory(db *sql.DB, w http.ResponseWriter, r *http.Request) boo
 	}
 	workspace := WorkspaceIDFromContext(r.Context())
 	id := r.PathValue("agentId")
-	rows, err := db.QueryContext(r.Context(), `SELECT a.id,a.name,a.slug,a.agent_role,EXISTS(SELECT 1 FROM access_grants cg WHERE cg.member_id=wm.id AND cg.agent_id=a.id AND cg.resource_kind='agent' AND cg.operation='chat') FROM agents a JOIN workspace_members wm ON wm.workspace_id=a.workspace_id AND wm.user_id=? JOIN access_grants g ON g.member_id=wm.id AND g.resource_kind='agent' AND g.agent_id=a.id AND g.operation='discover' WHERE a.workspace_id=? AND a.deleted_at IS NULL AND (?='' OR a.id=?) AND (?='' OR a.name LIKE ? OR a.slug LIKE ?) ORDER BY a.slug LIMIT 500`, user.ID, workspace, id, id, r.URL.Query().Get("search"), "%"+r.URL.Query().Get("search")+"%", "%"+r.URL.Query().Get("search")+"%")
+	rows, err := db.QueryContext(r.Context(), `SELECT a.id,a.name,a.slug,a.agent_role,EXISTS(SELECT 1 FROM live_access_grants cg WHERE cg.member_id=wm.id AND cg.agent_id=a.id AND cg.resource_kind='agent' AND cg.operation='chat') FROM agents a JOIN workspace_members wm ON wm.workspace_id=a.workspace_id AND wm.user_id=? JOIN live_access_grants g ON g.member_id=wm.id AND g.resource_kind='agent' AND g.agent_id=a.id AND g.operation='discover' WHERE a.workspace_id=? AND a.deleted_at IS NULL AND (?='' OR a.id=?) AND (?='' OR a.name LIKE ? OR a.slug LIKE ?) ORDER BY a.slug LIMIT 500`, user.ID, workspace, id, id, r.URL.Query().Get("search"), "%"+r.URL.Query().Get("search")+"%", "%"+r.URL.Query().Get("search")+"%")
 	if err != nil {
 		replyError(w, http.StatusInternalServerError, "directory unavailable")
 		return true

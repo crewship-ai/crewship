@@ -53,7 +53,7 @@ func (s *Service) authorizedCatalog(ctx context.Context, user, workspace string,
 		return nil, ErrDenied
 	}
 
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id,p.slug,p.name FROM pipelines p JOIN access_grants g ON g.routine_id=p.id AND g.resource_kind='routine' AND g.operation='run' AND g.member_id=? WHERE p.workspace_id=? AND p.status='active' AND p.deleted_at IS NULL ORDER BY p.slug`, member.ID, workspace)
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id,p.slug,p.name FROM pipelines p JOIN live_access_grants g ON g.routine_id=p.id AND g.resource_kind='routine' AND g.operation='run' AND g.member_id=? WHERE p.workspace_id=? AND p.status='active' AND p.deleted_at IS NULL ORDER BY p.slug`, member.ID, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func HasAnyWorkflowRunAuthority(ctx context.Context, db *sql.DB, user, workspace
 	}
 	eligible := false
 	if member.Mode == "restricted" && manualPolicy(ctx, db, user, workspace) == nil {
-		err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM access_grants g JOIN agents a ON a.id=g.agent_id WHERE g.member_id=? AND g.resource_kind='agent' AND g.operation='run' AND a.workspace_id=? AND a.deleted_at IS NULL)`, member.ID, workspace).Scan(&eligible)
+		err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM live_access_grants g JOIN agents a ON a.id=g.agent_id WHERE g.member_id=? AND g.resource_kind='agent' AND g.operation='run' AND a.workspace_id=? AND a.deleted_at IS NULL)`, member.ID, workspace).Scan(&eligible)
 		if err != nil {
 			return false, err
 		}

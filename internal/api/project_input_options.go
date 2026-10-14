@@ -42,7 +42,7 @@ func (r *Router) projectInputOptions(w http.ResponseWriter, req *http.Request) {
  FROM project_file_versions v JOIN project_files f ON f.head_version_id=v.id AND f.id=v.file_id AND f.project_id=v.project_id AND f.workspace_id=v.workspace_id
  JOIN project_file_blobs b ON b.version_id=v.id AND b.workspace_id=v.workspace_id AND b.project_id=v.project_id
  JOIN projects p ON p.id=v.project_id AND p.workspace_id=v.workspace_id
- JOIN access_grants g ON g.member_id=? AND g.resource_kind='project' AND g.project_id=p.id AND g.operation='read'
+ JOIN live_access_grants g ON g.member_id=? AND g.resource_kind='project' AND g.project_id=p.id AND g.operation='read'
  WHERE v.workspace_id=? AND v.retired_at IS NULL AND f.retired_at IS NULL
  AND (?='' OR instr(lower(v.name),lower(?))>0 OR instr(lower(p.name),lower(?))>0)
  ORDER BY p.name,v.name,v.id LIMIT 101`, member.ID, workspace, search, search, search)
