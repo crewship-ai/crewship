@@ -1,0 +1,61 @@
+---
+title: "Share"
+description: "Share individual routines and projects with existing Guest members."
+icon: "share-nodes"
+stability: experimental
+tag: Experimental
+---
+
+# crewship share
+
+
+## `share <routine|project> <resource-id>`
+
+Trusted workspace OWNER/ADMIN members can change individual Guest shares from
+an object's side. These commands take a **resource ID**, not a slug; `--with`
+accepts an existing membership ID, user ID or exact email. They never invite
+someone or change their account mode. Trusted members keep role-based access.
+
+```bash
+crewship share routine ROUTINE_ID --with client@example.com --operation run
+crewship share project PROJECT_ID --with MEMBER_ID --operation list,read
+crewship share list routine ROUTINE_ID
+crewship --format json share list project PROJECT_ID
+crewship unshare routine ROUTINE_ID --with MEMBER_ID --operation run
+crewship unshare project PROJECT_ID --with MEMBER_ID --operation read
+# Deliberately move the selected share's authority to the current administrator:
+crewship share routine ROUTINE_ID --with MEMBER_ID --operation run --reissue
+```
+
+Supported commands are `share <routine|project> <resource-id>`,
+`share list <routine|project> <resource-id>` and
+`unshare <routine|project> <resource-id>`. `share` and `unshare` require `--with`
+and `--operation`; operations are repeatable or comma-separated. Routine
+operations currently support `run`; project operations support independent
+`list` and `read`. Routine Run also requires all agent grants and a qualified
+installed runtime. View/Edit and Contribute/Manage are not implemented here.
+
+Each mutation reads the selected member's current snapshot once and submits
+its membership ID and revision. Other objects, operations and unchanged
+issuers are preserved. Inactive rights stay inactive unless `share --reissue`
+explicitly names them. A 409 is returned to the caller without refresh or
+retry; inspect the current shares and run the intended change again.
+`share list` returns only explicit shares for the selected object, including
+issuer and active/inactive state; trusted role-based access is not enumerated.
+An unreadable roster or policy fails the command instead of printing an empty
+list. Use `workspace member access get` for a complete member policy.
+
+### Flags
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--with <member>` | required | Existing membership ID, user ID or exact email. |
+| `--operation <operation>` | required | Routine `run`; project `list` or `read`. Repeat or use comma-separated values. |
+| `--reissue` | `false` | Explicitly reissue the selected rights as the authenticated administrator. |
+
+## `share list <routine|project> <resource-id>`
+
+List explicit Guest shares for this object with member, email, operation, issuer
+and active/inactive state. Takes no command-specific flags. Use `--format json`
+for machine output. A policy read error fails the command, rather than hiding
+an unreadable share in an otherwise successful list.

@@ -235,5 +235,10 @@ all other resources and unsupported future operations, and sends only writable
 policy fields. The backend preserves unchanged issuer provenance. An inactive
 share remains inactive unless explicitly selected for **Reissue as me**. A 409
 blocks further saves until the administrator reloads and reviews current shares;
-there is no automatic retry or account conversion. Existing member-policy API and
-CLI commands remain the transport; object-oriented CLI aliases are still pending.
+there is no automatic retry or account conversion. The existing versioned member-policy API remains the transport.
+The object-oriented CLI offers `share`, `share list` and `unshare` for routine
+Run and project List/Read. It uses the same member-policy endpoint, preserves
+unrelated rights, never converts account mode and never retries a conflict.
+`share --reissue` deliberately changes selected share authority. The member
+may be identified by membership ID, user ID or exact email; resource arguments
+are IDs. See [the CLI contract](../cli/share.mdx).
