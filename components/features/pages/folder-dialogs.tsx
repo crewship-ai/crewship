@@ -494,7 +494,7 @@ export function MoveToFolderDialog({ workspaceId, open, onOpenChange, subject, s
   }
 
   const options: Array<{ slug: string | null; name: string; folder: PageFolderView | null }> = [
-    ...folders.folders.map((f) => ({ slug: f.slug, name: f.name, folder: f })),
+    ...folders.folders.filter(f => f.canAcceptPages === true).map((f) => ({ slug: f.slug, name: f.name, folder: f })),
     { slug: null, name: "Unfiled", folder: null },
   ]
   const listId = React.useId()

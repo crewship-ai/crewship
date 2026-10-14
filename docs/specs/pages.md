@@ -15,6 +15,18 @@ Pages combine typed producer payloads, freshness metadata and per-panel
 authorization. Producers own data access; the page itself holds no data-source
 credentials. The sections below define the technical boundaries and tests.
 
+## Caller-specific folder controls
+
+Folder responses expose `can_rename`, `can_share`, `can_delete` and
+`can_accept_pages`, derived from the same live crew membership, workspace role
+and folder ACL predicates as mutations. Page index rows expose `can_move` and
+`can_remove_from_folder`, including page ownership and live folder write shares.
+The Pages rail offers each operation only when its corresponding server flag is
+true. Missing flags offer no mutation. Folder write shares permit arrangement,
+not sharing or deletion; VIEWER page owners retain their own move controls. Move
+destinations require `can_accept_pages`. Existing server checks, version fences
+and empty-folder requirements remain authoritative.
+
 ## 1. What a Page is
 
 A **Page** is a workspace-scoped, slug-addressable record holding an ordered list of **panels**.

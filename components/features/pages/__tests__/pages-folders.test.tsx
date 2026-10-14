@@ -47,12 +47,12 @@ const DIRECTORY = [{ id: "ws-1", name: "Test workspace", slug: "test-workspace",
 
 const OPS_REF = { slug: "ops", name: "Ops", icon: "rocket", color: "amber" }
 
-const FLEET: WirePage = { id: "p1", slug: "fleet-201", name: "Flotila .201", owner: "crew/lookout", folder: OPS_REF, pages_version: 3, panels: [] }
-const NOTES: WirePage = { id: "p2", slug: "my-notes", name: "My notes", owner: "user/u1", folder: null, pages_version: 0, panels: [] }
+const FLEET: WirePage = { id: "p1", slug: "fleet-201", name: "Flotila .201", owner: "crew/lookout", can_move: true, can_remove_from_folder: true, folder: OPS_REF, pages_version: 3, panels: [] }
+const NOTES: WirePage = { id: "p2", slug: "my-notes", name: "My notes", owner: "user/u1", can_move: true, can_remove_from_folder: false, folder: null, pages_version: 0, panels: [] }
 
-const OPS: WirePageFolder = { id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", page_count: 1, acl_version: 5 }
-const ARCHIVE: WirePageFolder = { id: "f2", slug: "archive", name: "Archive", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", page_count: 0, acl_version: 1 }
-const BUSY: WirePageFolder = { id: "f3", slug: "busy", name: "Busy", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", page_count: 2, acl_version: 1 }
+const OPS: WirePageFolder = { id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", can_rename: true, can_share: true, can_delete: true, can_accept_pages: true, page_count: 1, acl_version: 5 }
+const ARCHIVE: WirePageFolder = { id: "f2", slug: "archive", name: "Archive", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", can_rename: true, can_share: true, can_delete: true, can_accept_pages: true, page_count: 0, acl_version: 1 }
+const BUSY: WirePageFolder = { id: "f3", slug: "busy", name: "Busy", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", can_rename: true, can_share: true, can_delete: true, can_accept_pages: true, page_count: 2, acl_version: 1 }
 
 function json(status: number, body: unknown): Response {
   return {
