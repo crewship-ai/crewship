@@ -1,9 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, act, cleanup } from "@testing-library/react"
+import { render as renderUI, screen, fireEvent, waitFor, act, cleanup } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { RoutinesDetailPanel } from "../routines-detail-panel"
 import type { PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
+
+
+// The detail card includes Share and uses the same query provider as the app.
+function render(ui: Parameters<typeof renderUI>[0]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return renderUI(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+}
 
 // Hoisted holder so vi.mock factories can read per-test state.
 const h = vi.hoisted(() => ({
