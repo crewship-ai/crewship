@@ -50,7 +50,7 @@ func (h *InternalHandler) matchRunStart(ctx context.Context, want journal.Entry)
 	}
 	// An old admission ACK must never launch an already settled execution again.
 	var ended bool
-	if err = h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM journal_entries WHERE trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop'))`, want.TraceID).Scan(&ended); err != nil {
+	if err = h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM journal_entries WHERE workspace_id=? AND trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop'))`, want.WorkspaceID, want.TraceID).Scan(&ended); err != nil {
 		return false, err
 	}
 	if ended {
