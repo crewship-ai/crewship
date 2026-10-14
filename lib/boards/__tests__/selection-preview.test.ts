@@ -25,3 +25,16 @@ it('includes only the selected image files and refuses unavailable image bytes',
   expect(Object.keys(selectionPreviewInput(board, ['image'], files).files)).toEqual(['own'])
   expect(() => selectionPreviewInput(board, ['image'], [])).toThrow('not available')
 })
+
+it('renders selected drawings in saved layer order while keeping pins separate and canonical bytes unchanged', () => {
+  const board: PageBoard = { format: 'test', seq: 2, can_write: true, records: [
+    { element_id: 'a_front', element_rev: 3, deleted: false, element: { id: 'a_front', type: 'rectangle', index: 'a1' } },
+    { element_id: 'z_back', element_rev: 8, deleted: false, element: { id: 'z_back', type: 'rectangle', index: 'a0' } },
+    { element_id: 'hidden', element_rev: 1, deleted: false, element: { id: 'hidden', type: 'text', index: 'Zz' } },
+  ], placements: [{ id: 'pin', x: 1, y: 2, width: 300, height: 200 }] }
+  const original = JSON.stringify(board)
+  const input = selectionPreviewInput(board, ['a_front', 'z_back', 'board-placement:pin'], [])
+  expect(input.elements.map(element => [element.id, element.index])).toEqual([['z_back', 'a0'], ['a_front', 'a1']])
+  expect(input.pins.map(pin => pin.id)).toEqual(['preview-pin:pin'])
+  expect(JSON.stringify(board)).toBe(original)
+})

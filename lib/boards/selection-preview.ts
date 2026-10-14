@@ -2,6 +2,7 @@ import type { BinaryFileData, BinaryFiles } from '@excalidraw/excalidraw/types'
 import type { ExcalidrawElement, NonDeleted } from '@excalidraw/excalidraw/element/types'
 import type { PageBoard } from '@/hooks/use-page-board'
 import type { BoardElement } from './revision-adapter'
+import { orderBoardElements } from './element-order'
 
 const check = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('Preview cancelled', 'AbortError') }
 
@@ -13,7 +14,7 @@ export function selectionPreviewInput(board: PageBoard, selectedIds: readonly st
   const ids = new Set(drawings.map(record => record.element_id))
   const files: BinaryFiles = {}
   const available = new Map(availableFiles.map(file => [file.id, file]))
-  const elements = drawings.map(record => {
+  const elements = orderBoardElements(drawings.map(record => {
     const element: Record<string, unknown> = structuredClone(record.element!)
     delete element.link; delete element.customData
     for (const key of ['containerId', 'frameId']) if (typeof element[key] === 'string' && !ids.has(element[key] as string)) element[key] = null
@@ -28,7 +29,7 @@ export function selectionPreviewInput(board: PageBoard, selectedIds: readonly st
       files[file.id] = file
     }
     return element as BoardElement
-  })
+  }))
   const pins = board.placements.filter(pin => selected.has(`board-placement:${pin.id}`)).map(pin => ({
     type: 'rectangle' as const, id: `preview-pin:${pin.id}`, x: pin.x, y: pin.y, width: pin.width, height: pin.height,
     strokeColor: '#868e96', backgroundColor: '#f1f3f5', fillStyle: 'solid' as const,
