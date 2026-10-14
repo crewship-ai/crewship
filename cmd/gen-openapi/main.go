@@ -624,6 +624,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range finalSpecialDomainSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range guestIssueContributionSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	for key, schema := range final21GenericResponseSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}

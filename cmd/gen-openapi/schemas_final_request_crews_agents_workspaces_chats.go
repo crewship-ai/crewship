@@ -40,7 +40,7 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 		}, "full_name", "email", "password"),
 		"FinalCoreChatSteerRequest":       object(map[string]any{"message": str()}, "message"),
 		"FinalCoreCrewAvatarStyleRequest": object(map[string]any{"avatar_style": str(), "reset_overrides": boolean()}),
-		"FinalCoreIssueCommentRequest":    object(map[string]any{"body": str()}, "body"),
+		"FinalCoreIssueCommentRequest":    object(map[string]any{"body": str(), "guest_visible": boolean()}, "body"),
 		"FinalCoreIssueRelationRequest": object(map[string]any{
 			"target_identifier": str(), "relation_type": enum("blocks", "blocked_by", "relates_to", "duplicate_of"),
 		}, "target_identifier", "relation_type"),

@@ -1240,6 +1240,7 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/comments?workspace_id={workspace
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `body` | string | Yes | Comment text |
+| `guest_visible` | boolean | No | Explicitly share this new comment with Guests who can read the current project; defaults to false. Project issues only. |
 
 ```json
 {
@@ -1248,6 +1249,13 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/comments?workspace_id={workspace
 ```
 
 **Response:** `201 Created` -- comment object with `author_type: "user"`.
+
+`guest_visible: true` appears when the comment is shared with the issue’s current
+project. Historical comments and omitted flags stay private. Agent mentions must remain
+in private comments; a shared comment containing one is refused with 400. Shared publication
+is bound to that project; moving the issue does not publish the old thread to
+new project readers. The trusted list includes private and shared comments;
+Guests use the dedicated [shared-comment routes](/api-reference/workspaces#read-guest-shared-comments).
 
 ---
 

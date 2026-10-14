@@ -124,6 +124,19 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 		} else if right.Kind == "routine" {
 			decision.State = "conditional"
 			decision.Reason = "Routine and agent grants are current; inputs, budget and runtime readiness are checked at invocation."
+		} else if right.Kind == "project" && right.Operation == "contribute" {
+			readErr := store.Check(r.Context(), user, workspace, access.Right{Kind: "project", ID: right.ID, Operation: "read"})
+			if readErr != nil && !errors.Is(readErr, access.ErrDenied) {
+				h.memberAccessError(w, readErr)
+				return
+			}
+			if readErr != nil {
+				decision.State = "denied"
+				decision.Reason = "Project contribution also requires a current Read grant."
+			} else {
+				decision.State = "conditional"
+				decision.Reason = "Read and Contribute are current. Shared comments and intake arrangement are allowed; new requests also require configured project intake. Trusted execution and review remain separate."
+			}
 		} else if right.Kind == "project" && (right.Operation == "write" || right.Operation == "delete") && !canRole(targetRole, "create") {
 			decision.State = "denied"
 			decision.Reason = "Project file writes still require the MANAGER role or higher."

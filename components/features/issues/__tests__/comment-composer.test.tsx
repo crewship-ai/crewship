@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 
 import { CommentComposer } from "../comment-composer"
 import type { MentionAgent } from "@/lib/mentions"
@@ -25,6 +25,18 @@ function type(box: HTMLTextAreaElement, value: string) {
 }
 
 describe("CommentComposer", () => {
+  it("requires explicit sharing and resets it after a successful post", async () => {
+    const onSubmit = vi.fn(async () => true)
+    render(<CommentComposer agents={[]} onSubmit={onSubmit} allowGuestSharing />)
+    const box = screen.getByRole("combobox") as HTMLTextAreaElement
+    const sharing = screen.getByRole("checkbox", { name: /Share this comment with Guests/ })
+    expect(sharing).not.toBeChecked()
+    type(box, "Public answer")
+    fireEvent.click(sharing)
+    await act(async () => { fireEvent.keyDown(box, {key:"Enter",ctrlKey:true}) })
+    expect(onSubmit).toHaveBeenCalledWith("Public answer",{guestVisible:true})
+    await vi.waitFor(() => expect(sharing).not.toBeChecked())
+  })
   it("posts the body it was given on Cmd+Enter", async () => {
     const { box, onSubmit } = setup()
     type(box, "looks good to me")

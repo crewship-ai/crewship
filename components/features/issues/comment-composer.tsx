@@ -39,7 +39,8 @@ interface Props {
    * Posts the comment. Resolve `true` to clear the draft; anything else keeps
    * it, because a body that failed to post is the only copy of it there is.
    */
-  onSubmit: (body: string) => boolean | Promise<boolean>
+  onSubmit: (body: string, options?: { guestVisible: boolean }) => boolean | Promise<boolean>
+  allowGuestSharing?: boolean
   /** Initial for the author bubble; the avatar column is decorative. */
   authorInitial?: string
   placeholder?: string
@@ -50,6 +51,7 @@ interface Props {
 export function CommentComposer({
   agents,
   onSubmit,
+  allowGuestSharing = false,
   authorInitial = "U",
   placeholder = "Write a comment.  @ to bring in an agent.",
   disabled,
@@ -60,6 +62,7 @@ export function CommentComposer({
   const boxRef = React.useRef<HTMLTextAreaElement>(null)
 
   const [value, setValue] = React.useState("")
+  const [guestVisible, setGuestVisible] = React.useState(false)
   const [caret, setCaret] = React.useState(0)
   const [dismissed, setDismissed] = React.useState(false)
   const [active, setActive] = React.useState(0)
@@ -126,10 +129,11 @@ export function CommentComposer({
     if (!body || submitting || disabled) return
     setSubmitting(true)
     try {
-      const ok = await onSubmit(body)
+      const ok = allowGuestSharing && guestVisible ? await onSubmit(body, { guestVisible: true }) : await onSubmit(body)
       if (ok) {
         setValue("")
         setCaret(0)
+        setGuestVisible(false)
       }
     } finally {
       setSubmitting(false)
@@ -250,6 +254,7 @@ export function CommentComposer({
           {open ? `${matches.length} agents match. Use the arrow keys.` : ""}
         </p>
 
+        {allowGuestSharing && <label className="flex min-h-9 items-center gap-2 text-xs coarse:min-h-12"><input type="checkbox" checked={guestVisible} disabled={disabled || submitting} onChange={event => setGuestVisible(event.target.checked)} />Share this comment with Guests who can read this project</label>}
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-muted-foreground-soft">
             <kbd className="font-sans">⌘/Ctrl</kbd> + <kbd className="font-sans">Enter</kbd> to

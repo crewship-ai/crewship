@@ -11,14 +11,15 @@ import (
 )
 
 type sharedIssue struct {
-	ID          string  `json:"id" yaml:"id"`
-	Identifier  string  `json:"identifier" yaml:"identifier"`
-	Title       string  `json:"title" yaml:"title"`
-	Status      string  `json:"status" yaml:"status"`
-	ProjectID   string  `json:"project_id" yaml:"project_id"`
-	ProjectName string  `json:"project_name" yaml:"project_name"`
-	CanRead     bool    `json:"can_read" yaml:"can_read"`
-	Description *string `json:"description,omitempty" yaml:"description,omitempty"`
+	ID            string  `json:"id" yaml:"id"`
+	Identifier    string  `json:"identifier" yaml:"identifier"`
+	Title         string  `json:"title" yaml:"title"`
+	Status        string  `json:"status" yaml:"status"`
+	ProjectID     string  `json:"project_id" yaml:"project_id"`
+	ProjectName   string  `json:"project_name" yaml:"project_name"`
+	CanRead       bool    `json:"can_read" yaml:"can_read"`
+	CanContribute bool    `json:"can_contribute" yaml:"can_contribute"`
+	Description   *string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 var issueSharedCmd = &cobra.Command{

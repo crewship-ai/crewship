@@ -56,7 +56,7 @@ func validRight(r Right) bool {
 		return r.Operation == "run"
 	case "project":
 		switch r.Operation {
-		case "list", "read", "write", "delete":
+		case "list", "read", "write", "delete", "contribute":
 			return true
 		}
 	}
@@ -154,6 +154,24 @@ func (s Store) Check(ctx context.Context, user, workspace string, r Right) error
 		return ErrDenied
 	}
 	_, err := check(ctx, s.DB, user, workspace, r)
+	return err
+}
+
+// CheckIn applies the resource ceiling in the same snapshot as a mutation.
+// It also rechecks the account rather than relying on earlier HTTP middleware.
+// Callers must still enforce their role, token scope and operation constraints.
+func (s Store) CheckIn(ctx context.Context, tx *sql.Tx, user, workspace string, r Right) error {
+	if tx == nil {
+		return ErrDenied
+	}
+	var active bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND suspended_at IS NULL)`, user).Scan(&active); err != nil {
+		return err
+	}
+	if !active {
+		return ErrDenied
+	}
+	_, err := check(ctx, tx, user, workspace, r)
 	return err
 }
 

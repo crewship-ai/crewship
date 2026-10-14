@@ -53,9 +53,9 @@ func memberEffectiveAccessSchema() map[string]any {
 }
 
 func restrictedIssueSchema() map[string]any {
-	properties := map[string]any{"can_read": map[string]any{"type": "boolean"}}
+	properties := map[string]any{"can_read": map[string]any{"type": "boolean"}, "can_contribute": map[string]any{"type": "boolean"}}
 	for _, key := range []string{"id", "identifier", "title", "status", "project_id", "project_name", "description"} {
 		properties[key] = map[string]any{"type": "string"}
 	}
-	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "identifier", "title", "status", "project_id", "project_name", "can_read"}, "properties": properties}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "identifier", "title", "status", "project_id", "project_name", "can_read", "can_contribute"}, "properties": properties}
 }

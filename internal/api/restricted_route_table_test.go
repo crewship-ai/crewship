@@ -52,12 +52,15 @@ var restrictedAllowedPatterns = []string{
 	"GET /api/v1/workspaces/{workspaceId}/access/me",
 	"GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files",
 	"GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{versionId}/download",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-issues",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-pages",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routines",
+	"PATCH /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
 	"POST /api/v1/agents/{agentId}/chats",
 	"POST /api/v1/agents/{agentId}/restricted-cli-chats",
 	"POST /api/v1/auth/cli-token",
@@ -72,6 +75,8 @@ var restrictedAllowedPatterns = []string{
 	"POST /api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight",
 	"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run",
 	"POST /api/v1/workspaces/{workspaceId}/projects/{projectId}/files",
+	"POST /api/v1/workspaces/{workspaceId}/restricted-issues",
+	"POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
 }
 
 // restrictedAgentCheckedPatterns are the allowlisted patterns that are not a

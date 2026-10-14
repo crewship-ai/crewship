@@ -11,6 +11,7 @@ import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { isResourceRight, resourcePolicySchema, resourceShareReplacement, shareOperations, type ResourcePolicy, type SharedResource } from "@/lib/resource-sharing"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { ProjectGuestIntake } from "./project-guest-intake"
 
 const rosterSchema = z.array(z.object({
   id: z.string().min(1), role: z.string(), access_mode: z.enum(["trusted", "restricted"]),
@@ -59,9 +60,10 @@ function ShareDialog({ workspaceId, resource }: { workspaceId: string; resource:
     <DialogTrigger asChild><Button variant="outline" size="sm" className="coarse:h-12"><Share2 className="mr-1.5 h-3.5 w-3.5" />Share</Button></DialogTrigger>
     <DialogContent className="max-h-[85dvh] overflow-y-auto">
       <DialogHeader><DialogTitle>Share {resource.name}</DialogTitle><DialogDescription>
-        {resource.kind === "routine" ? "Run uses the routine’s configured credentials and also requires access to every agent it uses." : "List shows the project in Issues. Read permits opening its issues; both are needed to browse them."}
+        {resource.kind === "routine" ? "Run uses the routine’s configured credentials and also requires access to every agent it uses." : "List shows the project in Issues. Read opens its issues and explicitly shared comments. Contribute also permits requests, shared comments and arranging intake work; it requires Read."}
       </DialogDescription></DialogHeader>
       <p className="text-sm text-muted-foreground">Trusted members use their workspace role. Individual shares apply to Guest accounts; changing account mode is managed in Settings.</p>
+      {open && resource.kind === "project" && <ProjectGuestIntake workspaceId={workspaceId} projectId={resource.id} disabled={busyMember !== null} onBusy={busy => setBusyMember(busy ? "__intake__" : null)} />}
       {query.isPending && <p role="status">Loading shares…</p>}
       {query.isError && <div role="alert"><p>{query.error.message}</p></div>}
       {!query.isError && query.data && <>
@@ -114,7 +116,7 @@ function ShareMember({ workspaceId, resource, policy, label, onSaved, disabled, 
         <label className="flex min-h-9 items-center gap-2 coarse:min-h-12"><input type="checkbox" checked={selected.includes(operation)} onChange={event => {
           setSelected(event.target.checked ? [...selected, operation] : selected.filter(op => op !== operation))
           if (!event.target.checked) setReissue(reissue.filter(op => op !== operation))
-        }} />{operation === "run" ? "Run" : operation === "list" ? "List in Issues" : "Read issues"}</label>
+        }} />{operation === "run" ? "Run" : operation === "list" ? "List in Issues" : operation === "contribute" ? "Contribute to issues" : "Read issues"}</label>
         {detail && <p className="text-xs text-muted-foreground">{detail.live ? "Active" : "Inactive — issuer no longer has authority"} · Issued by {detail.issuer_name || detail.issuer_id}</p>}
         {detail && !detail.live && selected.includes(operation) && <label className="flex min-h-9 items-center gap-2 text-xs coarse:min-h-12"><input type="checkbox" checked={reissue.includes(operation)} onChange={event => setReissue(event.target.checked ? [...reissue, operation] : reissue.filter(op => op !== operation))} />Reissue {operation} as me</label>}
       </div>

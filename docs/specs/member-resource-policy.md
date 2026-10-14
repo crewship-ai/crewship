@@ -255,3 +255,25 @@ existing tier/scope checks and ordinary self-revocation behavior.
 
 
 Pages’ existing grant resolver now also requires an active trusted issuer account, including no Guest restriction elsewhere. This applies to workspace administrators, user owners and owning crew members. Stored Page grants remain available to administrators with an account-status reason when inactive. The two Pages ACL models have not yet been migrated to access_grants.
+## Project contributions and explicit comment audiences
+
+Project `contribute` supplements `read`, independently of source-file `write`.
+Dedicated Guest routes create unassigned Backlog requests in an administrator's
+versioned project intake crew, post shared comments and arrange intake between
+BACKLOG and TODO. They recheck live issuer grants, membership and active account
+inside the mutation transaction and commit audit atomically. Unknown mutation
+fields are refused; there is no agent/crew/assignee/routine override or trusted
+board route exposure. Review/execution states and project reassignment stay
+behind the existing trusted workflow. Full Issues Manage is not implemented.
+
+Every historical comment stays private. Trusted authors may explicitly mark a
+new comment as shared with Guests; Guest contributions are explicitly shared.
+Each publication is bound to the issue's project at that time. A later project
+move does not expose the original client's thread. Guest responses contain only
+shared bodies, timestamps, comment IDs and generic author labels, with no
+member email, agent metadata, mention expansion or private comment count.
+
+The Share dialog configures intake and grants Contribute; Settings and CLI offer
+the same grant. Guest forms preserve failed drafts, explain unconfigured intake
+and never offer trusted execution or deletion controls. The new endpoints have
+CLI equivalents and built-binary acceptance, and join the route-walking leak test.

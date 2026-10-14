@@ -410,6 +410,7 @@ type relationResponse struct {
 }
 
 type commentResponse struct {
+	GuestVisible bool `json:"guest_visible,omitempty"`
 	OperationID string `json:"operation_id,omitempty"`
 	ID          string `json:"id"`
 	MissionID   string `json:"mission_id"`
