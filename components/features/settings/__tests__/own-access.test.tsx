@@ -77,3 +77,18 @@ it("rejects an invalid access response before rendering its rows", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("Access details unavailable")
   expect(screen.queryByText("Invalid")).not.toBeInTheDocument()
 })
+
+it.each([401,403,404])("clears cached rows when access is lost (%s)",async(status)=>{
+ mocks.fetch.mockResolvedValueOnce({ok:true,json:async()=>({...accessMetadata,explanation:"Former access",decisions:[{kind:"agent",id:"a",name:"Former shared agent",operation:"chat",state:"conditional",reason:"Private audience"}]})})
+ const {client}=view()
+ expect(await screen.findByText(/Former shared agent/)).toBeVisible()
+ mocks.fetch.mockResolvedValueOnce({ok:false,status})
+ await client.invalidateQueries({queryKey:["own-access"]})
+ expect(await screen.findByRole("alert")).toHaveTextContent("Access details unavailable")
+ expect(screen.queryByText(/Former shared agent/)).not.toBeInTheDocument()
+ expect(client.getQueryData(["own-access","w","h1"])).toBeNull()
+ mocks.fetch.mockResolvedValueOnce({ok:false,status:500})
+ fireEvent.click(screen.getByRole("button",{name:"Retry"}))
+ await waitFor(()=>expect(mocks.fetch).toHaveBeenCalledTimes(3))
+ expect(screen.queryByText(/Former shared agent/)).not.toBeInTheDocument()
+})

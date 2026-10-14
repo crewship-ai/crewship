@@ -213,4 +213,21 @@ func TestEffectiveAccessNameDeletionAfterCheck(t *testing.T) {
 	if err != nil || before != after {
 		t.Fatalf("test no longer reproduces race without epoch change: %+v %+v %v", before, after, err)
 	}
+	// Exercise the HTTP explanation writer with the pre-deletion snapshot.
+	h := newWsHandlerForTest(t)
+	h.db = db
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/", nil), owner, ws, "OWNER")
+	req.SetPathValue("workspaceId", ws)
+	rr := httptest.NewRecorder()
+	h.writeEffectiveAccess(rr, req, owner, owner, ws, access.Policy{Membership: before, Rights: []access.Right{right}}, true)
+	if rr.Code != 200 {
+		t.Fatalf("deleted resource failed entire response: %d %s", rr.Code, rr.Body.String())
+	}
+	var result memberEffectiveAccess
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Decisions) != 1 || result.Decisions[0].State != "denied" || result.Decisions[0].Reason != "resource_unavailable" || result.Decisions[0].Name != "" {
+		t.Fatalf("missing resource not mapped to unavailable row: %s", rr.Body.String())
+	}
 }

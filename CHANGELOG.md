@@ -9,9 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Your access remains readable during a temporary refresh failure.** Settings distinguishes agents, routines and projects, labels access states, and keeps the last successful explanation with a refresh notice. A concurrently deleted resource becomes a denied row instead of failing the entire explanation.
-
-- **Guests can understand their own access.** Settings shows saved resource grants and execution prerequisites. Members can also inspect their own explanation through `workspace access me` and the workspace `access/me` API without administrator access.
+- **Guests can understand their own access.** Settings shows named resources and execution prerequisites; `workspace access me` and the workspace `access/me` API expose the same self-scoped explanation. Temporary refresh errors preserve the last good result, while access loss clears it. Concurrent resource deletion becomes an unavailable row.
 
 - **Audit chart selections clear when the same bar is selected again (#3094).** The chart and table retain the chosen time-window anchor while activity loads or filters change, so incoming samples no longer shift a relative bucket beneath the selection.
 
