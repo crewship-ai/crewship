@@ -318,7 +318,7 @@ func currentContextAudience(ctx context.Context, q contextQuery, user, workspace
 	if err != nil || a.ChatGeneration == "" || a.ChatRevision < 1 {
 		return Attempt{}, ErrDenied
 	}
-	rows, err := q.QueryContext(ctx, `SELECT resource_kind,COALESCE(agent_id,project_id,routine_id),operation FROM access_grants WHERE member_id=?`, m.ID)
+	rows, err := q.QueryContext(ctx, `SELECT resource_kind,COALESCE(agent_id,project_id,routine_id),operation FROM live_access_grants WHERE member_id=?`, m.ID)
 	if err != nil {
 		return Attempt{}, err
 	}

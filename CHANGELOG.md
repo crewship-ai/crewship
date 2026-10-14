@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Guests can understand their own access.** Settings shows saved resource grants and execution prerequisites. Members can also inspect their own explanation through `workspace access me` and the workspace `access/me` API without administrator access.
 
+- ⚠️ **Behaviour change: resource shares follow current administrator authority.** Guest discovery, Issues, chat and routine execution stop using a grant when its issuer leaves, is demoted or suspended, or becomes a Guest. Stored shares are preserved; restoring the issuer does not revive previously admitted runs.
+
 - **Audit chart selections clear when the same bar is selected again (#3094).** The chart and table retain the chosen time-window anchor while activity loads or filters change, so incoming samples no longer shift a relative bucket beneath the selection.
 
 - Fix Settings reloads while account access loads, Guest chat regeneration controls and restricted resource path segments. Add CLI Guest invitation policy/consent flags and binary acceptance coverage.

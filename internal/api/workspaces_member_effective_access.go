@@ -121,6 +121,9 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 			}
 			decision.State = "denied"
 			decision.Reason = "resource_unavailable"
+			if errors.Is(err, access.ErrIssuerDenied) {
+				decision.Reason = "The grant issuer no longer has active trusted administrator authority in this workspace."
+			}
 		} else if right.Kind == "routine" && !authorized[right.ID] {
 			decision.State = "denied"
 			decision.Reason = "Requires current agent run/delegate grants, provider authority and a supported active definition."
