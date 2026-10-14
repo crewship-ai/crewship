@@ -1,5 +1,6 @@
 "use client"
 import dynamic from "next/dynamic"
+import type { BoardEditorViewState } from "./board-editor"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Collaborator, SocketId } from "@excalidraw/excalidraw/types"
 import { useBoardImages } from "@/hooks/use-board-images"
@@ -38,6 +39,8 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
   const [base, setBase] = useState<PageBoard | null>(null)
   const [draft, setDraft] = useState<readonly ExcalidrawElement[] | null>(null)
   const [generation, setGeneration] = useState(0)
+  const viewState = useRef<BoardEditorViewState | undefined>(undefined)
+  const rememberView = useCallback((state: BoardEditorViewState) => { viewState.current = state }, [])
   const epoch = useRef(0)
   const observed = useRef<string | null>(null)
   const [confirmReload, setConfirmReload] = useState(false)
@@ -109,7 +112,7 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
   const sendCursor = presence.setCursor
   const onPointer = useCallback((x: number, y: number) => sendCursor({ x, y, coordinate_space: "board" }), [sendCursor])
   const denied = query.error instanceof PageBoardError && [401, 403, 404].includes(query.error.status)
-  useEffect(() => { if (denied) { epoch.current++; setBase(null); setDraft(null); setPinning(false); setModeIntent(null); previewSnapshot.current = []; setImageDialog(false); setInsertImage(null); setCommands([]); undoAttempt.current = null; saveAttempt.current = null; setEditorScene(undefined) } }, [denied])
+  useEffect(() => { if (denied) { viewState.current = undefined; epoch.current++; setBase(null); setDraft(null); setPinning(false); setModeIntent(null); previewSnapshot.current = []; setImageDialog(false); setInsertImage(null); setCommands([]); undoAttempt.current = null; saveAttempt.current = null; setEditorScene(undefined) } }, [denied])
   const localDraft = useMemo<BoardDraft | null>(() => base && draft ? { elements: drawing, placements: base.placements.flatMap(item => {
     const projection = draft.find(element => element.id === placementId(item.id) && !element.isDeleted)
     const { source: _source, ...geometry } = item
@@ -189,7 +192,7 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
     {write.error && !pinning && <p role="alert" className="px-4 pb-3 text-sm text-destructive">{write.error.message} Your unsaved drawing is retained. Reload latest deliberately to discard it.</p>}
     {invalid && <p role="alert" className="px-4 pb-3 text-sm text-destructive">Only local drawing shapes, text and approved artifact placements can be saved. Remove unsupported links or embeds. Artifact pins support moving and resizing; remove rotation, groups or frame membership before saving.</p>}
     {!authorization.can_write && <p className="px-4 pb-3 text-sm text-muted-foreground">Read-only board. Your access does not allow saving changes.</p>}
-    {!imageAccessLost && <Editor onInteraction={stopFollowing} focusPoint={follow.focusPoint ?? focusPoint} onSelection={onSelection} files={images.files} insertImage={insertImage} onImageInserted={imageInserted} scene={editorScene} onBusy={setBusy} key={generation} base={base} authorization={{ ...authorization, placements: shownPlacements }} workspaceId={workspaceId} disabled={!authorization.can_write || write.isPending || imageUpload.pending || uncertain} onChange={onChange} collaborators={collaborators} onPointer={onPointer} />}
+    {!imageAccessLost && <Editor initialViewState={viewState.current} onViewState={rememberView} onInteraction={stopFollowing} focusPoint={follow.focusPoint ?? focusPoint} onSelection={onSelection} files={images.files} insertImage={insertImage} onImageInserted={imageInserted} scene={editorScene} onBusy={setBusy} key={generation} base={base} authorization={{ ...authorization, placements: shownPlacements }} workspaceId={workspaceId} disabled={!authorization.can_write || write.isPending || imageUpload.pending || uncertain} onChange={onChange} collaborators={collaborators} onPointer={onPointer} />}
     <div className="space-y-2 border-t p-4"><p className="text-xs text-muted-foreground">Undo applies to the current unsaved drawing. Saving or reloading resets drawing history. Remote disjoint changes merge when drawing is idle. Overlapping changes require review; saving stays explicit.</p>{previewFrozen && <p className="text-xs text-muted-foreground">Artifact previews stay on their displayed revisions while you edit.</p>}{shownPlacements.map(item => <BoardPlacementLink key={item.id} workspaceId={workspaceId} placement={item} disabled={!authorization.can_write || previewFrozen} onModeChange={authorization.can_write ? placement => { write.reset(); setModeIntent(pinModeIntent(base.seq, placement)) } : undefined} />)}</div>
     <BoardElementPermissions key={`permissions:${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} board={authorization} selectedIds={selectedSavedIds} disabled={dirty || busy || write.isPending || uncertain || imageUpload.pending} onDirtyChange={setPermissionDirty} />
     <BoardComments key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} board={base} selectedElementId={selectedSavedIds.length === 1 ? selectedSavedIds[0] : undefined} onDirtyChange={setCommentDirty} onViewAnchor={anchor => { if (anchor.type === "board-element" && anchor.snapshot) { stopFollow(); setFocusLabel(undefined); setFocusPoint({ x: anchor.snapshot.x + anchor.snapshot.width / 2, y: anchor.snapshot.y + anchor.snapshot.height / 2, requestId: crypto.randomUUID() }) } }} />

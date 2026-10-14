@@ -83,7 +83,10 @@ func (h *PageHandler) checkArtifactRunPrincipal(ctx context.Context, a *artifact
 	}
 	return nil
 }
-func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *artifactRunAuthority) error {
+
+// checkArtifactRunDelegation is shared by publication and discussion. A live
+// chat principal and a Page grant alone never authorize resource mutations.
+func (h *PageHandler) checkArtifactRunDelegation(ctx context.Context, pageID string, a *artifactRunAuthority) error {
 	if err := h.checkArtifactRunPrincipal(ctx, a); err != nil {
 		return err
 	}
@@ -105,7 +108,25 @@ func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *ar
 		if state == "running" && !pageRequestWithinDeadline(deadline, updated, time.Now()) {
 			return errors.New("artifact request deadline elapsed")
 		}
+		var role, slug string
+		if q.QueryRowContext(ctx, `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, pageID, a.WorkspaceID).Scan(&slug) != nil {
+			return errors.New("artifact request page missing")
+		}
+		rec, err := h.loadPage(ctx, a.WorkspaceID, slug)
+		if err != nil {
+			return err
+		}
+		if q.QueryRowContext(ctx, `SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, a.WorkspaceID, a.HumanUserID).Scan(&role) != nil || !h.mayEditSpec(ctx, a.WorkspaceID, a.HumanUserID, role, rec) {
+			return errors.New("artifact request editor authority revoked")
+		}
 	}
+	return h.checkArtifactCreationPublication(ctx, pageID, a)
+}
+func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *artifactRunAuthority) error {
+	if err := h.checkArtifactRunDelegation(ctx, pageID, a); err != nil {
+		return err
+	}
+	q := h.pageAuthReader(ctx)
 	// A delegation is explicit but it does not bypass Pages' agent grant.
 	var slug string
 	if err := q.QueryRowContext(ctx, `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, pageID, a.WorkspaceID).Scan(&slug); err != nil {
@@ -115,16 +136,10 @@ func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *ar
 	if err != nil {
 		return err
 	}
-	if a.RequestID != "" {
-		var role string
-		if q.QueryRowContext(ctx, `SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, a.WorkspaceID, a.HumanUserID).Scan(&role) != nil || !h.mayEditSpec(ctx, a.WorkspaceID, a.HumanUserID, role, rec) {
-			return errors.New("artifact request editor authority revoked")
-		}
-	}
 	if !h.agentMayEditSpec(ctx, a.WorkspaceID, rec, a.AgentID) {
 		return errors.New("agent page write grant required")
 	}
-	return h.checkArtifactCreationPublication(ctx, pageID, a)
+	return nil
 }
 
 // The same writer fence used by publication orders grants/revocation and live ACL changes.

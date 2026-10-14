@@ -288,6 +288,10 @@ func (h *PageHandler) mutateBoardThread(w http.ResponseWriter, r *http.Request, 
 	}
 	now := h.clock.Now().UTC()
 	stamp := tsformat.Format(now)
+	if err := compactDiscussionReceipts(r.Context(), tx, rec.ID, true, now); err != nil {
+		h.boardError(w, err)
+		return
+	}
 	var total, recent int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(CASE WHEN created_at>? THEN 1 ELSE 0 END),0) FROM page_board_comment_mutations WHERE page_id=?`, tsformat.Format(now.Add(-time.Hour)), rec.ID).Scan(&total, &recent); err != nil {
 		replyInternalError(w, h.logger, "check comment quota", err)

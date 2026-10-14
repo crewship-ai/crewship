@@ -8,13 +8,14 @@ import (
 )
 
 func TestArtifactRetentionPrunesUnpinnedAndKeepsRetryReceipts(t *testing.T) {
-	h, _, _, _, _, page := artifactFixture(t)
+	h, _, _, ws, user, page := artifactFixture(t)
 	execOrFatal(t, h.db, `INSERT INTO page_artifacts(page_id,head_rev) VALUES(?,200)`, page)
 	for i := 1; i <= 200; i++ {
 		execOrFatal(t, h.db, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,mutation_id,request_digest,created_at) VALUES(?,?,?,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',?,'fingerprint','2020-01-01T00:00:00.000Z')`, fmt.Sprint("retain-", i), page, i, fmt.Sprint("mutation-", i))
 		execOrFatal(t, h.db, `INSERT INTO page_artifact_mutation_receipts(page_id,mutation_id,revision,request_digest,created_at) VALUES(?,?,?,'fingerprint','2020-01-01T00:00:00.000Z')`, page, fmt.Sprint("mutation-", i), i)
 	}
-	// The durable restore receipt pins source even after its output is gone.
+	// Discussion pins its exact source; restore provenance alone does not.
+	artifactExpect(t, artifactDiscussionCreate(t, h, ws, user, "Keep original anchor", "anchor", 1), 201)
 	execOrFatal(t, h.db, `UPDATE page_artifact_mutation_receipts SET restored_from=1 WHERE page_id=? AND revision=199`, page)
 	tx, err := h.db.BeginTx(t.Context(), nil)
 	if err != nil {
@@ -51,6 +52,7 @@ func TestArtifactRetention_RestoreRetryAfterOutputPruned(t *testing.T) {
 		execOrFatal(t, h.db, `INSERT INTO page_artifact_mutation_receipts(page_id,mutation_id,revision,request_digest,created_at) VALUES(?,?,?,'historical','2000-01-01T00:00:00.000Z')`, page, fmt.Sprint("historical-", i), i)
 	}
 	execOrFatal(t, h.db, `UPDATE page_artifacts SET head_rev=200 WHERE page_id=?`, page)
+	artifactExpect(t, artifactDiscussionCreate(t, h, ws, user, "Keep original source", "source-anchor", 1), 201)
 	clock.advance(2 * time.Hour)
 	artifactExpect(t, artifactSave(t, h, ws, user, "<p>new head</p>", "after-retention", 200), 201)
 	artifactExpect(t, artifactCall(t, h, ws, user, "OWNER", "GET", "?revision=2", ""), 404)

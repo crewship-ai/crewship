@@ -15,6 +15,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // Preauthenticated synthetic DB sessions exercise the real Router and static
@@ -52,14 +53,20 @@ func TestArtifactWorkflowBrowser(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	router, err := NewRouter(db, secret, newTestLogger(), WithInternalToken("synthetic-artifact-browser-internal"), WithStoragePath(t.TempDir()))
+	hub := ws.NewHub(newTestLogger(), nil, validator, sessions.NewDBStore(db))
+	hub.SetChannelAuthorizer(ws.NewDBChannelAuthorizer(db))
+	hubContext, stopHub := context.WithCancel(t.Context())
+	hubDone := make(chan struct{})
+	go func() { defer close(hubDone); hub.Run(hubContext) }()
+	t.Cleanup(func() { stopHub(); <-hubDone })
+	router, err := NewRouter(db, secret, newTestLogger(), WithInternalToken("synthetic-artifact-browser-internal"), WithStoragePath(t.TempDir()), WithHub(hub))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(router.Shutdown)
 	mux := http.NewServeMux()
 	mux.Handle("/api/", router)
-	mux.Handle("/ws", router)
+	mux.HandleFunc("/ws", hub.HandleUpgrade)
 	mux.Handle("/", StaticFileHandler(os.DirFS(filepath.Join(repo, "out"))))
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -78,6 +85,10 @@ func TestArtifactWorkflowBrowser(t *testing.T) {
 	command.Stdout, command.Stderr = os.Stdout, os.Stderr
 	if err = command.Run(); err != nil {
 		t.Fatal("preauthenticated artifact workflow browser", err)
+	}
+	var boardSeq, boardElements int
+	if err = db.QueryRow(`SELECT b.seq,(SELECT COUNT(*) FROM page_board_elements e WHERE e.board_page_id=b.page_id AND e.element_json IS NOT NULL) FROM page_boards b JOIN pages p ON p.id=b.page_id WHERE p.slug='browser-board' AND p.workspace_id=?`, workspace).Scan(&boardSeq, &boardElements); err != nil || boardSeq != 2 || boardElements != 2 {
+		t.Fatalf("real Board DB seq=%d elements=%d err=%v", boardSeq, boardElements, err)
 	}
 	var head, threads, requests int
 	if err = db.QueryRow(`SELECT head_rev FROM page_artifacts JOIN pages ON pages.id=page_artifacts.page_id WHERE pages.workspace_id=? AND pages.slug='browser-report'`, workspace).Scan(&head); err != nil || head != 3 {

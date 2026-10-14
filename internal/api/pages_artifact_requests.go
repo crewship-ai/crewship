@@ -228,6 +228,10 @@ func (h *PageHandler) CreateArtifactRequest(w http.ResponseWriter, r *http.Reque
 		}
 		snapshot = thread
 	}
+	if err = compactPageRequestHistory(ctx, tx, wsID, time.Now()); err != nil {
+		h.boardError(w, err)
+		return
+	}
 	var pending int
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_artifact_requests WHERE page_id=? AND status IN ('queued','running')`, rec.ID).Scan(&pending); err != nil {
 		replyInternalError(w, h.logger, "count artifact requests", err)
@@ -367,6 +371,7 @@ func (h *PageHandler) RunArtifactRequests(ctx context.Context, gates ...artifact
 		next := time.Time{}
 		cursor := ""
 		noticeCursor := ""
+		retentionPageCursor, retentionWorkspaceCursor := "", ""
 		for {
 			select {
 			case <-ctx.Done():
@@ -387,6 +392,10 @@ func (h *PageHandler) RunArtifactRequests(ctx context.Context, gates ...artifact
 				noticeCursor, err = h.reconcilePageRequestNoticesAfter(ctx, noticeCursor)
 				if err != nil {
 					h.logger.Warn("reconcile page request notices", "error", err)
+				}
+				retentionPageCursor, retentionWorkspaceCursor, err = h.cleanupPageRetention(ctx, retentionPageCursor, retentionWorkspaceCursor, now)
+				if err != nil {
+					h.logger.Warn("compact Page retention", "error", err)
 				}
 				h.cleanupArtifactRunPrincipals(ctx, now)
 				next = now.Add(time.Minute)

@@ -35,6 +35,10 @@ func (h *PageHandler) artifactAgentCommentsPage(w http.ResponseWriter, r *http.R
 		replyError(w, 404, "artifact not found")
 		return nil, false
 	}
+	if err := h.checkArtifactRunDelegation(r.Context(), rec.ID, a); err != nil {
+		replyError(w, 403, err.Error())
+		return nil, false
+	}
 	var role string
 	if h.pageAuthReader(r.Context()).QueryRowContext(r.Context(), `SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, a.WorkspaceID, a.HumanUserID).Scan(&role) != nil {
 		replyError(w, 403, "human membership required")

@@ -144,6 +144,10 @@ func (h *PageHandler) changeArtifactComment(w http.ResponseWriter, r *http.Reque
 	}
 	now := h.clock.Now().UTC()
 	stamp := tsformat.Format(now)
+	if err := compactDiscussionReceipts(r.Context(), tx, rec.ID, false, now); err != nil {
+		h.boardError(w, err)
+		return
+	}
 	var total, recent int
 	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(created_at>?),0) FROM page_artifact_comment_mutations WHERE page_id=?`, tsformat.Format(now.Add(-time.Hour)), rec.ID).Scan(&total, &recent); err != nil {
 		h.boardError(w, err)

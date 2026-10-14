@@ -4,14 +4,18 @@ import { boardImageSkeleton } from "@/lib/boards/image-element"
 import { BoardLibrary } from "./board-library"
 import { Excalidraw, convertToExcalidrawElements, MainMenu } from "@excalidraw/excalidraw"
 import { CaptureUpdateAction } from "@excalidraw/excalidraw"
-import type { ExcalidrawImperativeAPI, Collaborator, SocketId, BinaryFileData } from "@excalidraw/excalidraw/types"
+import type { AppState, ExcalidrawImperativeAPI, Collaborator, SocketId, BinaryFileData } from "@excalidraw/excalidraw/types"
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types"
 import "@excalidraw/excalidraw/index.css"
+import "./board-editor.css"
 import type { PageBoard } from "@/hooks/use-page-board"
 import { BoardArtifactPlacement } from "./board-artifact-placement"
+export type BoardEditorViewState = Pick<AppState, "zoom" | "scrollX" | "scrollY" | "activeTool" | "selectedElementIds">
 const linkFor = (id: string) => `https://board-placement.invalid/${encodeURIComponent(id)}`
 export const placementElementId = (id: string) => `board-placement:${id}`
-export default function BoardEditor({ base, authorization, workspaceId, disabled, onChange, collaborators, onPointer, scene, onBusy, files, insertImage, onImageInserted, onSelection, focusPoint, onInteraction, onViewportChange }: {
+export default function BoardEditor({ base, authorization, workspaceId, disabled, onChange, collaborators, onPointer, scene, onBusy, files, insertImage, onImageInserted, onSelection, focusPoint, onInteraction, onViewportChange, initialViewState, onViewState }: {
+  initialViewState?: BoardEditorViewState
+  onViewState?: (state: BoardEditorViewState) => void
   onViewportChange?: (scrollX: number, scrollY: number) => void
   onInteraction?: () => void
   focusPoint?: { x: number; y: number; requestId: string }
@@ -58,9 +62,17 @@ export default function BoardEditor({ base, authorization, workspaceId, disabled
     return [...drawings, ...placements]
   }, [base, scene])
   const safeLinks = useMemo(() => new Set(base.placements.map(item => linkFor(placementElementId(item.id)))), [base])
-  return <div onPointerDownCapture={onInteraction} onWheelCapture={onInteraction} onKeyDownCapture={event => { if (event.key === "Escape") onInteraction?.() }} className="h-[65dvh] min-h-96 w-full border-t" aria-label="Board drawing canvas"><Excalidraw
+  return <div onClickCapture={event => {
+    // 0.18.1 renders this built-in converter even with aiEnabled=false.
+    // It must not process untrusted Mermaid in Studio. Paste is also disabled;
+    // the product's separate-site converter is the only diagram input path.
+    if (event.target instanceof Element && event.target.closest('[data-testid="toolbar-embeddable"]')) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+  }} onPointerDownCapture={onInteraction} onWheelCapture={onInteraction} onKeyDownCapture={event => { if (event.key === "Escape") onInteraction?.() }} className="crewship-board-editor h-[65dvh] min-h-96 w-full border-t" aria-label="Board drawing canvas"><Excalidraw
     excalidrawAPI={setApi} onScrollChange={onViewportChange} isCollaborating={collaborators.size > 0} onPointerUpdate={({ pointer }) => onPointer(pointer.x, pointer.y)}
-    initialData={{ elements: initial }} onChange={(elements, state) => { onChange(elements); onSelection?.(Object.keys(state.selectedElementIds).filter(id => state.selectedElementIds[id])); onBusy?.(Boolean(state.editingTextElement || state.newElement || state.multiElement || state.isResizing || state.isRotating || state.selectedElementsAreBeingDragged)) }}
+    initialData={{ elements: initial, appState: initialViewState }} onChange={(elements, state) => { onViewState?.({ zoom: state.zoom, scrollX: state.scrollX, scrollY: state.scrollY, activeTool: state.activeTool, selectedElementIds: state.selectedElementIds }); onChange(elements); onSelection?.(Object.keys(state.selectedElementIds).filter(id => state.selectedElementIds[id])); onBusy?.(Boolean(state.editingTextElement || state.newElement || state.multiElement || state.isResizing || state.isRotating || state.selectedElementsAreBeingDragged)) }}
     viewModeEnabled={disabled} aiEnabled={false} handleKeyboardGlobally={false}
     onPaste={() => false} onLinkOpen={(_element, event) => event.preventDefault()}
     validateEmbeddable={link => safeLinks.has(link)}

@@ -203,10 +203,13 @@ base until the editor explicitly chooses to use a newer revision as the base.
 Limits are 10 MiB of nonempty UTF-8 source, 200 retained source revisions per artifact,
 30 committed revisions per artifact per rolling hour and 200 per workspace per
 rolling hour. Restore counts as a revision. Old unpinned source revisions are
-pruned before admitting a new revision; discussion, request and restore references
-protect their original source. If all slots are pinned, publication is refused
-with a retention-specific error. Up to 10,000 durable mutation receipts preserve
-retry identity independently of source retention; an expired source returns 404.
+pruned before admitting a new revision. Discussion, active jobs and active Board
+pins protect their original source. Restore provenance records the original
+revision number without permanently pinning another copy of its source. If all
+slots have active pins, publication is refused with a retention-specific error.
+Publication replay receipts are retained for at least 24 hours and while their
+source revision exists; an expired source returns 404. Expired receipts no longer
+consume a permanent lifetime quota.
 Workspace rate receipts survive Page deletion. Two upload slots bound concurrent
 JSON decoding, and the decoder reads the bounded request stream directly. Blobs use the existing attachment store; artifact references pin
 historical blobs against collection and are included in workspace backup and
@@ -1562,8 +1565,11 @@ are not required to build, test or use the product.
 
 The sidecar exposes `GET /artifacts/{slug}/threads` and
 `POST /artifacts/{slug}/threads/{threadId}/comments`. These require the current
-run credential, a live verified human principal, that human's current comment
-permission and the agent's own live `comment` or `write` Page grant. A crew grant
+run credential, a live verified human principal, explicit unexpired and unrevoked
+Page/run delegation, that human's current comment permission and the agent's own
+live `comment` or `write` Page grant. A chat message alone is not delegation.
+Request-backed delegations additionally retain the initiator's current editor
+authority. A crew grant
 never substitutes for it. Reads paginate with `limit` (default 5, maximum 10),
 optional positive `revision`, and the returned `next_cursor` as `cursor`.
 
@@ -1572,3 +1578,36 @@ records the human, agent and run; retries cannot transfer identity across runs.
 The UI distinguishes agent replies from the human who authorized the run.
 Comment authority does not create threads, resolve them, dispatch jobs, publish
 artifact revisions or grant additional rights.
+
+
+### Artifact and Board lifecycle maintenance
+
+Artifacts and Boards retain human ownership on member removal or workspace-scoped
+user erasure. An active, unrestricted workspace OWNER (then ADMIN, ordered by user
+ID) takes custody, with an administrator Inbox notice and journal entry. Without
+such a successor, the entire departure fails with 409 and preserves all data and
+membership. Regular panel Pages continue to use their existing crew transfer rule.
+
+Discussion replay receipts have a 24-hour minimum lifetime. Thread-creation
+receipts remain for the thread lifetime because creation has no version
+precondition; the thread count bounds them. Other expired mutation retries fail
+monotonic thread version preconditions. Comments, original revision anchors and
+private body history are preserved separately from replay receipts.
+
+Terminal artifact/Board jobs, their snapshots, source/file references and optional
+previews expire after 90 days since their final update. Queued/running jobs and
+diagrams awaiting human insertion remain available. Retry submission IDs are
+supported while the corresponding job remains in history. Expired job IDs cannot
+be used as explicit retry sources. This cleanup does not restart or authorize runs.
+
+Unused Board images expire after the 24-hour replay/undo window, measured from
+upload or the last confirmed scene change that used or removed the image. Current
+scene references, retained job snapshots and recent upload receipts protect them.
+SQL reference removal precedes ordinary blob GC; shared reachable bytes remain.
+Maintenance uses bounded batches in the existing Page worker and also runs before
+relevant write quotas. Upgrades give existing Board images a full grace window.
+
+The Excalidraw 0.18.1 native Web Embed/Mermaid toolbar items are hidden and their
+activation is intercepted by the Board adapter. Paste is disabled; Mermaid input
+uses the isolated product converter. Browser regression coverage renders the
+actual pinned package and asserts that the native dialog/converter never mounts.
