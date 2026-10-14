@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/mentions"
 )
 
 var issueCommentCmd = &cobra.Command{
@@ -32,6 +33,10 @@ var issueCommentCmd = &cobra.Command{
 			body = strings.Join(args[1:], " ")
 		}
 		mentionSlugs, _ := cmd.Flags().GetStringArray("mention")
+		guestVisible, _ := cmd.Flags().GetBool("guest-visible")
+		if guestVisible && (len(mentionSlugs) > 0 || len(mentions.ExtractAgentIDs(body)) > 0) {
+			return fmt.Errorf("agent mentions must remain in private comments")
+		}
 		if body == "" && len(mentionSlugs) == 0 {
 			return fmt.Errorf("comment body is required (pass as arguments, --body, or --mention)")
 		}
@@ -76,9 +81,13 @@ var issueCommentCmd = &cobra.Command{
 			}
 			client = client.WithHeader("Idempotency-Key", key)
 		}
+		requestBody := map[string]interface{}{"body": body}
+		if guestVisible {
+			requestBody["guest_visible"] = true
+		}
 		resp, err := client.Post(
 			fmt.Sprintf("/api/v1/crews/%s/issues/%s/comments", issue.CrewID, url.PathEscape(identifier)),
-			map[string]interface{}{"body": body},
+			requestBody,
 		)
 		if err != nil {
 			return err

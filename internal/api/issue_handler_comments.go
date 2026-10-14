@@ -122,6 +122,10 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, 400, "Remove agent mentions before sharing this comment with Guests; use a private comment to request agent work")
 		return
 	}
+	if req.GuestVisible && len(req.Body) > 32768 {
+		writeProblem(w, r, 400, "Shared comments must contain at most 32768 bytes")
+		return
+	}
 
 	// Resolve identifier to mission_id
 	missionID, err := h.resolveMissionID(r.Context(), ident, crewID, wsID)
@@ -134,15 +138,8 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.GuestVisible {
-		var hasProject bool
-		if err := h.db.QueryRowContext(r.Context(), `SELECT project_id IS NOT NULL FROM missions WHERE id=? AND workspace_id=?`, missionID, wsID).Scan(&hasProject); err != nil {
-			internalError(w, r, h.logger, "check shared comment project", err)
-			return
-		}
-		if !hasProject {
-			writeProblem(w, r, 400, "Only project issues can have comments shared with Guests")
-			return
-		}
+		h.createSharedStaffComment(w, r, missionID, req.Body)
+		return
 	}
 
 	tx, err := h.db.BeginTx(r.Context(), nil)

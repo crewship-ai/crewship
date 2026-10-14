@@ -122,10 +122,11 @@ func TestGuestIssueContributeIsProjectScopedAndAudited(t *testing.T) {
 		t.Fatalf("bounded thread lost latest comments: %d %v %s", len(visible), err, thread.Body.String())
 	}
 	// Journal failure must roll back the comment, not merely its receipt.
-	execOrFatal(t, db, `CREATE TRIGGER deny_guest_comment_audit BEFORE INSERT ON journal_entries WHEN NEW.entry_type='mission.comment' AND NEW.actor_id='contributor' BEGIN SELECT RAISE(ABORT,'synthetic audit failure'); END`)
+	execOrFatal(t, db, `CREATE TRIGGER deny_guest_comment_audit BEFORE INSERT ON journal_entries WHEN NEW.entry_type='mission.comment' BEGIN SELECT RAISE(ABORT,'synthetic audit failure'); END`)
 	call("contributor", "POST", path+"/comments", `{"body":"MUST_ROLL_BACK_COMMENT"}`, 500)
+	call(owner, "POST", trustedComments, `{"body":"STAFF_MUST_ROLL_BACK_COMMENT","guest_visible":true}`, 500)
 	var rolledBack int
-	if err = db.QueryRow(`SELECT COUNT(*) FROM mission_comments WHERE body='MUST_ROLL_BACK_COMMENT'`).Scan(&rolledBack); err != nil || rolledBack != 0 {
+	if err = db.QueryRow(`SELECT COUNT(*) FROM mission_comments WHERE body IN ('MUST_ROLL_BACK_COMMENT','STAFF_MUST_ROLL_BACK_COMMENT')`).Scan(&rolledBack); err != nil || rolledBack != 0 {
 		t.Fatalf("comment escaped audit transaction: %d %v", rolledBack, err)
 	}
 	execOrFatal(t, db, `DROP TRIGGER deny_guest_comment_audit`)

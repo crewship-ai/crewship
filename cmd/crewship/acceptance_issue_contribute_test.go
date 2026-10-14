@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -143,6 +144,56 @@ func TestAcceptanceGuestIssueContributionRejectsInvalidInput(t *testing.T) {
 			defer mu.Unlock()
 			if calls != 0 {
 				t.Fatalf("invalid command made %d requests", calls)
+			}
+		})
+	}
+}
+
+func TestAcceptanceStaffExplicitlySharesIssueComment(t *testing.T) {
+	for _, share := range []bool{false, true} {
+		t.Run(fmt.Sprint(share), func(t *testing.T) {
+			var mu sync.Mutex
+			var submitted map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/v1/workspaces":
+					_, _ = io.WriteString(w, `[{"id":"ws_test","slug":"ws_test"}]`)
+				case "/api/v1/issues/CLIENT-1":
+					_, _ = io.WriteString(w, `{"id":"i1","identifier":"CLIENT-1","crew_id":"crew-1","title":"Request"}`)
+				case "/api/v1/crews/crew-1/issues/CLIENT-1/comments":
+					if err := json.NewDecoder(r.Body).Decode(&submitted); err != nil {
+						t.Error(err)
+					}
+					w.WriteHeader(201)
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": "c1", "body": "Staff answer", "guest_visible": share})
+				default:
+					t.Errorf("unexpected route %s", r.URL.Path)
+					w.WriteHeader(404)
+				}
+			}))
+			defer server.Close()
+			args := []string{"issue", "comment", "CLIENT-1", "--body", "Staff answer", "--format", "json"}
+			if share {
+				args = append(args, "--guest-visible")
+			}
+			out, err := runGuestCLI(t, server.URL, "", args...)
+			if err != nil {
+				t.Fatal(err, out)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if submitted["body"] != "Staff answer" || (share && submitted["guest_visible"] != true) || (!share && submitted["guest_visible"] != nil) {
+				t.Fatalf("sharing must be explicit: %#v", submitted)
+			}
+			var result map[string]any
+			if err = json.Unmarshal([]byte(out), &result); err != nil {
+				t.Fatal(err, out)
+			}
+			if share && result["guest_visible"] != true {
+				t.Fatalf("sharing state absent: %s", out)
 			}
 		})
 	}

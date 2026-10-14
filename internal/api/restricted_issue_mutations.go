@@ -59,10 +59,15 @@ func guestIssueError(w http.ResponseWriter, err error) {
 }
 
 func (r *Router) appendGuestIssueAudit(ctx context.Context, tx *sql.Tx, entry journal.Entry) (func(), error) {
-	if r.journal == nil {
+	return appendProjectIssueAudit(ctx, tx, r.journal, entry)
+}
+
+func appendProjectIssueAudit(ctx context.Context, tx *sql.Tx, writer journal.Emitter, entry journal.Entry) (func(), error) {
+	_, noop := writer.(noopEmitter)
+	if writer == nil || noop {
 		return journal.AppendTx(ctx, tx, entry)
 	}
-	emitter, ok := r.journal.(journal.TransactionEmitter)
+	emitter, ok := writer.(journal.TransactionEmitter)
 	if !ok {
 		return nil, errors.New("issue journal cannot write atomically")
 	}
