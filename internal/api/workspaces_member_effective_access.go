@@ -49,8 +49,8 @@ func (h *WorkspaceHandler) GetMemberEffectiveAccess(w http.ResponseWriter, r *ht
 func (h *WorkspaceHandler) GetOwnEffectiveAccess(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	caller := UserFromContext(r.Context())
-	workspace := WorkspaceIDFromContext(r.Context())
-	if caller == nil || workspace == "" || workspace != r.PathValue("workspaceId") {
+	workspace, matches := memberAccessWorkspace(r)
+	if caller == nil || !matches {
 		h.memberAccessError(w, access.ErrDenied)
 		return
 	}
