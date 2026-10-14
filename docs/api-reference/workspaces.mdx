@@ -2223,3 +2223,16 @@ and run history are excluded. No mutation endpoint is enabled by this read.
 | `403` | Workspace authentication gate denied |
 | `404` | Foreign, missing or revoked issue/project |
 | `500` | Database error |
+
+## Explain my access
+
+```http
+GET /api/v1/workspaces/{workspaceId}/access/me
+```
+
+Returns the authenticated member's own effective access explanation, including
+`membership_id`, `mode`, `revision`, `account_restricted`, `restriction_scope`,
+`explanation` and saved-grant `decisions` (`kind`, `id`, optional `name`, `operation`, `state`,
+`reason`). Available to Guests without workspace administration. No target user
+parameter is accepted. An unavailable membership returns 404; a concurrent
+policy change returns 409. Responses use `Cache-Control: no-store`.

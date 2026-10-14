@@ -47,6 +47,8 @@ var restrictedAllowedPatterns = []string{
 	"GET /api/v1/chats/{chatId}/restricted-files/{fileId}/download",
 	"GET /api/v1/pages/{slug}/application/actions/{pendingId}",
 	"GET /api/v1/workspaces",
+	// Own saved policy only; forged target/foreign workspace tests exercise the handler.
+	"GET /api/v1/workspaces/{workspaceId}/access/me",
 	"GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files",
 	"GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{versionId}/download",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-issues",

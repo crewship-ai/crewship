@@ -35,6 +35,7 @@ var restrictedSurfaces = []restrictedSurface{
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}",
 	}},
 	{Name: "account_security", Patterns: []string{
+		"GET /api/v1/workspaces/{workspaceId}/access/me",
 		"GET /api/v1/auth/sessions",
 		"POST /api/v1/auth/sessions/{id}/revoke",
 		"GET /api/v1/auth/cli-tokens",

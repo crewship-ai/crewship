@@ -38,7 +38,7 @@ func memberEffectiveAccessSchema() map[string]any {
 	properties["explanation"] = map[string]any{"type": "string"}
 	properties["decisions"] = map[string]any{"type": "array", "items": map[string]any{
 		"type": "object", "additionalProperties": false, "required": []string{"kind", "id", "operation", "state", "reason"},
-		"properties": map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"agent", "project", "routine"}}, "id": map[string]any{"type": "string"}, "operation": map[string]any{"type": "string"}, "state": map[string]any{"type": "string", "enum": []string{"allowed", "denied", "conditional", "unavailable"}}, "reason": map[string]any{"type": "string"}},
+		"properties": map[string]any{"name": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string", "enum": []string{"agent", "project", "routine"}}, "id": map[string]any{"type": "string"}, "operation": map[string]any{"type": "string"}, "state": map[string]any{"type": "string", "enum": []string{"allowed", "denied", "conditional", "unavailable"}}, "reason": map[string]any{"type": "string"}},
 	}}
 	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"membership_id", "mode", "revision", "account_restricted", "restriction_scope", "explanation", "decisions"}, "properties": properties}
 }

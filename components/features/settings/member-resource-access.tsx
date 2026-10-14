@@ -165,7 +165,7 @@ function useResourceDirectory(workspaceId: string, kind: Right["kind"], enabled:
   })
 }
 
-const effectiveSchema = z.object({membership_id:z.string(), revision:z.number(), explanation:z.string(), account_restricted:z.boolean(), decisions:z.array(rightSchema.extend({state:z.string(),reason:z.string()}))})
+const effectiveSchema = z.object({membership_id:z.string(), revision:z.number(), explanation:z.string(), account_restricted:z.boolean(), decisions:z.array(rightSchema.extend({name:z.string().optional(),state:z.string(),reason:z.string()}))})
 function EffectiveAccess({url,revision,memberId}:{url:string;revision:number;memberId:string}) {
   const query=useQuery({
     queryKey:["member-effective-access",url,revision],retry:false,
@@ -181,6 +181,6 @@ function EffectiveAccess({url,revision,memberId}:{url:string;revision:number;mem
     <summary className="cursor-pointer">Effective access — saved policy</summary>
     {query.isPending && <p>Checking current access…</p>}
     {query.isError && <p role="status">Effective access unavailable. <button type="button" onClick={()=>void query.refetch()}>Retry access check</button></p>}
-    {query.data && <><p className="mt-2 text-muted-foreground">{query.data.explanation}</p><ul className="mt-2 space-y-2">{query.data.decisions.map(row=><li key={rightKey(row)}><span className="font-medium">{row.kind} · {row.id} · {row.operation}: {row.state}</span><p className="text-muted-foreground">{row.reason}</p></li>)}</ul></>}
+    {query.data && <><p className="mt-2 text-muted-foreground">{query.data.explanation}</p><ul className="mt-2 space-y-2">{query.data.decisions.map(row=><li key={rightKey(row)}><span className="font-medium">{row.kind} · {row.name || row.id} · {row.operation}: {row.state}</span><p className="text-muted-foreground">{row.reason}</p></li>)}</ul></>}
   </details>
 }
