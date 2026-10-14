@@ -362,6 +362,7 @@ try {
   await check('owner reads the real canonical raster through its authorized route', response.status() === 200 && response.headers()['content-type'] === 'image/png')
   response = await contexts.commenter.request.get(boardEndpoint(`/board/files/${encodeURIComponent(uploaded.file_id)}`))
   await check('revoked participant cannot read Board image bytes', [403, 404].includes(response.status()))
+  await transferBoardOwnership(uploaded)
   console.log(`Artifact workflow browser passed ${results.length} checks; evidence: ${output}`)
 } catch (error) {
   await writeFile(join(output, 'failure.txt'), String(error))
