@@ -10,6 +10,7 @@ import (
 	"io"
 	"os/exec"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,7 +27,42 @@ func ValidateImage(image string) error {
 	return nil
 }
 
-type DockerBuilder struct{ Image string }
+// DockerBuilder compiles in a locked-down container. Image, when set, is the
+// pinned image to run (explicit configuration and tests); otherwise Resolver
+// finds the image labelled by `crewship page enable`. With neither, the
+// builder is not enabled and never starts a container.
+type DockerBuilder struct {
+	Image    string
+	Resolver *ImageResolver
+}
+
+// Availability is implemented by builders that can be wired but not enabled.
+// Callers check it before recording a build so a refusal leaves no row behind.
+type Availability interface {
+	Available(context.Context) error
+}
+
+func (d *DockerBuilder) image(ctx context.Context) (string, error) {
+	if d.Image != "" {
+		return d.Image, ValidateImage(d.Image)
+	}
+	if d.Resolver == nil {
+		return "", ErrNotEnabled
+	}
+	return d.Resolver.Image(ctx)
+}
+
+// Available reports whether a build could start now. Only `docker image ls`
+// runs here. A negative answer is looked up once more, uncached, so a
+// `crewship page enable` takes effect on the next request without a restart.
+func (d *DockerBuilder) Available(ctx context.Context) error {
+	_, err := d.image(ctx)
+	if errors.Is(err, ErrNotEnabled) && d.Image == "" && d.Resolver != nil {
+		d.Resolver.Invalidate()
+		_, err = d.Resolver.Image(ctx)
+	}
+	return err
+}
 
 // No crew mounts, credentials, network or project-supplied runtime flags.
 // The container has its own deadline even if the server process disappears.
@@ -35,7 +71,8 @@ func containerArgs(name, image string) []string {
 }
 
 func (d *DockerBuilder) Build(ctx context.Context, p *pages.SourceProject) (*Artifact, error) {
-	if err := ValidateImage(d.Image); err != nil {
+	image, err := d.image(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if _, err := p.MarshalYAMLSource(); err != nil {
@@ -60,7 +97,7 @@ func (d *DockerBuilder) Build(ctx context.Context, p *pages.SourceProject) (*Art
 	}()
 	out := &boundedOutput{limit: MaxArtifactDocumentBytes + 1, cancel: cancel}
 	logs := &boundedOutput{limit: 64 << 10, cancel: cancel}
-	cmd := exec.CommandContext(ctx, "docker", containerArgs(name, d.Image)...)
+	cmd := exec.CommandContext(ctx, "docker", containerArgs(name, image)...)
 	cmd.WaitDelay = 3 * time.Second
 	cmd.Stdin = bytes.NewReader(input)
 	cmd.Stdout = out
@@ -72,13 +109,21 @@ func (d *DockerBuilder) Build(ctx context.Context, p *pages.SourceProject) (*Art
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("Page build stopped: %w", ctx.Err())
 		}
+		// Only a labelled image is replaced by `crewship page enable`; a
+		// missing explicit image keeps Docker's own message.
+		if d.Image == "" && d.Resolver != nil && d.Resolver.Explicit == "" && imageMissing(logs.buffer.String()) {
+			// Removed since it was resolved (`crewship page disable`, docker rmi):
+			// forget it so the next request looks again instead of failing here.
+			d.Resolver.Invalidate()
+			return nil, fmt.Errorf("%w (the Pages tools image was removed)", ErrNotEnabled)
+		}
 		return nil, fmt.Errorf("Page build failed: %s", logs.buffer.String())
 	}
 	a, err := decodeWorkerArtifact(out, logs)
 	if err != nil {
 		return nil, err
 	}
-	a.Toolchain = d.Image
+	a.Toolchain = image
 	if _, _, err := a.Encode(); err != nil {
 		return nil, err
 	}
@@ -101,9 +146,15 @@ func decodeWorkerArtifact(out, logs *boundedOutput) (*Artifact, error) {
 		return nil, errors.New("multiple worker artifacts")
 	}
 	if a.ProfileSHA256 != pageprofile.Fingerprint() {
-		return nil, errors.New("Pages tools image does not match this server release; rebuild and install the image from tools/pages-build")
+		return nil, errors.New("Pages tools image does not match this server release; run `" + EnableCommand + "` on the server host to install the matching image")
 	}
 	return &a, nil
+}
+
+// imageMissing recognises Docker's refusal to run an absent image under
+// --pull=never.
+func imageMissing(stderr string) bool {
+	return strings.Contains(stderr, "No such image") || strings.Contains(stderr, "Unable to find image")
 }
 
 type boundedOutput struct {
