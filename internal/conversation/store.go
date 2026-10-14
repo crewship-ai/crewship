@@ -302,10 +302,31 @@ func (s *Store) SyncSession(ctx context.Context, sessionID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := validateID(sessionID); err != nil {
+		return fmt.Errorf("invalid session ID: %w", err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f := s.files[sessionID]
 	if f == nil {
+		// Restore closes cached descriptors. A different chat's existing transcript
+		// still needs its durability barrier; never create missing history here.
+		root, err := os.OpenRoot(s.basePath)
+		if err != nil {
+			return fmt.Errorf("open conversation storage: %w", err)
+		}
+		defer root.Close()
+		f, err = root.Open("conversations/" + sessionID + ".jsonl")
+		if err != nil {
+			return fmt.Errorf("open existing conversation session: %w", err)
+		}
+		defer f.Close()
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat conversation session: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() == 0 {
 		return fmt.Errorf("conversation session has no appended message")
 	}
 	if err := f.Sync(); err != nil {
