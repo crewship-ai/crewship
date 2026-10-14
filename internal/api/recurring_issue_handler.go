@@ -462,6 +462,17 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Default new fields to execution-affecting. Only labels and disabling
+	// are safe to preserve another person's standing admission.
+	metadataOnly := true
+	for _, clause := range ub.sets {
+		if clause == "updated_at = ?" || clause == "labels_json = ?" ||
+			(clause == "enabled = ?" && req.Enabled != nil && !*req.Enabled) {
+			continue
+		}
+		metadataOnly = false
+	}
+
 	if req.Enabled != nil && *req.Enabled && limitedChatToken(r.Context()) {
 		writeChatIssueError(w, runauthority.ErrUnavailable)
 		return
@@ -473,6 +484,31 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	user := UserFromContext(r.Context())
+	if user == nil {
+		writeChatIssueError(w, runauthority.ErrUnavailable)
+		return
+	}
+	if limitedChatToken(r.Context()) && !metadataOnly {
+		var pinned string
+		if err = tx.QueryRowContext(r.Context(), `SELECT COALESCE(chat_origin_id,'') FROM recurring_issues WHERE id=? AND workspace_id=?`, riID, wsID).Scan(&pinned); err != nil {
+			internalError(w, r, h.logger, "read recurring authority before edit", err)
+			return
+		}
+		// An unbound template remains unbound. Existing authority may only
+		// follow execution edits by the same currently authorized person.
+		if pinned != "" {
+			origin, authErr := runauthority.ValidateOriginReceipt(r.Context(), tx, pinned, wsID)
+			if authErr != nil && !permanentRecurringAuthorityError(authErr) {
+				internalError(w, r, h.logger, "validate recurring editor", authErr)
+				return
+			}
+			if authErr != nil || origin.HumanAuthority == nil || origin.HumanAuthority.UserID != user.ID {
+				writeProblem(w, r, http.StatusForbidden, "requester_authority_required: save execution changes with a full authenticated session")
+				return
+			}
+		}
+	}
 	query, args := ub.Build("recurring_issues", "id = ? AND workspace_id = ?", riID, wsID)
 	if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
 		internalError(w, r, h.logger, "update recurring issue", err)
@@ -487,14 +523,9 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user := UserFromContext(r.Context())
-	if user == nil {
-		writeChatIssueError(w, runauthority.ErrUnavailable)
-		return
-	}
 	// Scoped CRUD keeps the existing pinned grant; it cannot establish or
-	// re-enable execution. Disabling never needs a fresh execution admission.
-	if !limitedChatToken(r.Context()) && !(req.Enabled != nil && !*req.Enabled) {
+	// re-enable execution. A pure disable needs no fresh execution admission.
+	if !limitedChatToken(r.Context()) && !(metadataOnly && req.Enabled != nil && !*req.Enabled) {
 		origin, captureErr := runauthority.CaptureWebOrigin(r.Context(), tx, "web_recurring", riID, user.ID, wsID)
 		if captureErr != nil {
 			writeChatIssueError(w, captureErr)

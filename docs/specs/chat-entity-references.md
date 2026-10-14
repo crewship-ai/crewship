@@ -102,8 +102,14 @@ prevents later assignment dispatch from classifying unknown provenance as
 autonomous. The template remains NULL-origin and its schedule advances, with one reauthorization
 notice to an eligible owner per template. A fresh authenticated Start can authorize
 the occurrence explicitly. Repeated pauses deduplicate notices per template/origin.
-Scoped edits and disable preserve an existing pinned origin; scoped explicit
-re-enable is refused without changing the template.
+Scoped execution-affecting edits preserve a valid origin only for its original
+human. Another scoped editor must use a full authenticated session to capture
+their own admission; otherwise a `403` problem with
+`requester_authority_required` in its detail leaves the
+entire template unchanged. Only labels and disable may preserve another person’s
+origin. Mixed disable/content edits require the content editor’s admission.
+Unbound scoped templates remain unbound; explicit scoped re-enable is refused
+without changing the template.
 
 Channel jobs without a verified authenticated admission may answer,
 but their runs carry a host-derived missing-requester marker. Issue mutations

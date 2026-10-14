@@ -176,26 +176,22 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		if matched {
-			writeJSON(w, http.StatusCreated, map[string]string{"id": body.ID, "status": "RUNNING"})
-			return
-		}
-		if _, err := synchronous.EmitSync(r.Context(), entry); err != nil {
-			// A concurrent identical admission may win the stable journal ID.
-			// Compare its committed identity rather than appending another start.
-			if matched, matchErr := h.matchRunStart(r.Context(), entry); matchErr == nil && matched {
-				writeJSON(w, http.StatusCreated, map[string]string{"id": body.ID, "status": "RUNNING"})
-				return
-			} else if errors.Is(matchErr, errRunStartIdentityConflict) || errors.Is(matchErr, errRunAlreadyTerminal) {
-				replyError(w, http.StatusConflict, matchErr.Error())
-				return
+		if !matched {
+			if _, err := synchronous.EmitSync(r.Context(), entry); err != nil {
+				// A concurrent identical admission may win the stable journal ID.
+				// Compare its committed identity rather than appending another start.
+				replayed, matchErr := h.matchRunStart(r.Context(), entry)
+				if matchErr != nil || !replayed {
+					if errors.Is(matchErr, errRunStartIdentityConflict) || errors.Is(matchErr, errRunAlreadyTerminal) {
+						replyError(w, http.StatusConflict, matchErr.Error())
+					} else if errors.Is(err, journal.ErrRecoveredStopConflict) {
+						replyError(w, http.StatusConflict, "Run was stopped during recovery without a recorded start")
+					} else {
+						replyInternalError(w, h.logger, "create run: emit run.started", err)
+					}
+					return
+				}
 			}
-			if errors.Is(err, journal.ErrRecoveredStopConflict) {
-				replyError(w, http.StatusConflict, "Run was stopped during recovery without a recorded start")
-				return
-			}
-			replyInternalError(w, h.logger, "create run: emit run.started", err)
-			return
 		}
 	}
 

@@ -33,10 +33,16 @@ func TestCreateRunRetrySingleIdentityAndConflict(t *testing.T) {
 			t.Fatalf("retry %d %s", rr.Code, rr.Body.String())
 		}
 	}
+	// Model the crash window after durable start but before status projection.
+	execOrFatal(t, h.db, `UPDATE agents SET status='IDLE' WHERE id=?`, agent)
 	for i := 0; i < 2; i++ {
 		if rr := call("retry-run", "SCHEDULED"); rr.Code != 201 {
 			t.Fatalf("sequential retry %d %s", rr.Code, rr.Body.String())
 		}
+	}
+	var projected string
+	if err := h.db.QueryRow(`SELECT status FROM agents WHERE id=?`, agent).Scan(&projected); err != nil || projected != "RUNNING" {
+		t.Fatalf("admission retry did not recover status: %s %v", projected, err)
 	}
 	if rr := call("retry-run", "WEBHOOK"); rr.Code != 409 {
 		t.Fatalf("conflicting admission %d %s", rr.Code, rr.Body.String())
