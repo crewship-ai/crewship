@@ -58,3 +58,53 @@ jobs:
           name: artifact-runtime-${{ matrix.browser }}
           path: test-results/
           if-no-files-found: error
+
+  production-workflow:
+    name: Artifact and Board production Router workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-node-pnpm
+        timeout-minutes: 12
+        with:
+          node-version: '22'
+      - uses: ./.github/actions/setup-playwright-browser
+        timeout-minutes: 14
+        with:
+          browser: chromium
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        timeout-minutes: 6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Verify durable Artifact publication boundaries
+        timeout-minutes: 6
+        run: go test ./internal/api -run '^Test(PageArtifactCrashAfterCommitBeforeResponseRetriesOnce|PageArtifactPublishGCAndSharedAttachmentLifetime|PageArtifactAllRetainedRevisionsPinnedRejectsPublishAndRestore|PageArtifacts_ConcurrentCASAndPageTypeBoundary)$' -count=1 -timeout 4m
+      - name: Verify Board conversion and job authorization boundaries
+        timeout-minutes: 6
+        run: go test ./internal/api -run '^Test(BoardRequestInsertTamperedPayloadIsAtomicAndHumanAttributed|BoardRequestAssetsRequireExactJobSelectionAndCurrentSourceGrant|BoardRequestCompletionAfterWriteGrantRevocationRetainsPrivateUnpinnedArtifact)$' -count=1 -timeout 4m
+      - name: Build the production frontend
+        timeout-minutes: 10
+        env:
+          NEXTAUTH_SECRET: synthetic-artifact-browser-build-secret
+        run: pnpm build
+      - name: Exercise actual Router and migrated DB in Chromium
+        timeout-minutes: 8
+        env:
+          CREWSHIP_ARTIFACT_WORKFLOW_BROWSER: '1'
+          CREWSHIP_ARTIFACT_WORKFLOW_OUTPUT: ${{ runner.temp }}/artifact-production-workflow
+          CREWSHIP_BOARD_MERMAID_BROWSER: '1'
+          CREWSHIP_BOARD_MERMAID_OUTPUT: ${{ runner.temp }}/board-mermaid-workflow
+        run: go test -tags 'artifact_workflow_browser board_mermaid_workflow_browser' ./internal/api -run '^(TestArtifactWorkflowBrowser|TestBoardMermaidWorkflowBrowser)$' -count=1 -timeout 6m
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        timeout-minutes: 3
+        if: always()
+        with:
+          name: artifact-production-workflow
+          path: |
+            ${{ runner.temp }}/artifact-production-workflow/
+            ${{ runner.temp }}/board-mermaid-workflow/
+          if-no-files-found: error

@@ -193,3 +193,22 @@ in a private mode-0600 temporary file that the Go test removes. Missing opt-in,
 static export or Chromium fails rather than skips. The conformance tag permits
 compile-only checks (`-run '^$'`); this harness is not automatically executed by
 CI and does not establish real-agent acceptance or login-flow coverage.
+
+`acceptance-board-mermaid-browser.mjs` is called only by Linux-only
+`TestBoardMermaidWorkflowBrowser` (`board_mermaid_workflow_browser` or
+compile-only `conformance`). It uses migrated temporary storage, real Router
+handlers and production UI with two synthetic authenticated sessions. The
+canonical converter bootstrap and built pinned runner use separate owned HTTPS
+loopback sites. It seeds admitted Mermaid source without executing an agent.
+An aborted insertion before network leaves the job ready across client loss;
+two independently converted proposals are held before the real POSTs race.
+The test checks one commit, the existing-result receipt and reload persistence.
+It mocks no API responses and creates no Docker or persistent dev resources.
+
+```bash
+crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_BOARD_MERMAID_BROWSER=1 go test -tags board_mermaid_workflow_browser ./internal/api -run '^TestBoardMermaidWorkflowBrowser$' -count=1 -timeout 6m
+```
+
+Build the real static export first. Missing Chromium, export or opt-in fails;
+`CREWSHIP_BOARD_MERMAID_OUTPUT` selects the evidence directory. Synthetic session
+credentials remain in a private temporary file removed by the Go fixture.

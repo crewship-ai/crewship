@@ -1,5 +1,6 @@
 "use client"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { orderBoardElements } from "@/lib/boards/element-order"
 import { boardImageSkeleton } from "@/lib/boards/image-element"
 import { BoardLibrary } from "./board-library"
 import { Excalidraw, convertToExcalidrawElements, MainMenu } from "@excalidraw/excalidraw"
@@ -57,7 +58,7 @@ export default function BoardEditor({ base, authorization, workspaceId, disabled
   }, [api, insertImage, onImageInserted])
   const initial = useMemo(() => {
     const rendered = scene ?? base
-    const drawings = rendered.records.filter(record => !record.deleted && record.element).map(record => record.element as ExcalidrawElement)
+    const drawings = orderBoardElements(rendered.records.filter(record => !record.deleted && record.element).map(record => record.element as ExcalidrawElement))
     const placements = convertToExcalidrawElements(rendered.placements.map(item => ({ type: "rectangle" as const, id: placementElementId(item.id), x: item.x, y: item.y, width: item.width, height: item.height })), { regenerateIds: false }).map(element => ({ ...element, type: "embeddable", link: linkFor(element.id) })) as ExcalidrawElement[]
     return [...drawings, ...placements]
   }, [base, scene])

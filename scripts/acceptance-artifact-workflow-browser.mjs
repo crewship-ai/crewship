@@ -17,6 +17,14 @@ async function check(name, condition, detail = {}) {
 }
 const contexts = {}, pages = {}
 const endpoint = path => `${fixture.server}/api/v1/pages/browser-report${path}?workspace_id=${encodeURIComponent(fixture.workspace)}`
+async function captureBoardDraft(page) {
+  const button = page.getByRole('button', { name: 'Export unsaved draft', exact: true })
+  if (!await button.isVisible()) return false
+  const pending = page.waitForEvent('download', { timeout: 5000 })
+  await button.click()
+  await (await pending).saveAs(join(output, 'owner-board-draft.json'))
+  return true
+}
 try {
   for (const actor of ['owner', 'commenter']) {
     contexts[actor] = await browser.newContext({ viewport: { width: 1280, height: 900 } })
@@ -29,7 +37,8 @@ try {
   const owner = pages.owner
   await owner.goto(`${fixture.server}/pages/browser-report`)
   await expect(owner.getByRole('region', { name: 'HTML artifact', exact: true })).toBeVisible()
-  await owner.getByLabel('Upload HTML', { exact: true }).setInputFiles({ name: 'report.html', mimeType: 'text/html', buffer: Buffer.from('<h1>First saved report</h1><script>window.__artifactExecuted=true</script>') })
+  const firstSource = '<h1>First saved report</h1>' + Array.from({ length: 80 }, (_, index) => `<p>Scroll fixture row ${index + 1}</p>`).join('') + '<script>window.__artifactExecuted=true</script>'
+  await owner.getByLabel('Upload HTML', { exact: true }).setInputFiles({ name: 'report.html', mimeType: 'text/html', buffer: Buffer.from(firstSource) })
   await expect(owner.getByLabel('HTML for the next revision')).toBeVisible()
   const firstSave = owner.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/artifact/revisions'))
   await owner.getByRole('button', { name: 'Save revision', exact: true }).click()
@@ -45,13 +54,51 @@ try {
   const commenter = pages.commenter
   await commenter.goto(`${fixture.server}/pages/browser-report`)
   await expect(commenter.getByRole('region', { name: 'HTML artifact', exact: true })).toBeVisible()
-  await commenter.getByRole('button', { name: 'Comments', exact: true }).click()
+  const commentPreview = commenter.frameLocator('iframe[title="Artifact static preview"]')
+  await expect(commentPreview.getByRole('heading', { name: 'First saved report' })).toBeVisible()
+  await commentPreview.locator('body').evaluate(() => window.scrollTo(0, 600))
+  await expect.poll(() => commentPreview.locator('body').evaluate(() => window.scrollY)).toBeGreaterThan(0)
+  await check('real static iframe scrolls before viewport point capture', true)
+  await commenter.getByRole('button', { name: 'Comment on a point', exact: true }).click()
+  const picker = commenter.getByRole('button', { name: 'Choose comment point in preview', exact: true })
+  await expect(picker).toBeEnabled()
+  await expect.poll(() => commentPreview.locator('body').evaluate(() => window.scrollY)).toBe(0)
+  await check('entering point capture reloads the scrolled iframe to its top', true)
+  const captureBounds = await picker.boundingBox()
+  if (!captureBounds) throw new Error('Point capture viewport unavailable')
+  const clickPoint = { x: 120, y: 90 }
+  await picker.click({ position: clickPoint })
+  await expect(commenter.getByLabel('Comment point', { exact: true })).toBeVisible()
   await commenter.getByLabel('New thread', { exact: true }).fill('Synthetic comment anchored to first revision')
   const commentSave = commenter.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/artifact/threads'))
   await commenter.getByRole('button', { name: 'Post comment', exact: true }).click()
   response = await commentSave
   await check('commenter posts revision-bound thread through real route', response.status() === 201, { http_status: response.status() })
+  const submittedPoint = response.request().postDataJSON()
+  const storedPointThread = await response.json()
+  const capturedAnchor = storedPointThread.anchor
+  expect(capturedAnchor).toEqual(submittedPoint.anchor)
+  await check('server persists the exact captured viewport point on revision one', storedPointThread.revision === 1 && capturedAnchor.schema_version === 1 && capturedAnchor.type === 'point' && capturedAnchor.coordinate_space === 'viewport' && Math.abs(capturedAnchor.x - clickPoint.x) < 1 && Math.abs(capturedAnchor.y - clickPoint.y) < 1 && capturedAnchor.viewport_width === captureBounds.width && capturedAnchor.viewport_height === captureBounds.height, { anchor: capturedAnchor })
   await expect(commenter.getByText('Synthetic comment anchored to first revision', { exact: true })).toBeVisible()
+  const pointLocation = async page => {
+    const frame = await page.getByTitle('Artifact static preview', { exact: true }).boundingBox()
+    const point = await page.getByLabel('Comment point', { exact: true }).boundingBox()
+    if (!frame || !point) return null
+    return { x: Math.round(point.x + point.width / 2 - frame.x), y: Math.round(point.y + point.height / 2 - frame.y) }
+  }
+  await expect.poll(() => pointLocation(commenter)).toEqual(clickPoint)
+  await commenter.setViewportSize({ width: 1000, height: 700 })
+  await expect(commenter.getByLabel('Comment point', { exact: true })).toHaveCount(0)
+  await expect(commenter.getByText(/This viewport differs from the captured size; the point is not overlaid/)).toBeVisible()
+  await check('responsive viewport change hides the point with an explicit mismatch notice', true)
+  await commenter.setViewportSize({ width: 1280, height: 900 })
+  await expect(commenter.getByLabel('Comment point', { exact: true })).toBeVisible()
+  await expect.poll(() => pointLocation(commenter)).toEqual(clickPoint)
+  await expect(commenter.getByText(/This viewport differs from the captured size; the point is not overlaid/)).toHaveCount(0)
+  response = await contexts.commenter.request.get(endpoint('/artifact/threads'))
+  const afterResize = await response.json()
+  expect(afterResize.threads[0]?.anchor).toEqual(capturedAnchor)
+  await check('restoring the viewport shows the original point without rewriting its server anchor', response.status() === 200 && afterResize.threads.length === 1 && afterResize.threads[0].revision === 1)
   response = await contexts.commenter.request.get(endpoint('/artifact/requests'))
   const requests = await response.json()
   await check('commenter current request capability is false', response.status() === 200 && requests.can_dispatch === false)
@@ -80,7 +127,19 @@ try {
   await expect(owner.frameLocator('iframe[title="Artifact static preview"]').getByRole('heading', { name: 'First saved report' })).toBeVisible()
   response = await contexts.owner.request.get(endpoint('/artifact/threads'))
   const discussion = await response.json()
+  expect(discussion.threads[0]?.anchor).toEqual(capturedAnchor)
   await check('restore preserves original revision-bound comment anchor', response.status() === 200 && discussion.threads.length === 1 && discussion.threads[0].revision === 1)
+  await expect(owner.getByLabel('Comment point', { exact: true })).toHaveCount(0)
+  await preview.locator('body').evaluate(() => window.scrollTo(0, 600))
+  await expect.poll(() => preview.locator('body').evaluate(() => window.scrollY)).toBeGreaterThan(0)
+  await owner.getByRole('button', { name: 'Comments', exact: true }).click()
+  await owner.getByRole('button', { name: 'Show comment point', exact: true }).click()
+  await expect(owner.getByText('Revision 1 · latest 3', { exact: true })).toBeVisible()
+  await expect(preview.getByRole('heading', { name: 'First saved report' })).toBeVisible()
+  await expect.poll(() => preview.locator('body').evaluate(() => window.scrollY)).toBe(0)
+  await expect(owner.getByLabel('Comment point', { exact: true })).toBeVisible()
+  await expect.poll(() => pointLocation(owner)).toEqual(clickPoint)
+  await check('viewing the historical point returns to revision one at the top and original viewport location', true)
   const boardEndpoint = path => `${fixture.server}/api/v1/pages/browser-board${path}?workspace_id=${encodeURIComponent(fixture.workspace)}`
   response = await contexts.owner.request.post(`${fixture.server}/api/v1/pages?workspace_id=${fixture.workspace}`, { data: { slug: 'browser-board', name: 'Browser Board', panels: [], allow_empty: true } })
   await check('owner creates Board source through real route', response.status() === 201)
@@ -160,11 +219,23 @@ try {
   await expect(owner.getByText('Board · Saved sequence 3', { exact: true })).toBeVisible()
   await moveSavedDrawings()
   await expect(owner.getByText('Board · Saved sequence 4', { exact: true })).toBeVisible()
+  const dirtyNotice = owner.getByText('Unsaved drawing changes. Save preserves the revisions you started from.', { exact: true })
+  const assertCleanBoard = async name => {
+    const canvas = owner.locator('.excalidraw__canvas.interactive')
+    await expect(canvas).toBeVisible()
+    // Let the remounted real editor deliver initialization callbacks before
+    // asserting that accepted local inverses did not become unsaved drafts.
+    await canvas.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await expect(owner.getByRole('button', { name: 'Save board', exact: true })).toBeDisabled()
+    await expect(dirtyNotice).toHaveCount(0)
+    await check(name, true)
+  }
   for (const sequence of [5, 6]) {
     const committed = owner.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/board/batches'))
     await owner.getByRole('button', { name: 'Undo last saved change', exact: true }).click()
     await check('consecutive saved undo commits with current server revisions', (await committed).status() === 201)
     await expect(owner.getByText(`Board · Saved sequence ${sequence}`, { exact: true })).toBeVisible()
+    await assertCleanBoard(`saved undo at sequence ${sequence} settles without an unsaved drawing`)
   }
   response = await contexts.owner.request.get(boardEndpoint('/board'))
   const afterUndos = await response.json()
@@ -172,15 +243,46 @@ try {
   await check('two saved undos restore real server geometry to the original baseline', JSON.stringify(geometry(afterUndos)) === JSON.stringify(geometry(beforeMoves)))
   const foreignTarget = afterUndos.records.find(record => record.element_id !== savedBoard.records[0].element_id && !record.deleted && record.element)
   if (!foreignTarget) throw new Error('Second saved drawing unavailable for foreign-edit regression')
+  await assertCleanBoard('Board remains clean immediately before the independent foreign edit')
   const foreignX = foreignTarget.element.x + 30
   response = await contexts.owner.request.post(boardEndpoint('/board/batches'), { data: { mutation_id: 'other-tab-change', base_seq: afterUndos.seq, upserts: [{ element: { ...foreignTarget.element, x: foreignX }, expected_rev: foreignTarget.element_rev }] } })
   await check('independent real server edit changes the older undo target', response.status() === 201)
+  response = await contexts.owner.request.get(boardEndpoint('/board'))
+  const foreignScene = await response.json()
   await expect(owner.getByText('Board · Saved sequence 7', { exact: true })).toBeVisible()
-  await owner.getByRole('button', { name: 'Undo last saved change', exact: true }).click()
-  await expect(owner.getByText('This saved change can no longer be undone because connected content changed remotely.', { exact: true })).toBeVisible()
+  const undo = owner.getByRole('button', { name: 'Undo last saved change', exact: true })
+  const conflict = owner.getByText('This saved change can no longer be undone because connected content changed remotely.', { exact: true })
+  const undoStatuses = []
+  const observeUndo = response => {
+    if (response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/board/batches')) undoStatuses.push(response.status())
+  }
+  owner.on('response', observeUndo)
+  let undoOutcome
+  try {
+    // A refresh can leave an unsaved editor draft and disable saved undo.
+    // The clean checkpoints above fence this from own-undo hydration. Preserve
+    // evidence of a refresh-created draft as a UX gap, while checking safety.
+    // Inspect and invoke atomically to avoid a race with that canonical refresh.
+    const invoked = await undo.evaluate(button => {
+      if (button.disabled) return false
+      button.click()
+      return true
+    })
+    if (invoked) {
+      await expect.poll(async () => await conflict.isVisible() || undoStatuses.includes(409)).toBe(true)
+      undoOutcome = undoStatuses.includes(409) ? 'server_conflict' : 'local_conflict'
+    } else {
+      await expect(undo).toBeDisabled()
+      undoOutcome = 'disabled_guard'
+      if (await dirtyNotice.isVisible()) {
+        await captureBoardDraft(owner)
+        await writeFile(join(output, 'owner-board-canonical.json'), JSON.stringify(foreignScene, null, 2))
+      }
+    }
+  } finally { owner.off('response', observeUndo) }
   response = await contexts.owner.request.get(boardEndpoint('/board'))
   const afterRefusal = await response.json()
-  await check('older saved undo refuses a foreign edit and preserves canonical content', afterRefusal.seq === 7 && afterRefusal.records.find(record => record.element_id === foreignTarget.element_id)?.element?.x === foreignX)
+  await check('older saved undo refuses a foreign edit and preserves canonical content', response.status() === 200 && afterRefusal.seq === 7 && afterRefusal.seq === foreignScene.seq && JSON.stringify(afterRefusal.records) === JSON.stringify(foreignScene.records) && afterRefusal.records.find(record => record.element_id === foreignTarget.element_id)?.element?.x === foreignX && undoStatuses.every(status => status === 409), { undo_outcome: undoOutcome, undo_http_statuses: undoStatuses, unsaved_draft_after_foreign_refresh: await dirtyNotice.isVisible() })
   const imageURL = `${boardEndpoint('/board/files')}&base_seq=7&mutation_id=browser-raster-upload`
   const imageBody = Buffer.from(fixture.image_png, 'base64')
   response = await contexts.owner.request.post(imageURL, { data: imageBody, headers: { 'Content-Type': 'image/png' } })
@@ -196,6 +298,9 @@ try {
   console.log(`Artifact workflow browser passed ${results.length} checks; evidence: ${output}`)
 } catch (error) {
   await writeFile(join(output, 'failure.txt'), String(error))
+  await captureBoardDraft(pages.owner).catch(() => {})
+  const canonical = contexts.owner ? await contexts.owner.request.get(`${fixture.server}/api/v1/pages/browser-board/board?workspace_id=${encodeURIComponent(fixture.workspace)}`, { timeout: 5000 }).catch(() => null) : null
+  if (canonical?.ok()) await writeFile(join(output, 'owner-board-canonical.json'), JSON.stringify(await canonical.json(), null, 2))
   for (const [actor, page] of Object.entries(pages)) await page.screenshot({ path: join(output, `${actor}-failure.png`) }).catch(() => {})
   throw error
 } finally { await browser.close() }

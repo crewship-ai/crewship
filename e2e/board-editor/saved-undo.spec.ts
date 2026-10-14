@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test'
+import { readFileSync } from 'node:fs'
+import type { BoardElement } from '../../lib/boards/revision-adapter'
 import { startBoardFixture } from './fixture'
 import type { PageBoard } from '../../hooks/use-page-board'
 import type { CollaborativeBatch } from '../../lib/boards/collaboration-types'
@@ -70,5 +72,66 @@ test('saved undo walks repeated edits and still refuses a foreign same-value rev
     await expect(page.getByRole('alert')).toContainText('connected content changed remotely')
     expect(batches).toHaveLength(5)
     expect(board.records[0].deleted).toBe(false)
+  } finally { await fixture.close() }
+})
+
+
+test('reverse ID order preserves saved layers and stays clean through consecutive editor replacements', async ({ page }) => {
+  const fixture = await startBoardFixture({ product: true })
+  const rectangle = (JSON.parse(readFileSync('internal/pages/testdata/board-excalidraw-0.18.1.json', 'utf8')) as BoardElement[]).find(element => element.type === 'rectangle')!
+  // The production GET orders by ID. Force its order to oppose the fractional
+  // layer order, rather than depending on random IDs from native drawing.
+  let board: PageBoard = { format: 'crewship-board-excalidraw-0.18.1-v1', seq: 0, can_write: true, placements: [], records: [
+    { element_id: 'a_front', element_rev: 1, deleted: false, element: { ...rectangle, id: 'a_front', index: 'a1', x: 300, y: 100, boundElements: null } },
+    { element_id: 'z_back', element_rev: 1, deleted: false, element: { ...rectangle, id: 'z_back', index: 'a0', x: 150, y: 100, boundElements: null } },
+  ] }
+  const geometry = () => board.records.map(record => [record.element_id, record.element!.index, record.element!.x, record.element!.y])
+  const original = geometry()
+  const batches: CollaborativeBatch[] = []
+  await page.route('**/api/v1/**', async route => {
+    const request = route.request(), path = new URL(request.url()).pathname
+    if (path.endsWith('/board/batches')) {
+      const body = request.postDataJSON() as CollaborativeBatch
+      const records = new Map(board.records.map(record => [record.element_id, record]))
+      if (body.base_seq !== board.seq || body.upserts.some(item => records.get(item.element.id)?.element_rev !== item.expected_rev) || body.deletes.length) return route.fulfill({ status: 409, json: { error: 'Board authority changed' } })
+      batches.push(body)
+      for (const item of body.upserts) records.set(item.element.id, { element_id: item.element.id, element_rev: item.expected_rev + 1, element: item.element, deleted: false })
+      board = { ...board, seq: board.seq + 1, records: [...records.values()] }
+      return route.fulfill({ status: 201, json: { seq: board.seq, result_seq: board.seq, element_revs: Object.fromEntries(board.records.map(record => [record.element_id, record.element_rev])), undo_expires_at: new Date(Date.now() + 86400000).toISOString() } })
+    }
+    if (path.endsWith('/board')) return route.fulfill({ json: board })
+    if (path.endsWith('/board/threads')) return route.fulfill({ json: { threads: [], can_comment: false, can_resolve: false } })
+    if (path.endsWith('/board/requests')) return route.fulfill({ json: { requests: [], eligible_chats: [], can_dispatch: false } })
+    return route.fulfill({ status: 404, json: { error: 'Fixture route unavailable' } })
+  })
+  try {
+    await page.goto(`${fixture.url}product.html`)
+    const save = page.getByRole('button', { name: 'Save board', exact: true })
+    const clean = async () => {
+      const canvas = page.locator('canvas.interactive')
+      await expect(canvas).toBeVisible()
+      await canvas.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      await expect(save).toBeDisabled()
+      await expect(page.getByText('Unsaved drawing changes. Save preserves the revisions you started from.', { exact: true })).toHaveCount(0)
+    }
+    await clean()
+    for (const seq of [1, 2]) {
+      await page.locator('canvas.interactive').click({ position: { x: 700, y: 350 } })
+      await page.keyboard.press('v'); await page.keyboard.press('ControlOrMeta+a')
+      await expect(page.getByText('2 saved drawing elements selected', { exact: true })).toBeVisible()
+      await page.keyboard.press('Shift+ArrowRight')
+      await expect(save).toBeEnabled(); await save.click()
+      await expect(page.getByText(`Board · Saved sequence ${seq}`, { exact: true })).toBeVisible()
+      await clean()
+    }
+    for (const seq of [3, 4]) {
+      await page.getByRole('button', { name: 'Undo last saved change', exact: true }).click()
+      await expect(page.getByText(`Board · Saved sequence ${seq}`, { exact: true })).toBeVisible()
+      await clean()
+    }
+    expect(geometry()).toEqual(original)
+    expect(batches).toHaveLength(4)
+    expect(batches.flatMap(batch => batch.upserts).every(item => item.element.index === (item.element.id === 'z_back' ? 'a0' : 'a1'))).toBe(true)
+    expect(board.records.map(record => record.element_rev)).toEqual([5, 5])
   } finally { await fixture.close() }
 })

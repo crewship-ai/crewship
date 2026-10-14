@@ -24,7 +24,9 @@ commits drawing and pin changes atomically. `POST /placements` pins an exact
 artifact revision; DELETE removes a pin. Writes require current Page write,
 workspace membership, a stable mutation identity and `base_seq`. Per-element
 and per-placement server revisions are authoritative; Excalidraw client
-versions never authorize overwriting another writer.
+versions never authorize overwriting another writer. Saved fractional indexes
+reconstruct drawing layer order when loading the editor or exporting a selected
+preview; record ID order does not change those indexes or create an unsaved edit.
 
 The reader accepts the persisted `crewship-board-excalidraw-0.18.1-v1` profile.
 An unknown profile fails without migration or writeback. If discovered during

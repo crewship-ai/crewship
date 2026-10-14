@@ -44,7 +44,8 @@ func TestBoardRequestInsertTamperedPayloadIsAtomicAndHumanAttributed(t *testing.
 		{"mixed unsafe link", 422, func(req map[string]any) {
 			req["upserts"] = append(req["upserts"].([]map[string]any), upsert(boardAgentElement(t, "unsafe", map[string]any{"link": "https://untrusted.invalid/"}), 0))
 		}},
-		{"mixed client provenance", 422, func(req map[string]any) {
+		// The bounded JSON grammar rejects unknown provenance keys before geometry validation.
+		{"mixed client provenance", 400, func(req map[string]any) {
 			req["upserts"] = append(req["upserts"].([]map[string]any), upsert(boardAgentElement(t, "unsafe", map[string]any{"author_agent_id": "artifact-agent"}), 0))
 		}},
 		{"mixed invalid graph", 422, func(req map[string]any) {
@@ -272,7 +273,7 @@ func TestBoardRequestCompletionAfterWriteGrantRevocationRetainsPrivateUnpinnedAr
 	const run = "board-output-run"
 	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, "artifact-crew"), workspace, "artifact-agent", run)
 	called := false
-	h.artifactDispatch = func(ctx context.Context, actualUser, chat, prompt string, opts ws.ChatMessageOption) error {
+	h.artifactDispatch = func(_ context.Context, actualUser, chat, prompt string, opts ws.ChatMessageOption) error {
 		called = true
 		if actualUser != user || opts.BoardRequestID != job.ID {
 			t.Fatal("wrong admitted job")
@@ -292,7 +293,7 @@ func TestBoardRequestCompletionAfterWriteGrantRevocationRetainsPrivateUnpinnedAr
 			revoke := pagesGrantCall(t, h, "DELETE", "/?subject_type=user&subject="+user+"&level=write", workspace, "board-owner", "MEMBER", "report", "")
 			artifactExpect(t, revoke, 200)
 		}}
-		ctx = context.WithValue(r.Context(), ctxInternalTokenWS, workspace)
+		ctx := context.WithValue(r.Context(), ctxInternalTokenWS, workspace)
 		ctx = context.WithValue(ctx, ctxInternalTokenCrew, "artifact-crew")
 		created := httptest.NewRecorder()
 		h.CreateArtifactAgent(created, r.WithContext(ctx))

@@ -245,3 +245,22 @@ passing the tab case does not establish iframe isolation. A console marker emitt
 immediately before the hostile loop proves it started before responsiveness is
 measured. Closing/removing the browsing context and continued Studio ticks do
 not measure underlying renderer process termination or reclaimed CPU.
+
+`acceptance-board-mermaid-browser.mjs` is called only by Linux-only
+`TestBoardMermaidWorkflowBrowser` (`board_mermaid_workflow_browser` or
+compile-only `conformance`). It uses migrated temporary storage, real Router
+handlers and production UI with two synthetic authenticated sessions. The
+canonical converter bootstrap and built pinned runner use separate owned HTTPS
+loopback sites. It seeds admitted Mermaid source without executing an agent.
+An aborted insertion before network leaves the job ready across client loss;
+two independently converted proposals are held before the real POSTs race.
+The test checks one commit, the existing-result receipt and reload persistence.
+It mocks no API responses and creates no Docker or persistent dev resources.
+
+```bash
+crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_BOARD_MERMAID_BROWSER=1 go test -tags board_mermaid_workflow_browser ./internal/api -run '^TestBoardMermaidWorkflowBrowser$' -count=1 -timeout 6m
+```
+
+Build the real static export first. Missing Chromium, export or opt-in fails;
+`CREWSHIP_BOARD_MERMAID_OUTPUT` selects the evidence directory. Synthetic session
+credentials remain in a private temporary file removed by the Go fixture.
