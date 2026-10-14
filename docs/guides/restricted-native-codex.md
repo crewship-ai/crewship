@@ -26,7 +26,7 @@ policy hash and Docker security options at admission, renewal, and delivery. A
 missing, changed, unsupported, or unenforced policy denies execution. Installation
 does not alter global sysctls, Docker configuration, proc masks, or capabilities.
 
-The Debian base digest and bubblewrap 0.8.0 package are pinned in the Dockerfile.
+The final Debian 13 base digest and Debian-patched bubblewrap 0.8.0 package are pinned in the Dockerfile. A separate Debian 12 stage downloads the authenticated bubblewrap package; the final image installs it with its package metadata and the same verified executable hash. Security upgrades and minimum glibc/Perl versions avoid the critical findings that blocked the original Debian 12 candidate.
 Bubblewrap 0.12 changes the proc-error path and prevents the pinned CLI's supported
 private-PID proc fallback in this Docker environment. Sandbox policy must not be
 weakened to compensate. The production image is selected by its immutable SHA.

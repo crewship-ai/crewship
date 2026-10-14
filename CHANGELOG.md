@@ -16,6 +16,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - ⚠️ **Behaviour change: resource shares follow current administrator authority.** Guest discovery, Issues, chat and routine execution stop using a grant when its issuer leaves, is demoted or suspended, or becomes a Guest. Stored shares are preserved; restoring the issuer does not revive previously admitted runs.
 - Guest accounts cannot acquire ADMIN or OWNER in any workspace; a database invariant protects both directions of the account-wide restriction. Guest Page actions retain Pages ACL checks and also require explicit routine Run and agent grants; existing capabilities are not backfilled.
+- Native Guest runtime candidates use a patched Debian 13 userspace while preserving the exact pinned bubblewrap 0.8 and Codex sandbox contract. Candidate publication still requires a passing vulnerability scan, signature verification and live acceptance before installation.
 
 - **Audit chart selections clear when the same bar is selected again (#3094).** The chart and table retain the chosen time-window anchor while activity loads or filters change, so incoming samples no longer shift a relative bucket beneath the selection.
 
