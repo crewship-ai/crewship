@@ -56,3 +56,22 @@ describe("your access", () => {
     await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2))
   })
 })
+
+it.each([409, 500])("keeps the last successful access visible on refetch failure %s", async (status) => {
+  mocks.fetch.mockResolvedValueOnce({ok:true,json:async()=>({explanation:"Saved access",decisions:[{kind:"agent",id:"a",name:"Shared",operation:"chat",state:"conditional",reason:"Private audience"},{kind:"routine",id:"r",name:"Shared",operation:"run",state:"denied",reason:"Missing agent grant"}]})})
+  const {client}=view()
+  expect(await screen.findByText("Agent · Shared · chat · Subject to execution checks")).toBeVisible()
+  expect(screen.getByText("Routine · Shared · run · No access")).toBeVisible()
+  mocks.fetch.mockResolvedValueOnce({ok:false,status})
+  await client.invalidateQueries({queryKey:["own-access"]})
+  expect(await screen.findByRole("status")).toHaveTextContent("last successful check")
+  expect(screen.getByText("Saved access")).toBeVisible()
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+})
+
+it("rejects an invalid access response before rendering its rows", async () => {
+  mocks.fetch.mockResolvedValueOnce({ok:true,json:async()=>({explanation:"Invalid",decisions:[{kind:"credential",id:"c",state:"allowed"}]})})
+  view()
+  expect(await screen.findByRole("alert")).toBeVisible()
+  expect(screen.queryByText("Invalid")).not.toBeInTheDocument()
+})
