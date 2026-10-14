@@ -925,6 +925,12 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Tickets carry a human user identity only. Agent transports have their
+	// own run credentials and must never turn acting-agent context into a human.
+	if agent, _ := pageGrantCallerIsAgent(r); agent || projectAgentFrom(r.Context()) != nil {
+		replyError(w, http.StatusForbidden, "human authentication required for websocket tickets")
+		return
+	}
 	jweToken, err := h.validator.IssueWSTicket(user.ID, user.SessionID, user.Name, user.Email)
 	if err != nil {
 		replyInternalError(w, h.logger, "issue ws ticket", err)

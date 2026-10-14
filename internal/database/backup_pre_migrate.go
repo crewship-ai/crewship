@@ -334,11 +334,28 @@ func pendingMigrationRange(ctx context.Context, db *sql.DB) (from, to, pending i
 		return 0, 0, 0, nil
 	}
 
-	var maxApplied sql.NullInt64
-	if err = db.QueryRowContext(ctx, `SELECT MAX(version) FROM _migrations`).Scan(&maxApplied); err != nil {
+	// Match Migrate's set of applied versions. Concurrent feature branches can
+	// introduce an unapplied version below the database's current maximum; it
+	// still needs the pre-migration snapshot and diagnostic upgrade guard.
+	rows, readErr := db.QueryContext(ctx, `SELECT version FROM _migrations`)
+	if readErr != nil {
+		return 0, 0, 0, readErr
+	}
+	defer rows.Close()
+	applied := map[int]bool{}
+	for rows.Next() {
+		var version int
+		if err = rows.Scan(&version); err != nil {
+			return 0, 0, 0, err
+		}
+		applied[version] = true
+		if version > from {
+			from = version
+		}
+	}
+	if err = rows.Err(); err != nil {
 		return 0, 0, 0, err
 	}
-	from = int(maxApplied.Int64)
 
 	if len(migrations) == 0 {
 		return from, from, 0, nil
@@ -346,7 +363,7 @@ func pendingMigrationRange(ctx context.Context, db *sql.DB) (from, to, pending i
 	to = migrations[len(migrations)-1].version
 
 	for _, m := range migrations {
-		if m.version <= from {
+		if applied[m.version] {
 			continue
 		}
 		pending++

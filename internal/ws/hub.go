@@ -27,8 +27,10 @@ import (
 // existing callers stay source-compatible; only the WS dispatch supplies one.
 type ChatMessageOption struct {
 	// Server-owned fields. The WS decoder constructs only MaxTurns and Metadata.
-	HumanAuthority *chataudience.Receipt `json:"-"`
-	HumanResume    bool                  `json:"-"`
+	HumanAuthority    *chataudience.Receipt `json:"-"`
+	BoardRequestID    string                `json:"-"`
+	ArtifactRequestID string                `json:"-"`
+	HumanResume       bool                  `json:"-"`
 	// MaxTurns overrides the adapter agent-loop cap for this run. 0 = leave the
 	// adapter default in place.
 	MaxTurns int
@@ -95,12 +97,17 @@ type ChatEvent struct {
 // broadcasting. It authenticates clients via JWT and routes chat messages
 // to the configured ChatHandler.
 type Hub struct {
-	logger       *slog.Logger
-	chatHandler  ChatHandler
-	jwtValidator *auth.JWTValidator
-	sessions     sessions.Store
-	clients      map[*Client]bool
-	channels     map[string]map[*Client]bool
+	presenceMu          sync.Mutex
+	presenceRooms       map[string]*presenceRoom
+	presenceEmitRate    presenceRate
+	contentRead         func(context.Context, string, string, string) (bool, error)
+	presenceDisplayName func(context.Context, string) (string, error)
+	logger              *slog.Logger
+	chatHandler         ChatHandler
+	jwtValidator        *auth.JWTValidator
+	sessions            sessions.Store
+	clients             map[*Client]bool
+	channels            map[string]map[*Client]bool
 	// observers are non-WebSocket subscribers (the HTTP NDJSON run stream,
 	// #1818). Guarded by the same mu as channels so dispatch fans out to
 	// sockets and observers under one lock acquisition. See observer.go.
@@ -359,8 +366,12 @@ func (h *Hub) Run(ctx context.Context) {
 	connSweepTicker := time.NewTicker(connSweepInterval)
 	defer connSweepTicker.Stop()
 
+	presenceTicker := time.NewTicker(5 * time.Second)
+	defer presenceTicker.Stop()
 	for {
 		select {
+		case <-presenceTicker.C:
+			h.expirePresence(time.Now())
 		case <-ctx.Done():
 			h.logger.Info("websocket hub stopping")
 			return
@@ -393,6 +404,7 @@ func (h *Hub) Run(ctx context.Context) {
 				h.logger.Debug("client disconnected", "user_id", client.userID)
 			}
 			h.mu.Unlock()
+			h.removePresence(client, "")
 		case msg := <-h.broadcast:
 			h.dispatch(msg.Channel, msg.Data, nil)
 		}
@@ -1057,7 +1069,12 @@ type ChannelAuthorizer interface {
 
 // SetChannelAuthorizer sets the authorizer used to check channel subscription permissions.
 func (h *Hub) SetChannelAuthorizer(auth ChannelAuthorizer) {
+	h.presenceMu.Lock()
+	defer h.presenceMu.Unlock()
 	h.channelAuth = auth
+	if a, ok := auth.(*DBChannelAuthorizer); ok {
+		a.SetPageContentAuthorizer(h.contentRead)
+	}
 }
 
 // wsOriginAllowlisted reports whether origin exactly matches an entry in

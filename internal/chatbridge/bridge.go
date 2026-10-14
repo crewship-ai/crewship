@@ -611,9 +611,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// The human turn is recorded and emitted regardless of whether the agent
 	// will respond. The sender also receives the event, which acknowledges
 	// persistence; its UI suppresses the duplicate optimistic turn.
+	humanMessageID := generateMsgID()
 	persistUserMsg := func() error {
 		return b.convStore.Append(ctx, chatID, conversation.Message{
-			ID:           generateMsgID(),
+			ID:           humanMessageID,
 			AgentID:      info.AgentID,
 			Role:         conversation.RoleUser,
 			Content:      content,
@@ -1153,14 +1154,24 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// concurrent routine/webhook run of the same agent no longer share them.
 	req.RunID = runID
 	runMeta := map[string]interface{}{
-		"cli_adapter": info.CLIAdapter,
-		"crew_id":     info.CrewID,
-		"crew_slug":   info.CrewSlug,
-		"agent_slug":  info.AgentSlug,
-		"tags":        []string{"chat", info.CLIAdapter},
+		"cli_adapter":               info.CLIAdapter,
+		"crew_id":                   info.CrewID,
+		"crew_slug":                 info.CrewSlug,
+		"agent_slug":                info.AgentSlug,
+		"tags":                      []string{"chat", info.CLIAdapter},
+		"artifact_human_receipt":    info.HumanAuthority,
+		"artifact_human_message_id": humanMessageID,
+		"artifact_request_id":       msgOpt.ArtifactRequestID,
+		"board_request_id":          msgOpt.BoardRequestID,
 	}
 	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER", runMeta); err != nil {
 		b.logger.Warn("failed to create run record", "error", err)
+		if msgOpt.ArtifactRequestID != "" || msgOpt.BoardRequestID != "" {
+			message := "artifact request admission failed before execution"
+			_ = b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &message, nil)
+			streamFn(ws.ChatEvent{Type: "error", Content: message})
+			return fmt.Errorf("artifact request admission: %w", err)
+		}
 	}
 	// Put the run on the context so every journal entry emitted beneath it
 	// inherits trace_id = runID. The orchestrator's JournalEntry has no
@@ -1214,9 +1225,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		costCancel()
 	}
 	if runErr != nil {
-		if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) || (errors.Is(runErr, orchestrator.ErrDetachedExecStopped) && ctx.Err() != context.Canceled) {
-			// Preserve partial replies for both detached outcomes. Only an
-			// unconfirmed stop remains nonterminal; a confirmed stop falls
+		if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) || errors.Is(runErr, orchestrator.ErrDetachedStillRunning) || (errors.Is(runErr, orchestrator.ErrDetachedExecStopped) && ctx.Err() != context.Canceled) {
+			// Preserve partial replies when execution observation is lost. An
+			// unconfirmed host capture or stop remains nonterminal; a confirmed stop falls
 			// through to normal failure/cancellation bookkeeping below.
 			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
 			defer cleanCancel()
@@ -1234,6 +1245,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
 			} else {
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
+			}
+			if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) {
+				b.logger.Warn("chat turn's protected host capture requires reconciliation; leaving the run nonterminal",
+					"chat_id", chatID, "run_id", runID, "error", runErr)
+				// Observer loss is not a terminal execution result, even if the
+				// request was cancelled. The retained-output projector owns it.
+				streamFn(ws.ChatEvent{Type: "done", Metadata: map[string]any{"reason": "host_capture_unconfirmed"}})
+				return nil
 			}
 			if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
 				b.logger.Warn("chat turn's exec detached after RunAgent's stop attempt; leaving the run nonterminal",

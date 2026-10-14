@@ -52,11 +52,17 @@ import (
 
 func (r *Router) registerPageRoutes() {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
+	if r.hub != nil {
+		r.hub.SetPageContentAuthorizer(p.CanReadPageContent)
+		r.hub.SetPresenceDisplayNameResolver(p.PresenceDisplayName)
+	}
 	p.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	// Held on the Router so cmd_start can reach THIS instance: it owns the
 	// create/update/delete paths that write wake-gate rules, and the freshness
 	// sweeper has to run against the same clock and journal.
 	r.pages = p
+	p.artifactStoragePath = r.storagePath
+	p.artifactMasterToken = r.internalToken
 	if r.pageProjectsPath != "" {
 		p.SetProjectStore(&pages.ProjectStore{Directory: r.pageProjectsPath})
 	}
@@ -88,6 +94,11 @@ func (r *Router) registerPageRoutes() {
 	// aliases keep the registration lines readable (router_orchestration.go).
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
+	// Human workspace administrators own this policy; it never grants Page access.
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy", authed(wsCtx(http.HandlerFunc(p.GetArtifactCreationPolicy))))
+	// openapi: responses 200,400,401,403,404,409,422,500
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/artifact-creation-policy", roleManage, p.UpdateArtifactCreationPolicy)
 	// 503 carries code restricted_runtime_unavailable when no private runtime is installed (#2877).
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-pages", authed(wsCtx(http.HandlerFunc(p.RestrictedCatalog))))
@@ -104,6 +115,55 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/pages/{slug}/access", authed(wsCtx(http.HandlerFunc(p.PageAccess))))
 	// openapi: query subject:string! subject_type:string limit:integer cursor:string; responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages/access", authed(wsCtx(http.HandlerFunc(p.SubjectAccess))))
+	// Metadata-only human access check; no runtime profile is activated.
+	// openapi: query revision:integer!; responses 200,400,401,403,404,409,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/lease", authed(wsCtx(http.HandlerFunc(p.GetArtifactLease))))
+	// Request notices are opaque pointers; the resolver rechecks current human access.
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/page-request-results/{kind}/{requestId}", authed(wsCtx(http.HandlerFunc(p.ResolvePageRequestResult))))
+	// openapi: query revision:integer; responses 200,400,401,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact", authed(wsCtx(http.HandlerFunc(p.GetArtifact))))
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/revisions", roleSelf, p.PublishArtifact)
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/restore", roleSelf, p.RestoreArtifact)
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/copies", roleSelf, p.CopyArtifact)
+	// openapi: query revision:integer; responses 200,400,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/threads", authed(wsCtx(http.HandlerFunc(p.ListArtifactThreads))))
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/threads", roleSelf, p.CreateArtifactThread)
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/threads/{threadId}/replies", roleSelf, p.ReplyArtifactThread)
+	// openapi: responses 200,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("PATCH", "/api/v1/pages/{slug}/artifact/threads/{threadId}", roleSelf, p.ResolveArtifactThread)
+	// openapi: responses 200,400,401,403,404,409,413,422,429,500
+	r.authedMut("PATCH", "/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}", roleSelf, p.EditArtifactComment)
+	// openapi: responses 200,400,401,403,404,409,429,500
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}", roleSelf, p.DeleteArtifactComment)
+	// openapi: responses 200,400,401,403,404,409,422,429,500
+	r.authedMut("PUT", "/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji}", roleSelf, p.ReactArtifactComment)
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/history", authed(wsCtx(http.HandlerFunc(p.GetArtifactCommentHistory))))
+
+	// openapi: responses 201,400,401,403,404,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/delegations", roleSelf, p.GrantArtifactRun)
+	// openapi: responses 204,401,403,404,500,503
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/artifact/delegations/{runId}", roleSelf, p.RevokeArtifactRun)
+	// openapi: responses 200,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/requests", authed(wsCtx(http.HandlerFunc(p.ListArtifactRequests))))
+	// openapi: responses 202,400,401,403,404,409,413,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/requests", roleSelf, p.CreateArtifactRequest)
+	// openapi: responses 200,400,401,403,404,409,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/requests/{requestId}/cancel", roleSelf, p.CancelArtifactRequest)
+	// openapi: responses 200,201,400,401,403,404,409,413,500,503
+	r.authedMut("POST", "/api/v1/artifact-creation-authorizations/{runId}", roleSelf, p.AuthorizeArtifactCreation)
+	// openapi: responses 204,401,403,404,500,503
+	r.authedMut("DELETE", "/api/v1/artifact-creation-authorizations/{runId}", roleSelf, p.RevokeArtifactCreation)
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/chats/{chatId}/artifact-creation-authorization", authed(wsCtx(http.HandlerFunc(p.ArtifactCreationStatus))))
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/chats/{chatId}/artifact-results", authed(wsCtx(http.HandlerFunc(p.ListChatArtifactResults))))
 	r.authedMut("POST", "/api/v1/pages", roleInline, p.Create)
 	r.authedMut("PATCH", "/api/v1/pages/{slug}", roleSelf, p.Update)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}", roleSelf, p.Delete)

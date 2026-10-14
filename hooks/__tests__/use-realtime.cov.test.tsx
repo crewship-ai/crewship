@@ -11,7 +11,7 @@ let wsStatus = "disconnected"
 let capturedOpts: {
   url: string
   getToken: () => Promise<string | null>
-  onMessage: (msg: { type: string; payload?: unknown }) => void
+  onMessage: (msg: { type: string; channel?: string; payload?: unknown }) => void
 } | null = null
 
 vi.mock("@/hooks/use-websocket", () => ({
@@ -398,5 +398,25 @@ describe("RealtimeProvider — private conversation delivery", () => {
     act(() => { result.current.subscribe("conversation.updated", callback) })
     act(() => { capturedOpts!.onMessage({ type: "conversation.updated", payload: { conversation_id: "room" } }) })
     expect(callback).toHaveBeenCalledWith(expect.objectContaining({ type: "conversation.updated", payload: { conversation_id: "room" } }))
+  })
+})
+
+describe("content presence transport", () => {
+  it("preserves the server room channel so consumers can isolate snapshots", () => {
+    const { result } = renderHook(() => useRealtime(), { wrapper })
+    const callback = vi.fn()
+    act(() => { result.current.subscribe("presence.snapshot", callback) })
+    act(() => { capturedOpts!.onMessage({ type: "presence.snapshot", channel: "board:page", payload: { schema_version: 1, members: [] } }) })
+    expect(callback.mock.calls[0][0].channel).toBe("board:page")
+  })
+  it("sends content heartbeats only while connected and refuses non-content rooms", () => {
+    wsStatus = "connected"
+    const { result } = renderHook(() => useRealtime(), { wrapper })
+    sendMock.mockClear()
+    act(() => { result.current.sendPresence("board:page", { schema_version: 1, board_seq: 3 }) })
+    expect(sendMock).toHaveBeenCalledWith({ type: "presence", channel: "board:page", payload: { schema_version: 1, board_seq: 3 } })
+    sendMock.mockClear()
+    act(() => { result.current.sendPresence("workspace:private", { schema_version: 1, board_seq: 3 }) })
+    expect(sendMock).not.toHaveBeenCalled()
   })
 })

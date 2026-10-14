@@ -89,6 +89,9 @@ func TestCrossWorkspaceFence_SkillsGenerate_PathQueryDivergence(t *testing.T) {
 // Anything not listed here is a handler deriving the tenant from a source that
 // was never checked for membership.
 var pathWorkspaceAllowlist = map[string]string{
+	// Equality rejection only; both policy handlers derive every database scope
+	// from validated context and reject a forged path before reading policy.
+	"pages_artifact_policy.go": "rejects path/context disagreement; validated context alone scopes policy queries (TestArtifactPolicyRejectsForgedPathAndQuery)",
 	// RequireWorkspace / OptionalWorkspaceRole: this IS the resolution step —
 	// the value read here is validated against workspace_members immediately
 	// below and only then written to the context.

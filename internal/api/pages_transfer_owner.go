@@ -66,7 +66,8 @@ type pageOwnerTransferResult struct {
 	PageName   string
 	ToCrewID   string
 	ToCrewName string
-	// Reason is "most_panels" or "member_crew" — which half of §7.1 rule 1b
+	ToUserID   string
+	// Reason is "human_administrator", "most_panels" or "member_crew" — which rule
 	// resolved the target, recorded on the journal entry and the
 	// notification payload so a reviewing ADMIN/OWNER can see why.
 	Reason string
@@ -85,7 +86,7 @@ type ErrPagesNeedManualTransfer struct {
 
 func (e *ErrPagesNeedManualTransfer) Error() string {
 	return fmt.Sprintf(
-		"cannot erase this user: page(s) %s have no crew that owns their panels and the user belongs to no crew in this workspace — reassign these pages to a crew manually, then retry",
+		"cannot erase this user: page(s) %s have no eligible successor — regular Pages require a panel-owning or member crew; Artifacts and Boards require an active human workspace administrator. Reassign ownership, then retry",
 		strings.Join(e.Pages, ", "))
 }
 
@@ -149,17 +150,20 @@ func emitPageOwnerTransferJournals(ctx context.Context, j journal.Emitter, wsID,
 // rows, and on the instance route the audit entry). It neither commits nor
 // writes the journal; the caller does both.
 func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID string) ([]pageOwnerTransferResult, error) {
-	type pageRow struct{ id, slug, name string }
+	type pageRow struct {
+		id, slug, name string
+		humanOnly      bool
+	}
 	var pages []pageRow
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, slug, name FROM pages WHERE workspace_id = ? AND owner_user_id = ?`,
+		`SELECT id, slug, name, EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id) OR EXISTS(SELECT 1 FROM page_boards WHERE page_id=pages.id) FROM pages WHERE workspace_id = ? AND owner_user_id = ?`,
 		wsID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("select user-owned pages: %w", err)
 	}
 	for rows.Next() {
 		var p pageRow
-		if err := rows.Scan(&p.id, &p.slug, &p.name); err != nil {
+		if err := rows.Scan(&p.id, &p.slug, &p.name, &p.humanOnly); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan user-owned page: %w", err)
 		}
@@ -181,12 +185,29 @@ func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID 
 		page     pageRow
 		crewID   string
 		crewName string
+		userID   string
 		reason   string
 	}
 	var toTransfer []resolvedTransfer
 	var unresolved []string
 
 	for _, p := range pages {
+		if p.humanOnly {
+			// Human-only outputs must never enter the legacy crew ownership path.
+			// An active workspace administrator takes custody; fail the whole departure
+			// if no eligible human remains. Ownership and notices commit together.
+			var successor string
+			err := tx.QueryRowContext(ctx, `SELECT m.user_id FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=? AND m.user_id!=? AND m.role IN ('OWNER','ADMIN') AND u.suspended_at IS NULL AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=m.user_id AND restricted.access_mode='restricted') ORDER BY CASE m.role WHEN 'OWNER' THEN 0 ELSE 1 END,m.user_id LIMIT 1`, wsID, userID).Scan(&successor)
+			if err == sql.ErrNoRows {
+				unresolved = append(unresolved, fmt.Sprintf("%s (%s; requires a human administrator)", p.slug, p.name))
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("resolve human successor for page %s: %w", p.slug, err)
+			}
+			toTransfer = append(toTransfer, resolvedTransfer{page: p, userID: successor, reason: "human_administrator"})
+			continue
+		}
 		crewID, reason, err := resolveTransferTargetCrew(ctx, tx, wsID, p.id, userID)
 		if err != nil {
 			return nil, fmt.Errorf("resolve target crew for page %s: %w", p.slug, err)
@@ -213,6 +234,21 @@ func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID 
 	now := time.Now().UTC().Format(time.RFC3339)
 	results := make([]pageOwnerTransferResult, 0, len(toTransfer))
 	for _, t := range toTransfer {
+		if t.userID != "" {
+			if _, err := tx.ExecContext(ctx, `UPDATE pages SET owner_user_id=?,owner_crew_id=NULL,updated_at=? WHERE id=?`, t.userID, now, t.page.id); err != nil {
+				return nil, fmt.Errorf("transfer page %s to human: %w", t.page.slug, err)
+			}
+			result := pageOwnerTransferResult{PageID: t.page.id, PageSlug: t.page.slug, PageName: t.page.name, ToUserID: t.userID, Reason: t.reason}
+			payload, err := json.Marshal(map[string]any{"page_id": t.page.id, "page_slug": t.page.slug, "from_user_id": userID, "to_user_id": t.userID, "reason": t.reason})
+			if err != nil {
+				return nil, fmt.Errorf("marshal human transfer notice: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO inbox_items(id,workspace_id,kind,source_id,target_role,title,body_md,sender_type,sender_name,state,priority,blocking,payload_json,created_at,updated_at) VALUES(?,?,?,?,'ADMIN',?,?,'system','Pages','unread','medium',0,?,?,?)`, generateCUID(), wsID, pagesTransferInboxKind, t.page.id, fmt.Sprintf("Page %q transferred to a human administrator", t.page.slug), "The owner left the workspace. This Artifact or Board requires human ownership; an active workspace administrator now has custody.", string(payload), now, now); err != nil {
+				return nil, err
+			}
+			results = append(results, result)
+			continue
+		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE pages SET owner_user_id = NULL, owner_crew_id = ?, updated_at = ? WHERE id = ?`,
 			t.crewID, now, t.page.id); err != nil {
@@ -331,20 +367,25 @@ func insertPageOwnerTransferNotice(ctx context.Context, tx *sql.Tx, wsID, fromUs
 // logged loudly by the Emitter itself; this package holds no logger of its
 // own here, matching the other post-commit journal call sites in Pages.
 func emitPageOwnerTransferJournal(ctx context.Context, j journal.Emitter, wsID, actorID, fromUserID string, res pageOwnerTransferResult) {
+	target := "crew " + res.ToCrewName
+	if res.ToUserID != "" {
+		target = "human administrator " + res.ToUserID
+	}
 	_, _ = j.Emit(ctx, journal.Entry{
 		WorkspaceID: wsID,
 		Type:        entryPageOwnerTransferred,
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorUser,
 		ActorID:     actorID,
-		Summary: fmt.Sprintf("page %s transferred to crew %s after owner departure (%s)",
-			res.PageSlug, res.ToCrewName, res.Reason),
+		Summary: fmt.Sprintf("page %s transferred to %s after owner departure (%s)",
+			res.PageSlug, target, res.Reason),
 		Payload: map[string]any{
 			"page_id":      res.PageID,
 			"page_slug":    res.PageSlug,
 			"from_user_id": fromUserID,
 			"to_crew_id":   res.ToCrewID,
 			"to_crew_name": res.ToCrewName,
+			"to_user_id":   res.ToUserID,
 			"reason":       res.Reason,
 		},
 	})
