@@ -60,7 +60,7 @@ jobs:
           if-no-files-found: error
 
   production-workflow:
-    name: Artifact production Router workflow
+    name: Artifact and Board production Router workflows
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -90,11 +90,15 @@ jobs:
         env:
           CREWSHIP_ARTIFACT_WORKFLOW_BROWSER: '1'
           CREWSHIP_ARTIFACT_WORKFLOW_OUTPUT: ${{ runner.temp }}/artifact-production-workflow
-        run: go test -tags artifact_workflow_browser ./internal/api -run '^TestArtifactWorkflowBrowser$' -count=1 -timeout 6m
+          CREWSHIP_BOARD_MERMAID_BROWSER: '1'
+          CREWSHIP_BOARD_MERMAID_OUTPUT: ${{ runner.temp }}/board-mermaid-workflow
+        run: go test -tags 'artifact_workflow_browser board_mermaid_workflow_browser' ./internal/api -run '^(TestArtifactWorkflowBrowser|TestBoardMermaidWorkflowBrowser)$' -count=1 -timeout 6m
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         timeout-minutes: 3
         if: always()
         with:
           name: artifact-production-workflow
-          path: ${{ runner.temp }}/artifact-production-workflow/
+          path: |
+            ${{ runner.temp }}/artifact-production-workflow/
+            ${{ runner.temp }}/board-mermaid-workflow/
           if-no-files-found: error
