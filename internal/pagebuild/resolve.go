@@ -32,7 +32,9 @@ func LabeledImages(ctx context.Context, fingerprint string) ([]string, error) {
 	if fingerprint != "" {
 		filter += "=" + fingerprint
 	}
-	out, err := exec.CommandContext(ctx, "docker", "image", "ls", "--quiet", "--no-trunc", "--filter", filter).Output()
+	// --all: with the containerd image store an untagged image (a plain
+	// `docker build --label …`) is otherwise invisible to `image ls`.
+	out, err := exec.CommandContext(ctx, "docker", "image", "ls", "--all", "--quiet", "--no-trunc", "--filter", filter).Output()
 	if err != nil {
 		return nil, fmt.Errorf("list Pages tools images: %w", err)
 	}
