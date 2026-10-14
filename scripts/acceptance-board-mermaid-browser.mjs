@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { chromium, expect } from '@playwright/test'
 const fixture = JSON.parse(await readFile(process.env.CREWSHIP_BOARD_MERMAID_FIXTURE, 'utf8'))
 if (!/^https:\/\/127\.0\.0\.1:\d+$/.test(fixture.server) || !/^https:\/\/127\.0\.0\.2:\d+$/.test(fixture.runtime)) throw new Error('Owned separate-site HTTPS fixtures required')
+if (!/^https:\/\/127\.0\.0\.3:\d+$/.test(fixture.resource_canary)) throw new Error('Owned third-site HTTPS resource canary required')
 const output = process.env.CREWSHIP_BOARD_MERMAID_OUTPUT ?? await mkdtemp(join(tmpdir(), 'crewship-board-mermaid-'))
 await mkdir(output, { recursive: true })
 const browser = await chromium.launch({ headless: true, args: ['--no-proxy-server'] })
@@ -25,6 +26,36 @@ async function readState(context) {
 }
 const insertPath = `/api/v1/pages/${fixture.slug}/board/requests/${fixture.request_id}/insert`
 const isInsert = url => new URL(url).pathname === insertPath
+// Send directly through the documented one-shot MessageChannel boundary so
+// Studio's own prevalidation cannot conceal a missing runtime validation gate.
+// This mounts the canonical bootstrap and actual pinned runner unchanged.
+async function rejectIsolatedSource(page, source) {
+  return page.evaluate(({ runtime, source }) => new Promise((resolve, reject) => {
+    const nonce = crypto.randomUUID(), channel = new MessageChannel()
+    const frame = document.createElement('iframe')
+    frame.title = 'Hostile source converter boundary test'
+    frame.sandbox.add('allow-scripts'); frame.referrerPolicy = 'no-referrer'
+    frame.style.cssText = 'position:fixed;left:-10000px;width:1200px;height:900px'
+    let admitted = false
+    const finish = (result, error) => {
+      clearTimeout(timer); window.removeEventListener('message', ready)
+      channel.port1.close(); channel.port2.close(); frame.remove()
+      if (error) reject(error); else resolve(result)
+    }
+    const ready = event => {
+      if (admitted || event.source !== frame.contentWindow || event.data?.type !== 'crewship.converter.ready' || event.data?.nonce !== nonce) return
+      admitted = true
+      if (event.origin !== 'null') return finish(null, new Error(`Converter is not opaque: ${event.origin}`))
+      channel.port1.onmessage = event => finish({ opaqueOrigin: true, validEnvelope: event.data?.type === 'crewship.converter.result' && event.data?.nonce === nonce, error: event.data?.error, hasElements: Object.hasOwn(event.data ?? {}, 'elements') })
+      frame.contentWindow.postMessage({ type: 'crewship.converter.connect', nonce }, '*', [channel.port2])
+      channel.port1.postMessage({ type: 'crewship.converter.input', nonce, source, target: { x: 0, y: 0, width: 600, height: 400 } })
+    }
+    const timer = setTimeout(() => finish(null, new Error('Hostile-source converter response timed out')), 20000)
+    window.addEventListener('message', ready)
+    frame.src = `${runtime}/api/v1/pages/runtime/board-converter#${nonce}`
+    document.body.append(frame)
+  }), { runtime: fixture.runtime, source })
+}
 try {
   for (const token of fixture.tokens) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, ignoreHTTPSErrors: true })
@@ -90,6 +121,44 @@ try {
   await Promise.all(pages.map(page => expect(work(page).getByText('Inserted at board sequence 1', { exact: true })).toBeVisible()))
   await Promise.all(pages.map(page => expect(insert(page)).toHaveCount(0)))
   await check('both reloaded clients retain the same saved insertion without offering another insertion', true)
+  const resourceControl = await pages[0].evaluate(async url => {
+    const response = await fetch(url)
+    return { status: response.status, body: await response.text() }
+  }, `${fixture.resource_canary}/control`)
+  await check('owned external-resource canary is reachable from the real browser', resourceControl.status === 200 && resourceControl.body === 'owned-resource-control')
+  const resourceEvidence = { attempted: [], succeeded: [], failed: [] }
+  const hostileUrl = url => url.startsWith(`${fixture.resource_canary}/hostile/`)
+  pages[0].on('request', request => { if (hostileUrl(request.url())) resourceEvidence.attempted.push(request.url()) })
+  pages[0].on('response', response => { if (hostileUrl(response.url()) && response.ok()) resourceEvidence.succeeded.push(response.url()) })
+  pages[0].on('requestfailed', request => { if (hostileUrl(request.url())) resourceEvidence.failed.push({ url: request.url(), error: request.failure()?.errorText }) })
+  await pages[0].evaluate(() => { window.__boardHostileExecuted__ = 0 })
+  const grammarError = 'HTML, links, directives and styling are unavailable.'
+  const hostileCases = [
+    { name: 'HTML image and event handler', source: `flowchart TD\nA[<img data-board-hostile src="${fixture.resource_canary}/hostile/image" onerror="parent.__boardHostileExecuted__=1">]`, error: grammarError },
+    { name: 'HTML script', source: `flowchart TD\nA[<script data-board-hostile src="${fixture.resource_canary}/hostile/script.js">parent.__boardHostileExecuted__=1</script>]`, error: grammarError },
+    { name: 'initialization directive with external styling', source: `flowchart TD\n%%{init: {"securityLevel":"loose","themeCSS":"@import url(${fixture.resource_canary}/hostile/style.css)"}}%%\nA`, error: grammarError },
+    { name: 'click link', source: `flowchart TD\nA --> B\nclick A "${fixture.resource_canary}/hostile/link"`, error: grammarError },
+    { name: 'plain external URL label', source: `flowchart TD\nA[${fixture.resource_canary}/hostile/label]`, error: grammarError },
+    { name: 'unsupported sequence diagram', source: 'sequenceDiagram\nAlice->>Bob: Hello', error: 'Use the supported plain flowchart profile.' },
+    { name: 'oversized source', source: `flowchart TD\nA[${'A'.repeat(32768)}]`, error: 'Diagram source exceeds 32 KiB.' },
+  ]
+  for (const test of hostileCases) {
+    const rejected = await rejectIsolatedSource(pages[0], test.source)
+    await check(`isolated converter rejects ${test.name} with a bounded readable error and no geometry`, rejected.opaqueOrigin && rejected.validEnvelope && typeof rejected.error === 'string' && rejected.error.includes(test.error) && rejected.error.length <= 512 && !rejected.hasElements, { error: rejected.error })
+    // Render the returned error as text in a test-owned output. This checks
+    // readability without claiming the direct protocol is a production UX.
+    await pages[0].evaluate(error => {
+      let output = document.getElementById('board-hostile-converter-error')
+      if (!output) { output = document.createElement('output'); output.id = 'board-hostile-converter-error'; document.body.append(output) }
+      output.textContent = error
+    }, rejected.error)
+    await expect(pages[0].locator('#board-hostile-converter-error')).toBeVisible()
+    await expect(pages[0].locator('#board-hostile-converter-error')).toContainText(test.error)
+    await check(`hostile ${test.name} leaves Studio script sentinel and DOM untouched`, await pages[0].evaluate(() => window.__boardHostileExecuted__ === 0 && !document.querySelector('[data-board-hostile]')))
+  }
+  await check('hostile converter inputs have no successful external resource response', resourceEvidence.succeeded.length === 0, { ...resourceEvidence, scope: 'Owned canary requests/responses only; this does not establish zero attempted DNS/TCP speculation or general network silence.' })
+  state = await readState(contexts[0])
+  await check('hostile conversion attempts preserve the committed Board and durable result', state.job.status === 'inserted' && state.board.seq === 1 && state.board.records.length === ids.length && state.board.records.every(value => ids.includes(value.element_id)))
   console.log(`Board Mermaid workflow passed ${results.length} checks; evidence: ${output}`)
 } catch (error) {
   await writeFile(join(output, 'failure.txt'), String(error))

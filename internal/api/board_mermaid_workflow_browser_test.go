@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,6 +72,29 @@ func TestBoardMermaidWorkflowBrowser(t *testing.T) {
 	}
 	runtime.StartTLS()
 	t.Cleanup(runtime.Close)
+	// A third owned site is deliberately reachable by the browser. Hostile
+	// sources refer to it so resource success is observable without contacting
+	// the public network or intercepting/fabricating a converter response.
+	var hostileResourceHits atomic.Int64
+	canary := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if r.URL.Path == "/control" {
+			_, _ = w.Write([]byte("owned-resource-control"))
+			return
+		}
+		hostileResourceHits.Add(1)
+		w.Header().Set("Content-Type", "application/javascript")
+		_, _ = w.Write([]byte("parent.__boardHostileExecuted__ = 1"))
+	}))
+	if err = canary.Listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	canary.Listener, err = net.Listen("tcp", "127.0.0.3:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	canary.StartTLS()
+	t.Cleanup(canary.Close)
 	if err = pagebuild.ValidateRuntimeOrigin(runtime.URL, studio.URL); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +113,7 @@ func TestBoardMermaidWorkflowBrowser(t *testing.T) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		http.ServeFile(w, r, filepath.Join(repo, "out", "board-converter", "runner.js"))
 	})
-	fixture, err := json.Marshal(map[string]any{"server": studio.URL, "runtime": runtime.URL, "workspace": workspace, "user_id": owner, "slug": "report", "request_id": job, "source": source, "tokens": tokens})
+	fixture, err := json.Marshal(map[string]any{"server": studio.URL, "runtime": runtime.URL, "resource_canary": canary.URL, "workspace": workspace, "user_id": owner, "slug": "report", "request_id": job, "source": source, "tokens": tokens})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +128,9 @@ func TestBoardMermaidWorkflowBrowser(t *testing.T) {
 	command.Stdout, command.Stderr = os.Stdout, os.Stderr
 	if err = command.Run(); err != nil {
 		t.Fatal("Board Mermaid production browser", err)
+	}
+	if hits := hostileResourceHits.Load(); hits != 0 {
+		t.Fatalf("hostile converter source reached the owned external resource server %d times", hits)
 	}
 	var status, idsJSON, actor string
 	var resultSeq, seq, elements, mutations int

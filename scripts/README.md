@@ -203,6 +203,13 @@ loopback sites. It seeds admitted Mermaid source without executing an agent.
 An aborted insertion before network leaves the job ready across client loss;
 two independently converted proposals are held before the real POSTs race.
 The test checks one commit, the existing-result receipt and reload persistence.
+It also sends HTML, directives, links, oversized source and an unsupported
+diagram directly through the canonical converter's one-shot MessageChannel,
+bypassing Studio prevalidation. It requires opaque-origin, readable rejection
+without geometry or Studio DOM execution. A third owned HTTPS canary has a
+successful browser reachability control; hostile resource successes fail in
+both browser evidence and server counters. Attempted and failed requests are
+recorded without claiming zero DNS/TCP speculation or general network silence.
 It mocks no API responses and creates no Docker or persistent dev resources.
 
 ```bash
