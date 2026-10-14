@@ -1,5 +1,5 @@
 import { affectedClosure, batchEntities, changedEntities } from './collaboration-plan'
-import { entityFromKey, type BoardEntity, type BoardHead, type CollaborativeBatch } from './collaboration-types'
+import { elementStamp, entityFromKey, placementStamp, type BoardEntity, type BoardHead, type CollaborativeBatch } from './collaboration-types'
 export interface BoardReceipt { seq: number; result_seq: number; placement_revs?: Record<string, number>; element_revs?: Record<string, number>; undo_expires_at?: string }
 export interface SavedBoardCommand { before: BoardHead; applied: BoardHead; inverse: CollaborativeBatch; touched: string[]; expiresAt: number }
 const copy = <T>(value: T): T => structuredClone(value)
@@ -89,4 +89,56 @@ export function planSavedUndo(command: SavedBoardCommand, latest: BoardHead, now
   const conflicts = [...changedEntities(command.applied, latest)].filter(id => closure.has(id)).map(entityFromKey)
   if (conflicts.length) return { kind: 'conflict', conflicts }
   return { kind: 'ready', batch: { ...copy(command.inverse), base_seq: latest.seq } }
+}
+
+/** Carry authority through a confirmed local inverse only. Restoring the same
+ * contents gets a new server revision; it does not erase an intervening writer.
+ * The restored revision must descend from the exact state an older command saw.
+ * Never use the subsequent GET (which may have raced another write) as proof. */
+export function recordSavedUndo(commands: readonly SavedBoardCommand[], inverse: CollaborativeBatch, receipt: BoardReceipt): SavedBoardCommand[] {
+  const undone = commands.at(-1)
+  if (!undone || inverse.base_seq < undone.applied.seq || JSON.stringify({ ...inverse, base_seq: undone.inverse.base_seq }) !== JSON.stringify(undone.inverse)) throw new Error('Cannot establish the saved inverse')
+  if (!Number.isSafeInteger(receipt.seq) || !Number.isSafeInteger(receipt.result_seq) || receipt.result_seq !== inverse.base_seq + 1 || receipt.seq < receipt.result_seq) throw new Error('Cannot establish the accepted undo sequence')
+  const revisions = new Map<string, number>()
+  const accept = (key: string, expected: number | undefined, revision: number | undefined) => {
+    if (expected === undefined || !Number.isSafeInteger(revision) || revision! <= expected) throw new Error('Cannot establish accepted undo authority')
+    revisions.set(key, revision!)
+  }
+  for (const item of inverse.upserts) accept(`element:${item.element.id}`, item.expected_rev, receipt.element_revs?.[item.element.id])
+  for (const item of inverse.deletes) accept(`element:${item.id}`, item.expected_rev, receipt.element_revs?.[item.id])
+  for (const item of [...inverse.placement_updates ?? [], ...inverse.placement_deletes ?? [], ...inverse.placement_restores ?? [], ...inverse.placement_modes ?? []]) accept(`placement:${item.id}`, item.expected_rev, receipt.placement_revs?.[item.id])
+  const originalElements = new Map(undone.before.records.map(item => [item.element_id, item]))
+  const originalPins = new Map(undone.before.placements.map(item => [item.id, item]))
+  const originalTombstones = new Map((undone.before.placement_tombstones ?? []).map(item => [item.id, item]))
+  return commands.slice(0, -1).map(command => {
+    const next = copy(command)
+    const appliedRevisions = new Map<string, number>()
+    for (const head of [next.before, next.applied]) {
+      const remember = (key: string, revision: number) => { if (head === next.applied) appliedRevisions.set(key, revision) }
+      for (const item of head.records) {
+        const key = `element:${item.element_id}`, revision = revisions.get(key), original = originalElements.get(item.element_id)
+        if (revision !== undefined && original && item.element_rev === original.element_rev && item.deleted === original.deleted && elementStamp(item.element) === elementStamp(original.element)) {
+          item.element_rev = revision; remember(key, revision)
+        }
+      }
+      for (const item of head.placements) {
+        const key = `placement:${item.id}`, revision = revisions.get(key), original = originalPins.get(item.id)
+        if (revision !== undefined && original && item.placement_rev === original.placement_rev && placementStamp(item) === placementStamp(original) && (item.mode ?? 'fixed') === (original.mode ?? 'fixed')) {
+          item.placement_rev = revision; remember(key, revision)
+        }
+      }
+      for (const item of head.placement_tombstones ?? []) {
+        const key = `placement:${item.id}`, revision = revisions.get(key)
+        if (revision !== undefined && item.placement_rev === originalTombstones.get(item.id)?.placement_rev) {
+          item.placement_rev = revision; remember(key, revision)
+        }
+      }
+    }
+    // Only update preconditions whose applied state matched the restored state.
+    // Older, different revisions remain conflicts even when geometry is equal.
+    for (const item of next.inverse.upserts) item.expected_rev = appliedRevisions.get(`element:${item.element.id}`) ?? item.expected_rev
+    for (const item of next.inverse.deletes) item.expected_rev = appliedRevisions.get(`element:${item.id}`) ?? item.expected_rev
+    for (const item of [...next.inverse.placement_updates ?? [], ...next.inverse.placement_deletes ?? [], ...next.inverse.placement_restores ?? [], ...next.inverse.placement_modes ?? []]) item.expected_rev = appliedRevisions.get(`placement:${item.id}`) ?? item.expected_rev
+    return next
+  })
 }

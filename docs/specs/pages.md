@@ -38,6 +38,11 @@ overlapping graph changes preserve the draft for review. An uncertain save
 must be retried with its original identity before rebasing. Local native undo
 covers unsaved changes. **Undo last saved change** submits a new conditional
 batch for the user's saved command and refuses if connected content changed.
+Successive saved undo steps carry only receipt-proven local inverse revisions
+into earlier commands, including repeated edits of the same drawing or pin. A
+foreign edit remains a conflict even if its geometry matches the restored state;
+a racing read cannot advance undo authority. Exact retries keep the original
+inverse and mutation identity, and earlier commands keep their original expiry.
 Remote edits never become local undo commands. Retained pin tombstones allow
 conditional restore without reusing a stale pin identity; restored sources
 still require independent access.
