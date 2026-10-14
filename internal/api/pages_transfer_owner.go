@@ -352,22 +352,19 @@ func emitPageOwnerTransferJournal(ctx context.Context, j journal.Emitter, wsID, 
 	if res.ToUserID != "" {
 		target = "human " + res.ToUserID
 	}
+	summary := fmt.Sprintf("page %s transferred to %s (%s)", res.PageSlug, target, res.Reason)
+	payload := map[string]any{
+		"page_id": res.PageID, "page_slug": res.PageSlug, "from_user_id": fromUserID,
+		"to_crew_id": res.ToCrewID, "to_crew_name": res.ToCrewName, "to_user_id": res.ToUserID, "reason": res.Reason,
+	}
+	if res.Reason == "explicit_human_transfer" {
+		// Journal List/Get/SSE are workspace-visible, not Page-authorized. Keep
+		// private output slugs/names in the administrator-only custody surface.
+		summary = "Private output ownership transferred"
+		payload = map[string]any{"page_id": res.PageID, "from_user_id": fromUserID, "to_user_id": res.ToUserID, "reason": res.Reason}
+	}
 	_, _ = j.Emit(ctx, journal.Entry{
-		WorkspaceID: wsID,
-		Type:        entryPageOwnerTransferred,
-		Severity:    journal.SeverityInfo,
-		ActorType:   journal.ActorUser,
-		ActorID:     actorID,
-		Summary: fmt.Sprintf("page %s transferred to %s (%s)",
-			res.PageSlug, target, res.Reason),
-		Payload: map[string]any{
-			"page_id":      res.PageID,
-			"page_slug":    res.PageSlug,
-			"from_user_id": fromUserID,
-			"to_crew_id":   res.ToCrewID,
-			"to_crew_name": res.ToCrewName,
-			"to_user_id":   res.ToUserID,
-			"reason":       res.Reason,
-		},
+		WorkspaceID: wsID, Type: entryPageOwnerTransferred, Severity: journal.SeverityInfo,
+		ActorType: journal.ActorUser, ActorID: actorID, Summary: summary, Payload: payload,
 	})
 }

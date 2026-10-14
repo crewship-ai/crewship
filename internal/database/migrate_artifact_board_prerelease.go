@@ -59,8 +59,10 @@ type artifactBoardSchemaObject struct {
 func preflightArtifactBoardConsolidation(ctx context.Context, db *sql.DB) error {
 	var feature []migration
 	registered := map[int]bool{}
+	registeredNames := map[int]string{}
 	for _, m := range migrations {
 		registered[m.version] = true
+		registeredNames[m.version] = m.name
 	}
 	for _, version := range artifactBoardConsolidatedVersions {
 		for _, m := range migrations {
@@ -90,6 +92,13 @@ func preflightArtifactBoardConsolidation(ctx context.Context, db *sql.DB) error 
 			if err = rows.Scan(&version, &name); err != nil {
 				rows.Close()
 				return fmt.Errorf("Artifact/Board schema preflight ledger: %w", err)
+			}
+			// A renumbered ledger row can make a complete feature schema look
+			// like an unfinished prefix. Preserve the existing repair-ledger
+			// diagnosis before interpreting feature stages; never repair here.
+			if expected, known := registeredNames[version]; known && expected != name {
+				rows.Close()
+				return fmt.Errorf("migration version %d collision: database has %q applied, code expects %q; refusing schema writes. Run `crewship db repair-ledger --dry-run` to inspect the ledger repair", version, name, expected)
 			}
 			applied[version] = name
 			if want, ok := artifactBoardPrereleaseVersions[version]; ok {
