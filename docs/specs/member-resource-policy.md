@@ -73,8 +73,9 @@ access first. A role change cannot silently remove or bypass the restriction.
 | Per-object sharing and meaningful type levels | Kept as target; only agent operations, routine run and project projection delivered | View/Edit, crew/credential subjects and Share dialogs need separate enforcement and UI work. |
 | Pages model migration | Deferred, as in original phases | Preserve current Pages ACL, issuer checks and data during the first routine/project slice. |
 
-Guest invitation acceptance and restricted provisioning refuse accounts that are
-OWNER or ADMIN anywhere, including unclaimed accounts. Consent cannot override
+Guest invitation acceptance, restricted provisioning and direct member policy
+replacement refuse accounts that are OWNER or ADMIN anywhere, including
+unclaimed accounts. Consent cannot override
 this protection. A matching stale Guest invitation returns typed 409 and rolls
 back signup or membership changes.
 

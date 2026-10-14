@@ -191,12 +191,16 @@ func (s Store) ReplaceIn(ctx context.Context, tx *sql.Tx, actor, user, workspace
 	if expected.ID != m.ID || expected.Revision != m.Revision {
 		return m, ErrConflict
 	}
-	var role string
-	if err = tx.QueryRowContext(ctx, `SELECT role FROM workspace_members WHERE id=?`, m.ID).Scan(&role); err != nil {
-		return m, err
-	}
-	if mode == "restricted" && (role == "OWNER" || role == "ADMIN") {
-		return m, ErrDenied
+	if mode == "restricted" {
+		// The restriction applies to the account, so protecting only this
+		// membership would let another workspace lock out an administrator.
+		var administrator bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=? AND role IN ('OWNER','ADMIN'))`, user).Scan(&administrator); err != nil {
+			return m, err
+		}
+		if administrator {
+			return m, ErrDenied
+		}
 	}
 	seen := map[Right]bool{}
 	for _, r := range rights {

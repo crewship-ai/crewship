@@ -160,7 +160,7 @@ func TestGuestProvisionCannotRestrictAnExistingAccountWithoutConsent(t *testing.
 
 func TestGuestInvitationAndProvisionPreserveOtherWorkspaceAdministrators(t *testing.T) {
 	for _, role := range []string{"OWNER", "ADMIN"} {
-		for _, route := range []string{"accept", "provision"} {
+		for _, route := range []string{"accept", "provision", "policy"} {
 			t.Run(role+"/"+route, func(t *testing.T) {
 				db := setupTestDB(t)
 				owner, ws := seedInviter(t, db)
@@ -180,20 +180,29 @@ func TestGuestInvitationAndProvisionPreserveOtherWorkspaceAdministrators(t *test
 					path = "/api/v1/workspaces/" + ws + "/members/provision"
 					body = `{"email":"protected@example.test","role":"VIEWER","access_mode":"restricted","rights":[]}`
 				}
-				req := httptest.NewRequest("POST", path, strings.NewReader(body))
+				method, want := "POST", 409
+				expectedMembers := 1
+				if route == "policy" {
+					execOrFatal(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('protected-policy',?,'protected-admin','VIEWER')`, ws)
+					actor = owner
+					method, want, expectedMembers = "PUT", 404, 2
+					path = "/api/v1/workspaces/" + ws + "/members/protected-policy/access"
+					body = `{"membership_id":"protected-policy","revision":1,"mode":"restricted","rights":[]}`
+				}
+				req := httptest.NewRequest(method, path, strings.NewReader(body))
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("X-Workspace-ID", ws)
 				req.Header.Set("Authorization", "Bearer "+mintTokenFor(t, db, actor, "protected-"+strings.Repeat("0", 40)))
 				rr := httptest.NewRecorder()
 				router.ServeHTTP(rr, req)
-				if rr.Code != 409 || !strings.Contains(rr.Body.String(), "guest_administrator_conflict") {
+				if rr.Code != want || route != "policy" && !strings.Contains(rr.Body.String(), "guest_administrator_conflict") {
 					t.Fatalf("protected admin=%d %s", rr.Code, rr.Body.String())
 				}
 				var count int
 				if err = db.QueryRow(`SELECT COUNT(*) FROM workspace_members WHERE user_id='protected-admin' AND access_mode='trusted' AND role=?`, role).Scan(&count); err != nil || count != 1 {
 					t.Fatal("administrator changed", count, err)
 				}
-				if err = db.QueryRow(`SELECT COUNT(*) FROM workspace_members WHERE user_id='protected-admin'`).Scan(&count); err != nil || count != 1 {
+				if err = db.QueryRow(`SELECT COUNT(*) FROM workspace_members WHERE user_id='protected-admin'`).Scan(&count); err != nil || count != expectedMembers {
 					t.Fatal("partial membership", count, err)
 				}
 			})
