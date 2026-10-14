@@ -10,6 +10,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - Guest accounts cannot acquire ADMIN or OWNER in any workspace; a database invariant protects both directions of the account-wide restriction. Guest Page actions retain Pages ACL checks and also require explicit routine Run and agent grants; existing capabilities are not backfilled.
+- **Your access remains readable during a temporary refresh failure.** Settings distinguishes agents, routines and projects, labels access states, and keeps the last successful explanation with a refresh notice. A concurrently deleted resource becomes a denied row instead of failing the entire explanation.
+
 - **Guests can understand their own access.** Settings shows saved resource grants and execution prerequisites. Members can also inspect their own explanation through `workspace access me` and the workspace `access/me` API without administrator access.
 
 - **Audit chart selections clear when the same bar is selected again (#3094).** The chart and table retain the chosen time-window anchor while activity loads or filters change, so incoming samples no longer shift a relative bucket beneath the selection.

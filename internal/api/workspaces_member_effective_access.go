@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 
@@ -98,21 +100,7 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 		// membership fence also covers changes while building this explanation.
 		grantErr := store.Check(r.Context(), user, workspace, right)
 		if grantErr == nil {
-			query := ""
-			switch right.Kind {
-			case "agent":
-				query = `SELECT name FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
-			case "routine":
-				query = `SELECT name FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
-			case "project":
-				query = `SELECT name FROM projects WHERE id=? AND workspace_id=?`
-			}
-			if query != "" {
-				if err = h.db.QueryRowContext(r.Context(), query, right.ID, workspace).Scan(&decision.Name); err != nil {
-					h.memberAccessError(w, err)
-					return
-				}
-			}
+			decision.Name, grantErr = effectiveAccessResourceName(r.Context(), h.db, workspace, right)
 		}
 		if err = grantErr; err != nil {
 			if !errors.Is(err, access.ErrDenied) {
@@ -162,4 +150,27 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// A resource can disappear after Check succeeds without changing membership
+// revision. Treat a missing name as a denied row, not an endpoint failure.
+func effectiveAccessResourceName(ctx context.Context, db *sql.DB, workspace string, right access.Right) (string, error) {
+	query := ""
+	switch right.Kind {
+	case "agent":
+		query = `SELECT name FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
+	case "routine":
+		query = `SELECT name FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
+	case "project":
+		query = `SELECT name FROM projects WHERE id=? AND workspace_id=?`
+	}
+	if query == "" {
+		return "", access.ErrDenied
+	}
+	var name string
+	err := db.QueryRowContext(ctx, query, right.ID, workspace).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", access.ErrDenied
+	}
+	return name, err
 }
