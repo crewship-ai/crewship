@@ -38,6 +38,11 @@ overlapping graph changes preserve the draft for review. An uncertain save
 must be retried with its original identity before rebasing. Local native undo
 covers unsaved changes. **Undo last saved change** submits a new conditional
 batch for the user's saved command and refuses if connected content changed.
+Successive saved undo steps carry only receipt-proven local inverse revisions
+into earlier commands, including repeated edits of the same drawing or pin. A
+foreign edit remains a conflict even if its geometry matches the restored state;
+a racing read cannot advance undo authority. Exact retries keep the original
+inverse and mutation identity, and earlier commands keep their original expiry.
 Remote edits never become local undo commands. Retained pin tombstones allow
 conditional restore without reusing a stale pin identity; restored sources
 still require independent access.
@@ -61,8 +66,20 @@ live agent authority. Historical discussion authors are included even after
 membership removal; this does not include discussions from other workspaces.
 
 Image uploads are bounded PNG/JPEG rasters, fully decoded and re-encoded into
-private content-addressed storage. Scenes persist opaque Board file IDs;
-base64 image data exists only in the viewer's transient editor state. Reads
+private content-addressed storage. Two process-wide Board write slots admit
+uploads before reading their bodies. Compressed input (5 MiB) and canonical
+output (8 MiB) are streamed through request-owned mode-0600 temporary files,
+removed on completion, rejection or cancellation. Staging lives in the existing
+workspace attachment tree, so its normal temporary-file collector also handles
+crash leftovers. Atomic blob publication uses the existing workspace digest path
+and GC lock. Two admitted uploads hold at most 26 MiB of staging files, plus up
+to 16 MiB of atomic blob-write temporaries.
+Pixels remain decoded in memory: the 2048 by 2048 bound permits 32 MiB for a
+16-bit RGBA raster per decoder, plus codec scratch space. These are resource
+bounds, not a promise that the process RSS stays below their sum.
+
+Scenes persist opaque Board file IDs; base64 image data exists only in the
+viewer's transient editor state. Reads
 recheck Board ACL and stored digest, MIME and dimensions, including restored
 files. Board limits include 100 files/50 MiB; workspace limits include 1,000
 files/500 MiB. Upload retries keep their original sequence and mutation ID.
@@ -210,8 +227,15 @@ slots have active pins, publication is refused with a retention-specific error.
 Publication replay receipts are retained for at least 24 hours and while their
 source revision exists; an expired source returns 404. Expired receipts no longer
 consume a permanent lifetime quota.
-Workspace rate receipts survive Page deletion. Two upload slots bound concurrent
-JSON decoding, and the decoder reads the bounded request stream directly. Blobs use the existing attachment store; artifact references pin
+Workspace rate receipts survive Page deletion. Two process-wide artifact upload
+slots bound concurrent JSON decoding independently of the two Board write slots.
+The decoder reads a bounded request stream directly, but Go's JSON decoder still
+buffers the complete JSON value. Sixfold source escaping allows a 60 MiB + 4096
+wire request; decoder buffer growth, unescaping and source copies can require
+substantially more heap than the 10 MiB source limit. Waiting requests do not
+read their bodies, and cancellation ends capacity waits. These slots remain a
+single-writer resource guard rather than an independent publication quota.
+Blobs use the existing attachment store; artifact references pin
 historical blobs against collection and are included in workspace backup and
 restore. Revision author, source digest and optional restored-from revision are
 stored with the revision. Workspace notifications contain identifiers only.

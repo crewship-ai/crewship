@@ -3,7 +3,9 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
@@ -12,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/pages"
@@ -21,27 +24,37 @@ import (
 const maxBoardFileInput = 5 << 20
 const maxBoardFileOutput = 8 << 20
 
-type boundedImageBuffer struct{ bytes.Buffer }
+// Encoding may expand a compressed raster. Refuse an over-limit write before
+// it reaches disk, independently of input bytes and decoded pixel dimensions.
+type boundedImageWriter struct {
+	writer io.Writer
+	size   int64
+}
 
-func (b *boundedImageBuffer) Write(data []byte) (int, error) {
-	if b.Len()+len(data) > maxBoardFileOutput {
+func (b *boundedImageWriter) Write(data []byte) (int, error) {
+	if int64(len(data)) > maxBoardFileOutput-b.size {
 		return 0, errors.New("canonical image too large")
 	}
-	return b.Buffer.Write(data)
+	n, err := b.writer.Write(data)
+	b.size += int64(n)
+	return n, err
 }
-func canonicalBoardImage(raw []byte) ([]byte, string, int, int, error) {
-	if len(raw) == 0 || len(raw) > maxBoardFileInput {
-		return nil, "", 0, 0, errors.New("image exceeds input limit")
+
+func canonicalBoardImage(source io.ReadSeeker, output io.Writer, inputSize int64) (string, int, int, error) {
+	if inputSize == 0 || inputSize > maxBoardFileInput {
+		return "", 0, 0, errors.New("image exceeds input limit")
 	}
-	config, format, err := image.DecodeConfig(bytes.NewReader(raw))
+	config, format, err := image.DecodeConfig(source)
 	if err != nil || (format != "png" && format != "jpeg") || config.Width < 1 || config.Height < 1 || config.Width > 2048 || config.Height > 2048 || config.Width*config.Height > 4*1024*1024 {
-		return nil, "", 0, 0, errors.New("only bounded PNG/JPEG images are supported")
+		return "", 0, 0, errors.New("only bounded PNG/JPEG images are supported")
 	}
-	decoded, actual, err := image.Decode(bytes.NewReader(raw))
+	if _, err = source.Seek(0, io.SeekStart); err != nil {
+		return "", 0, 0, err
+	}
+	decoded, actual, err := image.Decode(source)
 	if err != nil || actual != format || decoded.Bounds().Dx() != config.Width || decoded.Bounds().Dy() != config.Height {
-		return nil, "", 0, 0, errors.New("invalid image pixels")
+		return "", 0, 0, errors.New("invalid image pixels")
 	}
-	output := &boundedImageBuffer{}
 	mime := "image/png"
 	if format == "png" {
 		err = png.Encode(output, decoded)
@@ -50,10 +63,46 @@ func canonicalBoardImage(raw []byte) ([]byte, string, int, int, error) {
 		err = jpeg.Encode(output, decoded, &jpeg.Options{Quality: 90})
 	}
 	if err != nil {
-		return nil, "", 0, 0, err
+		return "", 0, 0, err
 	}
-	return output.Bytes(), mime, config.Width, config.Height, nil
+	return mime, config.Width, config.Height, nil
 }
+
+type boardImageContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r boardImageContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
+}
+
+// Staging files are private (CreateTemp uses 0600) and remain owned by this
+// request. They are never database references or publicly readable blobs.
+func boardImageTemp(root, workspace string) (*os.File, func(), error) {
+	// The fixed shard is only a staging location; final names are still derived
+	// from canonical bytes. Using the existing tree also lets attachment GC
+	// reclaim crashed uploads with its normal .tmp-* age floor.
+	path, err := attachmentBlobPath(root, workspace, "0000000000000000000000000000000000000000000000000000000000000000")
+	if err != nil {
+		return nil, nil, err
+	}
+	if err = os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return nil, nil, err
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), ".tmp-board-image-*")
+	if err != nil {
+		return nil, nil, err
+	}
+	return file, func() {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+	}, nil
+}
+
 func (h *PageHandler) UploadBoardFile(w http.ResponseWriter, r *http.Request) {
 	if agent, _ := pageGrantCallerIsAgent(r); agent || projectAgentFrom(r.Context()) != nil {
 		replyError(w, 401, "human authentication required")
@@ -79,26 +128,62 @@ func (h *PageHandler) UploadBoardFile(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "base_seq and mutation_id required")
 		return
 	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBoardFileInput))
-	if err != nil {
-		replyError(w, 413, "image exceeds 5 MiB")
-		return
-	}
-	data, mime, width, height, err := canonicalBoardImage(raw)
-	if err != nil {
-		replyError(w, 422, err.Error())
-		return
-	}
 	if h.artifactStoragePath == "" {
 		replyError(w, 503, "board file storage unavailable")
 		return
 	}
+	// Keep compressed input and canonical output on disk. Only the two admitted
+	// decoders retain pixels; a 16-bit RGBA PNG can need 32 MiB at 2048².
 	ws := WorkspaceIDFromContext(r.Context())
-	sha := attachmentDigest(data)
-	digest := boardFingerprint("file-upload", []any{base, attachmentDigest(raw)})
+	input, closeInput, err := boardImageTemp(h.artifactStoragePath, ws)
+	if err != nil {
+		h.boardError(w, err)
+		return
+	}
+	defer closeInput()
+	rawDigest := sha256.New()
+	inputSize, err := io.Copy(io.MultiWriter(input, rawDigest), boardImageContextReader{r.Context(), http.MaxBytesReader(w, r.Body, maxBoardFileInput)})
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if r.Context().Err() != nil {
+			replyError(w, 408, "board image upload cancelled")
+		} else if errors.As(err, &tooLarge) {
+			replyError(w, 413, "image exceeds 5 MiB")
+		} else {
+			h.boardError(w, err)
+		}
+		return
+	}
+	if _, err = input.Seek(0, io.SeekStart); err != nil {
+		h.boardError(w, err)
+		return
+	}
+	output, closeOutput, err := boardImageTemp(h.artifactStoragePath, ws)
+	if err != nil {
+		h.boardError(w, err)
+		return
+	}
+	defer closeOutput()
+	canonicalDigest := sha256.New()
+	bounded := &boundedImageWriter{writer: io.MultiWriter(output, canonicalDigest)}
+	mime, width, height, err := canonicalBoardImage(input, bounded, inputSize)
+	if err != nil {
+		replyError(w, 422, err.Error())
+		return
+	}
+	if r.Context().Err() != nil {
+		replyError(w, 408, "board image upload cancelled")
+		return
+	}
+	sha := hex.EncodeToString(canonicalDigest.Sum(nil))
+	digest := boardFingerprint("file-upload", []any{base, hex.EncodeToString(rawDigest.Sum(nil))})
 	unlock := lockAttachmentBlob(ws, sha)
 	defer unlock()
-	if _, _, err = storeAttachmentBlob(h.artifactStoragePath, ws, data); err != nil {
+	if _, err = output.Seek(0, io.SeekStart); err != nil {
+		h.boardError(w, err)
+		return
+	}
+	if _, _, err = storeAttachmentBlobStream(h.artifactStoragePath, ws, sha, boardImageContextReader{r.Context(), output}); err != nil {
 		h.boardError(w, err)
 		return
 	}
@@ -158,13 +243,13 @@ func (h *PageHandler) UploadBoardFile(w http.ResponseWriter, r *http.Request) {
 		h.boardError(w, err)
 		return
 	}
-	if boardCount >= 100 || boardBytes+int64(len(data)) > 50<<20 || workspaceCount >= 1000 || workspaceBytes+int64(len(data)) > 500<<20 {
+	if boardCount >= 100 || boardBytes+bounded.size > 50<<20 || workspaceCount >= 1000 || workspaceBytes+bounded.size > 500<<20 {
 		replyError(w, 409, "board image storage quota reached")
 		return
 	}
 	file = generateCUID()
 	head++
-	if _, err = tx.ExecContext(r.Context(), `INSERT INTO page_board_files(id,board_page_id,sha256,content_type,width,height,byte_size,author_user_id,created_at,last_used_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, file, rec.ID, sha, mime, width, height, len(data), UserFromContext(r.Context()).ID, tsformat.Format(h.evaluator().Now()), tsformat.Format(h.evaluator().Now())); err != nil {
+	if _, err = tx.ExecContext(r.Context(), `INSERT INTO page_board_files(id,board_page_id,sha256,content_type,width,height,byte_size,author_user_id,created_at,last_used_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, file, rec.ID, sha, mime, width, height, bounded.size, UserFromContext(r.Context()).ID, tsformat.Format(h.evaluator().Now()), tsformat.Format(h.evaluator().Now())); err != nil {
 		h.boardError(w, err)
 		return
 	}

@@ -72,7 +72,9 @@ func boardFileID(t *testing.T, rr *httptest.ResponseRecorder) string {
 func TestBoardRasterCanonicalizationRejectsHostileImages(t *testing.T) {
 	for _, jpegInput := range []bool{false, true} {
 		raw := append(boardRaster(t, jpegInput), []byte("<script>secret-polyglot</script>")...)
-		clean, mime, w, h, err := canonicalBoardImage(raw)
+		var output bytes.Buffer
+		mime, w, h, err := canonicalBoardImage(bytes.NewReader(raw), &boundedImageWriter{writer: &output}, int64(len(raw)))
+		clean := output.Bytes()
 		if err != nil || w != 4 || h != 3 || bytes.Contains(clean, []byte("secret-polyglot")) {
 			t.Fatalf("canonicalization %s %d %d %v", mime, w, h, err)
 		}
@@ -81,7 +83,7 @@ func TestBoardRasterCanonicalizationRejectsHostileImages(t *testing.T) {
 	binary.BigEndian.PutUint32(huge[16:20], 2049)
 	binary.BigEndian.PutUint32(huge[29:33], crc32.ChecksumIEEE(huge[12:29]))
 	for _, raw := range [][]byte{[]byte("<svg onload='alert(1)'/>"), []byte("<html>payload</html>"), []byte("GIF89a"), huge, boardRaster(t, false)[:25], bytes.Repeat([]byte("x"), maxBoardFileInput+1)} {
-		if _, _, _, _, err := canonicalBoardImage(raw); err == nil {
+		if _, _, _, err := canonicalBoardImage(bytes.NewReader(raw), &boundedImageWriter{writer: io.Discard}, int64(len(raw))); err == nil {
 			t.Fatal("hostile/truncated/oversize image accepted")
 		}
 	}

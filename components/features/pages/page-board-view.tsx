@@ -17,7 +17,7 @@ import { ContentPresenceStatus } from "./content-presence"
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types"
 import { usePageBoard, PageBoardError, type PageBoard } from "@/hooks/use-page-board"
 import { planBoardMerge } from "@/lib/boards/collaboration-plan"
-import { planSavedUndo, savedBoardCommand, type SavedBoardCommand } from "@/lib/boards/command-history"
+import { planSavedUndo, recordSavedUndo, savedBoardCommand, type SavedBoardCommand } from "@/lib/boards/command-history"
 import type { BoardDraft, CollaborativeBatch } from "@/lib/boards/collaboration-types"
 import { manualBoardBatch } from "@/lib/boards/manual-batch"
 import { Button } from "@/components/ui/button"
@@ -178,7 +178,16 @@ export function PageBoardView({ workspaceId, slug, pageId, onDirtyChange }: { wo
           undoAttempt.current = undo.batch
         }
         const inverse = undoAttempt.current
-        try { const canonical = await write.mutateAsync({ base_seq: inverse.base_seq, operation: { kind: "batch", batch: inverse } }); undoAttempt.current = null; setCommands(previous => previous.slice(0, -1)); replace(canonical) } catch (error) { if (error instanceof PageBoardError && error.status < 500) undoAttempt.current = null }
+        try {
+          const canonical = await write.mutateAsync({ base_seq: inverse.base_seq, operation: { kind: "batch", batch: inverse } })
+          try {
+            if (!receipt.current) throw new Error("Missing undo receipt")
+            setCommands(recordSavedUndo(commands, inverse, receipt.current)); setUndoNotice(null)
+          } catch {
+            setCommands([]); setUndoNotice("Board change undone. Further saved undo is unavailable because the server did not provide complete revision proof.")
+          }
+          undoAttempt.current = null; replace(canonical)
+        } catch (error) { if (error instanceof PageBoardError && error.status < 500) undoAttempt.current = null }
       }}>Undo last saved change</Button>
       <p className="w-full text-xs text-muted-foreground">Saved undo expires after 24 hours and cannot recreate compacted targets.</p>
       {undoNotice && <p role="status" className="w-full text-xs text-muted-foreground">{undoNotice}</p>}
