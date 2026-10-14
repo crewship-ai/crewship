@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - **Guests can understand their own access.** Settings shows named resources and execution prerequisites; `workspace access me` and the workspace `access/me` API expose the same self-scoped explanation. Temporary refresh errors preserve the last good result, while access loss clears it. Concurrent resource deletion becomes an unavailable row.
+- Policy saves and explicit grant reissues record previous and new issuers and rights atomically. Member access CLI supports `--reissue` and shows inactive shares; Settings displays issuer names when available.
 
 - **Editing one Guest share preserves other administrators’ grants.** Unchanged rights retain their issuer and creation time, and inactive grants require an explicit reissue. Administrative policy shows issuer and active status; changes to already inactive issuers no longer stop newly authorized work.
 

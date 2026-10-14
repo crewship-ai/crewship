@@ -173,7 +173,10 @@ try {
   await pages.owner.locator('[data-member="nav-client-a"] button').first().click()
   const grantEditor=pages.owner.getByRole('region',{name:'Resource access for nav-client-a',exact:true})
   await grantEditor.getByRole('button',{name:'Edit resource access',exact:true}).click()
-  await expect(grantEditor.getByText(`Issuer: ${fixture.owner} · Active`,{exact:true})).toHaveCount(2)
+  const savedPolicyResponse = await contexts.owner.request.get(`${fixture.server}/api/v1/workspaces/${fixture.workspace}/members/${fixture.members['nav-client-a']}/access?workspace_id=${fixture.workspace}`)
+  const savedPolicy = await savedPolicyResponse.json()
+  const issuer = savedPolicy.grant_details.find(detail => detail.issuer_id === fixture.owner)
+  await expect(grantEditor.getByText(`Issuer: ${issuer.issuer_name || issuer.issuer_id} · Active`,{exact:true})).toHaveCount(2)
   await expect(grantEditor.getByRole('button',{name:'Reissue as me',exact:true})).toHaveCount(0)
   await check('real admin grant editor shows server-provided issuer and active status', true)
   for (const actor of ['desktop', 'phone']) {

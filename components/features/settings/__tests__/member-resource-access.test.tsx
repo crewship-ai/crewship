@@ -164,14 +164,14 @@ describe("member resource access", () => {
 })
 
 it("keeps inactive issuer metadata visible and reissues only after an explicit choice", async () => {
-  const inactive={...policy,grant_details:[{...policy.rights[0],issuer_id:"former-admin",created_at:"2026-10-14T00:00:00Z",live:false}]}
+  const inactive={...policy,grant_details:[{...policy.rights[0],issuer_id:"former-admin",issuer_name:"Former administrator",created_at:"2026-10-14T00:00:00Z",live:false}]}
   fetchMock.mockImplementation(async (url:string,init?:RequestInit)=>{
     if(init?.method==="PUT")return response({...inactive,revision:8})
     if(url.includes("/members/"))return response(inactive)
     return response([{id:"agent-1",name:"Shared agent"}])
   })
   show();fireEvent.click(screen.getByRole("button",{name:"Edit resource access"}))
-  expect(await screen.findByText(/former-admin/)).toHaveTextContent("Inactive")
+  expect(await screen.findByText(/Former administrator/)).toHaveTextContent("Inactive")
   expect(bar()).toBeNull()
   fireEvent.click(screen.getByRole("button",{name:"Reissue as me"}))
   expect(bar()).toHaveTextContent("1 unsaved change")
