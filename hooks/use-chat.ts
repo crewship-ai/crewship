@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
 import { checkChatMessageSize } from "@/components/features/chat/hooks/use-message-submit"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { apiFetch } from "@/lib/api-fetch"
 import { projectInputVersionIds } from "@/components/features/chat/files/project-input-metadata"
 import { randomUUIDv4 } from "@/lib/random-id"
@@ -181,6 +182,7 @@ const RENDERABLE_PART_TYPES: ReadonlySet<string> = new Set<TurnPartType>([
 ])
 
 interface UseChatOptions {
+  canSend?: boolean
   /** False for a session with no realtime at all (a restricted account: the
    *  allowlist refuses /ws-token). The socket is then never opened and the
    *  connection reads "unavailable" — except on a restricted chat, whose
@@ -324,7 +326,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
  * Handles streaming text/thinking/tool events, turn grouping, history loading,
  * message editing, regeneration, and stop/cancel.
  */
-export function useChat({ realtimeEnabled = true, wsUrl, getToken, sessionId, currentUserId, onStreamReset, onReplyCompleted, onOwnMessageSaved, executionProfile, getExecutionProfile, workspaceId }: UseChatOptions) {
+export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToken, sessionId, currentUserId, onStreamReset, onReplyCompleted, onOwnMessageSaved, executionProfile, getExecutionProfile, workspaceId }: UseChatOptions) {
   const completedReplyRef = useRef(onReplyCompleted)
   completedReplyRef.current = onReplyCompleted
   const ownMessageSavedRef = useRef(onOwnMessageSaved)
@@ -1389,6 +1391,7 @@ export function useChat({ realtimeEnabled = true, wsUrl, getToken, sessionId, cu
    *  thing from the persisted message (messagesToTurns above). */
   const sendMessage = useCallback(
     (content: string, metadata?: Record<string, unknown>) => {
+      if (!canSend) return false
       const profile = getExecutionProfile?.() ?? executionProfile
       if (!content.trim() || isStreaming || profile === "pending") return false
       if (profile === "restricted") {
@@ -1405,7 +1408,7 @@ export function useChat({ realtimeEnabled = true, wsUrl, getToken, sessionId, cu
         void (async () => {
           let done = false
           try {
-            const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/restricted-run?workspace_id=${encodeURIComponent(workspaceId)}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:content.trim(), ...(projectFileVersions.length ? {project_file_versions:projectFileVersions} : {})}),signal:controller.signal})
+            const response = await apiFetch(`/api/v1/chats/${requireApiPathSegment(sessionId)}/restricted-run?workspace_id=${encodeURIComponent(workspaceId)}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:content.trim(), ...(projectFileVersions.length ? {project_file_versions:projectFileVersions} : {})}),signal:controller.signal})
             if (!response.ok || !response.body) throw new Error("Restricted text run denied or unavailable")
             const reader = response.body.getReader()
             const decoder = new TextDecoder()
@@ -1468,7 +1471,7 @@ export function useChat({ realtimeEnabled = true, wsUrl, getToken, sessionId, cu
 
       return true
     },
-    [sessionId, send, isStreaming, executionProfile, getExecutionProfile, workspaceId, applyChatEvent],
+    [canSend, sessionId, send, isStreaming, executionProfile, getExecutionProfile, workspaceId, applyChatEvent],
   )
 
   const stopGeneration = useCallback(() => {
@@ -1513,7 +1516,7 @@ export function useChat({ realtimeEnabled = true, wsUrl, getToken, sessionId, cu
 
   // Regenerate the last assistant response by re-sending the last user message.
   const regenerateLastTurn = useCallback(() => {
-    if (isStreaming) return
+    if (!canSend || isStreaming) return
     // Find the last user turn
     const lastUserIdx = turns.map((t) => t.role).lastIndexOf("user")
     if (lastUserIdx === -1) return
@@ -1578,12 +1581,12 @@ export function useChat({ realtimeEnabled = true, wsUrl, getToken, sessionId, cu
     cancelledRef.current = false
     replyHasTextRef.current = false
 
-  }, [turns, sessionId, send, isStreaming, executionProfile, getExecutionProfile, sendMessage])
+  }, [canSend, turns, sessionId, send, isStreaming, executionProfile, getExecutionProfile, sendMessage])
 
   // Edit a user message and resend — removes all subsequent turns.
   const editAndResend = useCallback(
     (turnId: string, newContent: string) => {
-      if (isStreaming || !newContent.trim()) return
+      if (!canSend || isStreaming || !newContent.trim()) return
       const turnIdx = turns.findIndex((t) => t.id === turnId)
       if (turnIdx === -1 || turns[turnIdx].role !== "user") return
 
@@ -1634,7 +1637,7 @@ export function useChat({ realtimeEnabled = true, wsUrl, getToken, sessionId, cu
         }),
       })
     },
-    [turns, sessionId, send, isStreaming, executionProfile, getExecutionProfile],
+    [canSend, turns, sessionId, send, isStreaming, executionProfile, getExecutionProfile],
   )
 
   const loadHistory = useCallback((history: ChatMessage[]) => {

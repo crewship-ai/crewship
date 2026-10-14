@@ -793,3 +793,23 @@ crewship issue deliveries failed --cursor NEXT_CURSOR --limit 50 --format json
 Pages are ordered by creation time and ID. Cursors are bound to the viewer and
 workspace. A page contains `jobs`, `has_more` and `next_cursor`; there is no
 workspace-wide total. Global output format and filter flags are supported.
+
+## `crewship issue shared`
+
+List or read the current Guest projection of issues in shared projects. This
+command uses project grants and does not request the shared workspace board.
+
+```bash
+crewship issue shared --project PROJECT_ID --limit 100 --offset 0
+crewship issue shared ISSUE_IDENTIFIER --format json
+```
+
+| Flag | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `--project` | string | none | Restrict the list to a granted project ID. |
+| `--limit` | integer | 100 | Maximum returned rows, capped at 500 by the API. |
+| `--offset` | integer | 0 | Pagination offset. |
+
+Listing requires project.list; detail requires project.read. A revoked or
+foreign issue returns 404, never a cached body. No issue mutations, comments,
+related-resource metadata or run history are returned.

@@ -3,6 +3,7 @@
 import { CreateSurfaceField } from "@/components/layout/create-surface"
 import { nativeSelect } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { cn } from "@/lib/utils"
 
 export type RestrictedProfile = "disabled" | "responses_text" | "native_api_key"
@@ -40,7 +41,7 @@ export function RestrictedExecutionField({ value, onChange }: { value: Restricte
 /** PUT /api/v1/agents/{id}/restricted-execution; rejects with the server's reason. */
 export async function saveRestrictedProfile(agentId: string, workspaceId: string, profile: RestrictedProfile): Promise<RestrictedProfile> {
   const res = await apiFetch(
-    `/api/v1/agents/${encodeURIComponent(agentId)}/restricted-execution?workspace_id=${encodeURIComponent(workspaceId)}`,
+    `/api/v1/agents/${requireApiPathSegment(agentId)}/restricted-execution?workspace_id=${encodeURIComponent(workspaceId)}`,
     { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile }) },
   )
   const body = (await res.json().catch(() => ({}))) as { profile?: RestrictedProfile; error?: string }

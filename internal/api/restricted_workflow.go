@@ -36,8 +36,7 @@ func restrictedActor(req *http.Request, db *sql.DB) (bool, error) {
 	if user == nil {
 		return false, nil
 	}
-	m, err := (access.Store{DB: db}).Membership(req.Context(), user.ID, WorkspaceIDFromContext(req.Context()))
-	return m.Mode == "restricted", err
+	return (access.Store{DB: db}).HasRestrictedMembership(req.Context(), user.ID)
 }
 func (h *PipelineHandler) serveRestrictedWorkflow(w http.ResponseWriter, req *http.Request) bool {
 	restricted, err := restrictedActor(req, h.db)

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/crewship-ai/crewship/internal/access"
 )
 
 // Provisioning a workspace member.
@@ -43,10 +45,12 @@ import (
 const accountSetupTTL = 7 * 24 * time.Hour
 
 type provisionRequest struct {
-	CreateOnly bool   `json:"create_only"` // Refuse existing accounts before membership/token mutations.
-	Email      string `json:"email"`
-	Role       string `json:"role"`
-	FullName   string `json:"full_name"`
+	AccessMode string         `json:"access_mode"`
+	Rights     []access.Right `json:"rights"`
+	CreateOnly bool           `json:"create_only"` // Refuse existing accounts before membership/token mutations.
+	Email      string         `json:"email"`
+	Role       string         `json:"role"`
+	FullName   string         `json:"full_name"`
 }
 
 type provisionResponse struct {
@@ -99,6 +103,13 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if req.AccessMode == "" {
+		req.AccessMode = "trusted"
+	}
+	if req.AccessMode != "trusted" && req.AccessMode != "restricted" || req.AccessMode == "trusted" && len(req.Rights) > 0 || req.AccessMode == "restricted" && role == "ADMIN" {
+		replyError(w, 400, "Guest access requires a non-administrator role and explicit resource grants")
+		return
+	}
 	// Config wins, else derive from the host the admin is already browsing.
 	// Requiring an env var to add a colleague is friction a self-hosted
 	// product should not impose — and unlike /forgot, which MAILS its link
@@ -154,6 +165,24 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if err := administratorAccountEligible(r.Context(), tx, userID, role); err != nil {
+		if errors.Is(err, errGuestAdministrator) {
+			writeJSON(w, http.StatusConflict, invitationConflict(err))
+		} else {
+			replyInternalError(w, h.logger, "administrator eligibility", err)
+		}
+		return
+	}
+	if req.AccessMode == "restricted" {
+		if err := guestAccountEligible(r.Context(), tx, userID); err != nil {
+			if errors.Is(err, errGuestAdministrator) {
+				writeJSON(w, http.StatusConflict, invitationConflict(err))
+			} else {
+				replyInternalError(w, h.logger, "Guest account eligibility", err)
+			}
+			return
+		}
+	}
 	if req.CreateOnly && !createdUser {
 		replyError(w, http.StatusConflict, "cannot provision a new account for this address")
 		return
@@ -181,6 +210,13 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if req.AccessMode == "restricted" {
+		_, err = (access.Store{DB: h.db}).ReplaceIn(r.Context(), tx, UserFromContext(r.Context()).ID, userID, workspaceID, "restricted", access.Membership{ID: memberID, Revision: 1}, req.Rights)
+		if err != nil {
+			h.memberAccessError(w, err)
+			return
+		}
+	}
 	// A setup token sets a password. Minting one for an account SOMEBODY
 	// ALREADY CONTROLS turns this endpoint into account takeover: creating a
 	// workspace is self-serve (POST /api/v1/workspaces is authedSelfMut), so
@@ -208,6 +244,10 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 	claimed, err := accountClaimedTx(r.Context(), tx, userID)
 	if err != nil {
 		replyInternalError(w, h.logger, "provision: claimed check", err)
+		return
+	}
+	if claimed && req.AccessMode == "restricted" {
+		replyError(w, 409, "An existing account must accept a Guest invitation before account-wide restrictions apply")
 		return
 	}
 	if claimed {

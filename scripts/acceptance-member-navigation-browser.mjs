@@ -37,15 +37,100 @@ try {
   for (const [actor, user, width] of [['owner', fixture.owner, 1280], ['desktop', 'nav-client-a', 1280], ['phone', 'nav-client-a', 390], ['other', 'nav-client-b', 1280], ['reader', 'nav-page-reader', 1280]]) {
     contexts[actor] = await browser.newContext({ viewport: { width, height: 900 } })
     await contexts[actor].addCookies([{ name: 'authjs.session-token', value: fixture.tokens[user], url: fixture.server, httpOnly: true, sameSite: 'Lax' }])
-    await contexts[actor].addInitScript(id => localStorage.setItem('crewship.workspaceId', id), fixture.workspace)
+    await contexts[actor].addInitScript(({id,user}) => localStorage.setItem(`crewship.workspaceId:${user}`, id), {id:fixture.workspace,user})
     await contexts[actor].addInitScript(() => {
       window.__navigationUnavailableShown = false
+      window.__trustedSettingsShown = false
       new MutationObserver(() => {
-        if ([...document.querySelectorAll('h1')].some(node => node.textContent === 'Not available with your access')) window.__navigationUnavailableShown = true
+        if (document.querySelector('input[aria-label="Full name"],nav[aria-label="Settings sections"]')) window.__trustedSettingsShown = true
+        if ([...document.querySelectorAll('h1,h2')].some(node => node.textContent === 'Not available with your access')) window.__navigationUnavailableShown = true
       }).observe(document, { childList: true, subtree: true, characterData: true })
     })
     pages[actor] = await contexts[actor].newPage()
   }
+  // A real directory omission must preserve selection and a mounted portal draft.
+  // Soft-delete is fixture-only; transient catalog errors are covered separately.
+  async function availability(omit) {
+    const response = await contexts.owner.request.post(`${fixture.server}/__fixture/workspace-availability`, {
+      headers: {'X-Fixture-Control':'synthetic-workspace-availability'}, data:{omit},
+    })
+    if(response.status()!==204) throw new Error(`fixture availability ${response.status()}`)
+    const directory=await contexts.owner.request.get(`${fixture.server}/api/v1/workspaces`)
+    const rows=await directory.json()
+    await check(`real directory ${omit?'omits':'restores'} selected workspace and retains sibling`,
+      directory.status()===200 && rows.some(row=>row.id===fixture.workspace)===!omit && rows.some(row=>row.id===fixture.empty_workspace))
+  }
+  await open('owner','/settings?tab=members')
+  await pages.owner.reload()
+  await expect(pages.owner.getByRole('heading', { name: 'Members', exact: true }).first()).toBeVisible()
+  await expect(pages.owner.getByText('Failed to load settings', {exact:true})).toHaveCount(0)
+  await expect(pages.owner.getByText('nav-client-a@example.test', {exact:true}).first()).toBeVisible()
+  await check('F5 Settings members deep link loads real member data', true)
+  await open('owner','/settings')
+  await pages.owner.reload()
+  await expect(pages.owner.getByText('Failed to load settings', {exact:true})).toHaveCount(0)
+  await expect(pages.owner.getByLabel(/full name/i)).toBeVisible()
+  await check('F5 Settings profile waits for workspace fence before metadata fetch', true)
+  const guestSettingsRequests=[]
+  const observeSettings=request=>{if(new URL(request.url()).pathname.startsWith('/api/v1/workspaces/'+fixture.workspace+'/')) guestSettingsRequests.push(request.url())}
+  pages.desktop.on('request',observeSettings)
+  await open('desktop','/settings?tab=members')
+  await pages.desktop.reload()
+  await expect(pages.desktop.getByRole('heading',{name:'Account security',exact:true})).toBeVisible()
+  await expect(pages.desktop.getByRole('textbox',{name:'Full name'})).toHaveCount(0)
+  await check('Guest Settings reload never flashes trusted settings', !(await pages.desktop.evaluate(()=>window.__trustedSettingsShown)))
+  await check('Guest Settings reload sends no workspace metadata or roster request',guestSettingsRequests.length===0)
+  pages.desktop.off('request',observeSettings)
+  await open('owner','/pages')
+  await pages.owner.getByRole('button',{name:'New page',exact:true}).first().click()
+  let editor=pages.owner.getByRole('dialog',{name:/New page/})
+  await expect(editor).toBeVisible()
+  const code=editor.locator('.cm-content')
+  await code.click()
+  await pages.owner.keyboard.press('ControlOrMeta+End')
+  await pages.owner.keyboard.insertText('\n# preserved workspace draft')
+  await expect(code).toContainText('preserved workspace draft')
+  let writes=0
+  const countWrites=request=>{if(request.method()!=='GET'&&new URL(request.url()).pathname.startsWith('/api/v1/pages'))writes++}
+  pages.owner.on('request',countWrites)
+  await availability(true)
+  let unavailable=pages.owner.getByRole('dialog',{name:'Selected workspace is unavailable'})
+  await expect(unavailable).toBeVisible({timeout:70000})
+  await expect(editor).toHaveCount(0)
+  await expect.poll(()=>unavailable.evaluate(element=>element.contains(document.activeElement))).toBe(true)
+  await check('omission preserves persisted selected workspace',await pages.owner.evaluate(user=>localStorage.getItem(`crewship.workspaceId:${user}`),fixture.owner)===fixture.workspace)
+  await unavailable.press('Escape')
+  await expect(unavailable).toBeVisible()
+  await pages.owner.evaluate(()=>{
+    const button=[...document.querySelectorAll('button')].find(button=>button.textContent?.trim()==='Create page')
+    if(!button) throw new Error('Mounted old editor submit control missing')
+    button.click()
+  })
+  await unavailable.press('ControlOrMeta+Enter')
+  await check('unavailable portal and keyboard send no Page write',writes===0)
+  pages.owner.once('dialog',dialog=>dialog.dismiss())
+  await unavailable.getByRole('button',{name:'Choose Empty workspace',exact:true}).click()
+  await expect(unavailable).toBeVisible()
+  await check('cancelled explicit choice retains selected workspace',await pages.owner.evaluate(user=>localStorage.getItem(`crewship.workspaceId:${user}`),fixture.owner)===fixture.workspace)
+  await availability(false)
+  await unavailable.getByRole('button',{name:'Retry workspace',exact:true}).click()
+  await expect(unavailable).toHaveCount(0)
+  editor=pages.owner.getByRole('dialog',{name:/New page/})
+  await expect(editor.locator('.cm-content')).toContainText('preserved workspace draft')
+  await check('same workspace recovery restores original portal draft',true)
+  await availability(true)
+  unavailable=pages.owner.getByRole('dialog',{name:'Selected workspace is unavailable'})
+  await expect(unavailable).toBeVisible({timeout:70000})
+  pages.owner.once('dialog',dialog=>dialog.accept())
+  await unavailable.getByRole('button',{name:'Choose Empty workspace',exact:true}).click()
+  await expect(unavailable).toHaveCount(0)
+  await expect(pages.owner.getByRole('dialog',{name:/New page/})).toHaveCount(0)
+  await check('confirmed explicit choice changes context and discards old draft',await pages.owner.evaluate(user=>localStorage.getItem(`crewship.workspaceId:${user}`),fixture.owner)===fixture.empty_workspace)
+  await availability(false)
+  pages.owner.off('request',countWrites)
+  await pages.owner.evaluate(({id,user})=>localStorage.setItem(`crewship.workspaceId:${user}`,id),{id:fixture.workspace,user:fixture.owner})
+  // Subsequent preexisting scenarios load the selected fixture workspace anew.
+  await pages.owner.reload()
   // Page creation uses the existing role-or-capability contract; reads remain available.
   await open('reader', '/pages')
   await expect(pages.reader.getByRole('button', {name:'New page', exact:true})).toHaveCount(0)

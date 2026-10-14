@@ -1616,10 +1616,11 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		var memoryCfg *SidecarMemoryConfig
 		if req.MemoryEnabled {
 			memoryCfg = &SidecarMemoryConfig{
-				Enabled:   true,
-				BasePath:  path.Join("/crew", "agents", req.AgentSlug, ".memory"),
-				AgentSlug: req.AgentSlug,
-				AgentRole: strings.ToLower(req.AgentRole),
+				TrustedStorageRoot: "/crew",
+				Enabled:            true,
+				BasePath:           path.Join("/crew", "agents", req.AgentSlug, ".memory"),
+				AgentSlug:          req.AgentSlug,
+				AgentRole:          strings.ToLower(req.AgentRole),
 			}
 			// Lead agents own the crew shared memory FTS5 index
 			if req.CrewID != "" {

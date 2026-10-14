@@ -116,7 +116,8 @@ type WorkspaceHandler struct {
 	// that RemoveMember triggers when the departing member owns a page.
 	// nil is safe: transferDepartingUserPages falls back to a no-op
 	// emitter on its own, matching every other SetJournal in this package.
-	journal journal.Emitter
+	journal           journal.Emitter
+	invitationJournal journal.Emitter
 	// storageRoot keeps uploaded workspace logos (#3005); the router's
 	// storagePath, set by SetStorageRoot.
 	storageRoot        string
@@ -139,7 +140,10 @@ func (h *WorkspaceHandler) SetHub(hub *wshub.Hub) { h.hub = hub }
 // SetJournal wires a journal emitter so RemoveMember's page-owner transfer
 // (§7.1 rule 1b) lands in the real Crew Journal once the router has resolved
 // one. A nil argument is fine — see the journal field comment.
-func (h *WorkspaceHandler) SetJournal(j journal.Emitter) { h.journal = j }
+func (h *WorkspaceHandler) SetJournal(j journal.Emitter) {
+	h.journal = j
+	h.invitationJournal = j
+}
 
 // workspaceCounts is the nested `_count` object the settings UI reads
 // (settings-layout.tsx: org._count.{crews,agents,members}). Always
@@ -289,6 +293,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = []workspaceResponse{}
 	}
 
+	w.Header().Set("X-Workspace-Directory-Complete", "true")
 	writeJSON(w, http.StatusOK, result)
 }
 

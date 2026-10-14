@@ -9,6 +9,11 @@ const success = (files = [own]) => ({ ok: true, json: async () => ({ files, has_
 
 beforeEach(() => fetchMock.mockReset())
 describe("native project input picker", () => {
+  it("rejects a dot-segment chat without requesting another route", async () => {
+    render(<ProjectInputPicker chatId=".." workspaceId="w" userId="h1" selected={[]} onChange={vi.fn()} refreshKey={0} />)
+    await screen.findByRole("alert")
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
   it("starts empty, fetches no bytes, and forwards an explicit version selection", async () => {
     fetchMock.mockResolvedValue(success())
     const onChange = vi.fn()

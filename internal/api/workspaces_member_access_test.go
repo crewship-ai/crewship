@@ -117,6 +117,13 @@ func TestMemberAccessPolicyAuthenticatedRoutes(t *testing.T) {
 	if len(p.Rights) != 1 || p.Revision < 2 {
 		t.Fatalf("policy not persisted: %+v", p)
 	}
+
+	explained := request(owner, "GET", path+"/effective", "", 200)
+	var effective memberEffectiveAccess
+	if err = json.Unmarshal(explained.Body.Bytes(), &effective); err != nil || effective.ID != p.ID || !effective.AccountRestricted || len(effective.Decisions) != 1 || effective.Decisions[0].Operation != "chat" {
+		t.Fatalf("effective=%+v %v", effective, err)
+	}
+	request("policy-user", "GET", path+"/effective", "", 404)
 	for _, bad := range []string{
 		`{"membership_id":"policy-member","revision":2,"mode":"restricted"}`,
 		`{"membership_id":"policy-member","revision":2,"mode":"restricted","rights":null}`,

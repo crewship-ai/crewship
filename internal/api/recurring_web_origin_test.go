@@ -154,7 +154,7 @@ func TestLegacyRecurringNoticeIsOnceAndNoRecipientDoesNotBlockGeneration(t *test
 		t.Run(map[bool]string{false: "eligible owner", true: "no eligible recipient"}[restricted], func(t *testing.T) {
 			h, user, workspace, crew := newRecurringHandler(t)
 			if restricted {
-				execOrFatal(t, h.db, `UPDATE workspace_members SET access_mode='restricted' WHERE user_id=?`, user)
+				execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE user_id=?`, user)
 			}
 			execOrFatal(t, h.db, `INSERT INTO recurring_issues(id,workspace_id,crew_id,title,cron_expression,enabled,next_run) VALUES('legacy-notice-template',?,?,'Legacy','0 9 * * *',1,'2020-01-01T00:00:00Z')`, workspace, crew)
 			d := NewRecurringIssueDispatcher(h.db, nil, newTestLogger())

@@ -129,12 +129,12 @@ describe("applyAuthInit", () => {
 })
 
 describe("serverFetch", () => {
-  it("same-origin: identical to bare fetch (url + init untouched)", async () => {
+  it("same-origin: preserves URL and caller init while adding availability cancellation", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}"))
     vi.stubGlobal("fetch", fetchMock)
     const init = { method: "POST" }
     await serverFetch("/api/v1/auth/signup", init)
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/auth/signup", init)
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/auth/signup", { ...init, signal: expect.any(AbortSignal) })
   })
 
   it("remote bearer: base-prefixed URL + Authorization + omit", async () => {

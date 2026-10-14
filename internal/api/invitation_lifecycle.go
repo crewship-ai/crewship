@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"net/http"
 	"time"
 )
@@ -30,6 +31,8 @@ func (h *WorkspaceHandler) mutateInvitation(w http.ResponseWriter, r *http.Reque
 	}
 	workspace := WorkspaceIDFromContext(r.Context())
 	id := r.PathValue("invitationId")
+	ctx, publishAudit := withInvitationAudit(r.Context(), h.invitationJournal)
+	r = r.WithContext(ctx)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin invitation mutation", err)
@@ -101,10 +104,19 @@ func (h *WorkspaceHandler) mutateInvitation(w http.ResponseWriter, r *http.Reque
 		replyError(w, 409, "Invitation changed")
 		return
 	}
+	kind := journal.EntryInvitationRevoked
+	if reissue {
+		kind = journal.EntryInvitationReissued
+	}
+	if err := appendInvitationAudit(r.Context(), tx, kind, workspace, user.ID, id, inv.Role, ""); err != nil {
+		replyInternalError(w, h.logger, "audit invitation mutation", err)
+		return
+	}
 	if err = tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit invitation mutation", err)
 		return
 	}
+	publishAudit()
 	if reissue {
 		inv.InvitedBy = user.ID
 		writeJSON(w, http.StatusOK, inv)

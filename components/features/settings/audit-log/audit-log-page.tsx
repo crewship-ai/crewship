@@ -69,9 +69,9 @@ export function AuditLogPage() {
   const people = useWorkspacePeople(workspaceId ?? "")
   const supports = sourceSupports(filters.source)
 
-  // One clock per render: the calendar, the histogram and the counts must
-  // agree on what "today" and "last 7 days" mean.
-  const now = useMemo(() => new Date(), [filters]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Anchor the chosen window across facet/slice changes and activity arrivals.
+  // Re-reading the clock on selection moves relative buckets beneath it.
+  const now = useMemo(() => new Date(), [filters.range, filters.from, filters.to])
   const today = utcDay(now)
   const bounds = rangeBounds(filters, now)
   const recentFrom = addDays(today, -(RECENT_DAYS - 1))
@@ -90,7 +90,7 @@ export function AuditLogPage() {
   // The chart: the Journal's histogram over the picked range, fed the events
   // the other filters keep, each with a Journal severity.
   const win = windowBounds(filters, now)
-  const customWindow = filters.range === "custom" && win.from ? { fromMs: Date.parse(win.from), toMs: win.to ? Date.parse(win.to) : now.getTime() } : null
+  const customWindow = win.from ? { fromMs: Date.parse(win.from), toMs: win.to ? Date.parse(win.to) : now.getTime() } : null
   const chartEntries = useMemo(() => activity.events
     .filter((e) => (filters.category === "all" || e.entityType === filters.category)
       && (!filters.userId || e.userId === filters.userId)
@@ -253,7 +253,7 @@ export function AuditLogPage() {
                 stacked by severity; a click picks a bar, a drag a range, and
                 that slice narrows the table without changing the range. */}
             <div className="overflow-hidden rounded-card border border-border bg-card [&>div]:border-b-0 [&>div]:bg-transparent [&>div]:px-4 [&>div]:py-3" data-slot="audit-histogram">
-              <LogsHistogram entries={chartEntries} timeRange={filters.range as TimeRange} customRange={customWindow}
+              <LogsHistogram entries={chartEntries} timeRange={customWindow ? "custom" : filters.range as TimeRange} customRange={customWindow}
                 selected={slice} onSelect={pickSlice} height={72} />
             </div>
             <CrewAuditSection

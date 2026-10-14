@@ -152,7 +152,7 @@ func TestChatEntityRefsPagingAuthorityAndFixtures(t *testing.T) {
 	if len(deleted.Refs) != 2 || deleted.HasMore {
 		t.Fatalf("deleted metadata disclosed: %+v", deleted)
 	}
-	execOrFatal(t, db, `UPDATE workspace_members SET access_mode='restricted' WHERE user_id=?`, user)
+	execOrFatal(t, db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE user_id=?`, user)
 	if rec := request("entity-chat", "", 2); rec.Code != 404 {
 		t.Fatalf("restricted %d", rec.Code)
 	}
@@ -240,7 +240,7 @@ func TestChatEntityRoutesAuthenticationWorkspaceAndRestrictedMode(t *testing.T) 
 			t.Fatalf("missing resource %s %d %s", path, rec.Code, rec.Body.String())
 		}
 	}
-	execOrFatal(t, db, `UPDATE workspace_members SET access_mode='restricted',access_revision=access_revision+1 WHERE user_id=?`, user)
+	execOrFatal(t, db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted',access_revision=access_revision+1 WHERE user_id=?`, user)
 	for _, path := range paths {
 		req := httptest.NewRequest("GET", path+"?workspace_id="+workspace, nil)
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -290,7 +290,7 @@ func TestChatEntityRevisionUsesLiveWorkspaceAndOrdinaryViewer(t *testing.T) {
 	if rec = request("ENG-1", "other-workspace"); rec.Code != 404 {
 		t.Fatal("path workspace mismatch disclosed revision")
 	}
-	execOrFatal(t, db, `UPDATE workspace_members SET access_mode='restricted' WHERE user_id=?`, user)
+	execOrFatal(t, db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE user_id=?`, user)
 	if rec = request("ENG-1", workspace); rec.Code != 404 {
 		t.Fatal("restricted revision leaked")
 	}

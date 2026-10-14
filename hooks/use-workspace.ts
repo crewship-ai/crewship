@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react"
 
 import { navigationAllowed } from "@/hooks/use-navigation-guard"
+import { setWorkspaceRequestAvailability, setWorkspaceRequestSession } from "@/lib/workspace-availability"
 import { apiFetch } from "@/lib/api-fetch"
 
 export interface WorkspaceData {
@@ -31,6 +32,7 @@ export interface WorkspaceData {
 
 interface UseWorkspaceReturn {
   workspaceId: string | null
+  workspaceUnavailable: boolean
   workspace: WorkspaceData | null
   workspaces: WorkspaceData[]
   role: string | null
@@ -41,7 +43,7 @@ interface UseWorkspaceReturn {
   /** The last load failed and no list is held: what the caller may reach is
    *  unknown. `useAccessMode` reads this as "still loading" (fail closed). */
   error: boolean
-  setWorkspaceId: (id: string) => void
+  setWorkspaceId: (id: string | null) => void
   refresh: () => Promise<void>
 }
 
@@ -57,6 +59,7 @@ interface Snapshot {
 const INITIAL: Snapshot = { workspaces: [], currentId: null, loading: true, error: false }
 let snapshot: Snapshot = INITIAL
 let fetched = false
+let directoryLoaded = false
 let inflight: Promise<void> | null = null
 
 const ssrSnapshot: Snapshot = INITIAL
@@ -68,14 +71,20 @@ function emit() {
 }
 
 function setSnapshot(next: Snapshot) {
+  setWorkspaceRequestAvailability(next.currentId, !next.loading && !next.error && (!next.currentId || next.workspaces.some(w => w.id === next.currentId)))
   snapshot = next
   emit()
+}
+
+// Account-bound sessions never adopt another account’s browser selection.
+function storageKey(): string {
+  return sessionIdentity ? `${STORAGE_KEY}:${sessionIdentity}` : STORAGE_KEY
 }
 
 function readPersistedId(): string | null {
   if (typeof window === "undefined") return null
   try {
-    return window.localStorage.getItem(STORAGE_KEY)
+    return window.localStorage.getItem(storageKey())
   } catch {
     return null
   }
@@ -84,8 +93,8 @@ function readPersistedId(): string | null {
 function persistId(id: string | null) {
   if (typeof window === "undefined") return
   try {
-    if (id) window.localStorage.setItem(STORAGE_KEY, id)
-    else window.localStorage.removeItem(STORAGE_KEY)
+    if (id) window.localStorage.setItem(storageKey(), id)
+    else window.localStorage.removeItem(storageKey())
   } catch {
     /* swallow quota / disabled-storage errors */
   }
@@ -100,26 +109,60 @@ function failLoad() {
     if (snapshot.loading) setSnapshot({ ...snapshot, loading: false })
     return
   }
-  setSnapshot({ workspaces: [], currentId: null, loading: false, error: true })
+  setSnapshot({ workspaces: [], currentId: snapshot.currentId ?? readPersistedId(), loading: false, error: true })
+}
+
+let sessionIdentity: string | null | undefined
+let storeGeneration = 0
+
+/** A new authenticated identity must load its own directory, never reuse rows. */
+export function bindWorkspaceSession(userId: string | null) {
+  if (sessionIdentity === userId) return
+  sessionIdentity = userId
+  directoryLoaded = false
+  storeGeneration++
+  inflight = null
+  fetched = false
+  setWorkspaceRequestSession(userId)
+  setSnapshot({ workspaces: [], currentId: userId ? readPersistedId() : null, loading: userId !== null, error: false })
+  if (userId) void loadWorkspaces()
 }
 
 function loadWorkspaces(): Promise<void> {
   if (inflight) return inflight
   // Background settings refresh must not unmount active Pages/forms.
-  if (snapshot.workspaces.length === 0) setSnapshot({ ...snapshot, loading: true })
+  if (snapshot.workspaces.length === 0 && snapshot.currentId === null) setSnapshot({ ...snapshot, loading: true })
+  const generation = storeGeneration
   inflight = (async () => {
     try {
       const res = await apiFetch("/api/v1/workspaces")
+      if (generation !== storeGeneration) return
       if (!res.ok) {
         failLoad()
         return
       }
       const data = (await res.json()) as WorkspaceData[]
+      if (generation !== storeGeneration) return
       const list = Array.isArray(data) ? data : []
       const persisted = readPersistedId()
-      const persistedValid = !!persisted && list.some((w) => w.id === persisted)
-      const next = persistedValid ? persisted! : list[0]?.id ?? null
-      if (next && !persistedValid) persistId(next)
+      // A partial directory cannot distinguish outage from removal. Preserve
+      // an explicit choice; absence requires retry or a guarded user selection.
+      let legacy: string | null = null
+      if (sessionIdentity && !persisted) {
+        try { legacy = window.localStorage.getItem(STORAGE_KEY) } catch { /* unavailable storage */ }
+      }
+      // Migrate only a value in this authenticated account's fresh directory.
+      const selected = snapshot.currentId ?? persisted ?? (list.some(w => w.id === legacy) ? legacy : null)
+      // On a fresh login there is no workspace draft to preserve. A stale
+      // account preference (e.g. removed membership) may safely recover.
+      const next = !directoryLoaded && res.headers?.get("X-Workspace-Directory-Complete") === "true" && selected && !list.some(w => w.id === selected)
+        ? list[0]?.id ?? null
+        : selected ?? list[0]?.id ?? null
+      directoryLoaded = true
+      if (next && next !== persisted) persistId(next)
+      if (legacy && next === legacy) {
+        try { window.localStorage.removeItem(STORAGE_KEY) } catch { /* unavailable storage */ }
+      }
       if (!next) persistId(null)
       // A periodic re-check (useAccessModeWatcher) usually returns exactly
       // what is held. Keeping the old snapshot then keeps every consumer's
@@ -133,10 +176,12 @@ function loadWorkspaces(): Promise<void> {
       ) return
       setSnapshot({ workspaces: list, currentId: next, loading: false, error: false })
     } catch {
-      failLoad()
+      if (generation === storeGeneration) failLoad()
     } finally {
-      fetched = true
-      inflight = null
+      if (generation === storeGeneration) {
+        fetched = true
+        inflight = null
+      }
     }
   })()
   return inflight
@@ -191,8 +236,8 @@ export function useWorkspace(): UseWorkspaceReturn {
     }
   }, [])
 
-  const setWorkspaceId = useCallback(function setWorkspaceId(id: string) {
-    if (!snapshot.workspaces.some((w) => w.id === id)) return
+  const setWorkspaceId = useCallback(function setWorkspaceId(id: string | null) {
+    if (id !== null && !snapshot.workspaces.some((w) => w.id === id)) return
     if (snapshot.currentId === id) return
     // A surface holding unsaved work refuses here and asks the person itself,
     // then calls this again once they agree. Switching workspaces is not a
@@ -212,6 +257,7 @@ export function useWorkspace(): UseWorkspaceReturn {
 
   return {
     workspaceId: state.currentId,
+    workspaceUnavailable: state.currentId !== null && workspace === null && !state.loading,
     workspace,
     workspaces: state.workspaces,
     role: workspace?.currentUserRole ?? null,
@@ -224,6 +270,11 @@ export function useWorkspace(): UseWorkspaceReturn {
 }
 
 export function _resetWorkspaceStoreForTests() {
+  sessionIdentity = undefined
+  directoryLoaded = false
+  storeGeneration++
+  setWorkspaceRequestSession(null)
+  setWorkspaceRequestAvailability(null, true)
   snapshot = INITIAL
   fetched = false
   inflight = null

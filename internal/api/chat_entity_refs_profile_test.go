@@ -111,7 +111,7 @@ func TestChatEntityRefsSyntheticProfile500Refs50Objects10Viewers(t *testing.T) {
 		t.Fatalf("permission-change reset: %+v %v", reset, err)
 	}
 	t.Logf("permission-change replacement latency=%s", latency)
-	execOrFatal(t, db, `UPDATE workspace_members SET access_mode='restricted' WHERE workspace_id=? AND user_id=?`, workspace, owner)
+	execOrFatal(t, db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE workspace_id=? AND user_id=?`, workspace, owner)
 	if _, status, _, _ := request(owner, reset.NextCursor); status != 404 {
 		t.Fatalf("revoked viewer status=%d want404", status)
 	}

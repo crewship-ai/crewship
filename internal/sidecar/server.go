@@ -27,11 +27,12 @@ const DefaultAddr = "127.0.0.1:9119"
 
 // MemoryConfig configures the sidecar memory engine.
 type MemoryConfig struct {
-	Enabled        bool   `json:"enabled"`
-	BasePath       string `json:"base_path"`
-	AgentSlug      string `json:"agent_slug"`
-	AgentRole      string `json:"agent_role"`       // "lead" or "agent" — lead owns crew memory index
-	CrewMemoryPath string `json:"crew_memory_path"` // path to crew shared memory (e.g. /crew/shared/.memory)
+	TrustedStorageRoot string `json:"trusted_storage_root"`
+	Enabled            bool   `json:"enabled"`
+	BasePath           string `json:"base_path"`
+	AgentSlug          string `json:"agent_slug"`
+	AgentRole          string `json:"agent_role"`       // "lead" or "agent" — lead owns crew memory index
+	CrewMemoryPath     string `json:"crew_memory_path"` // path to crew shared memory (e.g. /crew/shared/.memory)
 }
 
 // IPCConfig holds the crewshipd internal API address for assignment forwarding.
@@ -200,8 +201,9 @@ type Server struct {
 	// in cfg.Memory.{BasePath,CrewMemoryPath}, stashed on the Server
 	// so handleMemoryWrite can validate path-traversal without
 	// reaching back into the construction config.
-	agentMemoryBase string
-	crewMemoryBase  string
+	memoryStorageRoot string
+	agentMemoryBase   string
+	crewMemoryBase    string
 	// memoryAgentSlug is the slug the sidecar's memory config was
 	// started for (cfg.Memory.AgentSlug). Crew members share one
 	// sidecar, so /mcp/memory/{slug} requests from OTHER members
@@ -477,6 +479,7 @@ func NewServer(cfg ServerConfig) *Server {
 	// degrade without taking the other down.
 	if cfg.Memory != nil && cfg.Memory.Enabled && cfg.Memory.BasePath != "" {
 		s.agentMemoryBase = cfg.Memory.BasePath
+		s.memoryStorageRoot = cfg.Memory.TrustedStorageRoot
 		s.memoryAgentSlug = cfg.Memory.AgentSlug
 		// Ensure the base directory exists before SQLite tries to open
 		// {basePath}/index.sqlite — on a freshly provisioned crew the
@@ -486,10 +489,10 @@ func NewServer(cfg ServerConfig) *Server {
 		// branch below.) Without this, memory-enabled crews that were
 		// never seeded with `--with-memory` permanently lose mid-session
 		// tools on first boot. (Issue #530.)
-		if err := os.MkdirAll(cfg.Memory.BasePath, 0o755); err != nil {
+		if err := memory.EnsureDirNoFollow(s.memoryStorageRoot, cfg.Memory.BasePath); err != nil {
 			cfg.Logger.Error("failed to create agent memory dir", "error", err, "path", cfg.Memory.BasePath)
 		}
-		engine, err := memory.New(cfg.Memory.BasePath, memory.DefaultConfig())
+		engine, err := s.newMemoryEngine(cfg.Memory.BasePath)
 		if err != nil {
 			cfg.Logger.Error("failed to init memory engine (path-based memory tools still functional; FTS5 search disabled)",
 				"error", err, "path", cfg.Memory.BasePath)
@@ -507,10 +510,10 @@ func NewServer(cfg ServerConfig) *Server {
 		if cfg.Memory.AgentRole == "lead" && cfg.Memory.CrewMemoryPath != "" {
 			s.crewMemoryBase = cfg.Memory.CrewMemoryPath
 			// Ensure crew memory directory exists (may not on first run)
-			if err := os.MkdirAll(cfg.Memory.CrewMemoryPath, 0o755); err != nil {
+			if err := memory.EnsureDirNoFollow(s.memoryStorageRoot, cfg.Memory.CrewMemoryPath); err != nil {
 				cfg.Logger.Error("failed to create crew memory dir", "error", err, "path", cfg.Memory.CrewMemoryPath)
 			}
-			crewEngine, err := memory.New(cfg.Memory.CrewMemoryPath, memory.DefaultConfig())
+			crewEngine, err := s.newMemoryEngine(cfg.Memory.CrewMemoryPath)
 			if err != nil {
 				cfg.Logger.Error("failed to init crew memory engine (path-based crew memory tools still functional)",
 					"error", err, "path", cfg.Memory.CrewMemoryPath)

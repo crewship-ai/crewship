@@ -16,6 +16,7 @@ import (
 // (or a surface's optional parts) rather than defining one. Naming them here is
 // what keeps the next allowlist entry from silently appearing in no surface.
 var restrictedSharedPatterns = map[string]bool{
+	"POST /api/v1/auth/invitation/accept":                                                  true,
 	"GET /api/v1/workspaces":                                                               true,
 	"GET /api/v1/agents/{agentId}":                                                         true,
 	"GET /api/v1/agents/{agentId}/run-profile":                                             true,
@@ -61,7 +62,7 @@ func TestRestrictedSurfacesAreDerivedFromTheAllowlist(t *testing.T) {
 			t.Errorf("restrictedSharedPatterns names %q, which is not allowlisted", p)
 		}
 	}
-	want := []string{"chat", "routines", "pages", "account_security"}
+	want := []string{"issues", "chat", "routines", "pages", "account_security"}
 	if got := allowedRestrictedSurfaces(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("allowed surfaces = %v, want %v", got, want)
 	}
@@ -71,7 +72,7 @@ func TestRestrictedSurfacesAreDerivedFromTheAllowlist(t *testing.T) {
 	saved := restrictedRoutes["GET /api/v1/workspaces/{workspaceId}/restricted-pages"]
 	delete(restrictedRoutes, "GET /api/v1/workspaces/{workspaceId}/restricted-pages")
 	defer func() { restrictedRoutes["GET /api/v1/workspaces/{workspaceId}/restricted-pages"] = saved }()
-	if got := allowedRestrictedSurfaces(); !reflect.DeepEqual(got, []string{"chat", "routines", "account_security"}) {
+	if got := allowedRestrictedSurfaces(); !reflect.DeepEqual(got, []string{"issues", "chat", "routines", "account_security"}) {
 		t.Fatalf("surfaces without the Pages catalog = %v", got)
 	}
 }

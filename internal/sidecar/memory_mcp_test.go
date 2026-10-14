@@ -184,8 +184,9 @@ func newMemoryMCPTestServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	return &Server{
-		agentMemoryBase: agentBase,
-		crewMemoryBase:  crewBase,
+		agentMemoryBase:   agentBase,
+		memoryStorageRoot: filepath.Dir(t.TempDir()),
+		crewMemoryBase:    crewBase,
 		ipc: &IPCConfig{
 			AgentID:     "agent-1",
 			AgentSlug:   "alpha",
@@ -218,9 +219,10 @@ func newMultiAgentMemoryMCPTestServer(t *testing.T) (*Server, string) {
 		}
 	}
 	return &Server{
-		agentMemoryBase: alphaBase,
-		memoryAgentSlug: "alpha",
-		crewMemoryBase:  crewBase,
+		agentMemoryBase:   alphaBase,
+		memoryStorageRoot: filepath.Dir(t.TempDir()),
+		memoryAgentSlug:   "alpha",
+		crewMemoryBase:    crewBase,
 		crewMembers: []CrewMember{
 			{ID: "agent-1", Slug: "alpha"},
 			{ID: "agent-2", Slug: "beta"},
@@ -338,10 +340,11 @@ func newTokenMemoryMCPTestServer(t *testing.T) (*Server, string) {
 		}
 	}
 	return &Server{
-		agentMemoryBase: alphaBase,
-		memoryAgentSlug: "alpha",
-		crewMemoryBase:  crewBase,
-		logger:          slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		agentMemoryBase:   alphaBase,
+		memoryStorageRoot: filepath.Dir(t.TempDir()),
+		memoryAgentSlug:   "alpha",
+		crewMemoryBase:    crewBase,
+		logger:            slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		crewMembers: []CrewMember{
 			{ID: "agent-1", Slug: "alpha", AuthToken: "tok-alpha"},
 			{ID: "agent-2", Slug: "beta", AuthToken: "tok-beta"},
