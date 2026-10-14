@@ -24,3 +24,12 @@ as plain SQL belongs here.
 
 Nothing at or below **v169** may move here or change: those numbers are applied
 in databases nobody controls. See `../migrate_version_scheme.go`.
+
+The three consolidated Artifact/Board migrations replace only the unreleased
+feature chain. A temporary [preflight](../migrate_artifact_board_prerelease.go)
+recognizes its exact 33 version/name pairs and complete final schema before any
+migration writes. This lets the managed deploy boot before an approved reset;
+the reset command uses the installed application. The final feature CREATEs are
+idempotent only after that verification. Partial, modified or untracked feature
+schemas are refused. Existing ledger rows remain intact; shipped main SQL and
+the general newer-schema guard are unchanged.
