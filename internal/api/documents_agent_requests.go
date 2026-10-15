@@ -325,9 +325,12 @@ func bindDocumentRequestRun(r *http.Request, db *sql.DB, id, run string, receipt
 	if n, _ := result.RowsAffected(); n != 1 {
 		return errors.New("document admission changed")
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO page_artifact_run_delegations(page_id,run_id,granted_by_user_id,expires_at,granted_at) SELECT ?,run_id,human_user_id,expires_at,? FROM artifact_run_principals WHERE run_id=? AND chat_id=? AND agent_id=? AND human_user_id=? ON CONFLICT(page_id,run_id) DO NOTHING`, page, tsformat.Format(time.Now()), run, receipt.ChatID, receipt.AgentID, receipt.UserID)
+	result, err = tx.ExecContext(ctx, `INSERT INTO page_artifact_run_delegations(page_id,run_id,granted_by_user_id,expires_at,granted_at,document_request_id) SELECT ?,run_id,human_user_id,expires_at,?,? FROM artifact_run_principals WHERE run_id=? AND chat_id=? AND agent_id=? AND human_user_id=? ON CONFLICT(page_id,run_id) DO UPDATE SET document_request_id=excluded.document_request_id WHERE page_artifact_run_delegations.request_id IS NULL AND (page_artifact_run_delegations.document_request_id IS NULL OR page_artifact_run_delegations.document_request_id=excluded.document_request_id)`, page, tsformat.Format(time.Now()), id, run, receipt.ChatID, receipt.AgentID, receipt.UserID)
 	if err != nil {
 		return err
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return errors.New("document request origin changed")
 	}
 	return tx.Commit()
 }
@@ -336,16 +339,29 @@ func bindDocumentRequestRun(r *http.Request, db *sql.DB, id, run string, receipt
 // live run delegation; it never creates authority from a historical request.
 func (h *PageHandler) checkDocumentRequestAuthority(ctx context.Context, page string, a *artifactRunAuthority) error {
 	q := h.pageAuthReader(ctx)
-	var state, slug, role string
-	err := q.QueryRowContext(ctx, `SELECT d.status,p.slug,m.role FROM document_requests d JOIN pages p ON p.id=d.page_id JOIN workspace_members m ON m.workspace_id=p.workspace_id AND m.user_id=d.human_user_id WHERE d.page_id=? AND d.run_id=? AND d.human_user_id=?`, page, a.RunID, a.HumanUserID).Scan(&state, &slug, &role)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	} // other explicit delegation kinds
-	if err != nil || state != "running" {
+	var origin string
+	err := q.QueryRowContext(ctx, `SELECT COALESCE(document_request_id,'') FROM page_artifact_run_delegations WHERE page_id=? AND run_id=?`, page, a.RunID).Scan(&origin)
+	if err != nil {
+		return errors.New("document run delegation missing")
+	}
+	if origin == "" {
+		var associated int
+		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM document_requests WHERE page_id=? AND run_id=?`, page, a.RunID).Scan(&associated); err != nil {
+			return err
+		}
+		if associated != 0 {
+			return errors.New("document request origin missing")
+		}
+		return nil // A generic explicit delegation with no document request.
+	}
+	var state, slug, run, human, agent, chat string
+	var role sql.NullString
+	err = q.QueryRowContext(ctx, `SELECT d.status,p.slug,COALESCE(d.run_id,''),COALESCE(d.human_user_id,''),COALESCE(d.agent_id,''),COALESCE(d.chat_id,''),m.role FROM document_requests d JOIN pages p ON p.id=d.page_id LEFT JOIN workspace_members m ON m.workspace_id=p.workspace_id AND m.user_id=d.human_user_id WHERE d.id=? AND d.page_id=? AND p.workspace_id=?`, origin, page, a.WorkspaceID).Scan(&state, &slug, &run, &human, &agent, &chat, &role)
+	if err != nil || state != "running" || !role.Valid || run != a.RunID || human != a.HumanUserID || agent != a.AgentID || chat != a.ChatID {
 		return errors.New("document request is not active")
 	}
 	rec, err := h.loadPage(ctx, a.WorkspaceID, slug)
-	if err != nil || !h.mayEditSpec(ctx, a.WorkspaceID, a.HumanUserID, role, rec) {
+	if err != nil || !h.mayEditSpec(ctx, a.WorkspaceID, a.HumanUserID, role.String, rec) {
 		return errors.New("document editor authority revoked")
 	}
 	return nil
