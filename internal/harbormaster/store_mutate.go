@@ -12,6 +12,37 @@ import (
 )
 
 func Enqueue(ctx context.Context, db *sql.DB, j journal.Emitter, req Request) (string, error) {
+	id, err := EnqueueTx(ctx, db, req)
+	if err != nil {
+		return "", err
+	}
+
+	if j != nil {
+		_, _ = j.Emit(ctx, journal.Entry{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
+			Type:        journal.EntryApprovalRequest,
+			Severity:    journal.SeverityNotice,
+			ActorType:   journal.ActorAgent,
+			ActorID:     req.RequestedBy,
+			Summary:     fmt.Sprintf("approval requested: %s — %s", req.Kind, req.Reason),
+			Payload:     map[string]any{"approval_id": id, "kind": string(req.Kind)},
+			Refs:        map[string]any{"approval_id": id},
+		})
+	}
+
+	return id, nil
+}
+
+// EnqueueTx writes a pending request in a caller-owned transaction, without
+// committing, broadcasting or journaling it. This lets a caller check live
+// resource authority and append an audit event atomically with submission.
+// Like DecideTx, it accepts DBTX so the legacy autocommit wrapper can reuse
+// identical validation/defaults. The caller must rollback on any error and
+// publish notifications only after commit.
+func EnqueueTx(ctx context.Context, tx DBTX, req Request) (string, error) {
 	if req.WorkspaceID == "" {
 		return "", errors.New("harbormaster: workspace_id required")
 	}
@@ -41,7 +72,7 @@ func Enqueue(ctx context.Context, db *sql.DB, j journal.Emitter, req Request) (s
 	}
 	// Enqueue always writes a pending row — a caller shouldn't be able
 	// to persist a pre-resolved approval via the public enqueue path,
-	// because the matching `approval.requested` journal emit below
+	// because the wrapper's matching `approval.requested` journal entry
 	// would lie about its state. Decide / Cancel / SweepTimeouts are
 	// the only ways to leave pending, and each emits its own terminal
 	// entry. Force pending regardless of what the caller set.
@@ -56,7 +87,7 @@ func Enqueue(ctx context.Context, db *sql.DB, j journal.Emitter, req Request) (s
 		(id, workspace_id, crew_id, agent_id, mission_id, requested_by, kind, reason,
 		 payload, status, timeout_at, created_at, routine_version)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err = db.ExecContext(ctx, insertSQL,
+	_, err = tx.ExecContext(ctx, insertSQL,
 		req.ID,
 		req.WorkspaceID,
 		nullable(req.CrewID),
@@ -73,22 +104,6 @@ func Enqueue(ctx context.Context, db *sql.DB, j journal.Emitter, req Request) (s
 	)
 	if err != nil {
 		return "", fmt.Errorf("harbormaster: insert approval: %w", err)
-	}
-
-	if j != nil {
-		_, _ = j.Emit(ctx, journal.Entry{
-			WorkspaceID: req.WorkspaceID,
-			CrewID:      req.CrewID,
-			AgentID:     req.AgentID,
-			MissionID:   req.MissionID,
-			Type:        journal.EntryApprovalRequest,
-			Severity:    journal.SeverityNotice,
-			ActorType:   journal.ActorAgent,
-			ActorID:     req.RequestedBy,
-			Summary:     fmt.Sprintf("approval requested: %s — %s", req.Kind, req.Reason),
-			Payload:     map[string]any{"approval_id": req.ID, "kind": string(req.Kind)},
-			Refs:        map[string]any{"approval_id": req.ID},
-		})
 	}
 
 	return req.ID, nil
