@@ -513,7 +513,7 @@ export function IssueDetailSurface({
   const [draft, setDraft] = React.useState<Record<string, unknown>>({})
   const draftRef = React.useRef(draft)
   draftRef.current = draft
-  React.useEffect(() => { setDraft({}); setCommentDraft(""); draftBaseRevision.current = undefined }, [identifier])
+  React.useEffect(() => { setDraft({}); setCommentDraft(""); draftBaseRevision.current = undefined }, [workspaceId, identifier])
   // Read current values for comparison without accepting them as a new base.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   React.useEffect(() => { if (write?.conflict) void fetchIssue() }, [write?.conflict])
@@ -957,9 +957,10 @@ export function IssueDetailSurface({
 
   return (
     <>
+    {rechecking && <p role="status" className="px-4 pt-3 text-xs text-muted-foreground">Checking current access…</p>}
     {feedback && <div className="px-4 pt-3">{feedback}</div>}
     {(write?.conflict || write?.resetKey) && draftCount > 0 ? <div className="border-b p-3 text-xs" aria-label="Current server values"><p>Current server values (your draft is kept below)</p>{Object.keys(draft).map((field) => <p key={field}>{field}: {String(issue[field as keyof Mission] ?? "Unassigned")}</p>)}</div> : null}
-    {write && draftCount > 0 && <div className="flex items-center gap-2 border-b p-3 text-xs"><span className="flex-1">{!write.blocked && !canSaveDraft ? "Draft kept. Current access does not allow saving these changes." : "Unsaved changes"}</span><Button size="sm" className="coarse:min-h-12" disabled={write.blocked || !canSaveDraft} onClick={() => void patch(draft)}>Save changes</Button><Button size="sm" variant="ghost" className="coarse:min-h-12" disabled={write.blocked} onClick={() => { setDraft({}); draftBaseRevision.current = undefined }}>Discard</Button></div>}
+    {write && draftCount > 0 && <div className="flex items-center gap-2 border-b p-3 text-xs"><span className="flex-1">{!write.blocked && !canSaveDraft ? "Draft kept. Current access does not allow saving these changes." : "Unsaved changes"}</span><Button size="sm" className="coarse:min-h-12" disabled={write.blocked || rechecking || !canSaveDraft} onClick={() => void patch(draft)}>Save changes</Button><Button size="sm" variant="ghost" className="coarse:min-h-12" disabled={write.blocked} onClick={() => { setDraft({}); draftBaseRevision.current = undefined }}>Discard</Button></div>}
     {authorizationKey && <p className="px-4 pt-3 text-xs text-muted-foreground">Detail fetched {detailFetchedAt ? new Date(detailFetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "not verified"} · Related data {subFetchedAt ? `fetched ${new Date(subFetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "not verified"} · Automation data fetched separately</p>}
     {subFailed.length > 0 && (
       <div
@@ -974,6 +975,7 @@ export function IssueDetailSurface({
         </Button>
       </div>
     )}
+    <fieldset disabled={write?.blocked} className="min-w-0">
     <IssueCardDetail
       issue={shown}
       filesPanel={<IssueFilesCard key={issue.id} issue={issue} editable={can("attach_files")} />}
@@ -1017,6 +1019,7 @@ export function IssueDetailSurface({
         />
       }
     />
+    </fieldset>
     {confirm && (
       <ConfirmDialog
         open

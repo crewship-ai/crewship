@@ -26,7 +26,7 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
   if (priorScope.current !== scope) { cursor.current = undefined; priorScope.current = scope }
   const active = enabled && !!workspaceId && !!chatId && !!userId
   const status = useRealtimeStatusSafe()
-  useRealtimeChannelSafe(active ? `session:${chatId}` : null)
+  useRealtimeChannelSafe(active ? `chat-hints:${chatId}` : null)
   const query = useQuery({
     queryKey: key, enabled: active, retry: false, gcTime: 0, staleTime: 0,
     refetchInterval: RECHECK_MS, refetchIntervalInBackground: false,
@@ -68,7 +68,7 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
   }, [active, client, workspaceId, chatId, userId])
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hint = (event: { channel?: string; payload: Record<string, unknown> }) => {
-    if (event.channel !== `session:${chatId}` || event.payload.contract_version !== 1 || hintTimer.current) return
+    if (event.channel !== `chat-hints:${chatId}` || event.payload.contract_version !== 1 || hintTimer.current) return
     hintTimer.current = setTimeout(() => { hintTimer.current = null; reconcile() }, 100)
   }
   useEffect(() => () => { if (hintTimer.current) clearTimeout(hintTimer.current); hintTimer.current = null }, [scope])

@@ -21,7 +21,7 @@ export function useChatIssueMutation(onChanged: () => void, onUnauthorized: () =
     if (!storageKey) return
     // Refuse a new write if durable recovery cannot be recorded.
     if (intent) sessionStorage.setItem(storageKey, JSON.stringify(intent))
-    else sessionStorage.removeItem(storageKey)
+    else { try { sessionStorage.removeItem(storageKey) } catch { /* A retained key conservatively blocks a fresh operation. */ } }
   }, [storageKey])
   const [state, setState] = useState<CardWriteState>(restored ? "unknown" : "idle")
   const [message, setMessage] = useState("")

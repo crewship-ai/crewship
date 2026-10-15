@@ -58,7 +58,7 @@ describe("authorized chat entity snapshots", () => {
     expect(fetch.mock.calls[2][0]).not.toContain("cursor=")
     await waitFor(() => expect(result.current.state).toBe("ready"))
     fetch.mockResolvedValueOnce(response({}, 404))
-    act(() => events.get("chat.entity_refs_changed")?.({ channel: "session:chat-1", payload: { contract_version: 1 } }))
+    act(() => events.get("chat.entity_refs_changed")?.({ channel: "chat-hints:chat-1", payload: { contract_version: 1 } }))
     await waitFor(() => expect(result.current.state).toBe("unavailable"))
     expect(result.current.refs).toEqual([])
     expect(result.current.live).toBe(false)
@@ -115,10 +115,10 @@ it("filters hints by exact chat channel and coalesces an invalidation burst", as
   const { result } = setup()
   await waitFor(() => expect(result.current.state).toBe("ready"))
   const before = fetch.mock.calls.length
-  act(() => events.get("chat.entity_refs_changed")?.({ channel: "session:another-chat", payload: { contract_version: 1 } }))
+  act(() => events.get("chat.entity_refs_changed")?.({ channel: "chat-hints:another-chat", payload: { contract_version: 1 } }))
   expect(fetch).toHaveBeenCalledTimes(before)
   act(() => {
-    for (let i = 0; i < 5; i++) events.get("chat.entity_refs_changed")?.({ channel: "session:chat-1", payload: { contract_version: 1 } })
+    for (let i = 0; i < 5; i++) events.get("chat.entity_refs_changed")?.({ channel: "chat-hints:chat-1", payload: { contract_version: 1 } })
   })
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(before + 1))
 })

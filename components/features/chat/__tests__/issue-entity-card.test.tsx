@@ -104,7 +104,7 @@ it("reloads current conflict values alongside the retained draft before a fresh 
   let revision = 1
   fetch.mockImplementation(async (path: string, init?: { method?: string }) => {
     if (init?.method === "PATCH") { revision = 2; return new Response("{}", { status: 409 }) }
-    return new Response(JSON.stringify(path.includes("/agents") ? [] : { title: revision === 1 ? "Synthetic title" : "Other person's title", status: "TODO", priority: "none", crew_id: "crew", revision, allowed_actions: base.current!.allowed_actions }))
+    return new Response(JSON.stringify(path.includes("/agents") ? [] : { title: revision === 1 ? "Synthetic title" : "Other person's title", status: base.current!.status, priority: revision === 1 ? "none" : "high", crew_id: "crew", revision, allowed_actions: base.current!.allowed_actions }))
   })
   setup()
   fireEvent.click(screen.getByRole("button", { name: "Edit" }))
@@ -118,5 +118,5 @@ it("reloads current conflict values alongside the retained draft before a fresh 
   fireEvent.click(screen.getByRole("button", { name: "Save" }))
   await waitFor(() => expect(fetch.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(2))
   const second = fetch.mock.calls.filter(([, init]) => init?.method === "PATCH")[1]
-  expect(JSON.parse(second[1].body)).toMatchObject({ title: "My draft", expected_revision: 2 })
+  expect(JSON.parse(second[1].body)).toEqual({ title: "My draft", expected_revision: 2 })
 })

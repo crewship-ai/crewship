@@ -88,7 +88,7 @@ it("does not restore another viewer's intent", async () => {
   expect(fetch).toHaveBeenCalledTimes(1)
 })
 it("sends no write when recovery storage cannot be recorded", async () => {
-  const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("unavailable") })
+  const set = vi.spyOn(sessionStorage, "setItem").mockImplementation(() => { throw new Error("unavailable") })
   try {
     const { result } = setup("viewer/workspace/issue")
     await act(async () => { expect(await result.current.submit("/issue", "POST", { body: "Do not duplicate" })).toBe(false) })

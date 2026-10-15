@@ -86,7 +86,26 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
     setEditor(kind)
     if (kind === "fields") { const initial = { title: current.title, status: current.status, priority: current.priority, assignee_id: current.assignee_id ?? "" }; baseline.current = initial; setDraft(initial); setDraftRevision(current.revision) }
   }
+  const reloadConflict = async () => {
+    const fresh = await detail.refetch()
+    if (fresh.error || !fresh.data?.revision) return
+    const value = fresh.data
+    const server = { title: value.title, status: value.status, priority: value.priority ?? "none", assignee_id: value.assignee_id ?? "" }
+    const previous = baseline.current
+    // Keep only actual local edits; accepting a new revision must not turn
+    // untouched old fields into edits that overwrite somebody else's work.
+    setDraft(local => ({
+      title: local.title !== previous.title ? local.title : server.title,
+      status: local.status !== previous.status ? local.status : server.status,
+      priority: local.priority !== previous.priority ? local.priority : server.priority,
+      assignee_id: local.assignee_id !== previous.assignee_id ? local.assignee_id : server.assignee_id,
+    }))
+    baseline.current = server
+    setDraftRevision(value.revision)
+    mutation.resolveConflict()
+  }
   return <EntityCardFrame>
+    {rechecking && <p role="status" className="text-xs text-muted-foreground">Checking current access…</p>}
     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
       <span>Issue</span><span className="font-mono">{ref.entity.identifier}</span>
       <span className="ml-auto">{live ? "Live" : checkedAt ? `Verified ${new Date(checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Not verified"}</span>
@@ -126,8 +145,8 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
         {can("assign") && <label className="space-y-1 text-xs">Assignee<select value={draft.assignee_id} disabled={!roster.data} onChange={(e) => setDraft({ ...draft, assignee_id: e.target.value })} className="block h-9 w-full rounded-md border bg-background px-2 coarse:min-h-12"><option value="">Unassigned</option>{baseline.current.assignee_id && !roster.data?.some((a) => a.id === baseline.current.assignee_id) && <option value={baseline.current.assignee_id}>{detail.data?.assignee_name ?? "Current assignee"}</option>}{roster.data?.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>{roster.error && <span role="alert">Could not load assignees</span>}</label>}
       </div>}</fieldset>
       {mutation.state === "conflict" && detail.data && <div className="space-y-1 text-xs" aria-label="Current server values"><p>Current server values</p><p>Title: {detail.data.title}</p><p>Status: {detail.data.status} · Priority: {detail.data.priority} · Assignee: {detail.data.assignee_id ?? "Unassigned"}</p><p>Your draft remains in the fields above.</p></div>}
-      <CardWriteFeedback {...mutation} resolveConflict={() => { void detail.refetch().then((fresh) => { if (!fresh.error && fresh.data?.revision) { const value = fresh.data; baseline.current = { title: value.title, status: value.status, priority: value.priority, assignee_id: value.assignee_id ?? "" }; setDraftRevision(value.revision); mutation.resolveConflict() } }) }} />
-      <div className="flex gap-2"><Button type="submit" size="sm" className="coarse:min-h-12" disabled={!detail.data || locked || (editor === "comment" && !can("comment"))}>{mutation.state === "saving" ? <RefreshCw className="size-3.5 animate-spin" /> : null}Save</Button><Button type="button" size="sm" variant="ghost" className="coarse:min-h-12" onClick={() => setEditor(null)} disabled={locked}>Cancel</Button></div>
+      <CardWriteFeedback {...mutation} resolveConflict={() => void reloadConflict()} />
+      <div className="flex gap-2"><Button type="submit" size="sm" className="coarse:min-h-12" disabled={!detail.data || locked || rechecking || (editor === "comment" && !can("comment"))}>{mutation.state === "saving" ? <RefreshCw className="size-3.5 animate-spin" /> : null}Save</Button><Button type="button" size="sm" variant="ghost" className="coarse:min-h-12" onClick={() => setEditor(null)} disabled={locked}>Cancel</Button></div>
     </form>}
   </EntityCardFrame>
 }
