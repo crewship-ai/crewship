@@ -122,3 +122,42 @@ func TestWriteFrameZeroUsesDefault(t *testing.T) {
 		t.Fatal("writeFrame with zero writeWait should use defaultWriteWait and succeed")
 	}
 }
+
+func TestEntityInvalidationDeliveryRechecksTrustedAudience(t *testing.T) {
+	for _, tc := range []struct{ name, revoke string }{
+		{"suspended", `UPDATE users SET suspended_at='now' WHERE id='u-good'`},
+		{"workspace deleted", `UPDATE workspaces SET deleted_at='now' WHERE id='ws-1'`},
+		{"agent deleted", `UPDATE agents SET deleted_at='now' WHERE id='agent-live'`},
+		{"membership removed", `DELETE FROM workspace_members WHERE user_id='u-good'`},
+		{"restricted elsewhere", `INSERT INTO workspaces(id,name,slug) VALUES('ws-2','Other','other'); INSERT INTO workspace_members(id,user_id,workspace_id,access_mode) VALUES('restricted','u-good','ws-2','restricted')`},
+		{"participant removed", `UPDATE chats SET created_by='other-user',visibility='group' WHERE id='chat-1'; DELETE FROM chat_participants WHERE user_id='u-good'`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := seededDB(t)
+			if _, err := db.Exec(`INSERT INTO users(id,email) VALUES('other-user','other@invalid.test')`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`INSERT INTO chat_participants(chat_id,user_id) VALUES('chat-1','u-good')`); err != nil {
+				t.Fatal(err)
+			}
+			hub := newRunningHub(t)
+			hub.SetChannelAuthorizer(NewDBChannelAuthorizer(db))
+			client := &Client{hub: hub, conn: dialClientConn(t), userID: "u-good", ctx: context.Background()}
+			for _, event := range []string{"chat.entity_refs_changed", "issue.revision_changed"} {
+				frame := []byte(fmt.Sprintf(`{"type":%q,"channel":"session:chat-1","payload":{"contract_version":1}}`, event))
+				if !client.writeFrame(frame) {
+					t.Fatal("legitimate trusted frame denied")
+				}
+			}
+			if _, err := db.Exec(tc.revoke); err != nil {
+				t.Fatal(err)
+			}
+			for _, event := range []string{"chat.entity_refs_changed", "issue.revision_changed"} {
+				frame := []byte(fmt.Sprintf(`{"type":%q,"channel":"session:chat-1","payload":{"contract_version":1}}`, event))
+				if client.writeFrame(frame) {
+					t.Fatal("queued hint delivered after authority revoked")
+				}
+			}
+		})
+	}
+}

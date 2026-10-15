@@ -1285,6 +1285,12 @@
       },
       "ChatEntityReferencePage": {
         "properties": {
+          "contract_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
           "has_more": {
             "type": "boolean"
           },
@@ -1308,6 +1314,7 @@
           }
         },
         "required": [
+          "contract_version",
           "reset",
           "next_cursor",
           "snapshot_id",

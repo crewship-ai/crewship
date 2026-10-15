@@ -27,6 +27,8 @@
 # introduced (2026-09-15). Listed so the count can only go down; each needs a
 # command, and the line goes when it lands.
 /api/v1/agents/{agentId}/container-files           no command as of 2026-09-15; `crewship agent files` reads the workspace proxy, not the container listing
+/api/v1/agents/{agentId}/peers                     no command as of 2026-09-15 (peer-card index)
+/api/v1/agents/{agentId}/peers/{userId}            no command as of 2026-09-15 (peer card get/delete)
 /api/v1/agents/{agentId}/persona/suggest           no command as of 2026-09-15 (agent-initiated persona proposal)
 /api/v1/templates                                  no command as of 2026-09-15 (`crewship template` drives /crew-templates, not /templates)
 /api/v1/templates/{templateId}                     no command as of 2026-09-15 (`crewship template` drives /crew-templates, not /templates)
