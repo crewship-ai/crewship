@@ -29,3 +29,14 @@ describe('static raster preflight', () => {
     expect(staticCSS('@media (min-width:1px){@supports(display:grid){h1{display:grid}}}@keyframes fade{to{opacity:1}}')).toBe(true)
   })
 })
+
+// Native stream checks do not delegate validity to the image codec.
+it('validates PNG deflate independently and fails closed on malformed streams or cancellation', async () => {
+  const { validStaticPNG } = await import('../artifact-raster')
+  const bytes = (src: string) => Uint8Array.from(atob(src.split(',')[1]), char => char.charCodeAt(0))
+  expect(await validStaticPNG(bytes(png))).toBe(true)
+  const invalid = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAYAAAC56t6BAAAACElEQVRub3QgemxpYlVpEfcAAAAASUVORK5CYII='
+  expect(await validStaticPNG(bytes(invalid))).toBe(false)
+  const controller = new AbortController(); controller.abort()
+  expect(await validStaticPNG(bytes(png), controller.signal)).toBe(false)
+})

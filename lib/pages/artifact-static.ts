@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify"
-import { STATIC_RASTER_LIMITS, staticCSS, staticRaster } from "./artifact-raster"
+import { STATIC_RASTER_LIMITS, staticCSS, staticRaster, validStaticPNG } from "./artifact-raster"
 
 /** Static presentation only. Original source is never inserted into Studio. */
 export async function staticArtifactDocument(html: string, signal?: AbortSignal): Promise<string> {
@@ -44,6 +44,7 @@ export async function staticArtifactDocument(html: string, signal?: AbortSignal)
       try {
         if (typeof createImageBitmap !== 'function') throw new Error('Raster decoder unavailable')
         const data = Uint8Array.from(atob(src.slice(src.indexOf(',') + 1)), char => char.charCodeAt(0))
+        if (src.startsWith('data:image/png;') && !await validStaticPNG(data, signal)) throw new Error('Invalid PNG scanlines')
         // Native decoders may apply JPEG EXIF orientation (including 90°).
         bitmap = await createImageBitmap(new Blob([data]))
         if (!((bitmap.width === image.width && bitmap.height === image.height) || (bitmap.width === image.height && bitmap.height === image.width))) throw new Error('Raster dimensions changed')

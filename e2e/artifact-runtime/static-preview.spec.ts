@@ -53,9 +53,9 @@ function chunk(type: string, data: Buffer): Buffer {
   crc.writeUInt32BE((value ^ 0xffffffff) >>> 0)
   return Buffer.concat([length, name, data, crc])
 }
-function pngContainer(width: number, height: number, compressed: Buffer, extra: Buffer[] = []): Buffer {
+function pngContainer(width: number, height: number, compressed: Buffer, extra: Buffer[] = [], interlace = 0): Buffer {
   const header = Buffer.alloc(13)
-  header.writeUInt32BE(width); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 6
+  header.writeUInt32BE(width); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 6; header[12] = interlace
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), ...extra, chunk('IDAT', compressed), chunk('IEND', Buffer.alloc(0))])
 }
 const uri = (type: string, data: Buffer) => `data:image/${type};base64,${data.toString('base64')}`
@@ -79,6 +79,13 @@ test('native raster validation accepts PNG/JPEG and refuses malformed containers
     const { deflateSync } = await import('node:zlib')
     const compressed = deflateSync(Buffer.concat(Array.from({ length: 3 }, () => Buffer.from([0, 32, 96, 160, 255, 32, 96, 160, 255]))))
     const png = pngContainer(2, 3, compressed)
+    const adam7Rows: Buffer[] = []
+    for (const [x, y, dx, dy] of [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]]) {
+      const width = Math.max(0, Math.ceil((5 - x) / dx)), height = Math.max(0, Math.ceil((7 - y) / dy))
+      if (width) for (let row = 0; row < height; row++) adam7Rows.push(Buffer.alloc(1 + width * 4))
+    }
+    const adam7 = pngContainer(5, 7, deflateSync(Buffer.concat(adam7Rows)), [], 1)
+    const badAdler = Buffer.from(compressed); badAdler[badAdler.length - 1] ^= 1
     const jpegBytes = Buffer.from(jpeg.split(',')[1], 'base64')
     const frameOffset = jpegBytes.indexOf(Buffer.from([255, 192]))
     expect(frameOffset).toBeGreaterThan(1)
@@ -90,20 +97,27 @@ test('native raster validation accepts PNG/JPEG and refuses malformed containers
     const rotatedJPEG = Buffer.concat([jpegBytes.subarray(0, 2), Buffer.from([255, 225]), exifLength, exif, jpegBytes.subarray(2)])
     const invalid = [
       uri('png', pngContainer(2, 3, Buffer.from('not zlib'))),
+      uri('png', pngContainer(2, 3, deflateSync(Buffer.alloc(1)))),
+      uri('png', pngContainer(2, 3, deflateSync(Buffer.alloc(28)))),
+      uri('png', pngContainer(2, 3, deflateSync(Buffer.from([5, ...Array(26).fill(0)])))),
+      uri('png', pngContainer(2, 3, deflateSync(Buffer.alloc(2 * 1024 * 1024)))),
+      uri('png', pngContainer(2, 3, badAdler)),
+      uri('png', pngContainer(2, 3, Buffer.concat([compressed, Buffer.from([0])]))),
+      uri('png', pngContainer(2, 3, compressed.subarray(0, -2))),
       uri('png', png.subarray(0, -8)), uri('png', duplicatePNG), uri('jpeg', duplicateJPEG),
       uri('jpeg', jpegBytes.subarray(0, -2)), uri('png', pngContainer(2049, 3, compressed)),
       uri('png', pngContainer(2, 3, compressed, [chunk('acTL', Buffer.alloc(8))])),
       uri('jpeg', png), uri('png', Buffer.concat([png, Buffer.from('<svg/>')])),
       uri('png', Buffer.alloc(1024 * 1024 + 1)), 'data:image/svg+xml;base64,PHN2Zz4=',
     ]
-    const source = `<h1>Raster report</h1><img id="png" src="${uri('png', png)}"><img id="jpeg" src="${jpeg}"><img id="rotated" src="${uri('jpeg', rotatedJPEG)}">` + invalid.map((src, i) => `<img id="bad-${i}" src="${src}" onerror="fetch('${sink}/error')">`).join('') + `<img id="remote" src="${sink}/image" srcset="${sink}/srcset 2x"><template shadowrootmode="open"><img src="${sink}/template"><img src="${invalid[0]}"></template><noscript><img src="${sink}/noscript"></noscript><iframe src="${sink}/iframe"></iframe><link rel="stylesheet" href="${sink}/style"><style>@import '${sink}/import';body{background:url('${sink}/css')}</style><style>@media screen{@import '${sink}/nested';}</style><div style="background:image-set('${sink}/set' 1x)">Safe text</div><script>fetch('${sink}/script')</script>`
+    const source = `<h1>Raster report</h1><img id="png" src="${uri('png', png)}"><img id="adam7" src="${uri('png', adam7)}"><img id="jpeg" src="${jpeg}"><img id="rotated" src="${uri('jpeg', rotatedJPEG)}">` + invalid.map((src, i) => `<img id="bad-${i}" src="${src}" onerror="fetch('${sink}/error')">`).join('') + `<img id="remote" src="${sink}/image" srcset="${sink}/srcset 2x"><template shadowrootmode="open"><img src="${sink}/template"><img src="${invalid[0]}"></template><noscript><img src="${sink}/noscript"></noscript><iframe src="${sink}/iframe"></iframe><link rel="stylesheet" href="${sink}/style"><style>@import '${sink}/import';body{background:url('${sink}/css')}</style><style>@media screen{@import '${sink}/nested';}</style><div style="background:image-set('${sink}/set' 1x)">Safe text</div><script>fetch('${sink}/script')</script>`
     await page.evaluate(async html => {
       const win = window as unknown as { staticArtifactDocument: (html: string) => Promise<string> }
       const iframe = document.createElement('iframe'); iframe.title = 'Validated raster'; iframe.setAttribute('sandbox', '')
       iframe.srcdoc = await win.staticArtifactDocument(html); document.body.append(iframe)
     }, source)
     const frame = page.frameLocator('iframe[title="Validated raster"]')
-    for (const [id, width, height] of [['png', 2, 3], ['jpeg', 2, 3], ['rotated', 3, 2]] as const) {
+    for (const [id, width, height] of [['png', 2, 3], ['adam7', 5, 7], ['jpeg', 2, 3], ['rotated', 3, 2]] as const) {
       await expect.poll(() => frame.locator(`#${id}`).evaluate((node: HTMLImageElement) => [node.naturalWidth, node.naturalHeight])).toEqual([width, height])
     }
     const rejected = await frame.locator('img[id^="bad-"][src],#remote[src],[srcset],script,iframe,link,template,noscript').evaluateAll(nodes => nodes.map(node => ({ tag: node.tagName, id: node.id, source: node.getAttribute('src')?.slice(0, 120) })))

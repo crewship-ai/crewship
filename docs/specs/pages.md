@@ -259,7 +259,11 @@ canonical base64 `data:image/png` and `data:image/jpeg` images use the same
 validated static profile in chat HTML/Markdown previews, Pages, comparisons,
 gallery previews and Board pins. Before native decoding, PNG containers require
 valid CRCs, bounded IHDR dimensions and ordered chunks; APNG and 16-bit channels
-are refused. JPEG accepts 8-bit baseline/progressive frames, bounded dimensions,
+are refused. PNG deflate is streamed in 256-byte compressed chunks, counted and
+discarded against exact scanline lengths/filter bytes (including Adam7), with a
+17 MiB per-image raw-stream ceiling and checksum/termination validation. Missing
+stream decompression fails closed. Native image codecs alone may accept corrupt
+PNG streams, so native decoding remains an additional check, not the validator. JPEG accepts 8-bit baseline/progressive frames, bounded dimensions,
 complete marker framing and no secondary frame or height redefinition. MIME
 labels alone never authorize an image. Native decoding must succeed; decoded
 dimensions must match the admitted dimensions (or swap under EXIF orientation).

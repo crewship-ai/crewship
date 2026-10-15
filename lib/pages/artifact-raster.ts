@@ -119,3 +119,63 @@ export function staticCSS(css: string): boolean {
   if (text.replace(/@[a-z-]+/gi, '').includes('@')) return false
   return rules.every(rule => ['@media', '@supports', '@layer', '@keyframes', '@-webkit-keyframes'].includes(rule.toLowerCase()))
 }
+
+/** Validate the PNG's entire zlib stream independently of tolerant image codecs.
+ * Input chunks are bounded; output is counted and discarded, never accumulated.
+ * Row lengths include all seven Adam7 passes when interlacing is enabled. */
+export async function validStaticPNG(data: Uint8Array, signal?: AbortSignal): Promise<boolean> {
+  if (data.byteLength > STATIC_RASTER_LIMITS.imageBytes) return false
+  const size = png(data)
+  if (!size || signal?.aborted || typeof DecompressionStream !== 'function') return false
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+  const bits = ({ 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 } as Record<number, number>)[data[25]] * data[24]
+  const passes = data[28] === 0 ? [[0, 0, 1, 1]] : [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]]
+  const filters: number[] = []
+  let expected = 0
+  for (const [x, y, dx, dy] of passes) {
+    const width = Math.max(0, Math.ceil((size.width - x) / dx)), height = Math.max(0, Math.ceil((size.height - y) / dy))
+    if (!width || !height) continue
+    const stride = 1 + Math.ceil(width * bits / 8)
+    for (let row = 0; row < height; row++) { filters.push(expected); expected += stride }
+  }
+  // Defense in depth if supported dimensions/channels are ever expanded.
+  if (!expected || expected > 17 * 1024 * 1024) return false
+  const chunks: Uint8Array[] = []
+  let length = 0
+  for (let pos = 8; pos + 12 <= data.length;) {
+    const count = view.getUint32(pos)
+    if (String.fromCharCode(...data.subarray(pos + 4, pos + 8)) === 'IDAT') { chunks.push(data.subarray(pos + 8, pos + 8 + count)); length += count }
+    pos += count + 12
+  }
+  const compressed = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) { compressed.set(chunk, offset); offset += chunk.length }
+  // RFC1950 deflate header, bounded window, no preset dictionary.
+  if (length < 6 || (compressed[0] & 15) !== 8 || (compressed[0] >>> 4) > 7 || ((compressed[0] << 8) | compressed[1]) % 31 !== 0 || (compressed[1] & 32)) return false
+  let input = 0
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (input === compressed.length) { controller.close(); return }
+      // Prevent a single large compressed write from expanding before the
+      // downstream row-budget check can apply backpressure/cancel the stream.
+      const end = Math.min(input + 256, compressed.length)
+      controller.enqueue(compressed.subarray(input, end)); input = end
+    },
+  }).pipeThrough(new DecompressionStream('deflate'))
+  const reader = stream.getReader()
+  let produced = 0, nextFilter = 0
+  try {
+    while (true) {
+      if (signal?.aborted) return false
+      const { value, done } = await reader.read()
+      if (done) return produced === expected && nextFilter === filters.length
+      if (value.byteLength > expected - produced) return false
+      while (nextFilter < filters.length && filters[nextFilter] < produced + value.byteLength) {
+        if (value[filters[nextFilter] - produced] > 4) return false
+        nextFilter++
+      }
+      produced += value.byteLength
+    }
+  } catch { return false }
+  finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
+}
