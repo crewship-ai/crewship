@@ -16,7 +16,10 @@ const outputs = [
   { path: "crew-1/marena/report.pdf", name: "report.pdf", is_dir: false },
   { path: "crew-1/marena/plan.csv", name: "plan.csv", is_dir: false },
   { path: "crew-1/marena/runs/msg_123/AGENTS.md", name: "AGENTS.md", is_dir: false },
-  { path: "crew-1/marena/runs/msg_123/report.pdf", name: "report.pdf", is_dir: false },
+  { path: "crew-1/marena/runs/msg_123/run-report.csv", name: "run-report.csv", is_dir: false },
+  { path: "crew-1/marena/runs/msg_123/exports/run-budget.xlsx", name: "run-budget.xlsx", is_dir: false },
+  { path: "crew-1/marena/runs/msg_123/.codex/internal.pdf", name: "internal.pdf", is_dir: false },
+  { path: "crew-1/marena/runs/msg_123/attachments/upload.pdf", name: "upload.pdf", is_dir: false },
   { path: "crew-1/marena/brief.md", name: "brief.md", is_dir: false },
 ]
 
@@ -61,6 +64,14 @@ describe("Chat agent context", () => {
     fireEvent.click(await screen.findByRole("button", { name: /plan.csv/ }))
     expect(useArtifactStore.getState().activeId).toBe("agent-1:crew-1/marena/plan.csv")
     expect(useArtifactStore.getState().open).toBe(true)
+  })
+
+  it("opens listed run outputs without showing nested runtime or attachment files", async () => {
+    renderPanel()
+    expect(await screen.findByRole("button", { name: /run-budget.xlsx/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /run-report.csv/ }))
+    expect(useArtifactStore.getState().activeId).toBe("agent-1:crew-1/marena/runs/msg_123/run-report.csv")
+    expect(screen.queryByRole("button", { name: /internal.pdf|upload.pdf|AGENTS.md/ })).toBeNull()
   })
 
   it("shows only work assigned to or authored by the selected agent", async () => {

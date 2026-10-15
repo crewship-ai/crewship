@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Chat Artifacts includes supported files in the canonical per-run output folder while retaining internal, hidden-directory and attachment filters.
+
 - Issue cards in chat can show linked pull requests on demand, using authorized stored provider metadata. Cards distinguish failed or missing synchronization and explicitly mark CI as unknown; no private source or diff is fetched.
 - **Issues created in chat stay with their conversation turn (#3068).** Viewer-authorized cards survive reload and failed runs, open an existing Issue detail panel, and support permitted field edits and comments with conflict and uncertain-write recovery. Access loss hides protected card and panel data; phone and keyboard flows use the same controls. Direct work execution remains on the canonical Issue page.
 
