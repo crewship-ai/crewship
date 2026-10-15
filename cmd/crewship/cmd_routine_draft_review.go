@@ -86,16 +86,17 @@ func sharedRoutineReviewRequest(routine, review string, body map[string]any) err
 	if workspace == "" || workspace == "." || workspace == ".." {
 		return fmt.Errorf("invalid workspace identifier")
 	}
-	path := "/api/v1/workspaces/" + url.PathEscape(workspace) + "/restricted-routine-library/" + url.PathEscape(routine) + "/draft/reviews"
-	if review != "" {
-		path += "/" + url.PathEscape(review)
-	}
+	base := "/api/v1/workspaces/" + url.PathEscape(workspace) + "/restricted-routine-library/" + url.PathEscape(routine) + "/draft/reviews"
 	var response *http.Response
 	var err error
 	if body == nil {
+		path := base
+		if review != "" {
+			path += "/" + url.PathEscape(review)
+		}
 		response, err = client.Get(path)
 	} else {
-		response, err = client.Post(path, body)
+		response, err = client.Post(base, body)
 	}
 	if err != nil {
 		return err

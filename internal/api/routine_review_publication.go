@@ -58,7 +58,7 @@ func (r *Router) finalizeRoutineDraftReviewTx(ctx context.Context, tx *sql.Tx, d
 		if err = json.Unmarshal([]byte(item.raw), &payload); err != nil {
 			return nil, err
 		}
-		deadline, parseErr := time.Parse(time.RFC3339Nano, item.deadline)
+		deadline, parseErr := time.Parse(time.RFC3339Nano, item.deadline) // tsformat:allow: parsing the persisted deadline for Go time comparison; SQL writes below use tsformat.Format
 		if parseErr != nil {
 			return nil, parseErr
 		}
