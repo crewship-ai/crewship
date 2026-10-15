@@ -6,7 +6,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { randomUUIDv4 } from "@/lib/random-id"
 
 export type CardWriteState = "idle" | "saving" | "saved" | "validation" | "conflict" | "unknown" | "rechecking"
-type Intent = { path: string; method: "PATCH" | "POST"; body: string; key: string; operationId?: string }
+type Intent = { path: string; method: "PATCH" | "POST"; body: string; key: string; operationId?: string; uncertain?: boolean }
 
 /** An unknown transport outcome keeps its exact request and key until resolved. */
 export function useChatIssueMutation(onChanged: () => void, onUnauthorized: () => void) {
@@ -38,11 +38,18 @@ export function useChatIssueMutation(onChanged: () => void, onUnauthorized: () =
       const result = await mutation.mutateAsync(intent)
       setState(result)
       if (result === "saved") { pending.current = null; onChanged(); return true }
-      if (result === "rechecking") { pending.current = null; onUnauthorized() }
+      if (result === "rechecking") {
+        // A denied retry says nothing about the earlier, unacknowledged write.
+        // Keep that intent locked until the same key can resolve its outcome.
+        if (intent.uncertain) setState("unknown")
+        else pending.current = null
+        onUnauthorized()
+      }
       if (result === "validation") pending.current = null
       // A conflict needs an explicit fresh revision before starting a new intent.
       return false
     } catch {
+      intent.uncertain = true
       setState("unknown")
       return false
     }
@@ -61,7 +68,7 @@ export function useChatIssueMutation(onChanged: () => void, onUnauthorized: () =
       try {
         const receipt = await apiFetch(`/api/v1/operations/${encodeURIComponent(intent.operationId)}?${new URLSearchParams(new URL(intent.path, "http://local").search).toString()}`)
         if (receipt.ok && (await receipt.json()).status === "completed") { pending.current = null; setState("saved"); onChanged(); return true }
-        if ([401, 403].includes(receipt.status)) { setState("rechecking"); onUnauthorized(); return false }
+        if ([401, 403].includes(receipt.status)) { setState("unknown"); onUnauthorized(); return false }
       } catch { /* Retrying the same key is the authoritative recovery path. */ }
     }
     return execute(intent)
