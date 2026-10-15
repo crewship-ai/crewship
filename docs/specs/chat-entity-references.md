@@ -550,7 +550,7 @@ outcomes persist the exact intent and key in viewer/workspace/issue-scoped
 session storage before sending, including across panel close and page reload.
 If recovery storage cannot be written, no new request is sent. Recovery checks
 an operation receipt when its ID is known,
-then allow retry with the same key and exact request. New intent is blocked
+and allows retry with the same key and exact request. New intent is blocked
 until that result is resolved. Local drafts are separate from authorized server
 data and survive successful reconciliation without remounting focused editors.
 Field and comment drafts clear independently after their own successful write.

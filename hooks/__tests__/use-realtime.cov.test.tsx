@@ -11,7 +11,7 @@ let wsStatus = "disconnected"
 let capturedOpts: {
   url: string
   getToken: () => Promise<string | null>
-  onMessage: (msg: { type: string; payload?: unknown }) => void
+  onMessage: (msg: { type: string; channel?: string; payload?: unknown }) => void
 } | null = null
 
 vi.mock("@/hooks/use-websocket", () => ({
