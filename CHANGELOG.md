@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Add private Page-scoped staged PNG/JPEG upload, metadata and canonical bytes API/CLI with bounded quotas, Page authorization and shared backup/GC. Typed editor image attachment remains separate.
+
 - Pages report compiled content format metadata and show an unavailable state for unsupported or conflicting formats. Empty human Pages retain HTML attachment, and application drafts remain available independently of publication.
 
 - Opt-in Docs in Pages with collaborative text, range comments, checkpoints, Markdown export and delegated semantic agent work (D1b; deployment qualification remains separate).

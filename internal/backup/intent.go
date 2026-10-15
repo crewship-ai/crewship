@@ -206,6 +206,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"page_board_elements":             IntentInclude,
 	"page_board_mutations":            IntentInclude,
 	"page_board_artifact_placements":  IntentInclude,
+	"page_assets":                     IntentInclude,
 	"page_artifacts":                  IntentInclude,
 	"page_artifact_mutation_receipts": IntentInclude,
 	"page_artifact_creations":         IntentInclude,
