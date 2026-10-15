@@ -159,6 +159,36 @@ try {
   await expect(editorB).toContainText('Shared starting paragraph', { timeout: 30000 })
   record('Create Doc from production Pages UI, human ownership, second person write grant')
 
+  if (process.env.D1B_SELECTION === 'true') {
+    const work = alice.getByRole('region', { name: 'Document agent work', exact: true })
+    const baseline = await state()
+    const block = baseline.outline.find(item => item.text === 'Shared starting paragraph')
+    if (!block?.id || !block.hash) throw new Error('Confirmed selection source block missing')
+    await editor.focus()
+    await editor.press('Control+Home', { delay: 50 })
+    for (let index = 0; index < 3; index++) await editor.press('Shift+ArrowRight', { delay: 50 })
+    await work.getByRole('button', { name: 'Use selected text', exact: true }).click()
+    await expect(work.getByLabel('Selected text for agent').locator('blockquote')).toHaveText('Sha')
+    await work.getByRole('textbox', { name: 'Agent instructions', exact: true }).fill('Revise only the selected quotation.')
+    await expect(work).toContainText(`Source revision ${baseline.rev}`)
+    await alice.screenshot({ path: join(output, 'selection-captured.png'), fullPage: true })
+    report.selectionDraft = { page_id: identity.id, base_rev: baseline.rev,
+      expectedTarget: { id: block.id, hash: block.hash, from: 0, to: 3, quote: 'Sha' },
+      actualSendPerformed: false, reason: 'Own fixture has no eligible agent chat; no model runtime substituted.' }
+    await moveToEnd(editorB); await bob.keyboard.insertText(' SELECTIONCHANGE')
+    await saved(bob); await expect(editor).toContainText('SELECTIONCHANGE')
+    await expect(work.getByLabel('Selected text for agent').locator('blockquote')).toHaveText('Sha')
+    await expect(work).toContainText(`Source revision ${baseline.rev}`)
+    await expect(work.getByRole('alert')).toContainText('document changed')
+    await expect(work.getByRole('button', { name: 'Send to agent', exact: true })).toBeDisabled()
+    await alice.screenshot({ path: join(output, 'selection-stale.png'), fullPage: true })
+    await work.getByRole('button', { name: 'Discard draft', exact: true }).click()
+    await expect(work.getByLabel('Selected text for agent')).toHaveCount(0)
+    report.selectionDraft.afterRev = (await state()).rev
+    record('Real selection quote/source snapshot remains frozen after another person edits; stale draft cannot send and explicit discard clears it')
+  }
+
+
   // Hold each actual update request until both independent editors have edited
   // the same saved block. Responses are never fabricated or altered.
   const barriers = []
