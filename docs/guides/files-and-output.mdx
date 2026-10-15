@@ -89,6 +89,16 @@ GET /api/v1/crews/{crewId}/files/download?path={filePath}
 
 The response streams the file as `application/octet-stream` with a `Content-Disposition` header for the filename.
 
+## Table previews in chat
+
+CSV and TSV artifacts open as read-only tables with row filtering, column sorting and virtualized rows. Column letters and row numbers always refer to the original file, including after filtering or sorting. Quoted separators, multiline fields, escaped quotes, Unicode and empty cells are preserved. Formula-like values remain text.
+
+Select source rows and choose **Ask about selection** to append a visible reference to your existing chat draft. Nothing is sent automatically. The reference includes the file path, source agent, original cell coordinates, selected values and a SHA-256 snapshot identity. A refreshed file clears the old selection. File reads still require your current access; denial removes the displayed snapshot.
+
+Parsing runs in a cancellable local worker with a five-second timeout. Preview limits are 5 MiB UTF-8 input, 20,000 rows, 100 columns, 200,000 cells and 32,768 characters per cell. Selection is limited to 200 cells and 12,000 UTF-8 bytes of context. Exceeding a limit produces an explicit download fallback rather than a truncated table. File contents are not sent to an external parser.
+
+XLSX worksheet previews are a separate follow-up. XLS, XLSM and unsupported workbook formats currently retain their download fallback.
+
 ## File Upload
 
 Upload a file to an agent's or crew's container.

@@ -225,3 +225,6 @@ __pycache__/
 # Match the root entries themselves as well as ordinary directories.
 /.next
 /out
+
+# Local chat worker bundles are generated before Next dev/build.
+/public/chat-workers/

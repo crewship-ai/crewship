@@ -386,6 +386,7 @@ func (h *CodeLinkHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, wsID, missionID, false)
 	broadcastWorkspaceEvent(h.hub, wsID, "issue.updated", map[string]string{"id": missionID})
 
 	link, err := h.loadOne(r.Context(), linkID, wsID)
@@ -481,6 +482,7 @@ func (h *CodeLinkHandler) noteSyncError(ctx context.Context, linkID, detail stri
 // was written in its mutation transaction.
 func (h *CodeLinkHandler) publishCodeLinkMutation(missionID, wsID string) {
 	h.events().mutationDelivery().drainCommittedIssueMutation(wsID)
+	broadcastIssueCardInvalidations(context.Background(), h.db, h.hub, wsID, missionID, false)
 	broadcastWorkspaceEvent(h.hub, wsID, "issue.updated", map[string]string{"id": missionID})
 }
 
