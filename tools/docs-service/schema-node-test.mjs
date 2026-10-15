@@ -115,8 +115,11 @@ test('Markdown export preserves list numbering and simple tables while escaping 
     ] },
     json.content[2],
   ];
+  json.content[1].content.push({ type: 'tableRow', attrs: { id: 'export-second-row' }, content: [{ type: 'tableCell', attrs: { id: 'export-second-cell' }, content: [{ type: 'paragraph', attrs: { id: 'export-cell-first-paragraph' }, content: [{ type: 'text', text: '1' }] }, { type: 'paragraph', attrs: { id: 'export-cell-second-paragraph' }, content: [{ type: 'text', text: 'second paragraph' }] }] }] });
   const exported = markdown(json);
   assert.ok(exported.startsWith('3. literal \\[link\\](x) \\*star\\*'));
   assert.ok(exported.includes('| A | B |\n| --- | --- |'));
+  assert.ok(exported.includes('| 1 second paragraph |'));
+  assert.ok(!exported.includes('1second paragraph'));
   assert.ok(exported.endsWith('\n'));
 });

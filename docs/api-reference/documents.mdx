@@ -2,6 +2,8 @@
 title: "Collaborative Documents API"
 description: "Confirmed document state, semantic edits, anchored comments, checkpoints and explicit agent requests."
 icon: "file-text"
+stability: experimental
+tag: Experimental
 ---
 
 # Collaborative documents
@@ -49,7 +51,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 401/403 for authentication or membership refusal.
 
-## GET /api/v1/pages/{slug}/document
+## GET /api/v1/pages/\{slug\}/document
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -59,7 +61,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 401/403/404 for access or missing document; 409 for unsupported schema; 429 for bounds; 500 storage/authority failure; 502/503 for engine/protocol failure.
 
-## POST /api/v1/pages/{slug}/document/initialize
+## POST /api/v1/pages/\{slug\}/document/initialize
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -69,7 +71,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 400 invalid input; 401/403 access; 404 missing Page; 409 occupied Page or conflicting identity; 429 quota; 500 storage/authority failure; 502/503 engine failure.
 
-## POST /api/v1/pages/{slug}/document/patch
+## POST /api/v1/pages/\{slug\}/document/patch
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -79,7 +81,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 400 invalid body/schema; 401/403 access; 404 missing document; 409 epoch/revision/hash or identity conflict; 429 quota; 500 storage/authority failure; 502/503 engine failure.
 
-## POST /api/v1/pages/{slug}/document/checkpoint
+## POST /api/v1/pages/\{slug\}/document/checkpoint
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -89,7 +91,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 400 invalid body; 401/403/404 access; 409 stale epoch/revision or identity; 429 quota; 500 storage/authority failure; 502/503 engine failure.
 
-## GET /api/v1/pages/{slug}/document/checkpoints
+## GET /api/v1/pages/\{slug\}/document/checkpoints
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -99,7 +101,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 401/403/404 access; 429 bounds; 500 storage/authority failure; 502/503 engine failure.
 
-## GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}
+## GET /api/v1/pages/\{slug\}/document/checkpoints/\{checkpoint\}
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -109,7 +111,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 401/403 access; 404 missing checkpoint/document; 409 unsupported schema; 500 storage/authority failure; 502/503 engine failure.
 
-## POST /api/v1/pages/{slug}/document/restore
+## POST /api/v1/pages/\{slug\}/document/restore
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -119,7 +121,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 400 invalid body; 401/403 access; 404 missing checkpoint; 409 stale epoch/revision or identity; 429 quota; 500 storage/authority failure; 502/503 engine failure.
 
-## GET /api/v1/pages/{slug}/document/export
+## GET /api/v1/pages/\{slug\}/document/export
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -129,7 +131,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 401/403/404 access; 500 storage/authority failure; 502/503 engine failure.
 
-## GET /api/v1/pages/{slug}/document/comments
+## GET /api/v1/pages/\{slug\}/document/comments
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -139,7 +141,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 401/403/404 access; 500 storage/authority failure; 502/503 engine failure.
 
-## POST /api/v1/pages/{slug}/document/comments
+## POST /api/v1/pages/\{slug\}/document/comments
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -149,7 +151,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 400 invalid selection/body; 401/403 access; 404 missing document; 409 stale generation/revision or ID; 429 quota; 500 storage/authority failure; 502/503 engine failure.
 
-## POST /api/v1/pages/{slug}/document/comments/resolve
+## POST /api/v1/pages/\{slug\}/document/comments/resolve
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -159,7 +161,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 400 invalid body; 401/403 access; 404 missing comment/document; 409 version/epoch/revision conflict; 429 quota; 500 storage/authority failure; 502/503 engine failure.
 
-## GET /api/v1/pages/{slug}/document/requests
+## GET /api/v1/pages/\{slug\}/document/requests
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
@@ -169,7 +171,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Statuses:** 200; 401/403/404 access; 500 storage failure.
 
-## POST /api/v1/pages/{slug}/document/requests
+## POST /api/v1/pages/\{slug\}/document/requests
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
