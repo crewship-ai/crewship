@@ -1004,9 +1004,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   }
   const entityStatus = accessMode === "loading" || executionProfile === "pending" ? null : entities.state === "unavailable" ? <p role="status" className="px-4 py-2 text-xs text-muted-foreground">Unavailable</p>
     : entities.state === "rechecking" && !entities.slots.length ? <p role="status" className="px-4 py-2 text-xs text-muted-foreground">Checking current access…</p> : null
-  const issuePanel = issueTarget ? <ChatIssuePanel key={issueTarget.id} target={issueTarget} reference={selectedRef}
+  const issuePanel = issueTarget && entities.state !== "unavailable" ? <ChatIssuePanel key={issueTarget.id} target={issueTarget} reference={selectedRef}
     rechecking={entities.state !== "ready"} checkedAt={entities.checkedAt} reconcile={entities.reconcile} onClose={closeIssue} /> : null
-  const mobileIssuePanel = isMobile ? <Sheet open={!!issueTarget} onOpenChange={(open) => { if (!open) closeIssue() }}>
+  const mobileIssuePanel = isMobile ? <Sheet open={!!issueTarget && entities.state !== "unavailable"} onOpenChange={(open) => { if (!open) closeIssue() }}>
     <SheetContent side="right" onCloseAutoFocus={(event) => { event.preventDefault(); if (issueOpener.current?.isConnected) issueOpener.current.focus() }} className="w-full max-w-full gap-0 p-0 sm:max-w-full"><SheetTitle className="sr-only">Issue detail</SheetTitle>{issuePanel}</SheetContent>
   </Sheet> : null
 
