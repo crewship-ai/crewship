@@ -16,7 +16,7 @@ let status = 200
 function mockServer(allowed = actions) {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("/api/v1/issues/ENG-1?") ? {
     id: "issue", identifier: "ENG-1", title: "Server title", status: "TODO", priority: "none", crew_id: "crew", workspace_id: "ws", revision,
-    aggregate_revision: revision, allowed_actions: allowed, labels: [], created_at: "2026-10-13T09:00:00Z", updated_at: "2026-10-13T09:00:00Z",
+    aggregate_revision: revision, allowed_actions: allowed, assignee_type: "agent", assignee_id: "worker", labels: [], created_at: "2026-10-13T09:00:00Z", updated_at: "2026-10-13T09:00:00Z",
   } : []), { status: url.includes("/api/v1/issues/ENG-1?") ? status : 200 })))
 }
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); revision = 1; status = 200 })
@@ -59,4 +59,15 @@ it("removes authorized detail data when access is revoked", async () => {
   await screen.findByText("Unavailable")
   expect(screen.queryByText("Server title")).toBeNull()
   expect(screen.queryByText("ENG-1")).toBeNull()
+})
+
+it("keeps direct work execution out of embedded chat while allowing issue field edits", async () => {
+  const allowed: IssueAction[] = ["view", "assign", "edit_fields", "comment", "change_status", "change_workflow", "start_work"]
+  mockServer(allowed)
+  render(<IssueDetailSurface workspaceId="ws" identifier="ENG-1" actions={allowed} authorizationKey={1} executionActions={false} />)
+  await screen.findByRole("button", { name: "Change assignee" })
+  expect(screen.queryByRole("button", { name: "Take over" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Hand off" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Start work" })).toBeNull()
+  expect(screen.queryByLabelText(/Require client acceptance/)).toBeNull()
 })
