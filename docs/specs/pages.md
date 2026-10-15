@@ -1736,3 +1736,13 @@ uses the isolated product converter. Browser regression coverage renders the
 actual pinned package and asserts that the native dialog/converter never mounts.
 
 A Page grant issuer must also have an active trusted account and no restricted membership anywhere. Every non-NULL suspension value, including an empty string, makes its Page shares inactive at use time. Existing membership/ownership/crew conditions remain required; the administrative grants list preserves inactive metadata and explains account unavailability.
+
+### Retained discussion pagination
+
+Artifact and Board discussion lists expose bounded keyset pagination through
+`limit` (1–100), `status` (`all`, `open`, `resolved`) and `cursor`, returning
+`next_cursor`. The continuation is scoped to workspace, Page, output kind and
+filters and never substitutes for live read authority. Original revision and
+anchor remain immutable. See the [discussion API](../api-reference/pages.mdx#artifact-discussion-threads)
+for ordering and concurrent status-change behavior. This listing is separate
+from the 100-open-thread mutation limit.

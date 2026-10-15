@@ -509,7 +509,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 
 	thread := obj(map[string]any{"id": str(), "revision": integer(), "anchor": commentAnchor, "status": map[string]any{"type": "string", "enum": []string{"open", "resolved"}}, "version": integer(), "created_by_user_id": str(), "created_by_name": str(), "created_at": timeString(), "updated_at": timeString(), "resolved_by_user_id": str(), "resolved_at": timeString(), "comments": arr(comment), "applied_version": integer()})
 	thread["required"] = []string{"id", "revision", "anchor", "status", "version", "created_by_user_id", "created_by_name", "created_at", "updated_at", "comments"}
-	threadList := obj(map[string]any{"threads": arr(thread), "can_comment": boolean(), "can_resolve": boolean()})
+	threadList := obj(map[string]any{"threads": arr(thread), "can_comment": boolean(), "can_resolve": boolean(), "next_cursor": str()})
 	threadList["required"] = []string{"threads", "can_comment", "can_resolve"}
 	mutationID := map[string]any{"type": "string", "minLength": 1, "maxLength": 128}
 	positiveVersion := map[string]any{"type": "integer", "minimum": 1}
@@ -592,7 +592,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"POST /api/v1/pages/{slug}/artifact/revisions":                                                {Request: artifactMutation, RequestRequired: true, Response: artifactResult, SuccessStatuses: []string{"200", "201"}},
 		"POST /api/v1/pages/{slug}/artifact/restore":                                                  {Request: artifactRestore, RequestRequired: true, Response: artifactResult, SuccessStatuses: []string{"200", "201"}},
 		"POST /api/v1/pages/{slug}/artifact/copies":                                                   {Request: artifactCopyRequest, RequestRequired: true, Response: artifactCopyResult, SuccessStatuses: []string{"200", "201"}},
-		"GET /api/v1/pages/{slug}/artifact/threads":                                                   {Response: threadList},
+		"GET /api/v1/pages/{slug}/artifact/threads":                                                   {Response: threadList, Parameters: discussionPaginationParameters(true), ErrorStatuses: []string{"400", "401", "403", "404", "500"}},
 		"POST /api/v1/pages/{slug}/artifact/threads":                                                  {Request: threadCreate, RequestRequired: true, Response: thread, SuccessStatuses: []string{"200", "201"}},
 		"POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies":                               {Request: threadReply, RequestRequired: true, Response: thread, SuccessStatuses: []string{"200", "201"}},
 		"PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}":                 {Request: threadReply, RequestRequired: true, Response: thread},

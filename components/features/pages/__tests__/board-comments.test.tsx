@@ -25,9 +25,10 @@ function thread(): BoardThread {
 function mount(initial = board, selectedElementId: string | undefined = "shape") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); clients.push(client)
   const dirty = vi.fn()
-  const content = (value: PageBoard, selection?: string) => <QueryClientProvider client={client}><BoardComments workspaceId="ws" slug="design" board={value} selectedElementId={selection} onDirtyChange={dirty} /></QueryClientProvider>
+  const onViewAnchor = vi.fn()
+  const content = (value: PageBoard, selection?: string) => <QueryClientProvider client={client}><BoardComments workspaceId="ws" slug="design" board={value} selectedElementId={selection} onDirtyChange={dirty} onViewAnchor={onViewAnchor} /></QueryClientProvider>
   const view = render(content(initial, selectedElementId))
-  return { ...view, client, dirty, change: (value: PageBoard, selection?: string) => view.rerender(content(value, selection)), refresh: async () => { await act(async () => { await client.invalidateQueries({ queryKey: ["board-threads"] }) }) } }
+  return { ...view, client, dirty, onViewAnchor, change: (value: PageBoard, selection?: string) => view.rerender(content(value, selection)), refresh: async () => { await act(async () => { await client.invalidateQueries({ queryKey: ["board-threads"] }) }) } }
 }
 beforeEach(() => {
   threads = []; denied = false; loseResponse = false; canComment = true; canResolve = true; requests.length = 0; receipts.clear()
@@ -106,4 +107,31 @@ it("uses an explicit POST resolution with a version precondition", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Resolve thread" }))
   await screen.findByRole("button", { name: "Reopen thread" })
   expect(requests[0]).toMatchObject({ path: "/api/v1/pages/design/board/threads/thread1/resolve", body: { resolved: true, base_version: 1 } })
+})
+
+it("browses older resolved Board discussions with their saved anchor", async () => {
+  const older = thread(); older.status = "resolved"; older.comments[0].body = "Historical Board discussion"
+  vi.mocked(apiFetch).mockImplementation(async input => {
+    const url = new URL(String(input), "https://studio.test")
+    const second = url.searchParams.get("cursor") === "older"
+    return new Response(JSON.stringify({ threads: second ? [older] : [], next_cursor: second ? "" : "older", can_comment: true, can_resolve: true }))
+  })
+  const view = mount()
+  fireEvent.change(await screen.findByLabelText("Discussion status"), { target: { value: "resolved" } })
+  fireEvent.click(await screen.findByRole("button", { name: "Load older discussions" }))
+  expect(await screen.findByText("Historical Board discussion")).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Show original position" }))
+  expect(view.onViewAnchor).toHaveBeenCalledWith(older.anchor)
+  expect(vi.mocked(apiFetch).mock.calls.some(([input]) => { const url = new URL(String(input), "https://studio.test"); return url.searchParams.get("status") === "resolved" && url.searchParams.get("cursor") === "older" })).toBe(true)
+})
+
+it("prevents filter changes from discarding a Board reply draft", async () => {
+  threads = [thread()]
+  mount()
+  const reply = await screen.findByLabelText("Reply to board thread thread1")
+  fireEvent.change(reply, { target: { value: "Keep Board draft" } })
+  expect(screen.getByLabelText("Discussion status")).toBeDisabled()
+  expect(reply).toHaveValue("Keep Board draft")
+  fireEvent.change(reply, { target: { value: "" } })
+  expect(screen.getByLabelText("Discussion status")).not.toBeDisabled()
 })

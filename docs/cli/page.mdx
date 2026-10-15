@@ -42,8 +42,15 @@ grant permission to dispatch an agent. All scene edits use server revisions.
 
 ### crewship page board threads show
 
+`--status all|open|resolved` filters retained discussions (default `all`).
+`--limit 1..100` bounds the response (default `100`). Pass the returned
+`next_cursor` through `--cursor` with the same workspace, Page and filters to
+continue; an empty cursor marks the end. Current read permission is checked
+on every page. Concurrent status changes can move a thread across the cursor;
+refresh from the first page to see the current ordering.
+
 `crewship page board threads show BOARD` lists anchored threads and current
-capabilities; `list` is an alias. No command-specific flags.
+capabilities; `list` is an alias.
 
 ### crewship page board threads create
 
@@ -328,6 +335,13 @@ and the same run's delegated publication on its created artifact. It preserves
 source history and does not silently re-enable permission when retried.
 
 ### crewship page artifact threads list
+
+`--status all|open|resolved` filters retained discussions (default `all`).
+`--limit 1..100` bounds the response (default `100`). Pass the returned
+`next_cursor` through `--cursor` with the same workspace, Page and filters to
+continue; an empty cursor marks the end. Current read permission is checked
+on every page. Concurrent status changes can move a thread across the cursor;
+refresh from the first page to see the current ordering.
 
 ```bash
 crewship page artifact threads list report --format json

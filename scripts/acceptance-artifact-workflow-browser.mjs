@@ -212,6 +212,27 @@ try {
   const artifactAfterTransfer = await artifactHistory()
   const threadsAfterTransfer = (await (await contexts.owner.request.get(endpoint('/artifact/threads'))).json()).threads
   await check('Artifact custody transfer preserves all retained source revisions, manifests, authors and comment anchors', JSON.stringify(artifactAfterTransfer) === JSON.stringify(artifactBeforeTransfer) && artifactAfterTransfer.every(revision => revision.head_rev === 3) && JSON.stringify(threadsAfterTransfer) === JSON.stringify(threadsBeforeTransfer) && threadsAfterTransfer[0]?.revision === 1 && JSON.stringify(threadsAfterTransfer[0]?.anchor) === JSON.stringify(capturedAnchor))
+  // Seed retained synthetic history in the owned migrated DB without exhausting
+  // production mutation rate limits; reads and browser navigation use real routes.
+  const seededHistory = await contexts.commenter.request.post(`${fixture.server}/_test/retained-discussions`)
+  expect(seededHistory.status()).toBe(201)
+  const oldestRetained = { id: 'pagination-thread-000', anchor: { schema_version: 1, type: 'document' } }
+  await commenter.goto(`${fixture.server}/pages/browser-report`)
+  await commenter.getByRole('button', { name: 'Comments', exact: true }).click()
+  await commenter.getByLabel('Discussion status', { exact: true }).selectOption('resolved')
+  await expect(commenter.getByRole('button', { name: 'Load older discussions', exact: true })).toBeVisible()
+  await expect(commenter.getByText('Retained pagination discussion 0', { exact: true })).toHaveCount(0)
+  await commenter.getByRole('button', { name: 'Load older discussions', exact: true }).click()
+  const oldestCard = commenter.getByRole('article', { name: 'Thread on revision 1', exact: true }).filter({ hasText: 'Retained pagination discussion 0' })
+  await expect(oldestCard).toBeVisible()
+  await oldestCard.getByRole('button', { name: 'View original revision 1', exact: true }).click()
+  await expect(commenter.getByText('Revision 1 · latest 3', { exact: true })).toBeVisible()
+  const retained = await contexts.commenter.request.get(`${endpoint('/artifact/threads')}&status=resolved&limit=100`)
+  const firstHistoryPage = await retained.json()
+  const continued = await contexts.commenter.request.get(`${endpoint('/artifact/threads')}&status=resolved&cursor=${encodeURIComponent(firstHistoryPage.next_cursor)}`)
+  const olderHistoryPage = await continued.json()
+  expect(olderHistoryPage.threads.find(thread => thread.id === oldestRetained.id)?.anchor).toEqual(oldestRetained.anchor)
+  await check('real browser loads discussions beyond 100 resolved threads and navigates to their immutable original revision', retained.status() === 200 && continued.status() === 200 && firstHistoryPage.threads.length === 100 && olderHistoryPage.threads.length === 1)
   const boardEndpoint = path => `${fixture.server}/api/v1/pages/browser-board${path}?workspace_id=${encodeURIComponent(fixture.workspace)}`
   response = await contexts.owner.request.post(`${fixture.server}/api/v1/pages?workspace_id=${fixture.workspace}`, { data: { slug: 'browser-board', name: 'Browser Board', panels: [], allow_empty: true } })
   await check('owner creates Board source through real route', response.status() === 201)
