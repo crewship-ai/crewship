@@ -98,8 +98,9 @@ type guestIssueIntake struct {
 func (r *Router) guestIssueIntake(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	user := UserFromContext(req.Context())
-	workspace, project := WorkspaceIDFromContext(req.Context()), req.PathValue("projectId")
-	if user == nil {
+	workspace, matches := memberAccessWorkspace(req)
+	project := req.PathValue("projectId")
+	if user == nil || !matches {
 		replyError(w, 404, "Project unavailable")
 		return
 	}
@@ -250,7 +251,8 @@ func (r *Router) finishGuestContentMutation(w http.ResponseWriter, req *http.Req
 func (r *Router) createRestrictedIssue(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	user := UserFromContext(req.Context())
-	if user == nil {
+	workspace, matches := memberAccessWorkspace(req)
+	if user == nil || !matches {
 		replyError(w, 404, "Issue unavailable")
 		return
 	}
@@ -267,7 +269,6 @@ func (r *Router) createRestrictedIssue(w http.ResponseWriter, req *http.Request)
 		replyError(w, 400, "Supply a title up to 4096 bytes and a description up to 65536 bytes")
 		return
 	}
-	workspace := WorkspaceIDFromContext(req.Context())
 	tx, err := r.db.BeginTx(req.Context(), nil)
 	if err != nil {
 		guestIssueError(w, err)
@@ -347,11 +348,11 @@ type guestIssueProject struct {
 func (r *Router) restrictedIssueProjects(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	user := UserFromContext(req.Context())
-	if user == nil {
+	workspace, matches := memberAccessWorkspace(req)
+	if user == nil || !matches {
 		replyError(w, 404, "Projects unavailable")
 		return
 	}
-	workspace := WorkspaceIDFromContext(req.Context())
 	tx, err := r.db.BeginTx(req.Context(), nil)
 	if err != nil {
 		guestIssueError(w, err)
@@ -393,7 +394,8 @@ func (r *Router) restrictedIssueProjects(w http.ResponseWriter, req *http.Reques
 func (r *Router) restrictedIssueComments(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	user := UserFromContext(req.Context())
-	if user == nil {
+	workspace, matches := memberAccessWorkspace(req)
+	if user == nil || !matches {
 		replyError(w, 404, "Issue unavailable")
 		return
 	}
@@ -416,7 +418,6 @@ func (r *Router) restrictedIssueComments(w http.ResponseWriter, req *http.Reques
 			return
 		}
 	}
-	workspace := WorkspaceIDFromContext(req.Context())
 	tx, err := r.db.BeginTx(req.Context(), nil)
 	if err != nil {
 		guestIssueError(w, err)
@@ -482,7 +483,8 @@ func (r *Router) restrictedIssueComments(w http.ResponseWriter, req *http.Reques
 func (r *Router) updateRestrictedIssue(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	user := UserFromContext(req.Context())
-	if user == nil {
+	workspace, matches := memberAccessWorkspace(req)
+	if user == nil || !matches {
 		replyError(w, 404, "Issue unavailable")
 		return
 	}
@@ -498,7 +500,6 @@ func (r *Router) updateRestrictedIssue(w http.ResponseWriter, req *http.Request)
 		replyError(w, 400, "Guest contributions may move issues between BACKLOG and TODO")
 		return
 	}
-	workspace := WorkspaceIDFromContext(req.Context())
 	tx, err := r.db.BeginTx(req.Context(), nil)
 	if err != nil {
 		guestIssueError(w, err)

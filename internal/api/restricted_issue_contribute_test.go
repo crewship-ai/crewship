@@ -67,6 +67,9 @@ func TestGuestIssueContributeIsProjectScopedAndAudited(t *testing.T) {
 		return rr
 	}
 	base := "/api/v1/workspaces/" + ws + "/restricted-issues"
+	call("contributor", "GET", "/api/v1/workspaces/not-selected/restricted-issue-projects?workspace_id="+ws, "", 404)
+	call("contributor", "GET", "/api/v1/workspaces/not-selected/restricted-issues?workspace_id="+ws, "", 404)
+	call("contributor", "POST", "/api/v1/workspaces/not-selected/restricted-issues?workspace_id="+ws, `{"project_id":"client-project","title":"Wrong workspace path"}`, 404)
 	intake := "/api/v1/workspaces/" + ws + "/projects/client-project/guest-intake"
 	contributor, err := store.Membership(t.Context(), "contributor", ws)
 	if err != nil {

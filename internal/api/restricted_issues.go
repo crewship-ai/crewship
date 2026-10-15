@@ -28,8 +28,8 @@ type restrictedIssue struct {
 func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	user := UserFromContext(req.Context())
-	workspace := WorkspaceIDFromContext(req.Context())
-	if user == nil {
+	workspace, matches := memberAccessWorkspace(req)
+	if user == nil || !matches {
 		replyError(w, 404, "Issues unavailable")
 		return
 	}

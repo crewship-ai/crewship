@@ -843,6 +843,8 @@ routine. Description is optional; maximum title/description sizes are 4096/65536
 bytes. Mutations use the existing `workspace:admin` token scope in addition to
 resource grants; this scope does not make a Guest an administrator.
 
+`--idempotency-key` optionally binds a retry to this exact creation request; keep it unchanged after a lost response.
+
 ## `crewship issue shared comment`
 
 ```bash
@@ -854,6 +856,8 @@ is shared with readers of this project; private staff comments remain private.
 The route does not resolve or trigger agent mentions.
 
 The required `--project` confirms the audience of the draft. If the issue has moved, the server returns 409; review the new project before sending again.
+
+`--idempotency-key` optionally binds a retry to this exact comment and expected project audience; conflicting requests are refused.
 
 ## `crewship issue shared comments`
 
