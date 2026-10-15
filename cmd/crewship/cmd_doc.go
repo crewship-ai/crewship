@@ -35,24 +35,22 @@ func newDocCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path := "/api/v1/documents/status"
-			if operation != "status" {
-				path = "/api/v1/pages/" + pagePathEscape(args[0]) + "/document"
-			}
 			var response *http.Response
 			switch operation {
 			case "read", "outline":
-				response, err = client.Get(path)
+				response, err = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/document")
 			case "status":
-				response, err = client.Get(path)
-			case "checkpoints", "comments":
-				response, err = client.Get(path + "/" + operation)
+				response, err = client.Get("/api/v1/documents/status")
+			case "checkpoints":
+				response, err = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/document/checkpoints")
+			case "comments":
+				response, err = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/document/comments")
 			case "checkpoint-read":
-				response, err = client.Get(path + "/checkpoints/" + pagePathEscape(args[1]))
+				response, err = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/document/checkpoints/" + pagePathEscape(args[1]))
 			case "request-list":
-				response, err = client.Get(path + "/requests")
+				response, err = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/document/requests")
 			case "export":
-				response, err = client.Get(path + "/export")
+				response, err = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/document/export")
 			default:
 				filename, _ := cmd.Flags().GetString("file")
 				if filename == "" {
@@ -82,17 +80,24 @@ func newDocCommand() *cobra.Command {
 				if decoder.Decode(new(any)) != io.EOF {
 					return fmt.Errorf("--file must contain one JSON object")
 				}
-				suffix := operation
-				if operation == "request" {
-					suffix = "requests"
+				switch operation {
+				case "patch":
+					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/patch", body)
+				case "checkpoint":
+					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/checkpoint", body)
+				case "restore":
+					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/restore", body)
+				case "request":
+					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/requests", body)
+				case "initialize":
+					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/initialize", body)
+				case "comment":
+					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/comments", body)
+				case "comment-resolve":
+					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/comments/resolve", body)
+				default:
+					return fmt.Errorf("unknown document operation %q", operation)
 				}
-				if operation == "comment" {
-					suffix = "comments"
-				}
-				if operation == "comment-resolve" {
-					suffix = "comments/resolve"
-				}
-				response, err = client.Post(path+"/"+suffix, body)
 			}
 			if err != nil {
 				return err
@@ -113,7 +118,7 @@ func newDocCommand() *cobra.Command {
 				return err
 			}
 			var state struct {
-				Outline json.RawMessage `json:"outline"`
+				Outline json.RawMessage `json:"outline" yaml:"outline"`
 			}
 			if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&state); err != nil {
 				return err
