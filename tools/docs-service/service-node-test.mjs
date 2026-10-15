@@ -238,3 +238,48 @@ test('slow incomplete bodies consume bounded admission while health remains resp
     assert.equal((await read(f)).status, 503, 'drain must terminate partial-body admission');
   } finally { for (const req of held) req.destroy(); await f.close(); }
 });
+
+test('drain aborts existing body readers and promptly closes new incomplete requests while persistence waits', { timeout: 10000 }, async () => {
+  const blocked = deferred(), entered = deferred();
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'recover') return { recovered: true };
+    if (op === 'ready') return { protocol: 1, schema: 2 };
+    entered.resolve(); await blocked.promise; res.writeHead(503); return { error: 'controlled persistence failure' };
+  }); await f.start();
+  const held = [];
+  const bounded = async promise => {
+    let timeout;
+    try { return await Promise.race([promise, new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('drain socket did not finish within one second')), 1000); })]); }
+    finally { clearTimeout(timeout); }
+  };
+  function incomplete() {
+    let status;
+    const req = http.request({ socketPath: f.socket, path: '/v1/documents/p/read', method: 'POST', headers: {
+      'X-Crewship-Docs-Service': secret, 'X-Workspace-ID': 'workspace', Authorization: 'Bearer human', 'Content-Length': 10,
+    } }); held.push(req);
+    const response = new Promise((resolve, reject) => {
+      req.on('error', reject); req.on('response', res => { status = res.statusCode; res.resume(); res.on('end', () => resolve(status)); });
+    }); response.catch(() => {});
+    const closed = new Promise(resolve => req.once('close', resolve));
+    const written = new Promise((resolve, reject) => { req.once('error', reject); req.write('{', error => error ? reject(error) : resolve()); });
+    return { response, closed, written };
+  }
+  const waiting = read(f); let draining, closed = false;
+  try {
+    await entered.promise;
+    const before = incomplete(); await before.written;
+    assert.equal((await call(f.socket, '/health/ready')).status, 200);
+    draining = call(f.socket, '/drain', {});
+    await bounded(before.closed);
+    const after = incomplete(); await after.written;
+    assert.equal(await bounded(after.response), 503);
+    await bounded(after.closed);
+    assert.equal((await call(f.socket, '/health/ready')).status, 503);
+    blocked.resolve(); assert.equal((await waiting).status, 503);
+    assert.equal((await draining).status, 200);
+    await bounded(f.close()); closed = true;
+  } finally {
+    for (const req of held) req.destroy(); blocked.resolve();
+    await Promise.allSettled([waiting, draining]); if (!closed) await f.close();
+  }
+});

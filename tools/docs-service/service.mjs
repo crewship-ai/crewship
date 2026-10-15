@@ -145,6 +145,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         return reply(200, { ready: true, ...identity });
       }
       if (req.method === 'POST' && req.url === '/drain') { await drain(); return reply(200, { drained: true }); }
+      if(draining){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'service draining');}
       if(!ready)throw fault(503,'engine recovering');
       const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(initialize|read|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
       if (req.method !== 'POST' || !match) throw fault(404, 'unknown operation');
