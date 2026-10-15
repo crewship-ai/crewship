@@ -118,6 +118,6 @@ func (h *InternalIssueHandler) Show(w http.ResponseWriter, r *http.Request) {
 		writeChatIssueError(w, err)
 		return
 	}
-	broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, id, true)
+	broadcastChatEntityRefsInvalidation(r.Context(), h.hub, op.authority.ChatID)
 	writeJSON(w, http.StatusCreated, result)
 }

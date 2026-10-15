@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Chat issue hints stay within their conversation.** Showing an issue refreshes only the originating chat; issue changes refresh revisions without announcing activity in another chat. Card-only viewers subscribe to a dedicated hint channel, avoiding run-stream traffic. Streaming observers recheck current access before receiving frames, and deletion, relation and review-policy changes refresh cards.
 - **Chat table previews rejected ordinary spreadsheets and legacy CSV text.** Hyperlinks are ignored without fetching, chart tabs are skipped while worksheets remain visible, invalid dates are labelled, and UTF-16/Windows-1250 CSV text is decoded locally. Both shipped worker acceptance checks now run in CI.
 
 - Chat Artifacts includes supported files in the canonical per-run output folder while retaining internal, hidden-directory and attachment filters.

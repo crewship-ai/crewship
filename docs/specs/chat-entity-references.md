@@ -261,11 +261,15 @@ before displaying it again. Failed synchronization must never be labelled live.
 
 ### WebSocket invalidation hints
 
-Successful writes can emit these `ServerMessage` frames on `session:{chatId}`:
+Successful writes emit these `ServerMessage` hints on `chat-hints:{chatId}`.
+The same hints remain on `session:{chatId}` for existing clients and NDJSON
+streams. Both channels use the exact same current trusted-audience predicate
+at subscription and delivery. Card-only clients subscribe to `chat-hints` to
+avoid receiving session run frames:
 
 ```json
-{"type":"chat.entity_refs_changed","channel":"session:c_1","payload":{"contract_version":1}}
-{"type":"issue.revision_changed","channel":"session:c_1","payload":{"contract_version":1}}
+{"type":"chat.entity_refs_changed","channel":"chat-hints:c_1","payload":{"contract_version":1}}
+{"type":"issue.revision_changed","channel":"chat-hints:c_1","payload":{"contract_version":1}}
 ```
 
 Payloads contain no chat/object IDs, revisions, counts or content. A session
@@ -277,17 +281,18 @@ workspaces. The session channel is already known to its authorized subscribers;
 these hints are never broadcast workspace-wide.
 
 `chat.entity_refs_changed` is emitted after verified internal create/update/
-comment/show operations append a reference, and after human deletion appends
-receipts. `issue.revision_changed` accompanies those hints and the primary
-successful public issue create/update/start notifications, `issueEvents.record`
+comment/show operations append a reference, only in the originating chat, and
+after human deletion appends receipts in each affected chat. Show emits no
+revision hint. `issue.revision_changed` reaches referenced chats after issue
+mutations, including agent relations (both endpoints), review policy, takeover,
+and the primary successful public issue create/update/start notifications, `issueEvents.record`
 notifications, and attachment/code-link publish paths. No hint is emitted for a
 failed transaction, or when an idempotent replay only returns its saved result.
 Delivery/outbox retries do not republish these hints.
 
 This is deliberately a bounded set of application write paths, not a database
-change feed. Bulk writes, relation deletion/changes to the opposite relation
-endpoint, child changes without a primary issue notification, and direct DB or
-background writes can still change revision counters without a hint. A show
+change feed. Bulk writes, relation deletion, child changes without a primary
+issue notification, and direct DB or background writes can still change revision counters without a hint. A show
 operation adds a reference without increasing issue revisions. Consumers treat
 either event as a coalescible request to refetch their authorized snapshot and
 current revisions, never as object data or proof that a revision increased.
@@ -519,7 +524,7 @@ of their durable run. Runs without an assistant reply anchor behind their
 triggering user message and show the durable run status. Both ordinary and
 virtualized transcripts use the same card renderer.
 
-Cards reconcile complete replacement snapshots on session invalidation hints,
+Cards reconcile complete replacement snapshots on `chat-hints:{chatId}` invalidation hints,
 reconnect, foreground return and every 60 seconds while visible. The E1 hint
 contract uses `chat.entity_refs_changed` and `issue.revision_changed` with
 `{ "contract_version": 1 }`; hints carry no object data. A client also accepts
