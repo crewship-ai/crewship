@@ -35,6 +35,41 @@ empty, and a line saying so would be read as a key. `page export` is the
 exception in the other direction: it prints YAML unless you ask for
 `--format json`.
 
+## Staged raster asset commands
+
+### crewship page assets upload
+
+```bash
+crewship page assets upload report --file chart.png --mutation-id chart-1
+cat chart.jpg | crewship page assets upload report --file - --mutation-id photo-1
+```
+
+Both flags are required. The human profile uploads raw bounded PNG/JPEG to
+`POST /api/v1/pages/{slug}/assets?mutation_id=ID` and prints server metadata.
+Use the same ID only for identical input under the same author. Staging expires
+in24h. EXIF orientations2–8 are explicitly unsupported; images are canonicalized,
+not stored as original file bytes. This command does not insert an editor image.
+
+### crewship page assets show
+
+```bash
+crewship page assets show report ASSET_ID
+```
+
+Reads metadata through `GET /api/v1/pages/{slug}/assets/{assetId}` using current
+Page visibility. Digest knowledge never grants access.
+
+### crewship page assets download
+
+```bash
+crewship page assets download report ASSET_ID > canonical.png
+```
+
+Writes canonical PNG/JPEG bytes to stdout from
+`GET /api/v1/pages/{slug}/assets/{assetId}/bytes`. The metadata MIME identifies
+the actual format. This binary command does not honor table formatting. Expired
+staging and revoked Page access fail; backup restore does not renew expiry.
+
 ## Artifact commands
 
 The first artifact surface stores HTML on a human-owned Page. Its preview is
