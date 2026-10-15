@@ -1022,6 +1022,11 @@ jobs:
           E2E_PASSWORD: password123
           CREWSHIP_INSTANCE_ID: pr-playwright
         run: pnpm exec playwright test --config=playwright.pr.config.ts
+      - name: Verify local chat table workers
+        timeout-minutes: 3
+        run: |
+          pnpm test:chat-worker
+          pnpm test:chat-xlsx-worker
       - name: Verify control contrast and reduced motion
         timeout-minutes: 3
         run: pnpm exec tsx scripts/check-control-accessibility.tsx

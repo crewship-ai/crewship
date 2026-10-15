@@ -524,7 +524,7 @@ of their durable run. Runs without an assistant reply anchor behind their
 triggering user message and show the durable run status. Both ordinary and
 virtualized transcripts use the same card renderer.
 
-Cards reconcile complete replacement snapshots on session invalidation hints,
+Cards reconcile complete replacement snapshots on `chat-hints:{chatId}` invalidation hints,
 reconnect, foreground return and every 60 seconds while visible. The E1 hint
 contract uses `chat.entity_refs_changed` and `issue.revision_changed` with
 `{ "contract_version": 1 }`; hints carry no object data. A client also accepts
