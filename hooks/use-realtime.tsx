@@ -242,6 +242,7 @@ export interface RealtimeEvent {
   type: RealtimeEventType
   payload: Record<string, unknown>
   timestamp: Date
+  channel?: string
 }
 
 type EventCallback = (event: RealtimeEvent) => void
@@ -420,8 +421,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   }, [refreshWorkspaces])
 
   const dispatchEvent = useCallback(
-    (type: RealtimeEventType, payload: Record<string, unknown>) => {
-      const event: RealtimeEvent = { type, payload, timestamp: new Date() }
+    (type: RealtimeEventType, payload: Record<string, unknown>, channel?: string) => {
+      const event: RealtimeEvent = { type, payload, channel, timestamp: new Date() }
       const callbacks = listenersRef.current.get(type)
       if (callbacks) {
         for (const cb of callbacks) {
@@ -454,6 +455,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         (typeof msg.payload === "object" && msg.payload !== null
           ? msg.payload as Record<string, string>
           : {}),
+        msg.channel,
       )
     },
     [dispatchEvent],
