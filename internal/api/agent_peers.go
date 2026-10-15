@@ -252,23 +252,20 @@ func (h *PeerCardHandler) DeleteAgentPeer(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if !h.requireStorage(w) {
-		return
-	}
 	agentID := r.PathValue("agentId")
 	targetUser := r.PathValue("userId")
 	wsID := WorkspaceIDFromContext(r.Context())
 	crewID, slug, err := h.resolveAgent(r, agentID)
-	if err != nil {
+	if err != nil && !errors.Is(err, errAgentHasNoCrew) {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "agent not found")
 			return
 		}
-		if errors.Is(err, errAgentHasNoCrew) {
-			replyError(w, http.StatusConflict, err.Error())
-			return
-		}
 		replyError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	crewless := errors.Is(err, errAgentHasNoCrew)
+	if !crewless && !h.requireStorage(w) {
 		return
 	}
 	if _, err := h.db.ExecContext(r.Context(), `UPDATE agent_user_preferences SET status='withdrawn',value='',reason='',revision=revision+1 WHERE workspace_id=? AND agent_id=? AND user_id=? AND status!='withdrawn'
@@ -278,10 +275,13 @@ func (h *PeerCardHandler) DeleteAgentPeer(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	paths := h.agentPeerDir(crewID, slug)
-	if err := memory.DeletePeerCard(paths, targetUser, wsID); err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
-		return
+	// Solo agents have structured memory but no safe Markdown storage path.
+	if !crewless {
+		paths := h.agentPeerDir(crewID, slug)
+		if err := memory.DeletePeerCard(paths, targetUser, wsID); err != nil {
+			replyError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	if _, err := h.db.ExecContext(r.Context(), `
 		DELETE FROM peer_cards WHERE agent_id = ? AND user_slug = ?
