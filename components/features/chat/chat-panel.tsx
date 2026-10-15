@@ -470,6 +470,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       role: string
       content: string
       parts?: HistoryPart[]
+      run_id?: string
       ts: string
       // The server has always returned this and this type has never named it,
       // so every reload dropped it here — the last hop of a chain that is
@@ -542,6 +543,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         role: m.role as "user" | "assistant" | "system" | "tool",
         content: m.content,
         parts: m.parts,
+        runId: m.run_id,
         timestamp: new Date(m.ts),
         metadata: m.metadata,
       })))
