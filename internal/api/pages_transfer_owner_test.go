@@ -439,7 +439,8 @@ func TestPagesOwnerTransferHumanOnlyRefusesIneligibleSuccessorsAtomically(t *tes
 			case "suspended":
 				execOrFatal(t, r.db, `UPDATE users SET suspended_at='2026-10-14T00:00:00Z' WHERE id=?`, r.adminID)
 			case "restricted":
-				execOrFatal(t, r.db, `UPDATE workspace_members SET access_mode='restricted' WHERE user_id=?`, r.adminID)
+				// Guest mode cannot coexist with an administrator membership.
+				execOrFatal(t, r.db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE user_id=?`, r.adminID)
 			case "foreign workspace":
 				execOrFatal(t, r.db, `INSERT INTO workspaces(id,name,slug) VALUES('other-workspace','Other','other')`)
 				execOrFatal(t, r.db, `UPDATE workspace_members SET workspace_id='other-workspace' WHERE user_id=?`, r.adminID)

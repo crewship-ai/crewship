@@ -165,26 +165,42 @@ func (h *PageHandler) listArtifactThreadsSnapshot(w http.ResponseWriter, r *http
 			return
 		}
 	}
-	rows, err := h.pageAuthReader(r.Context()).QueryContext(r.Context(), `SELECT id FROM page_artifact_threads WHERE page_id=? AND (?=0 OR revision=?) ORDER BY (status='open') DESC,created_at DESC,id DESC LIMIT 100`, rec.ID, revision, revision)
+	pagination, err := parseDiscussionPage(r, WorkspaceIDFromContext(r.Context()), rec.ID, "artifact", revision)
+	if err != nil {
+		replyError(w, 400, err.Error())
+		return
+	}
+	rows, err := h.pageAuthReader(r.Context()).QueryContext(r.Context(), `SELECT id,created_at,(status='open') FROM page_artifact_threads WHERE page_id=? AND (?=0 OR revision=?) AND (?='all' OR status=?) AND (?='' OR (status='open') < ? OR ((status='open')=? AND (created_at < ? OR (created_at=? AND id < ?)))) ORDER BY (status='open') DESC,created_at DESC,id DESC LIMIT ?`, rec.ID, revision, revision, pagination.Status, pagination.Status, pagination.ID, pagination.Open, pagination.Open, pagination.Created, pagination.Created, pagination.ID, pagination.Limit+1)
 	if err != nil {
 		replyInternalError(w, h.logger, "list artifact threads", err)
 		return
 	}
 	ids := make([]string, 0)
+	nextCursor := ""
+	hasMore := false
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, created string
+		var open int
+		if err := rows.Scan(&id, &created, &open); err != nil {
 			rows.Close()
 			replyInternalError(w, h.logger, "list artifact threads", err)
 			return
 		}
+		if len(ids) == pagination.Limit {
+			hasMore = true
+			break
+		}
 		ids = append(ids, id)
+		nextCursor = pagination.cursor(created, id, open)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		replyInternalError(w, h.logger, "list artifact threads", err)
 		return
+	}
+	if !hasMore {
+		nextCursor = ""
 	}
 	threads := make([]artifactThreadWire, 0, len(ids))
 	for _, id := range ids {
@@ -196,7 +212,7 @@ func (h *PageHandler) listArtifactThreadsSnapshot(w http.ResponseWriter, r *http
 		threads = append(threads, *v)
 	}
 	canComment := h.mayComment(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)
-	writeJSON(w, 200, map[string]any{"threads": threads, "can_comment": canComment, "can_resolve": artifactAgentID(r) == "" && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)})
+	writeJSON(w, 200, map[string]any{"threads": threads, "next_cursor": nextCursor, "can_comment": canComment, "can_resolve": artifactAgentID(r) == "" && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, RoleFromContext(r.Context()), rec)})
 }
 
 type artifactCommentMutation struct {

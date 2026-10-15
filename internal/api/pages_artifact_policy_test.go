@@ -49,7 +49,9 @@ func TestArtifactCreationPolicyDefaultAdminScopeAndCAS(t *testing.T) {
 	if h.artifactAgentPolicyAllows(t.Context(), ws, "crew-lookout") {
 		t.Fatal("workspace disable ineffective")
 	}
-	execOrFatal(t, h.db, `UPDATE workspace_members SET access_mode='restricted' WHERE workspace_id=? AND user_id=?`, ws, user)
+	// A restricted account cannot retain an administrator role. The caller
+	// context stays OWNER so both handlers must recheck the live membership.
+	execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE workspace_id=? AND user_id=?`, ws, user)
 	artifactExpect(t, artifactPolicyCall(t, h, ws, user, "OWNER", "GET", ""), 403)
 	artifactExpect(t, artifactPolicyCall(t, h, ws, user, "OWNER", "PUT", `{"enabled":true,"crew_ids":["crew-lookout"],"base_version":2}`), 403)
 

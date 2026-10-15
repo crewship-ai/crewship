@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 
@@ -38,6 +38,7 @@ export interface ArtifactThread {
   comments: ArtifactComment[]
 }
 interface ThreadsResult {
+  next_cursor?: string
   threads: ArtifactThread[]
   can_comment: boolean
   can_resolve: boolean
@@ -52,12 +53,12 @@ export type ThreadWrite =
   | (ArtifactCommentChange & { threadId: string; base_version: number })
   | { action: "resolve"; threadId: string; base_version: number; resolved: boolean }
 
-export function useArtifactThreads(workspace: string, slug: string) {
+export function useArtifactThreads(workspace: string, slug: string, status: "all" | "open" | "resolved" = "all") {
   const client = useQueryClient()
   const [accessError, setAccessError] = useState<ArtifactCommentError | null>(null)
   const [uncertainReplies, setUncertainReplies] = useState<ArtifactReplyWrite[]>([])
   const submissions = useRef(new Map<string, { id: string; input: ThreadWrite }>())
-  const key = ["artifact-threads", workspace, slug] as const
+  const key = ["artifact-threads", workspace, slug, status] as const
   const endpoint = `/api/v1/pages/${encodeURIComponent(slug)}/artifact/threads`
   const params = new URLSearchParams({ workspace_id: workspace })
   const invalidate = useCallback(() => {
@@ -66,11 +67,16 @@ export function useArtifactThreads(workspace: string, slug: string) {
   useRealtimeEventSafe("page.updated", invalidate)
   useRealtimeEventSafe("page.deleted", invalidate)
   useRealtimeEventSafe("realtime.reconnected", invalidate)
-  const query = useQuery({
+  const pagesQuery = useInfiniteQuery({
+    initialPageParam: "",
+    getNextPageParam: (last: ThreadsResult) => last.next_cursor || undefined,
     queryKey: key, enabled: Boolean(workspace && slug) && !accessError, retry: false, gcTime: 0,
     refetchInterval: 60000, refetchIntervalInBackground: false,
-    queryFn: async ({ signal }): Promise<ThreadsResult> => {
-      const response = await apiFetch(`${endpoint}?${params}`, { signal })
+    queryFn: async ({ signal, pageParam }): Promise<ThreadsResult> => {
+      const pageParams = new URLSearchParams(params)
+      pageParams.set("status", status)
+      if (pageParam) pageParams.set("cursor", pageParam)
+      const response = await apiFetch(`${endpoint}?${pageParams}`, { signal })
       if (!response.ok) {
         const body = await response.json().catch(() => null)
         throw new ArtifactCommentError(body?.error ?? "Could not load comments.", response.status)
@@ -80,12 +86,16 @@ export function useArtifactThreads(workspace: string, slug: string) {
       return result
     },
   })
+  const query = { ...pagesQuery, data: pagesQuery.data ? {
+    ...pagesQuery.data.pages[0],
+    threads: Array.from(new Map(pagesQuery.data.pages.flatMap(page => page.threads).map(thread => [thread.id, thread])).values()),
+  } : undefined }
   const fingerprintOf = (input: ThreadWrite) => JSON.stringify({ workspace, slug, input })
   const denyAccess = useCallback((error: ArtifactCommentError) => {
     setAccessError(error)
     submissions.current.clear()
     setUncertainReplies([])
-    client.removeQueries({ queryKey: ["artifact-threads", workspace, slug], exact: true })
+    client.removeQueries({ queryKey: ["artifact-threads", workspace, slug] })
   }, [client, workspace, slug])
   useEffect(() => {
     const error = query.error

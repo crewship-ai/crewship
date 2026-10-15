@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"net/http"
@@ -68,6 +69,37 @@ func TestArtifactWorkflowBrowser(t *testing.T) {
 	}
 	t.Cleanup(router.Shutdown)
 	mux := http.NewServeMux()
+	// Test-only fixture insertion on the owned loopback server. Production
+	// rate limits remain enabled; browsing still uses the real authorized API.
+	mux.HandleFunc("POST /_test/retained-discussions", func(w http.ResponseWriter, r *http.Request) {
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
+			http.Error(w, "fixture transaction", 500)
+			return
+		}
+		defer tx.Rollback()
+		var pageID string
+		if err := tx.QueryRowContext(r.Context(), "SELECT id FROM pages WHERE workspace_id=? AND slug='browser-report'", workspace).Scan(&pageID); err != nil {
+			http.Error(w, "fixture Page", 500)
+			return
+		}
+		for index := 0; index < 101; index++ {
+			id := fmt.Sprintf("pagination-thread-%03d", index)
+			if _, err := tx.ExecContext(r.Context(), `INSERT INTO page_artifact_threads(id,page_id,revision,anchor_json,status,created_by_user_id,created_at,updated_at) VALUES(?,?,1,'{"schema_version":1,"type":"document"}','resolved',?,'2026-10-15T12:00:00Z','2026-10-15T12:00:00Z')`, id, pageID, commenter); err != nil {
+				http.Error(w, "fixture thread", 500)
+				return
+			}
+			if _, err := tx.ExecContext(r.Context(), `INSERT INTO page_artifact_comments(id,thread_id,thread_version,body,author_user_id,created_at) VALUES(?,?,1,?,?,'2026-10-15T12:00:00Z')`, fmt.Sprintf("pagination-comment-%03d", index), id, fmt.Sprintf("Retained pagination discussion %d", index), commenter); err != nil {
+				http.Error(w, "fixture comment", 500)
+				return
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			http.Error(w, "fixture commit", 500)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	})
 	mux.Handle("/api/", router)
 	mux.HandleFunc("/ws", hub.HandleUpgrade)
 	mux.Handle("/", StaticFileHandler(os.DirFS(filepath.Join(repo, "out"))))
@@ -101,8 +133,8 @@ func TestArtifactWorkflowBrowser(t *testing.T) {
 	if err = db.QueryRow(`SELECT head_rev FROM page_artifacts JOIN pages ON pages.id=page_artifacts.page_id WHERE pages.workspace_id=? AND pages.slug='browser-report'`, workspace).Scan(&head); err != nil || head != 3 {
 		t.Fatalf("real DB head=%d err=%v", head, err)
 	}
-	if err = db.QueryRow(`SELECT COUNT(*) FROM page_artifact_threads t JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=? AND p.slug='browser-report' AND t.revision=1`, workspace).Scan(&threads); err != nil || threads != 1 {
-		t.Fatalf("original anchor count=%d err=%v", threads, err)
+	if err = db.QueryRow(`SELECT COUNT(*) FROM page_artifact_threads t JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=? AND p.slug='browser-report' AND t.revision=1`, workspace).Scan(&threads); err != nil || threads != 102 {
+		t.Fatalf("retained original-revision anchor count=%d err=%v", threads, err)
 	}
 	if err = db.QueryRow(`SELECT COUNT(*) FROM page_artifact_requests`).Scan(&requests); err != nil || requests != 0 {
 		t.Fatalf("commenter created work count=%d err=%v", requests, err)

@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"unicode/utf8"
 
@@ -75,8 +76,18 @@ func newPageArtifactThreadsCommand() *cobra.Command {
 			switch verb {
 			case "list":
 				endpoint := "/api/v1/pages/" + pagePathEscape(args[0]) + "/artifact/threads"
+				params := url.Values{}
 				if revision > 0 {
-					endpoint += fmt.Sprintf("?revision=%d", revision)
+					params.Set("revision", fmt.Sprint(revision))
+				}
+				for _, flag := range []string{"status", "cursor", "limit"} {
+					if cmd.Flags().Changed(flag) {
+						value, _ := cmd.Flags().GetString(flag)
+						params.Set(flag, value)
+					}
+				}
+				if len(params) > 0 {
+					endpoint += "?" + params.Encode()
 				}
 				response, err = client.Get(endpoint)
 			case "create":
@@ -103,6 +114,11 @@ func newPageArtifactThreadsCommand() *cobra.Command {
 		}
 		if verb != "list" {
 			cmd.Flags().String("mutation-id", "", "Stable identity for retrying this exact operation; generated when omitted")
+		}
+		if verb == "list" {
+			cmd.Flags().String("status", "all", "Discussion filter: all, open or resolved")
+			cmd.Flags().String("cursor", "", "Continuation returned as next_cursor; keep the same filters")
+			cmd.Flags().String("limit", "100", "Page size between 1 and 100")
 		}
 		group.AddCommand(cmd)
 	}

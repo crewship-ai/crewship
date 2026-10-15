@@ -263,7 +263,10 @@ func TestPageRequestResultUsesLiveRoleNotMiddlewareRole(t *testing.T) {
 	artifactExpect(t, call("MEMBER"), 200)
 	execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, workspace, user)
 	artifactExpect(t, call("OWNER"), 404)
-	execOrFatal(t, h.db, `UPDATE workspace_members SET role='OWNER' WHERE workspace_id=? AND user_id=?`, workspace, user)
+	// Restore Page visibility through a live owner-issued grant, rather than
+	// an administrator role that is incompatible with account-wide Guest mode.
+	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) SELECT page_id,'user',?,'read','result-new-owner' FROM page_artifact_requests WHERE id=?`, user, id)
+	artifactExpect(t, call("OWNER"), 200)
 	execOrFatal(t, h.db, `INSERT INTO workspaces(id,name,slug) VALUES('result-restricted-ws','Restricted','result-restricted-ws')`)
 	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('result-restricted-member','result-restricted-ws',?,'MEMBER','restricted')`, user)
 	artifactExpect(t, call("OWNER"), 404)

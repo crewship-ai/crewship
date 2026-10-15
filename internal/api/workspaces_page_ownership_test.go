@@ -268,7 +268,8 @@ func TestOutputCustodyLiveAuthorityAndEligibility(t *testing.T) {
 					revoke = func() { mustExec(t, f.db, `UPDATE users SET suspended_at='2026-10-14' WHERE id='wsadmin'`) }
 				case "actor restricted":
 					revoke = func() {
-						mustExec(t, f.db, `UPDATE workspace_members SET access_mode='restricted' WHERE user_id='wsadmin'`)
+						// Apply a valid live transition: Guest mode cannot retain ADMIN.
+						mustExec(t, f.db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE user_id='wsadmin'`)
 					}
 				case "actor removed":
 					revoke = func() { mustExec(t, f.db, `DELETE FROM workspace_members WHERE user_id='wsadmin'`) }

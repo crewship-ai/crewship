@@ -211,6 +211,24 @@ blob independently, so removing an old source revision does not delete the copy.
 
 ## Artifact discussion threads
 
+Artifact and Board thread lists accept `status=all|open|resolved` (default
+`all`), `limit=1..100` (default 100) and `cursor`. A nonempty `next_cursor`
+continues with the same workspace, Page, kind, status and artifact revision
+filter; an empty value marks the end. Every page rechecks current read rights.
+Cursors are selectors and confer no access. Invalid or foreign-scope cursors
+return 400 after authorization. CLI lists accept `--status`, `--limit` and
+`--cursor`; the discussion panels offer a status filter and **Load older
+discussions**, preserving original revision and anchor navigation.
+
+Ordering is open first, then descending immutable creation timestamp and ID.
+Keyset continuation visits every matching thread exactly once in unchanged
+data, including equal timestamps. Each request reads its own transaction
+snapshot, not a snapshot held across requests: new threads above the cursor
+appear after refreshing, and concurrent resolve/reopen can move a thread across
+the boundary (it may be repeated or require refresh). Clients deduplicate IDs;
+refresh restarts the loaded pages. Historical listing has no relation to the
+100-open-thread creation/reopen limit and never removes retained anchors.
+
 Threads refer to an immutable artifact revision. Publishing or restoring the
 source does not delete them or retarget their anchors. Whole-document anchors
 use `{"schema_version":1,"type":"document"}`. Static preview point anchors use
@@ -233,7 +251,7 @@ DOM identity or scroll offset inside an opaque frame, or move points to new revi
 
 Readers can list threads. Creating threads and replies requires a human
 identity with Page comment or write access;
-resolution/reopening requires write access. List returns `{threads, can_comment, can_resolve}`. Each thread
+resolution/reopening requires write access. List returns `{threads, can_comment, can_resolve, next_cursor}`. Each thread
 contains `id`, original `revision`, `anchor`, `status` (`open` or `resolved`),
 `version`, server-author metadata/timestamps and `comments`. Comments contain
 `id`, `body`, `author_user_id`, `author_name` and `created_at`. Bodies are rendered
@@ -2717,7 +2735,7 @@ Board's lifetime; deleting the Board releases references for ordinary blob GC.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/api/v1/pages/{slug}/board/threads` | Read up to 100 threads |
+| GET | `/api/v1/pages/{slug}/board/threads` | Read a bounded page of retained threads |
 | POST | `/api/v1/pages/{slug}/board/threads` | Create an anchored thread |
 | POST | `/api/v1/pages/{slug}/board/threads/{threadId}/comments` | Reply at an observed thread version |
 | POST | `/api/v1/pages/{slug}/board/threads/{threadId}/resolve` | Resolve or reopen a thread |
@@ -2738,7 +2756,7 @@ Replies take `mutation_id`, `body` and `base_version`; resolve/reopen replaces
 `body` with `resolved:true/false`. Keep the exact mutation ID and body after a
 lost response. Anchors cannot be changed after creation.
 
-**Response:** listing returns `{threads,can_comment,can_resolve}`; mutations return the current thread
+**Response:** listing returns `{threads,can_comment,can_resolve,next_cursor}`; mutations return the current thread
 with `applied_version` identifying the committed retry result. Each thread has
 `id`, `anchor`, `status`, `version`, author/timestamps and `comments`.
 Comments are plain text, limited to 4 KiB, with 50 replies per thread.
