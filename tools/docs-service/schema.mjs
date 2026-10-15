@@ -111,11 +111,14 @@ function validateRetained(doc) {
         (cell && ['colspan', 'rowspan', 'colwidth', 'align'].includes(key));
       if (!allowed) throw new Error('unsupported retained attributes');
       if (content instanceof Y.ContentDeleted) continue;
-      if (!(content instanceof Y.ContentAny) || content.arr.length !== 1) throw new Error('unsupported retained attribute content');
-      const value = content.arr[0];
-      const valid = key === 'id' ? value === null || (typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)) :
-        key === 'level' ? [1,2,3].includes(value) : key === 'start' ? Number.isInteger(value) && value >=1 && value<=10000 : ['colspan','rowspan'].includes(key) ? value===1 : value===null;
-      if (!valid) throw new Error('unsupported retained attribute value');
+      // Yjs coalesces adjacent deleted versions of the same scalar attribute.
+      // Active attributes remain scalar; every retained value still needs validation.
+      if (!(content instanceof Y.ContentAny) || content.arr.length === 0 || (!item.deleted && content.arr.length !== 1)) throw new Error('unsupported retained attribute content');
+      for (const value of content.arr) {
+        const valid = key === 'id' ? value === null || (typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)) :
+          key === 'level' ? [1,2,3].includes(value) : key === 'start' ? Number.isInteger(value) && value >=1 && value<=10000 : ['colspan','rowspan'].includes(key) ? value===1 : value===null;
+        if (!valid) throw new Error('unsupported retained attribute value');
+      }
     } else if (content instanceof Y.ContentType) {
       if (item.parent instanceof Y.XmlText || !supportedType(content.type) || content.type === root) throw new Error('unsupported retained Yjs type');
     } else if (content instanceof Y.ContentString) {

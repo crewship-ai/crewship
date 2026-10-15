@@ -123,3 +123,28 @@ test('Markdown export preserves list numbering and simple tables while escaping 
   assert.ok(!exported.includes('1second paragraph'));
   assert.ok(exported.endsWith('\n'));
 });
+
+function mergedDeletedIDHistory(second) {
+  const doc = new Y.Doc({ gc: false }); const root = doc.getXmlFragment('default');
+  const deleted = new Y.XmlElement('paragraph'); root.insert(0, [deleted]);
+  deleted.setAttribute('id', 'first-safe-id'); deleted.setAttribute('id', second);
+  root.delete(0, 1);
+  const retained = new Y.XmlElement('paragraph'); root.insert(0, [retained]); retained.setAttribute('id', 'retained-paragraph');
+  const restored = load(snapshot(doc)); doc.destroy();
+  const merged = [...restored.store.clients.values()].flat().find(item => item.deleted && item.parentSub === 'id' && item.content instanceof Y.ContentAny && item.content.arr.length === 2);
+  assert.ok(merged, 'fixture must contain the merged deleted attribute shape observed in actual Tiptap updates');
+  return { restored, merged };
+}
+test('merged deleted stable-ID attribute versions survive binary reload', () => {
+  const { restored, merged } = mergedDeletedIDHistory('second-safe-id');
+  assert.deepEqual(merged.content.arr, ['first-safe-id', 'second-safe-id']);
+  assert.doesNotThrow(() => validate(restored));
+  restored.destroy();
+});
+test('a hidden unsafe value in the second merged deleted attribute entry is rejected', () => {
+  const { restored, merged } = mergedDeletedIDHistory({ hidden: 'unsupported-value' });
+  assert.equal(merged.content.arr[0], 'first-safe-id');
+  assert.deepEqual(merged.content.arr[1], { hidden: 'unsupported-value' });
+  assert.throws(() => validate(restored), /unsupported retained attribute value/);
+  restored.destroy();
+});
