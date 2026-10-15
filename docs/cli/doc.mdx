@@ -108,7 +108,16 @@ same comment; resolution requires current Page write access.
 
 `crewship doc request report --file request.json` calls
 `POST /api/v1/pages/{slug}/document/requests`. `--file` names a JSON file;
-`--file -` reads stdin. Body: `{chat_id,instruction,base_rev,submission_id}`.
+`--file -` reads stdin. Body:
+`{page_id,chat_id,instruction,base_rev,submission_id,targets:[{id,hash,from,to,quote}]}`.
+`page_id` is the existing Page ID. Capture `base_rev` and each full block hash
+from confirmed state; targets preserve the exact selected quotation and its
+UTF-16 offsets within one paragraph or heading. Supply 1–16 targets with at most
+4096 UTF-16 code units of quoted text in total. A nonempty quote must match the
+specified range exactly. A changed revision, block hash or selection returns
+`409`; the CLI does not fetch replacement state, retry or rebase automatically.
+Discard a stale draft and explicitly select again. Exact transport retries retain
+the entire body and submission ID, including the original base and targets.
 The selected private chat must belong to this human, and its agent needs an
 explicit Page write grant. A `202` response means queued work, not completion.
 Success requires the admitted agent's durable semantic patch and checkpoint.

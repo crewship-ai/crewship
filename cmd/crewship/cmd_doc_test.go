@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -60,5 +62,30 @@ func TestDocumentCLIReadParityRoutes(t *testing.T) {
 				t.Fatal("command did not call exact declared endpoint")
 			}
 		})
+	}
+}
+
+// A human request is an immutable selection snapshot, not a command to look
+// up whichever text happens to occupy the selected range when a run starts.
+func TestDocumentCLIRequestPreservesSelectionAndStopsOnStaleBase(t *testing.T) {
+	stub := pageStub(t)
+	resetDocCommand(t)
+	payload := `{"page_id":"page-original","chat_id":"private-chat","instruction":"Revise only this quotation","base_rev":17,"submission_id":"same-submission","targets":[{"id":"block-one","hash":"confirmed-full-block-hash","from":2,"to":6,"quote":"A😀B"}]}`
+	stub.OnPost("/api/v1/pages/report/document/requests", func(r *http.Request, body []byte) (int, []byte, string) {
+		var got, want any
+		if json.Unmarshal(body, &got) != nil || json.Unmarshal([]byte(payload), &want) != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("changed immutable request: %s", body)
+		}
+		return 409, []byte(`{"error":"document request base revision changed"}`), "application/json"
+	})
+	_, err := runPageCLI(t, payload, "doc", "request", "report", "--file", "-")
+	if err == nil || !strings.Contains(err.Error(), "base revision changed") {
+		t.Fatalf("stale request conflict hidden: %v", err)
+	}
+	if len(stub.CallsFor("POST", "/api/v1/pages/report/document/requests")) != 1 {
+		t.Fatal("CLI retried or rebased a stale request")
+	}
+	if len(stub.CallsFor("GET", "/api/v1/pages/report/document")) != 0 {
+		t.Fatal("CLI fetched new state to rebase request")
 	}
 }
