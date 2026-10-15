@@ -310,6 +310,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   const session = useSession()
   const currentUserId = session.data?.user?.id ?? null
+  const artifactScope = JSON.stringify([currentUserId, workspaceId, agentId, sessionId])
+  const artifactContextNonce = useRef(0)
+  const [artifactContext, setArtifactContext] = useState<{ id: number; text: string; scope: string } | null>(null)
+  const askArtifactSelection = useCallback((text: string) => setArtifactContext({ id: ++artifactContextNonce.current, text: `Source agent: ${agentId} · workspace: ${workspaceId}\n${text}`, scope: artifactScope }), [agentId, workspaceId, artifactScope])
   // A restricted account has no WebSocket in any workspace (#2861).
   const sessionRealtime = useAccessMode() === "trusted"
   const canChat = sessionRealtime || agentMeta?.current_user_can_chat === true
@@ -1128,7 +1132,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           initialTab={mobilePanel}
           style={{ width: "100%", height: "100%" }}
         />
-        {executionProfile === "trusted" && <ArtifactPane agentId={agentId} />}
+        {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
       </div>
     )
   }
@@ -1199,6 +1203,8 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           onSend={onSend}
           onSent={handleSent}
           initialInput={composerInitialInput}
+          contextRequest={artifactContext?.scope === artifactScope ? artifactContext : undefined}
+          onContextApplied={() => setArtifactContext(null)}
           askForm={activeAskForm}
           onCloseAskForm={closeAskForm}
           renderAskTemplate={renderAskTemplate}
@@ -1224,7 +1230,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         )}
         <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
         <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
-        {executionProfile === "trusted" && <ArtifactPane agentId={agentId} />}
+        {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
       </div>
     )
   }
@@ -1326,6 +1332,8 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           onSend={onSend}
           onSent={handleSent}
           initialInput={composerInitialInput}
+          contextRequest={artifactContext?.scope === artifactScope ? artifactContext : undefined}
+          onContextApplied={() => setArtifactContext(null)}
           mentionMembers={mentionMembers}
           askForm={activeAskForm}
           onCloseAskForm={closeAskForm}
@@ -1333,7 +1341,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         /> : <p role="status" className="border-t px-4 py-4 text-sm text-muted-foreground">You can discover this agent. Ask your administrator for chat access to send messages.</p>}
       </div>
 
-      {executionProfile === "trusted" && <ArtifactPane agentId={agentId} expanded={artifactFocus} />}
+      {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
         {issuePanel ?? <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}

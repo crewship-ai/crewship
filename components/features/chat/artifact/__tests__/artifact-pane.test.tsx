@@ -16,6 +16,11 @@ import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-libra
 //   · a save writes the edited bytes to the path that was actually read.
 // =============================================================================
 
+// These tests exercise authenticated IO and refresh. Worker/table behavior has its own suite.
+vi.mock("../table-preview", () => ({ TablePreview: ({ bytes }: { bytes: Uint8Array }) => <div aria-label="Spreadsheet preview">{new TextDecoder().decode(bytes)}</div> }))
+
+let viewer = "user-a"
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: viewer } } }) }))
 let workspaceId: string | null = "ws-1"
 let workspaceRole = "OWNER"
 vi.mock("@/hooks/use-workspace", () => ({
@@ -107,6 +112,7 @@ function openTab(id: string, path: string) {
 }
 
 beforeEach(() => {
+  viewer = "user-a"
   workspaceId = "ws-1"
   workspaceRole = "OWNER"
   apiFetch.mockReset()
@@ -223,6 +229,33 @@ describe("ArtifactPane — saving", () => {
 })
 
 describe("ArtifactPane — live revisions", () => {
+  it("removes bytes and tab metadata immediately when the viewer changes", async () => {
+    apiFetch.mockImplementation(() => response({ body: "secret,123", contentType: "application/octet-stream" }))
+    const view = render(<ArtifactPane agentId="agent-1" />)
+    openTab("secret", "reports/private.csv")
+    await screen.findByLabelText("Spreadsheet preview")
+    apiFetch.mockImplementation(() => new Promise(() => {}))
+    viewer = "user-b"
+    view.rerender(<ArtifactPane agentId="agent-1" />)
+    expect(screen.queryByLabelText("Spreadsheet preview")).not.toBeInTheDocument()
+    expect(screen.queryByText("private.csv")).not.toBeInTheDocument()
+    expect(useArtifactStore.getState().tabs).toEqual([])
+    expect(useArtifactStore.getState().activeId).toBeNull()
+  })
+
+  it.each([401, 403, 404])("clears displayed bytes after refresh is refused with %s", async status => {
+    apiFetch.mockImplementation(() => response({ body: "private,123", contentType: "application/octet-stream" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("private", "reports/private.csv")
+    await screen.findByLabelText("Spreadsheet preview")
+    fireEvent.click(screen.getByRole("button", { name: "Pause live updates" }))
+    apiFetch.mockImplementation(() => response({ ok: false, status, body: "{}", contentType: "application/json" }))
+    fireEvent.click(screen.getByRole("button", { name: "Follow live updates" }))
+    await waitFor(() => expect(screen.queryByLabelText("Spreadsheet preview")).not.toBeInTheDocument())
+    expect(screen.getByRole("alert")).toHaveTextContent("Artifact unavailable")
+    expect(screen.queryByRole("link", { name: "Download artifact" })).not.toBeInTheDocument()
+  })
+
   it("increments only when scoped file bytes change and Pause stops fetching", async () => {
     let body = "name,value\nfirst,1\n"
     apiFetch.mockImplementation(() => response({ body, contentType: "application/octet-stream" }))
