@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Behaviour change: CLI pairing follows its source browser session.** Suspended accounts and missing, logged-out, revoked or expired source sessions cannot redeem codes. Request a fresh browser code for older pairings without session provenance; CLI-token authentication cannot start pairing.
+
 ### Fixed
 - **Personal memory stays forgotten across access changes.** Clearing all preferences also works for agents without a crew. Switching an account to restricted access withdraws its stored preferences; restoring trusted access does not reactivate them.
 - ⚠️ **Upgrade: restart agent containers after updating the backend and sidecar.** Coordinate an idle window and use `crewship crew restart-agents` so existing containers receive the matching sidecar; old sidecars can fail issue writes. Follow [the execution-authority rollout](RELEASING.md#execution-authority-rollout-3068), including the read-only `doctor execution-origins` audit against the actual stage/production database before upgrade.
