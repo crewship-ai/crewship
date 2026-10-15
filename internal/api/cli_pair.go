@@ -75,7 +75,7 @@ type pairStartResponse struct {
 // POST /api/v1/cli/pair/start
 func (h *CliPairHandler) Start(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
-	if user == nil || user.SessionID == "" {
+	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -84,6 +84,11 @@ func (h *CliPairHandler) Start(w http.ResponseWriter, r *http.Request) {
 	// must not widen its authority through a pairing code either.
 	if AuthKindFromContext(r.Context()) == AuthKindCLIToken && limitedChatToken(r.Context()) {
 		replyError(w, http.StatusForbidden, "Tokens with limited scopes cannot create pairing codes. Sign in to pair a CLI.")
+		return
+	}
+
+	if user.SessionID == "" {
+		replyError(w, http.StatusForbidden, "A browser session is required")
 		return
 	}
 

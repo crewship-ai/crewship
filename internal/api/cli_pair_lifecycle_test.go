@@ -99,8 +99,8 @@ func TestPairStart_RequiresSourceSession(t *testing.T) {
 	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: uid}))
 	rr := httptest.NewRecorder()
 	h.Start(rr, req)
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status=%d, want 401", rr.Code)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status=%d, want 403", rr.Code)
 	}
 }
 
