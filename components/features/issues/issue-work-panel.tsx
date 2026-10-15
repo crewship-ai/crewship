@@ -10,9 +10,11 @@ import { useIssuePeople } from "@/hooks/use-issue-people"
 import type { MentionAgent } from "@/lib/mentions"
 import type { Mission } from "@/lib/types/mission"
 
-export function IssueWorkPanel({ issue, agents, editable, onChanged, latestOutcome }: {
+export function IssueWorkPanel({ issue, agents, editable, onChanged, latestOutcome, allowedActions }:  {
+  allowedActions?: readonly import("@/lib/chat-entity-cards").IssueAction[]
   issue: Mission; agents: readonly MentionAgent[]; editable: boolean; onChanged: () => Promise<void>; latestOutcome?: string
 }) {
+  const can = (action: string) => allowedActions ? allowedActions.some((a) => a === action) : editable
   const [form, setForm] = useState<"handoff" | "submit" | null>(null)
   const [target, setTarget] = useState("")
   const [note, setNote] = useState("")
@@ -70,12 +72,12 @@ export function IssueWorkPanel({ issue, agents, editable, onChanged, latestOutco
         {issue.owner && <p className="mt-1 text-xs text-muted-foreground">Accountable owner: {issue.owner.name || "Workspace member"}</p>}
         <a href="#issue-conversation" className="mt-2 inline-block text-xs text-primary hover:underline">Conversation and handoffs</a>
       </div>
-      {editable && !closed && <div className="flex flex-wrap gap-2">
-        {issue.work_stopping && <Button size="sm" variant="outline" disabled={busy} onClick={() => void retryStop()}>Retry stopping agents</Button>}
+      {(allowedActions ? can("assign") || can("change_workflow") : editable) && !closed && <div className="flex flex-wrap gap-2">
+        {can("change_workflow") && issue.work_stopping && <Button size="sm" variant="outline" disabled={busy} onClick={() => void retryStop()}>Retry stopping agents</Button>}
         {needsInput && <Button size="sm" asChild><a href="/inbox">Open request in Inbox</a></Button>}
-        {!human && <Button size="sm" variant="outline" disabled={busy} onClick={() => void act("take_over")}>Take over</Button>}
-        <Button size="sm" variant="outline" disabled={busy || issue.work_stopping} onClick={() => { setForm("handoff"); setError(null) }}><ArrowRightLeft className="mr-1 h-3.5 w-3.5" />Hand off</Button>
-        {human && <Button size="sm" disabled={busy || issue.work_stopping} onClick={() => { setForm("submit"); setError(null) }}>Submit result</Button>}
+        {can("assign") && !human && <Button size="sm" variant="outline" disabled={busy} onClick={() => void act("take_over")}>Take over</Button>}
+        {can("assign") && <Button size="sm" variant="outline" disabled={busy || issue.work_stopping} onClick={() => { setForm("handoff"); setError(null) }}><ArrowRightLeft className="mr-1 h-3.5 w-3.5" />Hand off</Button>}
+        {can("change_workflow") && human && <Button size="sm" disabled={busy || issue.work_stopping} onClick={() => { setForm("submit"); setError(null) }}>Submit result</Button>}
       </div>}
     </div>
     {issue.execution && <div className="mt-4 space-y-2 border-t border-border pt-3 text-xs" aria-label="Execution progress">
@@ -86,11 +88,11 @@ export function IssueWorkPanel({ issue, agents, editable, onChanged, latestOutco
       {issue.execution.note && <p className="whitespace-pre-wrap break-words">{issue.execution.note}</p>}
     </div>}
     <div className="mt-3 text-xs text-muted-foreground">
-      <label className="flex items-center gap-2"><input type="checkbox" checked={issue.client_review_required ?? true} disabled={!editable || busy || !["TODO", "BACKLOG"].includes(issue.status)} onChange={(event) => void setReviewPolicy(event.target.checked)} />Require client acceptance after Lead review</label>
+      {can("change_workflow") && <label className="flex items-center gap-2"><input type="checkbox" checked={issue.client_review_required ?? true} disabled={!can("change_workflow") || busy || !["TODO", "BACKLOG"].includes(issue.status)} onChange={(event) => void setReviewPolicy(event.target.checked)} />Require client acceptance after Lead review</label>}
       <p className="mt-1">{(issue.client_review_required ?? true) ? "Lead verifies the result, then a person approves completion." : "Lead can mark verified work Done. Uncertainty still comes back to a person."}</p>
     </div>
     {issue.work_note && <details className="mt-3 text-xs"><summary className="cursor-pointer text-muted-foreground">Latest handoff or result</summary><p className="mt-2 whitespace-pre-wrap break-words">{issue.work_note}</p></details>}
-    {form && <form className="mt-4 space-y-3 border-t border-border pt-3" onSubmit={(event) => {
+    {form && can(form === "handoff" ? "assign" : "change_workflow") && <form className="mt-4 space-y-3 border-t border-border pt-3" onSubmit={(event) => {
       event.preventDefault()
       if (form === "submit") void act("submit")
       else { const [type, id] = target.split(":"); void act(type === "agent" ? "handoff_agent" : "handoff_human", id) }
