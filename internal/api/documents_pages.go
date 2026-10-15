@@ -148,6 +148,7 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 		return
 	}
 	if operation == "read" || operation == "comments" {
+		value["page_id"] = rec.ID
 		user := UserFromContext(r.Context())
 		value["can_write"] = user != nil && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID, RoleFromContext(r.Context()), rec)
 		value["can_resolve"] = value["can_write"]

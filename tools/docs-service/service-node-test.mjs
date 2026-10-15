@@ -62,6 +62,58 @@ function authorityModel() {
   return model;
 }
 const read = (f, headers) => call(f.socket, '/v1/documents/p/read', {}, headers);
+test('request targets are verified from confirmed text with no lease or content mutation', async () => {
+  const model = authorityModel(), f = await fixture(model.handle); await f.start();
+  try {
+    const state = (await read(f)).body;
+    const block = state.outline.find(block => block.id === 'intro');
+    const target = { id: block.id, hash: block.hash, from: 0, to: 8, quote: block.text.slice(0, 8) };
+    const verify = (targets, base_rev = state.rev, headers) => call(f.socket, '/v1/documents/p/verify-targets', { base_rev, targets }, headers);
+    const verified = await verify([target]);
+    assert.equal(verified.status, 200);
+    assert.deepEqual(verified.body, { page_id: 'p', rev: state.rev, targets: [{ ...target, text: block.text, ancestors: [] }] });
+    assert.equal((await verify([target], state.rev - 1)).status, 409);
+    assert.equal((await verify([{ ...target, hash: '0'.repeat(64) }])).status, 409);
+    assert.equal((await verify([{ ...target, quote: 'not the selected text' }])).status, 409);
+    assert.equal((await verify([{ ...target, from: -1 }])).status, 400);
+    assert.equal((await verify([{ ...target, text: 'client-authored baseline' }])).status, 400);
+    assert.equal((await verify([target, target])).status, 400);
+    assert.equal((await verify(Array(17).fill(target))).status, 400);
+    assert.equal((await verify([])).status, 400);
+    const table = state.outline.find(block => block.id === 'table');
+    assert.equal((await verify([{ id: table.id, hash: table.hash, from: 0, to: 1, quote: table.text.slice(0, 1) }])).status, 400);
+    assert.equal((await verify([target], state.rev, { Authorization: 'Bearer agtv2.not-a-human' })).status, 403);
+    const nested = state.outline.find(block => block.id === 'cell-a-p');
+    const nestedTarget = { id: nested.id, hash: nested.hash, from: 0, to: 1, quote: 'A' };
+    assert.deepEqual((await verify([nestedTarget])).body.targets[0].ancestors, ['cell-a', 'row', 'table']);
+    assert.equal(model.acquisitions, 0); assert.equal(model.commits, 0); assert.equal(model.state.rev, state.rev);
+  } finally { await f.close(); }
+});
+test('semantic commits convey the exact replacement to Go for range authorization', async () => {
+  const model = authorityModel(), f = await fixture(model.handle); await f.start();
+  try {
+    const state = (await read(f)).body;
+    const request = patchRequest(state, 'selected-patch', 'selected replacement');
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', request)).status, 200);
+    assert.deepEqual(model.seen.find(entry => entry.op === 'commit').data.semantic, { target: 'intro', text: 'selected replacement' });
+  } finally { await f.close(); }
+});
+test('target ranges use UTF-16 without splitting supplementary characters or exceeding quote bounds', async () => {
+  const model = authorityModel();
+  const json = initialJSON(); json.content[1].content = [{ type: 'text', text: 'A😀B' }];
+  const doc = create(json); model.state.snapshot = snapshot(doc); doc.destroy();
+  const f = await fixture(model.handle); await f.start();
+  try {
+    const state = (await read(f)).body, block = state.outline.find(block => block.id === 'intro');
+    const target = { id: block.id, hash: block.hash, from: 1, to: 3, quote: '😀' };
+    const verify = targets => call(f.socket, '/v1/documents/p/verify-targets', { base_rev: state.rev, targets });
+    assert.equal((await verify([target])).status, 200);
+    assert.equal((await verify([{ ...target, to: 2, quote: '😀'.slice(0, 1) }])).status, 400);
+    assert.equal((await verify([{ ...target, from: 2, quote: '😀'.slice(1) }])).status, 400);
+    assert.equal((await verify([{ ...target, quote: 'x'.repeat(4097) }])).status, 400);
+    assert.equal(model.commits, 0);
+  } finally { await f.close(); }
+});
 function patchRequest(state, id, text = 'durable') {
   return { id, schema: 2, epoch: state.epoch, target: 'intro', text, ifRev: state.rev, ifHash: state.outline.find(b => b.id === 'intro').hash };
 }

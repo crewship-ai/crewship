@@ -27,6 +27,11 @@ closes. Drain waits at most 30 seconds, then reports failure. Document requests 
 
 - `read`: `{}`.
 - `initialize`: `{id,schema,body}` with schema-valid JSON content.
+- `verify-targets`: internal human request admission only; `{base_rev,targets}`
+  verifies stable text-block IDs, original hashes, UTF-16 ranges and exact quotes
+  against confirmed state without a writer lease or content change. It returns
+  canonical text and ancestor IDs for Go's immutable request snapshot. No public
+  route exposes this operation. The original agent bearer cannot admit targets.
 - `patch`: `{id,schema,epoch,kind:"human",update}` or
   `{id,schema,epoch,target,text,ifRev,ifHash}` for semantic replaceText.
 - `checkpoint`: `{id,schema,epoch,ifRev}`.

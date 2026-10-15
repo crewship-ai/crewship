@@ -9,6 +9,33 @@ import { VERSION, create, load, snapshot, outline, validate, patch, hash, decode
 export const PROTOCOL = 1;
 const fault = (status, message,code) => Object.assign(new Error(message), { status,...(code?{code}:{}) });
 const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
+const readOperations = new Set(['read', 'verify-targets', 'comments', 'checkpoints', 'checkpoint-read', 'export']);
+// Offsets are ProseMirror/JavaScript UTF-16 positions. Do not admit a range
+// which splits a surrogate pair, even when its submitted quote matches it.
+const textBoundary = (text, index) => index === 0 || index === text.length ||
+  !(text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff && text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff);
+async function verifyTargets(doc, targets) {
+  if (!Array.isArray(targets) || targets.length < 1 || targets.length > 16) throw fault(400, 'one to sixteen selected text targets required');
+  const blocks = new Map((await outline(doc)).map(block => [block.id, block]));
+  const seen = new Set(), verified = []; let quoted = 0;
+  for (const target of targets) {
+    if (!target || typeof target !== 'object' || Array.isArray(target) || Object.keys(target).some(key => !['id','hash','from','to','quote'].includes(key)) ||
+      !id(target.id) || seen.has(target.id) || typeof target.hash !== 'string' || !/^[a-f0-9]{64}$/.test(target.hash) || typeof target.quote !== 'string') throw fault(400, 'invalid selected text target');
+    seen.add(target.id);
+    const block = blocks.get(target.id);
+    if (!block) throw fault(409, 'selected block changed');
+    if (!['paragraph','heading'].includes(block.type)) throw fault(400, 'select text inside a paragraph or heading');
+    if (!Number.isSafeInteger(target.from) || !Number.isSafeInteger(target.to) || target.from < 0 || target.to <= target.from || target.to > block.text.length ||
+      !textBoundary(block.text, target.from) || !textBoundary(block.text, target.to)) throw fault(400, 'invalid selected text range');
+    quoted += target.quote.length;
+    if (quoted > 4096) throw fault(400, 'selected text exceeds request limit');
+    if (target.hash !== block.hash || target.quote !== block.text.slice(target.from, target.to)) throw fault(409, 'selected text changed');
+    const ancestors = []; let parent = block.parent;
+    while (parent) { ancestors.push(parent); parent = blocks.get(parent)?.parent; }
+    verified.push({ id: block.id, hash: block.hash, from: target.from, to: target.to, quote: block.text.slice(target.from, target.to), text: block.text, ancestors });
+  }
+  return verified;
+}
 async function body(req) {
   let size = 0; const chunks = [];
   for await (const chunk of req) { size += chunk.length; if (size > 2 * 1024 * 1024) throw fault(413, 'request limit'); chunks.push(chunk); }
@@ -50,6 +77,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     return result;
   }
   async function execute(page, operation, context, request) {
+    if (operation === 'verify-targets' && context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'human request admission required');
     if (operation === 'initialize') {
       if (request.schema !== VERSION || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
       const fingerprint = await hash({ operation, request });
@@ -60,15 +88,19 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     }
     const state = await go(page, 'state', context);
     if (state.schema !== VERSION && state.schema !== 1) throw fault(409, 'unsupported schema; content preserved');
-    if (!['read','comments','checkpoints','checkpoint-read','export'].includes(operation) && request.schema !== VERSION) throw fault(409, 'unsupported client schema');
-    if (!['read','comments','checkpoints','checkpoint-read','export'].includes(operation) && !id(request.id)) throw fault(400, 'operation ID required');
-    const fingerprint = ['read','comments','checkpoints','checkpoint-read','export'].includes(operation) ? undefined : await hash({ operation, request });
+    if (!readOperations.has(operation) && request.schema !== VERSION) throw fault(409, 'unsupported client schema');
+    if (!readOperations.has(operation) && !id(request.id)) throw fault(400, 'operation ID required');
+    const fingerprint = readOperations.has(operation) ? undefined : await hash({ operation, request });
     if (fingerprint) { const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint }); if (receipt.found) return { ...receipt, schema:VERSION, epoch:syncEpoch(state), duplicate: true }; }
     let doc = load(state.snapshot); let lease;
     try {
       for (const update of state.updates || []) Y.applyUpdate(doc, decode(typeof update === 'string' ? update : update.update));
       const baseVector = Y.encodeStateVector(doc);
       if (operation === 'read') return { ...state, schema:VERSION, epoch:syncEpoch(state), content: validate(doc), outline: await outline(doc) };
+      if (operation === 'verify-targets') {
+        if (!Number.isSafeInteger(request.base_rev) || request.base_rev !== state.rev) throw fault(409, 'document request revision changed');
+        return { page_id: page, rev: state.rev, targets: await verifyTargets(doc, request.targets) };
+      }
       if(operation==='export') return {markdown:markdown(validate(doc))};
       if(operation==='checkpoints') return {checkpoints:await go(page,'checkpoints',context)};
       if(operation==='checkpoint-read') { const c=await go(page,'checkpoint-read',context,{id:request.checkpoint});const pinned=load(c.snapshot);try{return {...c,content:validate(pinned),outline:await outline(pinned)}}finally{pinned.destroy()} };
@@ -113,7 +145,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if(renewal.expiresAt)lease.expiresAt=renewal.expiresAt;
       if (operation === 'restore') return {...await go(page, 'restore', context, { id: request.id, fingerprint, checkpoint: request.checkpoint, ifRev: state.rev,generation:state.generation??0, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner }),epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
       if (operation === 'checkpoint') return {...await go(page, 'checkpoint', context, { id: request.id, fingerprint, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, ifRev: state.rev,generation:state.generation??0, snapshot: snapshot(doc) }),epoch:syncEpoch(state)};
-      return {...await go(page, 'commit', context, { id: request.id, fingerprint, kind: operation === 'patch' ? (request.kind === 'human' ? 'human' : 'agent') : operation, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation:state.generation??0, schema: VERSION, snapshot: snapshot(doc), blocks, ifHashes: hashes, checkpoint: request.checkpoint }),epoch:syncEpoch(state)};
+      return {...await go(page, 'commit', context, { id: request.id, fingerprint, kind: operation === 'patch' ? (request.kind === 'human' ? 'human' : 'agent') : operation, ...(operation === 'patch' && request.kind !== 'human' ? { semantic: { target: request.target, text: request.text } } : {}), epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation:state.generation??0, schema: VERSION, snapshot: snapshot(doc), blocks, ifHashes: hashes, checkpoint: request.checkpoint }),epoch:syncEpoch(state)};
     } finally {
       doc.destroy();
       // The engine retains its fenced lease across editor operations. Each write renews with the original live principal; no unconfirmed document is cached.
@@ -147,7 +179,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if (req.method === 'POST' && req.url === '/drain') { await drain(); return reply(200, { drained: true }); }
       if(draining){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'service draining');}
       if(!ready)throw fault(503,'engine recovering');
-      const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(initialize|read|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
+      const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(initialize|read|verify-targets|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
       if (req.method !== 'POST' || !match) throw fault(404, 'unknown operation');
       const context = { workspace: req.headers['x-workspace-id'], authorization: req.headers.authorization };
       if (!id(context.workspace) || typeof context.authorization !== 'string' || !/^Bearer \S+$/.test(context.authorization)) throw fault(401, 'workspace and bearer required');
