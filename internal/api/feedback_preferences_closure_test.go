@@ -55,11 +55,11 @@ func TestFeedbackClosureRestrictedTransitionDoesNotResurrect(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			b := savedClosurePreference(t)
 			if mode == "update" {
-				// Restriction anywhere suppresses recall globally; retain the same scope on withdrawal.
+				// Local restriction permanently withdraws memory in this workspace.
 				execOrFatal(t, b.h.db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE user_id=?`, b.userID)
 			} else {
-				execOrFatal(t, b.h.db, `UPDATE workspace_members SET role='MEMBER' WHERE user_id=?`, b.userID)
-				execOrFatal(t, b.h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('restricted-extra','ws-other-fb',?,'MEMBER','restricted')`, b.userID)
+				execOrFatal(t, b.h.db, `DELETE FROM workspace_members WHERE workspace_id=? AND user_id=?`, b.wsID, b.userID)
+				execOrFatal(t, b.h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('restricted-extra',?,?,'MEMBER','restricted')`, b.wsID, b.userID)
 			}
 			execOrFatal(t, b.h.db, `UPDATE workspace_members SET access_mode='trusted' WHERE user_id=?`, b.userID)
 			if err := usermodel.ProcessFeedbackPreferences(t.Context(), b.h.db); err != nil {
@@ -81,10 +81,12 @@ func TestFeedbackClosureRestrictedTransitionDoesNotResurrect(t *testing.T) {
 func TestFeedbackClosureMigrationWithdrawsExistingRestrictedSubjects(t *testing.T) {
 	b := savedClosurePreference(t)
 	// Recreate the pre-upgrade state: recall is hidden but the saved value remains.
-	execOrFatal(t, b.h.db, `DROP TRIGGER feedback_preference_restricted_insert`)
-	execOrFatal(t, b.h.db, `DROP TRIGGER feedback_preference_restricted_update`)
+	execOrFatal(t, b.h.db, `DROP TRIGGER feedback_preference_restricted_insert;
+CREATE TRIGGER feedback_preference_restricted_insert AFTER INSERT ON workspace_members BEGIN SELECT 1; END;
+DROP TRIGGER feedback_preference_restricted_update;
+CREATE TRIGGER feedback_preference_restricted_update AFTER UPDATE OF access_mode ON workspace_members BEGIN SELECT 1; END;`)
 	execOrFatal(t, b.h.db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE user_id=?`, b.userID)
-	migration, err := os.ReadFile("../database/migrations/20261015165023_withdraw_restricted_preferences.sql")
+	migration, err := os.ReadFile("../database/migrations/20261015203343_scope_preference_withdrawal_workspace.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

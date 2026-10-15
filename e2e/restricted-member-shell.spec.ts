@@ -250,6 +250,7 @@ for (const width of [1280, 390]) {
     let revoked = false, revision = 1, writes = 0
     let status = "PLANNING"
     let hasReply = false, loseCommentAck = false
+    let refsFailure: "network" | "server" | null = null
     const commentKeys = new Set<string>()
     const agent = { id: "entity-agent", slug: "_", name: "Jamie", status: "IDLE", crew_id: "crew", crew_name: "Platform", role: "lead", current_user_can_chat: true }
     const issue = () => ({ id: "entity-1", identifier: "ENG-1", workspace_id: "test-workspace-id", crew_id: "crew", title: "Synthetic title", status, priority: "none", revision, aggregate_revision: revision, allowed_actions: ["view", "comment", "change_status"], labels: [], created_at: "2026-10-13T09:00:00Z", updated_at: "2026-10-13T09:00:00Z" })
@@ -276,6 +277,8 @@ for (const width of [1280, 390]) {
         ...(hasReply ? [{ id: "reply", role: "assistant", content: "Here is the result.", run_id: "entity-run", ts: "2026-10-13T09:01:00Z" }] : []),
       ] }
       else if (path.endsWith("/entity-refs")) {
+        if (refsFailure === "network") return route.abort("failed")
+        if (refsFailure === "server") return route.fulfill({ status: 500, contentType: "application/json", body: "{}" })
         if (revoked) { code = 404; body = {} }
         else body = { ...fixture, contract_version: 1, has_more: false, snapshot_complete: true, refs: [{ ...fixture.refs[0], anchor: { ...fixture.refs[0].anchor, run_status: hasReply ? "completed" : "failed" }, current: { ...fixture.refs[0].current, status, revision, aggregate_revision: revision, allowed_actions: issue().allowed_actions } }] }
       }
@@ -344,6 +347,29 @@ for (const width of [1280, 390]) {
     await page.getByRole("button", { name: "Save changes", exact: true }).click()
     await expect(page.getByRole("button", { name: "Save changes", exact: true })).toHaveCount(0)
     await expect(panelComment).toHaveValue("Comment survives a field save")
+
+    // Real production DOM must survive a completed failed check, not only an
+    // in-flight fetch. Both kinds of outage used to unmount this editor.
+    for (const failure of ["server", "network"] as const) {
+      refsFailure = failure
+      await panelComment.focus()
+      await panelComment.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(3, 9))
+      const editor = await panelComment.elementHandle()
+      const completed = failure === "server"
+        ? page.waitForResponse((r) => new URL(r.url()).pathname.endsWith("/entity-refs") && r.status() === 500).then((r) => r.finished())
+        : page.waitForEvent("requestfailed", { predicate: (r) => new URL(r.url()).pathname.endsWith("/entity-refs") })
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")))
+      await completed
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+      await expect(page.getByText("Checking current access…", { exact: true })).toBeVisible()
+      expect(await editor!.evaluate((el: HTMLTextAreaElement) => ({ same: el.isConnected && document.activeElement === el, start: el.selectionStart, end: el.selectionEnd, value: el.value }))).toEqual({ same: true, start: 3, end: 9, value: "Comment survives a field save" })
+      refsFailure = null
+      const recovered = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith("/entity-refs") && r.ok())
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")))
+      await recovered
+      await expect(page.getByText("Checking current access…", { exact: true })).toHaveCount(0)
+      await expect(panelComment).toHaveValue("Comment survives a field save")
+    }
 
     if (width === 1280) {
       // An open Issue belongs to Work and must not cover other side panels.
