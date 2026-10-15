@@ -73,3 +73,16 @@ directory is therefore a support boundary: operators must not replace or remove
 the socket while the service process is alive. There is no custody guarantee
 against replacement by another actor able to write that directory. The service
 adds no separate unlink on shutdown. Container packaging remains unqualified.
+
+The supplemental `Docs foundation` workflow builds this Dockerfile and runs
+`DOCS_IMAGE=<local-image> node tools/docs-service/image-smoke.mjs` against that
+exact image. The smoke uses a private, controlled authority fixture to exercise
+matching-UID mode-0600 access, the packaged healthcheck, unavailable-authority
+readiness, drain and graceful container restart with a read-only filesystem and
+no network. It does not prove Go durability or power-loss behavior; the separate
+real Go/Node process integration covers persistence and process crashes.
+
+The native suite also holds an authority response until explicitly released,
+proves the 32-operation per-document queue rejects overflow, and verifies that
+drain waits for all admitted failed responses. This is controlled downstream
+backpressure and failure injection, not a slow-disk throughput measurement.

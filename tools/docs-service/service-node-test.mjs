@@ -98,3 +98,41 @@ test('checkpoint and restore retries return original durable receipt; authority 
     await new Promise(resolve=>authority.close(resolve));assert.equal((await call(socket,'/health/ready')).status,503);
   }finally{await service.close();await new Promise(resolve=>authority.close(resolve));await rm(dir,{recursive:true});}
 });
+
+test('blocked persistence bounds per-document queue and drain waits for failed acknowledgements', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'docs-backpressure-'));
+  const socket = join(dir, 's'), authoritySocket = join(dir, 'a'), tokenFile = join(dir, 't');
+  await writeFile(tokenFile, secret, { mode: 0o600 });
+  let unblock; const blocked = new Promise(resolve => { unblock = resolve; });
+  let entered; const started = new Promise(resolve => { entered = resolve; });
+  let calls = 0;
+  const authority = http.createServer(async (req, res) => {
+    for await (const chunk of req) void chunk;
+    if (req.method === 'GET') return res.end(JSON.stringify({ protocol: 1, schema: 1 }));
+    calls++; entered(); await blocked;
+    res.writeHead(503); res.end(JSON.stringify({ error: 'controlled persistence failure' }));
+  });
+  await new Promise(resolve => authority.listen(authoritySocket, resolve));
+  const service = await startService({ socket, authoritySocket, tokenFile });
+  const pending = [];
+  try {
+    pending.push(call(socket, '/v1/documents/p/read', {})); await started;
+    // Each admission completes body parsing before reaching the bounded queue.
+    for (let i = 1; i < 32; i++) pending.push(call(socket, '/v1/documents/p/read', {}));
+    // Socket ordering on one endpoint ensures this request follows those above.
+    assert.equal((await call(socket, '/v1/documents/p/read', {})).status, 429);
+    assert.equal(calls, 1, 'same-key operations must serialize behind blocked persistence');
+    assert.equal((await call(socket, '/health/ready')).status, 200);
+    let drained = false; const draining = call(socket, '/drain', {}).then(result => { drained = true; return result; });
+    assert.equal((await call(socket, '/health/ready')).status, 503);
+    assert.equal((await call(socket, '/v1/documents/other/read', {})).status, 503);
+    assert.equal(drained, false, 'drain must wait for outstanding authority acknowledgements');
+    unblock();
+    assert.ok((await Promise.all(pending)).every(result => result.status === 503));
+    assert.equal((await draining).status, 200);
+    assert.equal(calls, 32, 'failed acknowledgement must not poison subsequent queue operations');
+  } finally {
+    unblock(); await Promise.allSettled(pending); await service.close();
+    await new Promise(resolve => authority.close(resolve)); await rm(dir, { recursive: true });
+  }
+});
