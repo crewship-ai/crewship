@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"testing"
@@ -143,6 +144,106 @@ func TestChatEntityInvalidationsDeletionCommitAndRollback(t *testing.T) {
 				if frames := entityHintFrames(t, hub, observer, chat); len(frames) != wantHints {
 					t.Fatalf("deletion hints in %s: %+v", chat, frames)
 				}
+			}
+		})
+	}
+}
+
+func TestChatEntityInvalidationsShowDoesNotAnnounceOtherChatActivity(t *testing.T) {
+	f := newChatIssueFixture(t)
+	seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, "ENG-1", "BACKLOG")
+	seedChatIssueRun(t, f.h, f.workspace, f.agent, f.user, "other-chat", "other-run")
+	body := map[string]any{"workspace_id": f.workspace, "agent_id": f.agent, "author_run_id": "other-run", "operation_key": "show-other"}
+	chatIssueJSON(t, chatIssueCall(t, f.h.Show, "POST", "ENG-1", body), 201)
+	hub := startedTestHub(t)
+	f.h.hub = hub
+	hub.SetChannelAuthorizer(ws.NewDBChannelAuthorizer(f.h.db))
+	a := hub.AddObserver("session:"+f.chat, f.user, 16)
+	defer hub.RemoveObserver("session:"+f.chat, a)
+	b := hub.AddObserver("session:other-chat", f.user, 16)
+	defer hub.RemoveObserver("session:other-chat", b)
+	body["author_run_id"] = f.run
+	body["operation_key"] = "show-current"
+	chatIssueJSON(t, chatIssueCall(t, f.h.Show, "POST", "ENG-1", body), 201)
+	if frames := entityHintFrames(t, hub, a, f.chat); len(frames) != 1 || frames[0].Type != "chat.entity_refs_changed" {
+		t.Fatalf("show origin: %+v", frames)
+	}
+	if frames := entityHintFrames(t, hub, b, "other-chat"); len(frames) != 0 {
+		t.Fatalf("show disclosed to other chat: %+v", frames)
+	}
+}
+
+func TestChatEntityInvalidationsCommentOnlyAnnouncesOriginReferences(t *testing.T) {
+	f := newChatIssueFixture(t)
+	seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, "ENG-1", "BACKLOG")
+	seedChatIssueRun(t, f.h, f.workspace, f.agent, f.user, "other-chat", "other-run")
+	body := map[string]any{"workspace_id": f.workspace, "agent_id": f.agent, "author_run_id": "other-run", "operation_key": "show-other"}
+	chatIssueJSON(t, chatIssueCall(t, f.h.Show, "POST", "ENG-1", body), 201)
+	hub := startedTestHub(t)
+	f.h.hub = hub
+	hub.SetChannelAuthorizer(ws.NewDBChannelAuthorizer(f.h.db))
+	a := hub.AddObserver("session:"+f.chat, f.user, 16)
+	defer hub.RemoveObserver("session:"+f.chat, a)
+	b := hub.AddObserver("session:other-chat", f.user, 16)
+	defer hub.RemoveObserver("session:other-chat", b)
+	body["author_run_id"] = f.run
+	body["operation_key"] = "comment-current"
+	body["body"] = "Changed here"
+	chatIssueJSON(t, chatIssueCall(t, f.h.CreateComment, "POST", "ENG-1", body), 201)
+	if frames := entityHintFrames(t, hub, a, f.chat); len(frames) != 2 || frames[0].Type != "chat.entity_refs_changed" || frames[1].Type != "issue.revision_changed" {
+		t.Fatalf("comment origin: %+v", frames)
+	}
+	if frames := entityHintFrames(t, hub, b, "other-chat"); len(frames) != 1 || frames[0].Type != "issue.revision_changed" {
+		t.Fatalf("comment disclosed activity to other chat: %+v", frames)
+	}
+}
+
+func TestChatEntityInvalidationsReviewPolicyAndTakeover(t *testing.T) {
+	for _, action := range []string{"review-policy", "take-over"} {
+		t.Run(action, func(t *testing.T) {
+			f := newChatIssueFixture(t)
+			seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, "ENG-1", "TODO")
+			chatIssueJSON(t, chatIssueCall(t, f.h.Show, "POST", "ENG-1", map[string]any{"workspace_id": f.workspace, "agent_id": f.agent, "author_run_id": f.run, "operation_key": "show"}), 201)
+			hub := startedTestHub(t)
+			hub.SetChannelAuthorizer(ws.NewDBChannelAuthorizer(f.h.db))
+			observer := hub.AddObserver("session:"+f.chat, f.user, 16)
+			defer hub.RemoveObserver("session:"+f.chat, observer)
+			handler := NewIssueHandler(f.h.db, hub, nil, newTestLogger())
+			rr := httptest.NewRecorder()
+			if action == "review-policy" {
+				handler.ReviewPolicy(rr, covIWReq(f.user, f.workspace, "OWNER", "PUT", `{"revision":0,"client_review_required":false}`, f.crew, "ENG-1"))
+			} else {
+				handler.Work(rr, covIWReq(f.user, f.workspace, "OWNER", "POST", `{"revision":0,"operation_id":"take-hint","action":"take_over"}`, f.crew, "ENG-1"))
+			}
+			if rr.Code != 200 {
+				t.Fatalf("mutation: %d %s", rr.Code, rr.Body.String())
+			}
+			if frames := entityHintFrames(t, hub, observer, f.chat); len(frames) != 1 || frames[0].Type != "issue.revision_changed" {
+				t.Fatalf("mutation hints: %+v", frames)
+			}
+		})
+	}
+}
+
+func TestChatEntityInvalidationsAgentRelations(t *testing.T) {
+	for _, relation := range []string{"relates_to", "sub_issue_of"} {
+		t.Run(relation, func(t *testing.T) {
+			f := newChatIssueFixture(t)
+			for _, ident := range []string{"ENG-1", "ENG-2"} {
+				seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, ident, "BACKLOG")
+				chatIssueJSON(t, chatIssueCall(t, f.h.Show, "POST", ident, map[string]any{"workspace_id": f.workspace, "agent_id": f.agent, "author_run_id": f.run, "operation_key": "show-" + ident}), 201)
+			}
+			hub := startedTestHub(t)
+			f.h.hub = hub
+			hub.SetChannelAuthorizer(ws.NewDBChannelAuthorizer(f.h.db))
+			observer := hub.AddObserver("session:"+f.chat, f.user, 16)
+			defer hub.RemoveObserver("session:"+f.chat, observer)
+			rr := chatIssueCall(t, f.h.CreateRelation, "POST", "ENG-1", map[string]any{"workspace_id": f.workspace, "agent_id": f.agent, "target_identifier": "ENG-2", "relation_type": relation})
+			if rr.Code != 201 {
+				t.Fatalf("relation: %d %s", rr.Code, rr.Body.String())
+			}
+			if frames := entityHintFrames(t, hub, observer, f.chat); len(frames) != 2 || frames[0].Type != "issue.revision_changed" || frames[1].Type != "issue.revision_changed" {
+				t.Fatalf("endpoint hints: %+v", frames)
 			}
 		})
 	}

@@ -17,10 +17,12 @@ type EntityInvalidation struct {
 }
 
 // Called only after a successful commit, never by mutation outbox retries.
+// deletionReceipts is true only when deletion appended a receipt to every
+// referenced chat. Ordinary issue mutations emit revision hints only.
 // Trusted chat viewers have the same workspace-wide issue read boundary as
 // entity-refs today. Keep the visibility predicate shared: a future narrower
 // issue boundary must update both projections before these hints are emitted.
-func broadcastIssueCardInvalidations(ctx context.Context, db *sql.DB, hub *ws.Hub, workspace, issue string, refsChanged bool) {
+func broadcastIssueCardInvalidations(ctx context.Context, db *sql.DB, hub *ws.Hub, workspace, issue string, deletionReceipts bool) {
 	if hub == nil || db == nil || workspace == "" || issue == "" {
 		return
 	}
@@ -55,7 +57,7 @@ func broadcastIssueCardInvalidations(ctx context.Context, db *sql.DB, hub *ws.Hu
 	for _, chat := range chats {
 		// Session subscription and socket-delivery gates recheck each viewer's
 		// live trusted audience. No workspace-wide hint discloses private chat work.
-		if refsChanged {
+		if deletionReceipts {
 			if hub.BroadcastChannelContext(ctx, "session", chat, "chat.entity_refs_changed", EntityInvalidation{entityRefsContractVersion}) != nil {
 				return
 			}
@@ -63,5 +65,13 @@ func broadcastIssueCardInvalidations(ctx context.Context, db *sql.DB, hub *ws.Hu
 		if hub.BroadcastChannelContext(ctx, "session", chat, "issue.revision_changed", EntityInvalidation{entityRefsContractVersion}) != nil {
 			return
 		}
+	}
+}
+
+// A completed chat operation changes only its originating reference list.
+// Other chats may refresh the issue revision, but must not learn chat activity.
+func broadcastChatEntityRefsInvalidation(ctx context.Context, hub *ws.Hub, chat string) {
+	if hub != nil && chat != "" {
+		_ = hub.BroadcastChannelContext(ctx, "session", chat, "chat.entity_refs_changed", EntityInvalidation{entityRefsContractVersion})
 	}
 }
