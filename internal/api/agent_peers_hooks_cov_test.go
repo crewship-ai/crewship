@@ -204,8 +204,8 @@ func TestCovPH2DeleteAgentPeer_AgentNoCrew(t *testing.T) {
 	h.DeleteAgentPeer(rec, covPH2PeerReq(http.MethodDelete, wsID, userID, map[string]string{
 		"agentId": solo, "userId": userID,
 	}))
-	if rec.Code != http.StatusConflict {
-		t.Errorf("crewless agent: code = %d, want 409 (%s)", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("crewless agent: code = %d, want 204 (%s)", rec.Code, rec.Body.String())
 	}
 }
 

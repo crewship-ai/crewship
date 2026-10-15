@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Personal memory stays forgotten across access changes.** Clearing all preferences also works for agents without a crew. Switching an account to restricted access withdraws its stored preferences; restoring trusted access does not reactivate them.
+- ⚠️ **Upgrade: restart agent containers after updating the backend and sidecar.** Coordinate an idle window and use `crewship crew restart-agents` so existing containers receive the matching sidecar; old sidecars can fail issue writes. Follow [the execution-authority rollout](RELEASING.md#execution-authority-rollout-3068), including the read-only `doctor execution-origins` audit against the actual stage/production database before upgrade.
+
 - Chat Artifacts includes supported files in the canonical per-run output folder while retaining internal, hidden-directory and attachment filters.
 - **Mobile table selections return to Chat without covering the draft.** Asking about selected rows closes the artifact overlay and preserves existing draft text. Switching between Chat, Work and Artifacts keeps previews within the selected panel and retains their tabs.
 

@@ -105,7 +105,7 @@ func TestFeedbackPreferenceSourceAndConsent(t *testing.T) {
 	for _, tc := range []struct{ name, mutation, want string }{
 		{"group", `UPDATE chats SET visibility='group'`, "not_eligible"},
 		{"other opener", `UPDATE chats SET created_by='user-other-fb'`, "not_eligible"},
-		{"restricted", `UPDATE workspace_members SET role='MEMBER',access_mode='restricted'`, "not_eligible"},
+		{"restricted", `UPDATE workspace_members SET role='MEMBER',access_mode='restricted'`, "withdrawn"},
 		{"deleted agent", `UPDATE agents SET deleted_at=datetime('now')`, "not_eligible"},
 		{"profile off", `INSERT INTO app_settings(key,value) VALUES('memory.user_model_profile','off')`, "disabled"},
 	} {
