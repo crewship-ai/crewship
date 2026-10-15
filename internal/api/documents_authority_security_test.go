@@ -173,4 +173,11 @@ func TestDocumentAuthoritySecurityStartupAndIsolation(t *testing.T) {
 			t.Fatalf("public mux private operation=%d want404", recorder.Code)
 		}
 	})
+	t.Run("revoked human session cannot read through private state dispatch", func(t *testing.T) {
+		request(t, serviceSecret, workspace, 200)
+		if err := sessions.NewDBStore(h.db).Revoke(t.Context(), session.ID, "synthetic security regression"); err != nil {
+			t.Fatal(err)
+		}
+		request(t, serviceSecret, workspace, 401)
+	})
 }
