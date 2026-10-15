@@ -32,6 +32,9 @@ try {
   const source = new Uint8Array(bytes).buffer
   worker.postMessage({ bytes: source }, [source])
  }), Array.from(bytes))
+ const fixture = await run(await readFile(resolve('components/features/chat/artifact/__tests__/fixtures/openpyxl-hyperlink-chartsheet.xlsx')))
+ assert.deepEqual(fixture.workbook.sheets.map(sheet => sheet.name), ['Data', 'After chart'])
+ assert.deepEqual(fixture.workbook.sheets[0].table.rows, [['Žofie', '42']])
  const valid = await run(archive('<row r="2"><c r="A2" t="inlineStr"><is><t> Unicode Žofie </t></is></c><c r="B2"><f>1+1</f><v>2</v></c><c r="C2"><f>1+2</f></c></row>'))
  assert.equal(valid.workbook.sheets[0].name, 'Žofie')
  assert.deepEqual(valid.workbook.sheets[0].table.rows[1], [' Unicode Žofie ', '2', '[Formula not evaluated: no cached result]'])
