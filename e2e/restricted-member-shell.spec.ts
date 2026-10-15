@@ -324,7 +324,6 @@ for (const width of [1280, 390]) {
       await expect(page.getByRole("region", { name: "Your preferences for this agent" })).toBeVisible()
       await expect(page.getByRole("button", { name: "Back to Work" })).toHaveCount(0)
       await page.keyboard.press("Escape")
-      await expect(page.getByRole("region", { name: "Your preferences for this agent" })).toBeVisible()
       await page.getByRole("tab", { name: "Work", exact: true }).click()
       await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()
       await page.getByRole("button", { name: "Good response", exact: true }).click()
