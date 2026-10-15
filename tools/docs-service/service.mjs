@@ -24,7 +24,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   const build = createHash('sha256');
   for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'service.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
   const identity = { protocol: PROTOCOL, schema: VERSION, build: build.digest('hex') };
-  const owner = randomUUID(); const documents = new Map(); let queued = 0; let draining = false;
+  const owner = randomUUID(); const documents = new Map(); let queued = 0; let draining = false; let admitted = 0; const decoding = new Set();
   async function go(page, operation, context, data = {}) {
     return new Promise((resolve, reject) => {
       const bytes = JSON.stringify(data);
@@ -110,11 +110,12 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   }
   const timer = setInterval(() => { for (const [key, entry] of documents) if (!entry.queued && Date.now() - entry.touched >= idleMs) documents.delete(key); }, Math.min(idleMs, 1000)); timer.unref();
   async function drain() {
-    draining = true; let timeout;
+    draining = true; for (const request of decoding) request.destroy(); let timeout;
     try { await Promise.race([Promise.all([...documents.values()].map(entry => entry.tail)), new Promise((_, reject) => { timeout = setTimeout(() => reject(fault(503, 'drain timeout')), drainTimeoutMs); })]); documents.clear(); }
     finally { clearTimeout(timeout); }
   }
   const server = http.createServer(async (req, res) => {
+    let counted = false;
     res.setHeader('Cache-Control', 'no-store');
     const reply = (status, value) => { if (!res.destroyed) { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); } };
     try {
@@ -128,13 +129,15 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         return reply(200, { ready: true, ...identity });
       }
       if (req.method === 'POST' && req.url === '/drain') { await drain(); return reply(200, { drained: true }); }
+      if(draining){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'service draining');}
       const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(initialize|read|patch|checkpoint|restore)$/.exec(req.url);
       if (req.method !== 'POST' || !match) throw fault(404, 'unknown operation');
       const context = { workspace: req.headers['x-workspace-id'], authorization: req.headers.authorization };
       if (!id(context.workspace) || typeof context.authorization !== 'string' || !/^Bearer \S+$/.test(context.authorization)) throw fault(401, 'workspace and bearer required');
-      const request = await body(req);
+      if (admitted >= 128) throw fault(429, 'request admission limit'); admitted++; counted = true;
+      let request; decoding.add(req); try { request = await body(req); } finally { decoding.delete(req); }
       reply(200, await enqueue(`${context.workspace}/${match[1]}`, () => execute(match[1], match[2], context, request)));
-    } catch (error) { reply(error.status || 400, { error: error.status ? error.message : 'invalid document operation' }); }
+    } catch (error) { reply(error.status || 400, { error: error.status ? error.message : 'invalid document operation' }); } finally { if (counted) admitted--; }
   });
   server.requestTimeout = timeoutMs * 8; server.headersTimeout = timeoutMs; server.keepAliveTimeout = 1000;
   // Refuse existing paths: deleting another listener's socket would bypass its writer fence.
