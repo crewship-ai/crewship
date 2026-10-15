@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/access"
 )
@@ -41,6 +43,16 @@ func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	id := req.PathValue("issueId")
+	search := req.URL.Query().Get("q")
+	if !utf8.ValidString(search) || utf8.RuneCountInString(search) > 256 {
+		replyError(w, http.StatusBadRequest, "Search must contain at most 256 valid Unicode characters")
+		return
+	}
+	search = strings.TrimSpace(search)
+	if id != "" && req.URL.Query().Has("q") {
+		replyError(w, http.StatusBadRequest, "Search is only available when listing shared issues")
+		return
+	}
 	operation := "list"
 	if id != "" {
 		operation = "read"
@@ -65,7 +77,8 @@ func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
 		err = r.db.QueryRowContext(req.Context(), `SELECT COUNT(*)
             FROM missions m JOIN projects p ON p.id=m.project_id AND p.workspace_id=m.workspace_id
             JOIN live_access_grants g ON g.project_id=p.id AND g.resource_kind='project' AND g.member_id=? AND g.operation='list'
-            WHERE m.workspace_id=? AND m.mission_type='issue' AND (?='' OR p.id=?)`, member.ID, workspace, project, project).Scan(&total)
+            WHERE m.workspace_id=? AND m.mission_type='issue' AND (?='' OR p.id=?)
+            AND (?='' OR instr(lower(m.title),lower(?))>0 OR instr(lower(COALESCE(m.identifier,m.id)),lower(?))>0)`, member.ID, workspace, project, project, search, search, search).Scan(&total)
 		if err != nil {
 			replyError(w, 500, "Issues unavailable")
 			return
@@ -79,7 +92,8 @@ func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
  FROM missions m JOIN projects p ON p.id=m.project_id AND p.workspace_id=m.workspace_id
  JOIN live_access_grants g ON g.project_id=p.id AND g.resource_kind='project' AND g.member_id=? AND g.operation=?
  WHERE m.workspace_id=? AND m.mission_type='issue' AND (?='' OR m.id=? OR m.identifier=?) AND (?='' OR p.id=?)
- ORDER BY m.created_at DESC,m.id LIMIT ? OFFSET ?`, member.ID, member.ID, member.ID, member.ID, member.ID, member.ID, operation, member.ID, operation, workspace, id, id, id, project, project, limit, offset)
+ AND (?='' OR instr(lower(m.title),lower(?))>0 OR instr(lower(COALESCE(m.identifier,m.id)),lower(?))>0)
+ ORDER BY m.created_at DESC,m.id LIMIT ? OFFSET ?`, member.ID, member.ID, member.ID, member.ID, member.ID, member.ID, operation, member.ID, operation, workspace, id, id, id, project, project, search, search, search, limit, offset)
 	if err != nil {
 		replyError(w, 500, "Issues unavailable")
 		return

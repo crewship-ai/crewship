@@ -156,14 +156,20 @@ Guest Issues use dedicated projections:
 CLI: `crewship issue shared --project PROJECT_ID` lists a shared project;
 `crewship issue shared ISSUE_ID` reads its current detail. `--limit` and
 `--offset` page the catalog without using shared workspace issue endpoints.
+`--search TEXT` filters shared issue titles and identifiers, without searching
+private descriptions or comments. It is only valid for the collection command.
 
-The list accepts `project_id`, `limit` and `offset`, filters by project.list in
-one SQL query and returns identifiers, titles, status and project identity. The
-detail accepts an issue ID or identifier, requires project.read and adds its
-description. Neither returns crew/agent references, comments, activity, relations
-or run history. Foreign and revoked details return 404. The shared issue board,
-search, statistics and mutation routes remain closed to Guests. Collection
-`X-Total-Count` counts the filtered total before pagination; the next-offset header supports pagination.
+The list accepts `project_id`, `limit`, `offset` and optional `q` (up to 256
+Unicode characters, trimmed). Search is a literal substring of title or identifier,
+using SQLite ASCII case folding; `%` and `_` are literal characters. Search and
+its total count use the same live project.list grants and workspace filter.
+The list returns identifiers, titles, status and project identity. The detail
+accepts an issue ID or identifier, requires project.read and adds its description. Neither returns crew/agent references, comments, activity, relations
+or run history. Foreign and revoked details return 404. The shared workspace
+issue board, global search and statistics routes remain closed to Guests;
+searching this dedicated Guest projection does not open them. Collection
+`X-Total-Count` counts the filtered total before pagination; the next-offset header
+supports pagination.
 
 Crews, credentials, routine Edit and shared-output audiences, full Issues Manage, explicit
 Page-action selection and a Pages grant migration remain separate work. This
