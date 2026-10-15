@@ -305,3 +305,12 @@ func TestPageAssetRealRouterAuthentication(t *testing.T) {
 	}
 	artifactExpect(t, call(http.MethodGet, "/api/v1/pages/asset-router/assets/"+a.ID+"/other?workspace_id="+workspace, nil, true), 404)
 }
+
+func TestPageAssetRequiresMutationID(t *testing.T) {
+	h, _, _, ws, user, _ := artifactFixture(t)
+	w := uploadAsset(t, h, ws, user, "report", "", pageAssetPNG(t))
+	artifactExpect(t, w, 400)
+	if assetBlobFiles(t, h.artifactStoragePath) != 0 {
+		t.Fatal("missing identity published bytes")
+	}
+}

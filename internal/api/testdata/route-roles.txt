@@ -336,6 +336,7 @@ POST /api/v1/pages/{slug}/artifact/requests roleSelf
 POST /api/v1/pages/{slug}/artifact/requests/{requestId}/cancel roleSelf
 POST /api/v1/pages/{slug}/artifact/restore roleSelf
 POST /api/v1/pages/{slug}/artifact/revisions roleSelf
+POST /api/v1/pages/{slug}/assets roleSelf
 POST /api/v1/pages/{slug}/artifact/threads roleSelf
 POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies roleSelf
 POST /api/v1/pages/{slug}/document/checkpoint roleSelf
