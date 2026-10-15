@@ -77,6 +77,8 @@ interface Props {
    */
   editable?: boolean
   actions?: readonly IssueAction[]
+  /** Embedded chat keeps work execution on the canonical issue workflow. */
+  executionActions?: boolean
   /** Chat hosts reauthorize every snapshot while retaining local drafts. */
   authorizationKey?: number
   rechecking?: boolean
@@ -110,7 +112,7 @@ export function IssueDetailSurface({
   workspaceId,
   identifier,
   editable = true,
-  actions, authorizationKey, rechecking, onUnauthorized, write, feedback,
+  actions, executionActions = true, authorizationKey, rechecking, onUnauthorized, write, feedback,
   viewerInitial,
   onChanged,
   onNotFound,
@@ -888,11 +890,12 @@ export function IssueDetailSurface({
       createLabel: can("edit_fields") ? createLabel : undefined,
       addRelation,
       removeRelation,
-      runRoutine: can("start_work") && issue.routine_slug ? runRoutine : undefined,
+      runRoutine: executionActions && can("start_work") && issue.routine_slug ? runRoutine : undefined,
       busy: busy || routineRunBusy,
     }
   }, [
     editable,
+    executionActions,
     allowed,
     can,
     issue,
@@ -968,7 +971,7 @@ export function IssueDetailSurface({
     <IssueCardDetail
       issue={shown}
       filesPanel={<IssueFilesCard key={issue.id} issue={issue} editable={can("attach_files")} />}
-      workPanel={<IssueWorkPanel key={issue.id} issue={issue} agents={roster.agents} editable={editable} allowedActions={allowed} onChanged={refresh} latestOutcome={runs[0]?.outcome} />}
+      workPanel={<IssueWorkPanel key={issue.id} issue={issue} agents={roster.agents} editable={executionActions && editable} allowedActions={executionActions ? allowed : []} onChanged={refresh} latestOutcome={runs[0]?.outcome} />}
       unavailable={subFailed}
       comments={comments}
       olderComments={commentsHasMore ? <Button size="sm" variant="outline" disabled={olderBusy} onClick={() => void loadOlderComments()}>{olderBusy ? "Loading…" : "Load older comments"}</Button> : undefined}
@@ -988,7 +991,7 @@ export function IssueDetailSurface({
       viewerInitial={viewerInitial}
       edit={edit}
       actions={
-        (editable || !!allowed?.length) ? (
+        executionActions && (editable || !!allowed?.length) ? (
           <IssueWorkflowActions issue={issue} onAction={runWorkflow} busy={busy} allowedActions={allowed} />
         ) : undefined
       }

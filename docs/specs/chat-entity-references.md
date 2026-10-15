@@ -499,7 +499,10 @@ sheet on phones. A completed snapshot independently reauthorizes that detail
 and clears its previous server data. Detail freshness is its own fetch time;
 run and automation data have separate fetches. Allowed actions are intersected
 with the detail's current server permissions and govern individual controls.
-Legacy detail callers retain the existing `editable` fallback.
+Legacy detail callers retain the existing `editable` fallback. Direct work
+execution, handoff and workflow controls are excluded from the initial chat
+embed; the authorized issue-page link opens the existing workflow. This slice
+does not implement a budget or approval preflight for starting work from chat.
 
 Chat field editors and comments send stable idempotency keys. Fields additionally
 send the revision captured when editing began. Validation retains input;
@@ -510,6 +513,6 @@ until that result is resolved. Local drafts are separate from authorized server
 data and survive reconciliation without keeping protected fields displayed.
 
 Browser acceptance uses the production static export with handler-verified
-reference fixtures: `pnpm exec playwright test --config=playwright.restricted.config.ts e2e/chat-issue-cards.spec.ts`.
+reference fixtures: `pnpm exec playwright test --config=playwright.restricted.config.ts`.
 It requires a preceding frontend build and an installed Chromium, and contacts
 no live application or model provider.
