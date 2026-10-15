@@ -22,6 +22,7 @@ import (
 // cursor starts a fresh replacement snapshot, deliberately avoiding a guessed
 // grant fingerprint. No internal sequence or hidden-object count is exposed.
 type EntityRefPage struct {
+	ContractVersion  int                 `json:"contract_version"`
 	Reset            bool                `json:"reset"`
 	NextCursor       string              `json:"next_cursor"`
 	SnapshotID       string              `json:"snapshot_id"`
@@ -269,7 +270,7 @@ func (r *Router) chatEntityRefs(w http.ResponseWriter, req *http.Request) {
 		replyError(w, 503, "entity_refs_unavailable")
 		return
 	}
-	page := EntityRefPage{Reset: reset, SnapshotID: c.Snapshot, Refs: []EntityRefResponse{}, HasMore: len(entries) > limit}
+	page := EntityRefPage{ContractVersion: entityRefsContractVersion, Reset: reset, SnapshotID: c.Snapshot, Refs: []EntityRefResponse{}, HasMore: len(entries) > limit}
 	if page.HasMore {
 		entries = entries[:limit]
 	}

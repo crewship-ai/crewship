@@ -18,7 +18,7 @@ func TestAcceptance_ChatEntityRefsAndOperationGet(t *testing.T) {
 		calls <- r.Method + " " + r.URL.RequestURI()
 		switch r.URL.Path {
 		case "/api/v1/chats/c_1/entity-refs":
-			_, _ = w.Write([]byte(`{"reset":true,"next_cursor":"opaque-next","snapshot_id":"snapshot-1","snapshot_complete":true,"has_more":false,"refs":[]}`))
+			_, _ = w.Write([]byte(`{"contract_version":1,"reset":true,"next_cursor":"opaque-next","snapshot_id":"snapshot-1","snapshot_complete":true,"has_more":false,"refs":[]}`))
 		case "/api/v1/operations/op_1":
 			_, _ = w.Write([]byte(`{"id":"op_1","status":"completed","kind":"issue","verb":"created","entity":{"id":"issue-1","identifier":"ENG-1","workspace_id":"ws_test"}}`))
 		default:
@@ -31,7 +31,7 @@ func TestAcceptance_ChatEntityRefsAndOperationGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("chat refs: %v %s", err, out)
 	}
-	if !strings.Contains(out, "opaque-next") || !strings.Contains(out, "snapshot_complete") {
+	if !strings.Contains(out, "contract_version") || !strings.Contains(out, "opaque-next") || !strings.Contains(out, "snapshot_complete") {
 		t.Fatal(out)
 	}
 	call := <-calls

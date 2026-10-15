@@ -18,6 +18,7 @@ package api
 // tenant's attachment id confirms the id exists, which is the whole disclosure.
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -539,6 +540,7 @@ func (h *AttachmentHandler) replyAttachError(w http.ResponseWriter, r *http.Requ
 func (h *AttachmentHandler) publishAttachmentMutation(missionID, wsID string) {
 	// Metadata and durable audit intent were committed together by the store.
 	h.events().mutationDelivery().drainCommittedIssueMutation(wsID)
+	broadcastIssueCardInvalidations(context.Background(), h.db, h.hub, wsID, missionID, false)
 	broadcastWorkspaceEvent(h.hub, wsID, "issue.updated", map[string]string{"id": missionID})
 }
 
