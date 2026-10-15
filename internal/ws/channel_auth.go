@@ -75,7 +75,7 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 
 	// Token/replay frames dominate delivery checks. Resolve both the global
 	// ceiling and exact audience in one indexed SQL snapshot, without a cache.
-	if chType == "session" {
+	if chType == "session" || chType == "chat-hints" {
 		return a.isSessionOwner(ctx, userID, chID)
 	}
 	restricted, err := (access.Store{DB: a.db}).HasRestrictedMembership(ctx, userID)

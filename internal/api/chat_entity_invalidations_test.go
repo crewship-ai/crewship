@@ -15,7 +15,12 @@ import (
 // dispatched; absence checks need no arbitrary sleep.
 func entityHintFrames(t *testing.T, hub *ws.Hub, observer *ws.Observer, chat string) []ws.ServerMessage {
 	t.Helper()
-	hub.BroadcastChannel("session", chat, "test.sentinel", nil)
+	return entityHintFramesOnChannel(t, hub, observer, "session:"+chat)
+}
+
+func entityHintFramesOnChannel(t *testing.T, hub *ws.Hub, observer *ws.Observer, channel string) []ws.ServerMessage {
+	t.Helper()
+	hub.Broadcast(channel, ws.ServerMessage{Type: "test.sentinel", Channel: channel})
 	var frames []ws.ServerMessage
 	deadline := time.After(3 * time.Second)
 	for {
@@ -28,7 +33,7 @@ func entityHintFrames(t *testing.T, hub *ws.Hub, observer *ws.Observer, chat str
 			if frame.Type == "test.sentinel" {
 				return frames
 			}
-			if frame.Type == "chat.entity_refs_changed" || frame.Type == "issue.revision_changed" {
+			if frame.Type == "chat_event" || frame.Type == "chat.entity_refs_changed" || frame.Type == "issue.revision_changed" {
 				frames = append(frames, frame)
 			}
 		case <-deadline:
@@ -246,5 +251,25 @@ func TestChatEntityInvalidationsAgentRelations(t *testing.T) {
 				t.Fatalf("endpoint hints: %+v", frames)
 			}
 		})
+	}
+}
+
+func TestChatEntityInvalidationsDedicatedChannelOmitsRunFrames(t *testing.T) {
+	f := newChatIssueFixture(t)
+	seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, "ENG-1", "BACKLOG")
+	hub := startedTestHub(t)
+	f.h.hub = hub
+	hub.SetChannelAuthorizer(ws.NewDBChannelAuthorizer(f.h.db))
+	channel := "chat-hints:" + f.chat
+	if allowed, err := hub.CanSubscribeChannel(t.Context(), f.user, channel); err != nil || !allowed {
+		t.Fatalf("hint subscription: %v %v", allowed, err)
+	}
+	observer := hub.AddObserver(channel, f.user, 16)
+	defer hub.RemoveObserver(channel, observer)
+	chatIssueJSON(t, chatIssueCall(t, f.h.Show, "POST", "ENG-1", map[string]any{"workspace_id": f.workspace, "agent_id": f.agent, "author_run_id": f.run, "operation_key": "show"}), 201)
+	hub.BroadcastChannel("session", f.chat, "chat_event", ws.ChatEvent{Type: "text", Content: "run frames stay on session"})
+	frames := entityHintFramesOnChannel(t, hub, observer, channel)
+	if len(frames) != 1 || frames[0].Type != "chat.entity_refs_changed" || frames[0].Channel != channel {
+		t.Fatalf("hint channel: %+v", frames)
 	}
 }

@@ -261,11 +261,15 @@ before displaying it again. Failed synchronization must never be labelled live.
 
 ### WebSocket invalidation hints
 
-Successful writes can emit these `ServerMessage` frames on `session:{chatId}`:
+Successful writes emit these `ServerMessage` hints on `chat-hints:{chatId}`.
+The same hints remain on `session:{chatId}` for existing clients and NDJSON
+streams. Both channels use the exact same current trusted-audience predicate
+at subscription and delivery. Card-only clients subscribe to `chat-hints` to
+avoid receiving session run frames:
 
 ```json
-{"type":"chat.entity_refs_changed","channel":"session:c_1","payload":{"contract_version":1}}
-{"type":"issue.revision_changed","channel":"session:c_1","payload":{"contract_version":1}}
+{"type":"chat.entity_refs_changed","channel":"chat-hints:c_1","payload":{"contract_version":1}}
+{"type":"issue.revision_changed","channel":"chat-hints:c_1","payload":{"contract_version":1}}
 ```
 
 Payloads contain no chat/object IDs, revisions, counts or content. A session

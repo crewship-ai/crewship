@@ -140,6 +140,12 @@ func TestEntityInvalidationDeliveryRechecksTrustedAudience(t *testing.T) {
 			if _, err := db.Exec(`INSERT INTO chat_participants(chat_id,user_id) VALUES('chat-1','u-good')`); err != nil {
 				t.Fatal(err)
 			}
+			auth := NewDBChannelAuthorizer(db)
+			for _, channel := range []string{"session:chat-1", "chat-hints:chat-1"} {
+				if allowed, err := auth.CanSubscribe(t.Context(), "u-good", channel); err != nil || !allowed {
+					t.Fatalf("authorized subscription %s: %v %v", channel, allowed, err)
+				}
+			}
 			hub := newRunningHub(t)
 			hub.SetChannelAuthorizer(NewDBChannelAuthorizer(db))
 			client := &Client{hub: hub, conn: dialClientConn(t), userID: "u-good", ctx: context.Background()}
@@ -151,6 +157,13 @@ func TestEntityInvalidationDeliveryRechecksTrustedAudience(t *testing.T) {
 			}
 			if _, err := db.Exec(tc.revoke); err != nil {
 				t.Fatal(err)
+			}
+			for _, channel := range []string{"session:chat-1", "chat-hints:chat-1"} {
+				subscribe, e1 := auth.CanSubscribe(t.Context(), "u-good", channel)
+				deliver, e2 := auth.CanDeliver(t.Context(), "u-good", channel)
+				if e1 != nil || e2 != nil || subscribe || deliver {
+					t.Fatalf("revoked %s: subscribe=%v deliver=%v errors=%v/%v", channel, subscribe, deliver, e1, e2)
+				}
 			}
 			for _, event := range []string{"chat.entity_refs_changed", "issue.revision_changed"} {
 				frame := []byte(fmt.Sprintf(`{"type":%q,"channel":"session:chat-1","payload":{"contract_version":1}}`, event))

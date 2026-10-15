@@ -58,11 +58,11 @@ func broadcastIssueCardInvalidations(ctx context.Context, db *sql.DB, hub *ws.Hu
 		// Session subscription and socket-delivery gates recheck each viewer's
 		// live trusted audience. No workspace-wide hint discloses private chat work.
 		if deletionReceipts {
-			if hub.BroadcastChannelContext(ctx, "session", chat, "chat.entity_refs_changed", EntityInvalidation{entityRefsContractVersion}) != nil {
+			if broadcastChatHint(ctx, hub, chat, "chat.entity_refs_changed") != nil {
 				return
 			}
 		}
-		if hub.BroadcastChannelContext(ctx, "session", chat, "issue.revision_changed", EntityInvalidation{entityRefsContractVersion}) != nil {
+		if broadcastChatHint(ctx, hub, chat, "issue.revision_changed") != nil {
 			return
 		}
 	}
@@ -72,6 +72,18 @@ func broadcastIssueCardInvalidations(ctx context.Context, db *sql.DB, hub *ws.Hu
 // Other chats may refresh the issue revision, but must not learn chat activity.
 func broadcastChatEntityRefsInvalidation(ctx context.Context, hub *ws.Hub, chat string) {
 	if hub != nil && chat != "" {
-		_ = hub.BroadcastChannelContext(ctx, "session", chat, "chat.entity_refs_changed", EntityInvalidation{entityRefsContractVersion})
+		_ = broadcastChatHint(ctx, hub, chat, "chat.entity_refs_changed")
 	}
+}
+
+// Keep session publication for existing clients and NDJSON stream consumers.
+// Card-only clients subscribe to chat-hints to avoid receiving run frames.
+// Both channels use the exact same trusted chat audience at subscribe/delivery.
+func broadcastChatHint(ctx context.Context, hub *ws.Hub, chat, event string) error {
+	for _, channel := range []string{"session", "chat-hints"} {
+		if err := hub.BroadcastChannelContext(ctx, channel, chat, event, EntityInvalidation{entityRefsContractVersion}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

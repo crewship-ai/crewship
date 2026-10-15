@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Chat issue hints stay within their conversation.** Showing an issue refreshes only the originating chat; issue changes refresh revisions without announcing activity in another chat. Streaming observers recheck current access before receiving frames, and deletion, relation and review-policy changes refresh cards.
+- **Chat issue hints stay within their conversation.** Showing an issue refreshes only the originating chat; issue changes refresh revisions without announcing activity in another chat. Card-only viewers subscribe to a dedicated hint channel, avoiding run-stream traffic. Streaming observers recheck current access before receiving frames, and deletion, relation and review-policy changes refresh cards.
 
 - Chat Artifacts includes supported files in the canonical per-run output folder while retaining internal, hidden-directory and attachment filters.
 - **Mobile table selections return to Chat without covering the draft.** Asking about selected rows closes the artifact overlay and preserves existing draft text. Switching between Chat, Work and Artifacts keeps previews within the selected panel and retains their tabs.
