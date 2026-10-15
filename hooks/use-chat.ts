@@ -53,6 +53,7 @@ export interface TurnPart {
 
 /** A complete turn in the conversation (user message or multi-part assistant response). */
 export interface ChatTurn {
+  runId?: string
   id: string
   role: "user" | "assistant" | "system"
   parts: TurnPart[]
@@ -142,6 +143,7 @@ export interface HistoryPart {
 
 /** @deprecated Legacy flat chat message; use ChatTurn/TurnPart for new code. Kept for history loading compatibility. */
 export interface ChatMessage {
+  runId?: string
   id: string
   role: MessageRole
   content: string
@@ -256,6 +258,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         timestamp: msg.timestamp,
         authorUserId: msg.authorUserId,
         metadata: msg.metadata,
+        runId: msg.runId,
       })
     } else if (msg.role === "system") {
       // Persisted system turns may carry structured parts (e.g. the error
@@ -272,6 +275,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         isStreaming: false,
         timestamp: msg.timestamp,
         metadata: msg.metadata,
+        runId: msg.runId,
       })
     } else if (msg.parts && msg.parts.length > 0) {
       // Modern message: rebuild the turn from its structured parts so the
@@ -285,6 +289,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         isStreaming: false,
         timestamp: msg.timestamp,
         metadata: msg.metadata,
+        runId: msg.runId,
       })
     } else {
       // assistant/tool messages: group consecutive ones into a single turn
@@ -293,7 +298,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         ? msg.eventType
         : msg.eventType === "thinking" ? "thinking" : "text"
 
-      if (lastTurn?.role === "assistant" && !lastTurn.isStreaming) {
+      if (lastTurn?.role === "assistant" && !lastTurn.isStreaming && lastTurn.runId === msg.runId) {
         lastTurn.parts.push({
           id: msg.id,
           type: partType,
@@ -305,6 +310,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         turns.push({
           id: msg.id,
           role: "assistant",
+          runId: msg.runId,
           parts: [{
             id: msg.id,
             type: partType,
@@ -377,6 +383,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   // late-resolving history fetch can't clobber an already-rendered in-flight
   // run (the mount race). loadHistory flips this true and drains.
   const historyLoadedRef = useRef(false)
+  const activeRunIdRef = useRef<string | undefined>(undefined)
   // Refs so the stable onConnect callback (passed to useWebSocket before `send`
   // exists) can resubscribe/resume without being re-created.
   const sendRef = useRef<((msg: WSMessage) => void) | null>(null)
@@ -402,6 +409,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   // loadHistory() once the new session's messages arrive, which performs
   // an atomic replace (including the empty-array case for fresh sessions).
   useEffect(() => {
+    activeRunIdRef.current = undefined
     replySoundSinceRef.current = Date.now()
     replyHasTextRef.current = false
     setIsStreaming(false)
@@ -666,6 +674,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         {
           id: uuid(),
           role: "assistant",
+          runId: activeRunIdRef.current,
           parts: [{ id: uuid(), type: "text" as TurnPartType, content, isStreaming: true, timestamp: new Date() }],
           isStreaming: true,
           timestamp: new Date(),
@@ -1093,6 +1102,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
   // followed on the wire.
   const applyChatEvent = useCallback(
     (eventType: StreamEventType | undefined, content: string, metadata?: Record<string, unknown>) => {
+      if (typeof metadata?.run_id === "string") activeRunIdRef.current = metadata.run_id
       if (eventType === "text" && content.trim()) replyHasTextRef.current = true
       if (eventType === "error" || eventType === "agent_busy") replyHasTextRef.current = false
       if (eventType === "text") {
@@ -1117,6 +1127,13 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         // another sender's message is already being processed for this chat.
         // Reuses the error rendering shape — additive case only, no new UI.
         case "agent_busy": handleErrorEvent(content); break
+      }
+      if (activeRunIdRef.current) {
+        const runId = activeRunIdRef.current
+        setTurns((prev) => {
+          const last = prev.at(-1)
+          return last?.role === "assistant" ? [...prev.slice(0, -1), { ...last, runId }] : prev
+        })
       }
     },
     [

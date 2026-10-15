@@ -294,6 +294,10 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
   const session = useSession()
   const currentUserId = session.data?.user?.id ?? null
+  const artifactScope = JSON.stringify([currentUserId, workspaceId, agentId, sessionId])
+  const artifactContextNonce = useRef(0)
+  const [artifactContext, setArtifactContext] = useState<{ id: number; text: string; scope: string } | null>(null)
+  const askArtifactSelection = useCallback((text: string) => setArtifactContext({ id: ++artifactContextNonce.current, text: `Source agent: ${agentId} · workspace: ${workspaceId}\n${text}`, scope: artifactScope }), [agentId, workspaceId, artifactScope])
   // A restricted account has no WebSocket in any workspace (#2861).
   const sessionRealtime = useAccessMode() === "trusted"
   const canChat = sessionRealtime || agentMeta?.current_user_can_chat === true
@@ -466,6 +470,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       role: string
       content: string
       parts?: HistoryPart[]
+      run_id?: string
       ts: string
       // The server has always returned this and this type has never named it,
       // so every reload dropped it here — the last hop of a chain that is
@@ -538,6 +543,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         role: m.role as "user" | "assistant" | "system" | "tool",
         content: m.content,
         parts: m.parts,
+        runId: m.run_id,
         timestamp: new Date(m.ts),
         metadata: m.metadata,
       })))
@@ -1061,7 +1067,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           initialTab={mobilePanel}
           style={{ width: "100%", height: "100%" }}
         />
-        {executionProfile === "trusted" && <ArtifactPane agentId={agentId} />}
+        {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
       </div>
     )
   }
@@ -1131,6 +1137,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           onSend={onSend}
           onSent={handleSent}
           initialInput={composerInitialInput}
+          contextRequest={artifactContext?.scope === artifactScope ? artifactContext : undefined}
+          onContextApplied={() => setArtifactContext(null)}
           askForm={activeAskForm}
           onCloseAskForm={closeAskForm}
           renderAskTemplate={renderAskTemplate}
@@ -1156,7 +1164,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         )}
         <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
         <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
-        {executionProfile === "trusted" && <ArtifactPane agentId={agentId} />}
+        {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
       </div>
     )
   }
@@ -1258,6 +1266,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           onSend={onSend}
           onSent={handleSent}
           initialInput={composerInitialInput}
+          contextRequest={artifactContext?.scope === artifactScope ? artifactContext : undefined}
+          onContextApplied={() => setArtifactContext(null)}
           mentionMembers={mentionMembers}
           askForm={activeAskForm}
           onCloseAskForm={closeAskForm}
@@ -1265,7 +1275,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         /> : <p role="status" className="border-t px-4 py-4 text-sm text-muted-foreground">You can discover this agent. Ask your administrator for chat access to send messages.</p>}
       </div>
 
-      {executionProfile === "trusted" && <ArtifactPane agentId={agentId} expanded={artifactFocus} />}
+      {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
         <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
