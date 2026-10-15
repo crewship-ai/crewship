@@ -83,3 +83,32 @@ func TestDocumentInitializeFirstStateAndRetryReceiptRemainDistinct(t *testing.T)
 		t.Fatalf("comment limit=%v", comment)
 	}
 }
+
+func TestDocumentSelectionRequestContract(t *testing.T) {
+	contract := documentSchemaCatalog()["POST /api/v1/pages/{slug}/document/requests"].Request
+	required := contract["required"].([]string)
+	for _, want := range []string{"page_id", "base_rev", "targets"} {
+		found := false
+		for _, field := range required {
+			if field == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("request field %s not required", want)
+		}
+	}
+	props := contract["properties"].(map[string]any)
+	targets := props["targets"].(map[string]any)
+	if targets["minItems"] != 1 || targets["maxItems"] != 16 {
+		t.Fatal("selection bounds missing")
+	}
+	item := targets["items"].(map[string]any)
+	if len(item["required"].([]string)) != 5 {
+		t.Fatal("target is not a complete immutable snapshot")
+	}
+	state := documentSchemaComponents()["DocumentState"].(map[string]any)
+	if _, ok := state["properties"].(map[string]any)["page_id"]; !ok {
+		t.Fatal("public state lacks Page identity")
+	}
+}

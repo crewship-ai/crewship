@@ -4723,6 +4723,9 @@
             },
             "type": "array"
           },
+          "page_id": {
+            "type": "string"
+          },
           "rev": {
             "minimum": 0,
             "type": "integer"
@@ -4746,6 +4749,7 @@
           }
         },
         "required": [
+          "page_id",
           "schema",
           "rev",
           "epoch",
@@ -128246,17 +128250,64 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "page_id": {
+                    "type": "string"
+                  },
                   "submission_id": {
                     "maxLength": 128,
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "targets": {
+                    "description": "Immutable paragraph/heading selections; total quotes at most4096 UTF-16 code units. Original base and hashes must remain valid; no automatic rebase. Current completion supports one textblock and one patch.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "from": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "hash": {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string"
+                        },
+                        "id": {
+                          "maxLength": 80,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "quote": {
+                          "description": "Exact nonempty substring at UTF-16 offsets [from,to); aggregate UTF-16 limit4096 enforced by server.",
+                          "maxLength": 4096,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "to": {
+                          "minimum": 0,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "hash",
+                        "from",
+                        "to",
+                        "quote"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 16,
+                    "minItems": 1,
+                    "type": "array"
                   }
                 },
                 "required": [
+                  "page_id",
                   "chat_id",
                   "instruction",
                   "base_rev",
-                  "submission_id"
+                  "submission_id",
+                  "targets"
                 ],
                 "type": "object"
               }
