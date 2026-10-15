@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useId, useState } from "react"
+import { useId, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { z } from "zod"
 import { apiFetch } from "@/lib/api-fetch"
@@ -24,13 +24,27 @@ class IssueReadError extends Error {
 }
 const accessLost = (error: unknown) => error instanceof IssueReadError && [401, 403, 404].includes(error.status)
 
-async function issueRequest(path: string, method: string, body: unknown) {
-  const response = await apiFetch(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+async function issueRequest(path: string, method: string, body: unknown, key: string) {
+  const response = await apiFetch(path, { method, headers: { "Content-Type": "application/json", "Idempotency-Key": key }, body: JSON.stringify(body) })
   if (!response.ok) {
     const detail = await response.json().catch(() => null)
     throw new Error(response.status === 404 ? "Your project access changed. Ask your administrator to check it." : typeof detail?.error === "string" ? detail.error : "Your change was not saved. Your draft is kept.")
   }
   return response.json()
+}
+
+// Keep an uncertain submission's key for explicit retries. Clear it only
+// after success; a new payload or audience is a new operation.
+function useIssueRequest() {
+  const pending = useRef<{ fingerprint: string; key: string } | null>(null)
+  return {
+    send: (path: string, method: string, body: unknown) => {
+      const fingerprint = JSON.stringify([path, method, body])
+      if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, key: crypto.randomUUID() }
+      return issueRequest(path, method, body, pending.current.key)
+    },
+    clear: () => { pending.current = null },
+  }
 }
 
 /** Guests use dedicated project projections and never mount the trusted board. */
@@ -65,7 +79,7 @@ export function RestrictedIssues({ identifier }: { identifier?: string | null })
     <p className="text-sm text-muted-foreground">Your project grants decide which issues you can list, read and contribute to. Only comments explicitly shared with this project appear here.</p>
     {!identifier && !accessLost(projects.error) && projects.data?.some(project => project.can_contribute) && <NewIssue key={`${session?.user.id}:${workspaceId}`} base={base} projects={projects.data} disabled={projects.isError} />}
     {query.isPending && <p role="status">Loading shared issues…</p>}
-    {query.isError && (!query.data || accessLost(query.error)) && <AccessNotice kind={query.error?.message === "Access unavailable" ? "no-access" : "unavailable"} title="Issues unavailable" description="Your access may have changed. Retry to check your current project grants." context={context} current="issues" onRetry={() => void query.refetch()} />}
+    {query.isError && (!query.data || accessLost(query.error)) && <AccessNotice kind={accessLost(query.error) ? "no-access" : "unavailable"} title="Issues unavailable" description="Your access may have changed. Retry to check your current project grants." context={context} current="issues" onRetry={() => void query.refetch()} />}
     {(!query.isError || !accessLost(query.error)) && query.data?.length === 0 && <AccessNotice kind="no-access" title="No issues shared here" description="There are no issues in the projects shared with you on this page." context={context} current="issues" />}
     {query.isError && query.data && !accessLost(query.error) && <p role="status" className="text-sm text-muted-foreground">Issues could not be refreshed. Your current view and drafts are kept; refresh before posting.</p>}
     {(!query.isError || !accessLost(query.error)) && query.data?.map(issue => <IssueCard key={`${session?.user.id}:${workspaceId}:${issue.id}`} issue={issue} detail={!!identifier} mutationsDisabled={query.isError} base={base} userId={session?.user.id} />)}
@@ -82,11 +96,12 @@ function NewIssue({ base, projects, disabled }: { base: string; projects: Projec
   const [projectId, setProjectId] = useState("")
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
+  const request = useIssueRequest()
   const eligible = projects.filter(project => project.can_contribute)
   const selected = eligible.find(project => project.id === projectId)
   const save = useMutation({
-    mutationFn: () => issueRequest(base, "POST", { project_id: projectId, title, description }),
-    onSuccess: async () => { setTitle(""); setDescription(""); await client.invalidateQueries({ queryKey: ["restricted-issues"] }) },
+    mutationFn: () => request.send(base, "POST", { project_id: projectId, title, description }),
+    onSuccess: async () => { request.clear(); setTitle(""); setDescription(""); await client.invalidateQueries({ queryKey: ["restricted-issues"] }) },
   })
   return <details className="rounded-lg border bg-card p-4"><summary className="cursor-pointer font-medium">New issue</summary>
     <form className="mt-3 space-y-3" onSubmit={event => { event.preventDefault(); if (!disabled && selected?.intake_ready && title.trim() && !save.isPending) save.mutate() }}>
@@ -107,6 +122,8 @@ function IssueCard({ issue, detail, base, userId, mutationsDisabled }: { issue: 
   const [draft, setDraft] = useState("")
   const [audience, setAudience] = useState<{ id: string; name: string } | null>(null)
   const audienceChanged = !!draft && audience?.id !== issue.project_id
+  const commentRequest = useIssueRequest()
+  const statusRequest = useIssueRequest()
   const commentId = useId()
   const path = `${base}/${requireApiPathSegment(issue.id)}`
   const comments = useQuery({
@@ -120,8 +137,8 @@ function IssueCard({ issue, detail, base, userId, mutationsDisabled }: { issue: 
       return parsed.data
     },
   })
-  const send = useMutation({ mutationFn: () => issueRequest(`${path}/comments`, "POST", { body: draft, project_id: audience?.id }), onSuccess: async () => { setDraft(""); setAudience(null); await comments.refetch() } })
-  const status = useMutation({ mutationFn: (next: string) => issueRequest(path, "PATCH", { status: next }), onSuccess: async () => { await client.invalidateQueries({ queryKey: ["restricted-issues"] }) } })
+  const send = useMutation({ mutationFn: () => commentRequest.send(`${path}/comments`, "POST", { body: draft, project_id: audience?.id }), onSuccess: async () => { commentRequest.clear(); setDraft(""); setAudience(null); await comments.refetch() } })
+  const status = useMutation({ mutationFn: (next: string) => statusRequest.send(path, "PATCH", { status: next }), onSuccess: async () => { statusRequest.clear(); await client.invalidateQueries({ queryKey: ["restricted-issues"] }) } })
   return <article className="space-y-3 rounded-lg border bg-card p-4">
     <p className="text-xs text-muted-foreground">{issue.project_name} · {issue.identifier} · {issue.status}</p>
     <h2 className="font-medium">{!detail && issue.can_read ? <Link className="hover:underline" href={`/issues/${encodeURIComponent(issue.identifier)}`}>{issue.title}</Link> : issue.title}</h2>

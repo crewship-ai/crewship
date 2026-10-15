@@ -2359,7 +2359,7 @@ Statuses: 400 invalid crew/body; 401 authentication; 403 workspace/token scope;
 CLI: `crewship project guest-intake --crew CREW_ID`.
 
 Guest issue create, move and comment endpoints accept optional `Idempotency-Key`
-(1–200 nonblank bytes). Reuse the same key and exact body when retrying a lost
+(1–200 nonblank bytes). Guest forms retain an operation key for an uncertain submission and clear it after success; changing content or audience creates a new operation. Reuse the same key and exact body when retrying a lost
 response. A completed replay returns the original result and `Operation-ID` with
 `Idempotency-Replayed: true`, after fresh project grants and audience checks.
 Changed payload or audience returns 409; revoked grants return 404. Activity and
