@@ -80,6 +80,7 @@ func TestCaptureTrustedRevokedThenRestoredAuthorityCannotRefreshRetry(t *testing
 
 func TestCaptureTrustedDeniesUnavailableAuthority(t *testing.T) {
 	for _, tc := range []struct{ name, mutation string }{
+		{"suspended requester", `UPDATE users SET suspended_at='2026-10-13T12:00:00Z' WHERE id='author'`},
 		{"removed membership", `DELETE FROM workspace_members WHERE id='author-member'`},
 		{"removed chat", `DELETE FROM chats WHERE id='private'`},
 		{"deleted agent", `UPDATE agents SET deleted_at='2026-10-02T00:00:00Z' WHERE id='agent'`},
@@ -96,6 +97,28 @@ func TestCaptureTrustedDeniesUnavailableAuthority(t *testing.T) {
 				t.Fatalf("unavailable authority admitted: %+v %v", receipt, err)
 			}
 		})
+	}
+}
+
+func TestCaptureTrustedSuspensionRevokesExistingReceiptInTransaction(t *testing.T) {
+	db := audienceDB(t)
+	receipt, err := CaptureTrusted(t.Context(), db, "private", "author", nil)
+	if err != nil || receipt == nil {
+		t.Fatalf("admission: %+v %v", receipt, err)
+	}
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(t.Context(), `UPDATE users SET suspended_at='2026-10-13T12:00:00Z' WHERE id='author'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []*Receipt{nil, receipt} {
+		actual, err := CaptureTrustedQuery(t.Context(), tx, "private", "author", expected)
+		if err != nil || actual != nil {
+			t.Fatalf("suspended requester admitted: %+v %v", actual, err)
+		}
 	}
 }
 

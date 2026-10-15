@@ -382,3 +382,16 @@ func TestInstanceAdminSeesTheWholeInstance(t *testing.T) {
 		t.Errorf("workspace list must name owners: %s", rr.Body.String())
 	}
 }
+
+func TestEmptySuspensionIsStillSuspended(t *testing.T) {
+	f := newInstanceFixture(t)
+	mustExec(t, f.db, `UPDATE users SET suspended_at='',instance_role='ADMIN' WHERE id='carol'`)
+	if !accountSuspended(t.Context(), f.db, "carol") {
+		t.Fatal("empty non-NULL suspension treated as active")
+	}
+	ok, _, err := instanceAdminStatus(t.Context(), f.db, "carol", "carol@ex.com")
+	if err != nil || ok {
+		t.Fatal("suspended instance admin admitted", ok, err)
+	}
+	wantCode(t, f.do(f.boss, "PUT", "/api/v1/admin/instance/admins/carol", ""), http.StatusConflict, "grant admin to empty suspension")
+}

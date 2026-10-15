@@ -1,0 +1,63 @@
+name: Native Worker Candidate Check
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/native-worker-candidate.yml
+      - cmd/crewship-restricted-native-runner/**
+      - scripts/ci/prepare-native-release.sh
+      - internal/restrictedruntime/**
+      - go.mod
+      - go.sum
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af
+        with:
+          go-version-file: go.mod
+      - name: Test runner and authenticate upstream release context
+        run: |
+          go test ./cmd/crewship-restricted-native-runner -count=1 -timeout 5m
+          bash scripts/ci/prepare-native-release.sh "$RUNNER_TEMP/native-context"
+      - name: Build the candidate without publication
+        run: docker build --pull --tag crewship-native-candidate:verify "$RUNNER_TEMP/native-context"
+      - name: Verify the pinned executable in the final userspace
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --entrypoint /opt/codex \
+            crewship-native-candidate:verify --version | grep -Fx 'codex-cli 0.159.0'
+      - name: Scan before this recipe can be approved
+        id: scan
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          image: crewship-native-candidate:verify
+          fail-build: true
+          severity-cutoff: critical
+          output-format: sarif
+      - name: Record the tested source and local image identity
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          docker image inspect crewship-native-candidate:verify > "$RUNNER_TEMP/native-context/image-inspect.json"
+          printf '%s\n' "$SOURCE_SHA" > "$RUNNER_TEMP/native-context/tested-source.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: native-worker-candidate-check-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/native-context/release-source.json
+            ${{ runner.temp }}/native-context/image-inspect.json
+            ${{ runner.temp }}/native-context/tested-source.txt
+            ${{ steps.scan.outputs.sarif }}
+          if-no-files-found: warn
+          retention-days: 14

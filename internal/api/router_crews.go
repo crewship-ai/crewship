@@ -33,6 +33,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	}
 	ws.SetJournal(r.Journal())
 	ws.invitationJournal = r.journal
+	ws.policyJournal = r.journal
 	ws.SetStorageRoot(r.storagePath)
 	crews := NewCrewHandler(r.db, r.logger)
 	crewSocket := r.socketPath
@@ -139,6 +140,44 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities", roleManage, ws.PatchMemberCapabilities)
 	// openapi: responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access", authed(wsCtx(http.HandlerFunc(ws.GetMemberAccess))))
+	// openapi: responses 200,400,401,403,404,409,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access/effective", authed(wsCtx(http.HandlerFunc(ws.GetMemberEffectiveAccess))))
+	// openapi: responses 200,400,401,403,404,409,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/access/me", authed(wsCtx(http.HandlerFunc(ws.GetOwnEffectiveAccess))))
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}", authed(wsCtx(http.HandlerFunc(r.restrictedProjectDetails))))
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}", roleInline, r.restrictedProjectDetails)
+	// openapi: responses 200,400,401,403,404,409,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones", authed(wsCtx(http.HandlerFunc(r.restrictedProjectMilestones))))
+	// openapi: responses 200,400,401,403,404,409,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}", authed(wsCtx(http.HandlerFunc(r.restrictedProjectMilestones))))
+	// openapi: responses 201,400,401,403,404,409,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones", roleInline, r.restrictedProjectMilestones)
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}", roleInline, r.restrictedProjectMilestones)
+	// openapi: responses 204,400,401,403,404,409,500
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}", roleInline, r.restrictedProjectMilestones)
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues", authed(wsCtx(http.HandlerFunc(r.restrictedIssues))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}", authed(wsCtx(http.HandlerFunc(r.restrictedIssues))))
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/deletion", authed(wsCtx(http.HandlerFunc(r.restrictedIssueDeletion))))
+	// openapi: responses 204,400,401,403,404,409,500
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}", roleInline, r.restrictedIssueDeletion)
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects", authed(wsCtx(http.HandlerFunc(r.restrictedIssueProjects))))
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments", authed(wsCtx(http.HandlerFunc(r.restrictedIssueComments))))
+	// openapi: responses 201,400,401,403,404,409,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-issues", roleInline, r.createRestrictedIssue)
+	// openapi: responses 201,400,401,403,404,409,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments", roleInline, r.restrictedIssueComments)
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}", roleInline, r.updateRestrictedIssue)
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/guest-intake", authed(wsCtx(http.HandlerFunc(r.guestIssueIntake))))
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/projects/{projectId}/guest-intake", roleManage, r.guestIssueIntake)
 	// openapi: responses 200,400,401,403,404,409,500
 	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/members/{memberId}/access", roleManage, ws.PutMemberAccess)
 	// Bulk variant — drives the Members capability grid in one

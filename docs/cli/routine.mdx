@@ -2211,3 +2211,71 @@ endpoint. Use `routine waitpoints reject <token>` for an action whose `approved`
 checks action consistency and the frozen form; malformed values fail without
 resolving the waitpoint. The authenticated user's identity is recorded separately
 from the answer. Legacy approvals still work without `--action` or `--input`.
+
+## `crewship routine origin-binding`
+
+OWNER/ADMIN operators can inspect a routine's chat authority binding and clear
+an explicitly reviewed stale binding. Scoped tokens and agent credentials are
+refused. Clearing restores the standing execution policy; immutable versions
+and already pending/running work retain their original authority.
+
+```bash
+crewship routine origin-binding get daily-report
+crewship routine origin-binding clear daily-report --expected-origin ORIGIN_ID --reason "Reviewed standing grant"
+crewship routine origin-binding clear daily-report --expected-origin null --schedule SCHEDULE_ID=ORIGIN_ID --reason "Reviewed schedule grant"
+```
+
+### `crewship routine origin-binding clear <slug>`
+
+`--expected-origin` is required for clear: pass the exact ID returned by get,
+or `null` for an unbound head. `--reason` is required. Repeat `--schedule` to
+clear selected independent schedule bindings, each with its exact expected ID
+or `null`. A bound draft requires `--draft DRAFT_ID=REVISION=ORIGIN_ID` (or `null`
+in the final field), using values from get. Clearing it increments its revision
+and invalidates previously prepared publications. Selecting a pinned schedule
+whose immutable version still has authority returns 409 and changes nothing.
+A stale binding returns 409 and changes nothing. Both get and clear support
+the global output format flags.
+
+```bash
+crewship routine origin-binding clear daily-report --expected-origin ORIGIN_ID --draft DRAFT_ID=REVISION=ORIGIN_ID --reason "Reviewed draft and standing grant"
+```
+
+
+## `crewship routine shared`
+
+```bash
+crewship routine shared
+crewship routine shared client-report --format json
+```
+
+Guests can list their live View/Run shares and inspect an explicitly shared
+routine definition by ID or slug. The table shows View, current Run eligibility
+and whether private execution is installed. JSON/YAML detail includes the stored
+definition, hash and version. View works without agent execution grants or a
+runtime. Definitions include prompts/defaults; existing Run shares retain their
+minimal invocation contract and do not acquire View automatically. Private run
+receipts remain actor-scoped. The command does not call the trusted routine or
+crew/agent directory endpoints.
+
+
+## shared-draft / shared-draft save
+
+Inspect or edit a shared collaborative draft with explicit routine View and
+Edit grants. The JSON projection is separate from the published definition.
+
+```bash
+crewship --format json routine shared-draft ROUTINE_ID > draft.json
+# Edit name, description and definition; retain draft_id/revision/base_revision.
+crewship --format json routine shared-draft save ROUTINE_ID --file draft.json
+crewship routine shared-draft save ROUTINE_ID --file - < draft.json
+```
+
+`shared-draft <routine-id-or-slug>` supports table, JSON and YAML output. Save
+requires `--file` containing one complete JSON snapshot; `-` reads stdin.
+`can_edit` is a read-only server hint and is removed before saving. Unknown
+fields and incomplete snapshots fail locally. PUT requires the existing
+`workspace:admin` token scope and rechecks current rights, issuers and account.
+A 409 preserves the conflict for review; the CLI performs no hidden GET or retry.
+Saving changes only the collaborative draft. Trusted testing and exact-revision
+review/publication remain required; this command cannot publish or run it.

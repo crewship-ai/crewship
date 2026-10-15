@@ -28,12 +28,13 @@ type creatorPayload struct {
 // ── 1. Internal (agent) create path persists the creator ───────────────────
 
 func TestInternalIssue_Create_PersistsAgentCreator(t *testing.T) {
-	h, wsID, crewID, _, _ := newInternalIssueHandler(t)
+	h, wsID, crewID, _, userID := newInternalIssueHandler(t)
 	workerID := "agent-worker" // seeded by seedIssueFixtures
+	seedChatIssueRun(t, h, wsID, workerID, userID, "chat-123", "run-456")
 
 	body := bytes.NewBufferString(`{"workspace_id":"` + wsID + `","crew_id":"` + crewID + `",
 		"title":"Agent authored","author_agent_id":"` + workerID + `",
-		"author_chat_id":"chat-123","author_run_id":"run-456"}`)
+		"author_chat_id":"forged-chat","author_run_id":"run-456","operation_key":"creator-attribution"}`)
 	req := httptest.NewRequest("POST", "/", body)
 	rr := httptest.NewRecorder()
 	h.Create(rr, req)

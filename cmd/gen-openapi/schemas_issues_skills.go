@@ -52,6 +52,7 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"id": str(), "name": str(),
 	}, "id")
 	issue := obj(map[string]any{
+		"revision": integer(), "aggregate_revision": integer(), "allowed_actions": stringArray(),
 		"work_mode": str(), "work_revision": integer(), "worker_user_id": nullable("string"), "worker_name": nullable("string"), "work_note": str(), "work_stopping": boolean(),
 		// brief_revision / client_review_required ride every issue row
 		// (no omitempty on issueResponse since #2448); the schema has to

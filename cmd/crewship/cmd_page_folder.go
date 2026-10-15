@@ -54,18 +54,22 @@ import (
 // ── The wire (mirrors internal/api/pages_folders.go) ───────────────────────
 
 type PageFolderJSON struct {
-	ID            string `json:"id" yaml:"id"`
-	Slug          string `json:"slug" yaml:"slug"`
-	Name          string `json:"name" yaml:"name"`
-	Icon          string `json:"icon" yaml:"icon"`
-	Color         string `json:"color" yaml:"color"`
-	Owner         string `json:"owner" yaml:"owner"`
-	OwnerCrewName string `json:"owner_crew_name" yaml:"owner_crew_name"`
-	PageCount     int    `json:"page_count" yaml:"page_count"`
-	Shared        string `json:"shared" yaml:"shared"`
-	ACLVersion    int64  `json:"acl_version" yaml:"acl_version"`
-	CreatedAt     string `json:"created_at" yaml:"created_at"`
-	UpdatedAt     string `json:"updated_at" yaml:"updated_at"`
+	CanRename      bool   `json:"can_rename" yaml:"can_rename"`
+	CanShare       bool   `json:"can_share" yaml:"can_share"`
+	CanDelete      bool   `json:"can_delete" yaml:"can_delete"`
+	CanAcceptPages bool   `json:"can_accept_pages" yaml:"can_accept_pages"`
+	ID             string `json:"id" yaml:"id"`
+	Slug           string `json:"slug" yaml:"slug"`
+	Name           string `json:"name" yaml:"name"`
+	Icon           string `json:"icon" yaml:"icon"`
+	Color          string `json:"color" yaml:"color"`
+	Owner          string `json:"owner" yaml:"owner"`
+	OwnerCrewName  string `json:"owner_crew_name" yaml:"owner_crew_name"`
+	PageCount      int    `json:"page_count" yaml:"page_count"`
+	Shared         string `json:"shared" yaml:"shared"`
+	ACLVersion     int64  `json:"acl_version" yaml:"acl_version"`
+	CreatedAt      string `json:"created_at" yaml:"created_at"`
+	UpdatedAt      string `json:"updated_at" yaml:"updated_at"`
 }
 
 type pageFoldersJSON struct {

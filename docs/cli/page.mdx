@@ -1092,6 +1092,12 @@ and their own access in [`page access --me`](#crewship-page-access-slug-me).
 
 Every folder command is backed by the [folder endpoints](/api-reference/pages#folders).
 
+Machine output includes caller-specific `can_rename`, `can_share`, `can_delete`
+and `can_accept_pages`. Page index rows include `can_move` and
+`can_remove_from_folder`. These are the server’s current authority decisions;
+mutation commands still recheck permissions, destination authority and version
+fences.
+
 ### `crewship page folder list`
 
 ```bash

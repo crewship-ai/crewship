@@ -55,7 +55,7 @@ func accountSuspended(ctx context.Context, db *sql.DB, userID string) bool {
 	if err := db.QueryRowContext(ctx, `SELECT suspended_at FROM users WHERE id = ?`, userID).Scan(&at); err != nil {
 		return false
 	}
-	return at.Valid && at.String != ""
+	return at.Valid
 }
 
 // instanceAdminStatus reports whether the user administers the instance and
@@ -72,7 +72,7 @@ func instanceAdminStatus(ctx context.Context, db *sql.DB, userID, email string) 
 	if err != nil {
 		return false, "", err
 	}
-	if suspended.Valid && suspended.String != "" {
+	if suspended.Valid {
 		return false, "", nil
 	}
 	if backup.IsInstanceOwner(email) {

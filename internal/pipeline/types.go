@@ -940,11 +940,14 @@ type AuthorMeta struct {
 // to Store.Save. The store enforces author metadata, hash, and the
 // test-run gate; the caller owns the raw DSL JSON + parsed slug.
 type SaveInput struct {
-	Publication *DraftPublication
-	WorkspaceID string
-	Slug        string
-	Name        string
-	Description string
+	SourceAgentID string
+	SourceRunID   string // Token-bound active authoring run, never model-authored.
+	ChatOriginID  string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
+	Publication   *DraftPublication
+	WorkspaceID   string
+	Slug          string
+	Name          string
+	Description   string
 	// PreserveDescription makes an update PATCH-like: keep the existing
 	// description rather than treating an omitted request field as a clear.
 	// Inserts still use Description, because there is no prior value to keep.
@@ -1111,6 +1114,7 @@ type AgentRunner interface {
 // row in the author crew (this is where author-crew-context
 // execution actually takes effect).
 type AgentStepRequest struct {
+	ChatOriginID string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
 	WorkspaceID  string
 	AuthorCrewID string
 	AgentSlug    string

@@ -55,7 +55,7 @@ func fixture(t *testing.T) (*Service, *restricteddispatch.TextRunner) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = store.Replace(t.Context(), "owner", user, "w", "restricted", m, []access.Right{{Kind: "agent", ID: "agent", Operation: "run"}}); err != nil {
+		if _, err = store.Replace(t.Context(), "owner", user, "w", "restricted", m, []access.Right{{Kind: "routine", ID: "routine", Operation: "run"}, {Kind: "agent", ID: "agent", Operation: "run"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -168,7 +168,7 @@ func TestQueuedWorkflowOriginalPolicyCannotRevive(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err = store.Replace(t.Context(), "owner", "h1", "w", "restricted", m, []access.Right{{Kind: "agent", ID: "agent", Operation: "run"}}); err != nil {
+				if _, err = store.Replace(t.Context(), "owner", "h1", "w", "restricted", m, []access.Right{{Kind: "routine", ID: "routine", Operation: "run"}, {Kind: "agent", ID: "agent", Operation: "run"}}); err != nil {
 					t.Fatal(err)
 				}
 			case "role":
@@ -203,13 +203,13 @@ func TestQueuedWorkflowOriginalPolicyCannotRevive(t *testing.T) {
 }
 func TestWorkflowRequiresRoutinePermissionAndBoundedTypedDeclaration(t *testing.T) {
 	s, _ := fixture(t)
-	if _, err := s.db.ExecContext(t.Context(), `UPDATE workspace_members SET capabilities='[]' WHERE id='m1'`); err != nil {
+	if _, err := s.db.ExecContext(t.Context(), `DELETE FROM access_grants WHERE member_id='m1' AND resource_kind='routine'`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "run grant alone"}, "", 0); !errors.Is(err, ErrDenied) {
 		t.Fatalf("agent run bypassed routine gate %v", err)
 	}
-	if _, err := s.db.ExecContext(t.Context(), `UPDATE workspace_members SET capabilities='["routine.run"]' WHERE id='m1'`); err != nil {
+	if _, err := s.db.ExecContext(t.Context(), `INSERT INTO access_grants(id,member_id,resource_kind,routine_id,operation,created_by,created_at) VALUES('restored-routine','m1','routine','routine','run','owner',strftime('%Y-%m-%dT%H:%M:%fZ','now'))`); err != nil {
 		t.Fatal(err)
 	}
 	for _, raw := range []string{

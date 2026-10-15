@@ -49,6 +49,7 @@ CREATE TABLE agents (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL);
 INSERT INTO agents (id, crew_id) VALUES ('agent_lead', 'crew_a');
 
 CREATE TABLE pipelines (
+chat_origin_id TEXT,
     id                       TEXT PRIMARY KEY,
     workspace_id             TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     slug                     TEXT NOT NULL,
@@ -84,6 +85,7 @@ CREATE TABLE pipelines (
 );
 
 CREATE TABLE pipeline_runs (
+chat_origin_id TEXT,
     id                  TEXT PRIMARY KEY,
     workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     pipeline_id         TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
@@ -188,6 +190,7 @@ CREATE TABLE IF NOT EXISTS inbox_item_reads (
 -- pipeline soft-delete, so a rig without the table turns every Delete
 -- into a 500 that production could never produce.
 CREATE TABLE IF NOT EXISTS pipeline_schedules (
+chat_origin_id TEXT,
     id                      TEXT PRIMARY KEY,
     workspace_id            TEXT NOT NULL,
     name                    TEXT NOT NULL,

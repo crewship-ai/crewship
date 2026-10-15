@@ -16,6 +16,7 @@ func newMetaDB(t *testing.T) *sql.DB {
 	}
 	if _, err := db.Exec(`
 CREATE TABLE pipeline_runs (
+chat_origin_id TEXT,
     id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, pipeline_id TEXT, pipeline_slug TEXT,
     status TEXT, triggered_via TEXT, triggered_by_id TEXT, cost_usd REAL DEFAULT 0,
     started_at TEXT DEFAULT '', metadata_json TEXT NOT NULL DEFAULT '{}',

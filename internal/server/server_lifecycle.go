@@ -186,6 +186,10 @@ func (s *Server) Start(ctx context.Context) error {
 			assign.StartLeaseSweeper(ctx, leaseSweepInterval)
 			s.logger.Info("lease sweeper started", "interval", leaseSweepInterval.String())
 		}
+		// Mutation/audit delivery survives a client disconnect or server restart.
+		// Recover assignments first, then resume committed outbox work using
+		// the same server lifetime as the dispatchers it calls.
+		s.apiRouter.StartIssueMutationOutbox(ctx)
 		// Escalation expiry sweeper: the net for questions whose agent is no
 		// longer waiting. The long poll expires its own escalation at the
 		// deadline (internal/api/escalation_lifecycle.go), so this only ever

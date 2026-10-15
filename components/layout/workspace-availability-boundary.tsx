@@ -6,8 +6,9 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { Button } from "@/components/ui/button"
 
 /** Keep the current route/draft mounted; unavailable is not proof of revocation. */
-export function WorkspaceAvailabilityBoundary({children}: {children: React.ReactNode}) {
-  const {workspaceId, workspaceUnavailable, workspaces, refresh, setWorkspaceId} = useWorkspace()
+export function WorkspaceAvailabilityBoundary({children, enabled = true}: {children: React.ReactNode; enabled?: boolean}) {
+  const {workspaceId, workspaceUnavailable: unavailable, workspaces, refresh, setWorkspaceId} = useWorkspace()
+  const workspaceUnavailable = enabled && unavailable
   useLayoutEffect(() => {
     if (!workspaceUnavailable) return
     // Portals escape the route's DOM wrapper. Preserve each dialog's own
@@ -38,7 +39,7 @@ export function WorkspaceAvailabilityBoundary({children}: {children: React.React
     if (workspaceUnavailable) {event.preventDefault();event.stopPropagation()}
   }
   return <>
-    <div key={workspaceId ?? "no-workspace"} className={workspaceUnavailable ? "hidden" : "contents"}
+    <div key={enabled ? workspaceId ?? "no-workspace" : "account"} className={workspaceUnavailable ? "hidden" : "contents"}
       inert={workspaceUnavailable || undefined} aria-hidden={workspaceUnavailable || undefined}
       onClickCapture={block} onKeyDownCapture={block} onSubmitCapture={block}>
       {children}

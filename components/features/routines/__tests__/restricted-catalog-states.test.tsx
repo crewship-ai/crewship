@@ -1,3 +1,4 @@
+vi.mock("../restricted-routine-definitions", () => ({ RestrictedRoutineDefinitions: () => null }))
 import React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
@@ -14,7 +15,7 @@ afterEach(() => { cleanup(); api.mockReset() })
 const runtimeSentence = /Private execution isn't installed on this server/
 
 const screens = [
-  { name: "routines", Component: RestrictedRoutines, loading: "Loading routines…", empty: "No routines are available with your current access.", unavailable: "Routine catalog unavailable.", item: [{ slug: "allowed", name: "Allowed routine", definition_hash: "h", execution_hash: "e", inputs: [] }], option: "Allowed routine" },
+  { name: "routines", Component: RestrictedRoutines, loading: "Loading routines…", empty: "No routines can currently be run with your access. Shared definitions appear above.", unavailable: "Routine catalog unavailable.", item: [{ slug: "allowed", name: "Allowed routine", definition_hash: "h", execution_hash: "e", inputs: [] }], option: "Allowed routine" },
   { name: "Pages", Component: RestrictedPages, loading: "Loading Page actions…", empty: "No Page actions are available with your current access.", unavailable: "Page actions unavailable.", item: [{ slug: "p", name: "Page", actions: [{ intent_hash: "i", panel_id: "panel", id: "go", label: "Go", inputs: [] }] }], option: "Page — Go" },
 ]
 

@@ -65,7 +65,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// in-flight post-run verdict goroutines before the journal closes
 	// (Router.DrainVerdicts). Otherwise `internal` is local to this func.
 	r.internalHandler = internal
-	internalAuth := internal.requireInternal
+	internalAuth := func(next http.Handler) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
 	// Crew transport authentication is only the outer boundary: the handler
 	// also validates the per-run bearer and a live human artifact delegation.
 	r.mux.Handle("GET /api/v1/internal/artifacts/{slug}/threads", internalAuth(http.HandlerFunc(r.pages.ListArtifactThreadsAgent)))
@@ -137,6 +137,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// the parent handler skip the mirror entirely.
 	if pipes != nil {
 		routineAdapter := NewRoutineInternalAdapter(pipes)
+		routineAdapter.SetRunTokenSecret(r.internalToken)
 		// #1768: the autonomy gate. Without this the adapter falls back to
 		// the conservative guided default (every schedule staged disabled),
 		// which is safe but not what an operator on trusted/full configured.
@@ -267,6 +268,8 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.mux.Handle("GET /api/v1/internal/issues", internalAuth(http.HandlerFunc(internalIssues.List)))
 	r.mux.Handle("GET /api/v1/internal/issues/{identifier}", internalAuth(http.HandlerFunc(internalIssues.Get)))
 	r.mux.Handle("POST /api/v1/internal/issues", internalAuth(http.HandlerFunc(internalIssues.Create)))
+	r.mux.Handle("POST /api/v1/internal/issues/authority", internalAuth(http.HandlerFunc(internalIssues.ClassifyRun)))
+	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/show", internalAuth(http.HandlerFunc(internalIssues.Show)))
 	r.mux.Handle("PATCH /api/v1/internal/issues/{identifier}", internalAuth(http.HandlerFunc(internalIssues.UpdateStatus)))
 	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/work", internalAuth(http.HandlerFunc(internalIssues.Work)))
 	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/comments", internalAuth(http.HandlerFunc(internalIssues.CreateComment)))

@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useRestrictedSurfaces } from "@/hooks/use-access-mode"
+import { useAccessMode, useRestrictedSurfaces } from "@/hooks/use-access-mode"
+import { OwnAccessCard } from "@/components/features/settings/own-access"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { apiFetch } from "@/lib/api-fetch"
 import { SubBar } from "@/components/layout/sub-bar"
@@ -136,6 +137,9 @@ export function SettingsLayout() {
   // workspace, members and every other section are off its allowlist, so not
   // even their requests are made.
   const surfaces = useRestrictedSurfaces()
+  const mode = useAccessMode()
+  const { error, refresh } = useWorkspace()
+  if (mode === "loading") return <div className="p-6" role="status">{error ? <><p>Account access unavailable.</p><Button onClick={() => void refresh()}>Retry</Button></> : "Loading account access…"}</div>
   if (surfaces) return <RestrictedAccountSettings />
   // One Save for the whole page: every card's edits join the floating bar,
   // and leaving with edits pending asks first (components/ui/page-save-bar).
@@ -149,7 +153,7 @@ export function SettingsLayout() {
 function RestrictedAccountSettings() {
   const { session, signOut } = useAuth()
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4 p-4 md:p-6">
+    <div key={session?.user?.id} className="mx-auto w-full max-w-3xl space-y-4 p-4 md:p-6">
       <h1 className="text-xl font-semibold">Account security</h1>
       {/* One page, as before the Sessions split: password, then sessions and
           token revoke. space-y-5 is the gap ProfileSection used between the
@@ -157,6 +161,7 @@ function RestrictedAccountSettings() {
           ignored here — /settings?tab=sessions from the user menu lands on
           this same page, which already shows sessions. */}
       <div className="space-y-5">
+        <OwnAccessCard />
         <ProfileSection restricted userName={session?.user?.name} userEmail={session?.user?.email} />
         <SessionsSection
           restricted
@@ -253,7 +258,7 @@ function SettingsPage() {
 
   useEffect(() => {
     // No workspace fetch for a tab we are already leaving.
-    if (!workspaceId || moved) return
+    if (!workspaceId || wsLoading || moved) return
     let cancelled = false
 
     async function fetchData() {
@@ -280,7 +285,7 @@ function SettingsPage() {
 
     fetchData()
     return () => { cancelled = true }
-  }, [workspaceId, moved])
+  }, [workspaceId, wsLoading, moved])
 
   const handleOrgUpdated = useCallback((updated: { name: string; slug: string; preferred_language: string | null }) => {
     setOrg((prev) => prev ? { ...prev, ...updated } : prev)

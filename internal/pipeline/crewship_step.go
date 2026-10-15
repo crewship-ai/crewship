@@ -47,9 +47,11 @@ type CrewshipActions interface {
 // resulting event resolve the originating run and inherit its chain budget
 // instead of starting a fresh one.
 type CrewshipRequest struct {
-	Verb        string
-	Args        map[string]any
-	WorkspaceID string
+	ChatOriginID string `json:"-"` // Server-owned execution lineage.
+	OperationKey string
+	Verb         string
+	Args         map[string]any
+	WorkspaceID  string
 	// CrewID is the routine's AUTHOR crew — the principal whose autonomy
 	// level bounds the action, and the crew the created row is attributed to.
 	CrewID  string

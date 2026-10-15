@@ -118,7 +118,8 @@ type orchCovResolver struct {
 	// messageCounts accumulates IncrementMessageCount deltas per chat, so a
 	// test can assert the chat's derived count against what actually landed in
 	// the conversation store (#1835).
-	messageCounts map[string]int
+	messageCounts    map[string]int
+	terminalStatuses []string
 }
 
 func (r *orchCovResolver) CreateChat(_ context.Context, req chatbridge.CreateChatRequest) error {
@@ -140,7 +141,8 @@ func (r *orchCovResolver) ResolveAgent(_ context.Context, agentID, workspaceID s
 func (r *orchCovResolver) CreateRun(_ context.Context, _, _, _, _, _ string, _ map[string]interface{}) error {
 	return nil
 }
-func (r *orchCovResolver) UpdateRun(_ context.Context, _, _ string, _ *int, _ *string, _ map[string]interface{}) error {
+func (r *orchCovResolver) UpdateRun(_ context.Context, _ string, status string, _ *int, _ *string, _ map[string]interface{}) error {
+	r.terminalStatuses = append(r.terminalStatuses, status)
 	return nil
 }
 func (r *orchCovResolver) IncrementMessageCount(_ context.Context, chatID string, delta int) error {

@@ -31,6 +31,7 @@ import (
 // version pins production schedules so an agent edit can't
 // accidentally change what the 8 AM run does.
 type Schedule struct {
+	ChatOriginID          string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
 	ID                    string
 	WorkspaceID           string
 	Name                  string
@@ -158,6 +159,7 @@ var validCatchupPolicies = map[string]bool{
 
 // SaveScheduleInput is the payload for ScheduleStore.Save.
 type SaveScheduleInput struct {
+	ChatOriginID          string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
 	ID                    string // "" = create; non-empty = update
 	WorkspaceID           string
 	Name                  string
@@ -240,6 +242,17 @@ func createSchedule(ctx context.Context, x sqlExecQuerier, in SaveScheduleInput)
 	if err != nil {
 		return nil, err
 	}
+	// Unpinned schedules resolve the current head at dispatch. Only an
+	// explicit requesting chat may freeze an independent schedule binding.
+	// A pinned schedule retains the immutable version's binding.
+	if in.ChatOriginID == "" && in.TargetPipelineVersion != nil {
+		err = x.QueryRowContext(ctx, `SELECT COALESCE(chat_origin_id,'') FROM pipeline_versions WHERE pipeline_id=? AND version=?`, in.TargetPipelineID, *in.TargetPipelineVersion).Scan(&in.ChatOriginID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("insert schedule origin: %w", err)
+		}
+	}
+
+	prepared.in.ChatOriginID = in.ChatOriginID
 	return insertScheduleRow(ctx, x, generateScheduleID(), prepared)
 }
 
@@ -345,8 +358,8 @@ INSERT INTO pipeline_schedules (
     catchup_policy,
     max_consecutive_failures,
     activation,
-    created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    created_at, updated_at, chat_origin_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, p.in.WorkspaceID, p.in.Name, p.in.TargetPipelineID,
 		nullInt(p.in.TargetPipelineVersion),
 		p.in.CronExpr, p.in.Timezone, string(p.inputsJSON), boolToInt(p.enabled),
@@ -355,7 +368,7 @@ INSERT INTO pipeline_schedules (
 		p.in.CatchupPolicy,
 		p.maxFailures,
 		nullStr(p.in.Activation),
-		tsformat.Format(now), tsformat.Format(now),
+		tsformat.Format(now), tsformat.Format(now), nullableStr(p.in.ChatOriginID),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert schedule: %w", err)
@@ -399,12 +412,12 @@ UPDATE pipeline_schedules
 SET name = ?, cron_expr = ?, timezone = ?, inputs_json = ?, enabled = ?,
     next_run_at = ?, catchup_policy = ?,
     max_consecutive_failures = COALESCE(?, max_consecutive_failures),
-    activation = ?, updated_at = ?
+    activation = ?, updated_at = ?, chat_origin_id = COALESCE(?,chat_origin_id)
 WHERE id = ?`,
 		prepared.in.Name, prepared.in.CronExpr, prepared.in.Timezone, string(prepared.inputsJSON),
 		boolToInt(prepared.enabled), tsformat.Format(prepared.nextRun), prepared.in.CatchupPolicy,
 		nullIntIfPositive(prepared.in.MaxConsecutiveFailures),
-		nullStr(prepared.in.Activation), tsformat.Format(now),
+		nullStr(prepared.in.Activation), tsformat.Format(now), nullableStr(in.ChatOriginID),
 		existingID,
 	); err != nil {
 		return nil, fmt.Errorf("update existing trigger schedule: %w", err)
@@ -443,6 +456,9 @@ func updateSchedule(ctx context.Context, x sqlExecQuerier, in SaveScheduleInput)
 	existingRow, gerr := getScheduleByID(ctx, x, in.ID)
 	if gerr != nil {
 		return nil, fmt.Errorf("update schedule: load existing: %w", gerr)
+	}
+	if in.ChatOriginID == "" {
+		in.ChatOriginID = existingRow.ChatOriginID
 	}
 	if existingRow.Activation == TriggerActivationDraft && in.Enabled {
 		return nil, fmt.Errorf(
@@ -518,7 +534,7 @@ SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     consecutive_failures = CASE WHEN ? = 1 AND enabled = 0 THEN 0 ELSE consecutive_failures END,
     disabled_reason = CASE WHEN ? = 1 AND enabled = 0 THEN NULL ELSE disabled_reason END,
     next_run_at = ?, wake_pipeline_id = ?, wake_inputs_json = ?,
-    wake_fail_closed = ?, catchup_policy = ?, updated_at = ?
+    wake_fail_closed = ?, catchup_policy = ?, updated_at = ?, chat_origin_id = ?
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
@@ -527,7 +543,7 @@ WHERE id = ? AND deleted_at IS NULL`,
 		tsformat.Format(nextRunToStore),
 		nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
 		in.CatchupPolicy,
-		tsformat.Format(now),
+		tsformat.Format(now), nullableStr(in.ChatOriginID),
 		in.ID,
 	)
 	if err != nil {
@@ -1280,6 +1296,7 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		Inputs:        inputs,
 		Mode:          ModeRun,
 		TriggeredVia:  TriggeredViaSchedule,
+		ChatOriginID:  sched.ChatOriginID,
 		TriggeredByID: sched.ID,
 		// The occurrence itself, persisted on the run as due_at so the
 		// punctuality of this fire (started_at - due_at) is a fact the
@@ -1638,7 +1655,7 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        COALESCE(consecutive_failures, 0), COALESCE(max_consecutive_failures, 5),
        COALESCE(disabled_reason, ''),
        COALESCE(activation, ''),
-       created_at, updated_at, deleted_at
+       created_at, updated_at, deleted_at, COALESCE(chat_origin_id,'')
 FROM pipeline_schedules`
 
 func scanSchedule(rs rowScanner) (*Schedule, error) {
@@ -1667,7 +1684,7 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		&s.ConsecutiveFailures, &s.MaxConsecutiveFailures,
 		&s.DisabledReason,
 		&s.Activation,
-		&createdAt, &updatedAt, &deletedAt,
+		&createdAt, &updatedAt, &deletedAt, &s.ChatOriginID,
 	)
 	if err != nil {
 		return nil, err

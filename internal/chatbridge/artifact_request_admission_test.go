@@ -30,21 +30,24 @@ func TestArtifactRequestAdmissionFailureNeverExecutesAgent(t *testing.T) {
 	ctr := &artifactCountingContainer{scriptedContainer: &scriptedContainer{agentOutput: claudeProvenanceOutput}}
 	bridge := testBridgeWithContainer(t, resolver, ctr)
 	err := bridge.HandleChatMessage(context.Background(), "user-1", "sess-request", "change artifact", func(ws.ChatEvent) {}, ws.ChatMessageOption{HumanResume: true, HumanAuthority: receipt, ArtifactRequestID: "request-id"})
-	if err == nil || !strings.Contains(err.Error(), "artifact request admission") || ctr.execs != 0 {
+	if err == nil || !strings.Contains(err.Error(), "create durable run") || !strings.Contains(err.Error(), "artifact admission refused") || ctr.execs != 0 {
 		t.Fatalf("admission err=%v execs=%d", err, ctr.execs)
 	}
-	if len(resolver.runUpdates) != 1 || resolver.runUpdates[0].status != "FAILED" {
-		t.Fatalf("missing terminal admission record: %+v", resolver.runUpdates)
+	// Without an admission ACK the caller cannot assert that a run began or
+	// ended. Preserve the server's evidence instead of inventing a terminal.
+	if len(resolver.runCreates) != 1 || len(resolver.runUpdates) != 0 {
+		t.Fatalf("unacknowledged admission: starts=%+v updates=%+v", resolver.runCreates, resolver.runUpdates)
 	}
 }
-func TestOrdinaryChatRunRecordErrorRemainsNonfatal(t *testing.T) {
+func TestOrdinaryChatRunRecordErrorNeverExecutesAgent(t *testing.T) {
 	resolver := &capResolver{info: baseInfo(), createRunErr: errors.New("ordinary journal failure")}
 	ctr := &artifactCountingContainer{scriptedContainer: &scriptedContainer{agentOutput: claudeProvenanceOutput}}
 	bridge := testBridgeWithContainer(t, resolver, ctr)
-	if err := bridge.HandleChatMessage(context.Background(), "user-1", "ordinary-chat", "hello", func(ws.ChatEvent) {}); err != nil {
-		t.Fatal(err)
+	err := bridge.HandleChatMessage(context.Background(), "user-1", "ordinary-chat", "hello", func(ws.ChatEvent) {})
+	if err == nil || !strings.Contains(err.Error(), "create durable run") || !strings.Contains(err.Error(), "ordinary journal failure") || ctr.execs != 0 {
+		t.Fatalf("admission err=%v execs=%d", err, ctr.execs)
 	}
-	if ctr.execs == 0 {
-		t.Fatal("ordinary chat was suppressed")
+	if len(resolver.runCreates) != 1 || len(resolver.runUpdates) != 0 {
+		t.Fatalf("unacknowledged admission: starts=%+v updates=%+v", resolver.runCreates, resolver.runUpdates)
 	}
 }

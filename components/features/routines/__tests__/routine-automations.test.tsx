@@ -23,6 +23,8 @@ import * as React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, within, waitFor, act } from "@testing-library/react"
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+
 import type { Automation } from "@/lib/automations"
 import type { RoutineDetail } from "../routines-detail-panel"
 
@@ -51,6 +53,11 @@ vi.mock("next/link", () => ({
 
 vi.mock("@/hooks/use-workspace-agent-directory", () => ({
   useWorkspaceAgentDirectory: () => ({ agents: [], error: false }),
+}))
+
+vi.mock("@/hooks/use-access-mode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/use-access-mode")>()),
+  useAccessMode: () => "trusted",
 }))
 
 vi.mock("@/hooks/use-abilities", () => ({
@@ -162,7 +169,10 @@ function rule(over: Partial<Automation> = {}): Automation {
 }
 
 function renderCard(r: RoutineDetail = routine()) {
-  return render(<RoutineCardDetail routine={r} workspaceId="ws1" onChanged={vi.fn()} />)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<RoutineCardDetail routine={r} workspaceId="ws1" onChanged={vi.fn()} />, {
+    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  })
 }
 
 beforeEach(() => {

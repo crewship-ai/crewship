@@ -130,26 +130,34 @@ func (f *pageFolderRecord) ref() *pageFolderRef {
 // `people_and_crews` or `workspace` (folderSharedLabel; #2533 §3/10); the
 // ACL itself is behind GET …/acl and its gate.
 type pageFolderWire struct {
-	ID            string `json:"id"`
-	Slug          string `json:"slug"`
-	Name          string `json:"name"`
-	Icon          string `json:"icon"`
-	Color         string `json:"color"`
-	Owner         string `json:"owner"`
-	OwnerCrewName string `json:"owner_crew_name"`
-	PageCount     int    `json:"page_count"`
-	Shared        string `json:"shared"`
-	ACLVersion    int64  `json:"acl_version"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID             string `json:"id"`
+	Slug           string `json:"slug"`
+	Name           string `json:"name"`
+	Icon           string `json:"icon"`
+	Color          string `json:"color"`
+	Owner          string `json:"owner"`
+	OwnerCrewName  string `json:"owner_crew_name"`
+	PageCount      int    `json:"page_count"`
+	Shared         string `json:"shared"`
+	ACLVersion     int64  `json:"acl_version"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	CanRename      bool   `json:"can_rename"`
+	CanShare       bool   `json:"can_share"`
+	CanDelete      bool   `json:"can_delete"`
+	CanAcceptPages bool   `json:"can_accept_pages"`
 }
 
-func (f *pageFolderRecord) wire(pageCount int, acl []pageFolderACLRecord) pageFolderWire {
+func (f *pageFolderRecord) wire(pageCount int, acl []pageFolderACLRecord, viewer *pageViewer) pageFolderWire {
 	return pageFolderWire{
 		ID: f.ID, Slug: f.Slug, Name: f.Name, Icon: f.Icon, Color: f.Color,
 		Owner: "crew/" + f.OwnerCrewSlug, OwnerCrewName: f.OwnerCrewName,
 		PageCount: pageCount, Shared: folderSharedLabel(acl), ACLVersion: f.ACLVersion,
 		CreatedAt: f.CreatedAt, UpdatedAt: f.UpdatedAt,
+		CanRename:      mayArrangeFolder(viewer, f, acl),
+		CanShare:       mayAdministerFolder(viewer, f),
+		CanDelete:      mayAdministerFolder(viewer, f),
+		CanAcceptPages: mayArrangeFolder(viewer, f, acl),
 	}
 }
 
@@ -396,7 +404,7 @@ func (h *PageHandler) ListFolders(w http.ResponseWriter, r *http.Request) {
 		if counts[f.ID] == 0 && !folderStanding(viewer, f, index.acl[f.ID]) {
 			continue
 		}
-		out = append(out, f.wire(counts[f.ID], index.acl[f.ID]))
+		out = append(out, f.wire(counts[f.ID], index.acl[f.ID], viewer))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"folders": out})
 }
@@ -427,7 +435,7 @@ func (h *PageHandler) GetFolder(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, fmt.Sprintf("folder %q not found", slug))
 		return
 	}
-	out := pageFolderShowWire{pageFolderWire: f.wire(len(index.rows), index.acl[f.ID]), Pages: make([]pageListWire, 0, len(index.rows))}
+	out := pageFolderShowWire{pageFolderWire: f.wire(len(index.rows), index.acl[f.ID], viewer), Pages: make([]pageListWire, 0, len(index.rows))}
 	for i := range index.rows {
 		out.Pages = append(out.Pages, h.pageListRow(&index.rows[i], index.folders, viewer))
 	}
@@ -516,7 +524,7 @@ func (h *PageHandler) CreateFolder(w http.ResponseWriter, r *http.Request) {
 	broadcastWorkspaceEvent(h.hub, wsID, pageFolderEvent, map[string]any{"slug": f.Slug, "folder_id": f.ID})
 	// Option (c): a new folder has no ACL entry; the owning crew and admins
 	// reach it, and "everyone in the workspace" is switched on explicitly.
-	writeJSON(w, http.StatusCreated, f.wire(0, nil))
+	writeJSON(w, http.StatusCreated, f.wire(0, nil, viewer))
 }
 
 // ── 4. Update — PATCH /api/v1/page-folders/{slug} ──────────────────────────
@@ -596,7 +604,7 @@ func (h *PageHandler) UpdateFolder(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "count page folder pages", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, f.wire(len(index.rows), acl))
+	writeJSON(w, http.StatusOK, f.wire(len(index.rows), acl, viewer))
 }
 
 // ── 5. Delete — DELETE /api/v1/page-folders/{slug} ─────────────────────────

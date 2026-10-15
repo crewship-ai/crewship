@@ -212,8 +212,8 @@ func insertIssueTx(ctx context.Context, tx *sql.Tx, logger *slog.Logger, s issue
 
 	var leadAgentID string
 	err = tx.QueryRowContext(ctx,
-		`SELECT id FROM agents WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL LIMIT 1`,
-		s.CrewID).Scan(&leadAgentID)
+		`SELECT id FROM agents WHERE crew_id = ? AND workspace_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL LIMIT 1`,
+		s.CrewID, s.WorkspaceID).Scan(&leadAgentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", "", errIssueNoLeadAgent

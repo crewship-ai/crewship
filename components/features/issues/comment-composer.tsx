@@ -39,7 +39,9 @@ interface Props {
    * Posts the comment. Resolve `true` to clear the draft; anything else keeps
    * it, because a body that failed to post is the only copy of it there is.
    */
-  onSubmit: (body: string) => boolean | Promise<boolean>
+  onSubmit: (body: string, options?: { guestVisible: boolean; expectedProjectId: string }) => boolean | Promise<boolean>
+  allowGuestSharing?: boolean
+  guestProject?: { id: string; name: string } | null
   /** Initial for the author bubble; the avatar column is decorative. */
   authorInitial?: string
   placeholder?: string
@@ -50,6 +52,8 @@ interface Props {
 export function CommentComposer({
   agents,
   onSubmit,
+  allowGuestSharing = false,
+  guestProject,
   authorInitial = "U",
   placeholder = "Write a comment.  @ to bring in an agent.",
   disabled,
@@ -60,6 +64,9 @@ export function CommentComposer({
   const boxRef = React.useRef<HTMLTextAreaElement>(null)
 
   const [value, setValue] = React.useState("")
+  const [guestVisible, setGuestVisible] = React.useState(false)
+  const [audience, setAudience] = React.useState<{ id: string; name: string } | null>(null)
+  const audienceChanged = guestVisible && (!audience || !allowGuestSharing || audience.id !== guestProject?.id)
   const [caret, setCaret] = React.useState(0)
   const [dismissed, setDismissed] = React.useState(false)
   const [active, setActive] = React.useState(0)
@@ -123,13 +130,15 @@ export function CommentComposer({
 
   async function submit() {
     const body = value.trim()
-    if (!body || submitting || disabled) return
+    if (!body || submitting || disabled || audienceChanged) return
     setSubmitting(true)
     try {
-      const ok = await onSubmit(body)
+      const ok = allowGuestSharing && guestVisible ? await onSubmit(body, { guestVisible: true, expectedProjectId: audience!.id }) : await onSubmit(body)
       if (ok) {
         setValue("")
         setCaret(0)
+        setGuestVisible(false)
+        setAudience(null)
       }
     } finally {
       setSubmitting(false)
@@ -175,7 +184,7 @@ export function CommentComposer({
             <Textarea
               ref={boxRef}
               value={value}
-              disabled={disabled}
+              disabled={disabled || submitting}
               placeholder={placeholder}
               role="combobox"
               aria-expanded={open}
@@ -250,6 +259,8 @@ export function CommentComposer({
           {open ? `${matches.length} agents match. Use the arrow keys.` : ""}
         </p>
 
+        {(allowGuestSharing || guestVisible) && <label className="flex min-h-9 items-center gap-2 text-xs coarse:min-h-12"><input type="checkbox" checked={guestVisible} disabled={disabled || submitting} onChange={event => { setGuestVisible(event.target.checked); setAudience(event.target.checked ? guestProject ?? null : null) }} />Share this comment with Guests who can read this project{guestProject ? ` (${guestProject.name})` : ""}</label>}
+        {audienceChanged && <p role="alert" className="text-xs">The project changed. Your draft is kept. Turn sharing off and review the new project before sharing it.</p>}
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-muted-foreground-soft">
             <kbd className="font-sans">⌘/Ctrl</kbd> + <kbd className="font-sans">Enter</kbd> to
@@ -260,7 +271,7 @@ export function CommentComposer({
             size="sm"
             className="h-7 gap-1.5 text-[11px]"
             onClick={() => void submit()}
-            disabled={disabled || submitting || !value.trim()}
+            disabled={disabled || submitting || !value.trim() || audienceChanged}
           >
             {submitting ? (
               <Loader2 className="h-3 w-3 animate-spin" />

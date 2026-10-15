@@ -48,6 +48,11 @@ type orchestrationHandlers struct {
 func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/issue-mutation-outbox", authed(wsCtx(http.HandlerFunc(r.failedIssueMutationJobs))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/entity-refs", authed(wsCtx(http.HandlerFunc(r.chatEntityRefs))))
+	r.mux.Handle("GET /api/v1/operations/{operationId}", authed(wsCtx(http.HandlerFunc(r.chatEntityOperation))))
+	r.mux.Handle("GET /api/v1/issues/{identifier}/revision", authed(wsCtx(http.HandlerFunc(r.issueEntityRevision))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision", authed(wsCtx(http.HandlerFunc(r.issueEntityRevision))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/run-profile", authed(wsCtx(http.HandlerFunc(r.restrictedRunProfile))))
 	r.authedMut("POST", "/api/v1/agents/{agentId}/restricted-cli-chats", roleSelf, r.createRestrictedCLIContext)
 	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-run", roleSelf, r.restrictedTextRun)
@@ -131,6 +136,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 		issueStarter = missionEngineForPublic
 	}
 	issues := NewIssueHandler(r.db, r.hub, issueStarter, r.logger)
+	r.issueMutationHandler = issues
 	issues.routines = r.PipelinesHandler
 	issues.SetJournal(r.Journal())
 	issues.SetStoragePath(r.storagePath)

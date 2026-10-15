@@ -895,7 +895,7 @@ func (s *Server) mountAPIRouter(
 	// Wire conversation history so Keeper can verify agent intent against actual chat
 	if convStore != nil {
 		convAdapter := &convStoreAdapter{store: convStore}
-		opts = append(opts, goapi.WithKeeperConversations(convAdapter))
+		opts = append(opts, goapi.WithKeeperConversations(convAdapter), goapi.WithTranscriptLock(convStore.LockTranscripts), goapi.WithTranscriptSnapshotLock(convStore.SnapshotTranscripts))
 		// Same adapter backs cross-session search; the searchable
 		// mirror is only populated when convStore was built WithDB.
 		opts = append(opts, goapi.WithConversationSearch(convAdapter))

@@ -296,6 +296,7 @@
               "cli/agent",
               "cli/ask",
               "cli/chat",
+              "cli/operation",
               "cli/context",
               "cli/conversation",
               "cli/feedback",
@@ -321,7 +322,9 @@
               "cli/capacity",
               "cli/crew",
               "cli/project",
-              "cli/workspace"
+              "cli/workspace",
+              "cli/share",
+              "cli/unshare"
             ]
           },
           {

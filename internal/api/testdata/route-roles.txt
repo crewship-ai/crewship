@@ -101,6 +101,8 @@ DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags/{tag} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust/{grantId} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{fileId} roleCreate
+DELETE /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId} roleInline
+DELETE /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId} roleInline
 DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId} roleManage
 GET /api/v1/approvals roleManage
 GET /api/v1/approvals/{id} roleManage
@@ -149,6 +151,7 @@ PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId} roleManag
 PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId} roleManage
 PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance roleCreate
 PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget roleManage
+PATCH /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId} roleInline
 POST /api/v1/admin/backups roleManage
 POST /api/v1/admin/backups/restore roleManage
 POST /api/v1/admin/backups/rotate roleManage
@@ -386,6 +389,7 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable roleManage
+POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/publish roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback roleManage
@@ -394,6 +398,9 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust roleCreate
 POST /api/v1/workspaces/{workspaceId}/projects/{projectId}/files roleCreate
+POST /api/v1/workspaces/{workspaceId}/restricted-issues roleInline
+POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments roleInline
+POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones roleInline
 POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
@@ -451,3 +458,7 @@ PUT /api/v1/workspaces/{workspaceId}/members/{memberId}/access roleManage
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key} roleManage
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override roleCreate
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags roleCreate
+PUT /api/v1/workspaces/{workspaceId}/projects/{projectId}/guest-intake roleManage
+PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId} roleInline
+PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId} roleInline
+PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft roleInline

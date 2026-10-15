@@ -466,6 +466,8 @@ scoped to the originating chat session.
 
 | Event Type | Description | Payload |
 |---|---|---|
+| `chat.entity_refs_changed` | A durable issue-reference write may require a fresh authorized replacement snapshot. Best-effort, trusted session viewers only. | `{ contract_version: 1 }` |
+| `issue.revision_changed` | A referenced issue may need its current revisions/detail refreshed. Best-effort; polling is still required. | `{ contract_version: 1 }` |
 | `assignment_created` | Assignment created in this session | `{ id, target, task }` |
 | `assignment_running` | Assignment started running | `{ ... }` |
 | `assignment_completed` | Assignment completed | `{ ... }` |

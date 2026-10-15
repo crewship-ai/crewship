@@ -12,6 +12,7 @@ func oneTimeAuthoringStore(t *testing.T) (*Store, *sql.DB) {
 	db := openVersioningTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 	_, err := db.Exec(`CREATE TABLE pending_runs (
+chat_origin_id TEXT,
  id TEXT PRIMARY KEY,workspace_id TEXT,pipeline_id TEXT,pipeline_slug TEXT,
  inputs_json TEXT,tags_json TEXT,metadata_json TEXT,priority INTEGER,
  fire_at TEXT,invoking_user_id TEXT,triggered_via TEXT,triggered_by_id TEXT,

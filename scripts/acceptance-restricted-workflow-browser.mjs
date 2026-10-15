@@ -9,7 +9,7 @@ try {
   for (const [actor, width] of [['browser-h1', 1280], ['browser-h2', 390]]) {
     const context = await browser.newContext({ viewport: { width, height: 900 } })
     await context.addCookies([{ name: 'authjs.session-token', value: fixture.tokens[actor], url: fixture.server, httpOnly: true, sameSite: 'Lax' }])
-    await context.addInitScript(id => localStorage.setItem('crewship.workspaceId', id), fixture.workspace)
+    await context.addInitScript(({id,user}) => localStorage.setItem(`crewship.workspaceId:${user}`, id), {id:fixture.workspace,user:actor})
     const page = await context.newPage()
     const successfulSharedReads = []
     page.on('response', response => {

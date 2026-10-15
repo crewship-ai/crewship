@@ -33,9 +33,11 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/policy"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // RoutineInternalAdapter wraps PipelineHandler.CreateSchedule so the
@@ -60,9 +62,10 @@ import (
 //     level. CreateSchedule's canRole("create") check saw only the
 //     MANAGER role this adapter injects, so it could never refuse.
 type RoutineInternalAdapter struct {
-	pipes   *PipelineHandler
-	policy  *policy.Resolver
-	journal journal.Emitter
+	runTokenSecret string
+	pipes          *PipelineHandler
+	policy         *policy.Resolver
+	journal        journal.Emitter
 }
 
 // NewRoutineInternalAdapter returns a wrapper that satisfies the
@@ -73,6 +76,8 @@ type RoutineInternalAdapter struct {
 func NewRoutineInternalAdapter(pipes *PipelineHandler) *RoutineInternalAdapter {
 	return &RoutineInternalAdapter{pipes: pipes}
 }
+
+func (h *RoutineInternalAdapter) SetRunTokenSecret(secret string) { h.runTokenSecret = secret }
 
 // scheduleRoutineVersion resolves the pipeline_versions.version an
 // autonomy-held schedule was created against — §9.8's routine_version
@@ -162,6 +167,50 @@ func (h *RoutineInternalAdapter) CreateSchedule(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	raw, e := io.ReadAll(http.MaxBytesReader(w, r.Body, maxExecBodyBytes))
+	if e != nil {
+		replyError(w, 400, "invalid schedule body")
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	var source struct {
+		Run   string `json:"source_run_id"`
+		Agent string `json:"source_agent_id"`
+	}
+	if json.Unmarshal(raw, &source) != nil {
+		replyError(w, 400, "invalid schedule body")
+		return
+	}
+	if source.Run != "" {
+		crew := InternalTokenCrewFromContext(r.Context())
+		if crew == "" {
+			crew = r.URL.Query().Get("crew_id")
+		}
+		key := internaltoken.DeriveAgentRunKey(h.runTokenSecret, wsID, crew)
+		ws, agent, run, valid := internaltoken.ValidateAgentRunToken(key, r.Header.Get("X-Crewship-Run-Token"))
+		if !valid || ws != wsID || agent != source.Agent || run != source.Run {
+			replyError(w, 403, "source_run_identity_mismatch")
+			return
+		}
+	}
+	if source.Run != "" {
+		tx, e := h.pipes.db.BeginTx(r.Context(), nil)
+		if e != nil {
+			writeChatIssueError(w, e)
+			return
+		}
+		o, e := runauthority.CaptureOrigin(r.Context(), tx, source.Run, source.Agent, wsID)
+		if e != nil {
+			_ = tx.Rollback()
+			writeChatIssueError(w, e)
+			return
+		}
+		if e = tx.Commit(); e != nil {
+			writeChatIssueError(w, e)
+			return
+		}
+		r = r.WithContext(runauthority.WithOriginID(r.Context(), o.ID))
+	}
 	// Dual-path: user-attributed slash command vs autonomous-agent.
 	// CallerUserIDFromRequest returns non-empty when the chat-bridge /
 	// CLI repl propagated X-Caller-User-Id; empty for the agent
