@@ -267,13 +267,17 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 403, "human comment required")
 			return
 		}
-		result, err = h.store.Comment(ctx, k, in.ID, in.Fingerprint, in.Body, in.Anchor, in.IfRev, in.Generation, auth)
+		var receipt documents.Receipt
+		receipt, err = h.store.Comment(ctx, k, in.ID, in.Fingerprint, in.Body, in.Anchor, in.IfRev, in.Generation, auth)
+		result = documentReceiptWire(receipt)
 	case "resolve":
 		if artifactAgentID(r) != "" {
 			replyError(w, 403, "human resolution required")
 			return
 		}
-		result, err = h.store.ResolveComment(ctx, k, in.ID, in.Fingerprint, in.Comment, in.Version, in.IfRev, in.Resolved, in.Generation, auth)
+		var receipt documents.Receipt
+		receipt, err = h.store.ResolveComment(ctx, k, in.ID, in.Fingerprint, in.Comment, in.Version, in.IfRev, in.Resolved, in.Generation, auth)
+		result = documentReceiptWire(receipt)
 	case "checkpoints":
 		result, err = h.store.Checkpoints(ctx, k, auth)
 	case "state":

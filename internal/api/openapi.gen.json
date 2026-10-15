@@ -4288,6 +4288,9 @@
           "created_at",
           "block",
           "quote",
+          "checkpoint",
+          "start",
+          "end",
           "status"
         ],
         "type": "object"
@@ -4746,13 +4749,17 @@
           "schema",
           "rev",
           "epoch",
+          "generation",
+          "incarnation",
           "snapshot",
           "snapshotRev",
           "updates",
           "blocks",
           "content",
           "outline",
-          "can_write"
+          "can_write",
+          "can_comment",
+          "can_resolve"
         ],
         "type": "object"
       },

@@ -45,6 +45,20 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	// Public human Docs responses; the real Go/Node subprocess test grades the wire.
+	{name: "DocumentState", pointer: "/components/schemas/DocumentState", value: DocumentStateResponse{}},
+	{name: "DocumentReceipt", pointer: "/components/schemas/DocumentReceipt", value: DocumentMutationResponse{}},
+	{name: "DocumentCheckpoint", pointer: "/components/schemas/DocumentCheckpoint", value: DocumentCheckpointResponse{}},
+	{name: "DocumentCheckpoints", pointer: "/components/schemas/DocumentCheckpoints", value: DocumentCheckpointsResponse{}},
+	{name: "DocumentComment", pointer: "/components/schemas/DocumentComment", value: DocumentCommentResponse{}},
+	{name: "DocumentComments", pointer: "/components/schemas/DocumentComments", value: DocumentCommentsResponse{}},
+	{name: "DocumentRequests", pointer: "/components/schemas/DocumentRequests", value: DocumentRequestListResponse{}},
+	{name: "DocumentInitializationState", pointer: "/components/schemas/DocumentInitializationState", value: DocumentInitializationState{}},
+	{name: "DocumentInitializeReceipt", pointer: "/components/schemas/DocumentInitializeReceipt", value: DocumentInitializeResponse{}},
+	{name: "DocumentNode", pointer: "/components/schemas/DocumentNode", value: DocumentNode{}},
+	{name: "DocumentComment.anchor", pointer: "/components/schemas/DocumentComment/properties/anchor", value: DocumentCommentAnchor{}},
+	{name: "DocumentRequests.rows", pointer: "/components/schemas/DocumentRequests/properties/requests/items", value: DocumentRequestResult{}},
+	{name: "DocumentRequests.targets", pointer: "/components/schemas/DocumentRequests/properties/eligible_chats/items", value: DocumentRequestTarget{}},
 	// Custody responses are metadata-only DTOs, including optional cursor/code.
 	{name: "WorkspacePageOwnershipListResponse", pointer: "/components/schemas/WorkspacePageOwnershipListResponse", value: WorkspacePageOwnershipListResponse{}},
 	{name: "WorkspacePageOwnershipSummary", pointer: "/components/schemas/WorkspacePageOwnershipSummary", value: WorkspacePageOwnershipSummary{}},

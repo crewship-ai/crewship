@@ -199,10 +199,12 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 		}
 		return result
 	}
+	schemas := documentResponseSchemas(t)
 	content := map[string]any{"type": "doc", "content": []any{map[string]any{"type": "paragraph", "attrs": map[string]any{"id": "intro"}, "content": []any{map[string]any{"type": "text", "text": "initial"}}}}}
 	for _, p := range []string{page, second} {
 		init := map[string]any{"id": "init-" + p, "schema": 2, "body": content}
 		initialized := call(p, "initialize", human, init, 200)
+		validateDocumentResponse(t, schemas, "DocumentInitializationState", mustDocumentsJSON(t, initialized))
 		for _, field := range []string{"schema", "rev", "epoch", "generation", "incarnation", "snapshot", "snapshotRev", "updates", "blocks"} {
 			if _, ok := initialized[field]; !ok {
 				t.Fatalf("actual first initialize missing state field %s: %v", field, initialized)
@@ -217,6 +219,7 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 			t.Fatalf("actual first initialize epoch is not numeric: %T", initialized["epoch"])
 		}
 		retry := call(p, "initialize", human, init, 200)
+		validateDocumentResponse(t, schemas, "DocumentInitializeReceipt", mustDocumentsJSON(t, retry))
 		for _, field := range []string{"id", "rev", "epoch", "actor", "kind", "found", "duplicate"} {
 			if _, ok := retry[field]; !ok {
 				t.Fatalf("actual initialize retry missing receipt field %s", field)
@@ -328,6 +331,57 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 	if read(page, human)["rev"] != restored["rev"] {
 		t.Fatal("restore retry advanced durable revision")
 	}
+
+	// Grade public human response contracts against the real Go bridge and real
+	// Node computation/Go persistence, including fields added by the bridge.
+	h.documentCall = func(_ context.Context, ws, bearer, p, operation string, body any) ([]byte, int, error) {
+		if ws != workspace {
+			t.Fatal("public bridge changed workspace")
+		}
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return nil, 500, err
+		}
+		var input map[string]any
+		if err := json.Unmarshal(encoded, &input); err != nil {
+			return nil, 500, err
+		}
+		result := call(p, operation, strings.TrimPrefix(bearer, "Bearer "), input, 200)
+		encoded, err = json.Marshal(result)
+		return encoded, 200, err
+	}
+	public := func(suffix, component string, input map[string]any) map[string]any {
+		t.Helper()
+		method, body := "GET", ""
+		if input != nil {
+			method = "POST"
+			body = string(mustDocumentsJSON(t, input))
+		}
+		req := pagesGrantRequest(t, method, "/api/v1/pages/report/document"+suffix, workspace, user, "OWNER", body)
+		req.SetPathValue("slug", "report")
+		req.Header.Set("Authorization", "Bearer "+human)
+		if strings.HasPrefix(suffix, "/checkpoints/") {
+			req.SetPathValue("checkpoint", strings.TrimPrefix(suffix, "/checkpoints/"))
+		}
+		response := httptest.NewRecorder()
+		if input == nil {
+			h.GetDocument(response, req)
+		} else {
+			h.MutateDocument(response, req)
+		}
+		if response.Code != 200 {
+			t.Fatalf("public %s status%d: %s", suffix, response.Code, response.Body.String())
+		}
+		return validateDocumentResponse(t, schemas, component, response.Body.Bytes())
+	}
+	publicState := public("", "DocumentState", nil)
+	public("/comments", "DocumentComments", nil)
+	public("/comments", "DocumentReceipt", map[string]any{"id": "public-contract-comment", "schema": 2, "epoch": publicState["epoch"], "ifRev": publicState["rev"], "block": "intro", "from": 0, "to": 3, "text": "Contract-checked discussion"})
+	public("/comments", "DocumentComments", nil)
+	public("/comments/resolve", "DocumentReceipt", map[string]any{"id": "public-contract-resolve", "schema": 2, "epoch": publicState["epoch"], "ifRev": publicState["rev"], "comment": "public-contract-comment", "version": 1, "resolved": true})
+	public("/comments", "DocumentComments", nil)
+	public("/checkpoints", "DocumentCheckpoints", nil)
+	public("/checkpoints/checkpoint-one", "DocumentCheckpoint", nil)
 
 	// Bounded representative history measurement: six documents total, one
 	// 200-paragraph document with forty small edits crossing compaction at 32.

@@ -143,3 +143,52 @@ type DocumentInitializationState struct {
 	Updates     [][]byte        `json:"updates"`
 	Blocks      json.RawMessage `json:"blocks"`
 }
+
+// Checkpoint list rows and checkpoint-read share one public component. Their
+// detail-only and list-only fields are optional; identity/schema are common.
+type DocumentCheckpointResponse struct {
+	ID        string                 `json:"id"`
+	Rev       int64                  `json:"rev"`
+	Schema    int                    `json:"schema"`
+	Actor     string                 `json:"actor,omitempty"`
+	CreatedAt string                 `json:"created_at,omitempty"`
+	Snapshot  string                 `json:"snapshot,omitempty"`
+	Blocks    []DocumentBlockHash    `json:"blocks,omitempty"`
+	Content   *DocumentNode          `json:"content,omitempty"`
+	Outline   []DocumentOutlineBlock `json:"outline,omitempty"`
+}
+type DocumentCheckpointsResponse struct {
+	Checkpoints []DocumentCheckpointResponse `json:"checkpoints"`
+}
+type DocumentCommentAnchor struct {
+	ID         string `json:"id"`
+	Block      string `json:"block"`
+	Quote      string `json:"quote"`
+	Checkpoint int64  `json:"checkpoint"`
+	Start      string `json:"start"`
+	End        string `json:"end"`
+}
+type DocumentCommentResponse struct {
+	ID         string                `json:"id"`
+	Body       string                `json:"body"`
+	Anchor     DocumentCommentAnchor `json:"anchor"`
+	Actor      string                `json:"actor"`
+	Rev        int64                 `json:"rev"`
+	Version    int64                 `json:"version"`
+	Resolved   bool                  `json:"resolved"`
+	CreatedAt  string                `json:"created_at"`
+	Block      string                `json:"block"`
+	Quote      string                `json:"quote"`
+	Checkpoint int64                 `json:"checkpoint"`
+	Start      string                `json:"start"`
+	End        string                `json:"end"`
+	Status     string                `json:"status"`
+	From       *int                  `json:"from,omitempty"`
+	To         *int                  `json:"to,omitempty"`
+}
+type DocumentCommentsResponse struct {
+	Comments   []DocumentCommentResponse `json:"comments"`
+	CanWrite   bool                      `json:"can_write"`
+	CanComment bool                      `json:"can_comment"`
+	CanResolve bool                      `json:"can_resolve"`
+}
