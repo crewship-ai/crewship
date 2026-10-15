@@ -24,7 +24,7 @@ func (h *IssueHandler) beginHumanIssueOperation(w http.ResponseWriter, r *http.R
 		return nil, true
 	}
 	var active bool
-	if err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND (suspended_at IS NULL OR suspended_at=''))`, user.ID).Scan(&active); err != nil {
+	if err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND suspended_at IS NULL)`, user.ID).Scan(&active); err != nil {
 		internalError(w, r, h.logger, "authorize human account", err)
 		return nil, true
 	}
