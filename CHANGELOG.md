@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Fixed
+- **Chat issue drafts survive saving and access rechecks.** Field and comment drafts clear independently; editors retain focus during successful refreshes. Unknown writes retain their original retry key across panel close and reload, and conflicts reload current values alongside the draft.
+
+
 - Chat Artifacts includes supported files in the canonical per-run output folder while retaining internal, hidden-directory and attachment filters.
 - **Mobile table selections return to Chat without covering the draft.** Asking about selected rows closes the artifact overlay and preserves existing draft text. Switching between Chat, Work and Artifacts keeps previews within the selected panel and retains their tabs.
 

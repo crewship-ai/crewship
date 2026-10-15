@@ -47,8 +47,8 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
   const baseline = useRef(draft)
   const [draftRevision, setDraftRevision] = useState(ref.current?.revision)
   const [comment, setComment] = useState("")
-  const mutation = useChatIssueMutation(reconcile, reconcile)
-  useEffect(() => { if (mutation.state === "saved") { setEditor(null); setComment("") } }, [mutation.state])
+  const mutation = useChatIssueMutation(reconcile, reconcile, JSON.stringify([ref.entity.workspace_id, userId, ref.entity.id]))
+  useEffect(() => { if (mutation.state === "saved") { setEditor(null); if (mutation.savedMethod === "POST") setComment("") } }, [mutation.state, mutation.savedMethod])
   const detail = useQuery({
     queryKey: [...chatEntityKeys.detail(ref.entity.workspace_id, chatId, userId), ref.entity.id],
     enabled: (!!editor || pullRequestsOpen) && !rechecking && !ref.entity.deleted,
@@ -59,6 +59,8 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
       return r.json() as Promise<Mission>
     },
   })
+  const refetchDetail = detail.refetch
+  useEffect(() => { if (mutation.state === "conflict") void refetchDetail() }, [mutation.state, refetchDetail])
   const roster = useQuery({
     queryKey: ["chat-issue-agents", ref.entity.workspace_id, userId],
     enabled: editor === "fields" && !rechecking && !!ref.current?.allowed_actions.includes("assign"),
@@ -69,7 +71,7 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
       return (Array.isArray(body) ? body : body.agents ?? []) as { id: string; name: string }[]
     },
   })
-  if (rechecking) return <EntityCardFrame><p role="status" className="text-muted-foreground">Checking current access…</p><Button size="sm" variant="outline" className="coarse:min-h-12" onClick={reconcile}>Retry verification</Button></EntityCardFrame>
+  if (rechecking && !ref.current) return <EntityCardFrame><p role="status" className="text-muted-foreground">Checking current access…</p><Button size="sm" variant="outline" className="coarse:min-h-12" onClick={reconcile}>Retry verification</Button></EntityCardFrame>
   if (ref.kind !== "issue") return <EntityCardFrame><p>Unavailable</p></EntityCardFrame>
   if (ref.entity.deleted) return <EntityCardFrame><p className="text-muted-foreground">Issue deleted</p></EntityCardFrame>
   const current = ref.current
@@ -107,7 +109,7 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
     </div>}
     {editor && <form className="space-y-3 border-t pt-3" onSubmit={async (event) => {
       event.preventDefault()
-      if (!path || locked) return
+      if (!path || locked || rechecking) return
       const body: Record<string, unknown> = editor === "comment" ? { body: comment } : {
         expected_revision: draftRevision,
         ...(can("edit_fields") && draft.title !== baseline.current.title ? { title: draft.title } : {}),
@@ -123,7 +125,8 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
         {can("change_status") && <label className="space-y-1 text-xs">Status<select value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as typeof draft.status })} className="block h-9 w-full rounded-md border bg-background px-2 coarse:min-h-12">{ISSUE_STATUSES.map((s) => <option key={s} value={s}>{statusLabel[s]}</option>)}</select></label>}
         {can("assign") && <label className="space-y-1 text-xs">Assignee<select value={draft.assignee_id} disabled={!roster.data} onChange={(e) => setDraft({ ...draft, assignee_id: e.target.value })} className="block h-9 w-full rounded-md border bg-background px-2 coarse:min-h-12"><option value="">Unassigned</option>{baseline.current.assignee_id && !roster.data?.some((a) => a.id === baseline.current.assignee_id) && <option value={baseline.current.assignee_id}>{detail.data?.assignee_name ?? "Current assignee"}</option>}{roster.data?.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>{roster.error && <span role="alert">Could not load assignees</span>}</label>}
       </div>}</fieldset>
-      <CardWriteFeedback {...mutation} resolveConflict={() => { void detail.refetch().then((fresh) => { if (fresh.data?.revision) { setDraftRevision(fresh.data.revision); mutation.resolveConflict() } }) }} />
+      {mutation.state === "conflict" && detail.data && <div className="space-y-1 text-xs" aria-label="Current server values"><p>Current server values</p><p>Title: {detail.data.title}</p><p>Status: {detail.data.status} · Priority: {detail.data.priority} · Assignee: {detail.data.assignee_id ?? "Unassigned"}</p><p>Your draft remains in the fields above.</p></div>}
+      <CardWriteFeedback {...mutation} resolveConflict={() => { void detail.refetch().then((fresh) => { if (!fresh.error && fresh.data?.revision) { const value = fresh.data; baseline.current = { title: value.title, status: value.status, priority: value.priority, assignee_id: value.assignee_id ?? "" }; setDraftRevision(value.revision); mutation.resolveConflict() } }) }} />
       <div className="flex gap-2"><Button type="submit" size="sm" className="coarse:min-h-12" disabled={!detail.data || locked || (editor === "comment" && !can("comment"))}>{mutation.state === "saving" ? <RefreshCw className="size-3.5 animate-spin" /> : null}Save</Button><Button type="button" size="sm" variant="ghost" className="coarse:min-h-12" onClick={() => setEditor(null)} disabled={locked}>Cancel</Button></div>
     </form>}
   </EntityCardFrame>
