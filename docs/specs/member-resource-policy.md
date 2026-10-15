@@ -70,7 +70,7 @@ access first. A role change cannot silently remove or bypass the restriction.
 | --- | --- | --- |
 | New GUEST workspace role | Changed: restricted access mode, Guest in UI, account-wide | The current global route fence has no mixed-mode bypass. Keeping one account ceiling avoids granting trusted routes through another workspace while per-resource integration is incomplete. Separate workspace-scoped guest accounts remain a future migration. |
 | New resource_grants registry | Changed: extend versioned access_grants | Reuse the shipped membership revision, resource foreign keys and execution revocation fences rather than introduce two authorities. Pages moves last as originally planned. |
-| Per-object sharing and meaningful type levels | Kept as target; only agent operations, routine Run and project read/contribute delivered | View/Edit and crew/credential subjects need separate enforcement and UI work. Routine/project Share dialogs reuse the versioned member policy. |
+| Per-object sharing and meaningful type levels | Kept as target; agent operations, routine Run, definition View and project read/contribute delivered | Full View/Edit and crew/credential subjects need separate enforcement and UI work. Routine/project Share dialogs reuse the versioned member policy. |
 | Pages model migration | Deferred, as in original phases | Preserve current Pages ACL, issuer checks and data during the first routine/project slice. |
 
 Guest invitation acceptance, restricted provisioning and direct member policy
@@ -165,7 +165,7 @@ or run history. Foreign and revoked details return 404. The shared issue board,
 search, statistics and mutation routes remain closed to Guests. Collection
 `X-Total-Count` counts the filtered total before pagination; the next-offset header supports pagination.
 
-Crews, credentials, routine View/Edit levels, full Issues Manage, explicit
+Crews, credentials, routine Edit and shared-output audiences, full Issues Manage, explicit
 Page-action selection and a Pages grant migration remain separate work. This
 contract does not claim complete resource-access PRD or release-1.0 acceptance.
 
@@ -228,7 +228,7 @@ Trusted workspace OWNER/ADMIN members can open **Share** on the routine or proje
 identity card. The dialog lists trusted role-based members and each Guest's
 explicit shares on that object, including inactive issuer state. Routine sharing
 currently offers Run; project sharing offers independent List and Read. It does
-not introduce routine View/Edit or full Issues Manage; project Contribute is described below.
+not introduce routine Edit or full project Manage; project Contribute is described below. Definition View is a separate explicit operation, described below.
 
 Each Guest save retains their membership ID, access mode and revision, preserves
 all other resources and unsupported future operations, and sends only writable

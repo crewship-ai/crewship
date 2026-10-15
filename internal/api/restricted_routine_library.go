@@ -82,7 +82,7 @@ func (r *Router) restrictedRoutineLibrary(w http.ResponseWriter, req *http.Reque
 		if err = rows.Scan(&item.ID, &item.Slug, &item.Name, &item.Status, &hash, &item.CanView); err != nil {
 			break
 		}
-		item.CanRun = authorized[item.ID] != "" && authorized[item.ID] == hash
+		item.CanRun = authorized[item.ID] != "" && authorized[item.ID] == hash && canScope(req.Context(), "workspace:admin")
 		item.RuntimeReady = r.restrictedWorkflow != nil
 		items = append(items, item)
 	}

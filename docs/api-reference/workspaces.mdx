@@ -721,7 +721,7 @@ POST /api/v1/workspaces/{workspaceId}/invitations
 `access_mode` is optional: `trusted` (default) or `restricted` (Guest).
 `rights` is an optional array of `{kind,id,operation}` resource grants, empty
 by default. Supported kinds are agent, routine and project; a routine supports
-run, agents support discover/chat/run/delegate, and projects list/read/contribute/write/delete.
+View/Run, agents support discover/chat/run/delegate, and projects list/read/contribute/write/delete.
 Trusted invitations require empty rights; Guest invitations cannot grant ADMIN.
 The server revalidates resources and issuer authority during redemption and
 installs membership and grants atomically. Existing accounts must explicitly
@@ -2078,7 +2078,7 @@ query parameters are required.
 
 `rights` is an explicit array, including when empty. Agent operations are
 `discover`, `chat`, `run`, `delegate`; project operations are `list`, `read`,
-`contribute`, `write`, `delete`; routine operation is `run`. Grants do not open application routes whose restricted
+`contribute`, `write`, `delete`; routine operations are `view` and `run`. Grants do not open application routes whose restricted
 runtime integration is incomplete.
 
 | Status | Condition |

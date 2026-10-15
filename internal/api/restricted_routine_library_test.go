@@ -97,6 +97,11 @@ func TestGuestRoutineViewSelectsDefinitionsWithoutExecutionAuthority(t *testing.
 	if !strings.Contains(directory.Body.String(), `"routines"`) {
 		t.Fatal("View-only member has no routine navigation", directory.Body.String())
 	}
+	execOrFatal(t, db, `UPDATE cli_tokens SET scopes='["agents:write"]' WHERE id='clt-view-client-a'`)
+	call("view-client-a", "GET", base, 200)
+	call("view-client-a", "GET", base+"/view-routine-0", 200)
+	call("view-client-a", "POST", "/api/v1/workspaces/"+workspace+"/pipelines/view-routine-0/run", 403)
+	execOrFatal(t, db, `UPDATE cli_tokens SET scopes=NULL WHERE id='clt-view-client-a'`)
 	execOrFatal(t, db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, workspace, owner)
 	call("view-client-a", "GET", base+"/view-routine-0", 404)
 	list = call("view-client-a", "GET", base, 200)
