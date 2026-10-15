@@ -2534,3 +2534,32 @@ All routes may return400 invalid input,401 authentication,403 credential access,
 404 unavailable local membership/project/milestone or grants,500 storage/audit
 failure. CLI equivalents are `project shared milestones` and its create/update/delete
 subcommands. The UI keeps failed drafts and requires explicit review after conflicts.
+
+
+## Guest collaborative routine drafts
+
+```http
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft
+PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft
+```
+
+Both require current local Guest membership and explicit live routine View and
+Edit shares. GET returns `draft_id`, `revision`, `base_revision`, `name`,
+`description`, `definition` and `can_edit`. PUT accepts the same snapshot/content
+fields except `can_edit`, and requires token scope `workspace:admin`. Unknown
+fields, non-object definitions and omitted content are rejected. An empty
+`draft_id` with revision zero creates the collaborative draft against the exact
+published baseline; subsequent saves require its current ID and revision.
+
+Draft authority, account status, revision/base checks and content-free audit
+commit atomically. The route does not publish, execute, mint test proofs or
+approve risk. Author identities, execution origin, trigger and approval controls
+remain server-owned and are excluded from the projection. View alone sees only
+the published definition. Granting Edit additionally shares unfinished work with
+all current editors of that routine.
+
+Statuses: 200 snapshot/saved draft; 400 malformed body; 401 authentication;
+403 workspace/token scope; 404 unavailable routine, View/Edit authority or local
+Guest membership; 409 changed draft or published base; 500 unavailable storage or
+audit. Conflicts are not retried. Trusted review/testing/publication remain
+required after a Guest saves changes.

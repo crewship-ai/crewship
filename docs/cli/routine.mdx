@@ -2257,3 +2257,25 @@ runtime. Definitions include prompts/defaults; existing Run shares retain their
 minimal invocation contract and do not acquire View automatically. Private run
 receipts remain actor-scoped. The command does not call the trusted routine or
 crew/agent directory endpoints.
+
+
+## shared-draft / shared-draft save
+
+Inspect or edit a shared collaborative draft with explicit routine View and
+Edit grants. The JSON projection is separate from the published definition.
+
+```bash
+crewship --format json routine shared-draft ROUTINE_ID > draft.json
+# Edit name, description and definition; retain draft_id/revision/base_revision.
+crewship --format json routine shared-draft save ROUTINE_ID --file draft.json
+crewship routine shared-draft save ROUTINE_ID --file - < draft.json
+```
+
+`shared-draft <routine-id-or-slug>` supports table, JSON and YAML output. Save
+requires `--file` containing one complete JSON snapshot; `-` reads stdin.
+`can_edit` is a read-only server hint and is removed before saving. Unknown
+fields and incomplete snapshots fail locally. PUT requires the existing
+`workspace:admin` token scope and rechecks current rights, issuers and account.
+A 409 preserves the conflict for review; the CLI performs no hidden GET or retry.
+Saving changes only the collaborative draft. Trusted testing and exact-revision
+review/publication remain required; this command cannot publish or run it.

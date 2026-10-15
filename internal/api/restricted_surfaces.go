@@ -29,6 +29,8 @@ var restrictedSurfaces = []restrictedSurface{
 		"GET /api/v1/chats/{chatId}/execution-profile",
 	}},
 	{Name: "routines", Patterns: []string{
+		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
+		"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library",
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}",
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routines",

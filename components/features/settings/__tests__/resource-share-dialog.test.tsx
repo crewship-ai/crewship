@@ -101,6 +101,6 @@ describe("resource Share", () => {
     expect(resourceShareReplacement(extended, resource, [], []).rights).toEqual([policy.rights[0], extended.rights[2]])
     expect(() => resourceShareReplacement({ ...policy, mode: "trusted" }, resource, [], [])).toThrow("Trusted access")
     expect(() => resourceShareReplacement(policy, resource, [], ["run"])).toThrow("Invalid resource operation")
-    expect(() => resourceShareReplacement(policy, resource, ["edit"], [])).toThrow("Invalid resource operation")
+    expect(() => resourceShareReplacement(policy, resource, ["unsupported-operation"], [])).toThrow("Invalid resource operation")
   })
 })

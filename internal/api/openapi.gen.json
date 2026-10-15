@@ -6475,7 +6475,8 @@
                     "operation": {
                       "enum": [
                         "view",
-                        "run"
+                        "run",
+                        "edit"
                       ],
                       "type": "string"
                     }
@@ -6678,7 +6679,8 @@
                     "operation": {
                       "enum": [
                         "view",
-                        "run"
+                        "run",
+                        "edit"
                       ],
                       "type": "string"
                     }
@@ -12653,6 +12655,9 @@
       "RestrictedRoutineDefinition": {
         "additionalProperties": false,
         "properties": {
+          "can_edit": {
+            "type": "boolean"
+          },
           "can_run": {
             "type": "boolean"
           },
@@ -12691,11 +12696,86 @@
           "name",
           "status",
           "can_view",
+          "can_edit",
           "can_run",
           "runtime_ready",
           "definition",
           "definition_hash",
           "version"
+        ],
+        "type": "object"
+      },
+      "RestrictedRoutineDraft": {
+        "additionalProperties": false,
+        "properties": {
+          "base_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "can_edit": {
+            "type": "boolean"
+          },
+          "definition": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": {
+            "type": "string"
+          },
+          "draft_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "draft_id",
+          "revision",
+          "base_revision",
+          "name",
+          "description",
+          "definition",
+          "can_edit"
+        ],
+        "type": "object"
+      },
+      "RestrictedRoutineDraftRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "base_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "definition": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": {
+            "type": "string"
+          },
+          "draft_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "draft_id",
+          "revision",
+          "base_revision",
+          "name",
+          "description",
+          "definition"
         ],
         "type": "object"
       },
@@ -12727,6 +12807,9 @@
       "RestrictedRoutineLibraryItem": {
         "additionalProperties": false,
         "properties": {
+          "can_edit": {
+            "type": "boolean"
+          },
           "can_run": {
             "type": "boolean"
           },
@@ -12755,6 +12838,7 @@
           "name",
           "status",
           "can_view",
+          "can_edit",
           "can_run",
           "runtime_ready"
         ],
@@ -142250,7 +142334,8 @@
                               "operation": {
                                 "enum": [
                                   "view",
-                                  "run"
+                                  "run",
+                                  "edit"
                                 ],
                                 "type": "string"
                               }
@@ -142355,7 +142440,8 @@
                               "operation": {
                                 "enum": [
                                   "view",
-                                  "run"
+                                  "run",
+                                  "edit"
                                 ],
                                 "type": "string"
                               }
@@ -142653,7 +142739,8 @@
                             "operation": {
                               "enum": [
                                 "view",
-                                "run"
+                                "run",
+                                "edit"
                               ],
                               "type": "string"
                             }
@@ -142758,7 +142845,8 @@
                             "operation": {
                               "enum": [
                                 "view",
-                                "run"
+                                "run",
+                                "edit"
                               ],
                               "type": "string"
                             }
@@ -142928,7 +143016,8 @@
                               "operation": {
                                 "enum": [
                                   "view",
-                                  "run"
+                                  "run",
+                                  "edit"
                                 ],
                                 "type": "string"
                               }
@@ -143033,7 +143122,8 @@
                               "operation": {
                                 "enum": [
                                   "view",
-                                  "run"
+                                  "run",
+                                  "edit"
                                 ],
                                 "type": "string"
                               }
@@ -161029,6 +161119,343 @@
           "workspaces"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft": {
+      "get": {
+        "description": "Get workspace restricted routine library draft (GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft).",
+        "operationId": "get_api_v1_workspaces_workspaceId_restricted-routine-library_routineId_draft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routineId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictedRoutineDraft"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace restricted routine library draft",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      },
+      "put": {
+        "description": "Update workspace restricted routine library draft (PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft).",
+        "operationId": "put_api_v1_workspaces_workspaceId_restricted-routine-library_routineId_draft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routineId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestrictedRoutineDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictedRoutineDraft"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update workspace restricted routine library draft",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/workspaces/{workspaceId}/restricted-routine-runs": {
