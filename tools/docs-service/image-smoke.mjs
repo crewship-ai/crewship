@@ -4,7 +4,8 @@ import http from 'node:http';
 import { mkdtemp, writeFile, chmod, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { create, initialJSON, snapshot } from './schema.mjs';
 
@@ -57,7 +58,7 @@ try {
   await waitReady();
   assert.equal((await stat(socket)).mode & 0o777, 0o600);
   assert.equal((await call('/v1/documents/p/read', {})).body.rev, 1);
-  docker('exec', name, 'node', 'healthcheck.mjs');
+  await promisify(execFile)('docker', ['exec', name, 'node', 'healthcheck.mjs']);
   available = false; assert.equal((await call('/health/ready')).status, 503);
   available = true; assert.equal((await call('/health/ready')).status, 200);
   assert.equal((await call('/drain', {})).status, 200);
