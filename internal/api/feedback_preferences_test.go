@@ -229,10 +229,10 @@ func TestFeedbackPreferenceLiveScopeAndDisabledValues(t *testing.T) {
 		{"new feedback with profile off", `INSERT INTO app_settings(key,value) VALUES('memory.user_model_profile','off')`, "disabled", true, false},
 		{"suspension before worker", `UPDATE users SET suspended_at=''`, "not_eligible", false, false},
 		{"deleted workspace before worker", `UPDATE workspaces SET deleted_at=datetime('now')`, "not_eligible", false, false},
-		{"restriction elsewhere before worker", `UPDATE workspace_members SET role='MEMBER'; INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) SELECT 'restricted-elsewhere','ws-other-fb',created_by,'MEMBER','restricted' FROM chats`, "not_eligible", false, false},
+		{"restriction elsewhere before worker", `UPDATE workspace_members SET role='MEMBER'; INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) SELECT 'restricted-elsewhere','ws-other-fb',created_by,'MEMBER','restricted' FROM chats`, "withdrawn", false, false},
 		{"suspension after save", `UPDATE users SET suspended_at=''`, "saved", false, true},
 		{"deleted workspace after save", `UPDATE workspaces SET deleted_at=datetime('now')`, "saved", false, true},
-		{"restriction elsewhere after save", `UPDATE workspace_members SET role='MEMBER'; INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) SELECT 'restricted-elsewhere','ws-other-fb',created_by,'MEMBER','restricted' FROM chats`, "saved", false, true},
+		{"restriction elsewhere after save", `UPDATE workspace_members SET role='MEMBER'; INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) SELECT 'restricted-elsewhere','ws-other-fb',created_by,'MEMBER','restricted' FROM chats`, "withdrawn", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := setupFeedbackTestBed(t)
