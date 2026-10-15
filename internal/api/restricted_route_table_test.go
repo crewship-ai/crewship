@@ -56,6 +56,7 @@ var restrictedAllowedPatterns = []string{
 	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-pages",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs",
@@ -78,6 +79,7 @@ var restrictedAllowedPatterns = []string{
 	"POST /api/v1/workspaces/{workspaceId}/projects/{projectId}/files",
 	"POST /api/v1/workspaces/{workspaceId}/restricted-issues",
 	"POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
+	"PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
 }
 
 // restrictedAgentCheckedPatterns are the allowlisted patterns that are not a

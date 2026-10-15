@@ -306,3 +306,17 @@ a live View share. Both use the authenticated Guest and selected workspace;
 the envelope includes no issuer/member identity or run records. Stored definition literals are deliberately shared as authored; vault credentials are never resolved. Revoked,
 foreign and deleted definitions return 404. View does not imply credentials,
 crew/agent directory access, publication or execution.
+## Guest project details management
+
+An explicit project `manage` share combined with `read` permits changing the
+project name and description through dedicated thin Guest routes. Manage explicitly shares that description; existing Read shares retain their prior issue/file projection. It does not
+imply Contribute, source-file writes, intake configuration or access administration.
+The UI preserves failed drafts and requires explicit reload after a changed
+snapshot; CLI requires the reviewed version and never automatically retries it.
+Live account, local membership, Read/Manage issuers, update and journal entry
+share one transaction. Other client projects and private metadata remain hidden.
+
+This is a first Manage increment. Milestone management, issue deletion and the
+remaining project settings still require separate scoped enforcement. The original
+PRD's level hierarchy remains a target: current operations are explicit, additive
+shares, so administrators must choose the lower operations they intend to share.

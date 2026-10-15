@@ -13,6 +13,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ Tokens with limited scopes can no longer create successor tokens or pairing codes. Use an interactive sign-in to create credentials; trusted full-role token creation remains available.
 
 - Guests with an explicit routine View share can inspect its definition without an execution runtime or agent Run grants. Stored Run grants retain their existing invocation-only disclosure; View does not expose another person’s private runs. UI, CLI and access explanations use the same live issuer policy.
+- Guests with explicit project Read and Manage shares can edit shared project names and descriptions. UI and CLI preserve review snapshots and refuse conflicting saves; private project metadata and unrelated operations remain inaccessible.
 
 - **Agent chat transcripts survive workspace and crew backups (#3109).** Encrypted bundles include scoped structured history, remapped fork identities and stable message/run anchors. Damaged lines produce per-chat completeness warnings instead of blocking all backups. Collection only fences file pinning; restore fences publication and commit, preserving existing histories unless replacement is explicit. Cross-workspace chat collisions are refused. The search/feedback mirror and atomic hard-crash recovery across filesystem/DB publication remain separate limitations.
 

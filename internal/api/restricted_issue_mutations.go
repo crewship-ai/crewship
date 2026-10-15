@@ -339,6 +339,7 @@ type guestIssueComment struct {
 }
 
 type guestIssueProject struct {
+	CanManage     bool   `json:"can_manage"`
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	CanContribute bool   `json:"can_contribute"`
@@ -367,8 +368,9 @@ func (r *Router) restrictedIssueProjects(w http.ResponseWriter, req *http.Reques
 	}
 	rows, err := tx.QueryContext(req.Context(), `SELECT p.id,p.name,
  EXISTS(SELECT 1 FROM live_access_grants g WHERE g.member_id=? AND g.resource_kind='project' AND g.project_id=p.id AND g.operation='contribute') AND EXISTS(SELECT 1 FROM live_access_grants g WHERE g.member_id=? AND g.resource_kind='project' AND g.project_id=p.id AND g.operation='read'),
+ EXISTS(SELECT 1 FROM live_access_grants mg WHERE mg.member_id=? AND mg.resource_kind='project' AND mg.project_id=p.id AND mg.operation='manage') AND EXISTS(SELECT 1 FROM live_access_grants rg WHERE rg.member_id=? AND rg.resource_kind='project' AND rg.project_id=p.id AND rg.operation='read'),
  EXISTS(SELECT 1 FROM project_guest_issue_intake i JOIN crews c ON c.id=i.crew_id AND c.workspace_id=i.workspace_id AND c.deleted_at IS NULL WHERE i.project_id=p.id AND i.workspace_id=p.workspace_id AND EXISTS(SELECT 1 FROM agents a WHERE a.crew_id=c.id AND a.workspace_id=c.workspace_id AND a.agent_role='LEAD' AND a.deleted_at IS NULL))
- FROM projects p JOIN live_access_grants visible ON visible.project_id=p.id AND visible.resource_kind='project' AND visible.member_id=? AND visible.operation='list' WHERE p.workspace_id=? ORDER BY p.name,p.id`, member, member, member, workspace)
+ FROM projects p JOIN live_access_grants visible ON visible.project_id=p.id AND visible.resource_kind='project' AND visible.member_id=? AND visible.operation='list' WHERE p.workspace_id=? ORDER BY p.name,p.id`, member, member, member, member, member, workspace)
 	if err != nil {
 		guestIssueError(w, err)
 		return
@@ -376,10 +378,11 @@ func (r *Router) restrictedIssueProjects(w http.ResponseWriter, req *http.Reques
 	items := []guestIssueProject{}
 	for rows.Next() {
 		var item guestIssueProject
-		if err = rows.Scan(&item.ID, &item.Name, &item.CanContribute, &item.IntakeReady); err != nil {
+		if err = rows.Scan(&item.ID, &item.Name, &item.CanContribute, &item.CanManage, &item.IntakeReady); err != nil {
 			break
 		}
 		item.CanContribute = item.CanContribute && canScope(req.Context(), "workspace:admin")
+		item.CanManage = item.CanManage && canScope(req.Context(), "workspace:admin")
 		items = append(items, item)
 	}
 	rowErr := rows.Err()

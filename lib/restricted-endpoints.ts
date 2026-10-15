@@ -23,6 +23,8 @@ export const RESTRICTED_FE_ENDPOINTS = [
  "GET /api/v1/workspaces/{workspaceId}/restricted-issues",
  "POST /api/v1/workspaces/{workspaceId}/restricted-issues",
  "GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
+ "PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
  "PATCH /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
  "GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
  "POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",

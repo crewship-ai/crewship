@@ -32,7 +32,7 @@ func newObjectShareCommand(remove bool) *cobra.Command {
 		},
 	}
 	cmd.Flags().String("with", "", "Existing member ID, user ID or exact email")
-	cmd.Flags().StringSlice("operation", nil, "Operations to add/remove: routine view,run; project list,read,contribute (repeatable or comma-separated)")
+	cmd.Flags().StringSlice("operation", nil, "Operations to add/remove: routine view,run; project list,read,contribute,manage (repeatable or comma-separated)")
 	_ = cmd.MarkFlagRequired("with")
 	_ = cmd.MarkFlagRequired("operation")
 	if !remove {
@@ -121,7 +121,7 @@ func changeObjectShare(kind, id, target string, operations []string, remove, rei
 	}
 	selected := map[access.Right]bool{}
 	for _, operation := range operations {
-		if (kind == "routine" && operation != "run" && operation != "view") || (kind == "project" && operation != "list" && operation != "read" && operation != "contribute") {
+		if (kind == "routine" && operation != "run" && operation != "view") || (kind == "project" && operation != "list" && operation != "read" && operation != "contribute" && operation != "manage") {
 			return fmt.Errorf("unsupported %s operation %q", kind, operation)
 		}
 		selected[access.Right{Kind: kind, ID: id, Operation: operation}] = true

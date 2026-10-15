@@ -26,6 +26,7 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 		wantReissue    bool
 	}{
 		{"share project by email", []string{"share", "project", "project-1", "--with", "CLIENT@example.test", "--operation", "list,read", "--format", "yaml"}, "restricted", 200, false, []string{"list", "read"}, false},
+		{"share project management", []string{"share", "project", "project-1", "--with", "member-1", "--operation", "read,manage", "--format", "json"}, "restricted", 200, false, []string{"read", "manage"}, false},
 		{"unshare routine by user", []string{"unshare", "routine", "routine-1", "--with", "user-1", "--operation", "run"}, "restricted", 200, false, []string{}, false},
 		{"explicit reissue", []string{"share", "routine", "routine-1", "--with", "member-1", "--operation", "run,run", "--reissue"}, "restricted", 200, false, []string{"run"}, true},
 		{"conflict no retry", []string{"unshare", "routine", "routine-1", "--with", "member-1", "--operation", "run"}, "restricted", 409, true, []string{}, false},
@@ -108,7 +109,7 @@ func TestAcceptanceObjectShareCLI(t *testing.T) {
 				t.Fatalf("unrelated/future rights lost: %+v", submitted)
 			}
 			kind, id := tc.args[1], tc.args[2]
-			for _, operation := range []string{"run", "list", "read"} {
+			for _, operation := range []string{"run", "view", "list", "read", "contribute", "manage"} {
 				right := access.Right{Kind: kind, ID: id, Operation: operation}
 				if slices.Contains(submitted.Rights, right) != slices.Contains(tc.wantOperations, operation) {
 					t.Fatalf("wrong operation %s: %+v", operation, submitted)

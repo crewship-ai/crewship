@@ -439,3 +439,4 @@ PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key} roleManage
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override roleCreate
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags roleCreate
 PUT /api/v1/workspaces/{workspaceId}/projects/{projectId}/guest-intake roleManage
+PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId} roleInline

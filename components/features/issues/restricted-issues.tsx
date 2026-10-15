@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { SharedProjectDetails } from "./shared-project-details"
 import { useId, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { z } from "zod"
@@ -14,7 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 
 const issueSchema = z.object({ id: z.string(), identifier: z.string(), title: z.string(), status: z.string(), project_id: z.string(), project_name: z.string(), can_read: z.boolean(), can_contribute: z.boolean().default(false), description: z.string().optional() })
-const projectSchema = z.object({ id: z.string(), name: z.string(), can_contribute: z.boolean(), intake_ready: z.boolean() })
+const projectSchema = z.object({ id: z.string(), name: z.string(), can_contribute: z.boolean(), intake_ready: z.boolean(), can_manage: z.boolean().default(false) })
 const commentSchema = z.object({ id: z.string(), body: z.string(), author: z.string(), created_at: z.string() })
 type Issue = z.infer<typeof issueSchema>
 type Project = z.infer<typeof projectSchema>
@@ -77,6 +78,7 @@ export function RestrictedIssues({ identifier }: { identifier?: string | null })
   return <main className="mx-auto w-full max-w-4xl space-y-4 p-4 md:p-6">
     <div className="flex items-center justify-between"><h1 className="text-lg font-semibold">{identifier ? "Issue" : "Issues shared with you"}</h1>{identifier ? <Link href="/issues" className="text-sm text-primary">Back to issues</Link> : <Button variant="outline" onClick={() => { void query.refetch(); void projects.refetch() }}>Refresh</Button>}</div>
     <p className="text-sm text-muted-foreground">Your project grants decide which issues you can list, read and contribute to. Only comments explicitly shared with this project appear here.</p>
+    {!identifier && !accessLost(projects.error) && workspaceId && projects.data?.some(project => project.can_manage) && <SharedProjectDetails key={`${session?.user.id}:${workspaceId}`} workspaceId={workspaceId} projects={projects.data.filter(project => project.can_manage)} />}
     {!identifier && !accessLost(projects.error) && projects.data?.some(project => project.can_contribute) && <NewIssue key={`${session?.user.id}:${workspaceId}`} base={base} projects={projects.data} disabled={projects.isError} />}
     {query.isPending && <p role="status">Loading shared issues…</p>}
     {query.isError && (!query.data || accessLost(query.error)) && <AccessNotice kind={accessLost(query.error) ? "no-access" : "unavailable"} title="Issues unavailable" description="Your access may have changed. Retry to check your current project grants." context={context} current="issues" onRetry={() => void query.refetch()} />}
