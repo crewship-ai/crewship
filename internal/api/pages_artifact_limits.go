@@ -12,8 +12,10 @@ import (
 )
 
 // Limit simultaneous decoded uploads in the single writer process. Waiting
-// requests retain their transport stream, not a 60 MiB JSON buffer. This covers
-// human publication, restore and agent creation alike.
+// requests retain their transport stream. encoding/json still buffers each
+// admitted whole JSON value (up to 60 MiB + 4096 on the wire); escaping, decoded
+// strings and buffer growth mean this is not a two-times-10-MiB heap bound.
+// This covers human publication, restore and agent creation alike.
 var artifactUploadSlots = make(chan struct{}, 2)
 
 func acquireArtifactUpload(w http.ResponseWriter, r *http.Request) (func(), bool) {

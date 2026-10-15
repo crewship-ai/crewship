@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -62,5 +63,24 @@ func TestArtifactWritesRecheckHumanCeilingAfterBodyRead(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+func TestBoardWritesRecheckHumanCeilingAfterBodyRead(t *testing.T) {
+	for _, change := range []string{"restricted", "workspace-deleted", "member-removed", "suspended"} {
+		t.Run(change, func(t *testing.T) {
+			h, _, _, workspace, user, page := artifactFixture(t)
+			artifactExpect(t, boardCall(t, h, workspace, user, "OWNER", "report", "init", `{"mutation_id":"init"}`), 200)
+			body := fmt.Sprintf(`{"mutation_id":"denied","base_seq":0,"upserts":[{"element":%s,"expected_rev":0}],"deletes":[]}`, boardAPIElement(t))
+			r := pagesGrantRequest(t, "POST", "/", workspace, user, "OWNER", body)
+			r.SetPathValue("slug", "report")
+			r.Body = &artifactRevokingBody{reader: strings.NewReader(body), revoke: func() { revokeContentCeiling(t, h, workspace, user, change) }}
+			w := httptest.NewRecorder()
+			h.ApplyBoardBatch(w, r)
+			artifactExpect(t, w, 403)
+			var seq int
+			if err := h.db.QueryRow(`SELECT seq FROM page_boards WHERE page_id=?`, page).Scan(&seq); err != nil || seq != 0 {
+				t.Fatalf("revoked board committed seq=%d err=%v", seq, err)
+			}
+		})
 	}
 }

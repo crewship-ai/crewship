@@ -224,8 +224,10 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if body.BoardRequestID != "" {
-		replyError(w, 403, "Board admission requires the Board delivery")
-		return
+		if body.ArtifactRequestID != "" || body.ArtifactHumanReceipt == nil || bindBoardRequestRun(r, h.db, body.BoardRequestID, body.ID, body.ArtifactHumanReceipt) != nil {
+			replyError(w, 403, "board request admission refused")
+			return
+		}
 	}
 	// Now flip the agent to RUNNING. Failure is debug-only because the
 	// run trace already exists — recoverOrphanedRuns will clean up.

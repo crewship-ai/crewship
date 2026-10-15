@@ -3,8 +3,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,7 +73,11 @@ func TestArtifactWorkflowBrowser(t *testing.T) {
 	mux.Handle("/", StaticFileHandler(os.DirFS(filepath.Join(repo, "out"))))
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	fixture, err := json.Marshal(map[string]any{"server": server.URL, "workspace": workspace, "owner": owner, "commenter": commenter, "tokens": tokens})
+	var pngInput bytes.Buffer
+	if err = png.Encode(&pngInput, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	fixture, err := json.Marshal(map[string]any{"server": server.URL, "workspace": workspace, "owner": owner, "commenter": commenter, "tokens": tokens, "image_png": pngInput.Bytes()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,9 +93,9 @@ func TestArtifactWorkflowBrowser(t *testing.T) {
 	if err = command.Run(); err != nil {
 		t.Fatal("preauthenticated artifact workflow browser", err)
 	}
-	var boards int
-	if err = db.QueryRow(`SELECT COUNT(*) FROM page_boards`).Scan(&boards); err != nil || boards != 0 {
-		t.Fatalf("Artifacts delivery unexpectedly created Board data: %d %v", boards, err)
+	var boardSeq, boardElements int
+	if err = db.QueryRow(`SELECT b.seq,(SELECT COUNT(*) FROM page_board_elements e WHERE e.board_page_id=b.page_id AND e.element_json IS NOT NULL) FROM page_boards b JOIN pages p ON p.id=b.page_id WHERE p.slug='browser-board' AND p.workspace_id=?`, workspace).Scan(&boardSeq, &boardElements); err != nil || boardSeq != 8 || boardElements != 2 {
+		t.Fatalf("real Board DB seq=%d elements=%d err=%v", boardSeq, boardElements, err)
 	}
 	var head, threads, requests int
 	if err = db.QueryRow(`SELECT head_rev FROM page_artifacts JOIN pages ON pages.id=page_artifacts.page_id WHERE pages.workspace_id=? AND pages.slug='browser-report'`, workspace).Scan(&head); err != nil || head != 3 {

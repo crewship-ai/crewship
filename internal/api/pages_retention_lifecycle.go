@@ -156,3 +156,18 @@ func (h *PageHandler) cleanupPageRetention(ctx context.Context, pageCursor, work
 	}
 	return pageCursor, workspaceCursor, nil
 }
+
+// Optional illustrations can release quota without deleting the canonical job
+// snapshot or its result. Never remove an active/awaiting-insertion input, and
+// preserve terminal inputs for at least the supported replay window.
+func compactTerminalBoardPreviews(ctx context.Context, tx *sql.Tx, workspace string, bytesNeeded int64, now time.Time) error {
+	if bytesNeeded <= 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `DELETE FROM page_board_request_previews WHERE request_id IN (
+ SELECT request_id FROM (SELECT p.request_id,COALESCE(SUM(p.byte_size) OVER(ORDER BY r.updated_at,p.request_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) prior_bytes
+ FROM page_board_request_previews p JOIN page_board_requests r ON r.id=p.request_id
+ WHERE r.workspace_id=? AND r.status IN('inserted','succeeded','failed','cancelled') AND r.updated_at<?)
+ WHERE prior_bytes<?)`, workspace, tsformat.Format(now.Add(-pageMutationReplayWindow)), bytesNeeded)
+	return err
+}

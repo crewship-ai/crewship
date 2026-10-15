@@ -17,7 +17,7 @@ func (h *PageHandler) ResolvePageRequestResult(w http.ResponseWriter, r *http.Re
 		return
 	}
 	kind, id := r.PathValue("kind"), r.PathValue("requestId")
-	if kind != "artifact" {
+	if kind != "artifact" && kind != "board" {
 		replyError(w, 404, "result unavailable")
 		return
 	}

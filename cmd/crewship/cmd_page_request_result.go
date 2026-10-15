@@ -14,8 +14,8 @@ func init() {
 		Short: "Resolve your request result using current Page access",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if args[0] != "artifact" {
-				return fmt.Errorf("kind must be artifact")
+			if args[0] != "artifact" && args[0] != "board" {
+				return fmt.Errorf("kind must be artifact or board")
 			}
 			client, err := pageClient()
 			if err != nil {

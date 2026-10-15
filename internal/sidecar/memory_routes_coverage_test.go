@@ -52,12 +52,16 @@ const (
 // The keys are derived mechanically from the source (see routeKeysFromSource),
 // so this table cannot drift from the router without the test failing.
 var sidecarRouteGuards = map[string]routeGuardKind{
+	"POST /boards/ /batches": guardHandlerIdentity,
 	// Each handler resolves the actual agtv2 run before forwarding that bearer;
 	// the host then checks the exact live human/request or comment authority.
 	"POST /artifact-requests/":             guardHandlerIdentity,
 	"GET /artifact-requests/":              guardHandlerIdentity,
+	"GET /board-requests/":                 guardHandlerIdentity,
+	"POST /board-requests/":                guardHandlerIdentity,
 	"GET /artifacts/ /threads":             guardHandlerIdentity,
 	"POST /artifacts/ /threads/ /comments": guardHandlerIdentity,
+	"GET /boards/":                         guardHandlerIdentity,
 	"POST /artifacts":                      guardHandlerIdentity,
 	"POST /artifacts/ /revisions":          guardHandlerIdentity,
 	"POST /artifacts/ /restore":            guardHandlerIdentity,

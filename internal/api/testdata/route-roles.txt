@@ -72,6 +72,10 @@ DELETE /api/v1/page-folders/{slug}/pages/{page} roleSelf
 DELETE /api/v1/pages/{slug} roleSelf
 DELETE /api/v1/pages/{slug}/artifact/delegations/{runId} roleSelf
 DELETE /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId} roleSelf
+DELETE /api/v1/pages/{slug}/board/delegations/{runId} roleSelf
+DELETE /api/v1/pages/{slug}/board/element-permissions/{permissionId} roleSelf
+DELETE /api/v1/pages/{slug}/board/placements/{placementId} roleSelf
+DELETE /api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId} roleSelf
 DELETE /api/v1/pages/{slug}/grants roleSelf
 DELETE /api/v1/pages/{slug}/public/{tokenId} roleSelf
 DELETE /api/v1/pages/{slug}/webhooks/{webhookId} roleSelf
@@ -136,6 +140,7 @@ PATCH /api/v1/page-folders/{slug} roleSelf
 PATCH /api/v1/pages/{slug} roleSelf
 PATCH /api/v1/pages/{slug}/artifact/threads/{threadId} roleSelf
 PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId} roleSelf
+PATCH /api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId} roleSelf
 PATCH /api/v1/projects/{projectId} roleCreate
 PATCH /api/v1/recurring-issues/{recurringId} roleCreate
 PATCH /api/v1/saved-views/{viewId} roleCreate
@@ -338,6 +343,18 @@ POST /api/v1/pages/{slug}/artifact/restore roleSelf
 POST /api/v1/pages/{slug}/artifact/revisions roleSelf
 POST /api/v1/pages/{slug}/artifact/threads roleSelf
 POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies roleSelf
+POST /api/v1/pages/{slug}/board roleSelf
+POST /api/v1/pages/{slug}/board/batches roleSelf
+POST /api/v1/pages/{slug}/board/delegations roleSelf
+POST /api/v1/pages/{slug}/board/element-permissions roleSelf
+POST /api/v1/pages/{slug}/board/files roleSelf
+POST /api/v1/pages/{slug}/board/placements roleSelf
+POST /api/v1/pages/{slug}/board/requests roleSelf
+POST /api/v1/pages/{slug}/board/requests/{requestId}/cancel roleSelf
+POST /api/v1/pages/{slug}/board/requests/{requestId}/insert roleSelf
+POST /api/v1/pages/{slug}/board/threads roleSelf
+POST /api/v1/pages/{slug}/board/threads/{threadId}/comments roleSelf
+POST /api/v1/pages/{slug}/board/threads/{threadId}/resolve roleSelf
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
 POST /api/v1/pages/{slug}/project/build roleSelf
 POST /api/v1/pages/{slug}/project/check roleSelf
@@ -448,6 +465,7 @@ PUT /api/v1/me/preferences/{key} roleSelf
 PUT /api/v1/notification-templates roleManage
 PUT /api/v1/page-folders/{slug}/acl roleCreate
 PUT /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji} roleSelf
+PUT /api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/reactions/{emoji} roleSelf
 PUT /api/v1/pages/{slug}/grants roleSelf
 PUT /api/v1/pages/{slug}/panels/{panelId}/data roleSelf
 PUT /api/v1/pages/{slug}/project roleSelf

@@ -90,6 +90,52 @@ func TestArtifactMCPOuterBudgetAndBoundedResult(t *testing.T) {
 	}
 }
 
+func TestArtifactMCPBoardInputsUseExactScopedRoutesAndLiveDenial(t *testing.T) {
+	s, key := newRunIdentityServer(t)
+	token := internaltoken.DeriveAgentRunToken(key, "ws-1", "agent-boot", "run-boot")
+	denied := false
+	paths := []string{}
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "run-status") {
+			w.WriteHeader(503)
+			return
+		}
+		paths = append(paths, r.URL.Path)
+		if r.Method != "GET" || r.Header.Get("Authorization") != "Bearer "+token {
+			t.Error("scoped read lost method/run")
+		}
+		if denied {
+			w.WriteHeader(403)
+			_, _ = w.Write([]byte(`{"error":"source permission revoked"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":"authorized input"}`))
+	}))
+	defer host.Close()
+	s.ipc.BaseURL = host.URL
+	for _, test := range []struct{ name, args, path string }{
+		{"board_request_file_read", `{"request_id":"job","file_id":"file"}`, "/api/v1/internal/board-requests/job/files/file"},
+		{"board_request_source_read", `{"request_id":"job","source_id":"source"}`, "/api/v1/internal/board-requests/job/sources/source"},
+		{"board_request_preview_read", `{"request_id":"job"}`, "/api/v1/internal/board-requests/job/preview"},
+	} {
+		w := artifactMCPCall(t, s, token, test.name, test.args)
+		if strings.Contains(w.Body.String(), `"isError":true`) || paths[len(paths)-1] != test.path {
+			t.Fatalf("%s: %s paths=%v", test.name, w.Body.String(), paths)
+		}
+		denied = true
+		w = artifactMCPCall(t, s, token, test.name, test.args)
+		if !strings.Contains(w.Body.String(), `"isError":true`) || !strings.Contains(w.Body.String(), "revoked") {
+			t.Fatalf("revoked %s: %s", test.name, w.Body.String())
+		}
+		denied = false
+	}
+	before := len(paths)
+	w := artifactMCPCall(t, s, token, "board_request_file_read", `{"request_id":"job","file_id":"../other"}`)
+	if len(paths) != before || !strings.Contains(w.Body.String(), `"isError":true`) {
+		t.Fatalf("unsafe path reached host: %s", w.Body.String())
+	}
+}
+
 func TestArtifactMCPRequestUpdatePreservesRunAndTypedBody(t *testing.T) {
 	s, key := newRunIdentityServer(t)
 	token := internaltoken.DeriveAgentRunToken(key, "ws-1", "agent-boot", "run-boot")

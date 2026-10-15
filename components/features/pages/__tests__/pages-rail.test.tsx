@@ -129,12 +129,12 @@ describe("PagesRail", () => {
     expect(panel()).toBeTruthy()
   })
 
-  it("offers artifact content facets without clearing owner or status", () => {
-    const filters: PageFilters = { states: ["stale"], owners: ["crew/finance"], shared: false, content: [] }
+  it("offers artifact and board content facets without clearing owner or status", () => {
+    const filters: PageFilters = { states: ["stale"], owners: ["crew/finance"], shared: false, content: ["board"] }
     const { onFiltersChange } = renderRail({ filters })
     openPanel()
     fireEvent.click(within(panel()!).getByRole("button", { name: /^Artifacts/i }))
-    expect(onFiltersChange).toHaveBeenCalledWith({ ...filters, content: ["artifact"] })
+    expect(onFiltersChange).toHaveBeenCalledWith({ ...filters, content: ["board", "artifact"] })
     expect(panel()).toBeTruthy()
     fireEvent.click(within(panel()!).getByRole("button", { name: "All content" }))
     expect(onFiltersChange).toHaveBeenCalledWith({ ...filters, content: [] })

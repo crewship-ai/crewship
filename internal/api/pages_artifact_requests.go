@@ -358,7 +358,7 @@ func (h *PageHandler) RunArtifactRequests(ctx context.Context, gates ...artifact
 						continue
 					}
 					initialize.Do(func() { h.initializePageRequestLifecycles(ctx) })
-					h.dispatchNextArtifactRequest(ctx)
+					h.dispatchNextPageRequest(ctx)
 				}
 			}
 		}(i)
