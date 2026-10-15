@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Saved Board undo works through repeated edits of the same drawing or pin (#3069).** Successful undo receipts advance earlier local commands to the restored server revisions, while intervening foreign edits still prevent undo even when geometry matches. Uncertain undo retries keep their original batch and identity; saved undo deadlines do not extend.
 - **Board image uploads use less memory (#3069).** Bounded private staging streams replace compressed image buffers while preserving raster re-encoding, workspace quotas and exact retry identities.
+- **Removing a Doc owner now explains the required human handoff (#3186).** Owners who belonged to a crew previously received a server error when leaving the workspace. Docs now follow the explicit human-successor flow while preserving content and membership until ownership is resolved.
+
 - Opt-in Docs in Pages with collaborative text, range comments, checkpoints, Markdown export and delegated semantic agent work (D1b; deployment qualification remains separate).
 
 - **Docs have an opt-in persistence foundation (#3161).** A private Go authority and separate Node engine store bounded binary updates, audit receipts and pinned checkpoints, fence stale writers across restart/restore, and include document bytes in workspace and instance backups. The foundation is disabled by default and adds no public editor or document API.
