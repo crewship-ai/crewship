@@ -17,6 +17,8 @@ import { apiFetch } from "@/lib/api-fetch"
 
 /** All supported real-time event types broadcast over the workspace WebSocket channel. */
 export type RealtimeEventType =
+  | "chat.entity_refs_changed"
+  | "issue.revision_changed"
   | "conversation.updated"
   | "run.started"
   | "run.completed"
@@ -254,6 +256,8 @@ interface RealtimeContextValue {
 // nothing in the app should read this directly; subscribe via
 // useRealtimeEvent instead.
 export const VALID_REALTIME_TYPES: Set<string> = new Set([
+  "chat.entity_refs_changed",
+  "issue.revision_changed",
   "conversation.updated",
   "run.started", "run.completed", "run.failed",
   "agent.status", "agent.created", "agent.updated", "agent.deleted",
