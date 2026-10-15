@@ -126220,6 +126220,22 @@
               "pattern": "^[A-Za-z0-9_-]{1,128}$",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -126632,9 +126648,16 @@
             }
           },
           {
-            "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
             "required": false,
             "schema": {
               "type": "string"
@@ -126881,9 +126904,16 @@
             }
           },
           {
-            "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
             "required": false,
             "schema": {
               "type": "string"
