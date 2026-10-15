@@ -100,8 +100,8 @@ func TestDocumentSelectionRequestContract(t *testing.T) {
 	}
 	props := contract["properties"].(map[string]any)
 	targets := props["targets"].(map[string]any)
-	if targets["minItems"] != 1 || targets["maxItems"] != 16 {
-		t.Fatal("selection bounds missing")
+	if targets["minItems"] != 1 || targets["maxItems"] != 1 {
+		t.Fatal("selection bounds must reject two-target requests")
 	}
 	item := targets["items"].(map[string]any)
 	if len(item["required"].([]string)) != 5 {
