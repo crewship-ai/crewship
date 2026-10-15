@@ -137,6 +137,19 @@ func (h *documentAuthority) authorize(r *http.Request, k documents.Key, write, i
 			if initialize || (h.pages.checkArtifactRun(ctx, k.PageID, a) != nil || h.pages.checkDocumentRequestAuthority(ctx, k.PageID, a) != nil) {
 				return "", errDocumentAccess
 			}
+			if write {
+				var origin string
+				if tx.QueryRowContext(ctx, `SELECT COALESCE(document_request_id,'') FROM page_artifact_run_delegations WHERE page_id=? AND run_id=?`, k.PageID, a.RunID).Scan(&origin) != nil {
+					return "", errDocumentAccess
+				}
+				if origin != "" {
+					switch r.PathValue("operation") {
+					case "commit", "checkpoint", "lease", "renew", "release":
+					default:
+						return "", errDocumentAccess
+					}
+				}
+			}
 			return "agent:" + a.AgentID + ":" + a.RunID, nil
 		}
 		// Exact session, not merely some other active session for this user.
@@ -216,27 +229,28 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 	k := documents.Key{WorkspaceID: WorkspaceIDFromContext(r.Context()), PageID: r.PathValue("page")}
 	op := r.PathValue("operation")
 	var in struct {
-		Generation  *int64            `json:"generation"`
-		ID          string            `json:"id"`
-		Fingerprint string            `json:"fingerprint"`
-		Schema      int               `json:"schema"`
-		Snapshot    []byte            `json:"snapshot"`
-		Update      []byte            `json:"update"`
-		Blocks      json.RawMessage   `json:"blocks"`
-		Owner       string            `json:"owner"`
-		Token       string            `json:"token"`
-		LeaseOwner  string            `json:"leaseOwner"`
-		LeaseToken  string            `json:"leaseToken"`
-		Epoch       int64             `json:"epoch"`
-		IfRev       int64             `json:"ifRev"`
-		IfHashes    map[string]string `json:"ifHashes"`
-		Kind        string            `json:"kind"`
-		Checkpoint  string            `json:"checkpoint"`
-		Body        string            `json:"body"`
-		Anchor      json.RawMessage   `json:"anchor"`
-		Comment     string            `json:"comment"`
-		Version     int64             `json:"version"`
-		Resolved    bool              `json:"resolved"`
+		Generation  *int64                 `json:"generation"`
+		ID          string                 `json:"id"`
+		Fingerprint string                 `json:"fingerprint"`
+		Schema      int                    `json:"schema"`
+		Snapshot    []byte                 `json:"snapshot"`
+		Update      []byte                 `json:"update"`
+		Blocks      json.RawMessage        `json:"blocks"`
+		Owner       string                 `json:"owner"`
+		Token       string                 `json:"token"`
+		LeaseOwner  string                 `json:"leaseOwner"`
+		LeaseToken  string                 `json:"leaseToken"`
+		Epoch       int64                  `json:"epoch"`
+		IfRev       int64                  `json:"ifRev"`
+		IfHashes    map[string]string      `json:"ifHashes"`
+		Semantic    *documentSemanticPatch `json:"semantic"`
+		Kind        string                 `json:"kind"`
+		Checkpoint  string                 `json:"checkpoint"`
+		Body        string                 `json:"body"`
+		Anchor      json.RawMessage        `json:"anchor"`
+		Comment     string                 `json:"comment"`
+		Version     int64                  `json:"version"`
+		Resolved    bool                   `json:"resolved"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 3<<20)
 	decoder := json.NewDecoder(r.Body)
@@ -324,7 +338,7 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var receipt documents.Receipt
-		receipt, err = h.store.Commit(ctx, k, documents.Commit{Lease: lease, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, IfGeneration: in.Generation, Schema: in.Schema, Update: in.Update, CandidateSnapshot: in.Snapshot, Projection: in.Blocks, IfHashes: in.IfHashes, Kind: in.Kind}, auth)
+		receipt, err = h.store.Commit(ctx, k, documents.Commit{Lease: lease, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, IfGeneration: in.Generation, Schema: in.Schema, Update: in.Update, CandidateSnapshot: in.Snapshot, Projection: in.Blocks, IfHashes: in.IfHashes, Kind: in.Kind, Guard: h.pages.documentRequestGuard(ctx, k.PageID, "commit", in.ID, in.IfRev, in.IfHashes, in.Semantic, in.Blocks)}, auth)
 		result = documentReceiptWire(receipt)
 	case "checkpoint":
 		if in.Generation == nil {
@@ -332,7 +346,7 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var c documents.Checkpoint
-		c, err = h.store.CheckpointRequestAtGeneration(ctx, k, lease, in.ID, in.Fingerprint, in.Snapshot, in.IfRev, in.Generation, auth)
+		c, err = h.store.CheckpointRequestGuarded(ctx, k, lease, in.ID, in.Fingerprint, in.Snapshot, in.IfRev, in.Generation, auth, h.pages.documentRequestGuard(ctx, k.PageID, "checkpoint", in.ID, in.IfRev, nil, nil, nil))
 		result = map[string]any{"id": c.ID, "rev": c.Rev, "schema": c.Schema, "checkpoint": c.ID, "epoch": lease.Epoch}
 	case "checkpoint-read":
 		var c documents.Checkpoint

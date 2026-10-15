@@ -57,7 +57,11 @@ type State struct {
 	Projection                              json.RawMessage
 	Updates                                 []Update
 }
+
+// MutationGuard enforces application-specific immutable request bounds inside the writer transaction.
+type MutationGuard func(context.Context, *sql.Tx, string, State) error
 type Commit struct {
+	Guard                     MutationGuard
 	Lease                     Lease
 	ID, Fingerprint           string
 	IfRev                     int64
@@ -395,6 +399,11 @@ func (s *Store) Commit(ctx context.Context, k Key, c Commit, a Authorize) (r Rec
 		if c.IfRev != v.HeadRev || (c.IfGeneration != nil && *c.IfGeneration != v.Generation) {
 			return ErrConflict
 		}
+		if c.Guard != nil {
+			if err = c.Guard(ctx, t, actor, v); err != nil {
+				return err
+			}
+		}
 		if (v.Schema != 1 && v.Schema != 2) || c.Schema < v.Schema {
 			return ErrSchema
 		}
@@ -448,7 +457,10 @@ func (s *Store) Checkpoint(ctx context.Context, k Key, l Lease, id string, snaps
 func (s *Store) CheckpointRequest(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, a Authorize) (Checkpoint, error) {
 	return s.CheckpointRequestAtGeneration(ctx, k, l, id, fingerprint, snapshot, ifRev, nil, a)
 }
-func (s *Store) CheckpointRequestAtGeneration(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, generation *int64, a Authorize) (c Checkpoint, e error) {
+func (s *Store) CheckpointRequestAtGeneration(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, generation *int64, a Authorize) (Checkpoint, error) {
+	return s.CheckpointRequestGuarded(ctx, k, l, id, fingerprint, snapshot, ifRev, generation, a, nil)
+}
+func (s *Store) CheckpointRequestGuarded(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, generation *int64, a Authorize, guard MutationGuard) (c Checkpoint, e error) {
 	e = s.tx(ctx, k, a, func(t *sql.Tx, actor string) error {
 		if id == "" || len(id) > 256 || len(fingerprint) > 256 {
 			return errors.New("checkpoint id required")
@@ -498,6 +510,11 @@ func (s *Store) CheckpointRequestAtGeneration(ctx context.Context, k Key, l Leas
 		}
 		if v.HeadRev != ifRev || (generation != nil && *generation != v.Generation) {
 			return ErrConflict
+		}
+		if guard != nil {
+			if err = guard(ctx, t, actor, v); err != nil {
+				return err
+			}
 		}
 		if err = s.valid(v.Schema, snapshot, v.Projection); err != nil {
 			return err

@@ -36,6 +36,7 @@ type DocumentBlockHash struct {
 	Hash string `json:"hash"`
 }
 type DocumentStateResponse struct {
+	PageID      string                 `json:"page_id"`
 	Schema      int                    `json:"schema"`
 	Rev         int64                  `json:"rev"`
 	Epoch       string                 `json:"epoch"`
@@ -81,11 +82,25 @@ type DocumentMutationResponse struct {
 	Duplicate  bool   `json:"duplicate,omitempty"`
 	Found      bool   `json:"found,omitempty"`
 }
+type DocumentSelectedTarget struct {
+	ID    string `json:"id"`
+	Hash  string `json:"hash"`
+	From  int    `json:"from"`
+	To    int    `json:"to"`
+	Quote string `json:"quote"`
+}
+type documentVerifiedTarget struct {
+	DocumentSelectedTarget
+	Text      string   `json:"text"`
+	Ancestors []string `json:"ancestors"`
+}
 type DocumentRequestInput struct {
-	ChatID       string `json:"chat_id"`
-	Instruction  string `json:"instruction"`
-	BaseRev      *int64 `json:"base_rev"`
-	SubmissionID string `json:"submission_id"`
+	PageID       string                   `json:"page_id"`
+	Targets      []DocumentSelectedTarget `json:"targets"`
+	ChatID       string                   `json:"chat_id"`
+	Instruction  string                   `json:"instruction"`
+	BaseRev      *int64                   `json:"base_rev"`
+	SubmissionID string                   `json:"submission_id"`
 }
 type DocumentRequestResult struct {
 	ID             string `json:"id"`

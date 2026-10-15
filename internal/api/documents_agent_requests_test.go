@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -14,12 +16,23 @@ import (
 
 func documentRequestFixture(t *testing.T) (*PageHandler, string, string, string) {
 	h, workspace, user, page, _ := artifactRunFixture(t)
-	h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) { return nil, 200, nil }
-	execOrFatal(t, h.db, `INSERT INTO documents(workspace_id,page_id,schema_version,head_rev,snapshot,projection) VALUES(?,?,1,0,X'01','{}')`, workspace, page)
+	h.documentCall = func(_ context.Context, _, _, actualPage, op string, data any) ([]byte, int, error) {
+		if op != "verify-targets" {
+			t.Fatalf("unexpected operation %s", op)
+		}
+		raw, _ := json.Marshal(map[string]any{"rev": 0, "page_id": actualPage, "targets": []map[string]any{{"id": "intro", "hash": "h1", "from": 2, "to": 5, "quote": "llo", "text": "Hello world", "ancestors": []string{}}}})
+		return raw, 200, nil
+	}
+	execOrFatal(t, h.db, `INSERT INTO documents(workspace_id,page_id,schema_version,head_rev,snapshot,projection) VALUES(?,?,1,0,X'01',CAST('[{"id":"intro","hash":"h1"},{"id":"other","hash":"h2"}]' AS BLOB))`, workspace, page)
 	return h, workspace, user, page
 }
 func createDocumentRequestTest(t *testing.T, h *PageHandler, workspace, user, body string, want int) string {
 	t.Helper()
+	var page string
+	if err := h.db.QueryRow(`SELECT id FROM pages WHERE slug='report'`).Scan(&page); err != nil {
+		t.Fatal(err)
+	}
+	body = strings.ReplaceAll(body, "PAGE_ID", page)
 	r := pagesGrantRequest(t, "POST", "/", workspace, user, "OWNER", body)
 	r.SetPathValue("slug", "report")
 	session, err := sessions.NewDBStore(h.db).Create(t.Context(), user, "Docrequesttest", "127.0.0.1", auth.RefreshTokenTTL)
@@ -39,7 +52,7 @@ func createDocumentRequestTest(t *testing.T, h *PageHandler, workspace, user, bo
 	return id
 }
 
-const documentRequestBody = `{"chat_id":"artifact-chat","instruction":"Improve report","base_rev":0,"submission_id":"doc-first"}`
+const documentRequestBody = `{"page_id":"PAGE_ID","targets":[{"id":"intro","hash":"h1","from":2,"to":5,"quote":"llo"}],"chat_id":"artifact-chat","instruction":"Improve report","base_rev":0,"submission_id":"doc-first"}`
 
 func TestDocumentRequestAdmissionIdempotencyAndRevocation(t *testing.T) {
 	h, workspace, user, _ := documentRequestFixture(t)
@@ -118,5 +131,21 @@ func TestDocumentRequestOriginSurvivesHistoricalRunReset(t *testing.T) {
 	}
 	if err = h.checkDocumentRequestAuthority(t.Context(), page, authority); err == nil {
 		t.Fatal("missing request retained document authority")
+	}
+}
+
+func TestDocumentRequestRejectsMultipleTargets(t *testing.T) {
+	h, workspace, user, _ := documentRequestFixture(t)
+	var body map[string]any
+	if err := json.Unmarshal([]byte(documentRequestBody), &body); err != nil {
+		t.Fatal(err)
+	}
+	selected := body["targets"].([]any)
+	body["targets"] = append(selected, selected[0])
+	raw, _ := json.Marshal(body)
+	createDocumentRequestTest(t, h, workspace, user, string(raw), 400)
+	var count int
+	if err := h.db.QueryRow(`SELECT count(*) FROM document_requests`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("partial multiblock request admitted=%d error=%v", count, err)
 	}
 }
