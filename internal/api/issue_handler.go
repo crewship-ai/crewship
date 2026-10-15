@@ -269,6 +269,12 @@ func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, ac
 // Delegates to the package-level helper; kept for call-site brevity.
 func (h *IssueHandler) broadcastIssueEvent(wsID, eventType string, payload map[string]string) {
 	broadcastWorkspaceEvent(h.hub, wsID, eventType, payload)
+	// The primary notification announces one mutation; status_changed is a
+	// second legacy event for the same write and must not duplicate the hint.
+	switch eventType {
+	case "issue.created", "issue.updated", "issue.started":
+		broadcastIssueCardInvalidations(context.Background(), h.db, h.hub, wsID, payload["id"], false)
+	}
 }
 
 // ── Response types ──────────────────────────────────────────────────────────
