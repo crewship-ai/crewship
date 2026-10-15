@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Agents can remember explicitly stated feedback preferences.** Optional future preferences on thumbs feedback now have scoped, source-tracked storage, asynchronous status, CLI self-service edits and deletion, and private-session recall with consent checks. Bare thumbs remain feedback only.
+
 - Guests with explicit routine View and Edit draft shares can change collaborative drafts through UI and CLI with revision/base conflicts and atomic audit. Published recipes, execution authority and trusted testing/review gates remain intact; direct Guest publication is still separate work.
 
 - Guest project managers can create and edit milestones with reviewed versions and atomic audit. Empty-only removal preserves linked issue work; UI and CLI enforce current action flags and conflict review.

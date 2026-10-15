@@ -24,7 +24,7 @@ import (
 //
 // POST is idempotent at the (message_id, user_id, signal) UNIQUE
 // constraint — re-submitting the same signal from the same user replaces
-// the reason text via INSERT OR REPLACE. That matches the UX of a user
+// the reason text via UPSERT. That matches the UX of a user
 // changing their mind about why a thumb-down happened without spawning
 // a new row each click.
 type MessageFeedbackHandler struct {
@@ -97,15 +97,27 @@ type feedbackCreateRequest struct {
 }
 
 type feedbackRow struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	MessageID   string  `json:"message_id"`
-	ChatID      *string `json:"chat_id,omitempty"`
-	TraceID     *string `json:"trace_id,omitempty"`
-	Signal      string  `json:"signal"`
-	Reason      *string `json:"reason,omitempty"`
-	UserID      *string `json:"user_id,omitempty"`
-	CreatedAt   string  `json:"created_at"`
+	ID          string         `json:"id"`
+	WorkspaceID string         `json:"workspace_id"`
+	MessageID   string         `json:"message_id"`
+	ChatID      *string        `json:"chat_id,omitempty"`
+	TraceID     *string        `json:"trace_id,omitempty"`
+	Signal      string         `json:"signal"`
+	Reason      *string        `json:"reason,omitempty"`
+	UserID      *string        `json:"user_id,omitempty"`
+	CreatedAt   string         `json:"created_at"`
+	Revision    int            `json:"revision"`
+	Memory      feedbackMemory `json:"memory"`
+}
+
+const feedbackStatusSQL = `CASE WHEN p.status IN ('saved','processing') AND (
+ EXISTS(SELECT 1 FROM agents a WHERE a.id=p.agent_id AND a.memory_enabled=0)
+ OR EXISTS(SELECT 1 FROM app_settings WHERE key='memory.user_model_profile' AND value NOT IN ('stated-technical','')))
+ THEN 'disabled' ELSE COALESCE(p.status,'feedback_only') END`
+
+type feedbackMemory struct {
+	Status  string `json:"status"`
+	EntryID string `json:"entry_id,omitempty"`
 }
 
 // ensureChatVisible scopes feedback to the chat's current audience. The
@@ -284,6 +296,7 @@ INSERT INTO message_feedback (id, workspace_id, chat_id, message_id, trace_id, s
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(workspace_id, message_id, user_id, signal) DO UPDATE SET
     workspace_id = excluded.workspace_id,
+    revision     = message_feedback.revision + CASE WHEN message_feedback.reason IS NOT excluded.reason THEN 1 ELSE 0 END,
     reason       = excluded.reason,
     trace_id     = COALESCE(excluded.trace_id, message_feedback.trace_id),
     chat_id      = COALESCE(excluded.chat_id, message_feedback.chat_id)
@@ -300,14 +313,16 @@ ON CONFLICT(workspace_id, message_id, user_id, signal) DO UPDATE SET
 	// workspaces since #2274 scoped the key, and this lookup must agree
 	// with the row the upsert just touched.
 	var persistedID string
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT id FROM message_feedback WHERE workspace_id = ? AND message_id = ? AND user_id = ? AND signal = ?`,
-		workspaceID, body.MessageID, user.ID, body.Signal).Scan(&persistedID); err != nil {
-		// The INSERT succeeded but the lookup failed — return what we
-		// know (the generated id) rather than erroring; the row exists.
-		persistedID = id
+	var revision int
+	var state feedbackMemory
+	if err := h.db.QueryRowContext(r.Context(), `SELECT f.id,f.revision,`+feedbackStatusSQL+` FROM message_feedback f LEFT JOIN agent_user_preferences p ON p.feedback_id=f.id WHERE f.workspace_id=? AND f.message_id=? AND f.user_id=? AND f.signal=?`, workspaceID, body.MessageID, user.ID, body.Signal).Scan(&persistedID, &revision, &state.Status); err != nil {
+		replyError(w, http.StatusInternalServerError, "internal")
+		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"id": persistedID})
+	if state.Status != "feedback_only" {
+		state.EntryID = persistedID
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"id": persistedID, "revision": revision, "memory": state})
 }
 
 // Delete handles DELETE /api/v1/feedback?message_id=...&signal=... .
@@ -452,7 +467,8 @@ func (h *MessageFeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 	// or the user is removed mid-query we still don't surface stale
 	// cross-tenant data.
 	const baseQuery = `
-SELECT id, workspace_id, message_id, chat_id, trace_id, signal, reason, user_id, created_at
+SELECT id, workspace_id, message_id, chat_id, trace_id, signal, reason, user_id, created_at, revision,
+ COALESCE((SELECT ` + feedbackStatusSQL + ` FROM agent_user_preferences p WHERE p.feedback_id=message_feedback.id),'feedback_only')
 FROM message_feedback
 WHERE user_id = ?
   AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = ?)
@@ -482,10 +498,13 @@ WHERE user_id = ?
 	for rows.Next() {
 		var fr feedbackRow
 		if err := rows.Scan(&fr.ID, &fr.WorkspaceID, &fr.MessageID, &fr.ChatID, &fr.TraceID,
-			&fr.Signal, &fr.Reason, &fr.UserID, &fr.CreatedAt); err != nil {
+			&fr.Signal, &fr.Reason, &fr.UserID, &fr.CreatedAt, &fr.Revision, &fr.Memory.Status); err != nil {
 			h.logger.Error("list feedback scan", "err", err)
 			replyError(w, http.StatusInternalServerError, "internal")
 			return
+		}
+		if fr.Memory.Status != "feedback_only" {
+			fr.Memory.EntryID = fr.ID
 		}
 		out = append(out, fr)
 	}
