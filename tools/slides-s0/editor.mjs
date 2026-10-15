@@ -5,7 +5,7 @@ import { hash } from './model.mjs';
 export async function startEditor(sessions) {
   const server = createServer(async (req, res) => {
     try {
-      res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; frame-src 'self' about:; connect-src 'self'; base-uri 'none'; form-action 'none'");
+      res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; frame-src 'self' about:; connect-src 'self'; base-uri 'none'; form-action 'none'");
       if (req.url === '/' && req.method === 'GET') { res.setHeader('Content-Type', 'text/html'); res.end(await readFile(new URL('./editor.html', import.meta.url))); return; }
       if (req.url === '/ui.mjs' && req.method === 'GET') { res.setHeader('Content-Type', 'text/javascript'); res.end(await readFile(new URL('./ui.mjs', import.meta.url))); return; }
       const name = req.url.slice(1); const session = sessions[name]; if (!session) { res.writeHead(404).end(); return; }

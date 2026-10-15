@@ -49,9 +49,13 @@ try {
     for (let i = 0; i < after.slides.length; i++) {
       const locator = page.locator('iframe').nth(i); const frame = await locator.contentFrame();
       await frame.locator('body > [data-id]').first().waitFor();
-      const result = await frame.locator('body').evaluate(body => [...body.children].map(e => ({ id: e.dataset.id, x: e.offsetLeft, y: e.offsetTop, w: e.offsetWidth, h: e.offsetHeight, overflow: e.scrollHeight > e.clientHeight || e.scrollWidth > e.clientWidth, type: e.tagName })));
+      const result = await frame.locator('body').evaluate(body => [...body.children].map(e => ({ id: e.dataset.id, x: e.offsetLeft, y: e.offsetTop, w: e.offsetWidth, h: e.offsetHeight, overflow: e.scrollHeight > e.clientHeight || e.scrollWidth > e.clientWidth, type: e.tagName, loaded: e.tagName === 'IMG' ? e.complete : null, naturalWidth: e.naturalWidth, naturalHeight: e.naturalHeight })));
       for (const measured of result) {
         const expected = after.slides[i].elements.find(e => e.id === measured.id); assert.ok(expected); assert.equal(measured.x, expected.x); assert.equal(measured.y, expected.y); assert.equal(measured.w, expected.w); assert.equal(measured.h, expected.h);
+        if (expected.type === 'image') {
+          const png = Buffer.from(after.assets.find(a => a.id === expected.asset).data, 'base64');
+          assert.equal(measured.loaded, true, 'PNG loaded'); assert.equal(measured.naturalWidth, png.readUInt32BE(16), 'PNG decoded width'); assert.equal(measured.naturalHeight, png.readUInt32BE(20), 'PNG decoded height');
+        }
         if (measured.overflow) overflow.push({ slideID: after.slides[i].id, elementID: measured.id });
       }
       const screenshot = await locator.screenshot(); const file = `${name}-${after.slides[i].id}.png`; await writeFile(join(output, file), screenshot); screenshots.push({ slideID: after.slides[i].id, file, hash: hash([...screenshot]) });
@@ -64,7 +68,7 @@ try {
   assert.deepEqual(sessions.html.read(), sessions.typed.read());
   assert.deepEqual(report.candidates.html.screenshots.map(s => s.hash), report.candidates.typed.screenshots.map(s => s.hash), 'same browser render pixels');
   assert.deepEqual(report.externalRequests, []); assert.deepEqual(browserErrors, []);
-  report.gates.browser = 'passed: identical manual controls, native patches, ID anchors, CAS, measured overflow, sandboxed previews, identical screenshot pixels, no observed external requests';
+  report.gates.browser = 'passed: identical manual controls, native patches, ID anchors, CAS, measured overflow, sandboxed previews, loaded PNG dimensions, identical screenshot pixels, no observed external requests';
   const files = ['html.mjs', 'typed.mjs', 'model.mjs', 'render.mjs', 'export.mjs', 'editor.mjs', 'ui.mjs', 'qualify.mjs', 'test.mjs'];
   report.codeLines = Object.fromEntries(await Promise.all(files.map(async file => [file, (await readFile(new URL(file, import.meta.url), 'utf8')).trimEnd().split('\n').length])));
   report.codeBytes = Object.fromEntries(await Promise.all(files.map(async file => [file, (await readFile(new URL(file, import.meta.url))).length])));
