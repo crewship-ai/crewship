@@ -61,16 +61,33 @@ func scanDraft(row interface{ Scan(...any) error }) (*Draft, error) {
 
 const draftColumns = `id, workspace_id, slug, revision, base_pipeline_id, base_revision, document_json, updated_by, created_at, updated_at, COALESCE(chat_origin_id,'')`
 
+type draftRowReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 // A missing draft returns a revision-zero baseline from a single published-row
 // read. Clients edit this document, then create the draft with that exact base.
 func (s *Store) GetDraft(ctx context.Context, ws, slug string) (*Draft, error) {
-	d, err := scanDraft(s.db.QueryRowContext(ctx, `SELECT `+draftColumns+` FROM pipeline_drafts WHERE workspace_id=? AND slug=?`, ws, slug))
+	return s.getDraft(ctx, s.db, ws, slug)
+}
+
+// GetDraftIn reads the collaborative draft and its published baseline in the
+// caller's snapshot. The caller owns authorization and transaction lifetime.
+func (s *Store) GetDraftIn(ctx context.Context, tx *sql.Tx, ws, slug string) (*Draft, error) {
+	if tx == nil {
+		return nil, errors.New("draft transaction required")
+	}
+	return s.getDraft(ctx, tx, ws, slug)
+}
+
+func (s *Store) getDraft(ctx context.Context, q draftRowReader, ws, slug string) (*Draft, error) {
+	d, err := scanDraft(q.QueryRowContext(ctx, `SELECT `+draftColumns+` FROM pipeline_drafts WHERE workspace_id=? AND slug=?`, ws, slug))
 	if !errors.Is(err, sql.ErrNoRows) {
 		return d, err
 	}
 	d = &Draft{WorkspaceID: ws, Slug: slug}
 	var definition, name, description, crew, agent string
-	err = s.db.QueryRowContext(ctx, `SELECT id, publication_revision, definition_json, name, COALESCE(description,''), COALESCE(author_crew_id,''), COALESCE(author_agent_id,'') FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, ws, slug).Scan(&d.BasePipelineID, &d.BaseRevision, &definition, &name, &description, &crew, &agent)
+	err = q.QueryRowContext(ctx, `SELECT id, publication_revision, definition_json, name, COALESCE(description,''), COALESCE(author_crew_id,''), COALESCE(author_agent_id,'') FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, ws, slug).Scan(&d.BasePipelineID, &d.BaseRevision, &definition, &name, &description, &crew, &agent)
 	if errors.Is(err, sql.ErrNoRows) {
 		d.Document = json.RawMessage(`{}`)
 		return d, nil
@@ -86,11 +103,31 @@ func (s *Store) SaveDraft(ctx context.Context, d Draft) (*Draft, error) {
 	if d.WorkspaceID == "" || d.Slug == "" || d.UpdatedBy == "" || !json.Valid(d.Document) || d.Revision < 0 {
 		return nil, errors.New("invalid draft")
 	}
-	tx, e := s.db.BeginTx(ctx, nil)
-	if e != nil {
-		return nil, e
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
 	}
 	defer tx.Rollback()
+	saved, err := s.SaveDraftIn(ctx, tx, d)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return saved, nil
+}
+
+// SaveDraftIn keeps the existing revision/base/origin checks and leaves commit
+// to the caller, so live resource authority and audit can share the write.
+func (s *Store) SaveDraftIn(ctx context.Context, tx *sql.Tx, d Draft) (*Draft, error) {
+	if d.WorkspaceID == "" || d.Slug == "" || d.UpdatedBy == "" || !json.Valid(d.Document) || d.Revision < 0 {
+		return nil, errors.New("invalid draft")
+	}
+	if tx == nil {
+		return nil, errors.New("draft transaction required")
+	}
+
 	if d.SourceRunID != "" {
 		o, e := runauthority.CaptureOrigin(ctx, tx, d.SourceRunID, d.SourceAgentID, d.WorkspaceID)
 		if e != nil {
@@ -128,9 +165,6 @@ func (s *Store) SaveDraft(ctx context.Context, d Draft) (*Draft, error) {
 	// RETURNING reads the exact written revision and immutable base metadata,
 	// never a subsequent edit or caller-supplied replacement of that base.
 	if err != nil {
-		return nil, err
-	}
-	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
 	return saved, nil
