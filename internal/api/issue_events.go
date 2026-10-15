@@ -319,6 +319,7 @@ func (e issueEvents) record(ctx context.Context, wsID string, payload map[string
 		e.log(ctx, ev)
 	}
 	broadcastWorkspaceEvent(e.hub, wsID, "issue.updated", payload)
+	broadcastIssueCardInvalidations(ctx, e.db, e.hub, wsID, payload["id"], false)
 }
 
 // logf reports a failed audit write without assuming a logger was wired —

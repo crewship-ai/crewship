@@ -214,6 +214,7 @@ The response has these fields:
 
 | Field | Meaning |
 | --- | --- |
+| `contract_version` | Integer `1`; version of this snapshot and invalidation contract. |
 | `reset` | Start a replacement list; discard the preceding list rather than append to it. |
 | `refs` | At most `limit` authorized reference records. |
 | `next_cursor` | Opaque cursor for continuation or the next poll. |
@@ -258,9 +259,43 @@ not silently destroy a draft, but a draft grants no permission to keep displayin
 old server data or submit an action. Independently reauthorize a selected detail
 before displaying it again. Failed synchronization must never be labelled live.
 
-No new entity-specific WebSocket event is emitted by this read surface. Polling
+### WebSocket invalidation hints
+
+Successful writes can emit these `ServerMessage` frames on `session:{chatId}`:
+
+```json
+{"type":"chat.entity_refs_changed","channel":"session:c_1","payload":{"contract_version":1}}
+{"type":"issue.revision_changed","channel":"session:c_1","payload":{"contract_version":1}}
+```
+
+Payloads contain no chat/object IDs, revisions, counts or content. A session
+receives a hint only when it contains a completed reference visible under the
+same trusted-workspace issue predicate as this endpoint. Each socket's live
+trusted chat audience is checked at delivery, including suspended users,
+restricted profiles, removed membership/participants and deleted agents or
+workspaces. The session channel is already known to its authorized subscribers;
+these hints are never broadcast workspace-wide.
+
+`chat.entity_refs_changed` is emitted after verified internal create/update/
+comment/show operations append a reference, and after human deletion appends
+receipts. `issue.revision_changed` accompanies those hints and the primary
+successful public issue create/update/start notifications, `issueEvents.record`
+notifications, and attachment/code-link publish paths. No hint is emitted for a
+failed transaction, or when an idempotent replay only returns its saved result.
+Delivery/outbox retries do not republish these hints.
+
+This is deliberately a bounded set of application write paths, not a database
+change feed. Bulk writes, relation deletion/changes to the opposite relation
+endpoint, child changes without a primary issue notification, and direct DB or
+background writes can still change revision counters without a hint. A show
+operation adds a reference without increasing issue revisions. Consumers treat
+either event as a coalescible request to refetch their authorized snapshot and
+current revisions, never as object data or proof that a revision increased.
+
+Hints are best effort and have no durable delivery or replay guarantee. Polling
 and reconnect/focus reconciliation remain necessary; WebSocket connectivity
-alone is not evidence that a card is current.
+alone is not evidence that a card is current. A failed read clears authorized
+display data according to the reconciliation rules above.
 
 ### Reference record
 
