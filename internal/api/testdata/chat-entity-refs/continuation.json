@@ -1,4 +1,5 @@
 {
+  "contract_version": 1,
   "reset": false,
   "next_cursor": "\u003copaque cursor\u003e",
   "snapshot_id": "\u003csnapshot id\u003e",
