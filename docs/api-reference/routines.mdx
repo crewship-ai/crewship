@@ -212,3 +212,24 @@ response only when `rotate_secret: true` was sent; an ordinary edit returns
 show-once contract.
 
 CLI: `crewship routine webhooks update <webhook_id> [--name ...] [--rate-limit N] [--inputs-template '{"...":"..."}'] [--enabled[=false]] [--rotate-secret]`.
+
+## Chat authority binding recovery
+
+`GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding` returns
+`{pipeline_id, origin_id, draft, schedules}`; origin IDs are nullable.
+`draft` is null or `{id, revision, origin_id}`. Schedule entries include
+`{id, origin_id, pinned_version, version_origin_id}`; both pin fields are nullable.
+This operator surface requires OWNER/ADMIN with a user session or unscoped user
+CLI token. Scoped tokens, restricted users and agent/internal callers are denied.
+
+`POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/origin-binding` accepts
+`{action: "clear", reason, expected_origin_id, schedules?: [{id, expected_origin_id}], draft?: {id, expected_revision, expected_origin_id}}`.
+Every expected binding is required and may be explicit null. It clears the
+head, an explicitly reviewed bound draft and selected schedules atomically with
+the audit record. A bound draft requires its exact draft CAS; omitting it returns
+409 `draft_binding_review_required`. Clearing a selected pinned schedule whose
+immutable version retains authority returns 409 `pinned_version_authority_immutable`.
+Cleared draft revisions increment, invalidating stale publication requests. Stale
+bindings return 409, missing resources 404, malformed input 400 and denied
+callers 403. Success returns the same shape as GET. Immutable versions and
+pending/running work remain bound. See [binding semantics](/specs/routine-origin-binding).

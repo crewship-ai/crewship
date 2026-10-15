@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // The supported httptest/static-export harness exercises production routes and
@@ -73,8 +74,13 @@ func TestMemberNavigationBrowser(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	seedAgentRow(t, db, "nav-alex", ws, seedTestCrew(t, db, ws), "Alex", "alex", "AGENT")
-	router, err := NewRouter(db, secret, newTestLogger(), WithInternalToken("synthetic-nav-internal-token"))
+	crew := seedTestCrew(t, db, ws)
+	seedAgentRow(t, db, "nav-alex", ws, crew, "Alex", "alex", "AGENT")
+	seedAgentRow(t, db, "nav-intake-lead", ws, crew, "Private intake lead", "nav-intake-lead", "LEAD")
+	writer := journal.NewWriter(db, newTestLogger(), journal.WriterOptions{})
+	defer writer.Close()
+	seedPipelineRowDef(t, db, ws, "nav-view-only", "nav-view-only", `{"dsl_version":"1.0","name":"Client view recipe","steps":[{"id":"prepare","type":"transform","transform":{"input":"Visible shared definition"}}]}`)
+	router, err := NewRouter(db, secret, newTestLogger(), WithJournal(writer), WithInternalToken("synthetic-nav-internal-token"))
 	if err != nil {
 		t.Fatal(err)
 	}

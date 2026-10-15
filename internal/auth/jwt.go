@@ -55,14 +55,15 @@ const (
 // so a stolen access token is killable in <= AccessTokenTTL once the
 // user signs out / changes password / an admin force-revokes.
 type Claims struct {
-	ID    string `json:"id"`
-	Name  string `json:"name,omitempty"`
-	Email string `json:"email,omitempty"`
-	Sid   string `json:"sid,omitempty"`
-	Kind  string `json:"kind,omitempty"`
-	Exp   int64  `json:"exp"`
-	Iat   int64  `json:"iat"`
-	Jti   string `json:"jti"`
+	ID                 string `json:"id"`
+	Name               string `json:"name,omitempty"`
+	Email              string `json:"email,omitempty"`
+	Sid                string `json:"sid,omitempty"`
+	Kind               string `json:"kind,omitempty"`
+	WSAuthorityVersion int    `json:"ws_authority_version,omitempty"`
+	Exp                int64  `json:"exp"`
+	Iat                int64  `json:"iat"`
+	Jti                string `json:"jti"`
 }
 
 // JWTValidator issues and decodes Auth.js v5 JWE tokens. Holds three
@@ -175,7 +176,17 @@ func (v *JWTValidator) ValidateRefresh(tokenStr string) (*Claims, error) {
 // shut now — tickets are issued specifically for /ws via IssueWSTicket
 // so there's no reason to broaden the validator.
 func (v *JWTValidator) ValidateWS(tokenStr string) (*Claims, error) {
-	return v.validate(v.wsKey, KindWS, tokenStr)
+	claims, err := v.validate(v.wsKey, KindWS, tokenStr)
+	if err != nil {
+		return nil, err
+	}
+	// Old tickets dropped limited CLI scopes on admission. Require a ticket
+	// minted after the scope gate was installed; callers can request a fresh
+	// ticket through the ordinary authenticated endpoint.
+	if claims.WSAuthorityVersion != 1 {
+		return nil, fmt.Errorf("%w: obsolete websocket authority", ErrInvalidToken)
+	}
+	return claims, nil
 }
 
 func (v *JWTValidator) validate(key []byte, expectedKind, tokenStr string) (*Claims, error) {
@@ -241,6 +252,9 @@ func (v *JWTValidator) issue(key []byte, kind string, ttl time.Duration, userID,
 		Iat:   now.Unix(),
 		Exp:   now.Add(ttl).Unix(),
 		Jti:   jti,
+	}
+	if kind == KindWS {
+		claims.WSAuthorityVersion = 1
 	}
 	payload, err := json.Marshal(claims)
 	if err != nil {

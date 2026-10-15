@@ -17,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -95,13 +96,15 @@ func truncate(s string, n int) string {
 }
 
 type createQueryBody struct {
-	TargetSlug  string `json:"target_slug"`
-	Question    string `json:"question"`
-	FromSlug    string `json:"from_slug"`
-	CrewID      string `json:"crew_id"`
-	WorkspaceID string `json:"workspace_id"`
-	ChatID      string `json:"chat_id"`
-	Depth       int    `json:"depth"`
+	ActorAgentID string `json:"actor_agent_id,omitempty"`
+	SourceRunID  string `json:"source_run_id,omitempty"`
+	TargetSlug   string `json:"target_slug"`
+	Question     string `json:"question"`
+	FromSlug     string `json:"from_slug"`
+	CrewID       string `json:"crew_id"`
+	WorkspaceID  string `json:"workspace_id"`
+	ChatID       string `json:"chat_id"`
+	Depth        int    `json:"depth"`
 }
 
 // Create handles POST /api/v1/internal/queries.
@@ -112,6 +115,18 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
+	}
+	if body.SourceRunID != "" {
+		chat, err := delegationExecutionChat(r.Context(), h.db, body.SourceRunID, body.ActorAgentID, body.WorkspaceID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if body.ChatID != "" && body.ChatID != chat {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		body.ChatID = chat
 	}
 	if body.TargetSlug == "" || body.Question == "" || body.CrewID == "" || body.WorkspaceID == "" || body.ChatID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -139,7 +154,13 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Look up the from agent (for logging/DB)
 	var fromAgentID string
-	if body.FromSlug != "" {
+	if body.ActorAgentID != "" {
+		err := h.db.QueryRowContext(r.Context(), `SELECT id,slug FROM agents WHERE id=? AND crew_id=? AND workspace_id=? AND deleted_at IS NULL`, body.ActorAgentID, body.CrewID, body.WorkspaceID).Scan(&fromAgentID, &body.FromSlug)
+		if err != nil {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+	} else if body.FromSlug != "" {
 		err := h.db.QueryRowContext(r.Context(), `
 			SELECT id FROM agents WHERE slug = ? AND crew_id = ? AND deleted_at IS NULL
 		`, body.FromSlug, body.CrewID).Scan(&fromAgentID)
@@ -222,13 +243,55 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Create peer_conversations record
 	convID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO peer_conversations (id, workspace_id, crew_id, chat_id, from_agent_id, to_agent_id, question, status, created_at)
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin peer query admission", err)
+		return
+	}
+	defer tx.Rollback()
+	originID := runauthority.OriginIDFromContext(r.Context())
+	if body.SourceRunID != "" {
+		chat, err := delegationExecutionChat(r.Context(), tx, body.SourceRunID, fromAgentID, body.WorkspaceID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if chat != body.ChatID {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+	}
+	if body.SourceRunID != "" {
+		origin, err := runauthority.CaptureOrigin(r.Context(), tx, body.SourceRunID, fromAgentID, body.WorkspaceID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if origin.ID != "" {
+			originID = origin.ID
+		}
+	}
+	if originID != "" {
+		if _, err := runauthority.ValidateOrigin(r.Context(), tx, originID, target.ID, body.WorkspaceID); err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+	}
+	_, err = tx.ExecContext(r.Context(), `
+  INSERT INTO peer_conversations (id, workspace_id, crew_id, chat_id, from_agent_id, to_agent_id, question, status, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'RUNNING', ?)
 	`, convID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, target.ID, body.Question, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "create peer_conversation", err)
 		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit peer query admission", err)
+		return
+	}
+	if originID != "" {
+		r = r.WithContext(runauthority.WithOriginID(r.Context(), originID))
 	}
 
 	// Dual-write into the Crew Journal. The old peer_conversations table
@@ -268,15 +331,16 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// source of truth post Phase J). trace_id == runID groups the
 	// query's lifecycle entries.
 	runID := generateCUID()
-	if _, err := h.journal.Emit(r.Context(), journal.Entry{
+	startedEntry := journal.Entry{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID, // target was resolved within this crew
 		AgentID:     target.ID,
 		Type:        journal.EntryRunStarted,
 		Severity:    journal.SeverityInfo,
-		ActorType:   journal.ActorAgent,
+		ActorType:   journal.ActorOrchestrator,
 		Summary:     fmt.Sprintf("run %s started (peer query)", shortRunID(runID)),
 		Payload: map[string]any{
+			"host_admitted": true,
 			"trigger_type":  "PEER_QUERY",
 			"chat_id":       body.ChatID,
 			"peer_query_id": convID,
@@ -286,8 +350,27 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		},
 		Refs:    map[string]any{"peer_query_id": convID, "chat_id": body.ChatID},
 		TraceID: runID,
-	}); err != nil {
-		h.logger.Error("create run record for query", "error", err)
+	}
+	if originID != "" {
+		startedEntry.Payload["chat_origin_id"] = originID
+	}
+	var startErr error
+	if originID != "" {
+		if syncEmitter, ok := h.journal.(journal.SyncEmitter); ok {
+			_, startErr = syncEmitter.EmitSync(r.Context(), startedEntry)
+		} else {
+			startErr = fmt.Errorf("durable peer query journal unavailable")
+		}
+	} else {
+		_, startErr = h.journal.Emit(r.Context(), startedEntry)
+	}
+	if startErr != nil {
+		h.logger.Error("create run record for query", "error", startErr)
+		if originID != "" {
+			h.finishQuery(r.Context(), convID, "", body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", "durable peer query authority unavailable", startTime, acc)
+			replyError(w, http.StatusServiceUnavailable, "durable peer query authority unavailable")
+			return
+		}
 		runID = "" // prevent finishQuery from emitting a terminal entry
 	}
 

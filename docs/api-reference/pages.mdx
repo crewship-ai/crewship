@@ -429,6 +429,13 @@ not supply one).
 ]
 ```
 
+`can_move` and `can_remove_from_folder` are caller-specific booleans on every
+index row. Moving requires page ownership (including membership of its owning
+crew) or workspace ADMIN/OWNER. Removing also accepts a live folder *can edit*
+share. A move still requires the destination folder to accept the caller.
+These flags describe authority; mutation endpoints recheck it and the version
+fences.
+
 `panel_count` counts **every** panel including sealed ones, because the grid
 draws a placeholder for those and a count that skipped them would disagree with
 what the reader sees. `last_produced_at` is the newest arrival across visible
@@ -1076,6 +1083,12 @@ GET /api/v1/page-folders
 
 **Response 200:** the folders the caller may read, by name.
 
+Each folder carries caller-specific `can_rename`, `can_share`, `can_delete` and
+`can_accept_pages` booleans. Rename and acceptance include live folder *can edit*
+shares; share and delete require ADMIN/OWNER or a manager of the owning crew.
+Deletion still requires an empty folder. The same flags appear on show, create
+and update responses; they reveal no other member or hidden page count.
+
 ```json
 {
   "folders": [
@@ -1090,6 +1103,10 @@ GET /api/v1/page-folders
       "page_count": 3,
       "shared": "none",
       "acl_version": 0,
+      "can_rename": true,
+      "can_share": true,
+      "can_delete": true,
+      "can_accept_pages": true,
       "created_at": "2026-09-13T06:00:00Z",
       "updated_at": "2026-09-13T06:00:00Z"
     }

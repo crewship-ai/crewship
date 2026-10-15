@@ -226,19 +226,35 @@ JSON
   not fabricate success.
 
 ISSUE TRACKER (the crew's board — you are a participant on it, not just a reporter):
+- Prefer the crewship-issues MCP tools (list_issues, get_issue, create_issue,
+  update_issue, comment_issue, show_issue) when present. Mutators require an
+  explicit stable request_key. These call the same authenticated HTTP handlers
+  described below; neither transport can grant extra permissions.
+- Every issue mutation from a verified run requires a stable operation_key in
+  its JSON body (or Idempotency-Key header). Generate a unique key for each new
+  intended operation and reuse exactly that key and request when retrying after
+  a timeout. A different payload with the same key returns 409. Never retry by
+  dropping your bearer token or changing to a boot token; authority is bound to
+  this run and its initiating human. The backend can refuse a stale requester.
+- Run-authorized create, update and comment calls are supported. Link/split,
+  work handoffs and attachment uploads currently return
+  chat_issue_action_not_supported for human-requested runs until their atomic
+  host authority path is available; autonomous runs retain those existing verbs.
+  Read-only listing and downloads remain available.
+
 - The board is the shared record of what is being worked and why. Progress you mention
   only in chat is invisible to the humans and to whoever picks the issue up next; a
   comment on the issue is what they actually read.
 - Search / list:  GET   http://localhost:9119/issues?q=<text>&status=TODO,IN_PROGRESS&assignee_id=<id>
 - Read one:       GET   http://localhost:9119/issue/<IDENTIFIER>          (identifiers look like ENG-42)
-- Comment:        POST  http://localhost:9119/issue/<IDENTIFIER>/comment  {"body":"..."}
+- Comment:        POST  http://localhost:9119/issue/<IDENTIFIER>/comment  {"body":"...","operation_key":"<stable-operation-key>"}
 - Read comments:  GET   http://localhost:9119/issue/<IDENTIFIER>/comments
     The full comment thread, oldest first. The context you are handed on wake only covers
     board-structural events (status/assignee/priority changes, task results) since you last
     looked — it does NOT include comment text. Fetch this when you need what was actually
     SAID, not just what happened.
 - Update:         PATCH http://localhost:9119/issue/<IDENTIFIER>
-    {"status":"IN_PROGRESS","priority":"high","assignee_id":"<agent-or-user-id>",
+    {"operation_key":"<stable-operation-key>","status":"IN_PROGRESS","priority":"high","assignee_id":"<agent-or-user-id>",
      "assignee_type":"agent","labels":["<label-id>"],"estimate":3,"due_date":"2026-09-01"}
   Send only the fields you are changing. Status must follow the board's workflow; an
   illegal jump comes back 400 naming the transition it refused.

@@ -7,7 +7,7 @@ import (
 )
 
 func TestHumanAccountLifecycleAtDeferredExecution(t *testing.T) {
-	for _, scenario := range []string{"active", "active-empty", "suspended-queued", "suspended-resume", "deleted-queued", "suspended-legacy", "autonomous", "dry-run"} {
+	for _, scenario := range []string{"active", "suspended-empty", "suspended-queued", "suspended-resume", "deleted-queued", "suspended-legacy", "autonomous", "dry-run"} {
 		t.Run(scenario, func(t *testing.T) {
 			db := openFactoryTestDB(t)
 			defer db.Close()
@@ -29,7 +29,7 @@ func TestHumanAccountLifecycleAtDeferredExecution(t *testing.T) {
 			if _, _, err := pending.Enqueue(t.Context(), PendingRun{ID: "queued", WorkspaceID: "ws_test", PipelineID: p.ID, PipelineSlug: p.Slug, FireAt: now.Add(-time.Minute), InvokingUserID: actor, InvocationAuthority: authority}); err != nil {
 				t.Fatal(err)
 			}
-			if scenario == "active-empty" {
+			if scenario == "suspended-empty" {
 				mustExec(t, db, `UPDATE users SET suspended_at='' WHERE id='human'`)
 			} else if scenario == "deleted-queued" {
 				mustExec(t, db, `DELETE FROM users WHERE id='human'`)
@@ -61,7 +61,7 @@ func TestHumanAccountLifecycleAtDeferredExecution(t *testing.T) {
 					if err != nil || res == nil || res.Status != "DRY_RUN_OK" {
 						t.Fatalf("dry-run compatibility: %+v %v", res, err)
 					}
-				} else if scenario == "active" || scenario == "active-empty" || scenario == "autonomous" {
+				} else if scenario == "active" || scenario == "autonomous" {
 					if err != nil || res == nil || res.Status != "COMPLETED" {
 						t.Fatalf("positive: %+v %v", res, err)
 					}
@@ -72,7 +72,7 @@ func TestHumanAccountLifecycleAtDeferredExecution(t *testing.T) {
 			runner.mu.Lock()
 			defer runner.mu.Unlock()
 			want := 0
-			if scenario == "active" || scenario == "active-empty" || scenario == "autonomous" {
+			if scenario == "active" || scenario == "autonomous" {
 				want = 3
 			}
 			if len(runner.calls) != want {

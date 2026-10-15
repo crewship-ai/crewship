@@ -79,6 +79,10 @@ export interface WirePageFolder {
   shared?: string | null
   created_at?: string | null
   updated_at?: string | null
+  can_rename?: boolean
+  can_share?: boolean
+  can_delete?: boolean
+  can_accept_pages?: boolean
 }
 
 /** A folder as the rail and the dialogs consume it. */
@@ -88,6 +92,10 @@ export interface PageFolderView extends PageFolderLike {
   ownerLabel: string | null
   aclVersion: number | null
   shared: FolderShared
+  canRename?: boolean
+  canShare?: boolean
+  canDelete?: boolean
+  canAcceptPages?: boolean
   createdAt: Date | null
   updatedAt: Date | null
 }
@@ -125,6 +133,10 @@ export function toPageFolderView(raw: WirePageFolder): PageFolderView | null {
     pageCount: Math.max(0, Math.trunc(finiteOrNull(raw.page_count) ?? 0)),
     aclVersion: finiteOrNull(raw.acl_version),
     shared: toFolderShared(raw.shared),
+    ...(raw.can_rename === undefined ? {} : { canRename: raw.can_rename === true }),
+    ...(raw.can_share === undefined ? {} : { canShare: raw.can_share === true }),
+    ...(raw.can_delete === undefined ? {} : { canDelete: raw.can_delete === true }),
+    ...(raw.can_accept_pages === undefined ? {} : { canAcceptPages: raw.can_accept_pages === true }),
     createdAt: toDate(raw.created_at),
     updatedAt: toDate(raw.updated_at),
   }

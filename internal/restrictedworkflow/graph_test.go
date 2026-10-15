@@ -37,7 +37,7 @@ func graphFixture(t *testing.T) (*Service, *restricteddispatch.TextRunner) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = store.Replace(t.Context(), "owner", user, "w", "restricted", m, []access.Right{{Kind: "agent", ID: "agent", Operation: "run"}, {Kind: "agent", ID: "other", Operation: "run"}, {Kind: "agent", ID: "other", Operation: "delegate"}})
+		_, err = store.Replace(t.Context(), "owner", user, "w", "restricted", m, []access.Right{{Kind: "routine", ID: "routine", Operation: "run"}, {Kind: "agent", ID: "agent", Operation: "run"}, {Kind: "agent", ID: "other", Operation: "run"}, {Kind: "agent", ID: "other", Operation: "delegate"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -157,7 +157,7 @@ func TestGraphMissingDelegateCannotEscalate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.Replace(t.Context(), "owner", "h1", "w", "restricted", m, []access.Right{{Kind: "agent", ID: "agent", Operation: "run"}, {Kind: "agent", ID: "other", Operation: "run"}}); err != nil {
+	if _, err = store.Replace(t.Context(), "owner", "h1", "w", "restricted", m, []access.Right{{Kind: "routine", ID: "routine", Operation: "run"}, {Kind: "agent", ID: "agent", Operation: "run"}, {Kind: "agent", ID: "other", Operation: "run"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "x"}, "", 0); err == nil {

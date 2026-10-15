@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { encodeApiPathSegment, requireApiPathSegment } from "@/lib/api-path-segment"
 import { apiFetch } from "@/lib/api-fetch"
 
 type FileVersion = { id: string; name: string; size_bytes: number; sha256: string; created_at: string }
@@ -10,10 +11,12 @@ export function RestrictedFiles({ chatId, workspaceId, refreshKey }: { chatId: s
   const [error, setError] = useState("")
   const [refresh, setRefresh] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
-  const base = `/api/v1/chats/${encodeURIComponent(chatId)}/restricted-files`
+  const segment = encodeApiPathSegment(chatId)
+  const base = segment === null ? null : `/api/v1/chats/${segment}/restricted-files`
   const query = `?workspace_id=${encodeURIComponent(workspaceId)}`
 
   useEffect(() => {
+    if (base === null) { setFiles([]); setError("Files are unavailable."); return }
     const controller = new AbortController()
     void apiFetch(base + query, { signal: controller.signal }).then(async response => {
       if (!response.ok) throw new Error("Files are unavailable. Your access may have changed.")
@@ -26,9 +29,10 @@ export function RestrictedFiles({ chatId, workspaceId, refreshKey }: { chatId: s
   }, [base, query, refreshKey, refresh])
 
   async function download(file: FileVersion) {
+    if (base === null) return
     setBusy(file.id)
     try {
-      const response = await apiFetch(`${base}/${encodeURIComponent(file.id)}/download${query}`)
+      const response = await apiFetch(`${base}/${requireApiPathSegment(file.id)}/download${query}`)
       if (!response.ok) throw new Error("File is unavailable. Your access may have changed.")
       const content = await response.blob()
       if (content.size !== file.size_bytes) throw new Error("Download was interrupted. Refresh and try again.")

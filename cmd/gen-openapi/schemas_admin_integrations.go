@@ -23,6 +23,8 @@ type DomainSchema struct {
 	// success path is deliberately no-content (for example DELETE → 204).
 	// A non-nil slice is significant; an empty slice means no success status.
 	SuccessStatuses []string
+	// ErrorStatuses adds helper-produced errors that source inference cannot see.
+	ErrorStatuses []string
 	// ErrorMedia and ErrorResponse describe the non-2xx bodies of an
 	// operation whose errors do NOT go through writeJSON. The generator
 	// otherwise declares application/json with the {"error"} or RFC 7807

@@ -141,10 +141,43 @@ describe("member resource access", () => {
     expect(grants.textContent).toContain("agent: Shared agent · chat")
     expect(grants.textContent).toContain("project: Roadmap project · read")
   })
+  it("shares one selected routine and explains its agent dependency", async () => {
+    mockPolicy(); show(); fireEvent.click(screen.getByRole("button", {name:"Edit resource access"}))
+    await screen.findByLabelText("Resource kind")
+    fireEvent.change(screen.getByLabelText("Resource kind"), {target:{value:"routine"}})
+    fireEvent.change(screen.getByLabelText("Resource operation"), {target:{value:"run"}})
+    await screen.findByRole("option", {name:"Other agent"})
+    fireEvent.change(screen.getByLabelText("Resource"), {target:{value:"agent-2"}})
+    fireEvent.click(screen.getByRole("button", {name:"Add grant"}))
+    expect(screen.getByText(/Guest restrictions apply to the entire account/)).toHaveTextContent("run access to every agent")
+    fireEvent.click(saveButton())
+    await waitFor(()=>expect(fetchMock.mock.calls.some(([,init])=>init?.method==="PUT")).toBe(true))
+    const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method==="PUT")!
+    expect(JSON.parse(init.body).rights).toContainEqual({kind:"routine",id:"agent-2",operation:"run"})
+    expect(fetchMock.mock.calls.some(([url])=>url.includes("/workspaces/workspace-1/pipelines"))).toBe(true)
+  })
   it("rejects a replacement membership and provides no save control", async () => {
     fetchMock.mockResolvedValue(response({ ...policy, membership_id: "new-membership" }))
     show(); fireEvent.click(screen.getByRole("button", { name: "Edit resource access" }))
     await screen.findByRole("alert")
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
   })
+})
+
+it("keeps inactive issuer metadata visible and reissues only after an explicit choice", async () => {
+  const inactive={...policy,grant_details:[{...policy.rights[0],issuer_id:"former-admin",issuer_name:"Former administrator",created_at:"2026-10-14T00:00:00Z",live:false}]}
+  fetchMock.mockImplementation(async (url:string,init?:RequestInit)=>{
+    if(init?.method==="PUT")return response({...inactive,revision:8})
+    if(url.includes("/members/"))return response(inactive)
+    return response([{id:"agent-1",name:"Shared agent"}])
+  })
+  show();fireEvent.click(screen.getByRole("button",{name:"Edit resource access"}))
+  expect(await screen.findByText(/Former administrator/)).toHaveTextContent("Inactive")
+  expect(bar()).toBeNull()
+  fireEvent.click(screen.getByRole("button",{name:"Reissue as me"}))
+  expect(bar()).toHaveTextContent("1 unsaved change")
+  fireEvent.click(saveButton())
+  await waitFor(()=>expect(fetchMock.mock.calls.some(([,init])=>init?.method==="PUT")).toBe(true))
+  const [,init]=fetchMock.mock.calls.find(([,init])=>init?.method==="PUT")!
+  expect(JSON.parse(init.body)).toEqual({...policy,reissue:policy.rights})
 })

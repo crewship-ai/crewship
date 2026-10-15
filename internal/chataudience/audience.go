@@ -23,7 +23,7 @@ const VisibleSQL = `EXISTS (
 	SELECT 1 FROM workspace_members wm
 	WHERE wm.workspace_id = c.workspace_id AND wm.user_id = ?
 	  AND (wm.access_mode = 'trusted' OR (wm.access_mode = 'restricted' AND EXISTS (
-	    SELECT 1 FROM access_grants g WHERE g.member_id = wm.id
+	    SELECT 1 FROM live_access_grants g WHERE g.member_id = wm.id
 	      AND g.resource_kind = 'agent' AND g.agent_id = c.agent_id AND g.operation = 'chat'
 	  )))
 	  AND (

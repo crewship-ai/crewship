@@ -38,7 +38,7 @@ func covMissionDB(t *testing.T) *sql.DB {
 		CREATE TABLE agents (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, name TEXT, slug TEXT,
 			agent_role TEXT DEFAULT 'AGENT', lead_mode TEXT DEFAULT 'active', status TEXT DEFAULT 'IDLE',
 			deleted_at TEXT);
-		CREATE TABLE missions (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, lead_agent_id TEXT,
+		CREATE TABLE missions (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, lead_agent_id TEXT, chat_origin_id TEXT,
 			trace_id TEXT UNIQUE, title TEXT, description TEXT, status TEXT DEFAULT 'PLANNING',
 			identifier TEXT, mission_type TEXT,
 			plan TEXT, workflow_template TEXT, total_token_count INTEGER, total_estimated_cost REAL,
@@ -52,7 +52,7 @@ func covMissionDB(t *testing.T) *sql.DB {
 			confidence REAL, needs_review INTEGER DEFAULT 0, handoff_context TEXT,
 			evaluation_status TEXT, evaluation_notes TEXT,
 			approval_required INTEGER DEFAULT 0, approval_status TEXT, approved_by TEXT, approved_at TEXT);
-		CREATE TABLE assignments (id TEXT PRIMARY KEY, workspace_id TEXT, chat_id TEXT,
+		CREATE TABLE assignments (id TEXT PRIMARY KEY, workspace_id TEXT, chat_id TEXT, chat_origin_id TEXT,
 			assigned_by_id TEXT, assigned_to_id TEXT, task TEXT, status TEXT DEFAULT 'PENDING',
 			started_at TEXT, finished_at TEXT, result_summary TEXT, error_message TEXT, outcome TEXT,
 			group_id TEXT, created_at TEXT,
@@ -64,7 +64,7 @@ func covMissionDB(t *testing.T) *sql.DB {
 		CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, email TEXT);
 		CREATE TABLE crew_connections (id TEXT PRIMARY KEY, from_crew_id TEXT, to_crew_id TEXT,
 			status TEXT, direction TEXT);
-		CREATE TABLE mission_comments (id TEXT PRIMARY KEY, mission_id TEXT, author_type TEXT,
+		CREATE TABLE mission_comments (id TEXT PRIMARY KEY, mission_id TEXT, author_type TEXT, chat_origin_id TEXT,
 			author_id TEXT, body TEXT, created_at TEXT, updated_at TEXT);
 		CREATE TABLE mission_activity (id TEXT PRIMARY KEY, mission_id TEXT, actor_type TEXT,
 			actor_id TEXT, action TEXT, details TEXT, created_at TEXT,

@@ -25,11 +25,11 @@ func TestPreparedSourceRightsAtomicEnqueueAndEveryStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rights := []access.Right{{Kind: "agent", ID: "agent", Operation: "run"}, {Kind: "project", ID: "project", Operation: "read"}}
+	rights := []access.Right{{Kind: "routine", ID: "routine", Operation: "run"}, {Kind: "agent", ID: "agent", Operation: "run"}, {Kind: "project", ID: "project", Operation: "read"}}
 	if _, err = store.Replace(t.Context(), "owner", "h1", "w", "restricted", m, rights); err != nil {
 		t.Fatal(err)
 	}
-	extra := rights[1:]
+	extra := rights[2:]
 	prepare := func() *PreparedInvocation {
 		p, err := s.PrepareManualWithRights(t.Context(), "h1", "w", "private-work", map[string]any{"task": "CLASSIFIED_PROJECT_INPUT"}, "", extra, "issue")
 		if err != nil {

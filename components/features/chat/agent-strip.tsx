@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
  * (README §5: agent → crew, chat, runs, skills, credentials).
  */
 export interface AgentStripAgent {
+  current_user_can_chat?: boolean
   id: string
   name: string
   slug: string

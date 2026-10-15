@@ -1,7 +1,6 @@
 -- Final private Artifact schema: immutable sources, discussion history, jobs and policy.
 -- Run principals/delegations are runtime authority; historical run IDs are opaque.
 -- The Board request foreign key is resolved by the following durable Board schema.
--- Existing objects are accepted only after Migrate's exact prerelease preflight.
 
 CREATE TABLE IF NOT EXISTS page_artifacts (
   page_id TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,

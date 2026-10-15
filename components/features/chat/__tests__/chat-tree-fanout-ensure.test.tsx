@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 
 // =============================================================================
 // The thirteenth agent, and the draft it used to open on top of a real history.
@@ -25,8 +25,9 @@ vi.mock("@/lib/api-fetch", () => ({
   apiFetch: (...args: unknown[]) => apiFetchMock(...args),
 }))
 
+const access = vi.hoisted(() => ({restricted:false}))
 vi.mock("@/hooks/use-workspace", () => ({
-  useWorkspace: () => ({ workspaceId: "ws-1", loading: false }),
+  useWorkspace: () => ({ workspaceId: "ws-1", loading: false, workspaces: access.restricted ? [{id:"ws-1",restricted_session:true}] : [] }),
 }))
 
 import { useChatTreeData, AGENT_FANOUT_CAP } from "../chat-tree-data"
@@ -56,6 +57,7 @@ function askedAgentIds(): string[] {
 
 describe("useChatTreeData — the capped fan-out must not drop the agent the URL named", () => {
   beforeEach(() => {
+    access.restricted=false
     apiFetchMock.mockReset()
     apiFetchMock.mockImplementation((url: string) => {
       const u = String(url)
@@ -79,6 +81,23 @@ describe("useChatTreeData — the capped fan-out must not drop the agent the URL
   })
 
   afterEach(() => vi.restoreAllMocks())
+
+  it("keeps the same roster on unchanged refresh and preserves agents on transient failure",async()=>{
+    access.restricted=true
+    const {result}=renderHook(()=>useChatTreeData())
+    await waitFor(()=>expect(result.current.threadsLoaded).toBe(true))
+    const before=result.current.agents
+    apiFetchMock.mockClear()
+    await act(async()=>{window.dispatchEvent(new Event("focus"))})
+    await waitFor(()=>expect(apiFetchMock).toHaveBeenCalled())
+    expect(result.current.agents).toBe(before)
+    expect(askedAgentIds()).toHaveLength(0)
+    apiFetchMock.mockImplementation((url:string)=>url.startsWith("/api/v1/agents?")?Promise.reject(new Error("directory unavailable")):ok([]))
+    await act(async()=>{window.dispatchEvent(new Event("focus"))})
+    await waitFor(()=>expect(result.current.error).toBeTruthy())
+    expect(result.current.agents?.map(agent=>agent.id)).toEqual(roster.map(agent=>agent.id))
+    expect(result.current.agents?.every(agent=>agent.current_user_can_chat===false)).toBe(true)
+  })
 
   it("still asks about no more than the cap", async () => {
     const { result } = renderHook(() => useChatTreeData({ ensureSlug: LATE.slug }))

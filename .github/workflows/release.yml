@@ -65,7 +65,7 @@ jobs:
           NEXT_PUBLIC_CREWSHIP_VERSION: ${{ steps.meta.outputs.version }}
       - name: Copy static export for embedding
         run: ./scripts/embed-web-out.sh sync
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true

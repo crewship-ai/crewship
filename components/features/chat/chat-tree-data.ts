@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { readTotalCount } from "@/hooks/use-paged-list"
+import { useAccessMode } from "@/hooks/use-access-mode"
 import { useWorkspace } from "@/hooks/use-workspace"
 
 import { httpError, scopeErrorMessage, useRetry } from "./scope-fetch"
@@ -46,6 +48,7 @@ export function parseKindCounts(raw: string | null): Record<string, number> | nu
 /* ------------------------------------------------------------------ types */
 
 export interface ChatTreeAgent {
+  current_user_can_chat?: boolean
   id: string
   name: string
   slug: string
@@ -218,6 +221,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
   kind,
 }: { ensureSlug?: string | null; kind?: string | null } = {}): ChatTreeData<A> {
   const { workspaceId, loading: wsLoading } = useWorkspace()
+  const restricted = useAccessMode() === "restricted"
 
   const [roster, setRoster] = useState<A[] | null>(null)
   const [threadsByAgent, setThreadsByAgent] = useState<Record<string, ChatTreeThread[]>>({})
@@ -232,6 +236,16 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
   const [error, setError] = useState<string | null>(null)
   const { nonce: threadsNonce, retry: retryThreads } = useRetry()
   const { nonce: rosterNonce, retry: retryRoster } = useRetry()
+
+  // Restricted sessions have no realtime channel. Re-read the existing
+  // directory so a chat-grant revoke also removes the composer in this tab.
+  useEffect(() => {
+    if (!restricted) return
+    const timer = setInterval(retryRoster, 15_000)
+    const focus = () => retryRoster()
+    window.addEventListener("focus", focus)
+    return () => { clearInterval(timer); window.removeEventListener("focus", focus) }
+  }, [restricted, retryRoster])
 
   // ── The roster ──
   useEffect(() => {
@@ -266,23 +280,20 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
       })
       .then((rows: A[]) => {
         if (cancelled) return
-        setRoster(rows)
+        setRoster(previous => JSON.stringify(previous) === JSON.stringify(rows) ? previous : rows)
         setError(null)
       })
       .catch((err: unknown) => {
         if (cancelled) return
-        setRoster([])
+        setRoster(previous => previous === null ? [] : restricted && previous.some(agent => agent.current_user_can_chat !== false) ? previous.map(agent => ({...agent,current_user_can_chat:false})) : previous)
         setError(err instanceof Error ? err.message : String(err))
       })
     return () => {
       cancelled = true
     }
-    // `setRoster([])` on failure rather than leaving it null is deliberate and
-    // only safe because `error` is now rendered: null keeps the page on its
-    // loading skeleton forever, so the failure has to resolve the list AND be
-    // reported. One without the other is how "no conversations yet" came to
-    // mean "the roster request 500ed".
-  }, [workspaceId, rosterNonce, ensureSlug])
+    // Preserve an open transcript on a transient roster failure. Restricted
+    // send controls fail closed until a fresh authorized directory succeeds.
+  }, [workspaceId, rosterNonce, ensureSlug, restricted])
 
   // Ghosts are retired agents; starting a conversation with one is not a thing
   // this surface should offer, so they are out of the tree — but still in the
@@ -308,8 +319,8 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
     setThreadsLoaded(false)
     Promise.all(
       scope.map((a) =>
-        apiFetch(
-          `/api/v1/agents/${encodeURIComponent(a.id)}/chats` +
+        Promise.resolve().then(() => apiFetch(
+          `/api/v1/agents/${requireApiPathSegment(a.id)}/chats` +
             `?workspace_id=${encodeURIComponent(workspaceId)}&limit=${PER_AGENT_CHAT_LIMIT}` +
             (kind ? `&kind=${encodeURIComponent(kind)}` : "") +
             // The tab strip needs totals for the kinds this request is
@@ -317,7 +328,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
             // it. `?counts=1` because the count is over every chat the agent
             // has, and nothing else asking this endpoint wants to pay for it.
             "&counts=1&source=1",
-        )
+        ))
           .then((r) => {
             if (!r.ok) throw httpError(r.status)
             // Optional-chained, and not to appease a stub: the counts
@@ -397,7 +408,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
       let total: number | null = null
       for (let offset = 0; offset < AGENT_CHAT_SHOW_ALL_CAP; offset += AGENT_CHAT_PAGE_CEILING) {
         const r = await apiFetch(
-          `/api/v1/agents/${encodeURIComponent(agentId)}/chats` +
+          `/api/v1/agents/${requireApiPathSegment(agentId)}/chats` +
             `?workspace_id=${encodeURIComponent(workspaceId)}&limit=${AGENT_CHAT_PAGE_CEILING}&offset=${offset}&source=1` +
             (kind ? `&kind=${encodeURIComponent(kind)}` : ""),
         )

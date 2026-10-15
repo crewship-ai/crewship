@@ -36,6 +36,7 @@ export function virtualChatEnabled(): boolean {
 }
 
 interface VirtualConversationProps {
+  canChat?: boolean
   turns: ChatTurn[]
   sessionId: string
   agentId: string
@@ -73,6 +74,7 @@ const VirtuosoFooter = ({ context }: { context?: VirtuosoCtx }) => (
 const VIRTUOSO_COMPONENTS = { Footer: VirtuosoFooter }
 
 export function VirtualConversation({
+  canChat = true,
   turns,
   sessionId,
   agentId,
@@ -102,8 +104,8 @@ export function VirtualConversation({
       <div className="relative flex-1 overflow-y-hidden" role="log">
         <ConversationEmptyState
           icon={<Bot className="h-12 w-12" />}
-          title="Start a conversation"
-          description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
+          title={canChat ? "Start a conversation" : "Agent shared for discovery"}
+          description={canChat ? (agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below") : "Chat has not been shared with you."}
         />
       </div>
     )

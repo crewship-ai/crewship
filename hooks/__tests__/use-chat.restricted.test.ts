@@ -7,6 +7,14 @@ import { useChat } from "@/hooks/use-chat"
 
 beforeEach(()=>{vi.clearAllMocks();vi.stubGlobal("requestAnimationFrame",()=>1);vi.stubGlobal("cancelAnimationFrame",()=>{})})
 describe("restricted chat transport",()=>{
+ it("revocation blocks direct sends and regeneration of loaded history",async()=>{
+  const {result,rerender}=renderHook(({allowed})=>useChat({canSend:allowed,wsUrl:"ws://test",getToken:async()=>"token",sessionId:"private",workspaceId:"workspace",executionProfile:"restricted"}),{initialProps:{allowed:true}})
+  act(()=>result.current.loadHistory([{id:"message-1",role:"user",content:"previous question",timestamp:new Date("2026-10-14T00:00:00Z")}]))
+  rerender({allowed:false})
+  act(()=>{expect(result.current.sendMessage("new question")).toBe(false);result.current.regenerateLastTurn();result.current.editAndResend("message-1","edited")})
+  expect(request).not.toHaveBeenCalled()
+  expect(send.mock.calls.some(call=>call[0]?.type==="send_message")).toBe(false)
+ })
  it("uses authenticated HTTP stream and finishes a classified text reply",async()=>{
   let index=0
   const chunks=[new TextEncoder().encode('data: {"type":"text","text":"private answer"}\n\ndata: {"type":"done","text":""}\n\n')]

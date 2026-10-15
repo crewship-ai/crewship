@@ -474,7 +474,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af # upstream main 2026-09-28 (cache 6.3.0)
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true

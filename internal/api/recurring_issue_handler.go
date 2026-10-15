@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/robfig/cron/v3"
 )
@@ -230,7 +231,13 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		createdBy = sql.NullString{String: callerID, Valid: true}
 	}
 
-	_, err = h.db.ExecContext(r.Context(), `
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin recurring issue", err)
+		return
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO recurring_issues (id, workspace_id, crew_id, title, description, priority,
 		    project_id, milestone_id, assignee_type, assignee_id, labels_json,
 		    cron_expression, enabled, next_run, run_count, created_at, created_by)
@@ -240,6 +247,28 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.CronExpression, nextRun, now, createdBy)
 	if err != nil {
 		internalError(w, r, h.logger, "insert recurring issue", err)
+		return
+	}
+
+	if callerID == "" {
+		writeChatIssueError(w, runauthority.ErrUnavailable)
+		return
+	}
+	var originID string
+	if !limitedChatToken(r.Context()) {
+		origin, captureErr := runauthority.CaptureWebOrigin(r.Context(), tx, "web_recurring", id, callerID, wsID)
+		if captureErr != nil {
+			writeChatIssueError(w, captureErr)
+			return
+		}
+		originID = origin.ID
+	}
+	if _, err = tx.ExecContext(r.Context(), `UPDATE recurring_issues SET chat_origin_id=NULLIF(?,'') WHERE id=? AND workspace_id=?`, originID, id, wsID); err != nil {
+		internalError(w, r, h.logger, "persist recurring authority", err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit recurring issue", err)
 		return
 	}
 
@@ -433,9 +462,82 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Default new fields to execution-affecting. Only labels and disabling
+	// are safe to preserve another person's standing admission.
+	metadataOnly := true
+	for _, clause := range ub.sets {
+		if clause == "updated_at = ?" || clause == "labels_json = ?" ||
+			(clause == "enabled = ?" && req.Enabled != nil && !*req.Enabled) {
+			continue
+		}
+		metadataOnly = false
+	}
+
+	if req.Enabled != nil && *req.Enabled && limitedChatToken(r.Context()) {
+		writeChatIssueError(w, runauthority.ErrUnavailable)
+		return
+	}
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin recurring update", err)
+		return
+	}
+	defer tx.Rollback()
+	user := UserFromContext(r.Context())
+	if user == nil {
+		writeChatIssueError(w, runauthority.ErrUnavailable)
+		return
+	}
+	if limitedChatToken(r.Context()) && !metadataOnly {
+		var pinned string
+		if err = tx.QueryRowContext(r.Context(), `SELECT COALESCE(chat_origin_id,'') FROM recurring_issues WHERE id=? AND workspace_id=?`, riID, wsID).Scan(&pinned); err != nil {
+			internalError(w, r, h.logger, "read recurring authority before edit", err)
+			return
+		}
+		// An unbound template remains unbound. Existing authority may only
+		// follow execution edits by the same currently authorized person.
+		if pinned != "" {
+			origin, authErr := runauthority.ValidateOriginReceipt(r.Context(), tx, pinned, wsID)
+			if authErr != nil && !permanentRecurringAuthorityError(authErr) {
+				internalError(w, r, h.logger, "validate recurring editor", authErr)
+				return
+			}
+			if authErr != nil || origin.HumanAuthority == nil || origin.HumanAuthority.UserID != user.ID {
+				writeProblem(w, r, http.StatusForbidden, "requester_authority_required: save execution changes with a full authenticated session")
+				return
+			}
+		}
+	}
 	query, args := ub.Build("recurring_issues", "id = ? AND workspace_id = ?", riID, wsID)
-	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
+	if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
 		internalError(w, r, h.logger, "update recurring issue", err)
+		return
+	}
+
+	// A row disappearing during its own mutation is an internal write/read
+	// failure, not a new permission decision. Keep the whole update rolled back.
+	var updatedID string
+	if err = tx.QueryRowContext(r.Context(), `SELECT id FROM recurring_issues WHERE id=? AND workspace_id=?`, riID, wsID).Scan(&updatedID); err != nil {
+		internalError(w, r, h.logger, "read updated recurring issue before authority", err)
+		return
+	}
+
+	// Scoped CRUD keeps the existing pinned grant; it cannot establish or
+	// re-enable execution. A pure disable needs no fresh execution admission.
+	if !limitedChatToken(r.Context()) && !(metadataOnly && req.Enabled != nil && !*req.Enabled) {
+		origin, captureErr := runauthority.CaptureWebOrigin(r.Context(), tx, "web_recurring", riID, user.ID, wsID)
+		if captureErr != nil {
+			writeChatIssueError(w, captureErr)
+			return
+		}
+		if _, err = tx.ExecContext(r.Context(), `UPDATE recurring_issues SET chat_origin_id=? WHERE id=? AND workspace_id=?`, origin.ID, riID, wsID); err != nil {
+			internalError(w, r, h.logger, "persist recurring authority", err)
+			return
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit recurring update", err)
 		return
 	}
 

@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/policy"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -74,6 +75,7 @@ func (h *InternalMissionHandler) SetAutonomyGate(r *policy.Resolver, j journal.E
 //	full     → journal-only, starts freely.
 func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		SourceRunID      string  `json:"source_run_id,omitempty"`
 		Title            string  `json:"title"`
 		Description      *string `json:"description"`
 		LeadAgentID      string  `json:"lead_agent_id"`
@@ -197,6 +199,33 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer tx.Rollback()
+	originID := runauthority.OriginIDFromContext(r.Context())
+	if req.SourceRunID != "" {
+		origin, err := runauthority.CaptureOrigin(r.Context(), tx, req.SourceRunID, req.LeadAgentID, req.WorkspaceID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if origin.ID != "" {
+			originID = origin.ID
+		}
+	}
+	if originID != "" {
+		authority, err := runauthority.ValidateOrigin(r.Context(), tx, originID, req.LeadAgentID, req.WorkspaceID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		allowed, err := issueRequesterAllowed(r.Context(), tx, authority.HumanAuthority.UserID, req.WorkspaceID, "updated")
+		if err != nil {
+			replyInternalError(w, h.logger, "mission requester permission", err)
+			return
+		}
+		if !allowed {
+			writeChatIssueError(w, errChatIssueRequesterForbidden)
+			return
+		}
+	}
 
 	// The crew's mission budget is re-proved INSIDE the INSERT, not just by the
 	// pre-check above: a loop firing /mission/create concurrently is the exact
@@ -286,6 +315,10 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	if _, err := tx.ExecContext(r.Context(), `UPDATE missions SET chat_origin_id=NULLIF(?, '') WHERE id=? AND workspace_id=?`, originID, id, req.WorkspaceID); err != nil {
+		replyInternalError(w, h.logger, "persist mission origin", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("commit tx", "error", err)
 		replyError(w, http.StatusInternalServerError, "internal error")
@@ -393,9 +426,9 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	crewID := effectiveCrewFilter(r)
 
 	selArgs := []any{missionID, wsID}
-	selQuery := `SELECT status FROM missions WHERE id = ? AND workspace_id = ?`
+	selQuery := `SELECT status FROM missions WHERE mission_type = 'orchestration' AND id = ? AND workspace_id = ?`
 	if crewID != "" {
-		selQuery = `SELECT status FROM missions WHERE id = ? AND workspace_id = ? AND crew_id = ?`
+		selQuery = `SELECT status FROM missions WHERE mission_type = 'orchestration' AND id = ? AND workspace_id = ? AND crew_id = ?`
 		selArgs = []any{missionID, wsID, crewID}
 	}
 
@@ -433,16 +466,80 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	updQuery := `UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND workspace_id = ?`
-	updArgs := []any{now, missionID, wsID}
-	if crewID != "" {
-		updQuery = `UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND workspace_id = ? AND crew_id = ?`
-		updArgs = []any{now, missionID, wsID, crewID}
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin mission start authority", err)
+		return
 	}
-	if _, err := h.db.ExecContext(r.Context(), updQuery, updArgs...); err != nil {
+	defer tx.Rollback()
+	var originID, leadAgentID string
+	if err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(chat_origin_id,''),lead_agent_id FROM missions WHERE id=? AND workspace_id=? AND mission_type='orchestration'`, missionID, wsID).Scan(&originID, &leadAgentID); err != nil {
+		replyError(w, 404, "mission not found")
+		return
+	}
+	if contextual := runauthority.OriginIDFromContext(r.Context()); contextual != "" {
+		if originID != "" && originID != contextual {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		originID = contextual
+	}
+	if sourceRunID := r.URL.Query().Get("source_run_id"); sourceRunID != "" {
+		origin, err := runauthority.CaptureOrigin(r.Context(), tx, sourceRunID, r.URL.Query().Get("actor_agent_id"), wsID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		if origin.ID != "" {
+			if originID != "" && originID != origin.ID {
+				writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+				return
+			}
+			originID = origin.ID
+		}
+	}
+	if originID != "" {
+		authority, err := runauthority.ValidateOrigin(r.Context(), tx, originID, leadAgentID, wsID)
+		if err != nil {
+			writeChatIssueError(w, err)
+			return
+		}
+		allowed, err := issueRequesterAllowed(r.Context(), tx, authority.HumanAuthority.UserID, wsID, "updated")
+		if err != nil {
+			replyInternalError(w, h.logger, "mission start requester permission", err)
+			return
+		}
+		if !allowed {
+			writeChatIssueError(w, errChatIssueRequesterForbidden)
+			return
+		}
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	updQuery := `UPDATE missions SET status = 'IN_PROGRESS', updated_at = ?, chat_origin_id=NULLIF(?, '') WHERE mission_type = 'orchestration' AND status = 'PLANNING' AND id = ? AND workspace_id = ?`
+	updArgs := []any{now, originID, missionID, wsID}
+	if crewID != "" {
+		updQuery = `UPDATE missions SET status = 'IN_PROGRESS', updated_at = ?, chat_origin_id=NULLIF(?, '') WHERE mission_type = 'orchestration' AND status = 'PLANNING' AND id = ? AND workspace_id = ? AND crew_id = ?`
+		updArgs = []any{now, originID, missionID, wsID, crewID}
+	}
+	result, err := tx.ExecContext(r.Context(), updQuery, updArgs...)
+	if err != nil {
 		h.logger.Error("update mission status", "error", err)
 		replyError(w, http.StatusInternalServerError, "failed to start mission")
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		h.logger.Error("count mission start update", "error", err)
+		replyError(w, http.StatusInternalServerError, "failed to start mission")
+		return
+	}
+	if affected != 1 {
+		replyError(w, http.StatusConflict, "mission changed before start")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit mission origin and start", err)
 		return
 	}
 

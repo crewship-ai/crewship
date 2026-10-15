@@ -12,10 +12,15 @@ import { test, expect } from "@playwright/test"
 // dependency on app code); lib/__tests__/restricted-endpoints.test.ts pins that
 // list to the Go source.
 const ALLOWED: RegExp[] = [
+  /^GET \/api\/v1\/workspaces\/[^/]+\/restricted-projects\/[^/]+\/milestones(\/[^/]+)?$/,
+  /^GET \/api\/v1\/workspaces\/[^/]+\/restricted-projects\/[^/]+$/,
+  /^GET \/api\/v1\/workspaces\/[^/]+\/restricted-issue-projects$/,
+
+  /^GET \/api\/v1\/workspaces\/[^/]+\/restricted-routine-library(\/[^/]+)?$/,
   /^GET \/api\/v1\/workspaces$/,
   /^GET \/api\/v1\/agents$/,
   /^GET \/api\/v1\/agents\/[^/]+$/,
-  /^GET \/api\/v1\/workspaces\/[^/]+\/restricted-(pages|routines|routine-runs)(\/[^/]+)?$/,
+  /^GET \/api\/v1\/workspaces\/[^/]+\/restricted-(pages|routines|routine-runs|issues)(\/[^/]+)?$/,
   /^GET \/api\/v1\/auth\/(sessions|cli-tokens)$/,
   /^GET \/api\/auth\/(session|csrf|providers)$/,
   /^POST \/api\/auth\/token\/refresh$/,
@@ -68,6 +73,32 @@ for (const width of [1280, 390]) {
     await page.goto("/issues")
     await expect(page.getByText("Not available with your access")).toBeVisible()
     await page.waitForTimeout(1_000)
+    expect(forbidden).toEqual([])
+  })
+}
+
+for (const width of [1280,390]) {
+  test(`Guest project Issues at ${width}px show only the authorized projection`,async({page})=>{
+    await page.setViewportSize({width,height:900})
+    const forbidden:string[]=[]
+    let revoked=false
+    await page.route("**/api/**",async route=>{
+      const request=route.request();const path=new URL(request.url()).pathname;const key=`${request.method()} ${path}`
+      if(!ALLOWED.some(re=>re.test(key))){forbidden.push(key);return route.fulfill({status:404,contentType:"application/json",body:"{}"})}
+      let body:unknown=[]
+      if(path==="/api/auth/session")body={user:{id:"issue-guest",name:"Guest",email:"guest@example.test"},expires:"2099-01-01T00:00:00Z"}
+      else if(path==="/api/v1/workspaces")body=[{...ROWS[0],restricted_surfaces:["issues","account_security"]}]
+      else if(path.endsWith("/restricted-issues"))body=revoked?[]:[{id:"shared-issue",identifier:"SHARED-1",title:"Client project issue",status:"TODO",project_id:"project-1",project_name:"Client project",can_read:true}]
+      await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(body)})
+    })
+    await page.goto("/issues")
+    await expect(page.getByRole("heading",{name:"Issues shared with you"})).toBeVisible()
+    await expect(page.getByRole("link",{name:"Client project issue"})).toBeVisible()
+    expect(forbidden).toEqual([])
+    revoked=true
+    await page.getByRole("button",{name:"Refresh",exact:true}).click()
+    await expect(page.getByRole("link",{name:"Client project issue"})).toHaveCount(0)
+    await expect(page.getByRole("heading",{name:"No issues shared here"})).toBeVisible()
     expect(forbidden).toEqual([])
   })
 }

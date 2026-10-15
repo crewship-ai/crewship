@@ -142,6 +142,7 @@ describe("PagesLayout", () => {
     expect(screen.queryByRole("button", {name:/^New board$/})).toBeNull()
     expect(screen.queryByRole("button", {name:/^New artifact$/})).toBeNull()
     expect(screen.queryByRole("button", {name:/^Import$/})).toBeNull()
+    expect(screen.queryByRole("button",{name:"New folder"})).toBeNull()
   })
 
   it("offers no creation shortcut in an empty VIEWER catalog", () => {
@@ -168,6 +169,7 @@ describe("PagesLayout", () => {
     expect(screen.getAllByRole("button", {name:/^Import$/}).length).toBeGreaterThan(0)
     expect(screen.getByRole("button", {name:/^New board$/})).toBeTruthy()
     expect(screen.getByRole("button", {name:/^New artifact$/})).toBeTruthy()
+    expect(screen.queryByRole("button",{name:"New folder"})).toBeNull()
   })
 
   it("writes the header line as '<n> pages · <n> stale'", async () => {

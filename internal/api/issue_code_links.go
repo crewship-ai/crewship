@@ -260,7 +260,13 @@ func (h *CodeLinkHandler) Attach(w http.ResponseWriter, r *http.Request) {
 		userID = u.ID
 	}
 
-	_, err = h.db.ExecContext(r.Context(), `
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin code link attach", err)
+		return
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO mission_code_links (
 			id, workspace_id, mission_id, provider, host, owner, repo, number, kind, url,
 			title, state, author, source_branch, target_branch,
@@ -285,7 +291,15 @@ func (h *CodeLinkHandler) Attach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.recordLinkEvent(r.Context(), missionID, wsID, userID, actionCodeLinkAdded, ref.URL)
+	if _, err = persistIssueActivityTx(r.Context(), tx, codeLinkIssueEvent(missionID, userID, actionCodeLinkAdded, ref.URL)); err != nil {
+		internalError(w, r, h.logger, "persist code link attach", err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit code link attach", err)
+		return
+	}
+	h.publishCodeLinkMutation(missionID, wsID)
 
 	link, err := h.loadOne(r.Context(), id, wsID)
 	if err != nil {
@@ -372,6 +386,7 @@ func (h *CodeLinkHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, wsID, missionID, false)
 	broadcastWorkspaceEvent(h.hub, wsID, "issue.updated", map[string]string{"id": missionID})
 
 	link, err := h.loadOne(r.Context(), linkID, wsID)
@@ -396,7 +411,13 @@ func (h *CodeLinkHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.db.ExecContext(r.Context(),
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "begin code link delete", err)
+		return
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(r.Context(),
 		`DELETE FROM mission_code_links WHERE id = ? AND mission_id = ? AND workspace_id = ?`,
 		r.PathValue("linkId"), missionID, wsID)
 	if err != nil {
@@ -412,7 +433,15 @@ func (h *CodeLinkHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if u := UserFromContext(r.Context()); u != nil {
 		userID = u.ID
 	}
-	h.recordLinkEvent(r.Context(), missionID, wsID, userID, actionCodeLinkRemoved, r.PathValue("linkId"))
+	if _, err = persistIssueActivityTx(r.Context(), tx, codeLinkIssueEvent(missionID, userID, actionCodeLinkRemoved, r.PathValue("linkId"))); err != nil {
+		internalError(w, r, h.logger, "persist code link removal", err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "commit code link delete", err)
+		return
+	}
+	h.publishCodeLinkMutation(missionID, wsID)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -449,27 +478,20 @@ func (h *CodeLinkHandler) noteSyncError(ctx context.Context, linkID, detail stri
 	}
 }
 
-// recordLinkEvent records an attach/detach on the issue timeline, in the
-// journal and on the hub, through the one shared emitter (issue_events.go).
-//
-// This handler used to carry its own logActivity with a THIRD signature
-// (missionID, userID, action, details) that derived the actor type itself and
-// never touched the journal. The actor derivation is the only part worth
-// keeping and it lives here: these routes are browser-authenticated, so a
-// missing user means an internal/system caller, not an agent — the issue
-// handlers' actorType/actorID pair would be guesswork at this call site.
-func (h *CodeLinkHandler) recordLinkEvent(ctx context.Context, missionID, wsID, userID string, action issueAction, details string) {
-	actorType, actorID := "user", userID
-	if actorID == "" {
-		actorType, actorID = "system", ""
+// publishCodeLinkMutation announces a committed link mutation; audit intent
+// was written in its mutation transaction.
+func (h *CodeLinkHandler) publishCodeLinkMutation(missionID, wsID string) {
+	h.events().mutationDelivery().drainCommittedIssueMutation(wsID)
+	broadcastIssueCardInvalidations(context.Background(), h.db, h.hub, wsID, missionID, false)
+	broadcastWorkspaceEvent(h.hub, wsID, "issue.updated", map[string]string{"id": missionID})
+}
+
+func codeLinkIssueEvent(missionID, userID string, action issueAction, details string) issueEvent {
+	actorType := "user"
+	if userID == "" {
+		actorType = "system"
 	}
-	h.events().record(ctx, wsID, map[string]string{"id": missionID}, issueEvent{
-		MissionID: missionID,
-		ActorType: actorType,
-		ActorID:   actorID,
-		Action:    action,
-		Details:   details,
-	})
+	return issueEvent{MissionID: missionID, ActorType: actorType, ActorID: userID, Action: action, Details: details}
 }
 
 // ── credential resolution ────────────────────────────────────────────────

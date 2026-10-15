@@ -1,0 +1,42 @@
+{
+  "has_more": false,
+  "jobs": [
+    {
+      "attempts": 8,
+      "created_at": "2026-10-14T09:00:00Z",
+      "error_code": "invalid_payload",
+      "failed_at": "2026-10-14T10:00:00Z",
+      "id": "job-1",
+      "kind": "journal",
+      "max_attempts": 8
+    },
+    {
+      "attempts": 8,
+      "created_at": "2026-10-14T09:00:00Z",
+      "error_code": "delivery_exhausted",
+      "failed_at": "2026-10-14T10:00:00Z",
+      "id": "job-2",
+      "kind": "journal",
+      "max_attempts": 8
+    },
+    {
+      "attempts": 8,
+      "created_at": "2026-10-14T09:00:00Z",
+      "error_code": "authority_revoked",
+      "failed_at": "2026-10-14T10:00:00Z",
+      "id": "job-3",
+      "kind": "journal",
+      "max_attempts": 8
+    },
+    {
+      "attempts": 8,
+      "created_at": "2026-10-14T09:00:00Z",
+      "error_code": "unknown",
+      "failed_at": "2026-10-14T10:00:00Z",
+      "id": "job-4",
+      "kind": "journal",
+      "max_attempts": 8
+    }
+  ],
+  "next_cursor": ""
+}

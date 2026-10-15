@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -53,10 +54,11 @@ type capResolver struct {
 	// exact point in the bridge's post-run sequence.
 	onUpdateRun func(status string)
 
-	runCreates []string // runIDs
-	runUpdates []runUpdateRec
-	increments []int
-	costCalls  []RunCostUsage
+	runCreates        []string // runIDs
+	triggerMessageIDs []string
+	runUpdates        []runUpdateRec
+	increments        []int
+	costCalls         []RunCostUsage
 	// costCtxErrs[i] is the ctx.Err() seen by the i-th RecordCost call — the
 	// difference between a ledger row and a warning line, see RecordCost below.
 	costCtxErrs []error
@@ -72,10 +74,11 @@ func (c *capResolver) ResolveAgent(context.Context, string, string) (*ChatInfo, 
 	return c.info, nil
 }
 
-func (c *capResolver) CreateRun(_ context.Context, runID, _, _, _, _ string, _ map[string]interface{}) error {
+func (c *capResolver) CreateRun(ctx context.Context, runID, _, _, _, _ string, _ map[string]interface{}) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.runCreates = append(c.runCreates, runID)
+	c.triggerMessageIDs = append(c.triggerMessageIDs, runauthority.TriggerMessageFromContext(ctx))
 	return c.createRunErr
 }
 
@@ -341,6 +344,21 @@ func TestHandleChatMessageSuccessFullFlow(t *testing.T) {
 	if len(resolver.runCreates) != 1 {
 		t.Fatalf("CreateRun calls = %d, want 1", len(resolver.runCreates))
 	}
+	messages, readErr := b.convStore.Read(context.Background(), "sess-ok", 0, 0)
+	if readErr != nil || len(messages) != 2 {
+		t.Fatalf("history: %+v %v", messages, readErr)
+	}
+	if messages[1].RunID != resolver.runCreates[0] || resolver.triggerMessageIDs[0] != messages[0].ID {
+		t.Fatalf("run/trigger history mismatch: %+v triggers=%v", messages, resolver.triggerMessageIDs)
+	}
+	for _, event := range events {
+		if event.Type == "text" || event.Type == "done" {
+			metadata, ok := event.Metadata.(map[string]any)
+			if !ok || metadata["run_id"] != resolver.runCreates[0] || metadata["trigger_message_id"] != messages[0].ID {
+				t.Fatalf("stream identity missing: %+v", event)
+			}
+		}
+	}
 	if len(resolver.runUpdates) != 1 {
 		t.Fatalf("UpdateRun calls = %d, want 1: %+v", len(resolver.runUpdates), resolver.runUpdates)
 	}
@@ -479,43 +497,31 @@ func TestHandleChatMessageTitleTruncationAndTitleError(t *testing.T) {
 	}
 }
 
-// ---------- non-fatal CreateRun error + UpdateRun(FAILED) error ----------
-
-func TestHandleChatMessageRunRecordErrorsAreNonFatal(t *testing.T) {
-	resolver := &capResolver{
-		info:         baseInfo(),
-		createRunErr: errors.New("runs table locked"),
-		updateRunErr: errors.New("runs table still locked"),
-	}
-	ctr := &scriptedContainer{agentExecErr: errors.New("exec exploded"), exitCode: 0}
+// A chat must never execute without its durable run admission.
+func TestHandleChatMessageRunRecordErrorPreventsExecution(t *testing.T) {
+	resolver := &capResolver{info: baseInfo(), createRunErr: errors.New("journal locked")}
+	ctr := &scriptedContainer{agentExecErr: errors.New("exec must not be reached")}
 	b := testBridgeWithContainer(t, resolver, ctr)
-
-	var errEvents []ws.ChatEvent
-	streamFn := func(e ws.ChatEvent) {
-		if e.Type == "error" {
-			errEvents = append(errEvents, e)
+	var events []ws.ChatEvent
+	err := b.HandleChatMessage(context.Background(), "user-1", "sess-recerr", "hi", func(e ws.ChatEvent) { events = append(events, e) })
+	if err == nil || !strings.Contains(err.Error(), "create durable run") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resolver.runCreates) != 1 || len(resolver.runUpdates) != 0 {
+		t.Fatalf("lifecycle: starts=%v updates=%v", resolver.runCreates, resolver.runUpdates)
+	}
+	messages, err := b.convStore.Read(context.Background(), "sess-recerr", 0, 0)
+	if err != nil || len(messages) != 1 || messages[0].Role != conversation.RoleUser {
+		t.Fatalf("trigger must survive failed admission: %+v %v", messages, err)
+	}
+	found := false
+	for _, e := range events {
+		if e.Type == "error" && e.Content == "failed to start a durable run" {
+			found = true
 		}
 	}
-	err := b.HandleChatMessage(context.Background(), "user-1", "sess-recerr", "hi", streamFn)
-	if err == nil {
-		t.Fatal("expected run agent error")
-	}
-	// The surfaced error must be the agent failure, not the bookkeeping
-	// failures — those are warn-only.
-	if !strings.Contains(err.Error(), "run agent") {
-		t.Errorf("error = %v, want 'run agent' wrap", err)
-	}
-	if len(resolver.runCreates) != 1 {
-		t.Errorf("CreateRun calls = %d, want 1 (error must not retry/abort)", len(resolver.runCreates))
-	}
-	if len(resolver.runUpdates) != 1 || resolver.runUpdates[0].status != "FAILED" {
-		t.Fatalf("runUpdates = %+v, want one FAILED", resolver.runUpdates)
-	}
-	if resolver.runUpdates[0].errorMsg == nil || !strings.Contains(*resolver.runUpdates[0].errorMsg, "exec exploded") {
-		t.Errorf("FAILED errorMsg = %v, want exec failure text", resolver.runUpdates[0].errorMsg)
-	}
-	if len(errEvents) == 0 {
-		t.Error("expected a streamed error event for the failed run")
+	if !found {
+		t.Fatal("missing admission failure event")
 	}
 }
 

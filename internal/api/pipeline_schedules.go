@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // scheduleResponse is the wire shape for pipeline_schedules. We
@@ -351,6 +352,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		maxFailures = *body.MaxConsecutiveFailures
 	}
 	in := pipeline.SaveScheduleInput{
+		ChatOriginID:           runauthority.OriginIDFromContext(r.Context()),
 		WorkspaceID:            workspaceID,
 		Name:                   defaultIfBlank(body.Name, slug),
 		TargetPipelineID:       pipelineID,
@@ -680,6 +682,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		maxFailures = *body.MaxConsecutiveFailures
 	}
 	in := pipeline.SaveScheduleInput{
+		ChatOriginID:           runauthority.OriginIDFromContext(r.Context()),
 		ID:                     scheduleID,
 		WorkspaceID:            workspaceID,
 		Name:                   defaultIfBlank(body.Name, existing.Name),
@@ -1016,7 +1019,8 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
-		PipelineID: p.ID,
+		PipelineID:   p.ID,
+		ChatOriginID: sched.ChatOriginID,
 		// Manual force-fire retains the authenticated operator. Its create-tier
 		// floor matches batch execution, not an autonomous scheduler trigger.
 		InvokingUserID:      user.ID,
@@ -1032,6 +1036,9 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		TriggeredByID: sched.ID,
 	})
 	if err != nil {
+		if writeRoutineOriginError(w, err) {
+			return
+		}
 		if errors.Is(err, pipeline.ErrInvocationAuthorityRevoked) || errors.Is(err, pipeline.ErrInvokingUserNotMember) {
 			replyError(w, http.StatusForbidden, "Scheduled run is not available with your access")
 			return
