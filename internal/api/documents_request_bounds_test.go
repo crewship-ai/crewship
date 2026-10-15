@@ -252,7 +252,7 @@ func TestDocumentSelectedRunCannotUseOtherPageGenericDelegation(t *testing.T) {
 		if err = h.checkArtifactRunDelegation(t.Context(), "other-doc", a); err == nil {
 			t.Fatal("direct discussion delegation escaped Doc Page")
 		}
-		if err = h.checkStandaloneArtifactCreation(t.Context(), a); err == nil {
+		if err = h.checkScopedArtifactCreation(t.Context(), a); err == nil {
 			t.Fatal("bound Doc run admitted standalone artifact creation")
 		}
 
@@ -317,7 +317,7 @@ func TestDocumentSelectedRunCannotPublishDifferentFormatPage(t *testing.T) {
 	h, workspace, user, page := documentRequestFixture(t)
 	artifactExpect(t, artifactCreationOptIn(t, h, workspace, user, "POST"), 201)
 	unbound := &artifactRunAuthority{WorkspaceID: workspace, AgentID: "artifact-agent", CrewID: "artifact-crew", RunID: "artifact-run", HumanUserID: user, ChatID: "artifact-chat", MessageID: "artifact-message"}
-	if err := h.checkStandaloneArtifactCreation(t.Context(), unbound); err != nil {
+	if err := h.checkScopedArtifactCreation(t.Context(), unbound); err != nil {
 		t.Fatalf("generic standalone creation fixture invalid: %v", err)
 	}
 	for _, other := range []string{"other-html", "other-board"} {

@@ -41,3 +41,7 @@ func boardRequestSchemaCatalog() map[string]DomainSchema {
 		"GET /api/v1/pages/runtime/board-converter":                   {Response: map[string]any{"type": "string"}, ResponseMedia: []string{"text/html"}},
 	}
 }
+
+func pageRequestResultSchema() DomainSchema {
+	return DomainSchema{Response: map[string]any{"type": "object", "properties": map[string]any{"page_slug": map[string]any{"type": "string"}, "revision": map[string]any{"type": "integer", "minimum": 1}}, "required": []string{"page_slug"}, "additionalProperties": false}}
+}
