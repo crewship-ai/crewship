@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import type { Slide, SlideDeck, SlideElement } from "@/lib/slides/model"
+import type { Slide, SlideElement } from "@/lib/slides/model"
 import { isNativeSlideDeck } from "./native-model"
 
 function ElementContent({ element }: { element: SlideElement }) {
