@@ -66,6 +66,8 @@ var responseShapeContracts = []struct {
 	{name: "GuestIssueIntake", pointer: "/paths/~1api~1v1~1workspaces~1{workspaceId}~1projects~1{projectId}~1guest-intake/get/responses/200/content/application~1json/schema", value: guestIssueIntake{}},
 	{name: "GuestIssueProject", pointer: "/paths/~1api~1v1~1workspaces~1{workspaceId}~1restricted-issue-projects/get/responses/200/content/application~1json/schema/items", value: guestIssueProject{}},
 	{name: "GuestIssueComment", pointer: "/paths/~1api~1v1~1workspaces~1{workspaceId}~1restricted-issues~1{issueId}~1comments/get/responses/200/content/application~1json/schema/items", value: guestIssueComment{}},
+	{name: "RestrictedRoutineLibraryItem", pointer: "/components/schemas/RestrictedRoutineLibraryItem", value: guestRoutineLibraryItem{}},
+	{name: "RestrictedRoutineDefinition", pointer: "/components/schemas/RestrictedRoutineDefinition", value: guestRoutineDefinition{}},
 	{name: "RestrictedRoutine", pointer: "/components/schemas/RestrictedRoutine", value: restrictedworkflow.CatalogRoutine{}},
 	{name: "RestrictedRoutineInput", pointer: "/components/schemas/RestrictedRoutineInput", value: restrictedworkflow.CatalogInput{}},
 	{name: "RestrictedWorkflowResult", pointer: "/components/schemas/RestrictedWorkflowResult", value: restrictedworkflow.Result{}},
