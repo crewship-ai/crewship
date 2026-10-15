@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { zipSync, strToU8 } from "fflate"
 import { parseXlsxWorkbook } from "../xlsx-data"
@@ -19,6 +20,22 @@ function workbook(sheets: string[], extras: Record<string, string> = {}, options
 }
 
 describe("bounded local XLSX data", () => {
+  it("retains real openpyxl cells while ignoring hyperlinks and chartsheets", async () => {
+    const bytes = readFileSync("components/features/chat/artifact/__tests__/fixtures/openpyxl-hyperlink-chartsheet.xlsx")
+    const result = await parseXlsxWorkbook(bytes)
+    expect(result.sheets.map(sheet => sheet.name)).toEqual(["Data", "After chart"])
+    expect(result.sheets[0].table.rows).toEqual([["Žofie", "42"]])
+    expect(result.sheets[1].table.rows).toEqual([["retained"]])
+    expect(JSON.stringify(result)).not.toContain("untrusted.test")
+  })
+  it("labels malformed ISO dates before passing data to the reader", async () => {
+    const result = await parseXlsxWorkbook(workbook(['<row><c r="A1" t="d"><v>not-a-date</v></c></row>']))
+    expect(result.sheets[0].table.rows).toEqual([["[Invalid date]"]])
+  })
+  it("labels out-of-range saved dates without throwing RangeError", async () => {
+    const result = await parseXlsxWorkbook(workbook(['<row><c r="A1" s="0"><v>1e100</v></c></row>'], {}, { styles: '<styleSheet><cellXfs><xf numFmtId="14"/></cellXfs></styleSheet>' }))
+    expect(result.sheets[0].table.rows).toEqual([["[Invalid date]"]])
+  })
   it("preserves Unicode, leading gaps, empty cells and sheet coordinates", async () => {
     const bytes = workbook(['<row r="3"><c r="B3" t="inlineStr"><is><t> Žofie &amp; 文 </t></is></c><c r="D3" t="b"><v>1</v></c></row>', '<row r="1"><c r="A1"><v>12345678901234567890</v></c></row>'])
     const result = await parseXlsxWorkbook(bytes)

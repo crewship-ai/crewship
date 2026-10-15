@@ -141,6 +141,7 @@ function normalizeSheet(bytes: Uint8Array, strings: string[], xmlBudget: XmlBudg
           if (!cell.hasInline) throw workbookRefusal("Workbook has a missing inline string.")
           value = cell.inline
         } else if (type === "str") type = "inlineStr"
+        if (type === "d" && !Number.isFinite(Date.parse(value))) { type = "inlineStr"; value = "[Invalid date]" }
         boundedText(value)
         if (type === "n" && value && (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$/.test(value) || !Number.isFinite(Number(value)))) throw workbookRefusal("Workbook has an invalid numeric value.")
         budget.projectedBytes += xmlBytes(value).byteLength
@@ -165,6 +166,8 @@ export async function parseXlsxWorkbook(bytes: Uint8Array): Promise<WorkbookData
     if (!path.endsWith(".rels")) continue
     inspectWorkbookXml(contents, xmlBudget, { open(name, attrs) {
       if (name !== "Relationship") return
+      // Hyperlink metadata never enters the canonical workbook or becomes a request.
+      if (attrs.Type === `${REL}/hyperlink` && path !== "xl/_rels/workbook.xml.rels") return
       if (attrs.TargetMode?.toLowerCase() === "external" || /^[\w+.-]+:|^\/\//.test(attrs.Target ?? "")) throw workbookRefusal("External workbook relationships are not supported.")
       if (path === "xl/_rels/workbook.xml.rels") {
         if (!attrs.Id || relations.has(attrs.Id)) throw workbookRefusal("Workbook relationships are duplicated or missing.")
@@ -181,9 +184,12 @@ export async function parseXlsxWorkbook(bytes: Uint8Array): Promise<WorkbookData
     if (name === "workbookPr") epoch1904 = attrs.date1904 === "1" || attrs.date1904 === "true"
     if (name !== "sheet" || stack.at(-2) !== "sheets") return
     const target = relations.get(attrs.id)
-    if (!attrs.name || attrs.name.length > 128 || names.has(attrs.name.toLowerCase()) || !target || target.type !== "worksheet") throw workbookRefusal("Workbook sheet metadata is unsupported.")
+    if (!attrs.name || attrs.name.length > 128 || names.has(attrs.name.toLowerCase()) || !target) throw workbookRefusal("Workbook sheet metadata is unsupported.")
+    names.add(attrs.name.toLowerCase())
+    if (["chartsheet", "dialogsheet"].includes(target.type)) return
+    if (target.type !== "worksheet") throw workbookRefusal("Workbook sheet type is unsupported.")
     if (sheets.length >= XLSX_LIMITS.sheets) throw workbookRefusal("Workbook exceeds the 10-sheet preview limit.")
-    names.add(attrs.name.toLowerCase()); sheets.push({ name: attrs.name, path: target.path })
+    sheets.push({ name: attrs.name, path: target.path })
   } })
   if (!sheets.length) throw workbookRefusal("Workbook contains no supported worksheets.")
   const shared = [...relations.values()].find(relation => relation.type === "sharedStrings")?.path ?? "xl/sharedStrings.xml"
@@ -213,7 +219,7 @@ export async function parseXlsxWorkbook(bytes: Uint8Array): Promise<WorkbookData
     // rectangle so cached empty strings and original coordinates survive.
     const rows = Array.from({ length: dimensionsForSheet.rows }, (_, row) => Array.from({ length: dimensionsForSheet.columns }, (_, column) => {
       const value = sheet.data[row]?.[column] ?? null
-      const text = value instanceof Date ? value.toISOString() : value === null ? "" : typeof value === "boolean" ? value ? "TRUE" : "FALSE" : String(value)
+      const text = value instanceof Date ? Number.isFinite(value.getTime()) ? value.toISOString() : "[Invalid date]" : value === null ? "" : typeof value === "boolean" ? value ? "TRUE" : "FALSE" : String(value)
       displayedBytes += xmlBytes(text).byteLength
       if (displayedBytes > XLSX_LIMITS.projectedTextBytes) throw workbookRefusal("Workbook values exceed the 10 MiB text preview limit.")
       return text
