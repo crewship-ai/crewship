@@ -24,6 +24,12 @@ export const RESTRICTED_FE_ENDPOINTS = [
  "POST /api/v1/workspaces/{workspaceId}/restricted-issues",
  "GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
+ "GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones",
+ "GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}",
+ "POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones",
+ "PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}",
+ "DELETE /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}",
+
  "PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
  "PATCH /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
  "GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",

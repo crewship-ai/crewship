@@ -37,7 +37,7 @@ func newSharedProjectCommand() *cobra.Command {
 		}
 		return sharedProjectRequest(args[0], map[string]any{"name": name, "description": description, "version": version})
 	}
-	command.AddCommand(update)
+	command.AddCommand(update, newSharedProjectMilestonesCommand())
 	return command
 }
 

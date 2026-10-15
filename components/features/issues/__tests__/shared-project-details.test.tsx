@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { SharedProjectDetails } from "../shared-project-details"
 
+vi.mock("../shared-project-milestones",()=>({SharedProjectMilestones:()=>null}))
+
 const fetchMock=vi.hoisted(()=>vi.fn())
 vi.mock("@/lib/api-fetch",()=>({apiFetch:fetchMock}))
 vi.mock("@/hooks/use-auth",()=>({useSession:()=>({data:{user:{id:"guest-a"}}})}))

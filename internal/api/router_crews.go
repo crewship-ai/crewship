@@ -142,6 +142,16 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}", authed(wsCtx(http.HandlerFunc(r.restrictedProjectDetails))))
 	// openapi: responses 200,400,401,403,404,409,500
 	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}", roleInline, r.restrictedProjectDetails)
+	// openapi: responses 200,400,401,403,404,409,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones", authed(wsCtx(http.HandlerFunc(r.restrictedProjectMilestones))))
+	// openapi: responses 200,400,401,403,404,409,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}", authed(wsCtx(http.HandlerFunc(r.restrictedProjectMilestones))))
+	// openapi: responses 201,400,401,403,404,409,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones", roleInline, r.restrictedProjectMilestones)
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}", roleInline, r.restrictedProjectMilestones)
+	// openapi: responses 204,400,401,403,404,409,500
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}", roleInline, r.restrictedProjectMilestones)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues", authed(wsCtx(http.HandlerFunc(r.restrictedIssues))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}", authed(wsCtx(http.HandlerFunc(r.restrictedIssues))))
 	// openapi: responses 200,400,401,403,404,500

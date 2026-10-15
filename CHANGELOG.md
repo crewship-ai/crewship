@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Guest project managers can create and edit milestones with reviewed versions and atomic audit. Empty-only removal preserves linked issue work; UI and CLI enforce current action flags and conflict review.
+
 - ⚠️ **Behaviour change:** Page shares become inactive when their issuer is suspended or restricted as a Guest anywhere. Existing share metadata remains visible to Page administrators with an account-status explanation.
 - ⚠️ Tokens with limited scopes can no longer create successor tokens or pairing codes. Use an interactive sign-in to create credentials; trusted full-role token creation remains available.
 

@@ -15,7 +15,7 @@ func guestIssueContributionSchemaCatalog() map[string]DomainSchema {
 	body := map[string]any{"type": "string", "minLength": 1, "description": "Nonblank shared comment, at most 32768 UTF-8 bytes"}
 	prefix := "/api/v1/workspaces/{workspaceId}/"
 	details := object(map[string]any{"id": str(), "name": str(), "description": str(), "version": str(), "can_manage": boolean()}, "id", "name", "description", "version", "can_manage")
-	return map[string]DomainSchema{
+	routes := map[string]DomainSchema{
 		"GET " + prefix + "restricted-projects/{projectId}": {Response: details, SuccessStatuses: []string{"200"}},
 		"PUT " + prefix + "restricted-projects/{projectId}": {Request: object(map[string]any{"name": title, "description": str(), "version": str()}, "name", "description", "version"), RequestRequired: true, Response: details, SuccessStatuses: []string{"200"}},
 
@@ -27,4 +27,8 @@ func guestIssueContributionSchemaCatalog() map[string]DomainSchema {
 		"GET " + prefix + "restricted-issues/{issueId}/comments":  {Response: array(comment), SuccessStatuses: []string{"200"}},
 		"POST " + prefix + "restricted-issues/{issueId}/comments": {Request: object(map[string]any{"body": body, "project_id": str()}, "body", "project_id"), RequestRequired: true, Response: comment, SuccessStatuses: []string{"201"}},
 	}
+	for key, schema := range guestProjectMilestoneSchemaCatalog() {
+		routes[key] = schema
+	}
+	return routes
 }
