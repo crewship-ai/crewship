@@ -14,6 +14,7 @@ type sharedRoutine struct {
 	Name           string         `json:"name" yaml:"name"`
 	Status         string         `json:"status" yaml:"status"`
 	CanView        bool           `json:"can_view" yaml:"can_view"`
+	CanResults     bool           `json:"can_results" yaml:"can_results"`
 	CanEdit        bool           `json:"can_edit" yaml:"can_edit"`
 	CanRun         bool           `json:"can_run" yaml:"can_run"`
 	RuntimeReady   bool           `json:"runtime_ready" yaml:"runtime_ready"`
@@ -50,9 +51,9 @@ func newRoutineSharedCommand() *cobra.Command {
 		if err = cli.CheckError(response); err != nil {
 			return err
 		}
-		columns := []string{"ROUTINE", "NAME", "VIEW", "EDIT DRAFT", "RUN", "RUNTIME READY"}
+		columns := []string{"ROUTINE", "NAME", "VIEW", "RESULTS", "EDIT DRAFT", "RUN", "RUNTIME READY"}
 		row := func(item sharedRoutine) []string {
-			return []string{item.Slug, item.Name, fmt.Sprint(item.CanView), fmt.Sprint(item.CanEdit), fmt.Sprint(item.CanRun), fmt.Sprint(item.RuntimeReady)}
+			return []string{item.Slug, item.Name, fmt.Sprint(item.CanView), fmt.Sprint(item.CanResults), fmt.Sprint(item.CanEdit), fmt.Sprint(item.CanRun), fmt.Sprint(item.RuntimeReady)}
 		}
 		if len(args) > 0 {
 			var item sharedRoutine

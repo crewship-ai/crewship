@@ -22,8 +22,8 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		"RestrictedRoutine":            obj(map[string]any{"slug": str(), "name": str(), "definition_hash": str(), "execution_hash": str(), "inputs": arr(ref("RestrictedRoutineInput"))}, "slug", "name", "definition_hash", "execution_hash", "inputs"),
 	}
 
-	libraryProperties := map[string]any{"id": str(), "slug": str(), "name": str(), "status": str(), "can_view": map[string]any{"type": "boolean"}, "can_edit": map[string]any{"type": "boolean"}, "can_run": map[string]any{"type": "boolean"}, "runtime_ready": map[string]any{"type": "boolean"}}
-	libraryRequired := []string{"id", "slug", "name", "status", "can_view", "can_edit", "can_run", "runtime_ready"}
+	libraryProperties := map[string]any{"id": str(), "slug": str(), "name": str(), "status": str(), "can_view": map[string]any{"type": "boolean"}, "can_edit": map[string]any{"type": "boolean"}, "can_results": map[string]any{"type": "boolean"}, "can_run": map[string]any{"type": "boolean"}, "runtime_ready": map[string]any{"type": "boolean"}}
+	libraryRequired := []string{"id", "slug", "name", "status", "can_view", "can_edit", "can_results", "can_run", "runtime_ready"}
 	components["RestrictedRoutineLibraryItem"] = obj(libraryProperties, libraryRequired...)
 	detailProperties := map[string]any{}
 	for key, value := range libraryProperties {
@@ -33,6 +33,17 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	detailProperties["definition_hash"] = str()
 	detailProperties["version"] = map[string]any{"type": "integer"}
 	components["RestrictedRoutineDefinition"] = obj(detailProperties, append(libraryRequired, "definition", "definition_hash", "version")...)
+
+	runProperties := map[string]any{"run_id": str(), "routine_id": str(), "status": str(), "mode": str(), "started_at": str(), "ended_at": map[string]any{"type": "string", "nullable": true}}
+	runRequired := []string{"run_id", "routine_id", "status", "mode", "started_at", "ended_at"}
+	components["SharedRoutineRun"] = obj(runProperties, runRequired...)
+	resultProperties := map[string]any{}
+	for key, value := range runProperties {
+		resultProperties[key] = value
+	}
+	resultProperties["output"] = map[string]any{"type": "string", "nullable": true}
+	resultProperties["step_outputs"] = map[string]any{"type": "object", "additionalProperties": str()}
+	components["SharedRoutineRunResult"] = obj(resultProperties, append(runRequired, "output", "step_outputs")...)
 
 	draftProperties := map[string]any{"draft_id": str(), "revision": map[string]any{"type": "integer", "minimum": 0}, "base_revision": map[string]any{"type": "integer", "minimum": 0}, "name": str(), "description": str(), "definition": map[string]any{"type": "object", "additionalProperties": true}}
 	draftRequired := []string{"draft_id", "revision", "base_revision", "name", "description", "definition"}
@@ -57,6 +68,11 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 
 	routes["GET "+prefix+"restricted-routine-library"] = DomainSchema{Response: arr(ref("RestrictedRoutineLibraryItem")), SuccessStatuses: []string{"200"}}
 	routes["GET "+prefix+"restricted-routine-library/{routineId}"] = DomainSchema{Response: ref("RestrictedRoutineDefinition"), SuccessStatuses: []string{"200"}}
+	routes["GET "+prefix+"restricted-routine-library/{routineId}/runs"] = DomainSchema{Response: arr(ref("SharedRoutineRun")), SuccessStatuses: []string{"200"}, SuccessHeaders: map[string]any{"X-Total-Count": map[string]any{"description": "Runs visible within the shared routine and inherited origin audiences, before pagination", "schema": map[string]any{"type": "integer", "minimum": 0}}}, Parameters: []map[string]any{
+		{"name": "limit", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 500, "default": 100}},
+		{"name": "offset", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 0, "maximum": 1000000, "default": 0}},
+	}}
+	routes["GET "+prefix+"restricted-routine-library/{routineId}/runs/{runId}"] = DomainSchema{Response: ref("SharedRoutineRunResult"), SuccessStatuses: []string{"200"}}
 	routes["GET "+prefix+"restricted-routine-library/{routineId}/draft"] = DomainSchema{Response: ref("RestrictedRoutineDraft"), SuccessStatuses: []string{"200"}}
 	routes["PUT "+prefix+"restricted-routine-library/{routineId}/draft"] = DomainSchema{RequestRequired: true, Request: ref("RestrictedRoutineDraftRequest"), Response: ref("RestrictedRoutineDraft"), SuccessStatuses: []string{"200"}}
 	routes["GET "+prefix+"restricted-pages"] = DomainSchema{Response: arr(ref("RestrictedPage")), SuccessStatuses: []string{"200"}, SuccessHeaders: map[string]any{"X-Total-Count": map[string]any{"description": "Number of Pages with currently authorized executable actions", "schema": map[string]any{"type": "integer", "minimum": 0}}}}

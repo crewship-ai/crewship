@@ -128,7 +128,7 @@ Supported operations:
 | Resource | Operations | Current scope |
 | --- | --- | --- |
 | Agent | discover, chat, run, delegate | Discovery is separate from conversation and execution authority. |
-| Routine | view, run, edit | Explicit root-routine grant **and** run on every resolved agent; cross-agent delegation additionally needs delegate. Nested definitions are frozen dependencies. View exposes the stored definition; Edit with View allows collaborative draft changes, with trusted testing/review before publication. |
+| Routine | view, results, run, edit | Explicit root-routine grant **and** run on every resolved agent; cross-agent delegation additionally needs delegate. Nested definitions are frozen dependencies. View exposes the stored definition; Edit with View allows collaborative draft changes, with trusted testing/review before publication. |
 | Project | list, read, contribute, manage, delete_issues, write, delete | List exposes issue metadata; Read exposes shared issue details/comments and project source files. Contribute with Read permits configured intake requests, shared comments and arranging intake work. Manage with Read explicitly shares editable project details and milestones. Delete issues additionally requires Read/Manage and reviewed disposable work. Write/delete apply to project source files with their existing role floor. |
 
 Routine grants replace the workspace-wide `routine.run` requirement for Guests.
@@ -388,3 +388,34 @@ access loss clears the editor. The CLI reads the same JSON snapshot with
 `crewship routine shared-draft save ROUTINE --file draft.json` (or `--file -`).
 Read-only `can_edit` is removed before PUT; the CLI performs no hidden GET or
 conflict retry.
+
+
+### Explicit routine history and outputs
+
+The `results` operation is a deliberate addition to definition View. Existing
+View and Run shares are not widened or backfilled. Administrators can select
+**View runs and outputs** in routine Share or the member editor; it also needs
+current View and active issuers. The share exposes past and future regular
+pipeline run metadata and outputs for this routine, including runs invoked by
+other people or automation. Review authored/output content before sharing.
+It does not grant execution or disclose inputs, requester identities, errors,
+costs, transcripts, internal origin IDs or credentials resolved from the vault.
+
+Dedicated GET collection/detail routes under the Guest definition library use
+one read transaction for local active membership, live View/Results grants,
+recipe existence, origin audience, filtered count and response projection.
+Lists contain only run ID, routine ID, status, mode and timestamps; selected
+results additionally expose final output and `pipeline_run_step_outputs`.
+Counts and pagination use the same visibility predicate before pagination.
+The run, its pinned version and the live recipe retain inherited conversation
+read audiences; a routine share cannot override a private chat or make a
+missing/non-chat origin readable. Detaching a live recipe does not erase a
+historical run/version origin. No execution runtime or agent Run grant is
+needed for an ordinary shared history read.
+
+Private restricted-runtime receipts retain their separate actor/attempt/proof
+ceiling and existing own-result surface; they are not read from raw output
+storage through the history projection. Generalizing those result audiences,
+full ordered View/Run/Edit presets and direct Guest publication remain open.
+UI hard 401/403/404 responses remove result data, while transient refresh errors
+retain the last successful authorized projection with a notice.

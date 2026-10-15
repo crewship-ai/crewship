@@ -80,6 +80,14 @@ func TestMemberNavigationBrowser(t *testing.T) {
 	writer := journal.NewWriter(db, newTestLogger(), journal.WriterOptions{})
 	defer writer.Close()
 	seedPipelineRowDef(t, db, ws, "nav-view-only", "nav-view-only", `{"dsl_version":"1.0","name":"Client view recipe","steps":[{"id":"prepare","type":"transform","transform":{"input":"Visible shared definition"}}]}`)
+	seedPipelineRowDef(t, db, ws, "nav-view-foreign", "nav-view-foreign", `{"dsl_version":"1.0","name":"Foreign recipe","steps":[]}`)
+	for _, run := range []struct{ id, routine, output string }{
+		{"nav-run-visible", "nav-view-only", "BROWSER_SHARED_ROUTINE_OUTPUT"},
+		{"nav-run-foreign", "nav-view-foreign", "BROWSER_FOREIGN_ROUTINE_OUTPUT"},
+	} {
+		execOrFatal(t, db, `INSERT INTO pipeline_runs(id,workspace_id,pipeline_id,pipeline_slug,status,started_at,output,inputs_json,error_message) VALUES(?,?,?,?,'completed','2026-10-15T00:00:00Z',?,'{"BROWSER_PRIVATE_RUN_INPUT":true}','BROWSER_PRIVATE_RUN_ERROR')`, run.id, ws, run.routine, run.routine, run.output)
+		execOrFatal(t, db, `INSERT INTO pipeline_run_step_outputs(run_id,step_id,output,updated_at) VALUES(?,'answer',?,'2026-10-15T00:00:00Z')`, run.id, run.output+"_STEP")
+	}
 	router, err := NewRouter(db, secret, newTestLogger(), WithJournal(writer), WithInternalToken("synthetic-nav-internal-token"))
 	if err != nil {
 		t.Fatal(err)

@@ -2279,3 +2279,25 @@ fields and incomplete snapshots fail locally. PUT requires the existing
 A 409 preserves the conflict for review; the CLI performs no hidden GET or retry.
 Saving changes only the collaborative draft. Trusted testing and exact-revision
 review/publication remain required; this command cannot publish or run it.
+
+
+## `crewship routine shared-runs`
+
+```bash
+crewship routine shared-runs client-report --limit 25 --offset 0
+crewship routine shared-runs client-report RUN_ID --format json
+```
+
+List explicitly shared regular routine run history or inspect one selected
+result in table, JSON or YAML. Requires current View and Results shares;
+existing View/Run shares are unchanged. Lists return metadata only; detail
+includes final and step outputs without inputs, transcripts or requester
+identities. Private conversation origins remain additional read ceilings.
+Private restricted-runtime receipts keep their existing actor-scoped path.
+No runtime or agent execution rights are needed for this read.
+
+`--limit` accepts 1–500 (default100), `--offset` accepts0–1000000. Pagination
+flags are only valid on the collection; invalid values and dot identifiers
+are rejected locally, before HTTP. Denials are not retried.
+Administrators grant deliberately with
+`crewship share routine ROUTINE_ID --with MEMBER --operation view,results`.

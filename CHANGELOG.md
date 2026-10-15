@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Guests can inspect explicitly shared routine history and outputs.** A new Results share with View exposes run metadata and selected outputs in UI and CLI, without execution authority, inputs or transcripts. Existing View/Run shares retain their previous scope; inherited private conversation audiences still constrain results.
+
 ### Fixed
 - **Personal memory stays forgotten across access changes.** Clearing all preferences also works for agents without a crew. Switching an account to restricted access withdraws its stored preferences; restoring trusted access does not reactivate them.
 - ⚠️ **Upgrade: restart agent containers after updating the backend and sidecar.** Coordinate an idle window and use `crewship crew restart-agents` so existing containers receive the matching sidecar; old sidecars can fail issue writes. Follow [the execution-authority rollout](RELEASING.md#execution-authority-rollout-3068), including the read-only `doctor execution-origins` audit against the actual stage/production database before upgrade.

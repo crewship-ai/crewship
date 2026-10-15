@@ -24,7 +24,7 @@ func memberAccessPolicySchema() map[string]any {
 			"rights": map[string]any{"type": "array", "maxItems": 256, "uniqueItems": true, "items": map[string]any{"oneOf": []any{
 				right("agent", []string{"discover", "chat", "run", "delegate"}),
 				right("project", []string{"list", "read", "write", "delete", "contribute", "manage", "delete_issues"}),
-				right("routine", []string{"view", "run", "edit"}),
+				right("routine", []string{"view", "results", "run", "edit"}),
 			}}},
 		},
 	}

@@ -31,7 +31,7 @@ Supported commands are `share <routine|project> <resource-id>`,
 `share list <routine|project> <resource-id>` and
 `unshare <routine|project> <resource-id>`. `share` and `unshare` require `--with`
 and `--operation`; operations are repeatable or comma-separated. Routine
-operations support `view`, `run` and `edit`; project operations support independent
+operations support `view`, `results`, `run` and `edit`; project operations support independent
 `list`, `read`, `contribute`, `manage` and `delete_issues`. Routine Run also requires all agent grants and a qualified
 installed runtime. Edit supplements View for collaborative draft changes; direct Guest publication, output sharing and full level presets remain separate.
 
@@ -50,7 +50,7 @@ list. Use `workspace member access get` for a complete member policy.
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--with <member>` | required | Existing membership ID, user ID or exact email. |
-| `--operation <operation>` | required | Routine `view`, `run` or `edit`; project `list`, `read`, `contribute`, `manage` or `delete_issues`. Repeat or use comma-separated values. |
+| `--operation <operation>` | required | Routine `view`, `results`, `run` or `edit`; project `list`, `read`, `contribute`, `manage` or `delete_issues`. Repeat or use comma-separated values. |
 | `--reissue` | `false` | Explicitly reissue the selected rights as the authenticated administrator. |
 
 ## `share list <routine|project> <resource-id>`
@@ -69,3 +69,5 @@ Project `manage` with `read` permits editing the project name, description and m
 does not imply Contribute, source-file writes, intake configuration or grant administration.
 
 Project `delete_issues` explicitly authorizes permanent issue deletion, together with Read and Manage. Source-file `delete` and earlier Manage shares do not imply it.
+
+`--operation view,results` deliberately shares regular routine run history and outputs in addition to the definition, including past and future runs. Inherited private conversation audiences still apply. Inputs and transcripts are excluded; private restricted-runtime receipts retain their own actor/attempt/proof checks. Existing View and Run grants are not expanded.
