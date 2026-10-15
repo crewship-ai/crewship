@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"unicode/utf8"
@@ -206,7 +207,18 @@ func newPageBoardThreadsCommand() *cobra.Command {
 			var response *http.Response
 			switch verb {
 			case "show":
-				response, err = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/board/threads")
+				endpoint := "/api/v1/pages/" + pagePathEscape(args[0]) + "/board/threads"
+				params := url.Values{}
+				for _, flag := range []string{"status", "cursor", "limit"} {
+					if cmd.Flags().Changed(flag) {
+						value, _ := cmd.Flags().GetString(flag)
+						params.Set(flag, value)
+					}
+				}
+				if len(params) > 0 {
+					endpoint += "?" + params.Encode()
+				}
+				response, err = client.Get(endpoint)
 			case "create":
 				response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/board/threads", payload)
 			case "reply":
@@ -236,6 +248,11 @@ func newPageBoardThreadsCommand() *cobra.Command {
 		}
 		if verb == "show" {
 			cmd.Aliases = []string{"list"}
+		}
+		if verb == "show" {
+			cmd.Flags().String("status", "all", "Discussion filter: all, open or resolved")
+			cmd.Flags().String("cursor", "", "Continuation returned as next_cursor; keep the same filters")
+			cmd.Flags().String("limit", "100", "Page size between 1 and 100")
 		}
 		group.AddCommand(cmd)
 	}

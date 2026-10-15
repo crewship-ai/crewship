@@ -120946,6 +120946,7 @@
             "name": "revision",
             "required": false,
             "schema": {
+              "minimum": 1,
               "type": "integer"
             }
           },
@@ -120955,6 +120956,41 @@
             "name": "X-Workspace-ID",
             "required": false,
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "open",
+                "resolved"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "next_cursor for the same workspace, Page, kind and filters; confers no authority.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 4096,
               "type": "string"
             }
           }
@@ -120970,6 +121006,9 @@
                     },
                     "can_resolve": {
                       "type": "boolean"
+                    },
+                    "next_cursor": {
+                      "type": "string"
                     },
                     "threads": {
                       "items": {
@@ -131862,6 +131901,41 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "open",
+                "resolved"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "next_cursor for the same workspace, Page, kind and filters; confers no authority.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 4096,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -131876,6 +131950,9 @@
                     },
                     "can_resolve": {
                       "type": "boolean"
+                    },
+                    "next_cursor": {
+                      "type": "string"
                     },
                     "threads": {
                       "items": {

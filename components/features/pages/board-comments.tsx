@@ -12,7 +12,8 @@ export function BoardComments({ workspaceId, slug, board, selectedElementId, onD
   onDirtyChange: (dirty: boolean) => void
   onViewAnchor?: (anchor: BoardAnchor) => void
 }) {
-  const { query, write, history, uncertainReplies, uncertainCreate } = useBoardThreads(workspaceId, slug)
+  const [discussionStatus, setDiscussionStatus] = useState<"all" | "open" | "resolved">("all")
+  const { query, write, history, uncertainReplies, uncertainCreate } = useBoardThreads(workspaceId, slug, discussionStatus)
   const [body, setBody] = useState("")
   const [draftAnchor, setDraftAnchor] = useState<BoardAnchor | null>(null)
   const [replyDrafts, setReplyDrafts] = useState<Record<string, boolean>>({})
@@ -44,13 +45,20 @@ export function BoardComments({ workspaceId, slug, board, selectedElementId, onD
   </div>
   if (!data) return <p role="status" className="border-t p-4 text-sm text-muted-foreground">Loading board comments…</p>
   return <section aria-label="Board comments" className="space-y-4 border-t p-4 md:p-6">
+    <div className="flex items-center gap-2 px-4 py-2">
+      <label className="text-sm">Discussions <select aria-label="Discussion status" disabled={dirty} title={dirty ? "Finish or clear your draft before changing discussion filters." : undefined} value={discussionStatus} onChange={event => setDiscussionStatus(event.target.value as "all" | "open" | "resolved")} className="ml-2 rounded border bg-background p-2 coarse:h-12">
+        <option value="all">All</option><option value="open">Open</option><option value="resolved">Resolved</option>
+      </select></label>
+      {query.hasNextPage && <Button variant="outline" size="sm" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? "Loading…" : "Load older discussions"}</Button>}
+    </div>
+    {dirty && <p className="px-4 text-xs text-muted-foreground">Finish or clear your draft before changing discussion filters.</p>}
     <div className="flex flex-wrap items-center gap-2">
       <div className="mr-auto"><h2 className="text-sm font-semibold">Comments</h2><p className="mt-1 text-xs text-muted-foreground">Select one saved drawing to discuss it, or comment on the whole board.</p></div>
       <Button size="sm" variant="ghost" className="coarse:h-12" aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded(value => !value)}>{expanded ? "Hide comments" : `Show comments (${data.threads.length})`}{!expanded && dirty ? " · Draft" : ""}</Button>
       <Button size="sm" variant="ghost" className="coarse:h-12" disabled={query.isFetching || write.isPending} onClick={() => { write.reset(); void query.refetch() }}>Refresh comments</Button>
     </div>
     <div id={panelId} hidden={!expanded} className="space-y-4">
-    {query.error && <p role="alert" className="text-sm text-warn">Comments could not refresh. Drafts are preserved. {query.error.message}</p>}
+    {query.error && <p role="alert" className="text-sm text-warn">{query.isFetchNextPageError ? "Older discussions could not load. Retry loading older discussions." : "Comments could not refresh."} Drafts are preserved. {query.error.message}</p>}
     {write.error && <p role="alert" className="text-sm text-destructive">{write.error.message}</p>}
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
       <div className="min-w-0 space-y-4">

@@ -261,3 +261,68 @@ it("retries a committed edit with the same mutation and captured thread version"
   await waitFor(() => expect(screen.queryByLabelText("Edit comment text")).toBeNull())
   expect(threads[0].version).toBe(2)
 })
+
+it("loads older resolved discussions and opens their original revision", async () => {
+  const older = thread(1, "old-thread")
+  older.status = "resolved"
+  older.comments[0].body = "Retained historical discussion"
+  vi.mocked(apiFetch).mockImplementation(async input => {
+    const url = new URL(String(input), "https://studio.test")
+    const second = url.searchParams.get("cursor") === "older"
+    return new Response(JSON.stringify({ threads: second ? [older] : [], next_cursor: second ? "" : "older", can_comment: true, can_resolve: true }))
+  })
+  const view = mount(3)
+  fireEvent.change(await screen.findByLabelText("Discussion status"), { target: { value: "resolved" } })
+  fireEvent.click(await screen.findByRole("button", { name: "Load older discussions" }))
+  expect(await screen.findByText("Retained historical discussion")).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "View original revision 1" }))
+  expect(view.onViewRevision).toHaveBeenCalledWith(1)
+  expect(vi.mocked(apiFetch).mock.calls.some(([input]) => { const url = new URL(String(input), "https://studio.test"); return url.searchParams.get("status") === "resolved" && url.searchParams.get("cursor") === "older" })).toBe(true)
+})
+
+it("keeps reply drafts mounted by preventing filter changes until cleared", async () => {
+  threads = [thread()]
+  mount()
+  const reply = await screen.findByLabelText("Reply to thread on revision 1")
+  fireEvent.change(reply, { target: { value: "Keep my draft" } })
+  expect(screen.getByLabelText("Discussion status")).toBeDisabled()
+  expect(reply).toHaveValue("Keep my draft")
+  fireEvent.change(reply, { target: { value: "" } })
+  expect(screen.getByLabelText("Discussion status")).not.toBeDisabled()
+})
+
+it("shows a failed older-page request without hiding already loaded discussions", async () => {
+  vi.mocked(apiFetch).mockImplementation(async input => new URL(String(input), "https://studio.test").searchParams.has("cursor")
+    ? new Response(JSON.stringify({ error: "Temporary history failure" }), { status: 503 })
+    : new Response(JSON.stringify({ threads: [thread()], next_cursor: "older", can_comment: true, can_resolve: true })))
+  mount()
+  fireEvent.click(await screen.findByRole("button", { name: "Load older discussions" }))
+  expect(await screen.findByRole("alert")).toHaveTextContent("Temporary history failure")
+  expect(screen.getByText("Please clarify the report.")).toBeTruthy()
+})
+
+it("hides all loaded pages when authority is revoked before continuation", async () => {
+  vi.mocked(apiFetch).mockImplementation(async input => new URL(String(input), "https://studio.test").searchParams.has("cursor")
+    ? new Response(JSON.stringify({ error: "Read access revoked" }), { status: 403 })
+    : new Response(JSON.stringify({ threads: [thread()], next_cursor: "older", can_comment: true, can_resolve: true })))
+  mount()
+  fireEvent.click(await screen.findByRole("button", { name: "Load older discussions" }))
+  expect(await screen.findByRole("alert")).toHaveTextContent("Comments and drafts are hidden")
+  expect(screen.queryByText("Please clarify the report.")).toBeNull()
+})
+
+it("deduplicates a thread that moves from open to resolved across continuation pages", async () => {
+  const original = thread(1, "moving-thread")
+  const resolved = { ...original, status: "resolved" as const, version: 2 }
+  vi.mocked(apiFetch).mockImplementation(async input => new Response(JSON.stringify({
+    threads: [new URL(String(input), "https://studio.test").searchParams.has("cursor") ? resolved : original],
+    next_cursor: new URL(String(input), "https://studio.test").searchParams.has("cursor") ? "" : "older",
+    can_comment: true, can_resolve: true,
+  })))
+  const view = mount(3)
+  fireEvent.click(await screen.findByRole("button", { name: "Load older discussions" }))
+  await screen.findByText("Resolved")
+  expect(screen.getAllByRole("article", { name: "Thread on revision 1" })).toHaveLength(1)
+  fireEvent.click(screen.getByRole("button", { name: "View original revision 1" }))
+  expect(view.onViewRevision).toHaveBeenCalledWith(1)
+})

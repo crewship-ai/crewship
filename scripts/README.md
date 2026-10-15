@@ -193,8 +193,8 @@ crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHI
 otherwise output uses an OS temporary directory. Fixture session tokens remain
 in a private mode-0600 temporary file that the Go test removes. Missing opt-in,
 static export or Chromium fails rather than skips. The conformance tag permits
-compile-only checks (`-run '^$'`); this harness is not automatically executed by
-CI and does not establish real-agent acceptance or login-flow coverage.
+compile-only checks (`-run '^$'`); this harness is executed by the Artifact Runtime Regression production-workflow
+CI job and does not establish real-agent acceptance or login-flow coverage.
 
 `acceptance-board-mermaid-browser.mjs` is called only by Linux-only
 `TestBoardMermaidWorkflowBrowser` (`board_mermaid_workflow_browser` or

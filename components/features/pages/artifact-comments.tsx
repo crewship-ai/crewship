@@ -16,7 +16,8 @@ export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, 
   onViewAnchor?: (revision: number, anchor: ArtifactAnchor) => void
   onDirtyChange: (dirty: boolean) => void
 }) {
-  const { query, write, uncertainReplies, history } = useArtifactThreads(workspaceId, slug)
+  const [discussionStatus, setDiscussionStatus] = useState<"all" | "open" | "resolved">("all")
+  const { query, write, uncertainReplies, history } = useArtifactThreads(workspaceId, slug, discussionStatus)
   const [body, setBody] = useState("")
   const [draftRevision, setDraftRevision] = useState<number | null>(null)
   const [draftAnchor, setDraftAnchor] = useState<ArtifactAnchor>()
@@ -64,11 +65,18 @@ export function ArtifactComments({ workspaceId, slug, revision, onViewRevision, 
     onResolve={item => void changeResolution(item)} onDirtyChange={markReplyDirty}
   />
   return <section aria-label="Artifact comments" className="space-y-4 border-t p-4 md:p-6">
+    <div className="flex items-center gap-2 px-4 py-2">
+      <label className="text-sm">Discussions <select aria-label="Discussion status" disabled={dirty} title={dirty ? "Finish or clear your draft before changing discussion filters." : undefined} value={discussionStatus} onChange={event => setDiscussionStatus(event.target.value as "all" | "open" | "resolved")} className="ml-2 rounded border bg-background p-2 coarse:h-12">
+        <option value="all">All</option><option value="open">Open</option><option value="resolved">Resolved</option>
+      </select></label>
+      {query.hasNextPage && <Button variant="outline" size="sm" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? "Loading…" : "Load older discussions"}</Button>}
+    </div>
+    {dirty && <p className="px-4 text-xs text-muted-foreground">Finish or clear your draft before changing discussion filters.</p>}
     <div className="flex flex-wrap items-center gap-2">
       <div className="mr-auto"><h2 className="text-sm font-semibold">Comments</h2><p className="mt-1 text-xs text-muted-foreground">Threads belong to their original revision. Comments do not run agents.</p></div>
       <Button size="sm" variant="ghost" className="coarse:h-12" disabled={query.isFetching || write.isPending} onClick={() => { write.reset(); void query.refetch() }}>Refresh comments</Button>
     </div>
-    {query.error && <p role="alert" className="rounded-md border border-warn/30 p-3 text-sm text-warn">Comments could not refresh. Showing the last authorized snapshot; drafts are preserved. {query.error.message}</p>}
+    {query.error && <p role="alert" className="rounded-md border border-warn/30 p-3 text-sm text-warn">{query.isFetchNextPageError ? "Older discussions could not load. Retry loading older discussions." : "Comments could not refresh."} Showing the last authorized snapshot; drafts are preserved. {query.error.message}</p>}
     {write.error && <p role="alert" className="rounded-md border border-destructive/30 p-3 text-sm text-destructive">{write.error.message}</p>}
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
       <div className="min-w-0 space-y-4">
