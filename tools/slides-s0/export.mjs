@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { effectiveFont } from './render.mjs';
 import { validate, check } from './model.mjs';
 import { escape } from './html.mjs';
+import { parseXML, textShape, tableShape } from './xml.mjs';
 export async function exportPptx(deck, file, overflow = []) {
   validate(deck);
   const pptx = new PptxGenJS();
@@ -34,12 +35,12 @@ export async function inspectPptx(deck, file) {
   for (let i = 0; i < deck.slides.length; i++) {
     const xml = await zip.file(`ppt/slides/slide${i + 1}.xml`).async('string');
     check(!xml.includes('TargetMode="External"'), 'external slide resource');
-    const source = deck.slides[i];
+    const source = deck.slides[i]; const document = parseXML(xml);
     const notes = await zip.file(`ppt/notesSlides/notesSlide${i + 1}.xml`).async('string'); check(notes.includes(escape(source.id)) && notes.includes(escape(source.notes)), 'speaker notes and slide ID');
     for (const e of source.elements) {
-      if (e.type === 'text') { check(xml.includes('name="' + e.id + '"') && xml.includes(`<a:t>${escape(e.text)}</a:t>`), `native text ${e.id}`); }
+      if (e.type === 'text') { check(textShape(document, e.id) === e.text, `native text including paragraph/run breaks ${e.id}`); }
       if (e.type === 'shape') check(xml.includes('name="' + e.id + '"'), `native shape ${e.id}`);
-      if (e.type === 'table') { check(xml.includes('<a:tbl>'), 'native table'); for (const cell of e.rows.flat()) check(xml.includes(`<a:t>${escape(cell)}</a:t>`), 'native table cell'); }
+      if (e.type === 'table') check(JSON.stringify(tableShape(document, e.id)) === JSON.stringify(e.rows), `native table cells ${e.id}`);
       if (e.type === 'image') check(xml.includes('<p:pic>'), 'PNG picture');
     }
     detail.push({ slideID: source.id, textRuns: (xml.match(/<a:t>/g) ?? []).length, nativeShapes: (xml.match(/<p:sp>/g) ?? []).length, tables: (xml.match(/<a:tbl>/g) ?? []).length, images: (xml.match(/<p:pic>/g) ?? []).length });

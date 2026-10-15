@@ -65,3 +65,25 @@ test('PNG dimensions and count limits reject before decoding', () => {
   const source = fixture(); const bytes = Buffer.from(source.assets[0].data, 'base64'); bytes.writeUInt32BE(65535, 16); bytes.writeUInt32BE(65535, 20); source.assets[0].data = bytes.toString('base64'); assert.throws(() => validate(source), /pixel limit/);
   const many = fixture(); many.slides = Array(limits.slides + 1).fill(many.slides[0]); assert.throws(() => validate(many), /slide count/);
 });
+
+// XML text semantics must survive legitimate splitting across runs/paragraphs.
+test('OOXML text reconstructs split runs, soft breaks, LF paragraphs and entities', async () => {
+  const { parseXML, textShape } = await import('./xml.mjs');
+  const source = `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:sp><p:nvSpPr><p:cNvPr id="1" name="czech"/></p:nvSpPr><p:txBody><a:bodyPr/><a:p><a:r><a:t>Češ</a:t></a:r><a:r><a:t>tina &amp; text</a:t></a:r><a:br/><a:r><a:t>řádek</a:t></a:r></a:p><a:p><a:r><a:t>další</a:t></a:r></a:p><a:p/></p:txBody></p:sp></p:sld>`;
+  assert.equal(textShape(parseXML(source), 'czech'), 'Čeština & text\nřádek\ndalší\n');
+});
+
+test('native PPTX validates multiple named tables and LF text independently', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { exportPptx, inspectPptx } = await import('./export.mjs');
+  const directory = await mkdtemp(join(tmpdir(), 'slides-s0-native-'));
+  try {
+    const deck = fixture(); const second = clone(deck.slides[2].elements[1]);
+    second.id = 'table-second'; second.y = 370; second.h = 120; second.rows[1][0] = 'Česká\nbuňka';
+    deck.slides[2].elements.push(second);
+    const file = join(directory, 'tables.pptx'); await exportPptx(deck, file);
+    const checked = await inspectPptx(deck, file); assert.equal(checked.slides[2].tables, 2);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

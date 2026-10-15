@@ -69,7 +69,7 @@ try {
   assert.deepEqual(report.candidates.html.screenshots.map(s => s.hash), report.candidates.typed.screenshots.map(s => s.hash), 'same browser render pixels');
   assert.deepEqual(report.externalRequests, []); assert.deepEqual(browserErrors, []);
   report.gates.browser = 'passed: identical manual controls, native patches, ID anchors, CAS, measured overflow, sandboxed previews, loaded PNG dimensions, identical screenshot pixels, no observed external requests';
-  const files = ['html.mjs', 'typed.mjs', 'model.mjs', 'render.mjs', 'export.mjs', 'editor.mjs', 'ui.mjs', 'qualify.mjs', 'test.mjs'];
+  const files = ['html.mjs', 'typed.mjs', 'model.mjs', 'render.mjs', 'export.mjs', 'editor.mjs', 'ui.mjs', 'qualify.mjs', 'test.mjs', 'xml.mjs'];
   report.codeLines = Object.fromEntries(await Promise.all(files.map(async file => [file, (await readFile(new URL(file, import.meta.url), 'utf8')).trimEnd().split('\n').length])));
   report.codeBytes = Object.fromEntries(await Promise.all(files.map(async file => [file, (await readFile(new URL(file, import.meta.url))).length])));
   report.codeHashes = Object.fromEntries(await Promise.all(files.map(async file => [file, hash(await readFile(new URL(file, import.meta.url), 'utf8'))])));

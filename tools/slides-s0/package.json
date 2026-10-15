@@ -3,14 +3,21 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "packageManager": "pnpm@10.11.0",
-  "scripts": { "test": "node --test test.mjs", "qualify": "node qualify.mjs" },
+  "scripts": {
+    "test": "node --test test.mjs",
+    "qualify": "node qualify.mjs",
+    "qualify:office": "node office.mjs"
+  },
   "dependencies": {
     "jszip": "3.10.1",
     "parse5": "8.0.0",
     "playwright": "1.63.0",
     "pngjs": "7.0.0",
-    "pptxgenjs": "4.0.1"
+    "pptxgenjs": "4.0.1",
+    "@xmldom/xmldom": "0.9.12"
   }
 }

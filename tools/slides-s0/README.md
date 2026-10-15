@@ -146,3 +146,54 @@ typed-specific work includes explicit schema handling. Five-slide results
 cannot establish general format or export superiority.
 
 Primary implementation references: [parse5 fragment parser](https://parse5.js.org/functions/parse5.parseFragment.html), [Playwright frame locators](https://playwright.dev/docs/api/class-framelocator), [pngjs decoder](https://github.com/pngjs/pngjs). Pin upgrades require rerunning all profile and browser tests.
+
+## Optional real LibreOffice qualification
+
+`pnpm qualify:office INPUT_EVIDENCE NEW_OUTPUT_DIRECTORY` opens **both** generated
+PPTX files in an owned LibreOffice process using a unique pipe and profile. It
+inspects the actual native shapes/text portions/table/image, appends Czech text
+with LF, edits a rectangle position/color and a table cell, saves PPTX and reopens
+it. It exports original/edited PDF plus each slide as PNG. The optional pinned
+PyMuPDF tool reads PDF dimensions/text/images and rasterizes its pages. These are
+actual application and native object operations through UNO, not manual GUI
+editing or proof about PowerPoint.
+
+Provide explicit executables; the harness never installs software or connects to
+an existing Office process. A verified official LibreOffice archive may be
+extracted into your own directory without running package installation scripts,
+when your host policy allows that. On the shared host all these runs use
+`crewship-heavy`. `S0_UNO_PYTHON` needs the matching LibreOffice UNO bridge; the
+official Linux distribution includes its own Python. `S0_PDF_PYTHON` needs
+`requirements-office.txt` in your own virtual environment (optional developer
+PDF tool, no application dependency).
+
+```sh
+crewship-heavy env S0_LIBREOFFICE=/your/verified/lo/program/soffice.bin \
+  S0_UNO_PYTHON=/your/verified/lo/program/python \
+  S0_PDF_PYTHON=/your/owned/pdf-venv/bin/python \
+  pnpm qualify:office /your/browser-evidence /your/new-office-evidence
+```
+
+The runner bounds startup and each process, handles the official binary's first
+profile initialization restart (exit81) at most twice, and terminates only its
+own process. Output must be a fresh directory. Raw UNO/PDF observations and
+source hashes accompany the summary. Dirty source is labelled with a base commit
+and hashes rather than claiming that the base commit contains working changes.
+The native frame/cell checks reconstruct XML paragraph/run/soft-break text,
+including LF and entities, and validate tables by stable frame name; two tables
+on the same slide are covered independently. This is still a fixture inspector,
+not an arbitrary PPTX importer.
+
+The Office report keeps native editing, PDF corpus checks and visual fidelity
+separate. It measures ink below the deliberately overflowing text box and emits
+an explicit fidelity failure when Office paints text that the browser clips.
+`fit:none` does not promise clipping parity. Pixel mismatch counts are diagnostic
+with no perceptual acceptance threshold, and iframe screenshot rounding can add
+one pixel. Do not silently accept the overflow difference, modify vendored
+PptxGenJS or treat Office screenshot parity between A/B as a format winner.
+PowerPoint remains unperformed and production S2 fidelity is unqualified even
+when both LibreOffice native editing and PDF corpus checks pass.
+
+Primary references: [LibreOffice GraphicExportFilter](https://api.libreoffice.org/docs/idl/ref/servicecom_1_1sun_1_1star_1_1drawing_1_1GraphicExportFilter.html),
+[XStorable](https://api.libreoffice.org/docs/idl/ref/interfacecom_1_1sun_1_1star_1_1frame_1_1XStorable.html),
+[xmldom](https://github.com/xmldom/xmldom), [PyMuPDF Page](https://pymupdf.readthedocs.io/en/latest/page.html).

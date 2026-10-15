@@ -72,7 +72,7 @@ export function fixture() {
     { id: 'slide-overflow', notes: 'Úmyslné přetečení; nezmenšovat potichu.', elements: [t('title-overflow', 'Dlouhý text a přetečení', 48), t('body-overflow', 'Dlouhý český odstavec má zachovat obsah a přiznat přetečení. '.repeat(40), 160, { h: 96, size: 24 })] },
     { id: 'slide-table', notes: 'Nativní editovatelná tabulka.', elements: [t('title-table', 'Jednoduchá tabulka', 48), { id: 'table-budget', type: 'table', x: 48, y: 160, w: 864, h: 180, rows: [['Město', 'Výsledek'], ['Praha', '42'], ['Brno', '27']], font: 'DejaVu Sans', size: 22, color: '203040' }] },
     { id: 'slide-image', notes: 'Lokální PNG a nativní tvary.', elements: [t('title-image', 'PNG a tvary', 48), { id: 'image-local', type: 'image', x: 48, y: 160, w: 288, h: 192, asset: 'asset-png' }, { id: 'shape-rect', type: 'shape', x: 400, y: 160, w: 180, h: 120, shape: 'rect', fill: '2B88A8' }, { id: 'shape-ellipse', type: 'shape', x: 650, y: 160, w: 160, h: 160, shape: 'ellipse', fill: 'ECA545' }] },
-    { id: 'slide-font', notes: 'Font není vložen; fallback musí být viditelný.', elements: [t('title-font', 'Chybějící font', 48), t('body-font', 'Čeština zůstává editovatelná: ěščřžýáíé.', 160, { font: 'S0 Missing Font' })] },
+    { id: 'slide-font', notes: 'Font není vložen; fallback musí být viditelný.', elements: [t('title-font', 'Chybějící font', 48), t('body-font', 'Čeština zůstává editovatelná: ěščřžýáíé.\nDruhý český řádek.', 160, { font: 'S0 Missing Font' })] },
   ] });
 }
 
