@@ -1,93 +1,120 @@
-# Docs persistence foundation
+# Docs in Pages
 
-Status: implemented D1a foundation for review in #3161, disabled by default.
-This is the Go/Node persistence contract for contributors and operators; it does
-not ship a public editor, public document routes, CLI or authoring skill.
-The [Pages contract](pages.md) continues to own Page permissions and identity.
-[D0](../../tools/docs-d0/README.md) records the prototype and its limitations.
+Status: D1a persistence and D1b Pages integration are proposed, disabled by
+`documents.enabled: false` by default. They are separate from the static
+Artifacts 1.0 release. Review readiness and runtime qualification do not activate
+Docs on a deployment. [Pages](pages.md) owns identity, ownership and grants;
+HTML artifacts and Boards keep their storage and routes.
 
-{/* docs-inventory: ignore-api-prefix /internal/docs/ reason=private-Unix-service-protocol-not-public-HTTP */}
+## Service and activation
 
-## Activation and process boundary
+Configure distinct clean absolute `authority_socket`, `service_socket` and
+`service_token_file` paths of at most 100 bytes. The secret must be a regular
+mode-0600 file, at most 512 bytes, holding 32–256 trimmed bytes. Go and Node use
+matching numeric UIDs. Environment equivalents are
+`CREWSHIP_DOCUMENTS_ENABLED`, `CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET`,
+`CREWSHIP_DOCUMENTS_SERVICE_SOCKET`, `CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE`.
+A configured authority startup failure prevents Go serving. Node has no DB
+mount or public listener. The [service package](../../tools/docs-service/README.md)
+provides frozen dependencies, readiness/drain, a Dockerfile and an optional
+profile requiring an explicitly qualified immutable image. Shared-host
+installation remains an Ansible delivery.
 
-`documents.enabled` defaults to false. Explicit configuration requires distinct
-clean absolute `authority_socket`, `service_socket` and `service_token_file`
-paths (at most 100 bytes). The token is a regular mode-0600 file, 32–256
-characters. Go binds only the private authority Unix socket; it never mounts
-these handlers on its public Router. Node is a separately managed process, with
-no database mount, no public listener and no runtime package installation.
-The [service package](../../tools/docs-service/README.md) supplies frozen
-dependencies, Docker build source, health checks and an optional Compose profile.
-Deployment on the shared host remains an Ansible change, not part of this PR.
+The private protocol `/internal/docs/v1/` requires service authentication and,
+for document operations, the original human or live-run bearer. These routes
+never mount on the public Router. The engine boot barrier is service-only and
+runs after exclusive ownership of its configured Unix socket. Its bounded boot
+identity makes retries idempotent. Until Go acknowledges recovery, Node rejects
+document admission and reports not ready. Operators must prove a crashed process
+has exited before removing its stale socket; Node's native close cannot protect
+against pathname replacement by another directory writer.
 
-Both processes need the same numeric UID for mode-0600 sockets and secrets.
-The container defaults to UID 1001; the sample profile requires explicit UID/GID
-alignment. Its image must be qualified and supplied explicitly. A failed bind
-does not fence another live authority. Boot fencing runs after socket ownership
-is established and before requests are accepted. A configured authority startup
-failure prevents the server from starting.
+## Pages API and client lifecycle
 
-## Write and identity contract
+Authenticated humans use `/api/v1/pages/{slug}/document` in their workspace:
 
-Node validates the visible **and retained** schema-1 Yjs structures, including
-deleted content. Tiptap 3.32.0, Yjs 13.6.33 and `@tiptap/y-tiptap` 3.0.7 are pinned
-together. Unknown metadata, nodes, marks and unresolved CRDT dependencies fail
-closed. Binary state is authoritative; JSON is a projection.
+- `GET` returns schema, durable `rev`, opaque `epoch`, binary baseline/replay,
+  JSON content, block outline with IDs/hashes, and current capability hints.
+- `POST /initialize` accepts `{id,schema:2,body}` on an empty human-owned Page.
+- `POST /patch` accepts `{id,schema:2,epoch,kind:"human",update}` for a bounded
+  binary update, or `{id,schema:2,epoch,target,text,ifRev,ifHash}` for semantic
+  text replacement. Original operation IDs/payloads identify exact retries.
+- `GET /comments`; `POST /comments` accepts
+  `{id,schema:2,epoch,ifRev,block,from,to,text}`. Offsets refer to one text block.
+  `POST /comments/resolve` accepts
+  `{id,schema:2,epoch,ifRev,comment,version,resolved}`. Read/comment/edit rights
+  remain distinct. Anchors report attached, collapsed or detached positions;
+  resolution is retained separately.
+- `POST /checkpoint` accepts `{id,schema:2,epoch,ifRev}`;
+  `GET /checkpoints` lists retained states; `GET /checkpoints/{checkpoint}`
+  returns validated content for comparison.
+- `POST /restore` accepts `{id,schema:2,epoch,ifRev,checkpoint}` and creates a
+  new durable revision and resynchronization generation.
+- `GET /export` downloads escaped Markdown, including simple lists and tables.
+- `GET /requests` lists requests and eligible private agent chats;
+  `POST /requests` accepts `{chat_id,instruction,base_rev,submission_id}`.
 
-Each operation is serialized per workspace/Page and uses a bounded queue. Node
-calls the private Go authority with service authentication and the original
-human or run bearer. Go takes the SQLite writer fence, rechecks exact session,
-membership, Page ACL or existing live run delegation, then applies epoch/lease,
-revision, target hash and idempotency checks. The stored actor comes from this
-authorization, never the payload. Agent raw CRDT updates are rejected.
+`GET /api/v1/documents/status` reports whether the bridge is configured.
+Capability hints never grant authority. Go rechecks live membership, exact
+session or CLI token/scopes, Page ACL and run delegation under the SQL fence.
+Scoped CLI access uses `pages:read` and `pages:write`. Sidecar document reads,
+semantic patches and checkpoints additionally require the original admitted run
+bearer; raw-agent updates and agent restores are denied.
 
-The durable update, projection and receipt/audit commit together. Node returns
-success only after Go confirms; D1a has no speculative peer broadcast or editor
-transport. Original operation fingerprints support retries after lost replies;
-different payloads or actors cannot reuse a receipt. Init/checkpoint/restore are
-also idempotent. Writer tokens expire after 30 seconds; acquisition advances
-the fence epoch. The D1a service releases a lease after each operation, so its
-acknowledgements can advance epochs without changing content. D1b must define
-the longer-lived editor transport rather than assume a stable per-session epoch.
+The first editor uses bounded polling of authorized durable state, rather than
+speculative peer broadcast. Local Yjs updates are coalesced; once attempted a
+batch and its ID remain immutable across uncertain retries. "Saved" follows Go
+acknowledgement only. Disconnection, rejection, revocation and generation change
+are explicit states. A changed generation freezes the old editor and offers a
+recovery copy; old pending binary is never automatically replayed after restore.
+Unacknowledged edits are memory-resident; leaving warns, and a browser crash can
+lose them. This does not claim an offline durable draft store.
 
-## History and limits
+## Writer fencing and schema
 
-`documents` stores the baseline snapshot and current projection.
-`document_updates` stores ordered incremental updates after its watermark.
-`document_receipts` retains audit and retry identities; `document_checkpoints`
-pins explicit complete states. These are separate from HTML revision tables.
-Replay coverage must be contiguous. Every 32 updates or 64 KiB, one transaction
-advances the baseline and removes only covered replay updates. This does not
-delete receipts, checkpoints or their Yjs tombstones.
+One managed Node engine serializes operations per workspace/Page. It retains a
+random fenced writer lease across operations, renews with each operation's live
+principal, and releases on idle/drain. The browser resynchronization epoch is
+opaque: Go process identity, Node boot identity and durable generation. Writer
+lease acquisition alone does not invalidate other editors. Fresh process
+identities prevent physical-backup rollback from reusing a prior editor epoch.
+Commits, comments, checkpoints and restores check generation/revision inside Go's
+transaction; semantic writes additionally check target hashes. Mutations commit
+before peers can observe them.
 
-Default instance/document bounds are 128 documents, 1 MiB snapshot plus
-projection, 256 KiB live replay log, 10,000 operation receipts per document and
-16 MiB pinned checkpoint data per document. The Node process admits at most 32
-document queues, 32 queued operations per document and 128 globally, and unloads
-idle queue state after 30 seconds. Quota errors preserve confirmed data and
-reject the affected operation; they do not silently prune promised history.
-`gc:false` is retained. Physical GC, arbitrary historical keystroke replay,
-assets, common revision UI and expanded retention remain separate work.
+Schema 2 adds bounded lists and heading levels 1–3 to paragraphs and simple
+tables. Every block has a stable ID. Node validates visible and retained Yjs
+structures, including tombstones, and rejects unknown metadata or unresolved
+CRDT dependencies. Tiptap 3.32.0, Yjs 13.6.33 and `@tiptap/y-tiptap` 3.0.7 are pinned.
+Existing schema-1 content can be read and upgraded on a validated commit;
+unsupported future schemas fail closed. JSON/Markdown are projections, never
+Docs persistence. Yjs garbage collection remains disabled.
 
-Documents attach only to empty human-owned Pages. Database constraints reject
-coexistence with panels, HTML, Board or project drafts. Page ownership departure
-requires an explicit eligible human successor; transfer keeps the same Page ID.
+## History, requests and recovery
 
-## Recovery and evidence
+`documents` stores baseline and projection; `document_updates` stores ordered
+incremental replay; `document_receipts` stores audit/retry identities;
+`document_checkpoints` pins explicit states. These remain separate from HTML
+revision tables. Every 32 updates or 64 KiB the baseline advances atomically and
+only covered replay updates are removed. Receipts/checkpoints are not pruned.
+Default bounds are 128 documents per instance, 1 MiB snapshot+projection,
+256 KiB replay, 10,000 receipts and 16 MiB checkpoint data per document. Node
+admits 32 document queues, 32 operations per key and 128 globally. Quota refusal
+preserves confirmed data. Physical GC and arbitrary keystroke history are not
+implemented.
 
-Workspace/fork and physical instance backups include all four document tables.
-Binary columns use an explicit base64 representation, preserving invalid UTF-8.
-Restore clears saved writer tokens and advances epochs; existing target rows
-are also fenced. The runtime singleton is excluded from workspace backups.
-Confirmed updates, checkpoints, projections and audit survive actual bundle
-roundtrips. Old run credentials do not become newly authorized by restoring data.
+`document_comments` retains relative anchors and discussion.
+`document_requests` retains the human instruction, base revision, trusted
+admission and result identity. A real request binds the existing trusted human
+chat admission to a live run. Completion requires an agent-authored durable
+patch and that run's exact checkpoint; model text alone cannot mark success.
+Admission is bounded to three active, 30/hour and 2,000 total requests per Page.
+Backup preserves historical results and comments but clears runnable request
+capabilities. Workspace/fork and physical recovery fence writers; old credentials
+never become newly authorized by restoring content.
 
-Tests cover actual Node and Go SIGKILL/restart, durable replay, exact mutation
-retries, six documents and 40 edits on 200 paragraphs across compaction, stale
-writer fencing, schema mismatch, live delegation
-and exact-session revocation, and SQL writer contention. The contention fixture
-holds a real SQL writer for 50 ms; it is not a measurement on slower hardware.
-Power loss, a qualified container image, multi-replica failover and production
-capacity are not established by these tests. No dev environment is deployed or
-reset. The [store contract](../../internal/documents/README.md) and service README
-document reproduction, quotas and the still-unqualified boundaries.
+Integration evidence must identify its exact source. D0 browser proof is scoped
+to its prototype; D1b browser and genuine model-run acceptance are separate.
+A held SQL writer or delayed fixture acknowledgement is not a slow-disk or
+power-loss test. Multi-replica operation, production capacity, offline recovery,
+images and richer formats remain outside this slice.

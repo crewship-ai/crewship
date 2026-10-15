@@ -54,6 +54,8 @@ const (
 var sidecarRouteGuards = map[string]routeGuardKind{
 	// Each handler resolves the actual agtv2 run before forwarding that bearer;
 	// the host then checks the exact live human/request or comment authority.
+	"GET /api/v1/pages/ /document":         guardHandlerIdentity,
+	"POST /api/v1/pages/ /document":        guardHandlerIdentity,
 	"POST /artifact-requests/":             guardHandlerIdentity,
 	"GET /artifact-requests/":              guardHandlerIdentity,
 	"GET /artifacts/ /threads":             guardHandlerIdentity,

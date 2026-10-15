@@ -4,8 +4,8 @@ import { Plugin } from '@tiptap/pm/state';
 import * as Y from 'yjs';
 import { prosemirrorToYDoc, yDocToProsemirrorJSON } from '@tiptap/y-tiptap';
 
-export const VERSION = 1;
-const types = ['heading', 'paragraph', 'table', 'tableRow', 'tableCell', 'tableHeader'];
+export const VERSION = 2;
+const types = ['heading', 'paragraph', 'table', 'tableRow', 'tableCell', 'tableHeader', 'bulletList', 'orderedList', 'listItem'];
 const ids = Extension.create({
   name: 'stableIDs',
   addGlobalAttributes: () => [{ types, attributes: { id: {
@@ -33,7 +33,10 @@ export const extensions = [
   Node.create({ name: 'doc', topNode: true, content: 'block+' }),
   Node.create({ name: 'text', group: 'inline' }),
   Node.create({ name: 'paragraph', group: 'block', content: 'text*', parseHTML: () => [{ tag: 'p' }], renderHTML: ({ HTMLAttributes }) => ['p', HTMLAttributes, 0] }),
-  Node.create({ name: 'heading', group: 'block', content: 'text*', addAttributes: () => ({ level: { default: 1 } }), parseHTML: () => [{ tag: 'h1' }], renderHTML: ({ HTMLAttributes }) => ['h1', HTMLAttributes, 0] }),
+  Node.create({ name: 'heading', group: 'block', content: 'text*', addAttributes: () => ({ level: { default: 1 } }), parseHTML: () => [1,2,3].map(level=>({tag:`h${level}`,attrs:{level}})), renderHTML: ({ node,HTMLAttributes }) => [`h${node.attrs.level}`, HTMLAttributes, 0] }),
+  Node.create({name:'bulletList',group:'block',content:'listItem+',parseHTML:()=>[{tag:'ul'}],renderHTML:({HTMLAttributes})=>['ul',HTMLAttributes,0]}),
+  Node.create({name:'orderedList',group:'block',content:'listItem+',addAttributes:()=>({start:{default:1},type:{default:null}}),parseHTML:()=>[{tag:'ol'}],renderHTML:({HTMLAttributes})=>['ol',HTMLAttributes,0]}),
+  Node.create({name:'listItem',content:'paragraph block*',parseHTML:()=>[{tag:'li'}],renderHTML:({HTMLAttributes})=>['li',HTMLAttributes,0]}),
   Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, ids,
 ];
 export const schema = getSchema(extensions);
@@ -76,9 +79,11 @@ export function validateJSON(json) {
       if (typeof node.attrs?.id !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(node.attrs.id) || seen.has(node.attrs.id)) throw new Error('invalid or duplicate block ID');
       seen.add(node.attrs.id);
     }
-    const allowed = node.type === 'tableCell' || node.type === 'tableHeader' ? ['id', 'colspan', 'rowspan', 'colwidth', 'align'] : node.type === 'heading' ? ['id', 'level'] : ['id'];
+    const allowed = node.type === 'tableCell' || node.type === 'tableHeader' ? ['id', 'colspan', 'rowspan', 'colwidth', 'align'] : node.type === 'heading' ? ['id', 'level'] : node.type === 'orderedList' ? ['id','start','type'] : ['id'];
     if (Object.keys(node.attrs || {}).some(k => !allowed.includes(k))) throw new Error('unsupported attributes');
-    if (node.type === 'heading' && node.attrs.level !== 1) throw new Error('D0 heading level');
+    if (node.type === 'heading' && ![1,2,3].includes(node.attrs.level)) throw new Error('unsupported heading level');
+    if (node.type === 'orderedList' && node.attrs.type != null) throw new Error('unsupported ordered list type');
+    if (node.type === 'orderedList' && (!Number.isInteger(node.attrs.start??1) || (node.attrs.start??1)<1 || (node.attrs.start??1)>10000)) throw new Error('invalid ordered list start');
     if (['tableCell', 'tableHeader'].includes(node.type) && ((node.attrs.colspan ?? 1) !== 1 || (node.attrs.rowspan ?? 1) !== 1 || node.attrs.colwidth != null || node.attrs.align != null)) throw new Error('D0 simple table only');
     for (const child of node.content || []) visit(child, depth + 1);
   };
@@ -102,15 +107,18 @@ function validateRetained(doc) {
       if (!(parent instanceof Y.XmlElement)) throw new Error('unsupported retained text attributes');
       const key = item.parentSub;
       const cell = ['tableCell', 'tableHeader'].includes(parent.nodeName);
-      const allowed = key === 'id' || (key === 'level' && parent.nodeName === 'heading') ||
+      const allowed = key === 'id' || (key === 'level' && parent.nodeName === 'heading') || (['start','type'].includes(key) && parent.nodeName === 'orderedList') ||
         (cell && ['colspan', 'rowspan', 'colwidth', 'align'].includes(key));
       if (!allowed) throw new Error('unsupported retained attributes');
       if (content instanceof Y.ContentDeleted) continue;
-      if (!(content instanceof Y.ContentAny) || content.arr.length !== 1) throw new Error('unsupported retained attribute content');
-      const value = content.arr[0];
-      const valid = key === 'id' ? value === null || (typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)) :
-        ['level', 'colspan', 'rowspan'].includes(key) ? value === 1 : value === null;
-      if (!valid) throw new Error('unsupported retained attribute value');
+      // Yjs coalesces adjacent deleted versions of the same scalar attribute.
+      // Active attributes remain scalar; every retained value still needs validation.
+      if (!(content instanceof Y.ContentAny) || content.arr.length === 0 || (!item.deleted && content.arr.length !== 1)) throw new Error('unsupported retained attribute content');
+      for (const value of content.arr) {
+        const valid = key === 'id' ? value === null || (typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)) :
+          key === 'level' ? [1,2,3].includes(value) : key === 'start' ? Number.isInteger(value) && value >=1 && value<=10000 : ['colspan','rowspan'].includes(key) ? value===1 : value===null;
+        if (!valid) throw new Error('unsupported retained attribute value');
+      }
     } else if (content instanceof Y.ContentType) {
       if (item.parent instanceof Y.XmlText || !supportedType(content.type) || content.type === root) throw new Error('unsupported retained Yjs type');
     } else if (content instanceof Y.ContentString) {
@@ -122,6 +130,7 @@ function validateRetained(doc) {
   }
 }
 export function validate(doc) {
+  if(doc.store.pendingStructs || doc.store.pendingDs)throw new Error("unresolved Yjs dependencies");
   // Projection serializers omit some raw Yjs metadata. Validate the binary
   // tree as well so omitted attributes cannot bypass the content contract.
   const inspect = (node, depth = 0) => {
@@ -198,4 +207,20 @@ export function create(json = initialJSON()) {
   validateJSON(json);
   const pm = schema.nodeFromJSON(json); pm.check();
   const doc = prosemirrorToYDoc(pm, 'default'); doc.gc = false; validate(doc); return doc;
+}
+
+export function markdown(json) {
+  const escape = text => text.replace(/([\\`*_{}\[\]<>#!|])/g, '\\$1');
+  const visit = (node, depth=0) => {
+    if (node.type==='text') return escape(node.text||'');
+    if (node.type==='heading') return '#'.repeat(node.attrs.level)+' '+(node.content||[]).map(n=>visit(n,depth)).join('')+'\n\n';
+    if (node.type==='paragraph') return (node.content||[]).map(n=>visit(n,depth)).join('')+'\n\n';
+    if (node.type==='bulletList'||node.type==='orderedList') return (node.content||[]).map((n,i)=>'  '.repeat(depth)+(node.type==='bulletList'?'- ':`${(node.attrs.start||1)+i}. `)+visit(n,depth+1).trim().replace(/\n/g,'\n'+'  '.repeat(depth+1))).join('\n')+'\n\n';
+    if (node.type==='table') {
+      const rows=(node.content||[]).map(r=>r.content.map(c=>escape((c.content||[]).map(textOf).join(' ')).replace(/\n/g,' ')));
+      return rows.map((r,i)=>'| '+r.join(' | ')+' |'+(i===0?'\n| '+r.map(()=>'---').join(' | ')+' |':'')).join('\n')+'\n\n';
+    }
+    return (node.content||[]).map(n=>visit(n,depth)).join('');
+  };
+  return visit(json).trimEnd()+'\n';
 }

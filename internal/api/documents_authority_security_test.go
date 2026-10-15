@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -15,9 +16,53 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/auth"
-	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/documents"
 )
+
+func TestDocumentEngineProtocolRecoveryCannotFenceAnIncompatiblePair(t *testing.T) {
+	h, _, _, workspace, user, page := artifactFixture(t)
+	store := documents.New(h.db, documents.Options{})
+	key := documents.Key{WorkspaceID: workspace, PageID: page}
+	allow := func(context.Context, *sql.Tx) (string, error) { return "user:" + user, nil }
+	if _, err := store.Init(t.Context(), key, 2, []byte("protocol-only fixture"), []byte(`[]`), allow); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.Acquire(t.Context(), key, "live-engine", allow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const secret = "protocol-recovery-synthetic-service-secret"
+	handler := &documentAuthority{pages: h, store: store, secret: secret}
+	call := func(body string, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest("POST", "/internal/docs/v1/engine/recover", strings.NewReader(body))
+		r.Header.Set("X-Crewship-Docs-Service", secret)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("recovery status=%d body=%s", w.Code, w.Body)
+		}
+		return w
+	}
+	for _, body := range []string{`{"boot":"synthetic-legacy-engine-boot"}`, `{"boot":"synthetic-legacy-engine-boot","protocol":1}`} {
+		call(body, 409)
+		if _, err := store.Renew(t.Context(), key, lease, allow); err != nil {
+			t.Fatalf("incompatible recovery fenced live writer: %v", err)
+		}
+	}
+	w := call(`{"boot":"synthetic-compatible-engine-boot","protocol":2}`, 200)
+	var ack struct {
+		Protocol  int  `json:"protocol"`
+		Recovered bool `json:"recovered"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &ack) != nil || ack.Protocol != documentEngineProtocol || !ack.Recovered {
+		t.Fatalf("missing compatible recovery acknowledgement: %s", w.Body)
+	}
+	if _, err := store.Renew(t.Context(), key, lease, allow); err == nil {
+		t.Fatal("compatible recovery failed to fence prior writer")
+	}
+}
 
 func TestDocumentAuthoritySecurityStartupAndIsolation(t *testing.T) {
 	h, _, _, workspace, user, page := artifactFixture(t)

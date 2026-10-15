@@ -36,6 +36,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		Metadata               json.RawMessage       `json:"metadata"`
 		ArtifactHumanReceipt   *chataudience.Receipt `json:"artifact_human_receipt"`
 		BoardRequestID         string                `json:"board_request_id"`
+		DocumentRequestID      string                `json:"document_request_id"`
 		ArtifactRequestID      string                `json:"artifact_request_id"`
 		ArtifactHumanMessageID string                `json:"artifact_human_message_id"`
 		HumanAuthority         *chataudience.Receipt `json:"human_authority"`
@@ -205,14 +206,14 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 
 	if body.ArtifactHumanReceipt != nil {
 		if err := captureArtifactChatPrincipal(r, h.db, body.ID, body.WorkspaceID, body.AgentID, agentCrewID, body.ChatID, body.ArtifactHumanMessageID, body.ArtifactHumanReceipt); err != nil {
-			if body.ArtifactRequestID != "" || body.BoardRequestID != "" {
+			if body.DocumentRequestID != "" || body.ArtifactRequestID != "" || body.BoardRequestID != "" {
 				replyError(w, 403, "artifact human admission refused")
 				return
 			}
 			h.logger.Warn("run has no artifact publication authority", "run_id", body.ID, "error", err)
 		}
 	}
-	if body.ArtifactRequestID != "" && body.BoardRequestID != "" {
+	if (body.DocumentRequestID != "" && (body.ArtifactRequestID != "" || body.BoardRequestID != "")) || (body.ArtifactRequestID != "" && body.BoardRequestID != "") {
 		replyError(w, 403, "one explicit request authority required")
 		return
 	}
@@ -223,6 +224,12 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if body.DocumentRequestID != "" {
+		if body.ArtifactHumanReceipt == nil || bindDocumentRequestRun(r, h.db, body.DocumentRequestID, body.ID, body.ArtifactHumanReceipt) != nil {
+			replyError(w, 403, "document request admission refused")
+			return
+		}
+	}
 	if body.BoardRequestID != "" {
 		replyError(w, 403, "Board admission requires the Board delivery")
 		return

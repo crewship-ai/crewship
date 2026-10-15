@@ -107,6 +107,7 @@ func newRemapCUID() string {
 // and add the real FK in a migration when one becomes possible — this map is a
 // bridge over a schema gap, not a substitute for the schema.
 var virtualForeignKeys = map[string][]foreignKeyEdge{
+	"document_requests":          {{column: "checkpoint_id", refTable: "document_checkpoints", refColumn: "id"}},
 	"page_board_requests":        {{column: "result_placement_id", refTable: "page_board_artifact_placements", refColumn: "id"}},
 	"page_board_request_sources": {{column: "placement_id", refTable: "page_board_artifact_placements", refColumn: "id"}},
 	"page_board_mutations":       {{column: "placement_id", refTable: "page_board_artifact_placements", refColumn: "id"}},
@@ -411,7 +412,7 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	}
 	// Composite document FKs point at documents(workspace_id,page_id), not
 	// a remapped documents.id. Follow the anchor identities explicitly.
-	for _, table := range []string{"document_updates", "document_receipts", "document_checkpoints"} {
+	for _, table := range []string{"document_updates", "document_receipts", "document_checkpoints", "document_comments"} {
 		for _, row := range dump.Tables[table] {
 			for column, anchor := range map[string]string{"workspace_id": "workspaces", "page_id": "pages"} {
 				if old, ok := row[column].(string); ok {
@@ -422,6 +423,7 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	remapDocumentCommentAnchors(dump, idMap)
 	remapPageRequestNotices(dump, idMap)
 	remapBoardPageReferences(dump, idMap)
 	remapArtifactCreationRuns(dump)

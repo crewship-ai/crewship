@@ -521,6 +521,19 @@ func loadFromFile(cfg *Config, path string) error {
 }
 
 func applyEnvOverrides(cfg *Config) {
+	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_ENABLED"); ok {
+		cfg.Documents.Enabled = v == "true" || v == "1"
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET"); ok {
+		cfg.Documents.AuthoritySocket = v
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_SERVICE_SOCKET"); ok {
+		cfg.Documents.ServiceSocket = v
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE"); ok {
+		cfg.Documents.ServiceTokenFile = v
+	}
+
 	if v := os.Getenv("CREWSHIP_HOST"); v != "" {
 		cfg.Server.Host = v
 	}

@@ -179,6 +179,19 @@ These are read by the **sidecar process** in the crew container, not by `crewshi
   `CREWSHIP_CONTAINER_PREFIX` is essential for multi-instance deployments. Without it, multiple Crewship instances will create containers with colliding names like `crewship-team-engineering`.
 </Note>
 
+## Collaborative documents
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_DOCUMENTS_ENABLED` | `false` | Explicit opt-in to the managed Docs authority and public editor API. A separately managed Node service is required; no packages are installed at runtime. |
+| `CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET` | *(unset)* | Clean absolute private Go authority Unix socket, at most 100 bytes. Required when enabled. |
+| `CREWSHIP_DOCUMENTS_SERVICE_SOCKET` | *(unset)* | Clean absolute private Node computation Unix socket, distinct from the authority and token paths; at most 100 bytes. |
+| `CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE` | *(unset)* | Distinct clean absolute regular mode-0600 file holding a trimmed 32–256 byte service secret. Both processes need matching UID and access; never expose the secret or socket publicly. |
+
+See [YAML configuration](/configuration/yaml-config#collaborative-documents) and
+[document contracts](/api-reference/documents). Enabling configuration does not
+qualify the optional container image or supply model credentials.
+
 ## Storage
 
 | Variable | Default | Description |

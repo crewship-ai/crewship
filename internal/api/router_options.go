@@ -488,3 +488,8 @@ func WithTranscriptLock(lock func(context.Context) (func(), error)) RouterOption
 func WithTranscriptSnapshotLock(lock func(context.Context) (func(), error)) RouterOption {
 	return func(r *Router) { r.transcriptSnapshotLock = lock }
 }
+
+// WithDocumentService connects the public Pages bridge to a private engine.
+func WithDocumentService(socket string) RouterOption {
+	return func(r *Router) { r.documentsServiceSocket = socket }
+}

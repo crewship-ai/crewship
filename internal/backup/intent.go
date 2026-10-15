@@ -37,6 +37,8 @@ import "sort"
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
 	"documents":             IntentInclude,
+	"document_comments":     IntentInclude,
+	"document_requests":     IntentInclude, // durable history; restore clears live dispatch authority
 	"document_updates":      IntentInclude,
 	"document_receipts":     IntentInclude,
 	"document_checkpoints":  IntentInclude,
