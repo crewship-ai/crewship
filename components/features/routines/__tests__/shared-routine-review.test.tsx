@@ -83,3 +83,15 @@ it("rejects a receipt that falsely claims publication without a version", async 
   await screen.findByRole("alert")
   expect(screen.queryByText(/Published ·/)).toBeNull()
 })
+
+it("refuses a successful response for a different saved snapshot", async () => {
+  api.mockImplementation(async (_url: string, init?: RequestInit) => response(init?.method === "POST" ? { ...receipt, revision: 4 } : null, init?.method === "POST" ? 202 : 200))
+  const client = show()
+  const button = screen.getByRole("button")
+  await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.click(button)
+  await screen.findByText("The publication review did not match this saved revision.")
+  expect(client.getQueryData(["shared-routine-review", ...draftKey])).toBeNull()
+  expect(screen.queryByText(/Awaiting publication review/)).toBeNull()
+  expect(client.getQueryData(draftKey)).toMatchObject(snapshot)
+})
