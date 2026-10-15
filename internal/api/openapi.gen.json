@@ -128259,7 +128259,7 @@
                     "type": "string"
                   },
                   "targets": {
-                    "description": "Immutable paragraph/heading selections; total quotes at most4096 UTF-16 code units. Original base and hashes must remain valid; no automatic rebase. Current completion supports one textblock and one patch.",
+                    "description": "Immutable paragraph/heading selections; total quotes at most4096 UTF-16 code units. Original base and hashes must remain valid; no automatic rebase. Exactly one paragraph or heading selection and one patch are supported.",
                     "items": {
                       "additionalProperties": false,
                       "properties": {
@@ -128296,7 +128296,7 @@
                       ],
                       "type": "object"
                     },
-                    "maxItems": 16,
+                    "maxItems": 1,
                     "minItems": 1,
                     "type": "array"
                   }
