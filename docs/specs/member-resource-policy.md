@@ -252,3 +252,6 @@ authentication kind to the restricted classifier before evaluating this rule.
 CLI bearer credentials cannot use this new Guest minting entrypoint, preserving
 their scope ceiling. Minted tokens retain account restriction, object grants,
 existing tier/scope checks and ordinary self-revocation behavior.
+
+
+Pages’ existing grant resolver now also requires an active trusted issuer account, including no Guest restriction elsewhere. This applies to workspace administrators, user owners and owning crew members. Stored Page grants remain available to administrators with an account-status reason when inactive. The two Pages ACL models have not yet been migrated to access_grants.

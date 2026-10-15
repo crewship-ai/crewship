@@ -36,7 +36,9 @@ package api
 // grant is LIVE only while the human who issued it could issue it again right
 // now:
 //
-//	the issuer is still a member of this workspace,   AND
+//	the issuer has an active trusted account,        AND
+//	  is not restricted in any workspace,              AND
+//	  is still a member of this workspace,             AND
 //	  they are still a workspace ADMIN/OWNER,          OR
 //	  they are still the page's user owner,            OR
 //	  they are still a member of the page's owner crew.
@@ -120,8 +122,9 @@ type pageGrantRecord struct {
 
 	// IssuerRole is the issuer's CURRENT workspace role, "" when they are no
 	// longer a member. Live is the whole rule above, decided in SQL.
-	IssuerRole string
-	Live       bool
+	IssuerRole               string
+	IssuerAccountUnavailable bool
+	Live                     bool
 }
 
 // inertReason says, in a sentence a person can act on, why a stored grant is
@@ -139,6 +142,9 @@ func (g pageGrantRecord) inertReason() string {
 	}
 	if g.IssuerRole == "" {
 		return "the human who issued it is no longer a member of this workspace"
+	}
+	if g.IssuerAccountUnavailable {
+		return "the account that issued this grant is suspended or has Guest restrictions"
 	}
 	return "the human who issued it no longer owns or administers this page"
 }
@@ -255,8 +261,10 @@ func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID s
 		SELECT g.page_id, g.subject_type, g.subject_id, g.level, COALESCE(g.panel_ids, ''),
 		       g.granted_by_user_id, g.granted_at,
 		       COALESCE(wm.role, ''),
+               (actor.id IS NULL OR actor.suspended_at IS NOT NULL OR COALESCE(wm.access_mode,'')<>'trusted' OR EXISTS(SELECT 1 FROM workspace_members ceiling WHERE ceiling.user_id=g.granted_by_user_id AND ceiling.access_mode='restricted')),
 		       CASE
 		         WHEN wm.user_id IS NULL                                THEN 0
+                 WHEN (actor.id IS NULL OR actor.suspended_at IS NOT NULL OR COALESCE(wm.access_mode,'')<>'trusted' OR EXISTS(SELECT 1 FROM workspace_members ceiling WHERE ceiling.user_id=g.granted_by_user_id AND ceiling.access_mode='restricted')) THEN 0
 		         WHEN wm.role IN ('OWNER', 'ADMIN')                     THEN 1
 		         WHEN p.owner_user_id IS NOT NULL
 		              AND g.granted_by_user_id = p.owner_user_id        THEN 1
@@ -269,6 +277,7 @@ func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID s
 		JOIN pages p ON p.id = g.page_id
 		LEFT JOIN workspace_members wm
 		       ON wm.user_id = g.granted_by_user_id AND wm.workspace_id = ?
+        LEFT JOIN users actor ON actor.id=g.granted_by_user_id
 		WHERE p.workspace_id = ? AND (? = '' OR g.page_id = ?)
 		ORDER BY g.subject_type, g.subject_id, g.level`,
 		wsID, wsID, pageID, pageID)
@@ -283,7 +292,7 @@ func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID s
 		var onPage, panelIDs string
 		var live int
 		if err := rows.Scan(&onPage, &g.SubjectType, &g.SubjectID, &g.Level, &panelIDs,
-			&g.GrantedBy, &g.GrantedAt, &g.IssuerRole, &live); err != nil {
+			&g.GrantedBy, &g.GrantedAt, &g.IssuerRole, &g.IssuerAccountUnavailable, &live); err != nil {
 			return nil, err
 		}
 		g.Live = live == 1
