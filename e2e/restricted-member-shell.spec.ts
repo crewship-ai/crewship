@@ -37,6 +37,80 @@ const ROWS = [
   { id: "ws-b", name: "Beta", slug: "beta", currentUserRole: "MEMBER", currentUserAccessMode: "trusted", restricted_session: true, restricted_surfaces: SURFACES },
 ]
 
+
+// CHAT19 visible flow uses the existing isolated static UI fixture. Backend,
+// source authority and prompt recall are covered by real Go/CLI tests.
+for (const width of [1280, 390]) {
+  test(`CHAT19 explicit preferences at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    let feedback: { id: string; workspace_id: string; user_id: string; message_id: string; signal: string; reason?: string; revision: number; memory: { status: string; entry_id?: string } } | null = null
+    let preferences: { id: string; revision: number; feedback_id: string; source_revision: number; chat_id: string; message_id: string; reason: string; value: string; status: string; source_type: string }[] = []
+    let optedOut = false
+    let processingReads = 0
+    const posts: { reason?: string }[] = []
+    const concise = "Next time, keep answers concise."
+    const conclusion = "Next time, start with the conclusion."
+    await page.addInitScript(() => localStorage.setItem("crewship.workspaceId:memory-user", "memory-ws"))
+    await page.route("**/api/**", async route => {
+      const req = route.request(), path = new URL(req.url()).pathname
+      let body: unknown = []
+      let status = 200
+      if (path === "/api/auth/session") body = { user: { id: "memory-user", name: "Memory reader", email: "memory@example.test" }, expires: "2099-01-01T00:00:00Z" }
+      else if (path === "/api/v1/workspaces") body = [{ id: "memory-ws", slug: "memory", name: "Memory workspace", currentUserRole: "OWNER", currentUserAccessMode: "trusted" }]
+      else if (path === "/api/v1/agents" || path === "/api/v1/agents/memory-agent") { const agent = { id: "memory-agent", name: "Jamie", slug: "_", status: "IDLE", crew_id: "memory-crew", agent_role: "AGENT", current_user_can_chat: true }; body = path.endsWith("/agents") ? [agent] : agent }
+      else if (path === "/api/v1/crews") body = [{ id: "memory-crew", slug: "memory-crew", name: "Memory crew" }]
+      else if (path.endsWith("/chats")) body = [{ id: "memory-chat", title: "Feedback preferences", status: "IDLE", mode: "CHAT", origin: "UI", created_by: "memory-user", visibility: "private", message_count: 1, started_at: "2026-10-15T08:00:00Z" }]
+      else if (path.endsWith("/execution-profile")) body = { mode: "trusted", audience: "private" }
+      else if (path === "/api/v1/chats/memory-chat/messages") body = { messages: [{ id: "memory-message", role: "assistant", content: "Here is the completed summary.", ts: "2026-10-15T08:00:00Z" }] }
+      else if (path === "/api/v1/feedback") {
+        if (req.method() === "POST") {
+          const data = req.postDataJSON(); posts.push(data)
+          feedback = { id: "feedback-1", workspace_id: "memory-ws", user_id: "memory-user", message_id: "memory-message", signal: data.signal, reason: data.reason, revision: data.reason ? 2 : 1, memory: { status: data.reason ? "processing" : "feedback_only", entry_id: data.reason ? "preference-1" : undefined } }
+          if (data.reason) preferences = [{ id: "preference-1", revision: 1, feedback_id: feedback.id, source_revision: 2, chat_id: "memory-chat", message_id: "memory-message", reason: data.reason, value: "", status: "processing", source_type: "feedback_reason" }]
+          body = feedback; status = 201
+        } else {
+          if (feedback?.memory.status === "processing" && ++processingReads >= 3) { feedback.memory.status = "saved"; preferences = preferences.map(p => ({ ...p, status: "saved", value: p.reason === concise ? "prefers concise answers" : "prefers the conclusion first" })) }
+          body = { feedback: feedback ? [feedback] : [] }
+        }
+      } else if (path.endsWith("/peers")) body = { peers: [], preferences }
+      else if (path.endsWith("/peers/memory-user")) {
+        const params = new URL(req.url()).searchParams
+        if (req.method() === "PATCH") { const data = req.postDataJSON(); expect(data).toMatchObject({ entry_id: "preference-1", revision: 1 }); preferences = preferences.map(p => ({ ...p, reason: data.reason, revision: 2, status: "processing" })); feedback = { ...feedback!, reason: data.reason, memory: { status: "processing" } }; processingReads = 0 }
+        else { expect(params.get("entry_id")).toBe("preference-1"); expect(params.get("revision")).toBe("2"); preferences = []; feedback = { ...feedback!, memory: { status: "withdrawn" } } }
+        status = 204; body = null
+      } else if (path.endsWith("/peer-consent")) { if (req.method() === "PUT") optedOut = req.postDataJSON().opted_out; body = { opted_out: optedOut } }
+      else if (path.endsWith("/conversations")) body = { conversations: [], next_offset: null }
+      else if (path === "/api/v1/me/preferences") body = {}
+      else if (path === "/api/v1/ws-token") { status = 404; body = {} }
+      await route.fulfill({ status, contentType: "application/json", body: status === 204 ? "" : JSON.stringify(body) })
+    })
+    await page.goto("/chat/_?session=memory-chat")
+    await expect(page.getByText("Here is the completed summary.")).toBeVisible()
+    await page.getByRole("button", { name: "Good response", exact: true }).click()
+    await expect(page.getByRole("button", { name: /What should change next time/ })).toBeVisible()
+    expect(posts[0].reason).toBeUndefined()
+    await page.getByRole("button", { name: /What should change next time/ }).click()
+    await page.getByRole("button", { name: concise, exact: true }).click()
+    await expect(page.getByRole("status").filter({ hasText: "Processing" })).toBeVisible()
+    await expect(page.getByText("Remembered for your next private chat with this agent.")).toBeVisible()
+    await page.getByRole("button", { name: "Manage my preferences", exact: true }).click()
+    const panel = page.getByRole("region", { name: "Your preferences for this agent" })
+    await expect(panel.getByText(concise, { exact: true })).toBeVisible()
+    await panel.getByText("Source", { exact: true }).click()
+    await expect(panel.getByRole("link", { name: "Open source conversation" })).toBeVisible()
+    await panel.getByRole("button", { name: "Change preference" }).click()
+    await panel.getByRole("button", { name: conclusion, exact: true }).click()
+    await expect(panel.getByRole("paragraph").filter({ hasText: conclusion })).toBeVisible()
+    await panel.getByRole("button", { name: "Forget", exact: true }).click()
+    await page.getByRole("alertdialog").getByRole("button", { name: "Forget preference", exact: true }).click()
+    await expect(panel.getByText("No preferences saved for this agent yet.")).toBeVisible()
+    await panel.getByRole("button", { name: "Turn off and forget", exact: true }).click()
+    await page.getByRole("alertdialog").getByRole("button", { name: "Turn off and forget", exact: true }).click()
+    await expect(panel.getByText("Personal memory off", { exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+  })
+}
+
 for (const width of [1280, 390]) {
   test(`restricted member shell at ${width}px: no reconnect banner, no forbidden request`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })

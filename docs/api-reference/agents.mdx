@@ -2113,3 +2113,28 @@ Get messages for a specific chat session. Proxied through crewshipd. Supports `?
 |---|---|
 | `403` | Caller lacks `read`-tier role, or is not a member of the chat's workspace |
 | `502` | Sidecar IPC call failed |
+
+### Explicit preferences in the peer API
+
+`GET /api/v1/agents/{agentId}/peers` additionally returns `preferences`, restricted
+to the authenticated subject in the selected workspace. Each entry has `id`,
+`revision`, `feedback_id`, `source_revision`, `chat_id`, `message_id`, `reason`,
+`value`, `status` and `source_type` (`feedback_reason`). Only currently accessible
+private sources qualify. Existing `peers` records are unchanged.
+
+`PATCH /api/v1/agents/{agentId}/peers/{userId}` corrects one own preference:
+
+```json
+{"entry_id":"entry…","revision":1,"reason":"Next time, start with the conclusion."}
+```
+
+A valid catalogue v1 reason creates a new feedback source revision for asynchronous
+verification. Returns 204; 400 for invalid input, 404 for a missing or inaccessible
+entry, 403 for another subject and 409 for stale or withdrawn entries.
+
+`DELETE /api/v1/agents/{agentId}/peers/{userId}?entry_id=entry…&revision=2`
+withdraws one own entry with the same revision checks. Omitting `entry_id` deletes
+the legacy peer card and withdraws this subject's preferences for the agent.
+Both use existing self-service authorization. The CLI equivalents are
+`crewship feedback preferences`, `crewship feedback edit-preference` and
+`crewship feedback delete-preference`.
