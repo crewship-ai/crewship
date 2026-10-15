@@ -86,7 +86,7 @@ export function RestrictedIssues({ identifier }: { identifier?: string | null })
   return <main className="mx-auto w-full max-w-4xl space-y-4 p-4 md:p-6">
     <div className="flex items-center justify-between"><h1 className="text-lg font-semibold">{identifier ? "Issue" : "Issues shared with you"}</h1>{identifier ? <Link href="/issues" className="text-sm text-primary">Back to issues</Link> : <Button variant="outline" onClick={() => { void query.refetch(); void projects.refetch() }}>Refresh</Button>}</div>
     <p className="text-sm text-muted-foreground">Your project grants decide which issues you can list, read and contribute to. Only comments explicitly shared with this project appear here.</p>
-    {!identifier && <form className="space-y-2" onSubmit={event => { event.preventDefault(); setFilter({ ...currentFilter, q: currentFilter.draft.trim(), offset: 0 }) }}>
+    {!identifier && <form className="touch-form space-y-2" onSubmit={event => { event.preventDefault(); setFilter({ ...currentFilter, q: currentFilter.draft.trim(), offset: 0 }) }}>
       <label htmlFor={searchId} className="text-sm font-medium">Search shared issues</label>
       <div className="flex gap-2"><Input id={searchId} type="search" maxLength={256} value={currentFilter.draft} onChange={event => setFilter({ ...currentFilter, draft: event.target.value })} /><Button type="submit">Search</Button>{q && <Button type="button" variant="outline" onClick={() => setFilter({ scope: filterScope, draft: "", q: "", offset: 0 })}>Clear search</Button>}</div>
       <p className="text-xs text-muted-foreground">Search titles and identifiers in projects shared with you.</p>

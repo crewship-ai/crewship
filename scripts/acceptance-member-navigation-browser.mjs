@@ -118,6 +118,17 @@ try {
   await pages.other.getByRole('button',{name:'Clear search',exact:true}).click()
   await expect(pages.other.getByRole('link',{name:'Client browser request',exact:true})).toBeVisible()
   await check('clearing the search restores the shared issue catalog',await pages.other.getByLabel('Search shared issues',{exact:true}).inputValue()==='')
+  contexts.touchSearch=await browser.newContext({viewport:{width:820,height:900},hasTouch:true})
+  await contexts.touchSearch.addCookies([{name:'authjs.session-token',value:fixture.tokens['nav-client-b'],url:fixture.server,httpOnly:true,sameSite:'Lax'}])
+  await contexts.touchSearch.addInitScript(({workspace})=>localStorage.setItem('crewship.workspaceId:nav-client-b',workspace),{workspace:fixture.workspace})
+  pages.touchSearch=await contexts.touchSearch.newPage()
+  await open('touchSearch','/issues')
+  const touchSearchInput=await pages.touchSearch.getByLabel('Search shared issues',{exact:true}).boundingBox()
+  const touchSearchButton=await pages.touchSearch.getByRole('button',{name:'Search',exact:true}).boundingBox()
+  await check('shared search has 44px targets on an 820px coarse-pointer tablet',await pages.touchSearch.evaluate(()=>matchMedia('(pointer: coarse)').matches) && touchSearchInput?.height>=44 && touchSearchButton?.height>=44)
+  await contexts.touchSearch.close()
+  delete contexts.touchSearch
+  delete pages.touchSearch
   const foreignSearch=await contexts.desktop.request.get(`${sharedSearchPath}?q=BROWSER%20REQUEST`)
   await check('another client cannot infer a shared issue from search rows or counts',foreignSearch.status()===200 && foreignSearch.headers()['x-total-count']==='0' && (await foreignSearch.json()).length===0)
   const foreignProjectSearch=await contexts.desktop.request.get(`${sharedSearchPath}?project_id=${sharedProject.id}&q=BROWSER%20REQUEST`)

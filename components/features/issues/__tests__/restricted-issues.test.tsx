@@ -53,6 +53,22 @@ it("does not present an empty search as an access denial", async () => {
   expect(screen.queryByText("No issues shared here")).toBeNull()
 })
 
+it("keeps an unsubmitted new issue draft when searching the catalog", async () => {
+  fetchMock.mockImplementation(async (path: string) => response(path.includes("restricted-issue-projects") ? [project] : path.includes("q=") ? [] : [row]))
+  show()
+  fireEvent.click(await screen.findByText("New issue"))
+  fireEvent.change(screen.getByLabelText("Project", { exact: true }), { target: { value: "project-1" } })
+  fireEvent.change(screen.getByLabelText("Title", { exact: true }), { target: { value: "Keep my request" } })
+  fireEvent.change(screen.getByLabelText("Description", { exact: true }), { target: { value: "Keep my brief" } })
+  fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "another request" } })
+  fireEvent.click(screen.getByRole("button", { name: "Search", exact: true }))
+  await screen.findByText(/No matching shared issues/)
+  expect(screen.getByLabelText("Title", { exact: true })).toHaveValue("Keep my request")
+  expect(screen.getByLabelText("Description", { exact: true })).toHaveValue("Keep my brief")
+  expect(screen.getByLabelText("Project", { exact: true })).toHaveValue("project-1")
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false)
+})
+
 it("does not retain another account or workspace's search input", async () => {
   fetchMock.mockImplementation(async (path: string) => response(path.includes("restricted-issue-projects") ? [] : [row]))
   const { rerender } = show()
