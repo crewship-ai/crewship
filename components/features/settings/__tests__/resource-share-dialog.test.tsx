@@ -21,6 +21,8 @@ const roster = [
 function response(body: unknown, status = 200) { return { ok: status < 400, status, json: async () => body } }
 function mockApi(writeStatus = 200) {
   h.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+	if (url.includes("/guest-intake")) return response({project_id:"routine-1",crew_id:"",crew_name:"",revision:0})
+	if (url.includes("/crews?")) return response([])
     if (init?.method === "PUT") return response({ ...JSON.parse(String(init.body)), revision: 8 }, writeStatus)
     return response(url.includes("/access?") ? policy : roster)
   })

@@ -12,6 +12,7 @@ import { test, expect } from "@playwright/test"
 // dependency on app code); lib/__tests__/restricted-endpoints.test.ts pins that
 // list to the Go source.
 const ALLOWED: RegExp[] = [
+  /^GET \/api\/v1\/workspaces\/[^/]+\/restricted-issue-projects$/,
   /^GET \/api\/v1\/workspaces$/,
   /^GET \/api\/v1\/agents$/,
   /^GET \/api\/v1\/agents\/[^/]+$/,

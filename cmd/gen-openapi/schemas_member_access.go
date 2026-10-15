@@ -23,7 +23,7 @@ func memberAccessPolicySchema() map[string]any {
 			"revision":      map[string]any{"type": "integer", "format": "int64", "minimum": 1},
 			"rights": map[string]any{"type": "array", "maxItems": 256, "uniqueItems": true, "items": map[string]any{"oneOf": []any{
 				right("agent", []string{"discover", "chat", "run", "delegate"}),
-				right("project", []string{"list", "read", "write", "delete"}),
+				right("project", []string{"list", "read", "write", "delete", "contribute"}),
 				right("routine", []string{"run"}),
 			}}},
 		},
@@ -53,9 +53,9 @@ func memberEffectiveAccessSchema() map[string]any {
 }
 
 func restrictedIssueSchema() map[string]any {
-	properties := map[string]any{"can_read": map[string]any{"type": "boolean"}}
+	properties := map[string]any{"can_read": map[string]any{"type": "boolean"}, "can_contribute": map[string]any{"type": "boolean"}}
 	for _, key := range []string{"id", "identifier", "title", "status", "project_id", "project_name", "description"} {
 		properties[key] = map[string]any{"type": "string"}
 	}
-	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "identifier", "title", "status", "project_id", "project_name", "can_read"}, "properties": properties}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "identifier", "title", "status", "project_id", "project_name", "can_read", "can_contribute"}, "properties": properties}
 }

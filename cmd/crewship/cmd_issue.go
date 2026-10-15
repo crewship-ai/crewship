@@ -22,6 +22,7 @@ import (
 // rather than "crew_id"). Without the yaml tag, --format yaml and --format
 // json return the same data under different key casing (#1211).
 type issueItem struct {
+	ProjectID            *string        `json:"project_id,omitempty" yaml:"project_id,omitempty"`
 	Revision             int64          `json:"revision" yaml:"revision"`
 	AggregateRevision    int64          `json:"aggregate_revision" yaml:"aggregate_revision"`
 	AllowedActions       []string       `json:"allowed_actions" yaml:"allowed_actions"`
@@ -131,11 +132,12 @@ type issueLabel struct {
 }
 
 type issueComment struct {
-	ID        string  `json:"id" yaml:"id"`
-	Body      string  `json:"body" yaml:"body"`
-	AuthorID  *string `json:"author_id" yaml:"author_id"`
-	Author    *string `json:"author_name" yaml:"author_name"`
-	CreatedAt string  `json:"created_at" yaml:"created_at"`
+	GuestVisible bool    `json:"guest_visible,omitempty" yaml:"guest_visible,omitempty"`
+	ID           string  `json:"id" yaml:"id"`
+	Body         string  `json:"body" yaml:"body"`
+	AuthorID     *string `json:"author_id" yaml:"author_id"`
+	Author       *string `json:"author_name" yaml:"author_name"`
+	CreatedAt    string  `json:"created_at" yaml:"created_at"`
 }
 
 // labelItem decodes one row of the label surface — GET /api/v1/labels and
@@ -579,6 +581,7 @@ func init() {
 	// issue comment flags
 	issueCommentCmd.Flags().String("idempotency-key", "", "Stable operation key; reuse on retry")
 	issueCommentCmd.Flags().String("body", "", "Comment body (alternative to positional args)")
+	issueCommentCmd.Flags().Bool("guest-visible", false, "Explicitly share this new comment with Guests who can read the current project; agent mentions must stay private")
 	issueCommentCmd.Flags().StringArray("mention", nil, "Mention an agent by slug (repeatable) — resolved to the "+
 		"workspace agent and written as the real [@slug](crewship:agent/<id>) link the server requires. "+
 		"A bare @slug typed into the body or --body is plain text and mentions nobody.")

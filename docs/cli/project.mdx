@@ -206,3 +206,20 @@ crewship project milestones rm mil_abc123 --yes      # alias on the group + verb
 - [`crewship issue`](/cli/issue) — issues live inside projects (or float unlinked).
 - [`crewship label`](/cli/label) — the labels referenced in the breakdown.
 - [Issues API](/api-reference/issues) — covers project endpoints (`GET /api/v1/projects`).
+
+
+## `crewship project guest-intake`
+
+Read or configure where new Guest requests for this project are filed.
+Trusted ADMIN/OWNER only; setting requires the existing mutation token scope.
+
+```bash
+crewship project guest-intake PROJECT_ID
+crewship project guest-intake PROJECT_ID --crew CREW_ID --format yaml
+```
+
+With `--crew`, reads the current revision and saves exactly once; a stale
+snapshot returns 409 without retry. The chosen crew must be active in the same
+workspace and have a live LEAD agent. Its ID, name and configuration revision
+appear only in this administrative view. New requests start unassigned in
+Backlog; configuring intake does not grant agent or routine execution access.

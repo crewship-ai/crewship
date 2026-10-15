@@ -17,6 +17,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Pages folder and page menus now follow caller-specific server ACL decisions: readers see no mutation controls, folder editors can arrange, and page owners retain move access.
 - Guest accounts can complete CLI login by creating their own token from a verified interactive session. Minted tokens retain Guest restrictions; bearer credentials cannot remint a wider successor.
 
+- Guest project contributors can submit Backlog requests, post explicitly shared comments and arrange intake work. Administrators choose the project intake crew; historical staff comments stay private and shared threads stay bound to their original project. UI and CLI cover the same operations.
+
 - **Share routines and projects from their detail cards.** Workspace administrators can inspect Guest shares, preserve unrelated rights and issuer provenance, revoke individual operations or explicitly reissue inactive shares. Conflicting saves require a fresh review. Routine sharing offers Run; project sharing offers independent List and Read.
 - **Share individual routines and projects from the CLI.** `share`, `share list` and `unshare` preserve unrelated rights and issuer provenance, expose inactive shares and require explicit `--reissue` to move authority. Stale policy saves fail without retry.
 

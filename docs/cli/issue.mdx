@@ -266,6 +266,7 @@ The comment body can be passed as positional arguments after the identifier, or 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--body` | `string` | | Comment body (alternative to positional args). |
+| `--guest-visible` | `bool` | `false` | Explicitly publish this new comment to Guests with project Read. Project issues only; agent mentions must stay private. |
 | `--mention` | `string` | | Mention an agent by slug. Repeatable. Resolved against the workspace agent roster (same lookup as `--assignee` elsewhere) and prepended to the body as the real `[@slug](crewship:agent/<id>)` link the server requires — one per mention, space-separated, before the rest of the text. Fails with a clear error naming the slug and the workspace's real agents if a slug does not resolve. `--mention` alone with no other text is a valid comment. |
 
 <Warning>
@@ -813,3 +814,73 @@ crewship issue shared ISSUE_IDENTIFIER --format json
 Listing requires project.list; detail requires project.read. A revoked or
 foreign issue returns 404, never a cached body. No issue mutations, comments,
 related-resource metadata or run history are returned.
+
+
+Trusted collaborators can explicitly publish a new project comment with
+`crewship issue comment CLIENT-1 --body "Staff answer" --guest-visible`.
+Omitting `--guest-visible` keeps it private. Agent mentions must remain in private
+comments; publication and its audit commit together.
+
+## `crewship issue shared projects`
+
+List the Guest's visible projects, including empty ones, with contribution and
+intake readiness columns. Requires a live project List grant.
+
+```bash
+crewship issue shared projects
+```
+
+## `crewship issue shared create`
+
+```bash
+crewship issue shared create --project PROJECT_ID --title "Client request" --description "Brief"
+```
+
+`--project` and `--title` are required. Requires project Read and Contribute;
+the administrator must configure an intake crew first. Creates an unassigned
+Backlog request. The caller cannot choose an execution crew, agent, assignee or
+routine. Description is optional; maximum title/description sizes are 4096/65536
+bytes. Mutations use the existing `workspace:admin` token scope in addition to
+resource grants; this scope does not make a Guest an administrator.
+
+`--idempotency-key` optionally binds a retry to this exact creation request; keep it unchanged after a lost response.
+
+## `crewship issue shared comment`
+
+```bash
+crewship issue shared comment CLIENT-1 --project project-id --body "Client question"
+```
+
+Requires Read and Contribute. `--body` is required, 1–32768 bytes. The comment
+is shared with readers of this project; private staff comments remain private.
+The route does not resolve or trigger agent mentions.
+
+The required `--project` confirms the audience of the draft. If the issue has moved, the server returns 409; review the new project before sending again.
+
+`--idempotency-key` optionally binds a retry to this exact comment and expected project audience; conflicting requests are refused.
+
+## `crewship issue shared comments`
+
+```bash
+crewship issue shared comments CLIENT-1 --format json
+```
+
+Requires Read. Shows the latest 100 explicitly shared comments with generic author
+labels. Moving the issue to another project does not publish its old shared
+thread to a different client. IDs or identifiers are accepted.
+
+## `crewship issue shared move`
+
+```bash
+crewship issue shared move CLIENT-1 --status TODO
+```
+
+Requires Read and Contribute. `--status` is required: BACKLOG or TODO. Only
+intake work can move between those states. Execution, review, terminal states
+and project reassignment retain the trusted workflow. A 409 is returned if the
+issue has already entered that workflow. No mutation retries a denied request.
+
+Guest `issue shared create`, `comment` and `move` accept `--idempotency-key`.
+Keep the key unchanged when retrying the same command after a lost response;
+a conflicting key is not retried automatically. The server rechecks current
+grants and project audience before replaying a saved result.

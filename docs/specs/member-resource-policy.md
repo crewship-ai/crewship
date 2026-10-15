@@ -70,7 +70,7 @@ access first. A role change cannot silently remove or bypass the restriction.
 | --- | --- | --- |
 | New GUEST workspace role | Changed: restricted access mode, Guest in UI, account-wide | The current global route fence has no mixed-mode bypass. Keeping one account ceiling avoids granting trusted routes through another workspace while per-resource integration is incomplete. Separate workspace-scoped guest accounts remain a future migration. |
 | New resource_grants registry | Changed: extend versioned access_grants | Reuse the shipped membership revision, resource foreign keys and execution revocation fences rather than introduce two authorities. Pages moves last as originally planned. |
-| Per-object sharing and meaningful type levels | Kept as target; only agent operations, routine run and project projection delivered | View/Edit and crew/credential subjects need separate enforcement and UI work. Routine/project Share dialogs reuse the versioned member policy. |
+| Per-object sharing and meaningful type levels | Kept as target; only agent operations, routine Run and project read/contribute delivered | View/Edit and crew/credential subjects need separate enforcement and UI work. Routine/project Share dialogs reuse the versioned member policy. |
 | Pages model migration | Deferred, as in original phases | Preserve current Pages ACL, issuer checks and data during the first routine/project slice. |
 
 Guest invitation acceptance, restricted provisioning and direct member policy
@@ -165,7 +165,7 @@ or run history. Foreign and revoked details return 404. The shared issue board,
 search, statistics and mutation routes remain closed to Guests. Collection
 `X-Total-Count` counts the filtered total before pagination; the next-offset header supports pagination.
 
-Crews, credentials, routine View/Edit levels, guest issue contribution, explicit
+Crews, credentials, routine View/Edit levels, full Issues Manage, explicit
 Page-action selection and a Pages grant migration remain separate work. This
 contract does not claim complete resource-access PRD or release-1.0 acceptance.
 
@@ -228,7 +228,7 @@ Trusted workspace OWNER/ADMIN members can open **Share** on the routine or proje
 identity card. The dialog lists trusted role-based members and each Guest's
 explicit shares on that object, including inactive issuer state. Routine sharing
 currently offers Run; project sharing offers independent List and Read. It does
-not introduce routine View/Edit or project Contribute/Manage.
+not introduce routine View/Edit or full Issues Manage; project Contribute is described below.
 
 Each Guest save retains their membership ID, access mode and revision, preserves
 all other resources and unsupported future operations, and sends only writable
@@ -255,3 +255,29 @@ existing tier/scope checks and ordinary self-revocation behavior.
 
 
 Pages’ existing grant resolver now also requires an active trusted issuer account, including no Guest restriction elsewhere. This applies to workspace administrators, user owners and owning crew members. Stored Page grants remain available to administrators with an account-status reason when inactive. The two Pages ACL models have not yet been migrated to access_grants.
+## Project contributions and explicit comment audiences
+
+Project `contribute` supplements `read`, independently of source-file `write`.
+Dedicated Guest routes create unassigned Backlog requests in an administrator's
+versioned project intake crew, post shared comments and arrange intake between
+BACKLOG and TODO. They recheck live issuer grants, membership and active account
+inside the mutation transaction. Content changes commit activity and durable journal outbox intents atomically, following the issue mutation contract; journal projection retries after commit. Intake configuration keeps its synchronous atomic journal. Guest-authored issues and comments carry explicit unavailable execution origins, so Contribute cannot become autonomous execution authority. Unknown mutation
+fields are refused; there is no agent/crew/assignee/routine override or trusted
+board route exposure. Review/execution states and project reassignment stay
+behind the existing trusted workflow. Full Issues Manage is not implemented.
+
+Every historical comment stays private. Trusted authors may explicitly mark a
+new comment as shared with Guests; Guest contributions are explicitly shared.
+Each publication is bound to the issue's project at that time. A later project
+move does not expose the original client's thread. Guest responses contain only
+shared bodies, timestamps, comment IDs and generic author labels, with no
+member email, agent metadata, mention expansion or private comment count.
+
+The Share dialog configures intake and grants Contribute; Settings and CLI offer
+the same grant. Guest forms preserve failed drafts, explain unconfigured intake
+and never offer trusted execution or deletion controls. The new endpoints have
+CLI equivalents and built-binary acceptance, and join the route-walking leak test.
+
+Shared comments confirm their expected project in the request. Staff use `expected_project_id` with `guest_visible`; Guest comments require `project_id`. A move returns 409 rather than silently changing the audience. Both composers preserve the draft and require an explicit new audience choice.
+
+Guest issue mutations accept optional actor-scoped idempotency keys; creation replay also rechecks the created issue’s current project and live grants. Content, operation receipt and durable audit intent share one transaction. This does not grant agent execution authority.

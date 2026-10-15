@@ -240,9 +240,10 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// recovery entry able to name what it is closing.
 	"page_panel_alerts": IntentInclude,
 	// `hooks` used to sit here; the table is hooks_config (#2274).
-	"labels":     IntentInclude,
-	"milestones": IntentInclude,
-	"projects":   IntentInclude,
+	"labels":                     IntentInclude,
+	"milestones":                 IntentInclude,
+	"projects":                   IntentInclude,
+	"project_guest_issue_intake": IntentInclude,
 
 	// === Eval / training (round-trip) =========================
 	"eval_runs":           IntentInclude,

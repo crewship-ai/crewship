@@ -12,14 +12,15 @@ import (
 // A guest's Issue view deliberately contains no agent/crew references, comments,
 // run history, summaries or cross-project relations from the shared issue DTO.
 type restrictedIssue struct {
-	ID          string  `json:"id"`
-	Identifier  string  `json:"identifier"`
-	Title       string  `json:"title"`
-	Status      string  `json:"status"`
-	ProjectID   string  `json:"project_id"`
-	ProjectName string  `json:"project_name"`
-	CanRead     bool    `json:"can_read"`
-	Description *string `json:"description,omitempty"`
+	ID            string  `json:"id"`
+	Identifier    string  `json:"identifier"`
+	Title         string  `json:"title"`
+	Status        string  `json:"status"`
+	ProjectID     string  `json:"project_id"`
+	ProjectName   string  `json:"project_name"`
+	CanRead       bool    `json:"can_read"`
+	CanContribute bool    `json:"can_contribute"`
+	Description   *string `json:"description,omitempty"`
 }
 
 // restrictedIssues serves a single, bulk-filtered project projection. List and
@@ -27,8 +28,8 @@ type restrictedIssue struct {
 func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	user := UserFromContext(req.Context())
-	workspace := WorkspaceIDFromContext(req.Context())
-	if user == nil {
+	workspace, matches := memberAccessWorkspace(req)
+	if user == nil || !matches {
 		replyError(w, 404, "Issues unavailable")
 		return
 	}
@@ -71,11 +72,12 @@ func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
 	}
 	rows, err := r.db.QueryContext(req.Context(), `SELECT m.id,COALESCE(m.identifier,m.id),m.title,m.status,p.id,p.name,
  EXISTS(SELECT 1 FROM live_access_grants read_grant WHERE read_grant.member_id=? AND read_grant.resource_kind='project' AND read_grant.project_id=p.id AND read_grant.operation='read'),
+ EXISTS(SELECT 1 FROM live_access_grants contribution WHERE contribution.member_id=? AND contribution.resource_kind='project' AND contribution.project_id=p.id AND contribution.operation='contribute') AND EXISTS(SELECT 1 FROM live_access_grants read_grant WHERE read_grant.member_id=? AND read_grant.resource_kind='project' AND read_grant.project_id=p.id AND read_grant.operation='read'),
  CASE WHEN ?='read' THEN m.description ELSE NULL END
  FROM missions m JOIN projects p ON p.id=m.project_id AND p.workspace_id=m.workspace_id
  JOIN live_access_grants g ON g.project_id=p.id AND g.resource_kind='project' AND g.member_id=? AND g.operation=?
  WHERE m.workspace_id=? AND m.mission_type='issue' AND (?='' OR m.id=? OR m.identifier=?) AND (?='' OR p.id=?)
- ORDER BY m.created_at DESC,m.id LIMIT ? OFFSET ?`, member.ID, operation, member.ID, operation, workspace, id, id, id, project, project, limit, offset)
+ ORDER BY m.created_at DESC,m.id LIMIT ? OFFSET ?`, member.ID, member.ID, member.ID, operation, member.ID, operation, workspace, id, id, id, project, project, limit, offset)
 	if err != nil {
 		replyError(w, 500, "Issues unavailable")
 		return
@@ -84,12 +86,13 @@ func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
 	for rows.Next() {
 		var item restrictedIssue
 		var description sql.NullString
-		if err = rows.Scan(&item.ID, &item.Identifier, &item.Title, &item.Status, &item.ProjectID, &item.ProjectName, &item.CanRead, &description); err != nil {
+		if err = rows.Scan(&item.ID, &item.Identifier, &item.Title, &item.Status, &item.ProjectID, &item.ProjectName, &item.CanRead, &item.CanContribute, &description); err != nil {
 			break
 		}
 		if description.Valid {
 			item.Description = &description.String
 		}
+		item.CanContribute = item.CanContribute && canScope(req.Context(), "workspace:admin")
 		items = append(items, item)
 	}
 	rowErr := rows.Err()

@@ -411,6 +411,7 @@ export interface IssueCodeLink {
 
 /** A comment on an issue, authored by a user or agent. */
 export interface IssueComment {
+  guest_visible?: boolean
   id: string
   mission_id: string
   author_type: "user" | "agent"

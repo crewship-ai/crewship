@@ -263,7 +263,8 @@ var TableCategory = map[string]string{
 	"issue_mutation_outbox": categoryWorkOnly,
 	"mission_labels":        categoryWorkOnly, "mission_proposals": categoryWorkOnly, "mission_relations": categoryWorkOnly,
 	"mission_code_links": categoryWorkOnly, "labels": categoryWorkOnly, "milestones": categoryWorkOnly,
-	"projects": categoryWorkOnly, "subscriptions": categoryWorkOnly, "inbox_items": categoryWorkOnly,
+	"project_guest_issue_intake": categoryWorkOnly,
+	"projects":                   categoryWorkOnly, "subscriptions": categoryWorkOnly, "inbox_items": categoryWorkOnly,
 	"inbox_item_reads": categoryWorkOnly, "triage_rules": categoryWorkOnly, "saved_views": categoryWorkOnly,
 }
 

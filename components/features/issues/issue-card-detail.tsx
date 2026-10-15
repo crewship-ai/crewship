@@ -148,7 +148,7 @@ interface Props {
    * drawn: the endpoint, the workspace and the refetch belong to the host,
    * the same way the action buttons do.
    */
-  onSubmitComment?: (body: string) => boolean | Promise<boolean>
+  onSubmitComment?: (body: string, options?: { guestVisible: boolean; expectedProjectId: string }) => boolean | Promise<boolean>
   /** Initial for the composer's author bubble. */
   viewerInitial?: string
   /**
@@ -444,6 +444,7 @@ export function IssueCardDetail({
                         <span className="text-[11px] text-muted-foreground">
                           {timeAgo(c.created_at)}
                         </span>
+                        {c.guest_visible && <span className="text-[11px] text-muted-foreground">Shared with Guests</span>}
                       </div>
                       <div className="mt-1 text-[13px] leading-relaxed text-foreground/85">
                         <MarkdownContent compact mentions={mentions}>
@@ -463,6 +464,8 @@ export function IssueCardDetail({
                 <CommentComposer
                   agents={agents ?? []}
                   onSubmit={onSubmitComment}
+                  allowGuestSharing={Boolean(project)}
+                  guestProject={project}
                   authorInitial={viewerInitial ?? "U"}
                 />
               </div>

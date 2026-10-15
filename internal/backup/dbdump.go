@@ -172,6 +172,8 @@ var BackupTables = []string{
 	"labels",
 	"milestones",
 	"projects",
+	// Project-scoped Guest request routing depends on projects and crews.
+	"project_guest_issue_intake",
 	"project_files", "project_file_versions", "project_file_blobs",
 	"missions",
 	"issue_work",

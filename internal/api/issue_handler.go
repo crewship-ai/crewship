@@ -410,15 +410,16 @@ type relationResponse struct {
 }
 
 type commentResponse struct {
-	OperationID string `json:"operation_id,omitempty"`
-	ID          string `json:"id"`
-	MissionID   string `json:"mission_id"`
-	AuthorType  string `json:"author_type"`
-	AuthorID    string `json:"author_id"`
-	AuthorName  string `json:"author_name,omitempty"`
-	Body        string `json:"body"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	GuestVisible bool   `json:"guest_visible,omitempty"`
+	OperationID  string `json:"operation_id,omitempty"`
+	ID           string `json:"id"`
+	MissionID    string `json:"mission_id"`
+	AuthorType   string `json:"author_type"`
+	AuthorID     string `json:"author_id"`
+	AuthorName   string `json:"author_name,omitempty"`
+	Body         string `json:"body"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 type activityResponse struct {
