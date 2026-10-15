@@ -9,6 +9,7 @@ import { IssueEntityCard } from "../issue-entity-card"
 const { fetch } = vi.hoisted(() => ({ fetch: vi.fn() }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetch, broadcastSessionExpired: vi.fn() }))
 vi.mock("../chat-agent-context", () => ({ useChatAgent: () => ({ id: "entity-agent", name: "Jamie" }) }))
+vi.mock("../issue-pull-requests", () => ({ ChatIssuePullRequests: ({ crewId, identifier }: { crewId: string; identifier: string }) => <div data-testid="chat-pr-card">{crewId}:{identifier}</div> }))
 const base = fixture.refs[0] as EntityRef
 const props = { reference: base, chatId: "chat", userId: "viewer", rechecking: false, live: true, checkedAt: 1234, onOpen: vi.fn(), reconcile: vi.fn() }
 function setup(reference = base) {
@@ -86,4 +87,16 @@ it("keeps an editor draft through authorization reconciliation", async () => {
   expect(screen.queryByDisplayValue("Unsaved")).toBeNull()
   act(() => rerenderCard({ rechecking: false }))
   await waitFor(() => expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Unsaved"))
+})
+
+it("opens linked requests only on demand using the verified issue crew", async () => {
+  fetch.mockResolvedValue(new Response(JSON.stringify({ crew_id: "verified-crew", allowed_actions: ["view"] })))
+  setup()
+  expect(fetch).not.toHaveBeenCalled()
+  expect(screen.queryByTestId("chat-pr-card")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Pull requests" }))
+  expect(await screen.findByTestId("chat-pr-card")).toHaveTextContent("verified-crew:ENG-1")
+  expect(fetch).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole("button", { name: "Pull requests" }))
+  expect(screen.queryByTestId("chat-pr-card")).toBeNull()
 })

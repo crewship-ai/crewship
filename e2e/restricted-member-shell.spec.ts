@@ -37,6 +37,80 @@ const ROWS = [
   { id: "ws-b", name: "Beta", slug: "beta", currentUserRole: "MEMBER", currentUserAccessMode: "trusted", restricted_session: true, restricted_surfaces: SURFACES },
 ]
 
+
+// CHAT19 visible flow uses the existing isolated static UI fixture. Backend,
+// source authority and prompt recall are covered by real Go/CLI tests.
+for (const width of [1280, 390]) {
+  test(`CHAT19 explicit preferences at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    let feedback: { id: string; workspace_id: string; user_id: string; message_id: string; signal: string; reason?: string; revision: number; memory: { status: string; entry_id?: string } } | null = null
+    let preferences: { id: string; revision: number; feedback_id: string; source_revision: number; chat_id: string; message_id: string; reason: string; value: string; status: string; source_type: string }[] = []
+    let optedOut = false
+    let processingReads = 0
+    const posts: { reason?: string }[] = []
+    const concise = "Next time, keep answers concise."
+    const conclusion = "Next time, start with the conclusion."
+    await page.addInitScript(() => localStorage.setItem("crewship.workspaceId:memory-user", "memory-ws"))
+    await page.route("**/api/**", async route => {
+      const req = route.request(), path = new URL(req.url()).pathname
+      let body: unknown = []
+      let status = 200
+      if (path === "/api/auth/session") body = { user: { id: "memory-user", name: "Memory reader", email: "memory@example.test" }, expires: "2099-01-01T00:00:00Z" }
+      else if (path === "/api/v1/workspaces") body = [{ id: "memory-ws", slug: "memory", name: "Memory workspace", currentUserRole: "OWNER", currentUserAccessMode: "trusted" }]
+      else if (path === "/api/v1/agents" || path === "/api/v1/agents/memory-agent") { const agent = { id: "memory-agent", name: "Jamie", slug: "_", status: "IDLE", crew_id: "memory-crew", agent_role: "AGENT", current_user_can_chat: true }; body = path.endsWith("/agents") ? [agent] : agent }
+      else if (path === "/api/v1/crews") body = [{ id: "memory-crew", slug: "memory-crew", name: "Memory crew" }]
+      else if (path.endsWith("/chats")) body = [{ id: "memory-chat", title: "Feedback preferences", status: "IDLE", mode: "CHAT", origin: "UI", created_by: "memory-user", visibility: "private", message_count: 1, started_at: "2026-10-15T08:00:00Z" }]
+      else if (path.endsWith("/execution-profile")) body = { mode: "trusted", audience: "private" }
+      else if (path === "/api/v1/chats/memory-chat/messages") body = { messages: [{ id: "memory-message", role: "assistant", content: "Here is the completed summary.", ts: "2026-10-15T08:00:00Z" }] }
+      else if (path === "/api/v1/feedback") {
+        if (req.method() === "POST") {
+          const data = req.postDataJSON(); posts.push(data)
+          feedback = { id: "feedback-1", workspace_id: "memory-ws", user_id: "memory-user", message_id: "memory-message", signal: data.signal, reason: data.reason, revision: data.reason ? 2 : 1, memory: { status: data.reason ? "processing" : "feedback_only", entry_id: data.reason ? "preference-1" : undefined } }
+          if (data.reason) preferences = [{ id: "preference-1", revision: 1, feedback_id: feedback.id, source_revision: 2, chat_id: "memory-chat", message_id: "memory-message", reason: data.reason, value: "", status: "processing", source_type: "feedback_reason" }]
+          body = feedback; status = 201
+        } else {
+          if (feedback?.memory.status === "processing" && ++processingReads >= 3) { feedback.memory.status = "saved"; preferences = preferences.map(p => ({ ...p, status: "saved", value: p.reason === concise ? "prefers concise answers" : "prefers the conclusion first" })) }
+          body = { feedback: feedback ? [feedback] : [] }
+        }
+      } else if (path.endsWith("/peers")) body = { peers: [], preferences }
+      else if (path.endsWith("/peers/memory-user")) {
+        const params = new URL(req.url()).searchParams
+        if (req.method() === "PATCH") { const data = req.postDataJSON(); expect(data).toMatchObject({ entry_id: "preference-1", revision: 1 }); preferences = preferences.map(p => ({ ...p, reason: data.reason, revision: 2, status: "processing" })); feedback = { ...feedback!, reason: data.reason, memory: { status: "processing" } }; processingReads = 0 }
+        else { expect(params.get("entry_id")).toBe("preference-1"); expect(params.get("revision")).toBe("2"); preferences = []; feedback = { ...feedback!, memory: { status: "withdrawn" } } }
+        status = 204; body = null
+      } else if (path.endsWith("/peer-consent")) { if (req.method() === "PUT") optedOut = req.postDataJSON().opted_out; body = { opted_out: optedOut } }
+      else if (path.endsWith("/conversations")) body = { conversations: [], next_offset: null }
+      else if (path === "/api/v1/me/preferences") body = {}
+      else if (path === "/api/v1/ws-token") { status = 404; body = {} }
+      await route.fulfill({ status, contentType: "application/json", body: status === 204 ? "" : JSON.stringify(body) })
+    })
+    await page.goto("/chat/_?session=memory-chat")
+    await expect(page.getByText("Here is the completed summary.")).toBeVisible()
+    await page.getByRole("button", { name: "Good response", exact: true }).click()
+    await expect(page.getByRole("button", { name: /What should change next time/ })).toBeVisible()
+    expect(posts[0].reason).toBeUndefined()
+    await page.getByRole("button", { name: /What should change next time/ }).click()
+    await page.getByRole("button", { name: concise, exact: true }).click()
+    await expect(page.getByRole("status").filter({ hasText: "Processing" })).toBeVisible()
+    await expect(page.getByText("Remembered for your next private chat with this agent.")).toBeVisible()
+    await page.getByRole("button", { name: "Manage my preferences", exact: true }).click()
+    const panel = page.getByRole("region", { name: "Your preferences for this agent" })
+    await expect(panel.getByText(concise, { exact: true })).toBeVisible()
+    await panel.getByText("Source", { exact: true }).click()
+    await expect(panel.getByRole("link", { name: "Open source conversation" })).toBeVisible()
+    await panel.getByRole("button", { name: "Change preference" }).click()
+    await panel.getByRole("button", { name: conclusion, exact: true }).click()
+    await expect(panel.getByRole("paragraph").filter({ hasText: conclusion })).toBeVisible()
+    await panel.getByRole("button", { name: "Forget", exact: true }).click()
+    await page.getByRole("alertdialog").getByRole("button", { name: "Forget preference", exact: true }).click()
+    await expect(panel.getByText("No preferences saved for this agent yet.")).toBeVisible()
+    await panel.getByRole("button", { name: "Turn off and forget", exact: true }).click()
+    await page.getByRole("alertdialog").getByRole("button", { name: "Turn off and forget", exact: true }).click()
+    await expect(panel.getByText("Personal memory off", { exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+  })
+}
+
 for (const width of [1280, 390]) {
   test(`restricted member shell at ${width}px: no reconnect banner, no forbidden request`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
@@ -78,6 +152,68 @@ for (const width of [1280, 390]) {
     expect(forbidden).toEqual([])
   })
 }
+
+// The production grid stays read only while mobile navigation returns the
+// selected source context to an actionable composer, without sending it.
+test.describe("mobile artifact selection", () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  test("Chat and Work uncover the composer; Ask selection preserves its draft", async ({ page }) => {
+    let sendAttempts = 0
+    const agent = { id: "entity-agent", slug: "_", name: "Jamie", status: "IDLE", crew_id: "crew", crew_name: "Platform", role: "lead", current_user_can_chat: true }
+    await page.route("**/api/**", async (route) => {
+      const request = route.request(), path = new URL(request.url()).pathname
+      let body: unknown = [], status = 200
+      if (request.method() === "POST" && path.includes("/chats/")) sendAttempts++
+      if (path === "/api/auth/session") body = { user: { id: "viewer", name: "Pavel", email: "pavel@example.test" }, expires: "2099-01-01T00:00:00Z" }
+      else if (path === "/api/v1/workspaces") body = [{ id: "test-workspace-id", name: "Test", slug: "test", currentUserRole: "ADMIN" }]
+      else if (path === "/api/v1/ws-token") { status = 404; body = {} }
+      else if (path === "/api/v1/conversations") body = { conversations: [], next_offset: null }
+      else if (path === "/api/v1/agents") body = [agent]
+      else if (path === "/api/v1/crews") body = [{ id: "crew", name: "Platform", slug: "platform" }]
+      else if (path === "/api/v1/agents/entity-agent") body = agent
+      else if (path === "/api/v1/agents/entity-agent/chats") body = [{ id: "chat-1", title: "Table selection", mode: "private", kind: "direct", status: "active", message_count: 1, started_at: "2026-10-13T09:00:00Z", updated_at: "2026-10-13T09:00:00Z" }]
+      else if (path.endsWith("/execution-profile")) body = { mode: "trusted" }
+      else if (path.endsWith("/messages")) body = { messages: [{ id: "trigger-message", role: "user", content: "Read the output", ts: "2026-10-13T09:00:00Z" }] }
+      else if (path.endsWith("/entity-refs")) body = { contract_version: 1, reset: true, snapshot_id: "empty", refs: [], has_more: false, snapshot_complete: true, next_cursor: "" }
+      else if (path === "/api/v1/agents/entity-agent/files") body = [{ name: "selection.csv", path: "runs/msg_test/selection.csv", is_dir: false, size: 33 }]
+      else if (path === "/api/v1/agents/entity-agent/files/download") return route.fulfill({ contentType: "application/octet-stream", body: "Region,Revenue\nNorth,10\nSouth,20\n" })
+      await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
+    })
+    await page.goto("/chat/_?session=chat-1")
+    const composer = page.getByPlaceholder("Message Jamie...")
+    await expect(composer).toBeVisible({ timeout: 30_000 })
+    await composer.fill("Keep this existing draft.")
+    const tabs = page.getByRole("tablist", { name: "Chat panel", exact: true })
+    const artifacts = tabs.getByRole("tab", { name: "Artifacts", exact: true })
+    const chat = tabs.getByRole("tab", { name: "Chat", exact: true })
+    await artifacts.click()
+    await page.getByRole("button", { name: /^selection\.csv/ }).click()
+    const grid = page.getByRole("region", { name: "Spreadsheet preview", exact: true })
+    await expect(grid).toBeVisible({ timeout: 30_000 })
+    await chat.click()
+    await expect(page.getByRole("complementary", { name: "Live artifact", exact: true })).toHaveCount(0)
+    await composer.click({ trial: true })
+    await expect(composer).toHaveValue("Keep this existing draft.")
+    await artifacts.click()
+    await expect(grid).toBeVisible()
+    await tabs.getByRole("tab", { name: "Work", exact: true }).click()
+    await expect(page.getByRole("complementary", { name: "Live artifact", exact: true })).toHaveCount(0)
+    await artifacts.click()
+    await expect(grid).toBeVisible()
+    await grid.getByRole("checkbox", { name: "Select source row 2", exact: true }).check()
+    await grid.getByRole("button", { name: "Ask about selection (1)", exact: true }).focus()
+    await page.keyboard.press("Enter")
+    await expect(chat).toHaveAttribute("aria-selected", "true")
+    await expect(page.getByRole("complementary", { name: "Live artifact", exact: true })).toHaveCount(0)
+    await composer.click({ trial: true })
+    await expect(composer).toHaveValue(/Keep this existing draft\.[\s\S]*A2:B2/)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    const draft = await composer.inputValue()
+    await page.reload()
+    await expect(composer).toHaveValue(draft, { timeout: 30_000 })
+    expect(sendAttempts).toBe(0)
+  })
+})
 
 for (const width of [1280,390]) {
   test(`Guest project Issues at ${width}px show only the authorized projection`,async({page})=>{
@@ -127,6 +263,11 @@ for (const width of [1280, 390]) {
       else if (path === "/api/v1/agents") body = [agent]
       else if (path === "/api/v1/crews") body = [{ id: "crew", name: "Platform", slug: "platform" }]
       else if (path === "/api/v1/agents/entity-agent") body = agent
+      else if (path.endsWith("/peers")) body = { peers: [], preferences: [] }
+      else if (path.endsWith("/peer-consent")) body = { opted_out: false }
+      else if (path === "/api/v1/feedback") body = request.method() === "POST"
+        ? { id: "detail-feedback", workspace_id: "test-workspace-id", user_id: "viewer", message_id: "reply", signal: "helpful", revision: 1, memory: { status: "feedback_only" } }
+        : { feedback: [] }
       else if (path === "/api/v1/agents/entity-agent/chats") body = [{ id: "chat-1", title: "Issue cards", mode: "private", kind: "direct", status: "active", message_count: 2, started_at: "2026-10-13T09:00:00Z", updated_at: "2026-10-13T09:01:00Z" }]
       else if (path.endsWith("/execution-profile")) body = { mode: "trusted" }
       else if (path.endsWith("/messages")) body = { messages: [
@@ -172,6 +313,28 @@ for (const width of [1280, 390]) {
     await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Change status" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Change priority" })).toHaveCount(0)
+    if (width === 1280) {
+      // An open Issue belongs to Work and must not cover other side panels.
+      await page.getByRole("tab", { name: "Artifacts", exact: true }).click()
+      await expect(page.getByText("No artifacts yet. Documents, sheets and pages the agent writes appear here.")).toBeVisible()
+      await expect(page.getByRole("button", { name: "Back to Work" })).toHaveCount(0)
+      await page.getByRole("tab", { name: "Work", exact: true }).click()
+      await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()
+      await page.getByRole("tab", { name: "Memory", exact: true }).click()
+      await expect(page.getByRole("region", { name: "Your preferences for this agent" })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Back to Work" })).toHaveCount(0)
+      await page.keyboard.press("Escape")
+      await page.getByRole("tab", { name: "Work", exact: true }).click()
+      await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()
+      await page.getByRole("button", { name: "Good response", exact: true }).click()
+      await page.getByRole("button", { name: /What should change next time/ }).click()
+      await page.getByRole("button", { name: "Manage my preferences", exact: true }).click()
+      await expect(page.getByRole("region", { name: "Your preferences for this agent" })).toBeVisible()
+      await page.getByRole("tab", { name: "Work", exact: true }).focus()
+      await page.keyboard.press("Enter")
+      await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Change status" })).toBeVisible()
+    }
     if (width === 390) {
       await expect(page.getByRole("dialog", { name: "Issue detail" })).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
