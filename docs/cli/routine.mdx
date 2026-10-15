@@ -2240,3 +2240,20 @@ the global output format flags.
 ```bash
 crewship routine origin-binding clear daily-report --expected-origin ORIGIN_ID --draft DRAFT_ID=REVISION=ORIGIN_ID --reason "Reviewed draft and standing grant"
 ```
+
+
+## `crewship routine shared`
+
+```bash
+crewship routine shared
+crewship routine shared client-report --format json
+```
+
+Guests can list their live View/Run shares and inspect an explicitly shared
+routine definition by ID or slug. The table shows View, current Run eligibility
+and whether private execution is installed. JSON/YAML detail includes the stored
+definition, hash and version. View works without agent execution grants or a
+runtime. Definitions include prompts/defaults; existing Run shares retain their
+minimal invocation contract and do not acquire View automatically. Private run
+receipts remain actor-scoped. The command does not call the trusted routine or
+crew/agent directory endpoints.

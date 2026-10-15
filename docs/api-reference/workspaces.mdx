@@ -2366,3 +2366,29 @@ Changed payload or audience returns 409; revoked grants return 404. Activity and
 durable journal intent commit with the mutation; projection failure retains a
 retryable outbox record rather than losing the audit. Guest-authored content
 carries no agent execution authority.
+
+## Guest routine definition library
+
+```http
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}
+```
+
+Guest only. The directory returns current live routine View/Run shares as
+`id`, `slug`, `name`, `status`, `can_view`, `can_run`, `runtime_ready`, with
+`X-Total-Count` for the filtered directory. View is independent of graph
+execution and runtime installation. `can_run` is eligibility; invocation still
+checks current dependencies, definition, inputs, budget and runtime readiness.
+
+The detail accepts an ID or slug and additionally returns `definition`
+(JSON object), `definition_hash` and `version`. It requires an explicit live
+`routine.view` share. This includes authored prompts and defaults, so
+administrators must review the definition before sharing. Existing Run shares
+do not implicitly disclose definitions. The route does not resolve vault credentials, roster or issuer metadata, or
+add another person's private run history. Authored literal content is shared as
+stored; administrators must review it before granting View.
+
+Statuses: 200 authorized projection; 401 authentication; 403 workspace/token
+scope; 404 absent/foreign/deleted/revoked definition or non-Guest membership;
+500 unavailable data. No execution runtime is needed for View.
+CLI: `crewship routine shared [routine-id-or-slug]`.

@@ -59,6 +59,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// invoking A routine, and fanning one out across a 50-item batch is a
 	// different amount of spend to hand a member.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}", authed(wsCtx(http.HandlerFunc(r.restrictedWorkflowResult))))
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineLibrary))))
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineLibrary))))
 	// 503 carries code restricted_runtime_unavailable when no private runtime is installed (#2877).
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routines", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineCatalog))))

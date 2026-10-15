@@ -281,3 +281,28 @@ CLI equivalents and built-binary acceptance, and join the route-walking leak tes
 Shared comments confirm their expected project in the request. Staff use `expected_project_id` with `guest_visible`; Guest comments require `project_id`. A move returns 409 rather than silently changing the audience. Both composers preserve the draft and require an explicit new audience choice.
 
 Guest issue mutations accept optional actor-scoped idempotency keys; creation replay also rechecks the created issue’s current project and live grants. Content, operation receipt and durable audit intent share one transaction. This does not grant agent execution authority.
+
+
+## Explicit routine definition View
+
+Routine `view` is an independent additive operation alongside `run`. It grants
+read access to the current stored definition, including prompts and defaults,
+for that one nondeleted routine. It does not require an execution runtime,
+agent Run/Delegate grants or an active runnable graph. The Guest navigation and
+self/admin access explanations expose View independently of invocation.
+Run keeps the existing root-routine plus every agent/provider dependency checks.
+
+| PRD model | Kept / changed / deferred | Reason |
+| --- | --- | --- |
+| View without Run | Kept for definition inspection | A reviewer can understand a routine without execution authority or a runtime. |
+| Run automatically implies definition View | Changed for existing operations | Existing Run shares deliberately exposed only a minimal invocation contract. Automatically revealing prompts/defaults would expand their disclosure without administrator review; View is explicit. |
+| View includes other participants’ private outputs | Deferred to an explicit result-audience contract | A routine share must not grant access to another client’s private execution/chat. Existing private run receipts keep their current actor and execution fences. |
+| Edit and version publication | Deferred to a separate increment | Author provenance and unattended execution require protection when a Guest changes executable content. |
+
+`GET /workspaces/{workspaceId}/restricted-routine-library` returns only live
+routine View/Run shares, with `can_view`, current graph `can_run`, and runtime
+installation metadata. The detail route adds definition/hash/version only with
+a live View share. Both use the authenticated Guest and selected workspace;
+the envelope includes no issuer/member identity or run records. Stored definition literals are deliberately shared as authored; vault credentials are never resolved. Revoked,
+foreign and deleted definitions return 404. View does not imply credentials,
+crew/agent directory access, publication or execution.
