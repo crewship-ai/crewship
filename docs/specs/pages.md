@@ -1577,3 +1577,31 @@ uses the isolated product converter. Browser regression coverage renders the
 actual pinned package and asserts that the native dialog/converter never mounts.
 
 A Page grant issuer must also have an active trusted account and no restricted membership anywhere. Every non-NULL suspension value, including an empty string, makes its Page shares inactive at use time. Existing membership/ownership/crew conditions remain required; the administrative grants list preserves inactive metadata and explains account unavailability.
+
+
+## Compiled Page content descriptors
+
+Page detail and index responses add `content_descriptor` and an optional
+`application_descriptor`. Each reference contains `type_id`, `schema_version`,
+`supported`, and an optional rejection `reason`. They are derived from existing
+storage records; they are neither a writable type discriminator nor an ACL.
+Existing presence flags retain their meaning. Application source (`has_project`)
+remains independent of publication (`has_application`) and can coexist with panels.
+
+The compiled registry is `internal/pages/content_types.json`, shared by Go and
+TypeScript. It names existing adapters, execution profiles, anchors, exports and
+bundled authoring skills. It does not load code or enable a plugin runtime.
+Docs schemas 1 and 2 remain supported by the existing document engine; stored
+schema versions are reported without substitution. Board records retain the
+unavailable viewer on this branch; integrating the Board editor requires changing
+the compiled adapter and qualifying that viewer separately.
+
+Clients resolve references against their compiled registry and reject unknown
+versions, unsupported profiles and conflicting storage. Old-server compatibility
+applies only when metadata is absent. Explicit unsupported or contradictory
+metadata cannot fall back to HTML, mount an application or offer content
+initialization. Empty human-owned panel Pages retain Attach HTML eligibility;
+this derived eligibility never replaces the existing live authorization checks.
+
+`node scripts/check-page-content-types.mjs` compares actual Go and TypeScript
+values and derivation against `testdata/page-content-derivation.json`.

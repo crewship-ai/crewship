@@ -252,6 +252,8 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
+	ContentDescriptor     pages.ContentReference  `json:"content_descriptor"`
+	ApplicationDescriptor *pages.ContentReference `json:"application_descriptor,omitempty"`
 	// HasProject and HasApplication answer DIFFERENT questions, and the editor
 	// needs both. HasApplication is "an application is published and running";
 	// HasProject is "this Page has application source at all", published or
@@ -321,7 +323,9 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
-	ArtifactSummary *pageArtifactSummary `json:"artifact_summary,omitempty"`
+	ContentDescriptor     pages.ContentReference  `json:"content_descriptor"`
+	ApplicationDescriptor *pages.ContentReference `json:"application_descriptor,omitempty"`
+	ArtifactSummary       *pageArtifactSummary    `json:"artifact_summary,omitempty"`
 	// See pageWire.HasProject: source that exists versus source that is live.
 	HasDocument        bool   `json:"has_document"`
 	HasBoard           bool   `json:"has_board"`
@@ -406,6 +410,9 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
+	DocumentSchema     int
+	BoardFormat        string
+	ArtifactManifest   string
 	HasDocument        bool
 	ArtifactSummary    *pageArtifactSummary
 	HasBoard           bool
@@ -548,6 +555,9 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
  EXISTS(SELECT 1 FROM page_boards WHERE page_id=p.id),
  EXISTS(SELECT 1 FROM documents WHERE page_id=p.id),
  EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=p.id),
+ COALESCE((SELECT schema_version FROM documents WHERE page_id=p.id),0),
+ COALESCE((SELECT format FROM page_boards WHERE page_id=p.id),''),
+ COALESCE(ar.manifest_json,''),
  COALESCE(ar.revision,0), COALESCE(ar.author_user_id,''), COALESCE(au.full_name,''),
  COALESCE(ar.author_agent_id,''), COALESCE(aa.name,''), COALESCE(ar.author_run_id,''), COALESCE(ar.created_at,''),
  MAX(COALESCE(ar.created_at,''),COALESCE((SELECT MAX(updated_at) FROM page_artifact_threads WHERE page_id=p.id),''),COALESCE((SELECT MAX(updated_at) FROM page_artifact_requests WHERE page_id=p.id),''))
@@ -570,7 +580,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasBoard, &p.HasDocument, &p.HasArtifact, &summary.HeadRev, &summary.AuthorUserID, &summary.AuthorName, &summary.AuthorAgentID, &summary.AuthorAgentName, &summary.AuthorRunID, &summary.PublishedAt, &summary.LastActivityAt); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasBoard, &p.HasDocument, &p.HasArtifact, &p.DocumentSchema, &p.BoardFormat, &p.ArtifactManifest, &summary.HeadRev, &summary.AuthorUserID, &summary.AuthorName, &summary.AuthorAgentID, &summary.AuthorAgentName, &summary.AuthorRunID, &summary.PublishedAt, &summary.LastActivityAt); err != nil {
 			return nil, err
 		}
 		if summary.HeadRev > 0 {
@@ -651,7 +661,9 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 // everything it reads was loaded in bulk by loadPageIndex.
 func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
 	rec := &row.rec
+	content := derivePageContent(rec, len(row.panels))
 	out := pageListWire{
+		ContentDescriptor: content.ContentDescriptor, ApplicationDescriptor: content.ApplicationDescriptor,
 		HasDocument: rec.HasDocument, HasBoard: rec.HasBoard, HasArtifact: rec.HasArtifact, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
@@ -1340,11 +1352,14 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0),
  EXISTS(SELECT 1 FROM page_boards WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id),
- EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id)
+ EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id),
+ COALESCE((SELECT schema_version FROM documents WHERE page_id=pages.id),0),
+ COALESCE((SELECT format FROM page_boards WHERE page_id=pages.id),''),
+ COALESCE((SELECT ar.manifest_json FROM page_artifacts pa JOIN page_artifact_revisions ar ON ar.page_id=pa.page_id AND ar.revision=pa.head_rev WHERE pa.page_id=pages.id),'')
 		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasBoard, &p.HasDocument, &p.HasArtifact)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasBoard, &p.HasDocument, &p.HasArtifact, &p.DocumentSchema, &p.BoardFormat, &p.ArtifactManifest)
 	if err != nil {
 		return nil, err
 	}
@@ -1735,7 +1750,9 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // branch, because it was replaced by the placeholder above. A reader who
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
+	content := derivePageContent(rec, len(panels))
 	out := pageWire{
+		ContentDescriptor: content.ContentDescriptor, ApplicationDescriptor: content.ApplicationDescriptor,
 		HasDocument: rec.HasDocument, HasBoard: rec.HasBoard, HasArtifact: rec.HasArtifact, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
@@ -2223,4 +2240,25 @@ func insertPageVersion(ctx context.Context, tx *sql.Tx, pageID string, seq int64
 // change (§3.1).
 type pageEmbedWire struct {
 	URL string `json:"url"`
+}
+
+// derivePageContent reads only metadata already loaded with the Page. It never
+// changes storage, authorization or the engine's own payload validation.
+func derivePageContent(rec *pageRecord, panelCount int) pages.ContentDerivation {
+	profile, version := artifactStaticProfile, artifactFormatVersion
+	if rec.ArtifactManifest != "" {
+		var manifest artifactManifest
+		if err := json.Unmarshal([]byte(rec.ArtifactManifest), &manifest); err != nil {
+			profile, version = "invalid", 0
+		} else {
+			profile, version = manifest.RuntimeProfile, manifest.FormatVersion
+		}
+	}
+	return pages.DeriveContentTypes(pages.ContentFacts{
+		HasDocument: rec.HasDocument, DocumentSchema: rec.DocumentSchema,
+		HasBoard: rec.HasBoard, BoardFormat: rec.BoardFormat,
+		HasArtifact: rec.HasArtifact, ArtifactProfile: profile, ArtifactVersion: version,
+		HasProject: rec.HasProject, HasApplication: rec.HasApplication,
+		HasPanels: panelCount > 0, HumanOwned: rec.OwnerUserID != "",
+	})
 }

@@ -1,5 +1,6 @@
 "use client"
 
+import { resolvePageContent } from "@/lib/pages/content-types"
 import { usePageCreationAccess, usePageFolderCreationAccess } from "@/hooks/use-page-creation-access"
 
 import { PageApplicationView } from "./page-application"
@@ -233,7 +234,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // rendered its grant and mint forms and fired reads against a Page that is
   // not there. The address is not allowed to reach a state the data does not
   // support.
-  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null
+  const contentSupported = detail.raw == null || resolvePageContent({ ...detail.raw, has_panels: Array.isArray(detail.raw.panels) && detail.raw.panels.length > 0 }).supported
+  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && contentSupported
 
   // Application | Panels. The switch lives in the page header beside Edit,
   // because that is where the page is named and where a person looks for
@@ -257,7 +259,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // refusal must be visible where the action was, not turned into an absence
   // that reads as "this product cannot do that".
   const grants = usePageGrants(workspaceId, selectedSlug, editing)
-  const capabilities = usePageCapabilities(detail.raw, {
+  const capabilities = usePageCapabilities(contentSupported ? detail.raw : null, {
     mayManageAccess: grants.refusal === null,
   })
 
@@ -338,8 +340,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               <SubBarSecondary
                 icon={Share2}
                 onClick={() => nav.openEditor("access")}
-                disabled={detail.page == null}
-                title="Who reaches this Page, who may send it data, and its public links"
+                disabled={detail.page == null || !contentSupported}
+                title={contentSupported ? "Who reaches this Page, who may send it data, and its public links" : "This content format is unavailable; sharing through its editor is disabled"}
               >
                 Share
               </SubBarSecondary>
@@ -348,8 +350,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               <SubBarSecondary
                 icon={Pencil}
                 onClick={() => nav.openEditor()}
-                disabled={detail.page == null}
-                title="Edit this Page's content, data, access and history"
+                disabled={detail.page == null || !contentSupported}
+                title={contentSupported ? "Edit this Page's content, data, access and history" : "This content format is unavailable; editing is disabled"}
               >
                 Edit
               </SubBarSecondary>
@@ -437,7 +439,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               inside it — the rail beside it is not, so it never participates in
               the transition and never blinks. */}
           <AnimatePresence mode="wait">
-            {editing && selectedSlug ? (
+            {editing && selectedSlug && contentSupported ? (
               <motion.div
                 key={`editor-${selectedSlug}`}
                 // The editor arrives from the right edge and leaves the same
@@ -474,7 +476,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 flex flex-col overflow-hidden"
               >
-                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={
+                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error || !contentSupported ? null : detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={
                 <PageView
                   headingRef={viewHeading}
                   page={detail.page}
