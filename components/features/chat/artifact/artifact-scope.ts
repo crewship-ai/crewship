@@ -1,5 +1,5 @@
 /** Presentation filter for paths from the authorized agent output listing. */
-const previewExtensions = new Set(["pdf", "html", "htm", "csv", "tsv", "xlsx", "xls", "png", "jpg", "jpeg", "webp"])
+const previewExtensions = new Set(["pdf", "html", "htm", "csv", "tsv", "xlsx", "xls", "xlsm", "png", "jpg", "jpeg", "webp"])
 const internalNames = new Set(["AGENTS.md", "CLAUDE.md", "GEMINI.md", "crewship.md"])
 const internalFolders = new Set(["runs", "attachments", ".agents", ".claude", ".codex", ".cursor", ".factory", ".gemini", ".opencode"])
 

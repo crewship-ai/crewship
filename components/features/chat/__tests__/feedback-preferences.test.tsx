@@ -5,12 +5,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { TurnPreferenceFeedback } from "../turn-preference-feedback"
 import { PreferencesTab } from "../right-panel-tabs/preferences-tab"
 import { useFeedbackStore } from "@/stores/feedback-store"
+import { useArtifactStore } from "@/stores/artifact-store"
+import { useDrawerStore } from "@/stores/drawer-store"
 
 const apiFetch = vi.fn()
 let currentUser = "user-1"
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(...args) }))
 vi.mock("@/hooks/use-auth", () => ({ useSession: () => ({ data: { user: { id: currentUser } } }) }))
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }))
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 
 const props = { agentId: "agent-1", workspaceId: "ws-1", userId: "user-1", messageId: "message-1", signal: "helpful" as const }
 const reason = "Next time, keep answers concise."
@@ -20,10 +23,36 @@ function mount(ui: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } })
   return { client, ...render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>) }
 }
-beforeEach(() => { currentUser = "user-1"; apiFetch.mockReset(); useFeedbackStore.getState().setUser(null); useFeedbackStore.getState().setUser(currentUser) })
+beforeEach(() => {
+  currentUser = "user-1"
+  apiFetch.mockReset()
+  useFeedbackStore.getState().setUser(null)
+  useFeedbackStore.getState().setUser(currentUser)
+  useArtifactStore.getState().closeAll()
+  useDrawerStore.setState({ open: false, activeTab: "work" })
+})
 afterEach(cleanup)
 
 describe("Optional explicit feedback preferences", () => {
+  for (const artifactOpen of [true, false]) {
+    it(`opens desktop preference management ${artifactOpen ? "in a dialog while preserving the preview" : "in the Memory drawer without a preview"}`, async () => {
+      apiFetch.mockImplementation(async (url: string) => response(url.includes("peer-consent") ? { opted_out: false } : url.includes("/peers?") ? { preferences: [] } : { feedback: [] }))
+      if (artifactOpen) useArtifactStore.getState().openFile({ id: "preview-1", agentId: "agent-1", path: "report.csv", title: "report.csv" })
+      const preview = useArtifactStore.getState()
+      mount(<TurnPreferenceFeedback {...props} />)
+      fireEvent.click(screen.getByRole("button", { name: /What should change/ }))
+      fireEvent.click(screen.getByRole("button", { name: "Manage my preferences" }))
+      if (artifactOpen) {
+        expect(await screen.findByRole("dialog", { name: "Your preferences" })).toBeVisible()
+        expect(useDrawerStore.getState()).toMatchObject({ open: false, activeTab: "work" })
+      } else {
+        expect(screen.queryByRole("dialog")).toBeNull()
+        expect(useDrawerStore.getState()).toMatchObject({ open: true, activeTab: "memory" })
+      }
+      expect(useArtifactStore.getState()).toBe(preview)
+    })
+  }
+
   it("sends nothing until the user selects a visible future preference, then shows server status", async () => {
     const row = { id: "feedback-1", workspace_id: "ws-1", user_id: "user-1", message_id: "message-1", signal: "helpful", reason: "", revision: 1, memory: { status: "feedback_only", entry_id: "entry-1" } }
     apiFetch.mockImplementation(async (_url: string, init?: RequestInit) => {

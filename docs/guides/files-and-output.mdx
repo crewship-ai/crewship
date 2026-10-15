@@ -97,7 +97,11 @@ Select source rows and choose **Ask about selection** to append a visible refere
 
 Parsing runs in a cancellable local worker with a five-second timeout. Preview limits are 5 MiB UTF-8 input, 20,000 rows, 100 columns, 200,000 cells and 32,768 characters per cell. Selection is limited to 200 cells and 12,000 UTF-8 bytes of context. Exceeding a limit produces an explicit download fallback rather than a truncated table. File contents are not sent to an external parser.
 
-XLSX worksheet previews are a separate follow-up. XLS, XLSM and unsupported workbook formats currently retain their download fallback.
+XLSX artifacts use the same read-only grid with a worksheet selector. Original worksheet names, row numbers and column letters appear in selection context. Saved numeric and string values are preserved; dates use ISO timestamps. Formatting, merged-cell layout, charts and images are outside the preview. Formulas are never calculated: cached results are shown, and formulas without saved results have an explicit marker. XLS and XLSM remain download only.
+
+XLSX parsing runs in a separate local worker using pinned MIT-licensed `read-excel-file` 9.3.12. A streaming ZIP/XML preflight counts actual decompressed output before the reader sees a normalized workbook. Limits are 5 MiB input, 20 MiB total expanded ZIP data, 128 ZIP entries, 10 worksheets, 20,000 rows, 100 columns, 200,000 rectangular cells across sheets, 32,768 characters per cell and 10 MiB displayed text. A five-second timeout terminates the worker. Sparse coordinates and repeated shared strings count toward the cell/text budgets. These are input/output budgets, not a browser heap guarantee.
+
+Encrypted, damaged, macro-enabled, DTD-bearing or externally linked workbooks receive an explicit download fallback. ZIP paths, duplicates, checksums and XML depth/node counts are checked. Preview parsing never executes macros, formulas or cell HTML, and does not fetch external relationships. Selection uses the same draft-only, versioned 200-cell / 12,000-byte limit as CSV/TSV.
 
 ## File Upload
 
