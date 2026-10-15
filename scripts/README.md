@@ -170,3 +170,26 @@ runs `go vet -tags conformance ./...`, which compiles this test but does not
 execute Chromium. Executing either tagged test set requires the explicit browser
 environment and real static export; missing configuration fails rather than skips.
 `go test -tags conformance ./...` therefore also requires those prerequisites.
+
+
+`acceptance-artifact-workflow-browser.mjs` is invoked by the Linux-only
+`TestArtifactWorkflowBrowser` harness (`artifact_workflow_browser` or
+`conformance` build tag). Build the real static export first. It uses an owned
+httptest server, migrated temporary database and synthetic preauthenticated DB
+sessions with production authorization routes; it does not mock HTTP, perform
+login, execute agents, send email, create Docker resources or contact dev4.
+It verifies HTML upload, commenter discussion and dispatch denial, exact saved
+revision comparison, and restore preserving the original comment anchor.
+
+```bash
+crewship-heavy pnpm exec prisma generate # generated TypeScript types only
+crewship-heavy pnpm build
+crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_ARTIFACT_WORKFLOW_BROWSER=1 go test -tags artifact_workflow_browser ./internal/api -run '^TestArtifactWorkflowBrowser$' -count=1 -timeout 6m
+```
+
+`CREWSHIP_ARTIFACT_WORKFLOW_OUTPUT` optionally chooses a local report directory;
+otherwise output uses an OS temporary directory. Fixture session tokens remain
+in a private mode-0600 temporary file that the Go test removes. Missing opt-in,
+static export or Chromium fails rather than skips. The conformance tag permits
+compile-only checks (`-run '^$'`); this harness is not automatically executed by
+CI and does not establish real-agent acceptance or login-flow coverage.

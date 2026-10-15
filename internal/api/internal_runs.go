@@ -28,15 +28,19 @@ const runVerdictFlagKey = "run_verdict_summaries"
 // POST /api/v1/internal/runs
 func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ID               string                `json:"id"`
-		AgentID          string                `json:"agent_id"`
-		ChatID           string                `json:"chat_id"`
-		WorkspaceID      string                `json:"workspace_id"`
-		TriggerType      string                `json:"trigger_type"`
-		Metadata         json.RawMessage       `json:"metadata"`
-		HumanAuthority   *chataudience.Receipt `json:"human_authority"`
-		TriggerMessageID string                `json:"trigger_message_id"`
-		ChatOriginID     string                `json:"chat_origin_id"`
+		ID                     string                `json:"id"`
+		AgentID                string                `json:"agent_id"`
+		ChatID                 string                `json:"chat_id"`
+		WorkspaceID            string                `json:"workspace_id"`
+		TriggerType            string                `json:"trigger_type"`
+		Metadata               json.RawMessage       `json:"metadata"`
+		ArtifactHumanReceipt   *chataudience.Receipt `json:"artifact_human_receipt"`
+		BoardRequestID         string                `json:"board_request_id"`
+		ArtifactRequestID      string                `json:"artifact_request_id"`
+		ArtifactHumanMessageID string                `json:"artifact_human_message_id"`
+		HumanAuthority         *chataudience.Receipt `json:"human_authority"`
+		TriggerMessageID       string                `json:"trigger_message_id"`
+		ChatOriginID           string                `json:"chat_origin_id"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
@@ -150,6 +154,10 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			metadataDecoder := json.NewDecoder(bytes.NewReader(body.Metadata))
 			metadataDecoder.UseNumber()
 			if err := metadataDecoder.Decode(&md); err == nil && md != nil {
+				delete(md, "artifact_human_receipt")
+				delete(md, "artifact_human_message_id")
+				delete(md, "artifact_request_id")
+				delete(md, "board_request_id")
 				payload["metadata"] = md
 			}
 		}
@@ -195,6 +203,30 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if body.ArtifactHumanReceipt != nil {
+		if err := captureArtifactChatPrincipal(r, h.db, body.ID, body.WorkspaceID, body.AgentID, agentCrewID, body.ChatID, body.ArtifactHumanMessageID, body.ArtifactHumanReceipt); err != nil {
+			if body.ArtifactRequestID != "" || body.BoardRequestID != "" {
+				replyError(w, 403, "artifact human admission refused")
+				return
+			}
+			h.logger.Warn("run has no artifact publication authority", "run_id", body.ID, "error", err)
+		}
+	}
+	if body.ArtifactRequestID != "" && body.BoardRequestID != "" {
+		replyError(w, 403, "one explicit request authority required")
+		return
+	}
+	if body.ArtifactRequestID != "" {
+		if body.ArtifactHumanReceipt == nil || bindArtifactRequestRun(r, h.db, body.ArtifactRequestID, body.ID, body.ArtifactHumanReceipt) != nil {
+			replyError(w, 403, "artifact request admission refused")
+			return
+		}
+	}
+
+	if body.BoardRequestID != "" {
+		replyError(w, 403, "Board admission requires the Board delivery")
+		return
+	}
 	// Now flip the agent to RUNNING. Failure is debug-only because the
 	// run trace already exists — recoverOrphanedRuns will clean up.
 	if _, err := h.db.ExecContext(r.Context(),

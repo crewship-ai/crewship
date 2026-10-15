@@ -45,6 +45,11 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	// Custody responses are metadata-only DTOs, including optional cursor/code.
+	{name: "WorkspacePageOwnershipListResponse", pointer: "/components/schemas/WorkspacePageOwnershipListResponse", value: WorkspacePageOwnershipListResponse{}},
+	{name: "WorkspacePageOwnershipSummary", pointer: "/components/schemas/WorkspacePageOwnershipSummary", value: WorkspacePageOwnershipSummary{}},
+	{name: "WorkspacePageOwnershipSuccessor", pointer: "/components/schemas/WorkspacePageOwnershipSuccessor", value: WorkspacePageOwnershipSuccessor{}},
+	{name: "WorkspacePageOwnershipError", pointer: "/components/schemas/WorkspacePageOwnershipError", value: WorkspacePageOwnershipError{}},
 	{name: "RoutineOriginBinding", pointer: "/components/schemas/RoutineOriginBinding", value: routineOriginBindingResponse{}},
 	{name: "FailedIssueMutationJob", pointer: "/components/schemas/FailedIssueMutationJob", value: failedIssueMutationJob{}},
 	{name: "FailedIssueMutationPage", pointer: "/components/schemas/FailedIssueMutationPage", value: failedIssueMutationPage{}},

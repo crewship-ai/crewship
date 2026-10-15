@@ -46,7 +46,11 @@ var grandfatheredPrefixes = map[string]bool{
 // package it is describing.
 var reservedSegments = []string{
 	"agent",
+	"artifact-requests",
+	"artifacts",
 	"assign",
+	"board-requests",
+	"boards",
 	"connections",
 	"credentials",
 	"crew",

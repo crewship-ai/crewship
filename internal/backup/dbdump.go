@@ -100,6 +100,8 @@ var BackupTables = []string{
 	"skills",
 	// Depth 1: direct workspace_id children
 	"crews",
+	"workspace_artifact_creation_policy",
+	"workspace_artifact_creation_crews",
 	"environment_revisions",
 	"service_runtime_intents",
 	"chats",
@@ -308,9 +310,37 @@ var BackupTables = []string{
 	"page_folders",    // pages.folder_id → page_folders, so folders land first; FK owner_crew_id → crews
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
-	"page_panels",               // FK page_id → pages; FK owner_crew_id → crews
-	"page_panel_data",           // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
-	"page_versions",             // FK page_id → pages
+	"page_panels",     // FK page_id → pages; FK owner_crew_id → crews
+	"page_panel_data", // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
+	"page_versions",   // FK page_id → pages
+	"page_artifacts",
+	"page_artifact_revisions",
+	"page_artifact_creations",
+	"page_artifact_copies",
+	"page_artifact_mutation_receipts",
+	"page_artifact_requests",
+	"page_artifact_request_updates",
+	"page_board_threads",
+	"page_board_comments",
+	"page_board_comment_history",
+	"page_board_comment_reactions",
+	"page_board_comment_mutations",
+	"page_artifact_threads",
+	"page_artifact_comments",
+	"page_artifact_comment_history",
+	"page_artifact_comment_reactions",
+	"page_artifact_comment_mutations",
+	"page_boards",
+	"page_board_files",
+	"page_board_requests",
+	"page_board_request_previews",
+	"page_board_request_files",
+	"page_board_request_sources",
+	"page_board_elements",
+	"page_board_artifact_placements",
+	"page_board_mutations",
+	"page_board_write_audit",
+	"page_board_source_history",
 	"page_project_builds",       // FK page_id → pages; nullable requested_by → users
 	"page_project_publications", // Build and Page rows precede immutable publications.
 	"page_project_live",
@@ -457,9 +487,25 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "pipeline_run_step_outputs", "pipeline_step_executions", "pipeline_run_artifacts":
 		// No workspace_id column — scoped via its run.
 		return "run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
+	case "page_artifact_copies":
+		return "workspace_id = ?", []any{workspaceID}, true
+	case "page_board_source_history", "page_board_write_audit", "page_board_files", "page_board_elements", "page_board_mutations", "page_board_artifact_placements":
+		return "board_page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "page_board_comment_history", "page_artifact_comment_history", "page_board_threads", "page_board_comment_mutations", "page_boards", "page_artifact_mutation_receipts", "page_artifact_requests", "page_artifact_creations", "page_artifact_threads", "page_artifact_comment_mutations", "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
 		// Scope through the owning page, never the nullable (or cross-workspace) editor.
 		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "page_artifact_request_updates":
+		return "request_id IN (SELECT q.id FROM page_artifact_requests q JOIN pages p ON p.id=q.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
+	case "page_board_request_previews", "page_board_request_files", "page_board_request_sources":
+		return "request_id IN (SELECT q.id FROM page_board_requests q WHERE q.workspace_id=?)", []any{workspaceID}, true
+	case "page_board_comments":
+		return "thread_id IN (SELECT t.id FROM page_board_threads t JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
+	case "page_board_comment_reactions":
+		return "comment_id IN (SELECT c.id FROM page_board_comments c JOIN page_board_threads t ON t.id=c.thread_id JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
+	case "page_artifact_comment_reactions":
+		return "comment_id IN (SELECT c.id FROM page_artifact_comments c JOIN page_artifact_threads t ON t.id=c.thread_id JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
+	case "page_artifact_comments":
+		return "thread_id IN (SELECT t.id FROM page_artifact_threads t JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
 	case "pipeline_versions":
 		// Human/autonomous historical versions have no execution origin. Scope
 		// through the owning routine, never the optional admission fence.
@@ -636,6 +682,19 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			if hasMembers {
 				where = "(" + where + `) OR id IN (SELECT user_id FROM workspace_members WHERE workspace_id = ?)`
 				args = append(args, workspaceID)
+			}
+			// Immutable update attribution may outlive workspace membership.
+			hasUpdates, err := tableExists(ctx, tx, "page_artifact_request_updates")
+			if err != nil {
+				return nil, fmt.Errorf("backup: probe artifact update attribution: %w", err)
+			}
+			if hasUpdates {
+				where = "(" + where + `) OR id IN (SELECT u.on_behalf_of_user_id FROM page_artifact_request_updates u JOIN page_artifact_requests q ON q.id=u.request_id JOIN pages p ON p.id=q.page_id WHERE p.workspace_id=? AND u.on_behalf_of_user_id IS NOT NULL)`
+				args = append(args, workspaceID)
+			}
+			where, args, err = includeDiscussionUsers(ctx, tx, workspaceID, where, args)
+			if err != nil {
+				return nil, err
 			}
 			where, args, err = includeConversationUsers(ctx, tx, workspaceID, where, args)
 			if err != nil {
@@ -1194,6 +1253,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				return stats, err
 			}
 		}
+		rows, err = orderPageRequestRetryRows(table, rows)
+		if err != nil {
+			return stats, err
+		}
 		if table == "chat_entity_refs" {
 			rows = orderedChatEntityRefs(rows)
 		}
@@ -1204,6 +1267,8 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			// copies whatever row is current — has to come after it or its
 			// CANCELLED status would be thrown away.
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
+			row = safeArtifactRequestRestoreRow(table, row)
+			row = safeBoardHistoryRestoreRow(table, row)
 			// Restoring a held issue must not restart work that was still stopping
 			// at backup time. Preserve historical terminal runs and their brief
 			// snapshots; import nonterminal held runs as cancelled.

@@ -218,6 +218,10 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if rec.HasArtifact {
+		replyError(w, 409, "use artifact revision restore for an artifact page")
+		return
+	}
 	current, originalSpec, ok := h.currentDocumentSnapshot(r.Context(), w, rec)
 	if !ok || !h.requireProjectDefinitions(w, r, current) {
 		return
@@ -336,7 +340,7 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback() }()
 
 	result, err := tx.ExecContext(r.Context(),
-		`UPDATE pages SET name = ?, description = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ? AND spec_json = ?`,
+		`UPDATE pages SET name = ?, description = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ? AND spec_json = ? AND NOT EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id)`,
 		doc.Metadata.Name, doc.Metadata.Description, string(restored), now, rec.ID, originalSpec)
 	if err != nil {
 		replyInternalError(w, h.logger, "update page for rollback", err)

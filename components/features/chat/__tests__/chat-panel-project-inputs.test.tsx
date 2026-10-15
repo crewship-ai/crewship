@@ -1,3 +1,4 @@
+vi.mock("../artifact-result-cards", () => ({ ArtifactResultCards: () => null }))
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 

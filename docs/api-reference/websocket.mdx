@@ -330,6 +330,35 @@ filter lives in one place — and carries no page data of its own.
 | `page.folder.updated` | A folder itself changed — created, renamed, re-iconed or recoloured, deleted, or its sharing set or removed. A page moved into or out of the folder broadcasts that page's `page.updated` instead | `{ slug, folder_id }` |
 | `page.action.dispatched` | An action button was clicked and its routine run accepted and scheduled (the `202 SCHEDULED` receipt of the dispatch endpoint). Fires once per accepted click, so every open copy of the page can show the button as running; the run's own progress arrives as `pipeline.run.*` on this channel | `{ page_id, slug, panel, action, pending_id }` |
 
+#### Private artifact and Board presence
+
+Human clients may subscribe to `artifact:{page_id}`.
+Unlike the ID-only `page:` channel, these rooms require current read access to
+the specific Page. Access is checked before each delivery and revoked
+subscriptions are removed by the reauthorization sweep. WebSocket tickets
+cannot be minted with acting-agent credentials.
+
+A Board update uses the existing socket envelope:
+
+```json
+{"type":"presence","channel":"artifact:page-id","payload":{"schema_version":1,"revision":4}}
+```
+
+Artifact updates contain a positive `revision`; their optional
+cursor uses `coordinate_space: "viewport"` and includes `viewport_width` and
+`viewport_height`. Coordinates are bounded; identity/content fields are refused.
+The UI currently emits Board cursors and artifact viewer presence, without a
+cursor bridge into artifact frames. A cursor-free heartbeat is valid.
+
+`presence.snapshot` retains the exact authorized `channel` and carries
+`{schema_version:1,members:[{connection_id,user_id,revision,board_seq,cursor}]}`.
+One location field is null; `cursor` is null until supplied. Connection IDs are
+opaque and server-created. Clients must filter by channel and matching revision
+or saved sequence. Presence is ephemeral and may be dropped under load; send a
+heartbeat every five seconds and discard stale client snapshots. Membership
+expires after 15 seconds. See [Pages limits](../specs/pages.md#private-content-presence)
+for room, subscription and fanout bounds. This is not a durable Board change log.
+
 #### Configuration & inbox
 
 | Event Type | Description | Payload |

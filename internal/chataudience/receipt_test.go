@@ -121,3 +121,19 @@ func TestCaptureTrustedSuspensionRevokesExistingReceiptInTransaction(t *testing.
 		}
 	}
 }
+
+func TestCaptureTrustedRejectsInactiveHuman(t *testing.T) {
+	for _, column := range []string{"suspended_at"} {
+		t.Run(column, func(t *testing.T) {
+			db := audienceDB(t)
+			receipt, err := CaptureTrusted(t.Context(), db, "private", "author", nil)
+			if err != nil || receipt == nil {
+				t.Fatalf("capture: %+v %v", receipt, err)
+			}
+			audienceExec(t, db, `UPDATE users SET `+column+`='2026-10-13T00:00:00Z' WHERE id='author'`)
+			if actual, err := CaptureTrusted(t.Context(), db, "private", "author", receipt); err != nil || actual != nil {
+				t.Fatalf("inactivehuman receipt retained: %+v %v", actual, err)
+			}
+		})
+	}
+}

@@ -219,6 +219,8 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 		"../backup/instance_recover.go|f, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)":        "instance_recover.go: writeExtracted landing a file in the recovered data dir, which no server uses until recover succeeds; each file is fsynced before close and checked against the bundle's index.",
 		"../backup/instance_recover.go|f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)":         "instance_recover.go: writeEnvFile — secrets.env / recovered-keys.env written to a temp, fsynced, and renamed into place.",
 
+		"../../cmd/crewship/cmd_page_board_files.go|file, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)": "Board download into an operator-named new file, never overwriting existing content. Canonical authorized server image remains the source of truth. Fsync and explicit close precede success; write/sync/close failure removes only this invocation's partial download. Re-running produces a fresh export.",
+
 		// ---- #2124: cmd/crewship, read one site at a time ----
 		//
 		// #1999 widened dirs to cover cmd/crewship for two named sites

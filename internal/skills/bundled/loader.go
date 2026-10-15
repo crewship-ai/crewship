@@ -109,7 +109,8 @@ var manifests = map[string]skillManifest{
 
 	// First-party Crewship playbooks. Self-contained (no companion
 	// scripts/references folders) so no incompleteBundleNote.
-	"crewship/routine-author": {category: "AUTOMATION", icon: "workflow"},
+	"crewship/routine-author":     {category: "AUTOMATION", icon: "workflow"},
+	"crewship/crewship-artifacts": {category: "CODING", icon: "file-code"},
 }
 
 // Install upserts every embedded SKILL.md into the skills table. Idempotent:

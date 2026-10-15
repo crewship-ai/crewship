@@ -35,6 +35,279 @@ empty, and a line saying so would be read as a key. `page export` is the
 exception in the other direction: it prints YAML unless you ask for
 `--format json`.
 
+## Artifact commands
+
+The first artifact surface stores HTML on a human-owned Page. Its preview is
+static: scripts and external resources stay disabled. These commands use your
+existing human CLI profile and the Page's read/write permissions; they do not
+provide agent-run publication authority.
+
+### crewship page artifact create
+
+```bash
+crewship page artifact create report --name "Weekly report"
+```
+
+`--name` supplies the Page name. This stages an empty Page owned by you, using
+`POST /api/v1/pages` with `allow_empty: true`. Publish its first source separately;
+an unsuccessful upload leaves the shell available for retry.
+
+### crewship page artifact show
+
+```bash
+crewship page artifact show report --format json
+crewship page artifact show report --revision 1 --format json
+```
+
+`--revision` selects a positive historical revision; omission selects the head.
+`GET /api/v1/pages/{slug}/artifact` returns source, history, selected revision
+and current head in a JSON envelope. Reading source does not execute it.
+
+### crewship page artifact publish
+
+```bash
+crewship page artifact publish report --file report.html --base-rev 0
+cat report.html | crewship page artifact publish report --file - --base-rev 1
+```
+
+`--file` selects an HTML source file or `-` for stdin. `--base-rev` is required,
+including explicit 0 for the first revision. The command calls
+`POST /api/v1/pages/{slug}/artifact/revisions`; a stale base fails instead of
+replacing somebody else's revision. Inspect the current revision and reconcile
+your source before submitting with a newer base.
+
+`--mutation-id` optionally supplies a retry identifier; otherwise the command
+generates one. Reuse an explicit identifier only for the identical operation,
+base revision and source under the same human identity. The server returns the
+original result for an identical retry and rejects conflicting reuse.
+
+### crewship page artifact copy
+
+```bash
+crewship page artifact copy report report-copy --revision 3 --name "Report copy" --mutation-id copy-report-3
+```
+
+`--revision` selects the required positive source revision; `--name` names the new artifact.
+`--mutation-id` supplies the exact-retry identity (generated once when omitted).
+
+Copies the selected immutable revision into a new private artifact owned by you
+in the same workspace. Source read access and permission to create a Page are
+checked at execution. Grants, comments, requests and agent authority are not
+copied. Supply the same `--mutation-id` and unchanged arguments when retrying
+an unconfirmed response; a revision is required rather than inferred from a
+moving head.
+
+### crewship page artifact restore
+
+```bash
+crewship page artifact restore report --revision 1 --base-rev 2
+```
+
+`--revision` selects the positive historical revision to copy. `--base-rev` is
+required and must match the current head. `--mutation-id` follows the same retry
+rules as publish. `POST /api/v1/pages/{slug}/artifact/restore` appends a new
+revision; it does not discard intervening history.
+
+Source is limited to 10 MiB UTF-8; each artifact retains up to 200 revisions and
+accepts up to 30 committed revisions per hour, including restores. Public
+links and agent credentials do not authorize these artifact routes.
+
+
+### crewship page artifact delegate
+
+```bash
+crewship page artifact delegate report --run RUN_ID
+```
+
+`POST /api/v1/pages/{slug}/artifact/delegations` accepts `run_id`. The Page owner
+may authorize their own verified, live human-initiated chat run to update this
+artifact. The agent must already have an explicit Page write grant. This does
+not grant access to other agents, create a new Page or start work automatically.
+Old runs without captured human authority and unproven dispatch paths are denied.
+
+### crewship page artifact revoke
+
+```bash
+crewship page artifact revoke report --run RUN_ID
+```
+
+`DELETE /api/v1/pages/{slug}/artifact/delegations/{runId}` revokes that run's
+artifact access. Revocation, run termination, the admission deadline or loss of
+the human/agent's access prevents further reads and publication through the
+run-scoped route. A revoked delegation cannot be reactivated for the same run.
+
+### crewship page artifact requests list
+
+```bash
+crewship page artifact requests list report --format json
+```
+
+Reads `GET /api/v1/pages/{slug}/artifact/requests`: durable status, original
+revision and confirmed result revision. Eligible targets are the initiating editor's private,
+unshared chats whose agents already have an explicit Page write grant.
+
+### crewship page artifact requests send
+
+```bash
+crewship page artifact requests send report --chat CHAT_ID --base-rev 2 --instruction "Clarify the totals" --thread THREAD_ID --submission-id review-2
+```
+
+Calls `POST /api/v1/pages/{slug}/artifact/requests`. A current Page editor explicitly
+starts work that can incur agent usage costs. `--chat`, `--base-rev` and
+`--instruction` are required; `--thread` is optional. The source must be the
+current head, and a selected thread must belong to that revision. Instruction
+text is limited to 4 KiB. Saved comments are snapshotted when the request is
+accepted; later replies do not change that task. A mention alone starts nothing.
+
+Use the same `--submission-id` and payload after an uncertain response. If the
+flag is omitted, the CLI generates an ID and includes it in an error so it can
+be reused. A new intentional request uses a new ID. Completion is confirmed by
+an actual published result revision, not by an agent saying it finished.
+
+Use `--result-kind reply` to request an answer without allowing this request to publish a revision. The default `--result-kind revision` requires publication to complete. This choice is fixed after submission.
+
+Use `--retry-of REQUEST_ID` only for a new intentional attempt after a failed or
+cancelled request. Review the current revision and use a new submission ID.
+The previous runtime may still be running; this can duplicate work.
+
+### crewship page artifact requests cancel
+
+```bash
+crewship page artifact requests cancel report REQUEST_ID
+```
+
+Calls `POST /api/v1/pages/{slug}/artifact/requests/{requestId}/cancel`. Cancellation
+blocks further publication for this request and asks an active local run to stop.
+It does not retract already delivered source or undo a committed revision.
+
+### crewship page artifact creation-status
+
+```bash
+crewship page artifact creation-status CHAT_ID --format json
+```
+
+Reads `GET /api/v1/chats/{chatId}/artifact-creation-authorization`, resolving your
+own live chat run and its one-artifact permission on the server. Studio exposes
+the same control in a running chat, so no manual run ID lookup is needed there.
+
+### crewship page artifact authorize-creation
+
+```bash
+crewship page artifact authorize-creation RUN_ID
+```
+
+Calls `POST /api/v1/artifact-creation-authorizations/{runId}` with `{}`. Only the
+server-recorded human initiator of a live chat run, with current Page creation
+rights, can permit that run to create one private artifact. Permission is off by
+default, expires with the run admission and cannot select another owner or audience.
+
+### crewship page artifact revoke-creation
+
+```bash
+crewship page artifact revoke-creation RUN_ID
+```
+
+Calls `DELETE /api/v1/artifact-creation-authorizations/{runId}`. Revokes creation
+and the same run's delegated publication on its created artifact. It preserves
+source history and does not silently re-enable permission when retried.
+
+### crewship page artifact threads list
+
+```bash
+crewship page artifact threads list report --format json
+crewship page artifact threads list report --revision 2 --format json
+```
+
+Reads discussion threads through `GET /api/v1/pages/{slug}/artifact/threads`.
+A revision filter selects the original immutable revision of a thread; a newer
+artifact revision never silently moves a discussion to different content.
+
+### crewship page artifact threads create
+
+```bash
+crewship page artifact threads create report --revision 2 --body "Please explain this result" --mutation-id review-1
+```
+
+`POST /api/v1/pages/{slug}/artifact/threads` creates a whole-document comment
+bound to the required revision. The server supplies the author. A comment or
+`@mention` does not dispatch an agent or grant permission to change the source.
+
+### crewship page artifact threads reply
+
+```bash
+crewship page artifact threads reply report THREAD_ID --base-version 1 --body "Updated in revision 3" --mutation-id reply-1
+```
+
+`POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies` requires the
+current thread version from the list response. Conflicting changes return 409.
+
+### crewship page artifact threads resolve
+
+```bash
+crewship page artifact threads resolve report THREAD_ID --base-version 2 --mutation-id resolve-1
+```
+
+`PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}` resolves a discussion
+with `resolved: true` and the required `base_version`.
+
+### crewship page artifact threads reopen
+
+```bash
+crewship page artifact threads reopen report THREAD_ID --base-version 3 --mutation-id reopen-1
+```
+
+The same endpoint reopens it with `resolved: false`. Creating or replying requires
+Page comment access; resolving or reopening requires Page write access. Readers
+can list threads. All mutation
+commands generate an ID when `--mutation-id` is omitted. Supply your own stable
+ID when you need to retry after a network error, using the original payload and
+base version. Responses remain escaped JSON, including untrusted comment text.
+
+### crewship page artifact comments edit
+
+```bash
+crewship page artifact comments edit report THREAD_ID COMMENT_ID --body 'Corrected text' --base-version 3 --mutation-id edit-1
+```
+
+`PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}`
+edits your own human-authored comment. `--base-version` is the current **thread**
+version; replacement text must be nonempty UTF-8 and at most 4 KiB.
+
+### crewship page artifact comments delete
+
+```bash
+crewship page artifact comments delete report THREAD_ID COMMENT_ID --base-version 4 --mutation-id delete-1
+```
+
+`DELETE /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}`
+deletes your own human-authored comment. The comment becomes a tombstone;
+previous bodies remain in its private author history.
+
+### crewship page artifact comments react
+
+```bash
+crewship page artifact comments react report THREAD_ID COMMENT_ID --emoji '👀' --active=true --base-version 5 --mutation-id reaction-1
+```
+
+`PUT /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji}`
+adds or removes your reaction. Choose `👍`, `❤️`, `👀`, or `✅` and specify
+`--active=true` or `--active=false`. Each write requires current Page comment
+access and the current thread version. Keep the same `--mutation-id`, body, and
+version when retrying an uncertain result; a stale conflict is never retried
+automatically.
+
+### crewship page artifact comments history
+
+```bash
+crewship page artifact comments history report THREAD_ID COMMENT_ID
+```
+
+`GET /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/history`
+reads your own comment's versions and actions, including deleted-comment history,
+while you still have Page comment access. It does not dispatch or authorize an agent.
+
+
+
 ## Subcommands
 
 | Command | Purpose |
@@ -223,6 +496,8 @@ most 24 panels and 256 KiB of spec.
 
 Remember that [`page update --file`](#crewship-page-update-slug) **replaces**
 the spec: omit any of these on a re-apply and they are deleted.
+
+
 
 ### `--owner crew/<slug>` — whose page it is
 
@@ -1822,3 +2097,32 @@ for a retained version) or `crewship page project publish`.
 After a transport timeout the outcome can be unknown; inspect the current
 revision and build status before retrying. Data producers keep pushing through
 the existing panel API/`page.write` path independently of source edits.
+
+### crewship page artifact chat-results
+
+`crewship page artifact chat-results <chat-id>` lists up to 20 artifact Pages
+linked by the server to that accessible chat. Each result points to an immutable
+revision. The server independently checks current Page access and omits hidden
+results without exposing their names.
+
+### crewship page request-result
+
+```bash
+crewship page request-result artifact REQUEST_ID --format json
+```
+
+Calls `GET /api/v1/page-request-results/{kind}/{requestId}` using your current
+workspace and human identity. Returns a current accessible Page slug and optional
+retained result revision. Only the initiating human can resolve the result;
+missing or revoked access returns 404. This reads a result and starts no work.
+
+### crewship page artifact lease
+
+```bash
+crewship page artifact lease report --revision 3 --format json
+```
+
+Calls `GET /api/v1/pages/{slug}/artifact/lease`. `--revision` is required and
+positive. Checks your current human Page access and returns exact retained
+revision metadata with a short expiry, without downloading HTML. It grants no
+additional access and does not enable interactive execution.

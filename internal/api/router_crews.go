@@ -111,6 +111,12 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/logo", roleManage, ws.DeleteLogo)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/logo", authed(http.HandlerFunc(ws.ServeLogo)))
 
+	// Explicit human custody: metadata only, with live actor and successor checks.
+	// openapi: responses 200,400,401,403,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/page-ownership", authed(wsCtx(http.HandlerFunc(ws.ListPageOwnership))))
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/page-ownership/{pageID}", roleManage, ws.TransferPageOwnership)
+
 	// Workspace members
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members", authed(wsCtx(http.HandlerFunc(ws.ListMembers))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/members", roleManage, ws.AddMember)
