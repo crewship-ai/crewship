@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { feedbackPreferenceChoices, useTurnPreference } from "@/hooks/use-feedback-preferences"
 import { useDrawerStore } from "@/stores/drawer-store"
+import { useArtifactStore } from "@/stores/artifact-store"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { PreferencesTab, preferenceStatusLabel } from "./right-panel-tabs/preferences-tab"
@@ -39,7 +40,7 @@ function PreferenceReasonForm(props: Props) {
     <div className="flex flex-wrap items-center gap-2">
       <Button type="button" size="sm" variant="ghost" onClick={() => { remember.reset(); void state.refetch() }}>Refresh status</Button>
       <Button type="button" size="sm" variant="ghost" onClick={() => {
-        if (mobile) setManageOpen(true)
+        if (mobile || useArtifactStore.getState().open) setManageOpen(true)
         else useDrawerStore.getState().setActiveTab("memory")
       }}>Manage my preferences</Button>
     </div>
