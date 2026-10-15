@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { z } from "zod"
-import { resourceRightSchema, resourcePolicySchema } from "@/lib/resource-sharing"
+import { resourceRightSchema, resourcePolicySchema, resourceOperationLabel } from "@/lib/resource-sharing"
 
 import { Button } from "@/components/ui/button"
 import { usePageSave } from "@/components/ui/page-save-bar"
@@ -16,7 +16,7 @@ const policySchema = resourcePolicySchema
 type Policy = z.infer<typeof policySchema>
 type Right = z.infer<typeof rightSchema>
 const directorySchema = z.array(z.object({ id: z.string(), name: z.string() }))
-const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "contribute", "manage", "write", "delete"], routine: ["view", "run"] }
+const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "contribute", "manage", "delete_issues", "write", "delete"], routine: ["view", "run"] }
 
 export function MemberResourceAccess({ workspaceId, memberId, label, role, onSaved }: {
   workspaceId: string; memberId: string; label: string; role: string
@@ -120,7 +120,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
             {reissue.some(r => rightKey(r) === rightKey(right)) ? "Cancel reissue" : "Reissue as me"}
           </Button>}
         </span>)}
-        <span>{right.kind}: {directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {right.operation}</span>
+        <span>{right.kind}: {directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {resourceOperationLabel(right.operation)}</span>
         <Button size="sm" variant="ghost" className="coarse:h-12" disabled={save.isPending || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
           aria-label={`Remove ${right.kind} ${right.id} ${right.operation}`}>Remove</Button>
       </li>)}</ul>
@@ -133,7 +133,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
           <option value="">Choose a resource</option>{directory.data?.map(resource => <option key={resource.id} value={resource.id}>{resource.name}</option>)}
         </select>
         <select aria-label="Resource operation" className={selectClass} value={operation} disabled={save.isPending || conflict} onChange={event => setOperation(event.target.value)}>
-          {operations[kind].map(value => <option key={value} value={value}>{value}</option>)}
+          {operations[kind].map(value => <option key={value} value={value}>{resourceOperationLabel(value)}</option>)}
         </select>
         <Button size="sm" className="coarse:h-12" variant="outline" disabled={save.isPending || conflict || !resourceId || rights.length >= 256} onClick={addRight}>Add grant</Button>
       </div>
@@ -187,6 +187,6 @@ function EffectiveAccess({url,revision,memberId}:{url:string;revision:number;mem
     <summary className="cursor-pointer">Effective access — saved policy</summary>
     {query.isPending && <p>Checking current access…</p>}
     {query.isError && <p role="status">Effective access unavailable. <button type="button" onClick={()=>void query.refetch()}>Retry access check</button></p>}
-    {query.data && <><p className="mt-2 text-muted-foreground">{query.data.explanation}</p><ul className="mt-2 space-y-2">{query.data.decisions.map(row=><li key={rightKey(row)}><span className="font-medium">{row.kind} · {row.name || row.id} · {row.operation}: {row.state}</span><p className="text-muted-foreground">{row.reason}</p></li>)}</ul></>}
+    {query.data && <><p className="mt-2 text-muted-foreground">{query.data.explanation}</p><ul className="mt-2 space-y-2">{query.data.decisions.map(row=><li key={rightKey(row)}><span className="font-medium">{row.kind} · {row.name || row.id} · {resourceOperationLabel(row.operation)}: {row.state}</span><p className="text-muted-foreground">{row.reason}</p></li>)}</ul></>}
   </details>
 }

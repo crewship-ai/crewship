@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -195,8 +196,13 @@ func TestGuestIssueContributeIsProjectScopedAndAudited(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,created_at,updated_at) VALUES('active-execution',?,0,0,'working','INTAKE_AGENT_PRIVATE','2026-10-14T00:00:00Z','2026-10-14T00:00:00Z')`, issue.ID)
 	call("contributor", "PATCH", path, `{"status":"BACKLOG"}`, 409)
 	execOrFatal(t, db, `DELETE FROM issue_executions WHERE id='active-execution'`)
+	seedMissionAssignment(t, &IssueHandler{db: db}, ws, issue.ID, "INTAKE_AGENT_PRIVATE", "guest-contribute-active-task", "PENDING", "", "", "")
+	call("contributor", "PATCH", path, `{"status":"BACKLOG"}`, 409)
+	execOrFatal(t, db, `UPDATE assignments SET status='COMPLETED' WHERE id='guest-contribute-active-task'`)
+	execOrFatal(t, db, `UPDATE mission_tasks SET status='COMPLETED' WHERE assignment_id='guest-contribute-active-task'`)
+	call("contributor", "PATCH", path, `{"status":"BACKLOG"}`, 200)
 	call("contributor", "PATCH", path, `{"project_id":"OTHER_PROJECT_PRIVATE"}`, 400)
-	call("contributor", "DELETE", path, "", 405)
+	call("contributor", "DELETE", path, fmt.Sprintf(`{"project_id":%q,"version":%q,"confirm":true}`, issue.ProjectID, strings.Repeat("a", 64)), 404)
 	var n int
 	if err = db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE actor_id='contributor' AND mission_id=?`, issue.ID).Scan(&n); err != nil || n < 3 {
 		t.Fatalf("missing atomic audit: %d %v", n, err)

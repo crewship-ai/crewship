@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAuth } from "@/hooks/use-auth"
+import { resourceOperationLabel } from "@/lib/resource-sharing"
 import { apiFetch } from "@/lib/api-fetch"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { Button } from "@/components/ui/button"
@@ -53,7 +54,7 @@ export function OwnAccessCard() {
               <p className="text-sm text-muted-foreground">{query.data.explanation}</p>
               {query.data.decisions.length === 0 ? <p>No individual resources are shared with you in this workspace. Ask your administrator for access.</p>
                 : <ul className="space-y-3">{query.data.decisions.map(decision => <li key={`${decision.kind}:${decision.id}:${decision.operation}`}>
-                  <p className="text-sm font-medium break-all">{kindLabels[decision.kind]} · {decision.name || decision.id} · {decision.operation} · {stateLabels[decision.state]}</p>
+                  <p className="text-sm font-medium break-all">{kindLabels[decision.kind]} · {decision.name || decision.id} · {resourceOperationLabel(decision.operation)} · {stateLabels[decision.state]}</p>
                   <p className="text-sm text-muted-foreground">{decision.reason}</p>
                 </li>)}</ul>}
             </>}

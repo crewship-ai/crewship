@@ -523,8 +523,7 @@ func (r *Router) updateRestrictedIssue(w http.ResponseWriter, req *http.Request)
 		replyError(w, 409, "This issue is already in the trusted execution workflow")
 		return
 	}
-	var activeWork bool
-	err = tx.QueryRowContext(req.Context(), `SELECT EXISTS(SELECT 1 FROM assignments WHERE (mission_id=? OR chat_id=? OR group_id=?) AND status NOT IN ('COMPLETED','FAILED','CANCELLED')) OR EXISTS(SELECT 1 FROM issue_executions WHERE mission_id=? AND stage IN ('working','reviewing'))`, issue.ID, issue.ID, issue.ID, issue.ID).Scan(&activeWork)
+	activeWork, err := guestIssueActiveWorkIn(req.Context(), tx, issue.ID)
 	if err != nil {
 		guestIssueError(w, err)
 		return

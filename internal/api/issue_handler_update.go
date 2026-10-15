@@ -1,15 +1,12 @@
 package api
 
 import (
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/chatentities"
 )
 
 // ── Update — PATCH /api/v1/issues/{id} ──────────────────────────────────────
@@ -580,36 +577,9 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusBadRequest, issueDeleteRefusal(ident, currentStatus))
 		return
 	}
-	// The human delete and every chat receipt commit together. Original run
-	// IDs are anchors only; the operation records the actual human deleter.
-	var referenced bool
-	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM chat_entity_refs cr JOIN agent_operations op ON op.id=cr.operation_id WHERE op.entity_id=? AND op.workspace_id=?)`, deletedID, wsID).Scan(&referenced); err != nil {
-		internalError(w, r, h.logger, "delete issue: read references", err)
+	if err := appendHumanIssueDeletionReceipts(r.Context(), tx, wsID, deletedID, user.ID, deletedRevision, deletedAggregate); err != nil {
+		internalError(w, r, h.logger, "delete issue: append receipts", err)
 		return
-	}
-	if referenced {
-		operationID := generateCUID()
-		op, _, err := chatentities.BeginOperation(r.Context(), tx, chatentities.OperationSpec{
-			ID: operationID, WorkspaceID: wsID, Key: "delete:" + operationID,
-			RequestHash: fmt.Sprintf("%x", sha256.Sum256([]byte(deletedID))),
-			ActorType:   "human", ActorID: user.ID, Provenance: "human", Kind: "issue", Verb: "deleted",
-		})
-		if err != nil {
-			internalError(w, r, h.logger, "delete issue: begin receipt", err)
-			return
-		}
-		snapshot, _ := json.Marshal(chatentities.DeletionAccessSnapshot{Version: 1, WorkspaceID: wsID, Visibility: "trusted_workspace"})
-		if err := chatentities.CompleteOperation(r.Context(), tx, op.ID, chatentities.ResultSpec{
-			EntityID: deletedID, Revision: deletedRevision, AggregateRevision: deletedAggregate,
-			AccessSnapshot: snapshot, Result: json.RawMessage(`{"deleted":true}`),
-		}); err != nil {
-			internalError(w, r, h.logger, "delete issue: complete receipt", err)
-			return
-		}
-		if _, err := chatentities.AppendDeletionRefs(r.Context(), tx, op.ID, wsID, deletedID); err != nil {
-			internalError(w, r, h.logger, "delete issue: append receipt", err)
-			return
-		}
 	}
 	// Commit before the blob sweep: the deferred foreign-key checks run here,
 	// and the sweep below is explicitly best-effort bookkeeping that must not

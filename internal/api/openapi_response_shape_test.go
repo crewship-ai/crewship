@@ -70,6 +70,7 @@ var responseShapeContracts = []struct {
 	{name: "RestrictedRoutineDefinition", pointer: "/components/schemas/RestrictedRoutineDefinition", value: guestRoutineDefinition{}},
 
 	{name: "GuestProjectMilestone", pointer: "/paths/~1api~1v1~1workspaces~1{workspaceId}~1restricted-projects~1{projectId}~1milestones/get/responses/200/content/application~1json/schema/items", value: guestProjectMilestone{}},
+	{name: "GuestIssueDeletion", pointer: "/paths/~1api~1v1~1workspaces~1{workspaceId}~1restricted-issues~1{issueId}~1deletion/get/responses/200/content/application~1json/schema", value: guestIssueDeletion{}},
 	{name: "GuestProjectDetails", pointer: "/paths/~1api~1v1~1workspaces~1{workspaceId}~1restricted-projects~1{projectId}/get/responses/200/content/application~1json/schema", value: guestProjectDetails{}},
 	{name: "RestrictedRoutine", pointer: "/components/schemas/RestrictedRoutine", value: restrictedworkflow.CatalogRoutine{}},
 	{name: "RestrictedRoutineInput", pointer: "/components/schemas/RestrictedRoutineInput", value: restrictedworkflow.CatalogInput{}},

@@ -30,5 +30,8 @@ func guestIssueContributionSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range guestProjectMilestoneSchemaCatalog() {
 		routes[key] = schema
 	}
+	for key, schema := range guestIssueDeletionSchemaCatalog() {
+		routes[key] = schema
+	}
 	return routes
 }

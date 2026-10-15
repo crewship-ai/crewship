@@ -63,6 +63,8 @@ var restrictedRoutes = map[string]restrictedRule{
 	"POST /api/v1/workspaces/{workspaceId}/restricted-issues":                                          restrictedPass,
 	"POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments":                       restrictedPass,
 	"PATCH /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}":                               restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/deletion":                        restrictedPass,
+	"DELETE /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}":                              restrictedPass,
 
 	"POST /api/v1/auth/invitation/accept": restrictedPass,
 	"POST /api/v1/auth/cli-token":         restrictedSessionTokenCreation,
