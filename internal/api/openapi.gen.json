@@ -6446,7 +6446,8 @@
                         "write",
                         "delete",
                         "contribute",
-                        "manage"
+                        "manage",
+                        "delete_issues"
                       ],
                       "type": "string"
                     }
@@ -6648,7 +6649,8 @@
                         "write",
                         "delete",
                         "contribute",
-                        "manage"
+                        "manage",
+                        "delete_issues"
                       ],
                       "type": "string"
                     }
@@ -142219,7 +142221,8 @@
                                   "write",
                                   "delete",
                                   "contribute",
-                                  "manage"
+                                  "manage",
+                                  "delete_issues"
                                 ],
                                 "type": "string"
                               }
@@ -142323,7 +142326,8 @@
                                   "write",
                                   "delete",
                                   "contribute",
-                                  "manage"
+                                  "manage",
+                                  "delete_issues"
                                 ],
                                 "type": "string"
                               }
@@ -142620,7 +142624,8 @@
                                 "write",
                                 "delete",
                                 "contribute",
-                                "manage"
+                                "manage",
+                                "delete_issues"
                               ],
                               "type": "string"
                             }
@@ -142724,7 +142729,8 @@
                                 "write",
                                 "delete",
                                 "contribute",
-                                "manage"
+                                "manage",
+                                "delete_issues"
                               ],
                               "type": "string"
                             }
@@ -142893,7 +142899,8 @@
                                   "write",
                                   "delete",
                                   "contribute",
-                                  "manage"
+                                  "manage",
+                                  "delete_issues"
                                 ],
                                 "type": "string"
                               }
@@ -142997,7 +143004,8 @@
                                   "write",
                                   "delete",
                                   "contribute",
-                                  "manage"
+                                  "manage",
+                                  "delete_issues"
                                 ],
                                 "type": "string"
                               }
@@ -157559,6 +157567,9 @@
                       "can_contribute": {
                         "type": "boolean"
                       },
+                      "can_delete_issues": {
+                        "type": "boolean"
+                      },
                       "can_read": {
                         "type": "boolean"
                       },
@@ -157592,7 +157603,8 @@
                       "project_id",
                       "project_name",
                       "can_read",
-                      "can_contribute"
+                      "can_contribute",
+                      "can_delete_issues"
                     ],
                     "type": "object"
                   },
@@ -157728,6 +157740,9 @@
                     "can_contribute": {
                       "type": "boolean"
                     },
+                    "can_delete_issues": {
+                      "type": "boolean"
+                    },
                     "can_read": {
                       "type": "boolean"
                     },
@@ -157761,7 +157776,8 @@
                     "project_id",
                     "project_name",
                     "can_read",
-                    "can_contribute"
+                    "can_contribute",
+                    "can_delete_issues"
                   ],
                   "type": "object"
                 }
@@ -157897,6 +157913,189 @@
       }
     },
     "/api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}": {
+      "delete": {
+        "description": "Delete workspace restricted issue (DELETE /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}).",
+        "operationId": "delete_api_v1_workspaces_workspaceId_restricted-issues_issueId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issueId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
+                  },
+                  "project_id": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "maxLength": 64,
+                    "minLength": 64,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "project_id",
+                  "version",
+                  "confirm"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete workspace restricted issue",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": false
+      },
       "get": {
         "description": "Get workspace restricted issue (GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}).",
         "operationId": "get_api_v1_workspaces_workspaceId_restricted-issues_issueId",
@@ -157937,6 +158136,9 @@
                     "can_contribute": {
                       "type": "boolean"
                     },
+                    "can_delete_issues": {
+                      "type": "boolean"
+                    },
                     "can_read": {
                       "type": "boolean"
                     },
@@ -157970,7 +158172,8 @@
                     "project_id",
                     "project_name",
                     "can_read",
-                    "can_contribute"
+                    "can_contribute",
+                    "can_delete_issues"
                   ],
                   "type": "object"
                 }
@@ -158104,6 +158307,9 @@
                     "can_contribute": {
                       "type": "boolean"
                     },
+                    "can_delete_issues": {
+                      "type": "boolean"
+                    },
                     "can_read": {
                       "type": "boolean"
                     },
@@ -158137,7 +158343,8 @@
                     "project_id",
                     "project_name",
                     "can_read",
-                    "can_contribute"
+                    "can_contribute",
+                    "can_delete_issues"
                   ],
                   "type": "object"
                 }
@@ -158659,6 +158866,190 @@
           "workspaces"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/deletion": {
+      "get": {
+        "description": "Get workspace restricted issue deletion (GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/deletion).",
+        "operationId": "get_api_v1_workspaces_workspaceId_restricted-issues_issueId_deletion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "issueId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "can_delete": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "identifier": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "identifier",
+                    "title",
+                    "project_id",
+                    "status",
+                    "version",
+                    "can_delete"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace restricted issue deletion",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/workspaces/{workspaceId}/restricted-pages": {

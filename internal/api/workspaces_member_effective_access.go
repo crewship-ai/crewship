@@ -126,6 +126,19 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 		} else if right.Kind == "routine" {
 			decision.State = "conditional"
 			decision.Reason = "Routine and agent grants are current; inputs, budget and runtime readiness are checked at invocation."
+		} else if right.Kind == "project" && right.Operation == "delete_issues" {
+			decision.State = "conditional"
+			decision.Reason = "Explicit deletion also requires Read and Manage, a reviewed version and confirmation. Only Backlog or Cancelled issues without active work can be removed."
+			for _, dependency := range []string{"read", "manage"} {
+				if e := store.Check(r.Context(), user, workspace, access.Right{Kind: "project", ID: right.ID, Operation: dependency}); e != nil {
+					if !errors.Is(e, access.ErrDenied) {
+						h.memberAccessError(w, e)
+						return
+					}
+					decision.State = "denied"
+					decision.Reason = "Deleting issues also requires current Read and Manage shares."
+				}
+			}
 		} else if right.Kind == "project" && (right.Operation == "contribute" || right.Operation == "manage") {
 			readErr := store.Check(r.Context(), user, workspace, access.Right{Kind: "project", ID: right.ID, Operation: "read"})
 			if readErr != nil && !errors.Is(readErr, access.ErrDenied) {

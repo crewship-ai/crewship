@@ -721,7 +721,7 @@ POST /api/v1/workspaces/{workspaceId}/invitations
 `access_mode` is optional: `trusted` (default) or `restricted` (Guest).
 `rights` is an optional array of `{kind,id,operation}` resource grants, empty
 by default. Supported kinds are agent, routine and project; a routine supports
-View/Run, agents support discover/chat/run/delegate, and projects list/read/contribute/manage/write/delete.
+View/Run, agents support discover/chat/run/delegate, and projects list/read/contribute/manage/delete_issues/write/delete.
 Trusted invitations require empty rights; Guest invitations cannot grant ADMIN.
 The server revalidates resources and issuer authority during redemption and
 installs membership and grants atomically. Existing accounts must explicitly
@@ -2078,7 +2078,7 @@ query parameters are required.
 
 `rights` is an explicit array, including when empty. Agent operations are
 `discover`, `chat`, `run`, `delegate`; project operations are `list`, `read`,
-`contribute`, `manage`, `write`, `delete`; routine operations are `view` and `run`. Grants do not open application routes whose restricted
+`contribute`, `manage`, `delete_issues`, `write`, `delete`; routine operations are `view` and `run`. Grants do not open application routes whose restricted
 runtime integration is incomplete.
 
 | Status | Condition |
@@ -2417,13 +2417,53 @@ checked in the same transaction as the update and audit. Body contains exactly
 `name`, `description` and the reviewed `version`. Name must be nonblank and at most
 4096 UTF-8 bytes; description is a required string up to 65536 bytes, and empty
 clears it. Unknown fields are refused. Manage here supports basic project details;
-milestones, deletion, file writes and intake configuration remain separate.
+Milestones use dedicated routes; issue deletion additionally requires `delete_issues`. File writes and intake configuration remain separate.
 
 Both routes return 200 with the thin details projection; 400 invalid request,
 401 unauthenticated, 404 unavailable local project/grant,
 500 storage/audit failure. PUT additionally returns 403 for a limited mutation credential and 409 on changed details, with no update;
 reload, review and explicitly resubmit. Audit failure rolls back the update.
 CLI equivalents are `project shared` and `project shared update`.
+
+
+## Guest issue deletion
+
+### `GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/deletion`
+
+Requires current Guest project Read, Manage and explicit `delete_issues` shares,
+including live issuers. Returns `id`, `identifier`, `title`, `project_id`, `status`,
+opaque `version` and `can_delete`. Eligibility also requires this credential's
+existing mutation scope, Backlog/Cancelled status and no active assignment, execution, pending task or sub-issue. Narrow credentials can inspect the preview with `can_delete=false`.
+The projection contains no private comments, agent identities or execution data.
+
+**Response:** `200 OK`
+
+```json
+{"id":"issue_123","identifier":"CLIENT-1","title":"Client request","project_id":"project_123","status":"BACKLOG","version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","can_delete":true}
+```
+
+### `DELETE /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}`
+
+Requires the same three rights and current mutation scope, rechecked in the
+transaction which deletes the issue and journals its actual human actor. The
+body is exactly the reviewed project, version and explicit confirmation:
+
+```json
+{"project_id":"project_123","version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","confirm":true}
+```
+
+Returns 204 with no body. Removes issue/comment attachment rows and reclaims only
+orphaned attachment digests after commit. Historical chat deletion receipts retain
+the existing trusted audience and disclose no deleted content. They do not open
+trusted chat/operation routes to a Guest. Audit or receipt failure rolls everything
+back. Existing Manage shares do not acquire deletion: administrators must issue
+`delete_issues` deliberately; source-file `delete` is a different operation.
+
+Both routes return 400 invalid input, 401 unauthenticated, 403 credential scope,
+404 absent/foreign/unshared issue or inactive authority, and 500 storage failure.
+DELETE additionally returns 409 on changed project/version, ineligible status or
+active work, without deletion. There is no automatic retry. CLI equivalents:
+`issue shared-delete-preview` and `issue shared-delete`.
 
 
 ## Guest milestone management

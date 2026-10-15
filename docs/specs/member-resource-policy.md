@@ -316,8 +316,8 @@ snapshot; CLI requires the reviewed version and never automatically retries it.
 Live account, local membership, Read/Manage issuers, update and journal entry
 share one transaction. Other client projects and private metadata remain hidden.
 
-This is a first Manage increment. Milestone management, issue deletion and the
-remaining project settings still require separate scoped enforcement. The original
+Milestones and explicit issue deletion use dedicated scoped routes. Remaining
+project settings require further scoped enforcement. The original
 PRD's level hierarchy remains a target: current operations are explicit, additive
 shares, so administrators must choose the lower operations they intend to share.
 
@@ -329,9 +329,26 @@ routes. Each write uses current account, local grants, live issuers, a reviewed
 version and atomic journal. Lists are paginated with a filtered total and current
 credential mutation hint. These routes never expose issue internals or member
 identity. Only empty milestones can be deleted: linked issue work, including
-legacy cross-project references, is never unlinked by a Guest. Full issue deletion,
-project settings and original PRD level inheritance remain open.
+legacy cross-project references, is never unlinked by a Guest. Issue deletion uses the separate explicit share below. Additional project
+settings and original PRD level inheritance remain open.
 
 UI edits preserve drafts, block stale snapshots and pin a deletion confirmation
 to the version actually reviewed. CLI drives the same projection and requires
 version/confirmation for deletion, with no conflict refresh or retry.
+## Explicit Guest issue deletion
+
+Project `delete_issues` is a separate destructive share and requires Read and
+Manage on the issue's current project. The dedicated preview and DELETE use that
+intersection; existing Manage and source-file `delete` grants do not imply it.
+Deletion requires a reviewed opaque snapshot, matching project and explicit
+confirmation. Only Backlog or Cancelled issues without active work or sub-issues are eligible.
+Authority, version, row cascade, human chat receipts and audit commit atomically.
+The historical receipt audience remains trusted; Guest chat/operation access does
+not expand. No deleted comment bodies or private execution metadata are returned.
+Attachment storage cleanup follows commit and targets exact orphaned digests.
+
+| PRD model | Kept / changed / deferred | Reason |
+| --- | --- | --- |
+| Project managers may remove disposable issues | Kept with current Backlog/Cancelled and active-work guards | Preserves the ordinary issue lifecycle and avoids interrupting trusted execution. |
+| Manage automatically includes deletion | Changed to explicit `delete_issues` | The earlier Manage increment was presented as metadata editing; a destructive capability requires a deliberate new share. |
+| A single inherited project-level preset | Deferred | Current explicit operations preserve saved grant provenance; a later level UI must describe and apply its full bundle deliberately. |

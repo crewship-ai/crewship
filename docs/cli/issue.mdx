@@ -884,3 +884,32 @@ Guest `issue shared create`, `comment` and `move` accept `--idempotency-key`.
 Keep the key unchanged when retrying the same command after a lost response;
 a conflicting key is not retried automatically. The server rechecks current
 grants and project audience before replaying a saved result.
+
+
+## `crewship issue shared-delete-preview`
+
+Review one Guest issue before permanent removal. Requires current project Read,
+Manage and explicit `delete_issues` shares. Returns its project, status, reviewed
+version and current credential's deletion eligibility. Private comments and
+execution history are not returned.
+
+```bash
+crewship issue shared-delete-preview CLIENT-1 -o json
+```
+
+## `crewship issue shared-delete`
+
+Permanently remove the reviewed issue, its comments and attachments. Only Backlog
+or Cancelled issues without active assignments/executions or sub-issues are eligible. A changed
+project/version returns 409; review again and explicitly resubmit. The command
+never fetches a replacement version or retries a deletion automatically.
+
+```bash
+crewship issue shared-delete CLIENT-1 --project project_123 --version REVIEWED_VERSION --confirm
+```
+
+| Flag | Required | Meaning |
+| --- | --- | --- |
+| `--project <id>` | yes | Project from the reviewed preview. |
+| `--version <version>` | yes | Exact 64-character snapshot from the preview. |
+| `--confirm` | yes | Explicit permanent-deletion confirmation. |

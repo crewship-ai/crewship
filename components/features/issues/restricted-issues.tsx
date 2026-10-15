@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { SharedIssueDelete } from "./shared-issue-delete"
 import { SharedProjectDetails } from "./shared-project-details"
 import { useId, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -14,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 
-const issueSchema = z.object({ id: z.string(), identifier: z.string(), title: z.string(), status: z.string(), project_id: z.string(), project_name: z.string(), can_read: z.boolean(), can_contribute: z.boolean().default(false), description: z.string().optional() })
+const issueSchema = z.object({ id: z.string(), identifier: z.string(), title: z.string(), status: z.string(), project_id: z.string(), project_name: z.string(), can_read: z.boolean(), can_contribute: z.boolean().default(false), can_delete_issues: z.boolean().default(false), description: z.string().optional() })
 const projectSchema = z.object({ id: z.string(), name: z.string(), can_contribute: z.boolean(), intake_ready: z.boolean(), can_manage: z.boolean().default(false) })
 const commentSchema = z.object({ id: z.string(), body: z.string(), author: z.string(), created_at: z.string() })
 type Issue = z.infer<typeof issueSchema>
@@ -155,5 +156,6 @@ function IssueCard({ issue, detail, base, userId, mutationsDisabled }: { issue: 
       {!comments.isError && comments.data?.length === 0 && <p className="text-sm text-muted-foreground">No comments have been shared with this project.</p>}
       {issue.can_contribute && <form className="space-y-2" onSubmit={event => { event.preventDefault(); if (draft.trim() && !send.isPending && !audienceChanged && !mutationsDisabled && !comments.isError) send.mutate() }}><label htmlFor={commentId} className="text-sm">Comment shared with this project</label><Textarea id={commentId} value={draft} maxLength={32768} disabled={send.isPending} onChange={event => { if (!draft) setAudience({ id: issue.project_id, name: issue.project_name }); setDraft(event.target.value) }} required />{audienceChanged && <div role="alert" className="text-sm"><p>The project changed. Your draft was written for {audience?.name}. Review the new audience before posting.</p><Button type="button" variant="outline" onClick={() => setAudience({ id: issue.project_id, name: issue.project_name })}>Share this draft with {issue.project_name}</Button></div>}<Button type="submit" disabled={!draft.trim() || send.isPending || audienceChanged || mutationsDisabled || comments.isError}>{send.isPending ? "Posting…" : "Post comment"}</Button>{send.isError && <p role="alert" className="text-sm">{send.error.message}</p>}</form>}
     </section>}
+    {detail && issue.can_delete_issues && <SharedIssueDelete path={path} issueId={issue.id} projectId={issue.project_id} userId={userId} disabled={mutationsDisabled} />}
   </article>
 }
