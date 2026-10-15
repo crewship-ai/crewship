@@ -87,6 +87,26 @@ if ( cd "$TMP" && PATH="$TMP/bin:$PATH" node "$GEN" "$TMP/out3" ) > "$TMP/log3" 
 fi
 echo "ok  missing license text without exception fails"
 
+# The reviewed worker-f declaration is exact-version only, and explicitly is
+# not represented as a copy of an upstream license text.
+rm -rf "$TMP/node_modules"
+mkpkg "worker-f@0.1.20" "worker-f" "worker-f" "0.1.20" "-"
+cat > "$TMP/expected-worker.json" <<'J'
+{"MIT": [{"name": "worker-f", "versions": ["0.1.20"]}]}
+J
+write_stub_pnpm "$TMP/expected-worker.json"
+( cd "$TMP" && PATH="$TMP/bin:$PATH" node "$GEN" "$TMP/worker" ) > "$TMP/worker-log" 2>&1
+grep -q -F 'NOT a copy of the' "$TMP/worker/texts/worker-f@0.1.20/EXCEPTION-NOTICE.md"
+grep -q -F '32742a0f8a57f19968c73539a09ecb3606efa3f9' "$TMP/worker/texts/worker-f@0.1.20/EXCEPTION-NOTICE.md"
+mkpkg "worker-f@0.1.21" "worker-f" "worker-f" "0.1.21" "-"
+cat > "$TMP/expected-worker.json" <<'J'
+{"MIT": [{"name": "worker-f", "versions": ["0.1.21"]}]}
+J
+if ( cd "$TMP" && PATH="$TMP/bin:$PATH" node "$GEN" "$TMP/future-worker" ) > "$TMP/future-worker-log" 2>&1; then
+  echo "TEST FAIL: unreviewed worker-f version passed without license text" >&2; exit 1
+fi
+echo "ok  reviewed worker-f declaration notice and unreviewed version refusal"
+
 # ── case 4: real-repo sanity for the actually installed scoped deps ────────
 if [ -d "$REPO_ROOT/node_modules/.pnpm" ] && command -v pnpm >/dev/null 2>&1; then
   OUT="$TMP/real"
