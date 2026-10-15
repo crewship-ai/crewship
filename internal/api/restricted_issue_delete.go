@@ -156,6 +156,7 @@ func (r *Router) restrictedIssueDeletion(w http.ResponseWriter, req *http.Reques
 	if r.storagePath != "" {
 		reclaimAttachmentDigests(req.Context(), r.db, r.logger, r.storagePath, workspace, digests)
 	}
+	broadcastIssueCardInvalidations(req.Context(), r.db, r.hub, workspace, issue.ID, true)
 	broadcastWorkspaceEvent(r.hub, workspace, "issue.deleted", map[string]string{"identifier": issue.Identifier, "crew_id": crew})
 	w.WriteHeader(204)
 }

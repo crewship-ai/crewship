@@ -249,7 +249,8 @@ for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 })
     let revoked = false, revision = 1, writes = 0
     let status = "PLANNING"
-    let hasReply = false
+    let hasReply = false, loseCommentAck = false
+    const commentKeys = new Set<string>()
     const agent = { id: "entity-agent", slug: "_", name: "Jamie", status: "IDLE", crew_id: "crew", crew_name: "Platform", role: "lead", current_user_can_chat: true }
     const issue = () => ({ id: "entity-1", identifier: "ENG-1", workspace_id: "test-workspace-id", crew_id: "crew", title: "Synthetic title", status, priority: "none", revision, aggregate_revision: revision, allowed_actions: ["view", "comment", "change_status"], labels: [], created_at: "2026-10-13T09:00:00Z", updated_at: "2026-10-13T09:00:00Z" })
     await page.route("**/api/**", async (route) => {
@@ -277,6 +278,11 @@ for (const width of [1280, 390]) {
       else if (path.endsWith("/entity-refs")) {
         if (revoked) { code = 404; body = {} }
         else body = { ...fixture, contract_version: 1, has_more: false, snapshot_complete: true, refs: [{ ...fixture.refs[0], anchor: { ...fixture.refs[0].anchor, run_status: hasReply ? "completed" : "failed" }, current: { ...fixture.refs[0].current, status, revision, aggregate_revision: revision, allowed_actions: issue().allowed_actions } }] }
+      }
+      else if (path === "/api/v1/crews/crew/issues/ENG-1/comments" && request.method() === "POST") {
+        commentKeys.add(request.headers()["idempotency-key"])
+        if (loseCommentAck) { loseCommentAck = false; return route.abort("failed") }
+        body = { id: "comment-1" }
       }
       else if (path === "/api/v1/issues/ENG-1") body = issue()
       else if (path === "/api/v1/crews/crew/issues/ENG-1" && request.method() === "PATCH") {
@@ -308,11 +314,37 @@ for (const width of [1280, 390]) {
     await page.reload()
     await expect(page.locator('[data-turn-id="reply"] + div').getByText("ENG-1")).toBeVisible()
     await expect(card.getByText("In Progress", { exact: true })).toBeVisible()
+    await card.getByRole("button", { name: "Comment", exact: true }).click()
+    const inlineComment = card.getByRole("textbox", { name: "Comment", exact: true })
+    await inlineComment.fill("One durable comment")
+    await inlineComment.focus()
+    const refreshed = page.waitForResponse(response => response.url().includes("/entity-refs"))
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")))
+    await refreshed
+    await expect(inlineComment).toBeFocused()
+    await expect(inlineComment).toHaveValue("One durable comment")
+    loseCommentAck = true
+    await card.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(card.getByText("The outcome is unknown. Your draft is kept.")).toBeVisible()
+    await page.reload()
+    await card.getByRole("button", { name: "Comment", exact: true }).click()
+    await expect(card.getByText("The outcome is unknown. Your draft is kept.")).toBeVisible()
+    await card.getByRole("button", { name: "Check and retry the same operation" }).click()
+    await expect(card.getByRole("textbox", { name: "Comment", exact: true })).toHaveCount(0)
+    expect(commentKeys.size).toBe(1)
     const opener = card.getByRole("button", { name: "Open on right" })
     await opener.focus(); await page.keyboard.press("Enter")
     await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Change status" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Change priority" })).toHaveCount(0)
+    const panelComment = page.getByPlaceholder("Write a comment.  @ to bring in an agent.")
+    await panelComment.fill("Comment survives a field save")
+    await page.getByRole("button", { name: "Change status", exact: true }).click()
+    await page.getByRole("button", { name: "Done", exact: true }).click()
+    await page.getByRole("button", { name: "Save changes", exact: true }).click()
+    await expect(page.getByRole("button", { name: "Save changes", exact: true })).toHaveCount(0)
+    await expect(panelComment).toHaveValue("Comment survives a field save")
+
     if (width === 1280) {
       // An open Issue belongs to Work and must not cover other side panels.
       await page.getByRole("tab", { name: "Artifacts", exact: true }).click()
@@ -364,12 +396,16 @@ test("Guest card capability is generic and never fetches identity or object data
       else if (path === "/api/v1/agents") body = [agent]
     else if (path === "/api/v1/agents/entity-agent") body = agent
     else if (path === "/api/v1/agents/entity-agent/chats") body = [{ id: "chat-1", title: "Chat", kind: "direct", status: "active", message_count: 1, started_at: "2026-10-13T09:00:00Z" }]
+    else if (path.endsWith("/restricted-files") || path.endsWith("/project-input-options")) body = { files: [], has_more: false }
+    else if (path.endsWith("/restricted-context")) body = { entries: [] }
     else if (path.endsWith("/execution-profile")) body = { mode: "restricted" }
     else if (path.endsWith("/messages")) body = { messages: [{ id: "trigger-message", role: "user", content: "Show the issue", ts: "2026-10-13T09:00:00Z" }] }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) })
   })
   await page.goto("/chat/_?session=chat-1")
+  await expect(page.getByText("Show the issue", { exact: true })).toBeVisible()
   await expect(page.getByText("Unavailable", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Something went wrong", exact: true })).toHaveCount(0)
   expect(protectedRequests).toEqual([])
   await expect(page.getByText("ENG-1", { exact: true })).toHaveCount(0)
   await expect(page.getByText("Synthetic title", { exact: true })).toHaveCount(0)

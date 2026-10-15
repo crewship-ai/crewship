@@ -18,7 +18,7 @@ function setup(reference = base) {
   const view = render(<IssueEntityCard {...props} reference={reference} />, { wrapper })
   return { ...view, rerenderCard: (next: Partial<typeof props>) => view.rerender(<IssueEntityCard {...props} reference={reference} {...next} />) }
 }
-afterEach(() => { cleanup(); fetch.mockReset(); props.onOpen.mockClear(); props.reconcile.mockClear() })
+afterEach(() => { cleanup(); fetch.mockReset(); props.onOpen.mockClear(); props.reconcile.mockClear(); sessionStorage.clear() })
 it("renders the real projection and operation provenance without fetching per card", () => {
   setup()
   expect(screen.getByRole("heading", { name: "Synthetic title" })).toBeVisible()
@@ -28,16 +28,14 @@ it("renders the real projection and operation provenance without fetching per ca
   fireEvent.click(screen.getByRole("button", { name: "Open on right" }))
   expect(props.onOpen).toHaveBeenCalledWith(base)
 })
-it("reveals only viewer actions, and hides every protected field during recheck", () => {
+it("reveals only viewer actions and keeps the verified projection during recheck", () => {
   const ref = { ...base, current: { ...base.current!, allowed_actions: ["view"] as const } } as EntityRef
   const { rerenderCard } = setup(ref)
   expect(screen.queryByRole("button", { name: "Edit" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Comment" })).toBeNull()
   rerenderCard({ rechecking: true })
-  expect(screen.getByText("Checking current access…")).toBeVisible()
-  expect(screen.queryByText("ENG-1")).toBeNull()
-  expect(screen.queryByText("Synthetic title")).toBeNull()
-  expect(screen.queryByText(/Jamie/)).toBeNull()
+  expect(screen.getByText("ENG-1")).toBeVisible()
+  expect(screen.getByText("Synthetic title")).toBeVisible()
 })
 it("uses a tombstone without a stale identifier or title", () => {
   setup(deleted.refs[0] as EntityRef)
@@ -84,7 +82,9 @@ it("keeps an editor draft through authorization reconciliation", async () => {
   const input = await screen.findByRole("textbox", { name: "Title" })
   fireEvent.change(input, { target: { value: "Unsaved" } })
   act(() => rerenderCard({ rechecking: true }))
-  expect(screen.queryByDisplayValue("Unsaved")).toBeNull()
+  input.focus()
+  expect(screen.getByDisplayValue("Unsaved")).toBe(input)
+  expect(input).toHaveFocus()
   act(() => rerenderCard({ rechecking: false }))
   await waitFor(() => expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Unsaved"))
 })
@@ -99,4 +99,24 @@ it("opens linked requests only on demand using the verified issue crew", async (
   expect(fetch).toHaveBeenCalledTimes(1)
   fireEvent.click(screen.getByRole("button", { name: "Pull requests" }))
   expect(screen.queryByTestId("chat-pr-card")).toBeNull()
+})
+it("reloads current conflict values alongside the retained draft before a fresh save", async () => {
+  let revision = 1
+  fetch.mockImplementation(async (path: string, init?: { method?: string }) => {
+    if (init?.method === "PATCH") { revision = 2; return new Response("{}", { status: 409 }) }
+    return new Response(JSON.stringify(path.includes("/agents") ? [] : { title: revision === 1 ? "Synthetic title" : "Other person's title", status: base.current!.status, priority: revision === 1 ? "none" : "high", crew_id: "crew", revision, allowed_actions: base.current!.allowed_actions }))
+  })
+  setup()
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+  const title = await screen.findByRole("textbox", { name: "Title" })
+  fireEvent.change(title, { target: { value: "My draft" } })
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await screen.findByText("Title: Other person's title")
+  expect(title).toHaveValue("My draft")
+  fireEvent.click(screen.getByRole("button", { name: "Reload current values; keep my draft" }))
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled())
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await waitFor(() => expect(fetch.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(2))
+  const second = fetch.mock.calls.filter(([, init]) => init?.method === "PATCH")[1]
+  expect(JSON.parse(second[1].body)).toEqual({ title: "My draft", expected_revision: 2 })
 })

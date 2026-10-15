@@ -551,7 +551,10 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.mutationDelivery().drainCommittedIssueMutation(req.WorkspaceID)
-	broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, id, op != nil && op.authority.HumanAuthority != nil && op.authority.ChatID != "")
+	if op != nil && op.authority.HumanAuthority != nil {
+		broadcastChatEntityRefsInvalidation(r.Context(), h.hub, op.authority.ChatID)
+	}
+	broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, id, false)
 	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.created", map[string]string{"id": id, "identifier": identifier, "title": req.Title, "crew_id": req.CrewID})
 
 	writeJSON(w, http.StatusCreated, result)
@@ -941,7 +944,10 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			internalError(w, r, h.logger, "commit issue update", err)
 			return
 		}
-		broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, missionID, op != nil && op.authority.HumanAuthority != nil && op.authority.ChatID != "")
+		if op != nil && op.authority.HumanAuthority != nil {
+			broadcastChatEntityRefsInvalidation(r.Context(), h.hub, op.authority.ChatID)
+		}
+		broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, missionID, false)
 	}
 
 	h.mutationDelivery().drainCommittedIssueMutation(req.WorkspaceID)
@@ -1074,7 +1080,10 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 
 	h.mutationDelivery().drainCommittedIssueMutation(req.WorkspaceID)
 
-	broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, missionID, op != nil && op.authority.HumanAuthority != nil && op.authority.ChatID != "")
+	if op != nil && op.authority.HumanAuthority != nil {
+		broadcastChatEntityRefsInvalidation(r.Context(), h.hub, op.authority.ChatID)
+	}
+	broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, req.WorkspaceID, missionID, false)
 	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
 
 	writeJSON(w, http.StatusCreated, result)
