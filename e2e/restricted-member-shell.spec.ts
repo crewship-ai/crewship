@@ -341,6 +341,7 @@ for (const width of [1280, 390]) {
     await expect(page.getByRole("button", { name: "Change status" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Change priority" })).toHaveCount(0)
     const panelComment = page.getByPlaceholder("Write a comment.  @ to bring in an agent.")
+    const issuePanel = page.getByRole("button", { name: "Back to Work" }).locator("xpath=../..")
     await panelComment.fill("Comment survives a field save")
     await page.getByRole("button", { name: "Change status", exact: true }).click()
     await page.getByRole("button", { name: "Done", exact: true }).click()
@@ -361,13 +362,13 @@ for (const width of [1280, 390]) {
       await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")))
       await completed
       await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
-      await expect(page.getByText("Checking current access…", { exact: true })).toBeVisible()
+      await expect(issuePanel.getByText("Checking current access…", { exact: true })).toBeVisible()
       expect(await editor!.evaluate((el: HTMLTextAreaElement) => ({ same: el.isConnected && document.activeElement === el, start: el.selectionStart, end: el.selectionEnd, value: el.value }))).toEqual({ same: true, start: 3, end: 9, value: "Comment survives a field save" })
       refsFailure = null
       const recovered = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith("/entity-refs") && r.ok())
       await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")))
       await recovered
-      await expect(page.getByText("Checking current access…", { exact: true })).toHaveCount(0)
+      await expect(issuePanel.getByText("Checking current access…", { exact: true })).toHaveCount(0)
       await expect(panelComment).toHaveValue("Comment survives a field save")
     }
 
