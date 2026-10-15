@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { staticRaster, staticCSS, STATIC_RASTER_LIMITS } from '../artifact-raster'
 
 // Own 2x3 RGBA PNG, generated with standard PNG chunks/zlib and valid CRCs.
@@ -39,4 +39,6 @@ it('validates PNG deflate independently and fails closed on malformed streams or
   expect(await validStaticPNG(bytes(invalid))).toBe(false)
   const controller = new AbortController(); controller.abort()
   expect(await validStaticPNG(bytes(png), controller.signal)).toBe(false)
+  vi.stubGlobal('DecompressionStream', undefined)
+  try { expect(await validStaticPNG(bytes(png))).toBe(false) } finally { vi.unstubAllGlobals() }
 })

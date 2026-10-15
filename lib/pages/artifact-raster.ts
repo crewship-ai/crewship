@@ -153,7 +153,7 @@ export async function validStaticPNG(data: Uint8Array, signal?: AbortSignal): Pr
   // RFC1950 deflate header, bounded window, no preset dictionary.
   if (length < 6 || (compressed[0] & 15) !== 8 || (compressed[0] >>> 4) > 7 || ((compressed[0] << 8) | compressed[1]) % 31 !== 0 || (compressed[1] & 32)) return false
   let input = 0
-  const stream = new ReadableStream<Uint8Array>({
+  const stream = new ReadableStream<BufferSource>({
     pull(controller) {
       if (input === compressed.length) { controller.close(); return }
       // Prevent a single large compressed write from expanding before the
