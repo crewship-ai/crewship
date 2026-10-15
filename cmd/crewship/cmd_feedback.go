@@ -233,7 +233,7 @@ func init() {
 					return err
 				}
 				var out struct {
-					Preferences []map[string]any `json:"preferences"`
+					Preferences []map[string]any `json:"preferences" yaml:"preferences"`
 				}
 				if err = cli.ReadJSON(resp, &out); err != nil {
 					return err
@@ -257,18 +257,18 @@ func init() {
 				return err
 			}
 			var subject struct {
-				UserID string `json:"user_id"`
+				UserID string `json:"user_id" yaml:"user_id"`
 			}
 			if err = cli.ReadJSON(resp, &subject); err != nil {
 				return err
 			}
-			path += "/" + url.PathEscape(subject.UserID)
+			entryPath := "/api/v1/agents/" + url.PathEscape(agent) + "/peers/" + url.PathEscape(subject.UserID)
 			if op == "delete-preference" {
 				q := url.Values{"entry_id": {entry}, "revision": {fmt.Sprint(revision)}}
-				resp, err = client.Delete(path + "?" + q.Encode())
+				resp, err = client.Delete(entryPath + "?" + q.Encode())
 			} else {
 				reason, _ := cmd.Flags().GetString("reason")
-				resp, err = client.Patch(path, map[string]any{"entry_id": entry, "revision": revision, "reason": reason})
+				resp, err = client.Patch(entryPath, map[string]any{"entry_id": entry, "revision": revision, "reason": reason})
 			}
 			if err != nil {
 				return err

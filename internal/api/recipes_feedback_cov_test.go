@@ -599,12 +599,16 @@ func TestCovRecFeedbackCreate_HappyDerivedFromMessage(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("Create happy: got %d, want 201 (body=%s)", rec.Code, rec.Body.String())
 	}
-	var out map[string]string
+	var out struct {
+		ID       string         `json:"id"`
+		Revision int            `json:"revision"`
+		Memory   feedbackMemory `json:"memory"`
+	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if out["id"] == "" {
-		t.Error("expected an id in the response")
+	if out.ID == "" || out.Revision != 1 || out.Memory.Status != "disabled" {
+		t.Errorf("expected persisted source and disabled default agent memory: %+v", out)
 	}
 
 	// Row landed in the fallback workspace.
