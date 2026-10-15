@@ -20,11 +20,15 @@ provides frozen dependencies, readiness/drain, a Dockerfile and an optional
 profile requiring an explicitly qualified immutable image. Shared-host
 installation remains an Ansible delivery.
 
-The private protocol `/internal/docs/v1/` requires service authentication and,
+Private protocol 3 at `/internal/docs/v1/` requires service authentication and,
 for document operations, the original human or live-run bearer. These routes
 never mount on the public Router. The engine boot barrier is service-only and
 runs after exclusive ownership of its configured Unix socket. Its bounded boot
-identity makes retries idempotent. Until Go acknowledges recovery, Node rejects
+identity makes retries idempotent. Go and Node must agree on protocol 3 before
+recovery can fence writers; schema 2 remains unchanged. Private agent state carries
+the immutable selected request scope and commits include the actual bounded
+UTF-16 edit interval. This metadata is excluded from public document reads.
+Until Go acknowledges recovery, Node rejects
 document admission and reports not ready. Operators must prove a crashed process
 has exited before removing its stale socket; Node's native close cannot protect
 against pathname replacement by another directory writer.
@@ -38,9 +42,15 @@ Authenticated humans use `/api/v1/pages/{slug}/document` in their workspace:
 - `POST /initialize` accepts `{id,schema:2,body}` on an empty human-owned Page.
 - `POST /patch` accepts `{id,schema:2,epoch,kind:"human",update}` for a bounded
   binary update, or `{id,schema:2,epoch,target,text,ifRev,ifHash}` for semantic
-  text replacement. Original operation IDs/payloads identify exact retries.
+  text replacement. The unchanged prefix and suffix retain character identities.
+  Bound requests compute the changed interval within their original selected
+  range, including repeated text. Original operation IDs/payloads identify exact retries.
 - `GET /comments`; `POST /comments` accepts
-  `{id,schema:2,epoch,ifRev,block,from,to,text}`. Offsets refer to one text block.
+  `{id,schema:2,epoch,ifRev,block,from,to,text}`. Offsets are aggregate UTF-16 positions within one paragraph or heading,
+  including multiple CRDT text children. New anchors retain at most 64 relative
+  per-child spans and fit the existing 8192-byte durable anchor limit. Existing
+  one-child anchors remain readable; an older reader detaches a new cross-child
+  anchor rather than silently attaching it elsewhere.
   `POST /comments/resolve` accepts
   `{id,schema:2,epoch,ifRev,comment,version,resolved}`. Read/comment/edit rights
   remain distinct. Anchors report attached, collapsed or detached positions;
@@ -52,7 +62,8 @@ Authenticated humans use `/api/v1/pages/{slug}/document` in their workspace:
   new durable revision and resynchronization generation.
 - `GET /export` downloads escaped Markdown, including simple lists and tables.
 - `GET /requests` lists requests and eligible private agent chats;
-  `POST /requests` accepts `{chat_id,instruction,base_rev,submission_id}`.
+  `POST /requests` accepts `{page_id,targets,chat_id,instruction,base_rev,submission_id}`,
+  with one server-verified paragraph/heading target `{id,hash,from,to,quote}`.
 
 `GET /api/v1/documents/status` reports whether the bridge is configured.
 Capability hints never grant authority. Go rechecks live membership, exact

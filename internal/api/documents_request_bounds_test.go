@@ -15,7 +15,7 @@ import (
 )
 
 func TestDocumentSelectedRequestSQLBounds(t *testing.T) {
-	for _, scenario := range []string{"outside target", "outside range", "human edit fresh conditions", "changed unrelated block", "revoked", "success retry checkpoint"} {
+	for _, scenario := range []string{"outside target", "outside range", "human edit fresh conditions", "changed unrelated block", "edit interval outside selection", "revoked", "success retry checkpoint"} {
 		t.Run(scenario, func(t *testing.T) {
 			h, workspace, user, page := documentRequestFixture(t)
 			id := createDocumentRequestTest(t, h, workspace, user, documentRequestBody, 202)
@@ -39,7 +39,7 @@ func TestDocumentSelectedRequestSQLBounds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			semantic := &documentSemanticPatch{Target: "intro", Text: "HeNEW world"}
+			semantic := &documentSemanticPatch{Target: "intro", Text: "HeNEW world", Edit: &documentSemanticEdit{From: 2, To: 5, Insert: "NEW"}}
 			projection := json.RawMessage(`[{"id":"intro","hash":"new"},{"id":"other","hash":"h2"}]`)
 			c := documents.Commit{Lease: lease, ID: "own-patch", Fingerprint: "stable", IfRev: 0, Schema: 2, Update: []byte{1}, CandidateSnapshot: []byte{1}, Projection: projection, IfHashes: map[string]string{"intro": "h1"}, Kind: "agent"}
 			switch scenario {
@@ -54,6 +54,8 @@ func TestDocumentSelectedRequestSQLBounds(t *testing.T) {
 				c.IfHashes["intro"] = "human"
 			case "changed unrelated block":
 				c.Projection = json.RawMessage(`[{"id":"intro","hash":"new"},{"id":"other","hash":"evil"}]`)
+			case "edit interval outside selection":
+				semantic.Edit = &documentSemanticEdit{From: 0, To: 5, Insert: "HeNEW"}
 			case "revoked":
 				execOrFatal(t, h.db, `DELETE FROM page_grants WHERE subject_type='agent'`)
 			}
@@ -191,7 +193,7 @@ func TestDocumentSelectedRequestWorkerCertifiesOnlyBoundDurableResult(t *testing
 					execOrFatal(t, h.db, `UPDATE documents SET head_rev=1 WHERE page_id=?`, page)
 				}
 				c := documents.Commit{Lease: lease, ID: "worker-patch", Fingerprint: "worker", IfRev: 0, Schema: 2, Update: []byte{1}, CandidateSnapshot: []byte{1}, Projection: json.RawMessage(`[{"id":"intro","hash":"new"},{"id":"other","hash":"h2"}]`), IfHashes: map[string]string{"intro": "h1"}, Kind: "agent"}
-				c.Guard = h.documentRequestGuard(r.Context(), page, "commit", c.ID, c.IfRev, c.IfHashes, &documentSemanticPatch{Target: "intro", Text: "HeNEW world"}, c.Projection)
+				c.Guard = h.documentRequestGuard(r.Context(), page, "commit", c.ID, c.IfRev, c.IfHashes, &documentSemanticPatch{Target: "intro", Text: "HeNEW world", Edit: &documentSemanticEdit{From: 2, To: 5, Insert: "NEW"}}, c.Projection)
 				if _, err = store.Commit(r.Context(), key, c, auth); err != nil {
 					return nil
 				} // A completion claim after refusal must not create a success card.

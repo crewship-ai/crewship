@@ -10,9 +10,21 @@ import (
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
+type documentSemanticEdit struct {
+	From   int    `json:"from"`
+	To     int    `json:"to"`
+	Insert string `json:"insert"`
+}
+
+type documentRequestScope struct {
+	BaseRev int64                  `json:"baseRev"`
+	Target  documentVerifiedTarget `json:"target"`
+}
+
 type documentSemanticPatch struct {
-	Target string `json:"target"`
-	Text   string `json:"text"`
+	Target string                `json:"target"`
+	Text   string                `json:"text"`
+	Edit   *documentSemanticEdit `json:"edit"`
 }
 
 func validDocumentTarget(t documentVerifiedTarget) bool {
@@ -76,6 +88,20 @@ func (h *PageHandler) documentRequestGuard(rctx context.Context, page, operation
 			return documents.ErrConflict
 		}
 		original := utf16.Encode([]rune(target.Text))
+		edit := semantic.Edit
+		if edit == nil || edit.From < target.From || edit.To > target.To || edit.To < edit.From {
+			return documents.ErrConflict
+		}
+		boundary := func(n int) bool {
+			return n >= 0 && n <= len(original) && (n == 0 || n == len(original) || !(original[n-1] >= 0xD800 && original[n-1] <= 0xDBFF && original[n] >= 0xDC00 && original[n] <= 0xDFFF))
+		}
+		if !boundary(edit.From) || !boundary(edit.To) {
+			return documents.ErrConflict
+		}
+		expected := string(utf16.Decode(original[:edit.From])) + edit.Insert + string(utf16.Decode(original[edit.To:]))
+		if expected != semantic.Text {
+			return documents.ErrConflict
+		}
 		replacement := utf16.Encode([]rune(semantic.Text))
 		prefix, suffix := string(utf16.Decode(original[:target.From])), string(utf16.Decode(original[target.To:]))
 		if len(replacement) < target.From+len(original)-target.To || !strings.HasPrefix(semantic.Text, prefix) || !strings.HasSuffix(semantic.Text, suffix) {
@@ -117,4 +143,29 @@ func (h *PageHandler) checkDocumentRunPageScope(ctx context.Context, page string
 		return errDocumentAccess
 	}
 	return nil
+}
+
+// Read scope and document state share Store.Read's authorization transaction.
+func (h *PageHandler) documentRequestReadScope(ctx context.Context, tx *sql.Tx, page string) (*documentRequestScope, error) {
+	a, ok := ctx.Value(artifactRunKey{}).(*artifactRunAuthority)
+	if !ok {
+		return nil, nil
+	}
+	var origin string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(document_request_id,'') FROM page_artifact_run_delegations WHERE page_id=? AND run_id=?`, page, a.RunID).Scan(&origin); err != nil {
+		return nil, errDocumentAccess
+	}
+	if origin == "" {
+		return nil, nil
+	}
+	var base int64
+	var raw string
+	if err := tx.QueryRowContext(ctx, `SELECT base_rev,targets_json FROM document_requests WHERE id=? AND page_id=? AND run_id=? AND status='running'`, origin, page, a.RunID).Scan(&base, &raw); err != nil {
+		return nil, errDocumentAccess
+	}
+	var targets []documentVerifiedTarget
+	if json.Unmarshal([]byte(raw), &targets) != nil || len(targets) != 1 || !validDocumentTarget(targets[0]) {
+		return nil, documents.ErrConflict
+	}
+	return &documentRequestScope{BaseRev: base, Target: targets[0]}, nil
 }

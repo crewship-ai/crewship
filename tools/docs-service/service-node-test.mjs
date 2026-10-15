@@ -5,7 +5,7 @@ import { mkdtemp, writeFile, stat, chmod, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startService, PROTOCOL } from './service.mjs';
-import { create, snapshot, initialJSON } from './schema.mjs';
+import { create, snapshot, initialJSON, outline, load, anchor } from './schema.mjs';
 const secret = 'a'.repeat(48);
 function call(socket, path, data, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -95,7 +95,7 @@ test('semantic commits convey the exact replacement to Go for range authorizatio
     const state = (await read(f)).body;
     const request = patchRequest(state, 'selected-patch', 'selected replacement');
     assert.equal((await call(f.socket, '/v1/documents/p/patch', request)).status, 200);
-    assert.deepEqual(model.seen.find(entry => entry.op === 'commit').data.semantic, { target: 'intro', text: 'selected replacement' });
+    assert.deepEqual(model.seen.find(entry => entry.op === 'commit').data.semantic, { target: 'intro', text: 'selected replacement', edit: { from: 0, to: 36, insert: 'selected replacement' } });
   } finally { await f.close(); }
 });
 test('target ranges use UTF-16 without splitting supplementary characters or exceeding quote bounds', async () => {
@@ -369,4 +369,39 @@ test('drain aborts existing body readers and promptly closes new incomplete requ
     for (const req of held) req.destroy(); blocked.resolve();
     await Promise.allSettled([waiting, draining]); if (!closed) await f.close();
   }
+});
+
+test('trusted selected scope bounds repeated-text edits and stays private on public reads', async () => {
+  const model = authorityModel(), json = initialJSON();
+  json.content[1].content = [{ type: 'text', text: 'aaaa' }];
+  const doc = create(json), target = (await outline(doc)).find(block => block.id === 'intro');
+  model.state.snapshot = snapshot(doc); doc.destroy();
+  model.state.requestScope = { baseRev: model.state.rev, target: { id: 'intro', hash: target.hash, text: 'aaaa', from: 0, to: 1 } };
+  const f = await fixture(model.handle);
+  try {
+    await f.start(); const current = await read(f);
+    assert.equal(current.status, 200); assert.equal(current.body.requestScope, undefined);
+    const result = await call(f.socket, '/v1/documents/p/patch', {
+      id: 'selected-repeat', schema: 2, epoch: current.body.epoch, target: 'intro',
+      text: 'aaaaa', ifRev: model.state.rev, ifHash: target.hash,
+      range: { from: 3, to: 4 }, requestScope: { target: { from: 3, to: 4 } },
+    });
+    assert.equal(result.status, 200);
+    const commit = model.seen.find(call => call.op === 'commit').data;
+    assert.deepEqual(commit.semantic.edit, { from: 1, to: 1, insert: 'a' });
+    assert.equal(commit.semantic.text, 'aaaaa');
+  } finally { await f.close(); }
+});
+
+test('public comment responses resolve spans without exposing the private anchor extension', async () => {
+  const model = authorityModel(), doc = load(model.state.snapshot), thread = anchor(doc, 'intro', 0, 8, 'thread', 1); doc.destroy();
+  assert.ok(thread.spans.length);
+  const f = await fixture((op, data, req, res) => op === 'comments' ? [{ id: 'thread', body: 'Comment', anchor: thread, actor: 'user:human', rev: 1, version: 1, resolved: false, created_at: '2026-10-15T00:00:00Z' }] : model.handle(op, data, req, res));
+  try {
+    await f.start(); const response = await call(f.socket, '/v1/documents/p/comments', {});
+    assert.equal(response.status, 200);
+    const comment = response.body.comments[0];
+    assert.equal(comment.status, 'attached'); assert.equal(comment.from, 0); assert.equal(comment.to, 8);
+    assert.equal(comment.spans, undefined); assert.equal(comment.anchor.spans, undefined);
+  } finally { await f.close(); }
 });
