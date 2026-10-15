@@ -20,7 +20,7 @@ carry `X-Workspace-ID` and the original `Authorization: Bearer …`; Go decides
 whether the live human or agent run has permission, including whether raw
 human updates are allowed. Never expose the service directly to users.
 
-`GET /health/live` and `/health/ready` return protocol 2, schema 2 and a SHA-256
+`GET /health/live` and `/health/ready` return protocol 3, schema 2 and a SHA-256
 build identity over the lockfile, schema and service. `POST /drain` stops new
 admission and waits for pending work and lease releases. SIGTERM drains and
 closes. Drain waits at most 30 seconds, then reports failure. Document requests are `POST /v1/documents/{page}/{operation}` with JSON:
@@ -34,6 +34,8 @@ closes. Drain waits at most 30 seconds, then reports failure. Document requests 
   route exposes this operation. The original agent bearer cannot admit targets.
 - `patch`: `{id,schema,epoch,kind:"human",update}` or
   `{id,schema,epoch,target,text,ifRev,ifHash}` for semantic replaceText.
+Semantic replacement preserves the shared prefix and suffix character identities, changing only the bounded middle interval across the paragraph’s live text children. Comment ranges use aggregate UTF-16 offsets over those children and retain per-child relative spans (at most 64 spans and 8192 encoded bytes). Reads never normalize them. Existing one-child anchors remain readable. Older engines fail closed as detached for a new cross-child anchor because its legacy start/end still belong to different text types; additive span data does not require a document-schema change (the private scope/edit contract independently requires matching protocol 3 engines).
+
 - `checkpoint`: `{id,schema,epoch,ifRev}`.
 - `restore`: `{id,schema,epoch,ifRev,checkpoint}` (checkpoint is a string ID).
 
@@ -110,4 +112,4 @@ proves the 32-operation per-document queue rejects overflow, and verifies that
 drain waits for all admitted failed responses. This is controlled downstream
 backpressure and failure injection, not a slow-disk throughput measurement.
 
-Private protocol 2 requires an explicit protocol-2 recovery request and acknowledgement before admission. Older Go/Node pairs fail startup without fencing or acknowledging edits; the content schema remains 2.
+Private protocol 3 requires an explicit protocol-3 recovery request and acknowledgement before admission. Protocol 3 adds private immutable request scope to authorized state and requires semantic edit interval metadata; mismatched engines fail before recovery. Older Go/Node pairs fail startup without fencing or acknowledging edits; the content schema remains 2.

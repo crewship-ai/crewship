@@ -29,7 +29,7 @@ type documentAuthority struct {
 
 var errDocumentAccess = errors.New("document access denied")
 
-const documentEngineProtocol = 2
+const documentEngineProtocol = 3
 
 // DocumentAuthority constructs the private authority. It is never registered
 // on r.mux. Boot fencing runs only after the caller owns its Unix listener.
@@ -222,7 +222,7 @@ func documentAuthorityError(w http.ResponseWriter, err error) {
 	}
 	replyError(w, status, message)
 }
-func (h *documentAuthority) documentStateWire(s documents.State) any {
+func (h *documentAuthority) documentStateWire(s documents.State) map[string]any {
 	updates := make([][]byte, 0, len(s.Updates))
 	for _, u := range s.Updates {
 		updates = append(updates, u.Payload)
@@ -303,8 +303,20 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		result, err = h.store.Checkpoints(ctx, k, auth)
 	case "state":
 		var s documents.State
-		s, err = h.store.Read(ctx, k, auth)
-		result = h.documentStateWire(s)
+		var scope *documentRequestScope
+		s, err = h.store.Read(ctx, k, func(readCtx context.Context, tx *sql.Tx) (string, error) {
+			actor, accessErr := auth(readCtx, tx)
+			if accessErr != nil {
+				return "", accessErr
+			}
+			scope, accessErr = h.pages.documentRequestReadScope(readCtx, tx, k.PageID)
+			return actor, accessErr
+		})
+		wire := h.documentStateWire(s)
+		if scope != nil {
+			wire["requestScope"] = scope
+		}
+		result = wire
 	case "initialize":
 		var s documents.State
 		s, err = h.store.InitRequest(ctx, k, in.ID, in.Fingerprint, in.Schema, in.Snapshot, in.Blocks, auth)

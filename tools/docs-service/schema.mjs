@@ -174,24 +174,112 @@ export function textNode(doc, id) {
   if (!text) { text = new Y.XmlText(); block.insert(0, [text]); }
   return text;
 }
+// Text offsets are aggregate UTF-16 positions across every live text child.
+// Reading anchors never coalesces children or changes retained CRDT identities.
+function textChildren(doc, id) {
+  const block = find(doc, id);
+  if (!['paragraph', 'heading'].includes(block.nodeName)) throw new Error('text target required');
+  return { block, texts: block.toArray().filter(node => node instanceof Y.XmlText) };
+}
+const textBoundary = (text, index) => index === 0 || index === text.length ||
+  !(text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff &&
+    text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff);
+function textPosition(texts, offset, assoc) {
+  let base = 0;
+  for (const text of texts) {
+    if (offset < base + text.length || (assoc < 0 && offset === base + text.length && text.length > 0)) return { text, index: offset - base };
+    base += text.length;
+  }
+  const text = texts.at(-1);
+  if (!text || offset !== base) throw new Error('invalid text position');
+  return { text, index: text.length };
+}
+function aggregatePosition(texts, position) {
+  let base = 0;
+  for (const text of texts) {
+    if (text === position.type) return position.index <= text.length ? base + position.index : null;
+    base += text.length;
+  }
+  return null;
+}
 export function patch(doc, op) {
   if (op.op !== 'replaceText' || typeof op.text !== 'string' || op.text.length > 100000) throw new Error('D0 requires bounded replaceText');
-  const text = textNode(doc, op.id);
-  doc.transact(() => { text.delete(0, text.length); text.insert(0, op.text); }, 'semantic-agent');
+  const { block, texts } = textChildren(doc, op.id);
+  const original = texts.map(text => text.toString()).join('');
+  const range = op.range ?? { from: 0, to: original.length };
+  if (!Number.isInteger(range.from) || !Number.isInteger(range.to) || range.from < 0 || range.to < range.from || range.to > original.length ||
+    !textBoundary(original, range.from) || !textBoundary(original, range.to)) throw new Error('invalid semantic edit range');
+  const prefix = original.slice(0, range.from), suffixText = original.slice(range.to);
+  if (op.text.length < prefix.length + suffixText.length || !op.text.startsWith(prefix) || !op.text.endsWith(suffixText)) throw new Error('semantic edit outside selected range');
+  const before = original.slice(range.from, range.to), after = op.text.slice(range.from, op.text.length - suffixText.length);
+  let localFrom = 0, suffix = 0;
+  while (localFrom < before.length && localFrom < after.length && before[localFrom] === after[localFrom]) localFrom++;
+  while (!textBoundary(before, localFrom) || !textBoundary(after, localFrom)) localFrom--;
+  while (suffix < before.length - localFrom && suffix < after.length - localFrom && before[before.length - suffix - 1] === after[after.length - suffix - 1]) suffix++;
+  while (!textBoundary(before, before.length - suffix) || !textBoundary(after, after.length - suffix)) suffix--;
+  const from = range.from + localFrom, to = range.to - suffix, replacement = after.slice(localFrom, after.length - suffix);
+  if (from !== to || replacement) doc.transact(() => {
+    if (texts.length === 0) { const text = new Y.XmlText(); block.insert(0, [text]); texts.push(text); }
+    const insertion = textPosition(texts, from, 0);
+    let base = 0;
+    for (const text of texts) {
+      const length = text.length, start = Math.max(0, from - base), end = Math.min(length, to - base);
+      if (end > start) text.delete(start, end - start);
+      base += length;
+    }
+    if (replacement) insertion.text.insert(insertion.index, replacement);
+  }, 'semantic-agent');
   validate(doc);
+  return { from, to, insert: replacement };
 }
 export function anchor(doc, id, from, to, threadID, rev) {
-  const text = textNode(doc, id);
-  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to <= from || to > text.length) throw new Error('invalid range');
-  return { id: threadID, block: id, quote: text.toString().slice(from, to), checkpoint: rev,
-    start: encode(Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, from, 0))),
-    end: encode(Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, to, -1))) };
+  const { texts } = textChildren(doc, id), text = texts.map(part => part.toString()).join('');
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to <= from || to > text.length ||
+    !textBoundary(text, from) || !textBoundary(text, to)) throw new Error('invalid range');
+  const relative = (text, index, assoc) => encode(Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(text, index, assoc)));
+  const spans = []; let base = 0;
+  for (const part of texts) {
+    const start = Math.max(0, from - base), end = Math.min(part.length, to - base);
+    if (end > start) spans.push({ start: relative(part, start, 0), end: relative(part, end, -1) });
+    base += part.length;
+  }
+  const result = { id: threadID, block: id, quote: text.slice(from, to), checkpoint: rev,
+    start: spans[0].start, end: spans.at(-1).end, spans };
+  // Match the durable Go anchor limit. Many tiny children must not create an
+  // unbounded anchor even when the selected quote itself is short.
+  if (spans.length > 64 || new TextEncoder().encode(JSON.stringify(result)).length > 8192) throw new Error('comment anchor limit');
+  return result;
 }
 export function resolve(doc, thread) {
-  const start = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(decode(thread.start)), doc);
-  const end = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(decode(thread.end)), doc);
-  if (!start || !end || start.type !== end.type || !start.type.parent || start.type.parent.getAttribute('id') !== thread.block || start.type.parent._item?.deleted) return { ...thread, status: 'detached' };
-  return { ...thread, status: start.index >= end.index ? 'collapsed' : 'attached', from: start.index, to: end.index };
+  let block, texts;
+  try { ({ block, texts } = textChildren(doc, thread.block)); } catch { return { ...thread, status: 'detached' }; }
+  const absolute = encoded => Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(decode(encoded)), doc);
+  const start = absolute(thread.start), end = absolute(thread.end);
+  if (!start || !end || start.type.parent !== block || end.type.parent !== block) return { ...thread, status: 'detached' };
+  const from = aggregatePosition(texts, start), to = aggregatePosition(texts, end);
+  if (from === null || to === null) return { ...thread, status: 'detached' };
+  if (thread.spans === undefined) {
+    // Existing anchors were confined to one text child. Do not reinterpret an
+    // unsupported cross-type legacy pair as a broad paragraph interval.
+    if (start.type !== end.type || from > to) return { ...thread, status: 'detached' };
+    return { ...thread, status: from === to ? 'collapsed' : 'attached', from, to };
+  }
+  if (!Array.isArray(thread.spans) || thread.spans.length === 0 || thread.spans.length > 64 ||
+    thread.spans[0].start !== thread.start || thread.spans.at(-1).end !== thread.end) return { ...thread, status: 'detached' };
+  const surviving = [];
+  for (const span of thread.spans) {
+    const first = absolute(span.start), last = absolute(span.end);
+    if (!first || !last || first.type !== last.type || first.type.parent !== block || last.type.parent !== block) continue;
+    const left = aggregatePosition(texts, first), right = aggregatePosition(texts, last);
+    if (left !== null && right !== null && left < right) {
+      if (surviving.length && left < surviving.at(-1).to) return { ...thread, status: 'detached' };
+      surviving.push({ from: left, to: right });
+    }
+  }
+  // Separate collapsed children can have newly inserted text between them.
+  // That text never belonged to this comment's selected CRDT identities.
+  if (!surviving.length) return { ...thread, status: 'collapsed', from: Math.min(from, to), to: Math.min(from, to) };
+  return { ...thread, status: 'attached', from: surviving[0].from, to: surviving.at(-1).to };
 }
 export function initialJSON() {
   const p = (id, text) => ({ type: 'paragraph', attrs: { id }, content: text ? [{ type: 'text', text }] : [] });

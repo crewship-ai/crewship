@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
 import { VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
 
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 const fault = (status, message,code) => Object.assign(new Error(message), { status,...(code?{code}:{}) });
 const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 const readOperations = new Set(['read', 'verify-targets', 'comments', 'checkpoints', 'checkpoint-read', 'export']);
@@ -96,7 +96,10 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     try {
       for (const update of state.updates || []) Y.applyUpdate(doc, decode(typeof update === 'string' ? update : update.update));
       const baseVector = Y.encodeStateVector(doc);
-      if (operation === 'read') return { ...state, schema:VERSION, epoch:syncEpoch(state), content: validate(doc), outline: await outline(doc) };
+      if (operation === 'read') {
+        const { rev, generation, incarnation, snapshot, snapshotRev, updates, blocks } = state;
+        return { schema: VERSION, rev, generation, incarnation, snapshot, snapshotRev, updates, blocks, epoch: syncEpoch(state), content: validate(doc), outline: await outline(doc) };
+      }
       if (operation === 'verify-targets') {
         if (!Number.isSafeInteger(request.base_rev) || request.base_rev !== state.rev) throw fault(409, 'document request revision changed');
         return { page_id: page, rev: state.rev, targets: await verifyTargets(doc, request.targets) };
@@ -113,7 +116,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if(!lease) { lease=await go(page,'lease',context,{owner,epoch:state.epoch});leases.set(key,{lease,context,page,touched:Date.now()}); } else {cached.touched=Date.now();cached.context=context;}
       if(lease.generation!==undefined && lease.generation!==state.generation) throw fault(409,'document generation changed; reload');
       if (!Number.isSafeInteger(lease.epoch) || lease.epoch < state.epoch || typeof lease.token !== 'string') throw fault(409, 'writer lease changed; reload document');
-      const hashes = {};
+      const hashes = {}; let semantic;
       switch (operation) {
         case 'patch':
           if (request.kind === 'human') {
@@ -124,7 +127,14 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
             const target = (await outline(doc)).find(block => block.id === request.target);
             if (request.ifRev !== state.rev || !target || target.hash !== request.ifHash) throw fault(409, 'semantic precondition conflict');
             hashes[request.target] = request.ifHash;
-            patch(doc, { op: 'replaceText', id: request.target, text: request.text });
+            const scope = state.requestScope;
+            if (scope && (scope.baseRev !== state.rev || request.ifRev !== scope.baseRev || request.target !== scope.target.id || request.ifHash !== scope.target.hash || target.text !== scope.target.text)) throw fault(409, 'original request scope changed');
+            if (scope && typeof request.text === 'string') {
+              const prefix = scope.target.text.slice(0, scope.target.from), suffix = scope.target.text.slice(scope.target.to);
+              if (request.text.length < prefix.length + suffix.length || !request.text.startsWith(prefix) || !request.text.endsWith(suffix)) throw fault(409, 'selected text range conflict');
+            }
+            const edit = patch(doc, { op: 'replaceText', id: request.target, text: request.text, ...(scope ? { range: { from: scope.target.from, to: scope.target.to } } : {}) });
+            semantic = { target: request.target, text: request.text, edit };
           }
           break;
         case 'restore': {
@@ -145,7 +155,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if(renewal.expiresAt)lease.expiresAt=renewal.expiresAt;
       if (operation === 'restore') return {...await go(page, 'restore', context, { id: request.id, fingerprint, checkpoint: request.checkpoint, ifRev: state.rev,generation:state.generation??0, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner }),epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
       if (operation === 'checkpoint') return {...await go(page, 'checkpoint', context, { id: request.id, fingerprint, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, ifRev: state.rev,generation:state.generation??0, snapshot: snapshot(doc) }),epoch:syncEpoch(state)};
-      return {...await go(page, 'commit', context, { id: request.id, fingerprint, kind: operation === 'patch' ? (request.kind === 'human' ? 'human' : 'agent') : operation, ...(operation === 'patch' && request.kind !== 'human' ? { semantic: { target: request.target, text: request.text } } : {}), epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation:state.generation??0, schema: VERSION, snapshot: snapshot(doc), blocks, ifHashes: hashes, checkpoint: request.checkpoint }),epoch:syncEpoch(state)};
+      return {...await go(page, 'commit', context, { id: request.id, fingerprint, kind: operation === 'patch' ? (request.kind === 'human' ? 'human' : 'agent') : operation, ...(operation === 'patch' && request.kind !== 'human' ? { semantic } : {}), epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation:state.generation??0, schema: VERSION, snapshot: snapshot(doc), blocks, ifHashes: hashes, checkpoint: request.checkpoint }),epoch:syncEpoch(state)};
     } finally {
       doc.destroy();
       // The engine retains its fenced lease across editor operations. Each write renews with the original live principal; no unconfirmed document is cached.
