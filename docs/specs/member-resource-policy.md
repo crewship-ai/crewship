@@ -163,6 +163,10 @@ The list accepts `project_id`, `limit`, `offset` and optional `q` (up to 256
 Unicode characters, trimmed). Search is a literal substring of title or identifier,
 using SQLite ASCII case folding; `%` and `_` are literal characters. Search and
 its total count use the same live project.list grants and workspace filter.
+Live grants are materialized before searching issues by the project index, so
+hidden workspace issues are not scanned. Issuer demotion or suspension returns
+no list rows and a zero total. Read/Contribute without List remains excluded
+from the catalog; Read still permits an individually authorized detail.
 The list returns identifiers, titles, status and project identity. The detail
 accepts an issue ID or identifier, requires project.read and adds its description. Neither returns crew/agent references, comments, activity, relations
 or run history. Foreign and revoked details return 404. The shared workspace

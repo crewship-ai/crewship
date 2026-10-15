@@ -29,6 +29,9 @@ func TestRestrictedIssuesSearchPreservesProjectAudience(t *testing.T) {
 	} {
 		execOrFatal(t, db, `INSERT INTO missions(id,workspace_id,crew_id,lead_agent_id,trace_id,identifier,title,description,status,mission_type,project_id) VALUES(?,?,'search-crew','search-agent',?,?,?,?, 'TODO',?,?)`, row.id, ws, row.id+"-trace", row.identifier, row.title, row.description, row.kind, row.project)
 	}
+	// Keep pagination deterministic regardless of insert timestamp resolution.
+	execOrFatal(t, db, `UPDATE missions SET created_at='2026-10-15T00:00:00Z' WHERE workspace_id=?`, ws)
+	execOrFatal(t, db, `UPDATE missions SET created_at='2026-10-16T00:00:00Z' WHERE id='search-a2'`)
 	store := access.Store{DB: db}
 	for _, row := range []struct{ user, project string }{{"search-a", "search-pa"}, {"search-b", "search-pb"}} {
 		member, err := store.Membership(t.Context(), row.user, ws)
@@ -103,6 +106,37 @@ func TestRestrictedIssuesSearchPreservesProjectAudience(t *testing.T) {
 	request("search-a", base+"?q="+url.QueryEscape(strings.Repeat("Ž", 257)), 400)
 	request("search-a", base+"/search-a1?q=", 400)
 	request("search-a", base+"/search-secret?q=release", 400)
+
+	assertEmpty := func(label string) {
+		t.Helper()
+		for _, suffix := range []string{"", "?q=Release", "?q=%25_"} {
+			rr := request("search-a", base+suffix, 200)
+			if strings.TrimSpace(rr.Body.String()) != "[]" || rr.Header().Get("X-Total-Count") != "0" {
+				t.Fatalf("%s: rows=%s count=%s", label, rr.Body.String(), rr.Header().Get("X-Total-Count"))
+			}
+		}
+	}
+	execOrFatal(t, db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, ws, owner)
+	assertEmpty("demoted issuer")
+	execOrFatal(t, db, `UPDATE workspace_members SET role='OWNER' WHERE workspace_id=? AND user_id=?`, ws, owner)
+	execOrFatal(t, db, `UPDATE users SET suspended_at='2026-10-15' WHERE id=?`, owner)
+	assertEmpty("suspended issuer")
+	execOrFatal(t, db, `UPDATE users SET suspended_at=NULL WHERE id=?`, owner)
+	for _, operations := range [][]string{{"read"}, {"read", "contribute"}} {
+		member, err := store.Membership(t.Context(), "search-a", ws)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rights []access.Right
+		for _, operation := range operations {
+			rights = append(rights, access.Right{Kind: "project", ID: "search-pa", Operation: operation})
+		}
+		if _, err := store.Replace(t.Context(), owner, "search-a", ws, "restricted", member, rights); err != nil {
+			t.Fatal(err)
+		}
+		assertEmpty("read/contribute without list")
+		request("search-a", base+"/search-a1", 200) // Read remains independently usable.
+	}
 	member, err := store.Membership(t.Context(), "search-a", ws)
 	if err != nil {
 		t.Fatal(err)
@@ -113,5 +147,38 @@ func TestRestrictedIssuesSearchPreservesProjectAudience(t *testing.T) {
 	rr := request("search-a", base+"?q=Release", 200)
 	if strings.TrimSpace(rr.Body.String()) != "[]" || rr.Header().Get("X-Total-Count") != "0" {
 		t.Fatalf("revoked search=%s count=%s", rr.Body.String(), rr.Header().Get("X-Total-Count"))
+	}
+}
+
+func TestRestrictedIssueSearchPlanStartsFromLiveGrants(t *testing.T) {
+	db := setupTestDB(t)
+	rows, err := db.Query(`EXPLAIN QUERY PLAN `+restrictedIssueAudienceSQL+`SELECT COUNT(*)`+restrictedIssueFromSQL+restrictedIssueSearchSQL,
+		"member", "list", "workspace", "", "", "release", "release", "release")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	materialized, indexedIssues := false, false
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(detail, "MATERIALIZE shared_projects") {
+			materialized = true
+		}
+		if strings.Contains(detail, "SEARCH m USING INDEX idx_mission_project (project_id=?)") {
+			indexedIssues = true
+		}
+		if strings.Contains(detail, "SCAN m") || strings.Contains(detail, "idx_mission_workspace") || strings.Contains(detail, "idx_missions_ws_created") {
+			t.Fatalf("search scans issues outside granted projects: %s", detail)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !materialized || !indexedIssues {
+		t.Fatalf("plan did not materialize live grants before indexed project lookup: materialized=%t indexed=%t", materialized, indexedIssues)
 	}
 }

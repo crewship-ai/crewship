@@ -11,6 +11,22 @@ import (
 	"github.com/crewship-ai/crewship/internal/access"
 )
 
+// Materialize live authority before touching issues. CROSS JOIN and the
+// shipped project index keep hidden workspace issues out of the search scan.
+const restrictedIssueAudienceSQL = `WITH shared_projects AS MATERIALIZED (
+ SELECT p.id,p.workspace_id,p.name FROM live_access_grants g
+ JOIN projects p ON p.id=g.project_id
+ WHERE g.resource_kind='project' AND g.member_id=? AND g.operation=? AND p.workspace_id=?
+ ) `
+
+const restrictedIssueFromSQL = ` FROM shared_projects p
+ CROSS JOIN missions m INDEXED BY idx_mission_project
+ ON m.project_id=p.id AND m.workspace_id=p.workspace_id
+ WHERE m.mission_type='issue' `
+
+const restrictedIssueSearchSQL = ` AND (?='' OR p.id=?)
+ AND (?='' OR instr(lower(m.title),lower(?))>0 OR instr(lower(COALESCE(m.identifier,m.id)),lower(?))>0) `
+
 // A guest's Issue view deliberately contains no agent/crew references, comments,
 // run history, summaries or cross-project relations from the shared issue DTO.
 type restrictedIssue struct {
@@ -74,26 +90,21 @@ func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
 	}
 	total := 0
 	if id == "" {
-		err = r.db.QueryRowContext(req.Context(), `SELECT COUNT(*)
-            FROM missions m JOIN projects p ON p.id=m.project_id AND p.workspace_id=m.workspace_id
-            JOIN live_access_grants g ON g.project_id=p.id AND g.resource_kind='project' AND g.member_id=? AND g.operation='list'
-            WHERE m.workspace_id=? AND m.mission_type='issue' AND (?='' OR p.id=?)
-            AND (?='' OR instr(lower(m.title),lower(?))>0 OR instr(lower(COALESCE(m.identifier,m.id)),lower(?))>0)`, member.ID, workspace, project, project, search, search, search).Scan(&total)
+		err = r.db.QueryRowContext(req.Context(), restrictedIssueAudienceSQL+`SELECT COUNT(*)`+restrictedIssueFromSQL+restrictedIssueSearchSQL,
+			member.ID, "list", workspace, project, project, search, search, search).Scan(&total)
 		if err != nil {
 			replyError(w, 500, "Issues unavailable")
 			return
 		}
 	}
-	rows, err := r.db.QueryContext(req.Context(), `SELECT m.id,COALESCE(m.identifier,m.id),m.title,m.status,p.id,p.name,
+	rows, err := r.db.QueryContext(req.Context(), restrictedIssueAudienceSQL+`SELECT m.id,COALESCE(m.identifier,m.id),m.title,m.status,p.id,p.name,
  EXISTS(SELECT 1 FROM live_access_grants read_grant WHERE read_grant.member_id=? AND read_grant.resource_kind='project' AND read_grant.project_id=p.id AND read_grant.operation='read'),
  EXISTS(SELECT 1 FROM live_access_grants contribution WHERE contribution.member_id=? AND contribution.resource_kind='project' AND contribution.project_id=p.id AND contribution.operation='contribute') AND EXISTS(SELECT 1 FROM live_access_grants read_grant WHERE read_grant.member_id=? AND read_grant.resource_kind='project' AND read_grant.project_id=p.id AND read_grant.operation='read'),
  EXISTS(SELECT 1 FROM live_access_grants d WHERE d.member_id=? AND d.resource_kind='project' AND d.project_id=p.id AND d.operation='delete_issues') AND EXISTS(SELECT 1 FROM live_access_grants mg WHERE mg.member_id=? AND mg.resource_kind='project' AND mg.project_id=p.id AND mg.operation='manage') AND EXISTS(SELECT 1 FROM live_access_grants rd WHERE rd.member_id=? AND rd.resource_kind='project' AND rd.project_id=p.id AND rd.operation='read'),
- CASE WHEN ?='read' THEN m.description ELSE NULL END
- FROM missions m JOIN projects p ON p.id=m.project_id AND p.workspace_id=m.workspace_id
- JOIN live_access_grants g ON g.project_id=p.id AND g.resource_kind='project' AND g.member_id=? AND g.operation=?
- WHERE m.workspace_id=? AND m.mission_type='issue' AND (?='' OR m.id=? OR m.identifier=?) AND (?='' OR p.id=?)
- AND (?='' OR instr(lower(m.title),lower(?))>0 OR instr(lower(COALESCE(m.identifier,m.id)),lower(?))>0)
- ORDER BY m.created_at DESC,m.id LIMIT ? OFFSET ?`, member.ID, member.ID, member.ID, member.ID, member.ID, member.ID, operation, member.ID, operation, workspace, id, id, id, project, project, search, search, search, limit, offset)
+ CASE WHEN ?='read' THEN m.description ELSE NULL END`+restrictedIssueFromSQL+` AND (?='' OR m.id=? OR m.identifier=?)`+restrictedIssueSearchSQL+`
+ ORDER BY m.created_at DESC,m.id LIMIT ? OFFSET ?`, member.ID, operation, workspace,
+		member.ID, member.ID, member.ID, member.ID, member.ID, member.ID, operation,
+		id, id, id, project, project, search, search, search, limit, offset)
 	if err != nil {
 		replyError(w, 500, "Issues unavailable")
 		return
