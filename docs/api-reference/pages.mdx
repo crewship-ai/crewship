@@ -31,6 +31,19 @@ responses exist to keep them true:
 Implementation: `internal/api/pages_*.go`, `internal/pages` for the schemas and
 validation.
 
+## Derived content format metadata
+
+Detail and index responses include `content_descriptor` with `type_id`,
+`schema_version`, `supported`, and optional `reason`. Optional
+`application_descriptor` identifies existing application source/publication
+alongside panels; an unpublished or withdrawn source still has this reference.
+These are derived read metadata, never writable discriminators or ACL grants.
+`page get/list --format json` preserve both references, including future types.
+Clients reject explicit unknown versions, unsupported profiles or contradictory
+metadata before selecting a viewer. Missing metadata alone permits compatibility
+with an older server. Empty human Pages still offer Attach HTML through the
+existing authorized creation path.
+
 ## Static HTML artifacts
 
 A human-owned empty Page can hold versioned HTML instead of panels or an App.
