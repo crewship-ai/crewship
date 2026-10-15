@@ -47,7 +47,7 @@ function download(name: string, content: string) {
   const link = document.createElement("a"); link.href = url; link.download = name; link.click(); URL.revokeObjectURL(url)
 }
 
-type DocumentProps = { workspaceId: string; slug: string; onDirtyChange?: (dirty: boolean) => void }
+type DocumentProps = { workspaceId: string; slug: string; pageId?: string; onDirtyChange?: (dirty: boolean) => void }
 export function PageDocument(props: DocumentProps) {
   const sync = usePageDocument(props.workspaceId, props.slug)
   // Bind ProseMirror only after hydration, so its empty default paragraph is
@@ -55,7 +55,7 @@ export function PageDocument(props: DocumentProps) {
   if (!sync.state) return <p role={sync.denied ? "alert" : "status"} className="p-6">{sync.status}{sync.error ? ` · ${sync.error}` : ""}</p>
   return <DocumentWorkspace {...props} sync={sync} />
 }
-function DocumentWorkspace({ workspaceId, slug, onDirtyChange, sync }: DocumentProps & { sync: ReturnType<typeof usePageDocument> }) {
+function DocumentWorkspace({ workspaceId, slug, pageId, onDirtyChange, sync }: DocumentProps & { sync: ReturnType<typeof usePageDocument> }) {
   const [history, setHistory] = useState<Checkpoint[] | null>(null)
   const [comparison, setComparison] = useState<Checkpoint | null>(null)
   const [actionError, setActionError] = useState<string>()
@@ -130,7 +130,7 @@ function DocumentWorkspace({ workspaceId, slug, onDirtyChange, sync }: DocumentP
     </div>}
     {sync.state ? <EditorContent editor={editor} /> : <p className="p-6">{sync.status}</p>}
     {sync.state && !sync.recovery && <DocumentComments workspaceId={workspaceId} slug={slug} rev={sync.state.rev} epoch={sync.state.epoch} editor={editor} disabled={busy || restoring || sync.pending > 0} />}
-    {sync.state && !sync.recovery && <DocumentAgentWork workspaceId={workspaceId} slug={slug} rev={sync.state.rev} disabled={busy || restoring || sync.pending > 0 || !sync.editable} onViewResult={checkpoint => void action(async () => setComparison(await documentRequest<Checkpoint>(workspaceId, slug, `/checkpoints/${encodeURIComponent(checkpoint)}`)))} />}
+    {sync.state && !sync.recovery && <DocumentAgentWork workspaceId={workspaceId} slug={slug} pageId={pageId} confirmed={sync.state} editor={editor} ready={sync.status === "Saved" && sync.pending === 0} disabled={busy || restoring || sync.pending > 0 || !sync.editable} onViewResult={checkpoint => void action(async () => setComparison(await documentRequest<Checkpoint>(workspaceId, slug, `/checkpoints/${encodeURIComponent(checkpoint)}`)))} />}
     {history && <section aria-label="Document history" className="space-y-3 border-t p-6"><h2 className="font-medium">Checkpoints</h2>{!history.length && <p>No checkpoints yet.</p>}{history.map(checkpoint => <div key={checkpoint.id} className="flex gap-2 items-center"><span className="mr-auto text-sm">Revision {checkpoint.rev} · {checkpoint.created_at}</span><Button variant="outline" size="sm" disabled={busy} onClick={() => void action(async () => setComparison(await documentRequest<Checkpoint>(workspaceId, slug, `/checkpoints/${encodeURIComponent(checkpoint.id)}`)))}>Compare</Button><Button variant="outline" size="sm" disabled={!sync.editable || restoring || sync.pending > 0 || busy || sync.status !== "Saved"} onClick={() => void restore(checkpoint.id)}>Restore</Button></div>)}</section>}
     {comparison && <section aria-label="Compare checkpoint" className="border-t p-6"><h2 className="font-medium">Checkpoint revision {comparison.rev} and current revision {sync.state?.rev}</h2><div className="grid gap-4 md:grid-cols-2"><pre className="overflow-auto whitespace-pre-wrap text-xs">{readableDocument(comparison.content)}</pre><pre className="overflow-auto whitespace-pre-wrap text-xs">{readableDocument(sync.state?.content)}</pre></div><Button variant="ghost" onClick={() => setComparison(null)}>Close comparison</Button></section>}
   </section>

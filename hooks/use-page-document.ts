@@ -5,8 +5,8 @@ import * as Y from "yjs"
 import { apiFetch } from "@/lib/api-fetch"
 
 export interface DocumentState {
-  schema: number; rev: number; epoch: string; snapshot: string; updates?: string[]
-  can_write: boolean; content?: unknown; outline?: { id: string; text: string }[]
+  page_id?: string; schema: number; rev: number; epoch: string; snapshot: string; updates?: string[]
+  can_write: boolean; content?: unknown; outline?: { id: string; text: string; hash?: string; type?: string }[]
 }
 export function decodeUpdate(value: string): Uint8Array { return Uint8Array.from(atob(value), c => c.charCodeAt(0)) }
 export function encodeUpdate(value: Uint8Array): string { let text = ""; for (const byte of value) text += String.fromCharCode(byte); return btoa(text) }
