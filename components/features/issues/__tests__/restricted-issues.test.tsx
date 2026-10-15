@@ -69,6 +69,53 @@ it("keeps an unsubmitted new issue draft when searching the catalog", async () =
   expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false)
 })
 
+it("confirms a created issue even when it does not match the current search", async () => {
+  fetchMock.mockImplementation(async (path: string, init?: RequestInit) => init?.method === "POST" ? response(row, 201) : response(path.includes("restricted-issue-projects") ? [project] : []))
+  show()
+  fireEvent.click(await screen.findByText("New issue"))
+  fireEvent.change(screen.getByLabelText("Project", { exact: true }), { target: { value: "project-1" } })
+  fireEvent.change(screen.getByLabelText("Title", { exact: true }), { target: { value: "Shared issue" } })
+  fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "Unrelated filter" } })
+  fireEvent.click(screen.getByRole("button", { name: "Search", exact: true }))
+  await screen.findByText(/No matching shared issues/)
+  fireEvent.click(screen.getByRole("button", { name: "Create issue" }))
+  await screen.findByText("Created CLIENT-1.")
+  expect(screen.getByRole("link", { name: "Open CLIENT-1" })).toHaveAttribute("href", "/issues/CLIENT-1")
+  expect(screen.getByLabelText("Search shared issues")).toHaveValue("Unrelated filter")
+  expect(screen.getByLabelText("Title", { exact: true })).toHaveValue("")
+})
+
+it.each([{ id: "partial" }, { ...row, project_id: "foreign-project", project_name: "FOREIGN_PROJECT_METADATA" }])("retains an uncertain creation draft and reuses its operation key on retry", async invalid => {
+  let malformed = true
+  fetchMock.mockImplementation(async (path: string, init?: RequestInit) => init?.method === "POST" ? response(malformed ? invalid : row, 201) : response(path.includes("restricted-issue-projects") ? [project] : []))
+  show()
+  fireEvent.click(await screen.findByText("New issue"))
+  fireEvent.change(screen.getByLabelText("Project", { exact: true }), { target: { value: "project-1" } })
+  fireEvent.change(screen.getByLabelText("Title", { exact: true }), { target: { value: "Uncertain request" } })
+  fireEvent.click(screen.getByRole("button", { name: "Create issue" }))
+  await screen.findByText(/Could not confirm the created issue/)
+  expect(screen.getByLabelText("Title", { exact: true })).toHaveValue("Uncertain request")
+  expect(screen.queryByText("FOREIGN_PROJECT_METADATA")).toBeNull()
+  expect(screen.queryByRole("link", { name: /^Open CLIENT/ })).toBeNull()
+  malformed = false
+  fireEvent.click(screen.getByRole("button", { name: "Create issue" }))
+  await screen.findByText("Created CLIENT-1.")
+  const writes = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")
+  expect(writes).toHaveLength(2)
+  expect(new Headers(writes[0][1].headers).get("Idempotency-Key")).toBe(new Headers(writes[1][1].headers).get("Idempotency-Key"))
+})
+
+it("does not offer a created-issue link when the response denies reading", async () => {
+  fetchMock.mockImplementation(async (path: string, init?: RequestInit) => init?.method === "POST" ? response({ ...row, can_read: false }, 201) : response(path.includes("restricted-issue-projects") ? [project] : []))
+  show()
+  fireEvent.click(await screen.findByText("New issue"))
+  fireEvent.change(screen.getByLabelText("Project", { exact: true }), { target: { value: "project-1" } })
+  fireEvent.change(screen.getByLabelText("Title", { exact: true }), { target: { value: "Shared issue" } })
+  fireEvent.click(screen.getByRole("button", { name: "Create issue" }))
+  await screen.findByText("Created CLIENT-1.")
+  expect(screen.queryByRole("link", { name: "Open CLIENT-1" })).toBeNull()
+})
+
 it("does not retain another account or workspace's search input", async () => {
   fetchMock.mockImplementation(async (path: string) => response(path.includes("restricted-issue-projects") ? [] : [row]))
   const { rerender } = show()

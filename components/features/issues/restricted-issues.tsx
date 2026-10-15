@@ -111,15 +111,21 @@ function NewIssue({ base, projects, disabled }: { base: string; projects: Projec
   const [projectId, setProjectId] = useState("")
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
+  const [created, setCreated] = useState<Pick<Issue, "identifier" | "can_read"> | null>(null)
   const request = useIssueRequest()
   const eligible = projects.filter(project => project.can_contribute)
   const selected = eligible.find(project => project.id === projectId)
   const save = useMutation({
-    mutationFn: () => request.send(base, "POST", { project_id: projectId, title, description }),
-    onSuccess: async () => { request.clear(); setTitle(""); setDescription(""); await client.invalidateQueries({ queryKey: ["restricted-issues"] }) },
+    mutationFn: async () => {
+      const result = issueSchema.safeParse(await request.send(base, "POST", { project_id: projectId, title, description }))
+      if (!result.success || !result.data.id || !result.data.identifier || result.data.project_id !== projectId) throw new Error("Could not confirm the created issue. Your draft is kept; retry to confirm the result.")
+      return result.data
+    },
+    onMutate: () => setCreated(null),
+    onSuccess: async saved => { request.clear(); setCreated({ identifier: saved.identifier, can_read: saved.can_read }); setTitle(""); setDescription(""); await client.invalidateQueries({ queryKey: ["restricted-issues"] }) },
   })
   return <details className="rounded-lg border bg-card p-4"><summary className="cursor-pointer font-medium">New issue</summary>
-    <form className="mt-3 space-y-3" onSubmit={event => { event.preventDefault(); if (!disabled && selected?.intake_ready && title.trim() && !save.isPending) save.mutate() }}>
+    <form className="touch-form mt-3 space-y-3" onSubmit={event => { event.preventDefault(); if (!disabled && selected?.intake_ready && title.trim() && !save.isPending) save.mutate() }}>
       <label htmlFor={`${id}-project`} className="block text-sm">Project</label>
       <select id={`${id}-project`} className="min-h-9 w-full rounded-md border bg-background px-3 coarse:min-h-12" value={projectId} disabled={disabled || save.isPending} onChange={event => setProjectId(event.target.value)}><option value="">Choose a project</option>{eligible.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
       {selected && !selected.intake_ready && <p role="status" className="text-sm text-muted-foreground">Ask your administrator to configure this project’s issue intake crew.</p>}
@@ -128,6 +134,7 @@ function NewIssue({ base, projects, disabled }: { base: string; projects: Projec
       <p className="text-xs text-muted-foreground">Creates an unassigned request in Backlog. An authorized workspace member can review it and start work.</p>
       <Button type="submit" disabled={disabled || !selected?.intake_ready || !title.trim() || save.isPending}>{save.isPending ? "Creating…" : "Create issue"}</Button>
       {save.isError && <p role="alert" className="text-sm">{save.error.message}</p>}
+      {created && <div><p role="status" className="text-sm">Created {created.identifier}.</p>{created.can_read && <Link className="inline-flex min-h-9 items-center text-sm text-primary underline coarse:min-h-12" href={`/issues/${encodeURIComponent(created.identifier)}`}>Open {created.identifier}</Link>}</div>}
     </form>
   </details>
 }

@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Guests can search shared issue titles and identifiers in UI and CLI.** Filtering and total counts retain live project grants; hidden descriptions, comments and unrelated projects are excluded. A new search starts from the first page in the UI.
+- **Guests can search shared issue titles and identifiers in UI and CLI.** Filtering and total counts retain live project grants; hidden descriptions, comments and unrelated projects are excluded. A new search starts from the first page in the UI. Creation confirmation remains visible when the filter hides the new issue.
 
 - **Chat table previews rejected ordinary spreadsheets and legacy CSV text.** Hyperlinks are ignored without fetching, chart tabs are skipped while worksheets remain visible, invalid dates are labelled, and UTF-16/Windows-1250 CSV text is decoded locally. Both shipped worker acceptance checks now run in CI.
 

@@ -171,6 +171,11 @@ searching this dedicated Guest projection does not open them. Collection
 `X-Total-Count` counts the filtered total before pagination; the next-offset header
 supports pagination.
 
+The web catalog keeps an unsubmitted new-issue draft when the search changes.
+A confirmed creation shows its identifier and, when readable, a detail link even
+if the current filter hides the new row. An unconfirmed or other-project response
+retains the draft for a retry under the same operation key.
+
 Crews, credentials, routine Edit and shared-output audiences, full Issues Manage, explicit
 Page-action selection and a Pages grant migration remain separate work. This
 contract does not claim complete resource-access PRD or release-1.0 acceptance.

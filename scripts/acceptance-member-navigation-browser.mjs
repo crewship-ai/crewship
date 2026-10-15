@@ -89,20 +89,28 @@ try {
   await expect(clientShares.getByLabel('Read issues',{exact:true})).toBeChecked()
   await shareDialog.getByRole('button',{name:'Close',exact:true}).click()
   await open('other','/issues')
+  const issueSearchForm=pages.other.locator('form').filter({has:pages.other.getByLabel('Search shared issues',{exact:true})})
   await expect(pages.other.getByRole('button',{name:'Share',exact:true})).toHaveCount(0)
   await check('Guest project screen never offers administration Share',true)
   await pages.other.getByText('New issue',{exact:true}).click()
   await pages.other.getByLabel('Project',{exact:true}).selectOption(sharedProject.id)
   await pages.other.getByLabel('Title',{exact:true}).fill('Client browser request')
   await pages.other.getByLabel('Description',{exact:true}).fill('Client browser brief')
+  await pages.other.getByLabel('Search shared issues',{exact:true}).fill('UNMATCHED_CATALOG_FILTER')
+  await issueSearchForm.getByRole('button',{name:'Search',exact:true}).click()
+  await expect(pages.other.getByText('No matching shared issues. Try another search or clear the filter.',{exact:true})).toBeVisible()
+  await check('search preserves a real unsubmitted project request',await pages.other.getByLabel('Title',{exact:true}).inputValue()==='Client browser request' && await pages.other.getByLabel('Description',{exact:true}).inputValue()==='Client browser brief')
   const requestCreated=pages.other.waitForResponse(response=>new URL(response.url()).pathname.endsWith('/restricted-issues') && response.request().method()==='POST')
   await pages.other.getByRole('button',{name:'Create issue',exact:true}).click()
   const createdResponse=await requestCreated
   await check('Guest creates a real unassigned project request',createdResponse.status()===201)
   const clientIssue=await createdResponse.json()
+  await expect(pages.other.getByRole('link',{name:`Open ${clientIssue.identifier}`,exact:true})).toBeVisible()
+  await expect(pages.other.getByRole('link',{name:'Client browser request',exact:true})).toHaveCount(0)
+  await check('Guest receives a confirmed creation link even when search hides the issue',await pages.other.getByText(`Created ${clientIssue.identifier}.`,{exact:true}).isVisible())
+  await issueSearchForm.getByRole('button',{name:'Clear search',exact:true}).click()
   await expect(pages.other.getByRole('link',{name:'Client browser request',exact:true})).toBeVisible()
   const sharedSearchPath=`${fixture.server}/api/v1/workspaces/${fixture.workspace}/restricted-issues`
-  const issueSearchForm=pages.other.locator('form').filter({has:pages.other.getByLabel('Search shared issues',{exact:true})})
   await pages.other.getByLabel('Search shared issues',{exact:true}).fill('BROWSER REQUEST')
   const [searchedResponse]=await Promise.all([
     pages.other.waitForResponse(response=>new URL(response.url()).pathname.endsWith('/restricted-issues') && new URL(response.url()).searchParams.get('q')==='BROWSER REQUEST'),
@@ -128,7 +136,10 @@ try {
   await open('touchSearch','/issues')
   const touchSearchInput=await pages.touchSearch.getByLabel('Search shared issues',{exact:true}).boundingBox()
   const touchSearchButton=await pages.touchSearch.locator('form').filter({has:pages.touchSearch.getByLabel('Search shared issues',{exact:true})}).getByRole('button',{name:'Search',exact:true}).boundingBox()
-  await check('shared search has 44px targets on an 820px coarse-pointer tablet',await pages.touchSearch.evaluate(()=>matchMedia('(pointer: coarse)').matches) && touchSearchInput?.height>=44 && touchSearchButton?.height>=44)
+  await pages.touchSearch.getByText('New issue',{exact:true}).click()
+  const touchIssueTitle=await pages.touchSearch.getByLabel('Title',{exact:true}).boundingBox()
+  const touchIssueCreate=await pages.touchSearch.getByRole('button',{name:'Create issue',exact:true}).boundingBox()
+  await check('shared search and intake have 44px targets on an 820px coarse-pointer tablet',await pages.touchSearch.evaluate(()=>matchMedia('(pointer: coarse)').matches) && touchSearchInput?.height>=44 && touchSearchButton?.height>=44 && touchIssueTitle?.height>=44 && touchIssueCreate?.height>=44)
   await contexts.touchSearch.close()
   delete contexts.touchSearch
   delete pages.touchSearch
