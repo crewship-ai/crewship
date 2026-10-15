@@ -268,4 +268,34 @@ func TestDocumentSelectedRunCannotUseOtherPageGenericDelegation(t *testing.T) {
 			t.Fatalf("scope rejection mutated history %d %d %d", rev, receipts, successes)
 		}
 	}
+	// Physical request deletion cascades its origin delegation. It must revoke
+	// the complete retained principal, including the other Page's generic grant.
+	execOrFatal(t, h.db, `DELETE FROM document_requests WHERE id=?`, id)
+	var retained int
+	if err = h.db.QueryRow(`SELECT count(*) FROM artifact_run_principals WHERE run_id='artifact-run'`).Scan(&retained); err != nil || retained != 1 {
+		t.Fatalf("principal audit row lost=%d %v", retained, err)
+	}
+	if err = h.checkArtifactRun(t.Context(), "other-doc", a); err == nil {
+		t.Fatal("request deletion restored generic authority")
+	}
+	// Host recapture of the same run cannot silently renew its revoked expiry.
+	if err = captureArtifactChatPrincipal(httptest.NewRequest("POST", "/", nil), h.db, "artifact-run", workspace, "artifact-agent", "artifact-crew", "artifact-chat", "artifact-message", receipt); err != nil {
+		t.Fatal(err)
+	}
+	if err = h.checkArtifactRunPrincipal(t.Context(), a); err == nil {
+		t.Fatal("recapture revived deleted request principal")
+	}
+	r := pagesGrantRequest(t, "POST", "/", workspace, user, "OWNER", "")
+	r = r.WithContext(context.WithValue(r.Context(), artifactRunKey{}, a))
+	r.SetPathValue("operation", "state")
+	key := documents.Key{WorkspaceID: workspace, PageID: "other-doc"}
+	store := documents.New(h.db, documents.Options{})
+	authority := &documentAuthority{pages: h}
+	if _, err = store.Read(r.Context(), key, authority.authorize(r, key, false, false)); err == nil {
+		t.Fatal("post-delete cross-Page read succeeded")
+	}
+	r.SetPathValue("operation", "commit")
+	if _, err = store.Acquire(r.Context(), key, "deleted-escape", authority.authorize(r, key, true, false)); err == nil {
+		t.Fatal("post-delete cross-Page mutation authority succeeded")
+	}
 }
