@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Chat issue references stay scoped to the current viewer (#3068).** Reconciliation replaces complete snapshots, clears protected projections while access is checked, and preserves durable run anchors. Uncertain human writes retain the same revision and idempotency key through recovery, including a denied retry after a lost acknowledgement.
+
 - Guests with explicit routine View and Edit draft shares can change collaborative drafts through UI and CLI with revision/base conflicts and atomic audit. Published recipes, execution authority and trusted testing/review gates remain intact; direct Guest publication is still separate work.
 
 - Guest project managers can create and edit milestones with reviewed versions and atomic audit. Empty-only removal preserves linked issue work; UI and CLI enforce current action flags and conflict review.
