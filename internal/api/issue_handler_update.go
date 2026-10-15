@@ -627,6 +627,7 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	broadcastIssueCardInvalidations(r.Context(), h.db, h.hub, wsID, deletedID, true)
 	h.broadcastIssueEvent(wsID, "issue.deleted", map[string]string{"identifier": ident, "crew_id": crewID})
 
 	w.WriteHeader(http.StatusNoContent)
