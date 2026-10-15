@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build unix
 
 package documents
 
@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // Every case depends on ReadServiceSecret's POSIX mode-0600 gate, including
@@ -61,5 +63,75 @@ func TestReadServiceSecretFileBoundary(t *testing.T) {
 	}
 	if _, err := ReadServiceSecret(filepath.Join(dir, "absent")); err == nil {
 		t.Fatal("missing secret accepted")
+	}
+}
+
+func TestServiceSecretOpenedDescriptorSurvivesPathReplacement(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "token")
+	if err := os.WriteFile(path, []byte(strings.Repeat("a", 32)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := openServiceSecret(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := os.Rename(path, path+".original"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Repeat("b", 32)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := file.Stat()
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatal("descriptor lost original permission evidence")
+	}
+	got, err := readServiceSecretContents(file)
+	if err != nil || got != strings.Repeat("a", 32) {
+		t.Fatal("read did not retain the originally opened inode")
+	}
+}
+
+func TestServiceSecretGrowthAfterDescriptorStatIsBounded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte(strings.Repeat("a", 32)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := openServiceSecret(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.Size() != 32 {
+		t.Fatal("unexpected initial descriptor state")
+	}
+	if err := os.WriteFile(path, []byte(strings.Repeat("a", 4096)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reader := &secretCountingReader{Reader: file}
+	if _, err := readServiceSecretContents(reader); err == nil {
+		t.Fatal("grown secret accepted")
+	}
+	if reader.bytes != 513 {
+		t.Fatalf("read %d bytes beyond bounded evidence", reader.bytes)
+	}
+}
+
+func TestReadServiceSecretFIFORejectsWithoutBlocking(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fifo")
+	if err := syscall.Mkfifo(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := ReadServiceSecret(path); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("FIFO accepted")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("opening a nonregular token blocked")
 	}
 }

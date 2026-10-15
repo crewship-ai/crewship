@@ -9,7 +9,7 @@ import { create, snapshot, initialJSON, outline, load, anchor } from './schema.m
 const secret = 'a'.repeat(48);
 function call(socket, path, data, headers = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ socketPath: socket, path, method: data === undefined ? 'GET' : 'POST', headers: { 'X-Crewship-Docs-Service': secret, 'X-Workspace-ID': 'workspace', Authorization: 'Bearer human', ...headers } }, res => { const chunks = []; res.on('data', c => chunks.push(c)); res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString()) })); });
+    const req = http.request({ socketPath: socket, path, method: data === undefined ? 'GET' : 'POST', headers: { 'X-Crewship-Docs-Service': secret, 'X-Workspace-ID': 'workspace', Authorization: 'Bearer human', ...headers } }, res => { const chunks = []; res.on('data', c => chunks.push(c)); res.on('end', () => resolve({ status: res.statusCode, contentType: res.headers['content-type'], body: JSON.parse(Buffer.concat(chunks).toString()) })); });
     req.on('error', reject); req.end(data === undefined ? undefined : JSON.stringify(data));
   });
 }
@@ -19,6 +19,7 @@ async function fixture(handler, options = {}) {
   const paths = { socket: join(dir, 's'), authoritySocket: join(dir, 'a'), tokenFile: join(dir, 't') };
   await writeFile(paths.tokenFile, secret, { mode: 0o600 });
   const authority = http.createServer(async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     try {
       assert.equal(req.headers['x-crewship-docs-service'], secret);
       const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -62,6 +63,14 @@ function authorityModel() {
   return model;
 }
 const read = (f, headers) => call(f.socket, '/v1/documents/p/read', {}, headers);
+test('fixture error responses declare JSON instead of an HTML interpretation', async () => {
+  const f = await fixture(() => { throw new Error('<script>literal diagnostic</script>'); });
+  try {
+    const response = await call(f.authoritySocket, '/internal/docs/v1/p/state', {});
+    assert.equal(response.status, 500); assert.equal(response.contentType, 'application/json');
+    assert.equal(response.body.error, '<script>literal diagnostic</script>');
+  } finally { await f.close(); }
+});
 test('request targets are verified from confirmed text with no lease or content mutation', async () => {
   const model = authorityModel(), f = await fixture(model.handle); await f.start();
   try {
@@ -154,9 +163,28 @@ test('startup rejects unsafe secrets and noncanonical socket paths', async () =>
     await assert.rejects(startService({ socket: join(dir, 's'), authoritySocket: join(dir, 'a'), tokenFile }), /512 bytes/);
     await writeFile(tokenFile, 'x'.repeat(257)); await assert.rejects(startService({ socket: join(dir, 's'), authoritySocket: join(dir, 'a'), tokenFile }), /32..256/);
     const link = join(dir, 'link'); await symlink(tokenFile, link);
-    await assert.rejects(startService({ socket: join(dir, 's'), authoritySocket: join(dir, 'a'), tokenFile: link }), /regular mode-0600/);
+    await assert.rejects(startService({ socket: join(dir, 's'), authoritySocket: join(dir, 'a'), tokenFile: link }), { code: 'ELOOP' });
     await assert.rejects(startService({ socket: tokenFile, authoritySocket: join(dir, 'a'), tokenFile }), /distinct/);
   } finally { await rm(dir, { recursive: true }); }
+});
+
+test('read dispatch cannot turn mutation fields into a write or bypass live state authorization', async () => {
+  const model = authorityModel(), f = await fixture(model.handle); await f.start();
+  try {
+    const before = structuredClone(model.state);
+    const malicious = { operation: 'patch', schema: 2, id: 'read-as-patch', epoch: 'forged', ifRev: 999, patch: { target: 'intro', ifHash: '0'.repeat(64), text: 'unauthorized replacement' }, snapshot: 'forged', targets: [] };
+    const result = await call(f.socket, '/v1/documents/p/read', malicious);
+    assert.equal(result.status, 200);
+    assert.equal(result.body.snapshot, before.snapshot);
+    assert.equal(model.acquisitions, 0); assert.equal(model.commits, 0);
+    assert.deepEqual(model.state, before); assert.equal(model.receipts.size, 0);
+    assert.equal((await call(f.socket, '/v1/documents/p/verify-targets', malicious)).status, 409);
+    assert.equal((await call(f.socket, '/v1/documents/p/verify-targets', malicious, { Authorization: 'Bearer agtv2.synthetic' })).status, 403);
+    model.revoked.add('Bearer human');
+    for (const operation of ['read', 'verify-targets', 'comments', 'checkpoints', 'checkpoint-read', 'export']) assert.equal((await call(f.socket, `/v1/documents/p/${operation}`, malicious)).status, 403);
+    assert.equal((await call(f.socket, '/v1/documents/p/read/patch', malicious)).status, 404);
+    assert.equal(model.acquisitions, 0); assert.equal(model.commits, 0); assert.equal(model.receipts.size, 0);
+  } finally { await f.close(); }
 });
 test('startup rejects an old Go recovery acknowledgement before admitting requests', async () => {
   let calls = 0;

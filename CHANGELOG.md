@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Docs service secrets are validated and read through one bounded descriptor (#3203).** Go, Node and the packaged healthcheck reject symlinks and nonregular files without blocking, and reject file growth beyond the secret budget.
+
 - **Local PNG/JPEG images now survive static previews in chat, Pages and Board pins.** All HTML/Markdown preview surfaces use one bounded raster validator and native decode check; remote images, SVG, srcset and network-bearing CSS remain unavailable. Original source downloads are preserved.
 
 

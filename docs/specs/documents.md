@@ -11,7 +11,10 @@ HTML artifacts and Boards keep their storage and routes.
 Configure distinct clean absolute `authority_socket`, `service_socket` and
 `service_token_file` paths of at most 100 bytes. The secret must be a regular
 mode-0600 file, at most 512 bytes, holding 32–256 trimmed bytes. Go and Node use
-matching numeric UIDs. Environment equivalents are
+matching numeric UIDs. They open secret files once with Unix no-follow/nonblocking
+flags, validate that descriptor and read at most 513 bytes through it, rejecting
+growth beyond the limit. The packaged healthcheck uses the same Node helper.
+Environment equivalents are
 `CREWSHIP_DOCUMENTS_ENABLED`, `CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET`,
 `CREWSHIP_DOCUMENTS_SERVICE_SOCKET`, `CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE`.
 A configured authority startup failure prevents Go serving. Node has no DB
