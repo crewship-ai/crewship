@@ -1277,3 +1277,6 @@ Public implementation references: `internal/pages/`, `internal/api/pages_*.go`,
 `cmd/crewship/cmd_page.go` and `components/features/pages/`.
 Market research and its bibliography are retained in private context; they
 are not required to build, test or use the product.
+
+
+A Page grant issuer must also have an active trusted account and no restricted membership anywhere. Every non-NULL suspension value, including an empty string, makes its Page shares inactive at use time. Existing membership/ownership/crew conditions remain required; the administrative grants list preserves inactive metadata and explains account unavailability.
