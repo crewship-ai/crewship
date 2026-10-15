@@ -5,7 +5,7 @@ import { mkdtemp, writeFile, stat, chmod, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startService, PROTOCOL } from './service.mjs';
-import { create, snapshot, initialJSON, outline } from './schema.mjs';
+import { create, snapshot, initialJSON, outline, load, anchor } from './schema.mjs';
 const secret = 'a'.repeat(48);
 function call(socket, path, data, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -390,5 +390,18 @@ test('trusted selected scope bounds repeated-text edits and stays private on pub
     const commit = model.seen.find(call => call.op === 'commit').data;
     assert.deepEqual(commit.semantic.edit, { from: 1, to: 1, insert: 'a' });
     assert.equal(commit.semantic.text, 'aaaaa');
+  } finally { await f.close(); }
+});
+
+test('public comment responses resolve spans without exposing the private anchor extension', async () => {
+  const model = authorityModel(), doc = load(model.state.snapshot), thread = anchor(doc, 'intro', 0, 8, 'thread', 1); doc.destroy();
+  assert.ok(thread.spans.length);
+  const f = await fixture((op, data, req, res) => op === 'comments' ? [{ id: 'thread', body: 'Comment', anchor: thread, actor: 'user:human', rev: 1, version: 1, resolved: false, created_at: '2026-10-15T00:00:00Z' }] : model.handle(op, data, req, res));
+  try {
+    await f.start(); const response = await call(f.socket, '/v1/documents/p/comments', {});
+    assert.equal(response.status, 200);
+    const comment = response.body.comments[0];
+    assert.equal(comment.status, 'attached'); assert.equal(comment.from, 0); assert.equal(comment.to, 8);
+    assert.equal(comment.spans, undefined); assert.equal(comment.anchor.spans, undefined);
   } finally { await f.close(); }
 });

@@ -107,7 +107,14 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if(operation==='export') return {markdown:markdown(validate(doc))};
       if(operation==='checkpoints') return {checkpoints:await go(page,'checkpoints',context)};
       if(operation==='checkpoint-read') { const c=await go(page,'checkpoint-read',context,{id:request.checkpoint});const pinned=load(c.snapshot);try{return {...c,content:validate(pinned),outline:await outline(pinned)}}finally{pinned.destroy()} };
-      if(operation==='comments') {const comments=await go(page,'comments',context);return {comments:comments.map(c=>({...c,...resolve(doc,c.anchor),...(c.resolved?{status:"resolved"}:{})}))}};
+      if (operation === 'comments') {
+        const comments = await go(page, 'comments', context);
+        return { comments: comments.map(comment => {
+          const { id, block, quote, checkpoint, start, end, status, from, to } = resolve(doc, comment.anchor);
+          const publicAnchor = { id, block, quote, checkpoint, start, end };
+          return { ...comment, anchor: publicAnchor, ...publicAnchor, status: comment.resolved ? 'resolved' : status, from, to };
+        }) };
+      }
       if (request.epoch !== syncEpoch(state)) throw fault(409, 'old epoch; reload document');
       if(operation==='comment') { if(request.ifRev!==state.rev)throw fault(409,'comment revision changed');const selected=anchor(doc,request.block,request.from,request.to,request.id,state.rev);const result=await go(page,'comment',context,{id:request.id,fingerprint,body:request.text,anchor:selected,ifRev:state.rev,generation:state.generation??0});return {...result,epoch:syncEpoch(state)}; }
       if(operation==='resolve') return {...await go(page,'resolve',context,{id:request.id,fingerprint,comment:request.comment,version:request.version,resolved:request.resolved,ifRev:request.ifRev,generation:state.generation??0}),epoch:syncEpoch(state)};
