@@ -16,6 +16,7 @@ var hashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 const MaxOperations = 100
 
 type PatchRequest struct {
+	PageID         string      `json:"page_id"`
 	SchemaVersion  int         `json:"schema_version"`
 	BaseRev        int64       `json:"base_rev"`
 	MutationID     string      `json:"mutation_id"`
@@ -33,6 +34,7 @@ type Operation struct {
 	Position  *int     `json:"position,omitempty"`
 }
 type ReorderRequest struct {
+	PageID         string   `json:"page_id"`
 	SchemaVersion  int      `json:"schema_version"`
 	BaseRev        int64    `json:"base_rev"`
 	MutationID     string   `json:"mutation_id"`
@@ -40,6 +42,7 @@ type ReorderRequest struct {
 	SlideOrder     []string `json:"slide_order"`
 }
 type RestoreRequest struct {
+	PageID         string `json:"page_id"`
 	SchemaVersion  int    `json:"schema_version"`
 	BaseRev        int64  `json:"base_rev"`
 	MutationID     string `json:"mutation_id"`
@@ -47,6 +50,7 @@ type RestoreRequest struct {
 	Revision       int64  `json:"revision"`
 }
 type InitializeRequest struct {
+	PageID        string `json:"page_id"`
 	SchemaVersion int    `json:"schema_version"`
 	BaseRev       int64  `json:"base_rev"`
 	MutationID    string `json:"mutation_id"`
@@ -95,23 +99,26 @@ func strictRequest(raw []byte, target any, check func(map[string]json.RawMessage
 	}
 	return nil
 }
-func validMutation(schema int, base int64, id string) error {
+func validMutation(schema int, base int64, id, pageID string) error {
 	if schema != SchemaVersion {
 		return ErrSchema
 	}
-	if base < 0 || !identifier.MatchString(id) {
+	if base < 0 || !identifier.MatchString(id) || !identifier.MatchString(pageID) {
 		return errors.New("invalid mutation identity or base revision")
 	}
 	return nil
 }
 func DecodeInitialize(raw []byte) (InitializeRequest, error) {
 	var r InitializeRequest
-	err := strictRequest(raw, &r, func(object map[string]json.RawMessage) error { _, err := Decode(object["deck"]); return err }, []string{"schema_version", "base_rev", "mutation_id", "deck"}, nil)
+	err := strictRequest(raw, &r, func(object map[string]json.RawMessage) error { _, err := Decode(object["deck"]); return err }, []string{"page_id", "schema_version", "base_rev", "mutation_id", "deck"}, nil)
 	if err != nil {
 		return r, err
 	}
-	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID); err != nil {
+	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID, r.PageID); err != nil {
 		return r, err
+	}
+	if r.PageID != r.Deck.DeckID {
+		return r, errors.New("initialize Page identity differs from deck")
 	}
 	if r.BaseRev != 0 {
 		return r, ErrConflict
@@ -175,11 +182,11 @@ func DecodePatch(raw []byte) (PatchRequest, error) {
 			}
 		}
 		return nil
-	}, []string{"schema_version", "base_rev", "mutation_id", "operations"}, []string{"if_order_version"})
+	}, []string{"page_id", "schema_version", "base_rev", "mutation_id", "operations"}, []string{"if_order_version"})
 	if err != nil {
 		return r, err
 	}
-	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID); err != nil {
+	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID, r.PageID); err != nil {
 		return r, err
 	}
 	if r.IfOrderVersion != nil && *r.IfOrderVersion < 0 {
@@ -222,11 +229,11 @@ func validateRequestSlide(raw json.RawMessage) error {
 }
 func DecodeReorder(raw []byte) (ReorderRequest, error) {
 	var r ReorderRequest
-	err := strictRequest(raw, &r, nil, []string{"schema_version", "base_rev", "mutation_id", "if_order_version", "slide_order"}, nil)
+	err := strictRequest(raw, &r, nil, []string{"page_id", "schema_version", "base_rev", "mutation_id", "if_order_version", "slide_order"}, nil)
 	if err != nil {
 		return r, err
 	}
-	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID); err != nil {
+	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID, r.PageID); err != nil {
 		return r, err
 	}
 	if r.IfOrderVersion < 0 || r.SlideOrder == nil || len(r.SlideOrder) > MaxSlides {
@@ -236,11 +243,11 @@ func DecodeReorder(raw []byte) (ReorderRequest, error) {
 }
 func DecodeRestore(raw []byte) (RestoreRequest, error) {
 	var r RestoreRequest
-	err := strictRequest(raw, &r, nil, []string{"schema_version", "base_rev", "mutation_id", "if_order_version", "revision"}, nil)
+	err := strictRequest(raw, &r, nil, []string{"page_id", "schema_version", "base_rev", "mutation_id", "if_order_version", "revision"}, nil)
 	if err != nil {
 		return r, err
 	}
-	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID); err != nil {
+	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID, r.PageID); err != nil {
 		return r, err
 	}
 	if r.IfOrderVersion < 0 || r.Revision < 1 {
@@ -266,6 +273,9 @@ func ObjectIDs(deck Deck) map[string]string {
 	return ids
 }
 func ApplyPatch(current Deck, request PatchRequest) (Deck, error) {
+	if request.PageID != current.DeckID {
+		return Deck{}, ErrConflict
+	}
 	encoded, err := Canonical(current)
 	if err != nil {
 		return Deck{}, err

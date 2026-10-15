@@ -46,3 +46,25 @@ still checks the persisted starting revision, and structural slide operations
 also require the separate order version. Deleted IDs remain reserved for the
 Page in persistence; insertion cannot retarget a historical identity. Explicit
 restore may revive the original object from its retained revision.
+
+Durable mutations require an immutable `page_id` equal to `deck_id`, as well as
+schema/base revision/mutation ID. The router's slug is only a lookup alias; it
+cannot redirect a pending mutation to a new Page that later reuses that slug.
+Store authorizers run under SQLite's writer fence and again immediately before
+commit, including receipt replays. Current Page ACL/session/run authority must
+be supplied by the API; content never supplies an actor.
+
+The store retains complete canonical snapshots, parent/order versions, actor,
+operation kind and mutation receipts atomically. Default limits are128 decks,
+1,000 retained revisions and64MiB revision bytes per deck, plus10,000 lifetime
+object IDs. Quota rejection preserves head/history; no silent history pruning.
+`OnRevision` is a compiled integration hook after the immutable revision INSERT
+and before receipt/commit; rejection rolls back head/revision/IDs and any hook
+writes. This is the future atomic private asset-ref boundary, not a runtime
+plugin mechanism.
+
+A normal same-identity backup retains receipts under live authorization. A fork
+must rewrite `deck_id` in every head/revision, preserve object IDs/tombstones
+within the new Page namespace, and recompute canonical hashes. Forks clear replay
+receipts; historical mutation IDs remain reserved and return conflict. Future
+asset-ID rewrites must join this same canonical rewrite before hashing.

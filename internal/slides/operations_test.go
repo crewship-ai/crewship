@@ -17,7 +17,7 @@ func TestPatchPreconditionsAtomicityAndStableIdentity(t *testing.T) {
 	text := *target.Text
 	text.Value = "Upraveno česky\nDruhý řádek"
 	updated.Text = &text
-	request := PatchRequest{SchemaVersion: 1, BaseRev: 1, MutationID: "patch_one", Operations: []Operation{{Op: "set_element", SlideID: current.Slides[0].ID, ElementID: target.ID, IfHash: hash, Element: &updated}}}
+	request := PatchRequest{PageID: "fixture_page", SchemaVersion: 1, BaseRev: 1, MutationID: "patch_one", Operations: []Operation{{Op: "set_element", SlideID: current.Slides[0].ID, ElementID: target.ID, IfHash: hash, Element: &updated}}}
 	raw, _ := json.Marshal(request)
 	decoded, err := DecodePatch(raw)
 	if err != nil {
@@ -77,7 +77,7 @@ func TestSmallPatchCannotCrossAggregateDeckBudget(t *testing.T) {
 	hash, _ := SlideHash(current.Slides[0])
 	element := current.Slides[0].Elements[0]
 	element.ID = "one_more"
-	request := PatchRequest{SchemaVersion: 1, BaseRev: 1, MutationID: "small_delta", Operations: []Operation{{Op: "insert_element", SlideID: "budget_slide", IfHash: hash, Element: &element}}}
+	request := PatchRequest{PageID: "budget_page", SchemaVersion: 1, BaseRev: 1, MutationID: "small_delta", Operations: []Operation{{Op: "insert_element", SlideID: "budget_slide", IfHash: hash, Element: &element}}}
 	raw, _ := json.Marshal(request)
 	if len(raw) >= MaxDeckBytes {
 		t.Fatal("patch itself must be small")
@@ -98,7 +98,7 @@ func TestRequestStrictFieldsAndStructuralOrderPrecondition(t *testing.T) {
 	deck, _, _ := modelFixture(t)
 	hash, _ := SlideHash(deck.Slides[0])
 	notes := "changed"
-	request := PatchRequest{SchemaVersion: 1, BaseRev: 1, MutationID: "notes", Operations: []Operation{{Op: "set_notes", SlideID: deck.Slides[0].ID, IfHash: hash, Notes: &notes}}}
+	request := PatchRequest{PageID: "fixture_page", SchemaVersion: 1, BaseRev: 1, MutationID: "notes", Operations: []Operation{{Op: "set_notes", SlideID: deck.Slides[0].ID, IfHash: hash, Notes: &notes}}}
 	raw, _ := json.Marshal(request)
 	source := string(raw)
 	for name, input := range map[string]string{
@@ -133,7 +133,7 @@ func TestRequestElementSentinelDoesNotRestrictPublicIDs(t *testing.T) {
 	hash, _ := SlideHash(deck.Slides[0])
 	element := deck.Slides[0].Elements[0]
 	element.ID = "__request_slide"
-	request := PatchRequest{SchemaVersion: 1, BaseRev: 1, MutationID: "insert", Operations: []Operation{{Op: "insert_element", SlideID: deck.Slides[0].ID, IfHash: hash, Element: &element}}}
+	request := PatchRequest{PageID: "fixture_page", SchemaVersion: 1, BaseRev: 1, MutationID: "insert", Operations: []Operation{{Op: "insert_element", SlideID: deck.Slides[0].ID, IfHash: hash, Element: &element}}}
 	raw, _ := json.Marshal(request)
 	if _, err := DecodePatch(raw); err != nil {
 		t.Fatal(err)
