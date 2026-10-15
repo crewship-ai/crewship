@@ -11,7 +11,7 @@ import (
 func TestChatRefsCLIUsesAuthorizedAPIAndPreservesCursor(t *testing.T) {
 	stub := covStub(t)
 	cmd := newChatRefsCommand()
-	stub.OnGet("/api/v1/chats/c_1/entity-refs", clitest.JSONResponse(200, map[string]any{"reset": true, "refs": []any{}, "next_cursor": "opaque", "snapshot_complete": true}))
+	stub.OnGet("/api/v1/chats/c_1/entity-refs", clitest.JSONResponse(200, map[string]any{"contract_version": 1, "reset": true, "refs": []any{}, "next_cursor": "opaque", "snapshot_complete": true}))
 	if err := cmd.Flags().Set("cursor", "opaque/+=="); err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestChatRefsCLIUsesAuthorizedAPIAndPreservesCursor(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if !strings.Contains(out, "snapshot_complete") {
+	if !strings.Contains(out, "contract_version") || !strings.Contains(out, "snapshot_complete") {
 		t.Fatal(out)
 	}
 	calls := stub.CallsFor("GET", "/api/v1/chats/c_1/entity-refs")
