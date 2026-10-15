@@ -64,15 +64,17 @@ build or select an image automatically. Set the required matching UID/GID,
 private socket directories and mode-0600 secret file before enabling the profile.
 
 The local image build attempt exited 125 in the shared heavy-job gateway without
-build output. No container image has been qualified by this acceptance run;
-passing native Node and Go process tests does not qualify the Docker image.
+build output. Local image qualification remains blocked; the supplemental workflow separately
+builds and exercises the image. Passing native Node and Go process tests alone
+does not qualify the Docker image.
 
 Node 24's native Unix listener removes its configured socket pathname when it
 closes, even if another process replaced that path. A dedicated private socket
 directory is therefore a support boundary: operators must not replace or remove
 the socket while the service process is alive. There is no custody guarantee
 against replacement by another actor able to write that directory. The service
-adds no separate unlink on shutdown. Container packaging remains unqualified.
+adds no separate unlink on shutdown. Container image smoke qualification is scoped to the workflow below; it does
+not qualify an Ansible deployment or published immutable registry image.
 
 The supplemental `Docs foundation` workflow builds this Dockerfile and runs
 `DOCS_IMAGE=<local-image> node tools/docs-service/image-smoke.mjs` against that
