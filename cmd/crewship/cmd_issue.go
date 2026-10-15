@@ -22,6 +22,7 @@ import (
 // rather than "crew_id"). Without the yaml tag, --format yaml and --format
 // json return the same data under different key casing (#1211).
 type issueItem struct {
+	ProjectID            *string        `json:"project_id,omitempty" yaml:"project_id,omitempty"`
 	Revision             int64          `json:"revision" yaml:"revision"`
 	AggregateRevision    int64          `json:"aggregate_revision" yaml:"aggregate_revision"`
 	AllowedActions       []string       `json:"allowed_actions" yaml:"allowed_actions"`

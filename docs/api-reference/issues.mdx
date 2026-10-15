@@ -1241,6 +1241,7 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/comments?workspace_id={workspace
 |---|---|---|---|
 | `body` | string | Yes | Comment text |
 | `guest_visible` | boolean | No | Explicitly share this new comment with Guests who can read the current project; defaults to false. Project issues only. |
+| `expected_project_id` | string | With sharing | Project observed when choosing the shared audience. A changed project returns 409 and does not publish the draft. |
 
 ```json
 {

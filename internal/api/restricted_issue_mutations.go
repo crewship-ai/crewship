@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/chatentities"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/mentions"
 )
@@ -170,6 +171,82 @@ func (r *Router) guestIssueIntake(w http.ResponseWriter, req *http.Request) {
 	finishGuestIssueMutation(w, tx, notify, 200, guestIssueIntake{ProjectID: project, CrewID: body.CrewID, CrewName: crewName, Revision: current.Revision + 1})
 }
 
+// The caller must first check fresh Guest Read/Contribute in this transaction.
+// Stored results never replace project authorization, including creation replay.
+func (r *Router) beginGuestIssueOperation(w http.ResponseWriter, req *http.Request, tx *sql.Tx, verb, entityID, project string, payload any) (*chatentities.Operation, bool) {
+	key := req.Header.Get("Idempotency-Key")
+	if key == "" {
+		return nil, false
+	}
+	if strings.TrimSpace(key) == "" || len(key) > 200 {
+		replyError(w, 400, "operation_invalid")
+		return nil, true
+	}
+	hash, err := chatIssueRequestHash(verb, entityID, payload)
+	if err != nil {
+		guestIssueError(w, err)
+		return nil, true
+	}
+	op, replay, err := chatentities.BeginOperation(req.Context(), tx, chatentities.OperationSpec{ID: generateCUID(), WorkspaceID: WorkspaceIDFromContext(req.Context()), Key: key, RequestHash: hash, ActorType: "human", ActorID: UserFromContext(req.Context()).ID, Provenance: "human", Kind: "issue", Verb: verb})
+	if err != nil {
+		writeChatIssueError(w, err)
+		return nil, true
+	}
+	if !replay {
+		return op, false
+	}
+	issue, err := r.restrictedIssueIn(req.Context(), tx, UserFromContext(req.Context()).ID, WorkspaceIDFromContext(req.Context()), op.EntityID, true)
+	if err != nil {
+		guestIssueError(w, err)
+		return nil, true
+	}
+	if issue.ProjectID != project || (entityID != "" && op.EntityID != entityID) {
+		replyError(w, 409, "The issue project changed. Review before retrying.")
+		return nil, true
+	}
+	_ = tx.Rollback()
+	w.Header().Set("Idempotency-Replayed", "true")
+	w.Header().Set("Operation-ID", op.ID)
+	w.Header().Set("Cache-Control", "no-store")
+	status := 201
+	if verb == "updated" {
+		status = 200
+	}
+	writeJSON(w, status, json.RawMessage(op.Result))
+	return nil, true
+}
+
+// Guest intake is human-authored but carries no agent execution grant. An
+// explicit unavailable origin prevents schedulers interpreting NULL as autonomous.
+func guestIssueOrigin(ctx context.Context, tx *sql.Tx, workspace, root string) (string, error) {
+	id := generateCUID()
+	_, err := tx.ExecContext(ctx, `INSERT INTO execution_origins(id,workspace_id,root_run_id,chat_id,trigger_message_id,human_authority,created_at) VALUES(?,?,?,'','','{}',?)`, id, workspace, root, time.Now().UTC().Format(time.RFC3339))
+	return id, err
+}
+
+func (r *Router) finishGuestContentMutation(w http.ResponseWriter, req *http.Request, tx *sql.Tx, op *chatentities.Operation, ev issueEvent, status int, body any) {
+	if _, err := persistIssueActivityTx(req.Context(), tx, ev); err != nil {
+		guestIssueError(w, err)
+		return
+	}
+	if err := completeHumanIssueOperation(req, tx, op, ev.MissionID, body); err != nil {
+		guestIssueError(w, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		guestIssueError(w, err)
+		return
+	}
+	if op != nil {
+		w.Header().Set("Operation-ID", op.ID)
+	}
+	delivery := issueEvents{db: r.db, hub: r.hub, logger: r.logger, journal: r.journal}.mutationDelivery()
+	delivery.drainCommittedIssueMutation(WorkspaceIDFromContext(req.Context()))
+	delivery.broadcastIssueEvent(WorkspaceIDFromContext(req.Context()), "issue.updated", map[string]string{"id": ev.MissionID})
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, status, body)
+}
+
 func (r *Router) createRestrictedIssue(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	user := UserFromContext(req.Context())
@@ -201,6 +278,10 @@ func (r *Router) createRestrictedIssue(w http.ResponseWriter, req *http.Request)
 		guestIssueError(w, err)
 		return
 	}
+	op, handled := r.beginGuestIssueOperation(w, req, tx, "created", "", body.ProjectID, body)
+	if handled {
+		return
+	}
 	var crew, projectName string
 	err = tx.QueryRowContext(req.Context(), `SELECT i.crew_id,p.name FROM project_guest_issue_intake i JOIN projects p ON p.id=i.project_id AND p.workspace_id=i.workspace_id JOIN crews c ON c.id=i.crew_id AND c.workspace_id=i.workspace_id AND c.deleted_at IS NULL WHERE i.project_id=? AND i.workspace_id=?`, body.ProjectID, workspace).Scan(&crew, &projectName)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -220,12 +301,15 @@ func (r *Router) createRestrictedIssue(w http.ResponseWriter, req *http.Request)
 		guestIssueError(w, err)
 		return
 	}
-	notify, err := r.appendGuestIssueAudit(req.Context(), tx, journal.Entry{WorkspaceID: workspace, MissionID: id, Type: journal.EntryMissionCreated, ActorType: journal.ActorUser, ActorID: user.ID, Summary: "Guest created a project issue", Payload: map[string]any{"project_id": body.ProjectID, "issue_id": id, "source": "guest_contribution"}})
+	origin, err := guestIssueOrigin(req.Context(), tx, workspace, "guest-intake:"+id)
+	if err == nil {
+		_, err = tx.ExecContext(req.Context(), `UPDATE missions SET chat_origin_id=? WHERE id=? AND workspace_id=?`, origin, id, workspace)
+	}
 	if err != nil {
 		guestIssueError(w, err)
 		return
 	}
-	finishGuestIssueMutation(w, tx, notify, 201, restrictedIssue{ID: id, Identifier: identifier, Title: body.Title, Status: "BACKLOG", ProjectID: body.ProjectID, ProjectName: projectName, CanRead: true, CanContribute: true, Description: body.Description})
+	r.finishGuestContentMutation(w, req, tx, op, issueEvent{MissionID: id, ActorType: "user", ActorID: user.ID, Action: actionCreated, Details: "Guest created a project issue"}, 201, restrictedIssue{ID: id, Identifier: identifier, Title: body.Title, Status: "BACKLOG", ProjectID: body.ProjectID, ProjectName: projectName, CanRead: true, CanContribute: true, Description: body.Description})
 }
 
 func (r *Router) restrictedIssueIn(ctx context.Context, tx *sql.Tx, user, workspace, id string, write bool) (restrictedIssue, error) {
@@ -314,7 +398,8 @@ func (r *Router) restrictedIssueComments(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	var body struct {
-		Body string `json:"body"`
+		Body      string `json:"body"`
+		ProjectID string `json:"project_id"`
 	}
 	write := req.Method == "POST"
 	if write {
@@ -368,18 +453,30 @@ func (r *Router) restrictedIssueComments(w http.ResponseWriter, req *http.Reques
 		writeJSON(w, 200, items)
 		return
 	}
+	if body.ProjectID == "" {
+		replyError(w, 400, "project_id is required to confirm the comment audience")
+		return
+	}
+	if body.ProjectID != issue.ProjectID {
+		replyError(w, 409, "The issue project changed. Review the audience before sharing your draft.")
+		return
+	}
+	op, handled := r.beginGuestIssueOperation(w, req, tx, "commented", issue.ID, issue.ProjectID, body)
+	if handled {
+		return
+	}
 	comment := guestIssueComment{ID: generateCUID(), Body: body.Body, Author: "You", CreatedAt: time.Now().UTC().Format(time.RFC3339)}
-	_, err = tx.ExecContext(req.Context(), `INSERT INTO mission_comments(id,mission_id,author_type,author_id,body,guest_visible,guest_project_id,created_at,updated_at) VALUES(?,?,'user',?,?,1,?,?,?)`, comment.ID, issue.ID, user.ID, comment.Body, issue.ProjectID, comment.CreatedAt, comment.CreatedAt)
+	origin, err := guestIssueOrigin(req.Context(), tx, workspace, "guest-comment:"+comment.ID)
 	if err != nil {
 		guestIssueError(w, err)
 		return
 	}
-	notify, err := r.appendGuestIssueAudit(req.Context(), tx, journal.Entry{WorkspaceID: workspace, MissionID: issue.ID, Type: journal.EntryMissionComment, ActorType: journal.ActorUser, ActorID: user.ID, Summary: "Guest commented on a shared issue", Payload: map[string]any{"project_id": issue.ProjectID, "issue_id": issue.ID, "comment_id": comment.ID, "guest_visible": true}})
+	_, err = tx.ExecContext(req.Context(), `INSERT INTO mission_comments(id,mission_id,author_type,author_id,body,guest_visible,guest_project_id,created_at,updated_at,chat_origin_id) VALUES(?,?,'user',?,?,1,?,?,?,?)`, comment.ID, issue.ID, user.ID, comment.Body, issue.ProjectID, comment.CreatedAt, comment.CreatedAt, origin)
 	if err != nil {
 		guestIssueError(w, err)
 		return
 	}
-	finishGuestIssueMutation(w, tx, notify, 201, comment)
+	r.finishGuestContentMutation(w, req, tx, op, issueEvent{MissionID: issue.ID, ActorType: "user", ActorID: user.ID, Action: actionCommented, Details: "Guest commented on a shared issue"}, 201, comment)
 }
 
 func (r *Router) updateRestrictedIssue(w http.ResponseWriter, req *http.Request) {
@@ -413,6 +510,10 @@ func (r *Router) updateRestrictedIssue(w http.ResponseWriter, req *http.Request)
 		guestIssueError(w, err)
 		return
 	}
+	op, handled := r.beginGuestIssueOperation(w, req, tx, "updated", issue.ID, issue.ProjectID, body)
+	if handled {
+		return
+	}
 	if issue.Status != "BACKLOG" && issue.Status != "TODO" {
 		replyError(w, 409, "This issue is already in the trusted execution workflow")
 		return
@@ -432,11 +533,7 @@ func (r *Router) updateRestrictedIssue(w http.ResponseWriter, req *http.Request)
 		guestIssueError(w, err)
 		return
 	}
-	notify, err := r.appendGuestIssueAudit(req.Context(), tx, journal.Entry{WorkspaceID: workspace, MissionID: issue.ID, Type: journal.EntryMissionStatus, ActorType: journal.ActorUser, ActorID: user.ID, Summary: "Guest arranged a shared issue", Payload: map[string]any{"project_id": issue.ProjectID, "issue_id": issue.ID, "from": issue.Status, "to": body.Status, "source": "guest_contribution"}})
-	if err != nil {
-		guestIssueError(w, err)
-		return
-	}
+	previous := issue.Status
 	issue.Status = body.Status
-	finishGuestIssueMutation(w, tx, notify, 200, issue)
+	r.finishGuestContentMutation(w, req, tx, op, issueEvent{MissionID: issue.ID, ActorType: "user", ActorID: user.ID, Action: actionStatusChanged, Details: previous + " → " + body.Status, From: previous, To: body.Status}, 200, issue)
 }

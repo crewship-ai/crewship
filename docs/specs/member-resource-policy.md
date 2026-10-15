@@ -261,7 +261,7 @@ Project `contribute` supplements `read`, independently of source-file `write`.
 Dedicated Guest routes create unassigned Backlog requests in an administrator's
 versioned project intake crew, post shared comments and arrange intake between
 BACKLOG and TODO. They recheck live issuer grants, membership and active account
-inside the mutation transaction and commit audit atomically. Unknown mutation
+inside the mutation transaction. Content changes commit activity and durable journal outbox intents atomically, following the issue mutation contract; journal projection retries after commit. Intake configuration keeps its synchronous atomic journal. Guest-authored issues and comments carry explicit unavailable execution origins, so Contribute cannot become autonomous execution authority. Unknown mutation
 fields are refused; there is no agent/crew/assignee/routine override or trusted
 board route exposure. Review/execution states and project reassignment stay
 behind the existing trusted workflow. Full Issues Manage is not implemented.
@@ -277,3 +277,7 @@ The Share dialog configures intake and grants Contribute; Settings and CLI offer
 the same grant. Guest forms preserve failed drafts, explain unconfigured intake
 and never offer trusted execution or deletion controls. The new endpoints have
 CLI equivalents and built-binary acceptance, and join the route-walking leak test.
+
+Shared comments confirm their expected project in the request. Staff use `expected_project_id` with `guest_visible`; Guest comments require `project_id`. A move returns 409 rather than silently changing the audience. Both composers preserve the draft and require an explicit new audience choice.
+
+Guest issue mutations accept optional actor-scoped idempotency keys; creation replay also rechecks the created issue’s current project and live grants. Content, operation receipt and durable audit intent share one transaction. This does not grant agent execution authority.

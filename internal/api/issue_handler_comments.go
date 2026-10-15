@@ -107,8 +107,9 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 
 	var req struct {
-		Body         string `json:"body"`
-		GuestVisible bool   `json:"guest_visible"`
+		Body              string `json:"body"`
+		GuestVisible      bool   `json:"guest_visible"`
+		ExpectedProjectID string `json:"expected_project_id"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -137,10 +138,6 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, h.logger, "resolve issue for comment creation", err)
 		return
 	}
-	if req.GuestVisible {
-		h.createSharedStaffComment(w, r, missionID, req.Body)
-		return
-	}
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -156,6 +153,25 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !exists {
 		writeProblem(w, r, 404, "Issue not found")
 		return
+	}
+	if req.GuestVisible {
+		if req.ExpectedProjectID == "" {
+			writeProblem(w, r, 400, "expected_project_id is required when sharing a comment")
+			return
+		}
+		var project string
+		if err = tx.QueryRowContext(r.Context(), `SELECT COALESCE(project_id,'') FROM missions WHERE id=? AND workspace_id=?`, missionID, wsID).Scan(&project); err != nil {
+			internalError(w, r, h.logger, "check shared comment audience", err)
+			return
+		}
+		if project == "" {
+			writeProblem(w, r, 400, "Only project issues can have comments shared with Guests")
+			return
+		}
+		if project != req.ExpectedProjectID {
+			writeProblem(w, r, 409, "The issue project changed. Review the audience before sharing your draft.")
+			return
+		}
 	}
 	op, handled := h.beginHumanIssueOperation(w, r, tx, "commented", missionID, req)
 	if handled {

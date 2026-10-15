@@ -15,7 +15,11 @@ type restrictedSurface struct {
 }
 
 var restrictedSurfaces = []restrictedSurface{
-	{Name: "issues", Patterns: []string{"GET /api/v1/workspaces/{workspaceId}/restricted-issues", "GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}"}},
+	{Name: "issues", Patterns: []string{
+		"GET /api/v1/workspaces/{workspaceId}/restricted-issues", "GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
+		"GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects", "POST /api/v1/workspaces/{workspaceId}/restricted-issues",
+		"PATCH /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}", "GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments", "POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
+	}},
 	{Name: "chat", Patterns: []string{
 		"GET /api/v1/agents",
 		"GET /api/v1/agents/{agentId}/chats",

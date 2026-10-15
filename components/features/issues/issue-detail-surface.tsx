@@ -519,13 +519,13 @@ export function IssueDetailSurface({
   })
 
   const postComment = React.useCallback(
-    async (body: string, options?: { guestVisible: boolean }): Promise<boolean> => {
+    async (body: string, options?: { guestVisible: boolean; expectedProjectId: string }): Promise<boolean> => {
       if (!base) return false
       try {
         const res = await apiFetch(`${base}/comments?${qs}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body, ...(options?.guestVisible ? { guest_visible: true } : {}) }),
+          body: JSON.stringify({ body, ...(options?.guestVisible ? { guest_visible: true, expected_project_id: options.expectedProjectId } : {}) }),
         })
         if (!res.ok) {
           const b = await res.json().catch(() => null)

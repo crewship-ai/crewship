@@ -148,7 +148,7 @@ interface Props {
    * drawn: the endpoint, the workspace and the refetch belong to the host,
    * the same way the action buttons do.
    */
-  onSubmitComment?: (body: string, options?: { guestVisible: boolean }) => boolean | Promise<boolean>
+  onSubmitComment?: (body: string, options?: { guestVisible: boolean; expectedProjectId: string }) => boolean | Promise<boolean>
   /** Initial for the composer's author bubble. */
   viewerInitial?: string
   /**
@@ -465,6 +465,7 @@ export function IssueCardDetail({
                   agents={agents ?? []}
                   onSubmit={onSubmitComment}
                   allowGuestSharing={Boolean(project)}
+                  guestProject={project}
                   authorInitial={viewerInitial ?? "U"}
                 />
               </div>

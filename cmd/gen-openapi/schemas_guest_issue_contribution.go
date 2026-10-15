@@ -21,6 +21,6 @@ func guestIssueContributionSchemaCatalog() map[string]DomainSchema {
 		"POST " + prefix + "restricted-issues":                    {Request: object(map[string]any{"project_id": map[string]any{"type": "string", "minLength": 1}, "title": title, "description": description}, "project_id", "title"), RequestRequired: true, Response: restrictedIssueSchema(), SuccessStatuses: []string{"201"}},
 		"PATCH " + prefix + "restricted-issues/{issueId}":         {Request: object(map[string]any{"status": map[string]any{"type": "string", "enum": []string{"BACKLOG", "TODO"}}}, "status"), RequestRequired: true, Response: restrictedIssueSchema(), SuccessStatuses: []string{"200"}},
 		"GET " + prefix + "restricted-issues/{issueId}/comments":  {Response: array(comment), SuccessStatuses: []string{"200"}},
-		"POST " + prefix + "restricted-issues/{issueId}/comments": {Request: object(map[string]any{"body": body}, "body"), RequestRequired: true, Response: comment, SuccessStatuses: []string{"201"}},
+		"POST " + prefix + "restricted-issues/{issueId}/comments": {Request: object(map[string]any{"body": body, "project_id": str()}, "body", "project_id"), RequestRequired: true, Response: comment, SuccessStatuses: []string{"201"}},
 	}
 }

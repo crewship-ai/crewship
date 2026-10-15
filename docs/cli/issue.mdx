@@ -846,12 +846,14 @@ resource grants; this scope does not make a Guest an administrator.
 ## `crewship issue shared comment`
 
 ```bash
-crewship issue shared comment CLIENT-1 --body "Client question"
+crewship issue shared comment CLIENT-1 --project project-id --body "Client question"
 ```
 
 Requires Read and Contribute. `--body` is required, 1–32768 bytes. The comment
 is shared with readers of this project; private staff comments remain private.
 The route does not resolve or trigger agent mentions.
+
+The required `--project` confirms the audience of the draft. If the issue has moved, the server returns 409; review the new project before sending again.
 
 ## `crewship issue shared comments`
 
@@ -873,3 +875,8 @@ Requires Read and Contribute. `--status` is required: BACKLOG or TODO. Only
 intake work can move between those states. Execution, review, terminal states
 and project reassignment retain the trusted workflow. A 409 is returned if the
 issue has already entered that workflow. No mutation retries a denied request.
+
+Guest `issue shared create`, `comment` and `move` accept `--idempotency-key`.
+Keep the key unchanged when retrying the same command after a lost response;
+a conflicting key is not retried automatically. The server rechecks current
+grants and project audience before replaying a saved result.

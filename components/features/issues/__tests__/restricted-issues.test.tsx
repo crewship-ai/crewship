@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RestrictedIssues } from "../restricted-issues"
 
@@ -15,6 +15,7 @@ const response = (data: unknown, status = 200) => new Response(JSON.stringify(da
 function show(identifier?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   render(<QueryClientProvider client={client}><RestrictedIssues identifier={identifier} /></QueryClientProvider>)
+  return { client }
 }
 it("uses filtered projections and clears data on a rejected refresh", async () => {
   let refused = false
@@ -86,4 +87,17 @@ it("gates contribution controls and keeps a refused shared comment draft", async
   expect(input).toHaveValue("Preserve this question")
   expect(screen.getByRole("button", { name: "Move to Backlog" })).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: /delete|start|run/i })).toBeNull()
+})
+
+it("keeps a Guest draft with its original audience after a project move", async () => {
+  let current={...row,can_contribute:true}
+  fetchMock.mockImplementation(async (path:string,init?:RequestInit)=>response(path.endsWith("/comments")?[]:current))
+  const {client}=show("CLIENT-1")
+  const input=await screen.findByLabelText("Comment shared with this project")
+  fireEvent.change(input,{target:{value:"Client one draft"}})
+  current={...current,project_id:"p2",project_name:"Second client"}
+  await act(async()=>{await client.invalidateQueries({queryKey:["restricted-issues"]})})
+  await waitFor(()=>expect(screen.getByRole("button",{name:"Post comment"})).toBeDisabled())
+  expect(input).toHaveValue("Client one draft")
+  expect(screen.getByRole("alert")).toHaveTextContent("project changed")
 })

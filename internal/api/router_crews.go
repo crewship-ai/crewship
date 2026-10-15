@@ -146,7 +146,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments", authed(wsCtx(http.HandlerFunc(r.restrictedIssueComments))))
 	// openapi: responses 201,400,401,403,404,409,500
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-issues", roleInline, r.createRestrictedIssue)
-	// openapi: responses 201,400,401,403,404,500
+	// openapi: responses 201,400,401,403,404,409,500
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments", roleInline, r.restrictedIssueComments)
 	// openapi: responses 200,400,401,403,404,409,500
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}", roleInline, r.updateRestrictedIssue)

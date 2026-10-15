@@ -2274,7 +2274,7 @@ are never accepted from the caller. The administrator-configured intake crew
 receives an unassigned BACKLOG issue; creation does not directly start an agent or routine. Existing workspace automations may process issue events.
 
 Returns 201 with the narrow Guest issue object, including `can_contribute`.
-The creation, authenticated creator and journal entry commit atomically.
+The creation, authenticated creator, activity and durable journal intent commit atomically. Journal projection may be retried after commit. An explicit unavailable execution origin prevents the request being treated as autonomous agent authority.
 Statuses: 400 invalid input; 401 authentication; 403 workspace/token scope;
 404 absent/revoked/foreign project; 409 intake not configured or unavailable;
 500 database/audit failure (no issue committed). CLI: `crewship issue shared create`.
@@ -2317,13 +2317,16 @@ POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments
 ```
 
 Guest with live read and contribute grants, plus mutation token scope as above.
-Body: `{ "body": "Client question" }`, 1–32768 bytes, unknown fields rejected.
+Body: `{ "project_id": "project_123", "body": "Client question" }`, 1–32768 bytes, unknown fields rejected.
+The body requires `project_id` (the expected audience) in addition to `body`. It must match the current issue project; a move returns 409 without publishing the draft.
+
 Agent mention links are refused with 400; shared comments do not request agent work.
 Returns 201 with the shared-comment object. It records the authenticated author,
 current project audience and audit in one transaction. Private comments and
 agent mentions are not exposed or triggered by this route.
 Statuses: 400 invalid body; 401 authentication; 403 workspace/token scope;
-404 unavailable issue/grants; 500 database/audit failure (no comment committed).
+404 unavailable issue/grants; 409 changed audience or conflicting retry key;
+500 database/audit intent failure (no comment committed).
 CLI: `crewship issue shared comment`.
 
 ## Read project Guest issue intake
@@ -2354,3 +2357,12 @@ agent or routine execution authority.
 Statuses: 400 invalid crew/body; 401 authentication; 403 workspace/token scope;
 404 unavailable project/operator; 409 stale revision; 500 database/audit failure.
 CLI: `crewship project guest-intake --crew CREW_ID`.
+
+Guest issue create, move and comment endpoints accept optional `Idempotency-Key`
+(1–200 nonblank bytes). Reuse the same key and exact body when retrying a lost
+response. A completed replay returns the original result and `Operation-ID` with
+`Idempotency-Replayed: true`, after fresh project grants and audience checks.
+Changed payload or audience returns 409; revoked grants return 404. Activity and
+durable journal intent commit with the mutation; projection failure retains a
+retryable outbox record rather than losing the audit. Guest-authored content
+carries no agent execution authority.

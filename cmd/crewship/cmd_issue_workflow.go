@@ -84,6 +84,10 @@ var issueCommentCmd = &cobra.Command{
 		requestBody := map[string]interface{}{"body": body}
 		if guestVisible {
 			requestBody["guest_visible"] = true
+			if issue.ProjectID == nil || *issue.ProjectID == "" {
+				return fmt.Errorf("only project issues can be shared with Guests")
+			}
+			requestBody["expected_project_id"] = *issue.ProjectID
 		}
 		resp, err := client.Post(
 			fmt.Sprintf("/api/v1/crews/%s/issues/%s/comments", issue.CrewID, url.PathEscape(identifier)),

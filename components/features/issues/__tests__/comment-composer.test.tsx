@@ -27,15 +27,31 @@ function type(box: HTMLTextAreaElement, value: string) {
 describe("CommentComposer", () => {
   it("requires explicit sharing and resets it after a successful post", async () => {
     const onSubmit = vi.fn(async () => true)
-    render(<CommentComposer agents={[]} onSubmit={onSubmit} allowGuestSharing />)
+    render(<CommentComposer agents={[]} onSubmit={onSubmit} allowGuestSharing guestProject={{id:"p1",name:"Client one"}} />)
     const box = screen.getByRole("combobox") as HTMLTextAreaElement
     const sharing = screen.getByRole("checkbox", { name: /Share this comment with Guests/ })
     expect(sharing).not.toBeChecked()
     type(box, "Public answer")
     fireEvent.click(sharing)
     await act(async () => { fireEvent.keyDown(box, {key:"Enter",ctrlKey:true}) })
-    expect(onSubmit).toHaveBeenCalledWith("Public answer",{guestVisible:true})
+    expect(onSubmit).toHaveBeenCalledWith("Public answer",{guestVisible:true,expectedProjectId:"p1"})
     await vi.waitFor(() => expect(sharing).not.toBeChecked())
+  })
+  it("keeps a shared draft pinned when its project changes", async () => {
+    const onSubmit=vi.fn(async()=>true)
+    const {rerender}=render(<CommentComposer agents={[]} onSubmit={onSubmit} allowGuestSharing guestProject={{id:"p1",name:"Client one"}} />)
+    const box=screen.getByRole("combobox") as HTMLTextAreaElement
+    type(box,"Confidential draft")
+    fireEvent.click(screen.getByRole("checkbox"))
+    rerender(<CommentComposer agents={[]} onSubmit={onSubmit} allowGuestSharing guestProject={{id:"p2",name:"Client two"}} />)
+    fireEvent.keyDown(box,{key:"Enter",ctrlKey:true})
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(box).toHaveValue("Confidential draft")
+    expect(screen.getByRole("alert")).toHaveTextContent("project changed")
+    fireEvent.click(screen.getByRole("checkbox"))
+    fireEvent.click(screen.getByRole("checkbox"))
+    await act(async()=>{fireEvent.keyDown(box,{key:"Enter",ctrlKey:true})})
+    expect(onSubmit).toHaveBeenCalledWith("Confidential draft",{guestVisible:true,expectedProjectId:"p2"})
   })
   it("posts the body it was given on Cmd+Enter", async () => {
     const { box, onSubmit } = setup()

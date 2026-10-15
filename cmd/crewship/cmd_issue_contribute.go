@@ -85,7 +85,7 @@ func newSharedIssueCreateCmd() *cobra.Command {
 		if strings.TrimSpace(project) == "" || strings.TrimSpace(title) == "" || len(title) > 4096 || len(description) > 65536 {
 			return fmt.Errorf("project and title are required; title maximum 4096 bytes, description maximum 65536 bytes")
 		}
-		client, base, err := guestIssueClient()
+		client, base, err := guestMutationClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -108,6 +108,7 @@ func newSharedIssueCreateCmd() *cobra.Command {
 	cmd.Flags().String("title", "", "Issue title")
 	_ = cmd.MarkFlagRequired("title")
 	cmd.Flags().String("description", "", "Issue description")
+	cmd.Flags().String("idempotency-key", "", "Stable key for retrying this exact mutation (1–200 bytes)")
 	return cmd
 }
 
@@ -118,14 +119,17 @@ func newSharedIssueCommentCmd() *cobra.Command {
 			return err
 		}
 		body, _ := cmd.Flags().GetString("body")
+		if strings.TrimSpace(mustSharedProject(cmd)) == "" {
+			return fmt.Errorf("--project is required to confirm this comment audience")
+		}
 		if strings.TrimSpace(body) == "" || len(body) > 32768 {
 			return fmt.Errorf("comment must contain 1–32768 bytes")
 		}
-		client, base, err := guestIssueClient()
+		client, base, err := guestMutationClient(cmd)
 		if err != nil {
 			return err
 		}
-		response, err := client.Post(base+"/restricted-issues/"+id+"/comments", map[string]string{"body": body})
+		response, err := client.Post(base+"/restricted-issues/"+id+"/comments", map[string]string{"body": body, "project_id": mustSharedProject(cmd)})
 		if err != nil {
 			return err
 		}
@@ -139,8 +143,11 @@ func newSharedIssueCommentCmd() *cobra.Command {
 		}
 		return newFormatter().Auto(item, []string{"COMMENT", "AUTHOR", "BODY"}, [][]string{{item.ID, item.Author, item.Body}})
 	}}
+	cmd.Flags().String("project", "", "Expected project ID; confirms the audience for this draft")
+	_ = cmd.MarkFlagRequired("project")
 	cmd.Flags().String("body", "", "Shared comment text")
 	_ = cmd.MarkFlagRequired("body")
+	cmd.Flags().String("idempotency-key", "", "Stable key for retrying this exact mutation (1–200 bytes)")
 	return cmd
 }
 
@@ -184,7 +191,7 @@ func newSharedIssueMoveCmd() *cobra.Command {
 		if status != "BACKLOG" && status != "TODO" {
 			return fmt.Errorf("status must be BACKLOG or TODO; trusted execution/review states require the existing workflow")
 		}
-		client, base, err := guestIssueClient()
+		client, base, err := guestMutationClient(cmd)
 		if err != nil {
 			return err
 		}
@@ -204,6 +211,7 @@ func newSharedIssueMoveCmd() *cobra.Command {
 	}}
 	cmd.Flags().String("status", "", "BACKLOG or TODO")
 	_ = cmd.MarkFlagRequired("status")
+	cmd.Flags().String("idempotency-key", "", "Stable key for retrying this exact mutation (1–200 bytes)")
 	return cmd
 }
 
@@ -265,4 +273,24 @@ func newProjectGuestIntakeCmd() *cobra.Command {
 func init() {
 	issueSharedCmd.AddCommand(newSharedIssueProjectsCmd(), newSharedIssueCreateCmd(), newSharedIssueCommentCmd(), newSharedIssueCommentsCmd(), newSharedIssueMoveCmd())
 	projectCmd.AddCommand(newProjectGuestIntakeCmd())
+}
+
+func mustSharedProject(cmd *cobra.Command) string {
+	project, _ := cmd.Flags().GetString("project")
+	return project
+}
+
+func guestMutationClient(cmd *cobra.Command) (*cli.Client, string, error) {
+	key, _ := cmd.Flags().GetString("idempotency-key")
+	if cmd.Flags().Changed("idempotency-key") && (strings.TrimSpace(key) == "" || len(key) > 200) {
+		return nil, "", fmt.Errorf("--idempotency-key must contain 1–200 bytes")
+	}
+	client, base, err := guestIssueClient()
+	if err != nil {
+		return nil, "", err
+	}
+	if key != "" {
+		client = client.WithHeader("Idempotency-Key", key)
+	}
+	return client, base, nil
 }

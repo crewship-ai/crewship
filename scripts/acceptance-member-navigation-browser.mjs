@@ -114,7 +114,7 @@ try {
   const staffCommentPath=`${fixture.server}/api/v1/crews/crew_test_${fixture.workspace}/issues/${clientIssue.identifier}/comments?workspace_id=${fixture.workspace}`
   let staffResponse=await contexts.owner.request.post(staffCommentPath,{data:{body:'PRIVATE_STAFF_BROWSER_CANARY'}})
   if(staffResponse.status()!==201) throw new Error(`staff private comment ${staffResponse.status()}`)
-  staffResponse=await contexts.owner.request.post(staffCommentPath,{data:{body:'Explicit shared staff browser reply',guest_visible:true}})
+  staffResponse=await contexts.owner.request.post(staffCommentPath,{data:{body:'Explicit shared staff browser reply',guest_visible:true,expected_project_id:clientIssue.project_id}})
   if(staffResponse.status()!==201) throw new Error(`staff shared comment ${staffResponse.status()}`)
   await pages.other.reload()
   await expect(pages.other.getByText('Explicit shared staff browser reply',{exact:true})).toBeVisible()

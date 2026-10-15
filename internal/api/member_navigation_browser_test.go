@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // The supported httptest/static-export harness exercises production routes and
@@ -76,7 +77,9 @@ func TestMemberNavigationBrowser(t *testing.T) {
 	crew := seedTestCrew(t, db, ws)
 	seedAgentRow(t, db, "nav-alex", ws, crew, "Alex", "alex", "AGENT")
 	seedAgentRow(t, db, "nav-intake-lead", ws, crew, "Private intake lead", "nav-intake-lead", "LEAD")
-	router, err := NewRouter(db, secret, newTestLogger(), WithInternalToken("synthetic-nav-internal-token"))
+	writer := journal.NewWriter(db, newTestLogger(), journal.WriterOptions{})
+	defer writer.Close()
+	router, err := NewRouter(db, secret, newTestLogger(), WithJournal(writer), WithInternalToken("synthetic-nav-internal-token"))
 	if err != nil {
 		t.Fatal(err)
 	}

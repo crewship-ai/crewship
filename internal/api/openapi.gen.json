@@ -6503,6 +6503,10 @@
           "body": {
             "type": "string"
           },
+          "expected_project_id": {
+            "description": "Required with guest_visible=true; must match the issue project observed when sharing was selected",
+            "type": "string"
+          },
           "guest_visible": {
             "type": "boolean"
           }
@@ -158365,10 +158369,14 @@
                     "description": "Nonblank shared comment, at most 32768 UTF-8 bytes",
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "project_id": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "body"
+                  "body",
+                  "project_id"
                 ],
                 "type": "object"
               }
@@ -158484,6 +158492,24 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "500": {
             "content": {

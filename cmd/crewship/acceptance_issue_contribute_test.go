@@ -23,10 +23,10 @@ func TestAcceptanceGuestIssueContributionCLI(t *testing.T) {
 		columns      []string
 	}{
 		{"projects", []string{"issue", "shared", "projects"}, "GET", "/restricted-issue-projects", nil, false, []string{"PROJECT", "CONTRIBUTE", "INTAKE READY", "Client project"}},
-		{"create", []string{"issue", "shared", "create", "--project", "p1", "--title", "Client request", "--description", "Brief", "--format", "json"}, "POST", "/restricted-issues", map[string]any{"project_id": "p1", "title": "Client request", "description": "Brief"}, false, nil},
-		{"comment", []string{"issue", "shared", "comment", "CLIENT-1", "--body", "Client question", "--format", "yaml"}, "POST", "/restricted-issues/CLIENT-1/comments", map[string]any{"body": "Client question"}, false, nil},
+		{"create", []string{"issue", "shared", "create", "--project", "p1", "--title", "Client request", "--description", "Brief", "--idempotency-key", "intake-request", "--format", "json"}, "POST", "/restricted-issues", map[string]any{"project_id": "p1", "title": "Client request", "description": "Brief"}, false, nil},
+		{"comment", []string{"issue", "shared", "comment", "CLIENT-1", "--project", "p1", "--body", "Client question", "--idempotency-key", "comment-request", "--format", "yaml"}, "POST", "/restricted-issues/CLIENT-1/comments", map[string]any{"body": "Client question", "project_id": "p1"}, false, nil},
 		{"comments", []string{"issue", "shared", "comments", "CLIENT-1"}, "GET", "/restricted-issues/CLIENT-1/comments", nil, false, []string{"COMMENT", "AUTHOR", "BODY", "Client question"}},
-		{"move", []string{"issue", "shared", "move", "CLIENT-1", "--status", "TODO", "--format", "json"}, "PATCH", "/restricted-issues/CLIENT-1", map[string]any{"status": "TODO"}, false, nil},
+		{"move", []string{"issue", "shared", "move", "CLIENT-1", "--status", "TODO", "--idempotency-key", "move-request", "--format", "json"}, "PATCH", "/restricted-issues/CLIENT-1", map[string]any{"status": "TODO"}, false, nil},
 		{"intake read", []string{"project", "guest-intake", "p1", "--format", "json"}, "GET", "/projects/p1/guest-intake", nil, false, nil},
 		{"intake save", []string{"project", "guest-intake", "p1", "--crew", "crew-2", "--format", "yaml"}, "PUT", "/projects/p1/guest-intake", map[string]any{"crew_id": "crew-2", "revision": float64(7)}, false, nil},
 		{"intake conflict is not retried", []string{"project", "guest-intake", "p1", "--crew", "crew-2"}, "PUT", "/projects/p1/guest-intake", map[string]any{"crew_id": "crew-2", "revision": float64(7)}, true, nil},
@@ -46,6 +46,10 @@ func TestAcceptanceGuestIssueContributionCLI(t *testing.T) {
 				path := strings.TrimPrefix(r.URL.Path, "/api/v1/workspaces/ws_test")
 				if path == tc.path && r.Method == tc.method {
 					calls++
+					expectedKey := map[string]string{"create": "intake-request", "comment": "comment-request", "move": "move-request"}[tc.name]
+					if r.Header.Get("Idempotency-Key") != expectedKey {
+						t.Errorf("mutation key %q want %q", r.Header.Get("Idempotency-Key"), expectedKey)
+					}
 					if tc.body != nil {
 						if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 							t.Error(err)
@@ -162,7 +166,7 @@ func TestAcceptanceStaffExplicitlySharesIssueComment(t *testing.T) {
 				case "/api/v1/workspaces":
 					_, _ = io.WriteString(w, `[{"id":"ws_test","slug":"ws_test"}]`)
 				case "/api/v1/issues/CLIENT-1":
-					_, _ = io.WriteString(w, `{"id":"i1","identifier":"CLIENT-1","crew_id":"crew-1","title":"Request"}`)
+					_, _ = io.WriteString(w, `{"id":"i1","identifier":"CLIENT-1","crew_id":"crew-1","project_id":"p1","title":"Request"}`)
 				case "/api/v1/crews/crew-1/issues/CLIENT-1/comments":
 					if err := json.NewDecoder(r.Body).Decode(&submitted); err != nil {
 						t.Error(err)
@@ -185,7 +189,7 @@ func TestAcceptanceStaffExplicitlySharesIssueComment(t *testing.T) {
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			if submitted["body"] != "Staff answer" || (share && submitted["guest_visible"] != true) || (!share && submitted["guest_visible"] != nil) {
+			if submitted["body"] != "Staff answer" || (share && (submitted["guest_visible"] != true || submitted["expected_project_id"] != "p1")) || (!share && submitted["guest_visible"] != nil) {
 				t.Fatalf("sharing must be explicit: %#v", submitted)
 			}
 			var result map[string]any
