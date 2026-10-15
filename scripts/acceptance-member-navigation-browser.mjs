@@ -102,20 +102,23 @@ try {
   const clientIssue=await createdResponse.json()
   await expect(pages.other.getByRole('link',{name:'Client browser request',exact:true})).toBeVisible()
   const sharedSearchPath=`${fixture.server}/api/v1/workspaces/${fixture.workspace}/restricted-issues`
+  const issueSearchForm=pages.other.locator('form').filter({has:pages.other.getByLabel('Search shared issues',{exact:true})})
   await pages.other.getByLabel('Search shared issues',{exact:true}).fill('BROWSER REQUEST')
-  const searchedIssues=pages.other.waitForResponse(response=>new URL(response.url()).pathname.endsWith('/restricted-issues') && new URL(response.url()).searchParams.get('q')==='BROWSER REQUEST')
-  await pages.other.getByRole('button',{name:'Search',exact:true}).click()
-  const searchedResponse=await searchedIssues
+  const [searchedResponse]=await Promise.all([
+    pages.other.waitForResponse(response=>new URL(response.url()).pathname.endsWith('/restricted-issues') && new URL(response.url()).searchParams.get('q')==='BROWSER REQUEST'),
+    issueSearchForm.getByRole('button',{name:'Search',exact:true}).click(),
+  ])
   const searchedRows=await searchedResponse.json()
   await expect(pages.other.getByRole('link',{name:'Client browser request',exact:true})).toBeVisible()
   await check('Guest searches real shared issue titles with the filtered total',searchedResponse.status()===200 && searchedResponse.headers()['x-total-count']==='1' && searchedRows.length===1 && searchedRows[0].id===clientIssue.id)
   await pages.other.getByLabel('Search shared issues',{exact:true}).fill('Client browser brief')
-  const hiddenBodySearch=pages.other.waitForResponse(response=>new URL(response.url()).searchParams.get('q')==='Client browser brief')
-  await pages.other.getByRole('button',{name:'Search',exact:true}).click()
-  const hiddenBodyResponse=await hiddenBodySearch
+  const [hiddenBodyResponse]=await Promise.all([
+    pages.other.waitForResponse(response=>new URL(response.url()).searchParams.get('q')==='Client browser brief'),
+    issueSearchForm.getByRole('button',{name:'Search',exact:true}).click(),
+  ])
   await expect(pages.other.getByText('No matching shared issues. Try another search or clear the filter.',{exact:true})).toBeVisible()
   await check('shared search does not match an issue description or imply access denial',hiddenBodyResponse.status()===200 && hiddenBodyResponse.headers()['x-total-count']==='0' && (await hiddenBodyResponse.json()).length===0)
-  await pages.other.getByRole('button',{name:'Clear search',exact:true}).click()
+  await issueSearchForm.getByRole('button',{name:'Clear search',exact:true}).click()
   await expect(pages.other.getByRole('link',{name:'Client browser request',exact:true})).toBeVisible()
   await check('clearing the search restores the shared issue catalog',await pages.other.getByLabel('Search shared issues',{exact:true}).inputValue()==='')
   contexts.touchSearch=await browser.newContext({viewport:{width:820,height:900},hasTouch:true})
@@ -124,7 +127,7 @@ try {
   pages.touchSearch=await contexts.touchSearch.newPage()
   await open('touchSearch','/issues')
   const touchSearchInput=await pages.touchSearch.getByLabel('Search shared issues',{exact:true}).boundingBox()
-  const touchSearchButton=await pages.touchSearch.getByRole('button',{name:'Search',exact:true}).boundingBox()
+  const touchSearchButton=await pages.touchSearch.locator('form').filter({has:pages.touchSearch.getByLabel('Search shared issues',{exact:true})}).getByRole('button',{name:'Search',exact:true}).boundingBox()
   await check('shared search has 44px targets on an 820px coarse-pointer tablet',await pages.touchSearch.evaluate(()=>matchMedia('(pointer: coarse)').matches) && touchSearchInput?.height>=44 && touchSearchButton?.height>=44)
   await contexts.touchSearch.close()
   delete contexts.touchSearch
