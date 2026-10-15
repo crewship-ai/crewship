@@ -13,6 +13,7 @@ import type { Mission } from "@/lib/types/mission"
 import { chatEntityKeys } from "@/hooks/use-chat-entity-refs"
 import { useChatIssueMutation, type CardWriteState } from "@/hooks/use-chat-issue-mutation"
 import { useChatAgent } from "./chat-agent-context"
+import { ChatIssuePullRequests } from "./issue-pull-requests"
 
 type Props = {
   reference: EntityRef; chatId: string; userId?: string; rechecking: boolean
@@ -40,6 +41,7 @@ export function EntityCardFrame({ children }: { children: React.ReactNode }) {
 
 export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, live, checkedAt, onOpen, reconcile }: Props) {
   const agent = useChatAgent()
+  const [pullRequestsOpen, setPullRequestsOpen] = useState(false)
   const [editor, setEditor] = useState<"fields" | "comment" | null>(null)
   const [draft, setDraft] = useState({ title: ref.current?.title ?? "", status: ref.current?.status ?? "TODO", priority: ref.current?.priority ?? "none", assignee_id: ref.current?.assignee_id ?? "" })
   const baseline = useRef(draft)
@@ -49,7 +51,7 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
   useEffect(() => { if (mutation.state === "saved") { setEditor(null); setComment("") } }, [mutation.state])
   const detail = useQuery({
     queryKey: [...chatEntityKeys.detail(ref.entity.workspace_id, chatId, userId), ref.entity.id],
-    enabled: !!editor && !rechecking && !ref.entity.deleted,
+    enabled: (!!editor || pullRequestsOpen) && !rechecking && !ref.entity.deleted,
     retry: false, gcTime: 0,
     queryFn: async ({ signal }) => {
       const r = await apiFetch(`/api/v1/issues/${encodeURIComponent(ref.entity.identifier ?? ref.entity.id)}?workspace_id=${encodeURIComponent(ref.entity.workspace_id)}`, { signal })
@@ -97,8 +99,12 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
     <div className="flex flex-wrap gap-1.5">
       {current.allowed_actions.some((a) => ["edit_fields", "assign", "change_status"].includes(a)) && <Button size="sm" variant="ghost" className="coarse:min-h-12" onClick={() => openEditor("fields")}><Pencil className="size-3.5" />Edit</Button>}
       {current.allowed_actions.includes("comment") && <Button size="sm" variant="ghost" className="coarse:min-h-12" onClick={() => openEditor("comment")}><MessageSquare className="size-3.5" />Comment</Button>}
+      <Button size="sm" variant="ghost" className="coarse:min-h-12" aria-expanded={pullRequestsOpen} onClick={() => setPullRequestsOpen(open => !open)}>Pull requests</Button>
       <Button size="sm" variant="outline" className="ml-auto coarse:min-h-12" onClick={() => onOpen(ref)}>Open on right<ArrowRight className="size-3.5" /></Button>
     </div>
+    {pullRequestsOpen && <div className="border-t pt-3">
+      {detail.isPending ? <p role="status">Checking current access…</p> : detail.error ? <p role="alert">Pull requests unavailable. <button type="button" className="underline" onClick={() => void detail.refetch()}>Retry verification</button></p> : detail.data?.crew_id ? <ChatIssuePullRequests crewId={detail.data.crew_id} identifier={ref.entity.identifier ?? ref.entity.id} revision={current.aggregate_revision} /> : <p role="status">Pull requests unavailable</p>}
+    </div>}
     {editor && <form className="space-y-3 border-t pt-3" onSubmit={async (event) => {
       event.preventDefault()
       if (!path || locked) return

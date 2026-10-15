@@ -9,12 +9,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Chat Artifacts includes supported files in the canonical per-run output folder while retaining internal, hidden-directory and attachment filters.
+- **Mobile table selections return to Chat without covering the draft.** Asking about selected rows closes the artifact overlay and preserves existing draft text. Switching between Chat, Work and Artifacts keeps previews within the selected panel and retains their tabs.
+
 - Chat CSV/TSV artifacts gain bounded local-worker previews with sorting, filtering, virtual rows and source-preserving selection. Ask about selection appends a versioned reference to the draft without sending it. Access denial clears displayed artifact bytes; XLSX previews remain a separate delivery.
 - **Chat issue references stay scoped to the current viewer (#3068).** Reconciliation replaces complete snapshots, clears protected projections while access is checked, and preserves durable run anchors. Uncertain human writes retain the same revision and idempotency key through recovery, including a denied retry after a lost acknowledgement.
 
 - **Issues created in chat stay with their conversation turn (#3068).** Viewer-authorized cards survive reload and failed runs, open an existing Issue detail panel, and support permitted field edits and comments with conflict and uncertain-write recovery. Access loss hides protected card and panel data; phone and keyboard flows use the same controls. Direct work execution remains on the canonical Issue page.
 
 - **Chat issue cards can refresh sooner after successful writes.** Authorized chat sessions now receive content-free reference/revision invalidation hints; reference snapshots include `contract_version: 1`. Queued session delivery also rejects suspended users and deleted chat agents/workspaces.
+- Issue cards in chat can show linked pull requests on demand, using authorized stored provider metadata. Cards distinguish failed or missing synchronization and explicitly mark CI as unknown; no private source or diff is fetched.
 
 - Guests with explicit routine View and Edit draft shares can change collaborative drafts through UI and CLI with revision/base conflicts and atomic audit. Published recipes, execution authority and trusted testing/review gates remain intact; direct Guest publication is still separate work.
 
@@ -30,6 +34,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Agent chat transcripts survive workspace and crew backups (#3109).** Encrypted bundles include scoped structured history, remapped fork identities and stable message/run anchors. Damaged lines produce per-chat completeness warnings instead of blocking all backups. Collection only fences file pinning; restore fences publication and commit, preserving existing histories unless replacement is explicit. Cross-workspace chat collisions are refused. The search/feedback mirror and atomic hard-crash recovery across filesystem/DB publication remain separate limitations.
 
 - **Agents can remember explicitly stated feedback preferences.** Optional future preferences on thumbs feedback now have scoped, source-tracked storage, asynchronous status, CLI self-service edits and deletion, and private-session recall with consent checks. Bare thumbs remain feedback only.
+
+- **Choose what an agent should remember from feedback.** Thumbs now offer optional explicit future preferences with verified memory status, and the chat Memory panel lets you inspect sources, change or forget preferences, and control personal memory.
 
 - Pages folder and page menus now follow caller-specific server ACL decisions: readers see no mutation controls, folder editors can arrange, and page owners retain move access.
 - Guest accounts can complete CLI login by creating their own token from a verified interactive session. Minted tokens retain Guest restrictions; bearer credentials cannot remint a wider successor.

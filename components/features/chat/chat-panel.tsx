@@ -313,7 +313,13 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const artifactScope = JSON.stringify([currentUserId, workspaceId, agentId, sessionId])
   const artifactContextNonce = useRef(0)
   const [artifactContext, setArtifactContext] = useState<{ id: number; text: string; scope: string } | null>(null)
-  const askArtifactSelection = useCallback((text: string) => setArtifactContext({ id: ++artifactContextNonce.current, text: `Source agent: ${agentId} · workspace: ${workspaceId}\n${text}`, scope: artifactScope }), [agentId, workspaceId, artifactScope])
+  const askArtifactSelection = useCallback((text: string) => {
+    setArtifactContext({ id: ++artifactContextNonce.current, text: `Source agent: ${agentId} · workspace: ${workspaceId}\n${text}`, scope: artifactScope })
+    if (mobilePanel) {
+      useArtifactStore.getState().setOpen(false)
+      onMobilePanelChange?.("chat")
+    }
+  }, [agentId, workspaceId, artifactScope, mobilePanel, onMobilePanelChange])
   // A restricted account has no WebSocket in any workspace (#2861).
   const sessionRealtime = useAccessMode() === "trusted"
   const canChat = sessionRealtime || agentMeta?.current_user_can_chat === true
@@ -980,11 +986,11 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     requestAnimationFrame(() => { if (issueOpener.current?.isConnected) issueOpener.current.focus() })
   }, [])
   useEffect(() => {
-    if (!issueTarget || isMobile) return
+    if (!issueTarget || isMobile || drawerActiveTab !== "work") return
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) closeIssue() }
     window.addEventListener("keydown", escape)
     return () => window.removeEventListener("keydown", escape)
-  }, [issueTarget, isMobile, closeIssue])
+  }, [issueTarget, isMobile, drawerActiveTab, closeIssue])
   const selectedRef = entities.refs.find((r) => r.entity.id === issueTarget?.id && !r.entity.deleted)
   const anchors = useMemo(() => anchorEntityRefs(turns, entities.slots), [turns, entities.slots])
   useEffect(() => { setIssueTarget(null) }, [sessionId, workspaceId, currentUserId])
@@ -1132,7 +1138,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           initialTab={mobilePanel}
           style={{ width: "100%", height: "100%" }}
         />
-        {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
+        {mobilePanel === "artifacts" && executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
       </div>
     )
   }
@@ -1230,7 +1236,6 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         )}
         <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
         <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
-        {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
       </div>
     )
   }
@@ -1343,7 +1348,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
       {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
-        {issuePanel ?? <RightPanel
+        {(drawerActiveTab === "work" ? issuePanel : null) ?? <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
