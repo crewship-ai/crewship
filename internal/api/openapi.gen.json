@@ -4507,6 +4507,55 @@
         ],
         "type": "object"
       },
+      "FeedbackPreferenceCorrectionV1": {
+        "properties": {
+          "entry_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "FeedbackPreferenceV1": {
+        "properties": {
+          "chat_id": {
+            "type": "string"
+          },
+          "feedback_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "source_revision": {
+            "type": "integer"
+          },
+          "source_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "FinalAdminPlatformBackupCreate": {
         "properties": {
           "attachments_included": {
@@ -10589,20 +10638,6 @@
         },
         "type": "array"
       },
-      "RemainingAgentPeerDeletedV1": {
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "success": {
-            "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
       "RemainingAgentPeerV1": {
         "properties": {
           "agent_id": {
@@ -10631,11 +10666,25 @@
         "type": "object"
       },
       "RemainingAgentPeersV1": {
-        "items": {
-          "additionalProperties": true,
-          "type": "object"
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "peers": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "preferences": {
+            "items": {
+              "$ref": "#/components/schemas/FeedbackPreferenceV1"
+            },
+            "type": "array"
+          }
         },
-        "type": "array"
+        "type": "object"
       },
       "RemainingAgentPersonaDeletedV1": {
         "properties": {
@@ -11644,12 +11693,26 @@
           "id": {
             "type": "string"
           },
+          "memory": {
+            "properties": {
+              "entry_id": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
           "message_id": {
             "type": "string"
           },
           "reason": {
             "nullable": true,
             "type": "string"
+          },
+          "revision": {
+            "type": "integer"
           },
           "signal": {
             "enum": [
@@ -49487,24 +49550,6 @@
             },
             "description": "Not Found"
           },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
           "500": {
             "content": {
               "application/json": {
@@ -49562,19 +49607,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "entry_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentPeerDeletedV1"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -49852,6 +49895,94 @@
           "agents"
         ],
         "x-crewship-read-only": true
+      },
+      "patch": {
+        "description": "Update agent peer (PATCH /api/v1/agents/{agentId}/peers/{userId}).",
+        "operationId": "patch_api_v1_agents_agentId_peers_userId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackPreferenceCorrectionV1"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update agent peer",
+        "tags": [
+          "agents"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/agents/{agentId}/persona": {
@@ -90799,6 +90930,20 @@
                   "properties": {
                     "id": {
                       "type": "string"
+                    },
+                    "memory": {
+                      "properties": {
+                        "entry_id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "revision": {
+                      "type": "integer"
                     }
                   },
                   "type": "object"
@@ -90814,6 +90959,20 @@
                   "properties": {
                     "id": {
                       "type": "string"
+                    },
+                    "memory": {
+                      "properties": {
+                        "entry_id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "revision": {
+                      "type": "integer"
                     }
                   },
                   "type": "object"
@@ -136309,6 +136468,24 @@
               }
             },
             "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "security": [
