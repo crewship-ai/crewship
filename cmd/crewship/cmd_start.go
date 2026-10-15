@@ -1481,6 +1481,7 @@ var startCmd = &cobra.Command{
 		if deps.DB != nil {
 			peerStop := make(chan struct{})
 			var peerWg sync.WaitGroup
+			usermodel.StartFeedbackPreferenceWorker(deps.DB, logger, peerStop, &peerWg)
 			consolidate.StartPeerCardSyncWorker(
 				deps.DB, logger,
 				consolidate.PeerCardWorkerConfig{BasePath: cfg.Storage.BasePath},

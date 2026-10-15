@@ -104,6 +104,9 @@ export type MissionPattern = "CHAIN" | "PARALLEL" | "ORCHESTRATOR"
 
 /** A mission (or issue) representing a unit of work assigned to a crew of agents. */
 export interface Mission {
+  revision?: number
+  aggregate_revision?: number
+  allowed_actions?: import("@/lib/chat-entity-cards").IssueAction[]
   id: string
   workspace_id: string
   crew_id: string

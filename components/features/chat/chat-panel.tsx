@@ -39,6 +39,14 @@ import { useDrawerStore } from "@/stores/drawer-store"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { TypingDots } from "@/components/features/chat/messages/typing-indicator"
 import { TurnRenderer } from "./turn-renderer"
+import { QueryClient, QueryClientContext, QueryClientProvider } from "@tanstack/react-query"
+import { useContext } from "react"
+import { useChatEntityRefs } from "@/hooks/use-chat-entity-refs"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { anchorEntityRefs, type EntityRef } from "@/lib/chat-entity-cards"
+import { IssueEntityCard } from "./issue-entity-card"
+import { ChatIssuePanel, type PanelTarget } from "./chat-issue-panel"
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { PinToTopSpacer } from "./pin-to-top-spacer"
 import { RightPanel } from "./right-panel"
 import { RightRail } from "./right-rail"
@@ -160,7 +168,15 @@ const EMPTY_STATE_CHIP_LIMIT = 6
 const NO_PROJECT_INPUTS: string[] = []
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, pageContextSlug, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
+export function ChatPanel(props: ChatPanelProps) {
+  const parent = useContext(QueryClientContext)
+  const [client] = useState(() => new QueryClient())
+  // The app provides a shared cache; standalone embedded chat also supports
+  // the same authorized data hooks without depending on a dashboard layout.
+  return parent ? <ChatPanelBody {...props} /> : <QueryClientProvider client={client}><ChatPanelBody {...props} /></QueryClientProvider>
+}
+
+function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, pageContextSlug, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole, suggestedPrompts)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -297,7 +313,13 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const artifactScope = JSON.stringify([currentUserId, workspaceId, agentId, sessionId])
   const artifactContextNonce = useRef(0)
   const [artifactContext, setArtifactContext] = useState<{ id: number; text: string; scope: string } | null>(null)
-  const askArtifactSelection = useCallback((text: string) => setArtifactContext({ id: ++artifactContextNonce.current, text: `Source agent: ${agentId} · workspace: ${workspaceId}\n${text}`, scope: artifactScope }), [agentId, workspaceId, artifactScope])
+  const askArtifactSelection = useCallback((text: string) => {
+    setArtifactContext({ id: ++artifactContextNonce.current, text: `Source agent: ${agentId} · workspace: ${workspaceId}\n${text}`, scope: artifactScope })
+    if (mobilePanel) {
+      useArtifactStore.getState().setOpen(false)
+      onMobilePanelChange?.("chat")
+    }
+  }, [agentId, workspaceId, artifactScope, mobilePanel, onMobilePanelChange])
   // A restricted account has no WebSocket in any workspace (#2861).
   const sessionRealtime = useAccessMode() === "trusted"
   const canChat = sessionRealtime || agentMeta?.current_user_can_chat === true
@@ -953,6 +975,51 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return preFill
   }, [turns, agentName])
 
+  const accessMode = useAccessMode()
+  const isMobile = useIsMobile()
+  const entities = useChatEntityRefs({ workspaceId, chatId: sessionId, userId: currentUserId ?? undefined,
+    enabled: accessMode === "trusted" && executionProfile === "trusted" && canChat })
+  const [issueTarget, setIssueTarget] = useState<PanelTarget | null>(null)
+  const issueOpener = useRef<HTMLElement | null>(null)
+  const closeIssue = useCallback(() => {
+    setIssueTarget(null)
+    requestAnimationFrame(() => { if (issueOpener.current?.isConnected) issueOpener.current.focus() })
+  }, [])
+  useEffect(() => {
+    if (!issueTarget || isMobile || drawerActiveTab !== "work") return
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) closeIssue() }
+    window.addEventListener("keydown", escape)
+    return () => window.removeEventListener("keydown", escape)
+  }, [issueTarget, isMobile, drawerActiveTab, closeIssue])
+  const selectedRef = entities.refs.find((r) => r.entity.id === issueTarget?.id && !r.entity.deleted)
+  const anchors = useMemo(() => anchorEntityRefs(turns, entities.slots), [turns, entities.slots])
+  useEffect(() => { setIssueTarget(null) }, [sessionId, workspaceId, currentUserId])
+  useEffect(() => {
+    if (entities.state === "unavailable" || entities.state === "ready" && issueTarget && !selectedRef) setIssueTarget(null)
+  }, [entities.state, issueTarget, selectedRef])
+  const openIssue = (ref: EntityRef) => {
+    issueOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    useArtifactStore.getState().setOpen(false)
+    setIssueTarget({ kind: "issue", id: ref.entity.id, identifier: ref.entity.identifier ?? ref.entity.id, workspaceId: ref.entity.workspace_id })
+    useDrawerStore.getState().setActiveTab("work")
+  }
+  const renderEntityCards = (turn: ChatTurn) => {
+    const group = anchors.get(turn.id)
+    if (!group) return null
+    return <div className="min-w-0">
+      {group.withoutReply && entities.state === "ready" && <p className="mt-2 text-xs text-muted-foreground" role="status">{group.refs[0]?.anchor.run_status === "running" ? "Run in progress" : group.refs[0]?.anchor.run_status ? `Run ended without a reply · ${group.refs[0].anchor.run_status}` : "Run without a reply · status unknown"}</p>}
+      {group.refs.map((ref) => <IssueEntityCard key={ref.event_id} reference={ref} chatId={sessionId} userId={currentUserId ?? undefined}
+        rechecking={entities.state !== "ready"} live={entities.live} checkedAt={entities.checkedAt} onOpen={openIssue} reconcile={entities.reconcile} />)}
+    </div>
+  }
+  const entityStatus = accessMode === "loading" || executionProfile === "pending" ? null : entities.state === "unavailable" ? <p role="status" className="px-4 py-2 text-xs text-muted-foreground">Unavailable</p>
+    : entities.state === "rechecking" && !entities.slots.length ? <p role="status" className="px-4 py-2 text-xs text-muted-foreground">Checking current access…</p> : null
+  const issuePanel = issueTarget && entities.state !== "unavailable" ? <ChatIssuePanel key={issueTarget.id} target={issueTarget} reference={selectedRef}
+    rechecking={entities.state !== "ready"} checkedAt={entities.checkedAt} reconcile={entities.reconcile} onClose={closeIssue} /> : null
+  const mobileIssuePanel = isMobile ? <Sheet open={!!issueTarget && entities.state !== "unavailable"} onOpenChange={(open) => { if (!open) closeIssue() }}>
+    <SheetContent side="right" onCloseAutoFocus={(event) => { event.preventDefault(); if (issueOpener.current?.isConnected) issueOpener.current.focus() }} className="w-full max-w-full gap-0 p-0 sm:max-w-full"><SheetTitle className="sr-only">Issue detail</SheetTitle>{issuePanel}</SheetContent>
+  </Sheet> : null
+
   // Opt-in virtualized list (localStorage crewship.virtualChat=1) — mounts
   // only the viewport instead of every turn. Initialized false and flipped
   // post-mount: reading localStorage during the hydration render made the
@@ -969,6 +1036,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const conversationEl = useVirtualChat ? (
     <VirtualConversation
       turns={turns}
+      workspaceId={workspaceId ?? undefined}
+      renderEntityCards={renderEntityCards}
       sessionId={sessionId}
       agentId={agentId}
       agentName={agentName}
@@ -982,7 +1051,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       onEditUserMessage={canChat && !isStreaming ? editAndResendWithPin : undefined}
       resolveAuthorName={resolveAuthorName}
       resolveAskProvenance={resolveAskProvenance}
-      footer={<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />}
+      footer={<>{entityStatus}<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} /></>}
     />
   ) : (
     <Conversation>
@@ -1019,6 +1088,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
             <TurnRenderer
               key={turn.id}
               turn={turn}
+              entityCards={renderEntityCards(turn)}
               onCopy={handleCopy}
               onFileClick={openFilePreview}
               isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
@@ -1033,6 +1103,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
             />
           ))}
         </AnimatePresence>
+        {entityStatus}
         <StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />
         <PinToTopSpacer pinNonce={pinNonce} pinTurnId={lastUserTurnId} sessionId={sessionId} />
       </ConversationContent>
@@ -1067,7 +1138,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           initialTab={mobilePanel}
           style={{ width: "100%", height: "100%" }}
         />
-        {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
+        {mobilePanel === "artifacts" && executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
       </div>
     )
   }
@@ -1075,6 +1146,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   if (mobilePanel === "chat") {
     return (
       <div className="relative flex flex-col h-full">
+        {mobileIssuePanel}
         <ReconnectBanner status={connectionStatus} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
@@ -1164,7 +1236,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         )}
         <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
         <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
-        {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
       </div>
     )
   }
@@ -1277,7 +1348,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
       {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
-        <RightPanel
+        {(drawerActiveTab === "work" ? issuePanel : null) ?? <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
@@ -1285,7 +1356,9 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           hideTabs
           style={{ width: "100%", height: "100%" }}
         />
+        }
       </RightDrawer>}
+      {mobileIssuePanel}
 
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightRail className={cn(pushOpen && "border-l-0")} />}
       {/* workspaceId is what makes the server-driven Actions group exist at

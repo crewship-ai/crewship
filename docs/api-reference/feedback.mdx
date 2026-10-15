@@ -51,7 +51,7 @@ Idempotent at the `(workspace_id, message_id, user_id, signal)` tuple. A re-subm
 **Response:** `201 Created`
 
 ```json
-{ "id": "fb_abc123" }
+{ "id": "fb_abc123", "revision": 1, "memory": { "status": "feedback_only" } }
 ```
 
 **Errors:**
@@ -62,7 +62,7 @@ Idempotent at the `(workspace_id, message_id, user_id, signal)` tuple. A re-subm
 | `401` | No authenticated user. Returned BEFORE any DB lookup so anonymous probes can't enumerate ids via response codes. |
 | `404` | `message_id` doesn't resolve to a row in `conversation_messages`, or it does but the caller isn't a member of that message's workspace. |
 | `413` | Request body exceeds the size cap (`http.MaxBytesReader`). |
-| `500` | DB write failure. The error body is `{"error":"internal"}` — details land in server logs. |
+| `500` | DB write failure, or the persisted source and revision cannot be verified after writing. No generated ID or memory success is reported. The error body is `{"error":"internal"}` — details land in server logs. |
 
 **Example:**
 
@@ -191,3 +191,32 @@ CREATE INDEX idx_feedback_message
 ```
 
 The eval pipeline reads from this table by `trace_id` to join feedback signals onto the routine run that produced them; see [Online eval sampler](/guides/routines#online-eval-sampler).
+
+## Explicit working preferences
+
+Helpful/not_helpful feedback may include an explicit future preference from the
+closed [catalogue v1](/cli/feedback#crewship-feedback-preferences). Bare thumbs and
+ordinary criticism remain feedback only. No sentiment, behaviour or personality
+is inferred. Only the authenticated opener of a private chat can create personal
+memory; feedback from another reader or a group chat creates no personal context.
+
+POST responses and GET rows add `revision` and
+`memory: {"status":"processing","entry_id":"…"}`. Repeating the same reason
+keeps the revision. Changing it advances the source revision and clears the old
+preference immediately. Statuses are `feedback_only`, `processing`, `saved`,
+`not_eligible`, `disabled`, `failed` and `withdrawn`. Failed writes retry the same revision at one-minute intervals, up to five attempts; correcting the entry starts a fresh attempt. Processing is durable and asynchronous;
+a storage failure never reports saved. `saved` means the structural stated-only
+verifier admitted the exact authenticated reason, with `source_type: feedback_reason`.
+The reason is not falsely attributed to a conversation message.
+
+The existing agent peers API lists, corrects and withdraws these structured DB
+entries. The store is scoped to workspace, agent and user, independently of daily
+peer-card Markdown. Feedback deletion withdraws its derived entry; opting out also
+withdraws current entries, and opting back in does not recreate them. The next
+eligible private prompt uses only its `OpenedByUserID`, checks source access,
+agent memory setting, consent and profile again, and includes source provenance.
+
+Workspace backups include preferences and tombstones, with their agent, user, chat
+and feedback references remapped on forks. Recall remains suppressed until the
+source message exists in the destination search mirror; restoring a preference
+alone never supplies authority or recreates an unavailable private source.

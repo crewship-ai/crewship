@@ -18,7 +18,8 @@ import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-libra
 
 // These tests exercise authenticated IO and refresh. Worker/table behavior has its own suite.
 vi.mock("../table-preview", () => ({ TablePreview: ({ bytes }: { bytes: Uint8Array }) => <div aria-label="Spreadsheet preview">{new TextDecoder().decode(bytes)}</div> }))
-vi.mock("../xlsx-preview", () => ({ XlsxPreview: () => <div aria-label="Workbook preview">Saved worksheet values</div> }))
+const workbookPreview = vi.hoisted(() => vi.fn())
+vi.mock("../xlsx-preview", () => ({ XlsxPreview: () => { workbookPreview(); return <div aria-label="Workbook preview">Saved worksheet values</div> } }))
 
 let viewer = "user-a"
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: viewer } } }) }))
@@ -116,6 +117,7 @@ beforeEach(() => {
   viewer = "user-a"
   workspaceId = "ws-1"
   workspaceRole = "OWNER"
+  workbookPreview.mockClear()
   apiFetch.mockReset()
   toastError.mockReset()
   toastSuccess.mockReset()
@@ -295,6 +297,17 @@ describe("ArtifactPane — document and table editing", () => {
       expect(await screen.findByText(/Legacy and macro-enabled workbooks/)).toBeInTheDocument()
       expect(screen.queryByTestId("editor-code")).toBeNull()
     }
+  })
+  it("keeps discovered macro-enabled run outputs out of the worksheet worker", async () => {
+    apiFetch.mockReturnValue(response({ body: "macro-enabled workbook bytes", contentType: "application/octet-stream" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("macro", "runs/run_3/budget.xlsm")
+
+    expect(await screen.findByText(/Legacy and macro-enabled workbooks/)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Download this workbook" })).toBeInTheDocument()
+    expect(workbookPreview).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText("Workbook preview")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Editor" })).toBeNull()
   })
   it("previews a Markdown document as a page and opens its source for editing", async () => {
     apiFetch.mockReturnValue(response({ body: "# Copy site\n\nA draft.\n", contentType: "application/octet-stream" }))

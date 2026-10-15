@@ -526,15 +526,16 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
-	hostOutputRoot          string
-	hostOutputCapacityBytes int64
-	hostOutputCapacityRuns  int
-	managedLaunchCrews      map[string]bool
-	managedLaunchResolver   ManagedLaunchResolver
-	runRecoveryMu           sync.Mutex // serializes recovered publication with local admission
-	agentRuns               sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
-	userModelReader         func(context.Context, string, string) (string, error)
-	personalizationAllowed  func(context.Context, string, string) (bool, error)
+	hostOutputRoot           string
+	hostOutputCapacityBytes  int64
+	hostOutputCapacityRuns   int
+	managedLaunchCrews       map[string]bool
+	managedLaunchResolver    ManagedLaunchResolver
+	runRecoveryMu            sync.Mutex // serializes recovered publication with local admission
+	agentRuns                sync.Map   // run id -> *agentRunControl; independent of credential HOME cleanup
+	userModelReader          func(context.Context, string, string) (string, error)
+	feedbackPreferenceReader func(context.Context, string, string, string) (string, error)
+	personalizationAllowed   func(context.Context, string, string) (bool, error)
 	// agentLive refuses process creation for an agent that may no longer run
 	// (soft-deleted). Asked at the creation boundary of every run.
 	agentLive      func(context.Context, string) error
@@ -1692,4 +1693,11 @@ func (o *Orchestrator) SetPersonalizationAllowed(check func(context.Context, str
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.personalizationAllowed = check
+}
+
+// SetFeedbackPreferenceReader supplies structured, source-checked explicit preferences.
+func (o *Orchestrator) SetFeedbackPreferenceReader(reader func(context.Context, string, string, string) (string, error)) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.feedbackPreferenceReader = reader
 }

@@ -117,14 +117,14 @@ func TestCategoryFilter_MemoryOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := &DBDump{Tables: map[string][]map[string]any{
-		"workspaces": {{}}, "users": {{}}, "crews": {{}}, "agents": {{}}, "memory_versions": {{}},
+		"workspaces": {{}}, "users": {{}}, "crews": {{}}, "agents": {{}}, "memory_versions": {{}}, "agent_user_preferences": {{}},
 		"chats": {{}}, "attachments": {{}}, "missions": {{}}, "journal_entries": {{}},
 	}}
 	dropped := f.filterDump(d)
 	if want := []string{"attachments", "chats", "journal_entries", "missions"}; !reflect.DeepEqual(dropped, want) {
 		t.Fatalf("dropped %v, want %v", dropped, want)
 	}
-	for _, keep := range []string{"workspaces", "users", "crews", "agents", "memory_versions"} {
+	for _, keep := range []string{"workspaces", "users", "crews", "agents", "memory_versions", "agent_user_preferences"} {
 		if _, ok := d.Tables[keep]; !ok {
 			t.Errorf("memory-only dump lost %s", keep)
 		}

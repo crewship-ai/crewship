@@ -126,6 +126,7 @@ function mcpEntryLabel(e: McpServerInfo | undefined, withType = true): string {
 }
 
 interface TurnRendererProps {
+  entityCards?: React.ReactNode
   turn: ChatTurn
   onCopy: (s: string) => void
   onFileClick: (s: string) => void
@@ -638,6 +639,7 @@ export const TurnRenderer = React.memo(function TurnRenderer(props: TurnRenderer
       )}
     >
       <TurnBody {...props} />
+      {props.entityCards && <div className="min-w-0 pl-12 pr-4 md:pr-0">{props.entityCards}</div>}
     </ErrorBoundary>
   )
 })

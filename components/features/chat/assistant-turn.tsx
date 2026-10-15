@@ -6,6 +6,7 @@ import { useEffect } from "react"
 import { feedbackTurnKey, useFeedbackStore } from "@/stores/feedback-store"
 import { useSession } from "@/hooks/use-auth"
 import { useCurrentWorkspaceId } from "@/hooks/use-workspace"
+import { TurnPreferenceFeedback } from "./turn-preference-feedback"
 import { TurnReactions } from "./reactions/turn-reactions"
 import {
   Message,
@@ -663,7 +664,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, work
 
       {/* Actions (only when done streaming and has text content) */}
       {!turn.isStreaming && fullText && !hasDelegation && (
-        <TurnFeedbackActions turn={turn} onCopy={onCopy} fullText={fullText} chatId={chatId} workspaceId={workspaceId} />
+        <TurnFeedbackActions turn={turn} onCopy={onCopy} fullText={fullText} chatId={chatId} workspaceId={workspaceId} agentId={agentId} />
       )}
     </Message>
   )
@@ -685,12 +686,14 @@ function TurnFeedbackActions({
   fullText,
   chatId,
   workspaceId: chatWorkspaceId,
+  agentId,
 }: {
   turn: ChatTurn
   onCopy: (content: string) => void
   fullText: string
   chatId?: string
   workspaceId?: string
+  agentId?: string
 }) {
   // Bind the feedback store to the authenticated user. Without this,
   // signing out and back in as a different account on the same browser
@@ -744,7 +747,7 @@ function TurnFeedbackActions({
       // `focus-within` is not optional here — these are the only way to
       // register feedback, and hover-only would put them out of reach of a
       // keyboard entirely.
-      className="opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+      className={cn("flex-wrap transition-opacity focus-within:opacity-100 group-hover:opacity-100", submitted.helpful || submitted.not_helpful ? "opacity-100" : "opacity-0")}
     >
       <MessageAction tooltip="Copy" onClick={() => onCopy(fullText)}>
         <Copy className="h-3.5 w-3.5" />
@@ -769,6 +772,10 @@ function TurnFeedbackActions({
           className={"h-3.5 w-3.5 " + (submitted.not_helpful ? "text-destructive" : "")}
         />
       </MessageAction>
+      {agentId && workspaceId && session.data?.user.id && (submitted.helpful || submitted.not_helpful) && <TurnPreferenceFeedback
+        key={`${session.data.user.id}:${workspaceId}:${turn.id}:${submitted.not_helpful ? "not_helpful" : "helpful"}`}
+        agentId={agentId} workspaceId={workspaceId} userId={session.data.user.id} messageId={turn.id}
+        signal={submitted.not_helpful ? "not_helpful" : "helpful"} chatId={chatId} traceId={traceId} />}
       {/* No emoji picker.
        *
        * Reactions persist — `message_reactions`, keyed per (chat, message,
