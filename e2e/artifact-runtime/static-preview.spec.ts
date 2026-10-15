@@ -106,7 +106,8 @@ test('native raster validation accepts PNG/JPEG and refuses malformed containers
     for (const [id, width, height] of [['png', 2, 3], ['jpeg', 2, 3], ['rotated', 3, 2]] as const) {
       await expect.poll(() => frame.locator(`#${id}`).evaluate((node: HTMLImageElement) => [node.naturalWidth, node.naturalHeight])).toEqual([width, height])
     }
-    await expect(frame.locator('img[id^="bad-"][src],#remote[src],[srcset],script,iframe,link,template,noscript')).toHaveCount(0)
+    const rejected = await frame.locator('img[id^="bad-"][src],#remote[src],[srcset],script,iframe,link,template,noscript').evaluateAll(nodes => nodes.map(node => ({ tag: node.tagName, id: node.id, source: node.getAttribute('src')?.slice(0, 120) })))
+    expect(rejected, 'No rejected candidate may retain a source after native validation').toEqual([])
     // A real metadata-heavy PNG crosses only the cumulative byte budget.
     const padded = uri('png', pngContainer(2, 3, compressed, [chunk('tEXt', Buffer.concat([Buffer.from('note\0'), Buffer.alloc(900 * 1024, 65)]))]))
     const counts = await page.evaluate(async ({ small, padded }) => {
