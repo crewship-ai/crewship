@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode } from "@/hooks/use-access-mode"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
+import { useAccessContext } from "@/components/features/restricted/access-notice"
 import { RestrictedPages } from "@/components/features/pages/restricted-pages"
 
 // /pages — the Pages surface (docs/specs/pages.md §9b).
@@ -16,6 +17,7 @@ import { RestrictedPages } from "@/components/features/pages/restricted-pages"
 // Everything below the workspace gate lives in components/features/pages.
 export default function PagesPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
+  const access = useAccessContext()
   // Session-level, not the selected workspace's row: one restricted
   // membership restricts every request the account makes (#2861).
   const accessMode = useAccessMode()
@@ -32,5 +34,5 @@ export default function PagesPage() {
     )
   }
 
-  return accessMode === "restricted" ? <RestrictedPages key={workspaceId} workspaceId={workspaceId} /> : <PagesLayout workspaceId={workspaceId} />
+  return accessMode === "restricted" ? <RestrictedPages key={workspaceId} workspaceId={workspaceId} access={access} /> : <PagesLayout workspaceId={workspaceId} />
 }

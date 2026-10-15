@@ -356,8 +356,10 @@ type pageListWire struct {
 	// Folder and PagesVersion are the same two fields pageWire carries, for
 	// the same reasons: the rail groups rows by folder, and a move from the
 	// rail needs the fence without a second read.
-	Folder       *pageFolderRef `json:"folder"`
-	PagesVersion int64          `json:"pages_version"`
+	Folder              *pageFolderRef `json:"folder"`
+	PagesVersion        int64          `json:"pages_version"`
+	CanMove             bool           `json:"can_move"`
+	CanRemoveFromFolder bool           `json:"can_remove_from_folder"`
 	// Icon and Color: see pageWire. The rail draws the avatar on every row.
 	Icon  string `json:"icon"`
 	Color string `json:"color"`
@@ -521,10 +523,12 @@ type pageIndex struct {
 }
 
 type pageIndexRow struct {
-	rec           pageRecord
-	panels        []*panelRecord
-	ownerCrewSlug string
-	reach         []string
+	rec                 pageRecord
+	panels              []*panelRecord
+	ownerCrewSlug       string
+	reach               []string
+	canMove             bool
+	canRemoveFromFolder bool
 }
 
 func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pageViewer, scope pageScope) (*pageIndex, error) {
@@ -625,7 +629,15 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 			}
 			reach = []string{}
 		}
-		out.rows = append(out.rows, pageIndexRow{rec: rec, panels: panels, ownerCrewSlug: ownerCrewSlug, reach: reach})
+		// Mirror the folder mutation's two independent authorities, using
+		// the viewer and ACL already loaded in bulk. No per-page query.
+		owner := rec.OwnerUserID != "" && rec.OwnerUserID == viewer.UserID
+		if rec.OwnerUserID == "" && rec.OwnerCrewID != "" {
+			owner = viewer.Crews[rec.OwnerCrewID]
+		}
+		canMove := owner || canRole(viewer.Role, "manage")
+		canRemove := rec.FolderID != "" && (canMove || folderACLReach(acl[rec.FolderID], viewer).write)
+		out.rows = append(out.rows, pageIndexRow{rec: rec, panels: panels, ownerCrewSlug: ownerCrewSlug, reach: reach, canMove: canMove, canRemoveFromFolder: canRemove})
 	}
 	return out, nil
 }
@@ -636,20 +648,22 @@ func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFol
 	rec := &row.rec
 	out := pageListWire{
 		HasBoard: rec.HasBoard, HasArtifact: rec.HasArtifact, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
-		ID:           rec.ID,
-		Slug:         rec.Slug,
-		Name:         rec.Name,
-		Description:  rec.Description,
-		Owner:        "user/" + rec.OwnerUserID,
-		PanelCount:   len(row.panels),
-		PanelStates:  zeroPanelStates(),
-		CreatedAt:    rec.CreatedAt,
-		UpdatedAt:    rec.UpdatedAt,
-		Reach:        row.reach,
-		Folder:       folders[rec.FolderID].ref(),
-		PagesVersion: rec.PagesVersion,
-		Icon:         rec.Icon,
-		Color:        rec.Color,
+		ID:                  rec.ID,
+		Slug:                rec.Slug,
+		Name:                rec.Name,
+		Description:         rec.Description,
+		Owner:               "user/" + rec.OwnerUserID,
+		PanelCount:          len(row.panels),
+		PanelStates:         zeroPanelStates(),
+		CreatedAt:           rec.CreatedAt,
+		UpdatedAt:           rec.UpdatedAt,
+		Reach:               row.reach,
+		Folder:              folders[rec.FolderID].ref(),
+		PagesVersion:        rec.PagesVersion,
+		CanMove:             row.canMove,
+		CanRemoveFromFolder: row.canRemoveFromFolder,
+		Icon:                rec.Icon,
+		Color:               rec.Color,
 	}
 	if len(row.reach) > 0 {
 		out.ArtifactSummary = rec.ArtifactSummary

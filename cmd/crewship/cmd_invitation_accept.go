@@ -2,15 +2,16 @@ package main
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"io"
 	"strings"
+
+	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 func init() {
-	var fromStdin bool
+	var fromStdin, confirmGuest bool
 	command := &cobra.Command{
 		Use: "accept --token-stdin", Short: "Accept an invitation with proof read from standard input", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -28,7 +29,7 @@ func init() {
 			if len(input) > 8192 || token == "" {
 				return fmt.Errorf("invitation proof must be non-empty and at most 8192 bytes")
 			}
-			response, err := newAPIClient().Post("/api/v1/auth/invitation/accept", map[string]string{"token": token})
+			response, err := newAPIClient().Post("/api/v1/auth/invitation/accept", map[string]any{"token": token, "confirm_account_restriction": confirmGuest})
 			if err != nil {
 				return err
 			}
@@ -46,5 +47,6 @@ func init() {
 		},
 	}
 	command.Flags().BoolVar(&fromStdin, "token-stdin", false, "Read invitation proof from standard input (avoids shell history and process arguments)")
+	command.Flags().BoolVar(&confirmGuest, "confirm-account-restriction", false, "Explicitly consent to Guest restrictions across all workspaces; OWNER/ADMIN accounts are refused")
 	workspaceInviteCmd.AddCommand(command)
 }

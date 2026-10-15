@@ -19,6 +19,7 @@ import (
 // dependency-free.
 const scheduleSchemaSQL = `
 CREATE TABLE IF NOT EXISTS pipeline_schedules (
+chat_origin_id TEXT,
     id                       TEXT PRIMARY KEY,
     workspace_id             TEXT NOT NULL,
     name                     TEXT NOT NULL,
@@ -59,6 +60,7 @@ CREATE TABLE IF NOT EXISTS pipeline_schedules (
 // openScheduleTestDBWithRunStore below, #2283.
 const pipelineRunsTestSchemaSQL = `
 CREATE TABLE IF NOT EXISTS pipeline_runs (
+chat_origin_id TEXT,
     id                  TEXT PRIMARY KEY,
     workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     pipeline_id         TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,

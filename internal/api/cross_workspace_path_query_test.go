@@ -103,6 +103,7 @@ var pathWorkspaceAllowlist = map[string]string{
 	// path can only deny a mismatch, never choose or widen the tenant. Covered
 	// for both methods by TestMemberAccessPolicyAuthenticatedRoutes.
 	"workspaces_member_access.go": "rejects path/context disagreement; only validated context scopes queries",
+	"chat_entity_refs.go":         "revision alias only rejects path/context disagreement; every query uses validated context",
 	// Instance administration: these routes register through authedInstance,
 	// with no RequireWorkspace and no ?workspace_id= to prefer. The workspace
 	// in the path IS the target, chosen by an instance admin who may act on

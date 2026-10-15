@@ -195,7 +195,9 @@ be granted again. See
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `--role <ROLE>` | `MEMBER` | Role to grant. `MEMBER` or `ADMIN`. This records an invitation row; no email is sent. |
+| `--role <ROLE>` | `MEMBER` | Role to grant. `ADMIN`, `MANAGER`, `MEMBER`, or `VIEWER`; no email is sent. |
+| `--access-mode <mode>` | `trusted` | Use `restricted` for Guest access across the account. |
+| `--rights-file <file>` | — | Initial rights JSON array (file or `-` for stdin); requires restricted mode. |
 
 The role flag is mirrored on the parent `invite` command so the shortcut form (`workspace invite alice@example.com --role ADMIN`) works without an explicit `create`. No mailer is wired for this command.
 
@@ -212,7 +214,9 @@ crewship workspace invite create alice@acme.com --role ADMIN
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `--role <ROLE>` | `MEMBER` | Role recorded on the invitation: `MEMBER` or `ADMIN`. |
+| `--role <ROLE>` | `MEMBER` | Role recorded on the invitation: `ADMIN`, `MANAGER`, `MEMBER`, or `VIEWER`. |
+| `--access-mode <mode>` | `trusted` | `restricted` creates a Guest invitation with account-wide restrictions. |
+| `--rights-file <file>` | — | Initial rights JSON array; use `-` for stdin. Requires restricted mode. |
 
 On success the CLI prints `Invitation recorded for <email> (<role> role).` and the recipient's invitation link. Save and share that creation response privately; invitation lists expose metadata without the redemption token.
 followed by a warning that no email was sent.
@@ -225,6 +229,8 @@ account when needed, adds the membership, and prints a one-time setup link.
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--role <ROLE>` | `MEMBER` | Role to grant: `ADMIN`, `MANAGER`, `MEMBER`, or `VIEWER`. |
+| `--access-mode <mode>` | `trusted` | Use `restricted` for Guest access. Claimed accounts must accept an invitation instead. OWNER/ADMIN accounts are refused. |
+| `--rights-file <file>` | — | Initial rights JSON array (file or `-` for stdin); requires restricted mode. |
 | `--create-only` | `false` | Require a new account. If the email already exists, return `409` before changing membership, role or setup tokens. |
 
 Use `--create-only` for isolated demo provisioning when an existing person must
@@ -416,6 +422,9 @@ crewship --workspace WORKSPACE --format json workspace member access get MEMBER 
 
 ### `crewship workspace member access set <member-id-or-user-id>`
 
+To deliberately take over a saved share, use `workspace member access set MEMBER --file policy.json --reissue routine:ROUTINE_ID:run` (repeatable). The right must be in the complete policy. The default policy table shows each issuer and whether a share is active or inactive. The API and CLI can explicitly reissue active shares too; Settings offers this action for inactive shares. Policy saves and reissues record old and new issuers and rights atomically in workspace activity.
+
+
 Replace the complete policy using its original membership ID and revision.
 Edit the `mode` and `rights` fields from `access get`; do not invent a revision.
 An explicit empty `rights` array in restricted mode denies all resource grants.
@@ -443,6 +452,15 @@ Accept the presented invitation with the signed-in account matching its email. R
 ```bash
 crewship workspace invite accept --token-stdin < /path/to/private-invitation-proof
 ```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--token-stdin` | `false` | Read invitation proof from stdin (required). |
+| `--confirm-account-restriction` | `false` | Explicitly accept Guest restrictions across all workspaces. OWNER/ADMIN accounts are refused even with consent. |
+
+Without confirmation a Guest invitation returns 400 `guest_confirmation_required`.
+Review the account-wide consequence, then retry with the flag. A stale invitation
+returns 409 `invitation_changed`; request a new link.
 
 Proof is read from standard input, never a positional argument or secret-valued flag. Use a private file or a secret manager pipe; do not paste a literal proof into shell command history. New recipient links use a fragment. The join page removes the proof from the current URL and retains it only in that tab during sign-in/signup.
 
@@ -552,3 +570,47 @@ A changed owner returns `409`; the command does not refresh or retry a transfer
 with a different expected owner. List again and review the current state before
 sending a new explicit transfer. The equivalent Studio controls are under
 **Settings → General → Artifact and Board ownership**.
+
+## `crewship workspace member access explain <member-id-or-user-id>`
+
+Read saved effective access and prerequisites as a trusted workspace OWNER/ADMIN.
+Calls `GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access/effective`.
+The output includes membership revision, account restriction scope and each saved
+grant's allowed/denied/conditional/unavailable state and reason. This does not
+expose private conversations or execution results. There are no command-specific flags.
+
+```bash
+crewship --format json workspace member access explain MEMBER
+crewship workspace invite create client@example.test --role VIEWER --access-mode restricted --rights-file grants.json
+```
+
+`grants.json` is an array, for example
+`[{"kind":"routine","id":"routine-id","operation":"run"},{"kind":"agent","id":"agent-id","operation":"run"}]`.
+Grant every dependency's agent run/delegate rights separately.
+
+## `crewship workspace access`
+
+Inspect your own access in the selected workspace.
+
+## `crewship workspace access me`
+
+Calls `GET /api/v1/workspaces/{workspaceId}/access/me` without looking up the
+workspace roster. Available to Guests and trusted members. The table explains
+saved resource grants and execution prerequisites; JSON/YAML includes membership
+revision and the account-wide restriction explanation.
+
+```bash
+crewship --format json workspace access me
+```
+
+Resource policy JSON includes read-only `grant_details` with each grant’s
+`issuer_id`, `created_at` and `live` status. Saving unchanged rights preserves
+their provenance. To deliberately reissue a share as the authenticated admin,
+include its exact `{kind,id,operation}` in both `rights` and optional `reissue`.
+Unrelated edits do not reactivate shares from an inactive issuer.
+
+## Object sharing
+
+Use [`share`](./share) and [`unshare`](./unshare) to change an existing Guest's
+individual routine or project operations without replacing unrelated rights.
+The versioned member-policy commands remain available for complete policies.

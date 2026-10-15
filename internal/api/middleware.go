@@ -392,10 +392,11 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 
 		ctx := context.WithValue(r.Context(), ctxUser, user)
 		ctx = context.WithValue(ctx, ctxAuthKind, authKind)
+		r = r.WithContext(ctx)
 		if !m.restrictedRequest(w, r, user.ID) {
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r)
 	})
 }
 

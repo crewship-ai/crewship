@@ -11,6 +11,29 @@ import (
 
 const testSecret = "supersecretkeythatisatleast32chars!!"
 
+func TestValidateWSRejectsTicketsBeforeScopeFence(t *testing.T) {
+	v, err := NewJWTValidator(testSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []int{0, 2} {
+		token := encryptTestTokenWithSalt(t, map[string]interface{}{
+			"id": "user", "kind": KindWS, "jti": "synthetic-jti",
+			"exp": time.Now().Add(time.Minute).Unix(), "ws_authority_version": version,
+		}, testSecret, saltWS)
+		if _, err := v.ValidateWS(token); !errors.Is(err, ErrInvalidToken) {
+			t.Fatalf("version %d accepted: %v", version, err)
+		}
+	}
+	token, err := v.IssueWSTicket("user", "", "User", "user@example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims, err := v.ValidateWS(token); err != nil || claims.WSAuthorityVersion != 1 {
+		t.Fatalf("new ticket: %+v %v", claims, err)
+	}
+}
+
 func encryptTestTokenWithSalt(t *testing.T, claims map[string]interface{}, secret, salt string) string {
 	t.Helper()
 

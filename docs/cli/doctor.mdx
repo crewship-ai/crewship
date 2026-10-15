@@ -314,3 +314,38 @@ installation/crew IDs, state, last observation, completeness, eligible remaining
 count, legacy unattributed count and fixed error code. Observations older than
 90 seconds read as stale `unknown`. Persisted snapshots are not live host
 clearance and do not certify cleanup of volumes, host data or images.
+
+## `crewship doctor execution-origins`
+
+Read a local database before or after upgrading to inventory execution-origin
+fences. This command uses the same `DATABASE_URL`/local database resolution as
+other doctor checks, opens SQLite read-only and never creates a database,
+applies migrations, captures authority, retries work or changes permissions.
+Local file access authorizes this diagnostic; it does not use a remote API.
+
+```bash
+crewship doctor execution-origins --json
+crewship doctor execution-origins --limit 1000 --format json
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--limit` | `200` | Maximum record IDs to inspect/display, from 1 to 1000. |
+| `--json` | `false` | Emit the inventory as JSON. Global output format flags also work. |
+
+The report lists bounded IDs, resource kinds, workspace IDs and machine-readable
+reasons for active assignments, orchestration missions, pipeline runs, pending
+pipeline runs and enabled recurring templates. It contains no titles, comment
+bodies, credentials or requester receipts. Per-workspace/resource `candidates`
+counts cover all matching rows; `inspected`, `blocked`, `needs_review` and
+`receipt_current` count only the inspected sample. `truncated` means additional
+records were not inspected. `missing_tables` identifies older schemas.
+
+`blocked` means a currently rejected receipt or agent execution from an enabled
+recurring template without its required origin. Such a template can still create
+issue records; the diagnostic does not claim that the entire schedule is paused. `needs_review` includes pre-migration provenance,
+NULL origins whose autonomy cannot be inferred, and unavailable validation.
+`receipt_current` means the original receipt passes its current read-only check;
+executor and action-specific permissions are still unchecked. This inventory
+is not an exact deployment-impact prediction or approval to deploy. Re-admission
+requires the existing authorized workflow; this command cannot perform it.

@@ -124,12 +124,33 @@ describe("useWorkspace", () => {
     await waitFor(()=>expect(result.current.workspaces).toEqual([WS_B]))
     await act(async()=>{oldReply({ok:true,json:async()=>[WS_A]});await Promise.resolve()})
     expect(result.current.workspaces).toEqual([WS_B])
-    expect(result.current.workspaceId).toBe("ws-a")
-    expect(result.current.workspaceUnavailable).toBe(true)
-    expect(result.current.role).toBeNull()
+    expect(result.current.workspaceId).toBe("ws-b")
+    expect(result.current.workspaceUnavailable).toBe(false)
+    expect(result.current.role).toBe("MEMBER")
     act(()=>bindWorkspaceSession(null))
     expect(result.current.workspaceId).toBeNull()
     expect(result.current.workspaces).toEqual([])
+  })
+
+  it("keeps a separate workspace preference for each authenticated account", async () => {
+    storage.set("crewship.workspaceId", "foreign-legacy-workspace")
+    storage.set("crewship.workspaceId:alice", "ws-b")
+    storage.set("crewship.workspaceId:bob", "removed-workspace")
+    mockFetch.mockResolvedValueOnce({ok:true,json:async()=>[WS_A,WS_B]})
+      .mockResolvedValueOnce({ok:true,headers:new Headers({"X-Workspace-Directory-Complete":"true"}),json:async()=>[WS_A]})
+      .mockResolvedValueOnce({ok:true,json:async()=>[WS_A,WS_B]})
+    act(()=>bindWorkspaceSession("alice"))
+    const {result}=renderHook(()=>useWorkspace())
+    await waitFor(()=>expect(result.current.workspaceId).toBe("ws-b"))
+    act(()=>bindWorkspaceSession("bob"))
+    await waitFor(()=>expect(result.current.loading).toBe(false))
+    expect(result.current.workspaceId).toBe("ws-a")
+    expect(result.current.workspaceUnavailable).toBe(false)
+    expect(storage.get("crewship.workspaceId:bob")).toBe("ws-a")
+    expect(storage.get("crewship.workspaceId:alice")).toBe("ws-b")
+    act(()=>bindWorkspaceSession("alice"))
+    await waitFor(()=>expect(result.current.loading).toBe(false))
+    expect(result.current.workspaceId).toBe("ws-b")
   })
 
   it("reads updated settings after the initial workspace request has finished", async () => {
@@ -328,18 +349,50 @@ describe("useWorkspace", () => {
     expect(result.current.role).toBe("MEMBER")
   })
 
-  it("requires an explicit choice when a persisted workspace is unavailable", async () => {
+  it("recovers a stale persisted workspace on initial load", async () => {
     window.localStorage.setItem("crewship.workspaceId", "ws-gone")
-    mockFetch.mockResolvedValue({ ok: true, json: async () => [WS_A, WS_B] })
+    mockFetch.mockResolvedValue({ ok: true, headers:new Headers({"X-Workspace-Directory-Complete":"true"}), json: async () => [WS_A, WS_B] })
 
     const { result } = renderHook(() => useWorkspace())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    expect(result.current.workspaceId).toBe("ws-gone")
-    expect(result.current.workspaceUnavailable).toBe(true)
+    expect(result.current.workspaceId).toBe("ws-a")
+    expect(result.current.workspaceUnavailable).toBe(false)
     act(() => result.current.setWorkspaceId("ws-a"))
     expect(result.current.workspaceId).toBe("ws-a")
     expect(result.current.workspaceUnavailable).toBe(false)
+  })
+
+  it("recovers a removed cold preference on Retry after the first request fails",async()=>{
+    storage.set("crewship.workspaceId","ws-gone")
+    mockFetch.mockResolvedValueOnce({ok:false,status:503})
+    const {result}=renderHook(()=>useWorkspace())
+    await waitFor(()=>expect(result.current.error).toBe(true))
+    mockFetch.mockResolvedValueOnce({ok:true,headers:new Headers({"X-Workspace-Directory-Complete":"true"}),json:async()=>[WS_A]})
+    await act(async()=>{await result.current.refresh()})
+    expect(result.current.workspaceId).toBe("ws-a")
+    expect(result.current.workspaceUnavailable).toBe(false)
+  })
+
+  it("migrates a legacy preference only after this account's directory authorizes it",async()=>{
+    storage.set("crewship.workspaceId","ws-b")
+    mockFetch.mockResolvedValue({ok:true,json:async()=>[WS_A,WS_B]})
+    act(()=>bindWorkspaceSession("new-account"))
+    const {result}=renderHook(()=>useWorkspace())
+    await waitFor(()=>expect(result.current.loading).toBe(false))
+    expect(result.current.workspaceId).toBe("ws-b")
+    expect(storage.get("crewship.workspaceId:new-account")).toBe("ws-b")
+    expect(storage.has("crewship.workspaceId")).toBe(false)
+  })
+
+  it("preserves a cold persisted selection when the server reports a partial directory",async()=>{
+    storage.set("crewship.workspaceId","ws-b")
+    mockFetch.mockResolvedValue({ok:true,headers:new Headers({"X-Workspace-Directory-Complete":"false"}),json:async()=>[WS_A]})
+    const {result}=renderHook(()=>useWorkspace())
+    await waitFor(()=>expect(result.current.loading).toBe(false))
+    expect(result.current.workspaceId).toBe("ws-b")
+    expect(result.current.workspaceUnavailable).toBe(true)
+    expect(storage.get("crewship.workspaceId")).toBe("ws-b")
   })
 
   it("shares state across hook instances (module-level store)", async () => {

@@ -1,3 +1,4 @@
+vi.mock("../restricted-routine-definitions", () => ({ RestrictedRoutineDefinitions: () => null }))
 import React from "react"
 import { afterEach, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"

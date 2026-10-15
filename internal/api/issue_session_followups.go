@@ -12,8 +12,8 @@ package api
 // session-busy delivery 'pending' instead of claiming it under a run that
 // cannot see it, and dispatchQueuedFollowUpsForSession — called from
 // finishAssignment right after consumeDeliveriesForRun — folds every
-// 'pending' delivery still queued for that (mission, agent) pair into ONE
-// new, REAL dispatch once the session's slot is actually free. That new
+// 'pending' deliveries for that (mission, agent) pair by requester authority
+// into new, REAL dispatches once the session's slot is actually free. That new
 // run's brief has the follow-up text in it before its exec ever starts,
 // because it goes through the exact same DispatchMention path an ordinary
 // mention does — there is nothing special-cased about how it reaches the
@@ -32,11 +32,16 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // pendingFollowUp is one 'pending' mission_comment_mentions row, joined
 // with enough of its comment to build a brief from.
 type pendingFollowUp struct {
+	CommentID  string
+	AuthorID   string
+	OriginID   string
 	DeliveryID string
 	AuthorType string
 	AuthorName string
@@ -46,8 +51,8 @@ type pendingFollowUp struct {
 
 // dispatchQueuedFollowUpsForSession looks for deliveries left 'pending'
 // against the (mission, agent) pair the just-finished run belonged to and,
-// if any exist, dispatches exactly ONE new run to carry all of them —
-// combining their comment text into one brief, the same shape
+// if any exist, dispatches each compatible requester/origin group separately,
+// combining only that group's comment text into one brief, the same shape
 // mentionTaskBrief gives an ordinary single-comment mention.
 //
 // Best-effort throughout, matching every other post-completion write in
@@ -123,81 +128,82 @@ func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Contex
 	// subset that survived; anything left out stays 'pending' for the next
 	// run to finish on this session to fold in — the same "never consumed
 	// before read" property this whole mechanism exists to hold.
-	body, includedIDs := followUpDigestBody(pending)
+	for _, pending := range groupFollowUpsByAuthority(pending) {
+		groupCtx := runauthority.WithOriginID(ctx, pending[0].OriginID)
+		body, includedIDs := followUpDigestBody(pending)
 
-	runID, dispatchErr := h.DispatchMention(ctx, mentionDispatchRequest{
-		WorkspaceID: workspaceID,
-		MissionID:   missionID,
-		Identifier:  identifier,
-		IssueTitle:  issueTitle,
-		IssueCrewID: issueCrewID,
-		// CommentID left empty on purpose: this brief digests possibly
-		// MANY comments, not one — see followUpDigestBody. AuthorType
-		// "user" (not "agent") so this is scoped as a root dispatch
-		// (depth 1, dispatchCaller.selfFiled) exactly like a person's
-		// mention — nobody's own delegation chain caused this, the
-		// session freeing up did.
-		CommentBody:   body,
-		AuthorType:    "user",
-		AuthorName:    "Crewship (queued follow-ups)",
-		TargetAgentID: agentID,
-	})
-	if dispatchErr != nil {
-		// Includes another *sessionBusyError (a fresh mention raced in and
-		// won the slot between this run's completion and this call): the
-		// deliveries stay 'pending', and whichever run holds the slot now
-		// will trigger this same function again when IT finishes.
-		h.logger.Info("dispatch queued follow-ups: not dispatched, deliveries stay pending",
-			"error", dispatchErr, "mission_id", missionID, "agent_id", agentID, "count", len(pending))
-		return
-	}
+		runID, dispatchErr := h.DispatchMention(groupCtx, mentionDispatchRequest{
+			WorkspaceID: workspaceID,
+			MissionID:   missionID,
+			Identifier:  identifier,
+			IssueTitle:  issueTitle,
+			IssueCrewID: issueCrewID,
+			// Every digest contains only one origin/author group and binds its
+			// first persisted comment as authority; the remaining groups stay pending.
+			CommentID:     pending[0].CommentID,
+			CommentBody:   body,
+			AuthorType:    pending[0].AuthorType,
+			AuthorID:      pending[0].AuthorID,
+			AuthorName:    "Crewship (queued follow-ups)",
+			TargetAgentID: agentID,
+		})
+		if dispatchErr != nil {
+			// Includes another *sessionBusyError (a fresh mention raced in and
+			// won the slot between this run's completion and this call): the
+			// deliveries stay 'pending', and whichever run holds the slot now
+			// will trigger this same function again when IT finishes.
+			h.logger.Info("dispatch queued follow-ups: not dispatched, deliveries stay pending",
+				"error", dispatchErr, "mission_id", missionID, "agent_id", agentID, "count", len(pending))
+			continue
+		}
 
-	n, err := claimPendingDeliveriesByID(ctx, h.db, includedIDs, runID)
-	if err != nil {
-		h.logger.Warn("dispatch queued follow-ups: claim under new run",
-			"error", err, "run_id", runID, "mission_id", missionID, "agent_id", agentID)
-		return
-	}
-	h.logger.Info("queued follow-ups dispatched as one run",
-		"run_id", runID, "mission_id", missionID, "agent_id", agentID, "claimed", n, "found", len(pending), "included", len(includedIDs))
-	if len(includedIDs) < len(pending) {
-		// Not a warning: this is the digest's own overflow bound doing its
-		// job, not a fault. The excluded deliveries stay 'pending' and the
-		// NEXT run to finish on this session (this one, once it completes)
-		// picks them up the same way.
-		h.logger.Info("queued follow-ups: digest exceeded the brief bound, some deliveries stay pending for the next round",
-			"mission_id", missionID, "agent_id", agentID, "included", len(includedIDs), "found", len(pending))
-	}
+		n, err := claimPendingDeliveriesByID(ctx, h.db, includedIDs, runID)
+		if err != nil {
+			h.logger.Warn("dispatch queued follow-ups: claim under new run",
+				"error", err, "run_id", runID, "mission_id", missionID, "agent_id", agentID)
+			continue
+		}
+		h.logger.Info("queued follow-ups dispatched as one run",
+			"run_id", runID, "mission_id", missionID, "agent_id", agentID, "claimed", n, "found", len(pending), "included", len(includedIDs))
+		if len(includedIDs) < len(pending) {
+			// Not a warning: this is the digest's own overflow bound doing its
+			// job, not a fault. The excluded deliveries stay 'pending' and the
+			// NEXT run to finish on this session (this one, once it completes)
+			// picks them up the same way.
+			h.logger.Info("queued follow-ups: digest exceeded the brief bound, some deliveries stay pending for the next round",
+				"mission_id", missionID, "agent_id", agentID, "included", len(includedIDs), "found", len(pending))
+		}
 
-	// Catch-up for a real race, not a theoretical one: DispatchMention
-	// spawns runID's exec in a background goroutine and returns before it
-	// runs, so a run that fails (or finishes) fast enough — no resolver
-	// wired, an immediate refusal — can reach finishAssignment's own
-	// consumeDeliveriesForRun call BEFORE the claim above has landed. That
-	// call finds nothing (these deliveries were still 'pending' at that
-	// moment) and consumeDeliveriesForRun is never invoked for runID
-	// again, so a delivery claimed here a moment later would stay
-	// 'claimed' forever — nothing left to trigger its own consumption.
-	// Detected by re-checking runID's status: if it is already terminal,
-	// this claim landed after finishAssignment's own attempt, so run the
-	// same consumeDeliveriesForRun ourselves. Safe to call unconditionally
-	// on a terminal run: it only touches rows already 'claimed' under
-	// runID, which by construction is exactly (and only) the set this call
-	// just claimed — it cannot mark anything 'consumed' that a real run
-	// did not actually reach.
-	var status string
-	if err := h.db.QueryRowContext(ctx, `SELECT status FROM assignments WHERE id = ?`, runID).Scan(&status); err != nil {
-		h.logger.Warn("dispatch queued follow-ups: read new run status for catch-up", "error", err, "run_id", runID)
-		return
-	}
-	switch status {
-	case "COMPLETED", "FAILED", "CANCELLED":
-		if cn, cErr := consumeDeliveriesForRun(ctx, h.db, runID); cErr != nil {
-			h.logger.Warn("dispatch queued follow-ups: catch-up consume for already-terminal run",
-				"error", cErr, "run_id", runID)
-		} else if cn > 0 {
-			h.logger.Info("dispatch queued follow-ups: caught up a run that finished before the claim landed",
-				"run_id", runID, "consumed", cn)
+		// Catch-up for a real race, not a theoretical one: DispatchMention
+		// spawns runID's exec in a background goroutine and returns before it
+		// runs, so a run that fails (or finishes) fast enough — no resolver
+		// wired, an immediate refusal — can reach finishAssignment's own
+		// consumeDeliveriesForRun call BEFORE the claim above has landed. That
+		// call finds nothing (these deliveries were still 'pending' at that
+		// moment) and consumeDeliveriesForRun is never invoked for runID
+		// again, so a delivery claimed here a moment later would stay
+		// 'claimed' forever — nothing left to trigger its own consumption.
+		// Detected by re-checking runID's status: if it is already terminal,
+		// this claim landed after finishAssignment's own attempt, so run the
+		// same consumeDeliveriesForRun ourselves. Safe to call unconditionally
+		// on a terminal run: it only touches rows already 'claimed' under
+		// runID, which by construction is exactly (and only) the set this call
+		// just claimed — it cannot mark anything 'consumed' that a real run
+		// did not actually reach.
+		var status string
+		if err := h.db.QueryRowContext(ctx, `SELECT status FROM assignments WHERE id = ?`, runID).Scan(&status); err != nil {
+			h.logger.Warn("dispatch queued follow-ups: read new run status for catch-up", "error", err, "run_id", runID)
+			continue
+		}
+		switch status {
+		case "COMPLETED", "FAILED", "CANCELLED":
+			if cn, cErr := consumeDeliveriesForRun(ctx, h.db, runID); cErr != nil {
+				h.logger.Warn("dispatch queued follow-ups: catch-up consume for already-terminal run",
+					"error", cErr, "run_id", runID)
+			} else if cn > 0 {
+				h.logger.Info("dispatch queued follow-ups: caught up a run that finished before the claim landed",
+					"run_id", runID, "consumed", cn)
+			}
 		}
 	}
 }
@@ -216,7 +222,7 @@ func pendingFollowUpsFor(ctx context.Context, db *sql.DB, missionID, agentID str
 		         ELSE ''
 		       END,
 		       COALESCE(c.body, ''),
-		       COALESCE(m.priority, 'normal')
+		       COALESCE(m.priority, 'normal'),COALESCE(c.id,''),COALESCE(c.author_id,''),COALESCE(c.chat_origin_id,'')
 		  FROM mission_comment_mentions m
 		  LEFT JOIN mission_comments c ON c.id = m.comment_id
 		 WHERE m.mission_id = ? AND m.agent_id = ? AND m.state = 'pending'
@@ -235,7 +241,7 @@ func pendingFollowUpsFor(ctx context.Context, db *sql.DB, missionID, agentID str
 	for rows.Next() {
 		var p pendingFollowUp
 		var authorName sql.NullString
-		if err := rows.Scan(&p.DeliveryID, &p.AuthorType, &authorName, &p.Body, &p.Priority); err != nil {
+		if err := rows.Scan(&p.DeliveryID, &p.AuthorType, &authorName, &p.Body, &p.Priority, &p.CommentID, &p.AuthorID, &p.OriginID); err != nil {
 			return nil, err
 		}
 		p.AuthorName = authorName.String
@@ -350,4 +356,23 @@ func followUpDigestBody(pending []pendingFollowUp) (body string, includedIDs []s
 		b.WriteString(e)
 	}
 	return b.String(), includedIDs
+}
+
+// Distinct origins/authors cannot share a run: doing so would grant one
+// comment the authority of another. First appearance preserves queue priority.
+func groupFollowUpsByAuthority(pending []pendingFollowUp) [][]pendingFollowUp {
+	type key struct{ origin, authorType, authorID string }
+	var groups [][]pendingFollowUp
+	indices := map[key]int{}
+	for _, p := range pending {
+		k := key{p.OriginID, p.AuthorType, p.AuthorID}
+		i, ok := indices[k]
+		if !ok {
+			i = len(groups)
+			indices[k] = i
+			groups = append(groups, nil)
+		}
+		groups[i] = append(groups[i], p)
+	}
+	return groups
 }

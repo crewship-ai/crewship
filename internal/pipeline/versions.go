@@ -27,6 +27,7 @@ import (
 // capture provenance so the diff UI can render
 // "v3 by agent xyz on 2026-05-07" rows.
 type PipelineVersion struct {
+	ChatOriginID   string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
 	ID             string
 	PipelineID     string
 	Version        int
@@ -174,7 +175,7 @@ func (s *Store) ListVersions(ctx context.Context, pipelineID string, limit int) 
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, pipeline_id, version, definition_json, definition_hash,
        author_type, author_id, parent_version, COALESCE(change_summary, ''),
-       created_at
+       created_at, COALESCE(chat_origin_id,'')
 FROM pipeline_versions
 WHERE pipeline_id = ?
 ORDER BY version DESC
@@ -201,7 +202,7 @@ func (s *Store) GetVersion(ctx context.Context, pipelineID string, version int) 
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, pipeline_id, version, definition_json, definition_hash,
        author_type, author_id, parent_version, COALESCE(change_summary, ''),
-       created_at
+       created_at, COALESCE(chat_origin_id,'')
 FROM pipeline_versions
 WHERE pipeline_id = ? AND version = ?`, pipelineID, version)
 	if err != nil {
@@ -287,7 +288,7 @@ func (s *Store) getVersionByID(ctx context.Context, id string) (*PipelineVersion
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, pipeline_id, version, definition_json, definition_hash,
        author_type, author_id, parent_version, COALESCE(change_summary, ''),
-       created_at
+       created_at, COALESCE(chat_origin_id,'')
 FROM pipeline_versions
 WHERE id = ?`, id)
 	if err != nil {
@@ -309,7 +310,7 @@ func scanVersion(rs rowScanner) (*PipelineVersion, error) {
 	)
 	err := rs.Scan(
 		&v.ID, &v.PipelineID, &v.Version, &v.DefinitionJSON, &v.DefinitionHash,
-		&v.AuthorType, &v.AuthorID, &parent, &summary, &createdAtStr,
+		&v.AuthorType, &v.AuthorID, &parent, &summary, &createdAtStr, &v.ChatOriginID,
 	)
 	if err != nil {
 		return nil, err

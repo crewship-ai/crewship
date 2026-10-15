@@ -233,3 +233,6 @@ __pycache__/
 
 # Trusted isolated converter bundle, generated from pinned source at build time.
 /public/board-converter/
+
+# Local chat worker bundles are generated before Next dev/build.
+/public/chat-workers/

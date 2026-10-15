@@ -233,6 +233,20 @@ var issueUpdateCmd = &cobra.Command{
 			// door — the override is recorded as a receipt naming the caller.
 			path += "?force=true"
 		}
+		if flags.Changed("expected-revision") {
+			v, _ := flags.GetInt64("expected-revision")
+			if v < 1 {
+				return fmt.Errorf("--expected-revision must be positive")
+			}
+			body["expected_revision"] = v
+		}
+		if flags.Changed("idempotency-key") {
+			key, _ := flags.GetString("idempotency-key")
+			if strings.TrimSpace(key) == "" || len(key) > 200 {
+				return fmt.Errorf("--idempotency-key must contain 1–200 bytes")
+			}
+			client = client.WithHeader("Idempotency-Key", key)
+		}
 		resp, err := client.Patch(path, body)
 		if err != nil {
 			return err

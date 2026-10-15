@@ -165,6 +165,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "invitation.reissued",
     "invitation.revoked",
     "invitation.accepted",
+    "member.access_changed",
   ],
   provisioning: [
     "provisioning.queued",

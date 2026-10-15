@@ -49,6 +49,7 @@ export default function DashboardLayout({
   useAccessModeWatcher()
   const isMobile = useIsMobile()
   const pathname = usePathname()
+  const independentPage = pathname === "/settings" || (pathname.startsWith("/admin") && session?.user.is_instance_admin === true)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   /**
@@ -89,7 +90,7 @@ export default function DashboardLayout({
   // Until the access mode is known, nothing below may mount: the shell and
   // every page start requests that a restricted session is refused. The
   // workspace list (allowlisted for everyone) is the only request in flight.
-  if (accessMode === "loading" && !workspaceUnavailable) {
+  if (accessMode === "loading" && !workspaceUnavailable && !independentPage) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background">
         {workspacesError ? (
@@ -128,11 +129,11 @@ export default function DashboardLayout({
             {trusted && <RuntimeBanner />}
             {trusted && <UpdateBanner />}
             <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
-              <WorkspaceAvailabilityBoundary>
+              <WorkspaceAvailabilityBoundary enabled={!independentPage}>
               {restrictedBlocked && !workspaceUnavailable
                 ? restrictedLanding
                   ? <div className="flex justify-center py-16"><Spinner className="h-6 w-6 text-muted-foreground-soft" /></div>
-                  : <RestrictedUnavailable home={surfaces ? restrictedHome(surfaces) : null} />
+                  : <RestrictedUnavailable home={surfaces ? restrictedHome(surfaces) : null} pathname={pathname} />
                 : children}
               </WorkspaceAvailabilityBoundary>
             </div>

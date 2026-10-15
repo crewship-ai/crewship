@@ -8,6 +8,11 @@ const note = { id: "note1", kind: "memory", content: "H1_MEMORY_CANARY", created
 
 describe("conversation memory", () => {
   beforeEach(() => fetchMock.mockReset())
+  it("rejects a dot-segment chat before dispatch", async () => {
+    render(<RestrictedMemory chatId=".." workspaceId="w1" refreshKey={0} />)
+    await screen.findByRole("alert")
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
   it("submits a human note without client-selected provenance", async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ entries: [] })))
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(note), { status: 201 }))

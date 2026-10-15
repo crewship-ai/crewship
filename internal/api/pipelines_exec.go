@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // maxExecBodyBytes caps the JSON request body on the pipeline exec
@@ -328,6 +329,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 
 	exec := h.newExecutor()
 	input := pipeline.RunInput{
+		ChatOriginID:          runauthority.OriginIDFromContext(r.Context()),
 		PinnedVersion:         body.PinnedVersion,
 		UseReviewedDefinition: body.ExpectedDefinitionHash != "",
 		PipelineID:            p.ID,
@@ -483,6 +485,7 @@ func (h *PipelineHandler) existingIdempotentRun(ctx context.Context, workspaceID
 // run. Workspace + invoker identity are injected by the sidecar from its IPC
 // config (never the model), mirroring the save flow's trust boundary.
 type internalRunRequest struct {
+	SourceRunID     string         `json:"source_run_id"`
 	WorkspaceID     string         `json:"workspace_id"`
 	Slug            string         `json:"slug"`
 	Inputs          map[string]any `json:"inputs"`
@@ -575,9 +578,29 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	originID := ""
+	if body.SourceRunID != "" {
+		tx, e := h.db.BeginTx(r.Context(), nil)
+		if e != nil {
+			writeChatIssueError(w, e)
+			return
+		}
+		origin, e := runauthority.CaptureOrigin(r.Context(), tx, body.SourceRunID, body.InvokingAgentID, body.WorkspaceID)
+		if e != nil {
+			_ = tx.Rollback()
+			writeChatIssueError(w, e)
+			return
+		}
+		if e = tx.Commit(); e != nil {
+			writeChatIssueError(w, e)
+			return
+		}
+		originID = origin.ID
+	}
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
 		PipelineID:      p.ID,
+		ChatOriginID:    originID,
 		WorkspaceID:     body.WorkspaceID,
 		InvokingCrewID:  body.InvokingCrewID,
 		InvokingAgentID: body.InvokingAgentID,
@@ -586,6 +609,9 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 		TriggeredVia:    pipeline.TriggeredViaCallPipeline,
 	})
 	if err != nil {
+		if writeRoutineOriginError(w, err) {
+			return
+		}
 		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
 			w.Header().Set("Retry-After", "5")
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{

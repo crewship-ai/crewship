@@ -108,6 +108,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	// bearer token. A valid token overrides any `from` in the body (closing
 	// intra-crew impersonation); a token matching no member is refused. With no
 	// token we fall back to the #796 membership-validated `from`.
+	actorAgentID := ""
 	tokenAuthed := false
 	if actorID, actorSlug, present, ok := s.actingIdentity(r); present {
 		if !ok {
@@ -118,6 +119,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 			s.logger.Warn("query: ignoring spoofed from-slug, attributing to authenticated agent",
 				"claimed_from", req.From, "acting_slug", actorSlug, "acting_agent_id", actorID)
 		}
+		actorAgentID = actorID
 		req.From = actorSlug
 		tokenAuthed = true
 	}
@@ -139,15 +141,21 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	sourceRunID, _, sourceOK := s.issueOperationOrigin(w, r, "")
+	if !sourceOK {
+		return
+	}
 	// Build IPC request body
 	body := map[string]interface{}{
-		"target_slug":  req.Target,
-		"question":     req.Question,
-		"from_slug":    req.From,
-		"crew_id":      s.ipc.CrewID,
-		"workspace_id": s.ipc.WorkspaceID,
-		"chat_id":      s.requestChatID(r),
-		"depth":        depth,
+		"source_run_id":  sourceRunID,
+		"actor_agent_id": actorAgentID,
+		"target_slug":    req.Target,
+		"question":       req.Question,
+		"from_slug":      req.From,
+		"crew_id":        s.ipc.CrewID,
+		"workspace_id":   s.ipc.WorkspaceID,
+		"chat_id":        s.requestChatID(r),
+		"depth":          depth,
 	}
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {
@@ -211,6 +219,15 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Escalations mutate durable human work. A v2-enabled crew must not
+	// downgrade to a boot-time identity to select the recipient chat.
+	if s.ipc.AgentRunKey != "" {
+		if _, _, ok := s.issueOperationOrigin(w, r, ""); !ok {
+			return
+		}
+	}
+	actorAgentID, _, sourceRunID, _, _ := s.actingRunIdentity(r)
+
 	var req escalateRequest
 	if !decodeCappedJSON(w, r, &req) {
 		return
@@ -237,7 +254,7 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 		tokenAuthed = true
 	}
 
-	if req.From == "" || req.Reason == "" {
+	if (req.From == "" && actorAgentID == "") || req.Reason == "" {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "from and reason required"})
 		return
 	}
@@ -275,14 +292,16 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	body := map[string]string{
-		"from_slug":    req.From,
-		"reason":       req.Reason,
-		"context":      req.Context,
-		"type":         req.Type,
-		"metadata":     metadata,
-		"crew_id":      s.ipc.CrewID,
-		"workspace_id": s.ipc.WorkspaceID,
-		"chat_id":      s.requestChatID(r),
+		"from_slug":      req.From,
+		"reason":         req.Reason,
+		"context":        req.Context,
+		"type":           req.Type,
+		"metadata":       metadata,
+		"crew_id":        s.ipc.CrewID,
+		"workspace_id":   s.ipc.WorkspaceID,
+		"chat_id":        s.requestChatID(r),
+		"source_run_id":  sourceRunID,
+		"actor_agent_id": actorAgentID,
 	}
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {
@@ -302,6 +321,9 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
+	if sourceRunID != "" {
+		httpReq.Header.Set("X-Crewship-Run-Token", bearerToken(r))
+	}
 
 	resp, err := ipcClient.Do(httpReq)
 	if err != nil {

@@ -15,6 +15,12 @@ type restrictedSurface struct {
 }
 
 var restrictedSurfaces = []restrictedSurface{
+	{Name: "issues", Patterns: []string{
+		"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/deletion", "DELETE /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
+		"GET /api/v1/workspaces/{workspaceId}/restricted-issues", "GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
+		"GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects", "GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}", "GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones", "GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}", "POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones", "PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}", "DELETE /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}", "PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}", "POST /api/v1/workspaces/{workspaceId}/restricted-issues",
+		"PATCH /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}", "GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments", "POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
+	}},
 	{Name: "chat", Patterns: []string{
 		"GET /api/v1/agents",
 		"GET /api/v1/agents/{agentId}/chats",
@@ -23,6 +29,10 @@ var restrictedSurfaces = []restrictedSurface{
 		"GET /api/v1/chats/{chatId}/execution-profile",
 	}},
 	{Name: "routines", Patterns: []string{
+		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
+		"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
+		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library",
+		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}",
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routines",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run",
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}",
@@ -34,9 +44,11 @@ var restrictedSurfaces = []restrictedSurface{
 		"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}",
 	}},
 	{Name: "account_security", Patterns: []string{
+		"GET /api/v1/workspaces/{workspaceId}/access/me",
 		"GET /api/v1/auth/sessions",
 		"POST /api/v1/auth/sessions/{id}/revoke",
 		"GET /api/v1/auth/cli-tokens",
+		"POST /api/v1/auth/cli-token",
 		"DELETE /api/v1/auth/cli-tokens/{tokenId}",
 		"POST /api/v1/users/me/password",
 	}},

@@ -225,6 +225,8 @@ func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id strin
 	if _, err = c.ExecContext(ctx, `INSERT INTO chats(id,agent_id,workspace_id,created_by,title,origin) VALUES(?,?,?,?,?,'AGENT')`, chatID, agentID, workspaceID, userID, "Channel: "+title); err != nil {
 		return "", err
 	}
+	// created_by_user_id is durable human provenance. The execution door marks
+	// this channel request unavailable for mutations until it has real authority.
 	if _, err = c.ExecContext(ctx, `INSERT INTO assignments(id,workspace_id,chat_id,assigned_by_id,assigned_to_id,task,status,created_by_user_id,created_at,queued_at) VALUES(?,?,?,?,?,?,'QUEUED',?,?,datetime('now','subsec'))`, assignmentID, workspaceID, chatID, agentID, agentID, task, userID, stamp); err != nil {
 		return "", err
 	}

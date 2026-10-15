@@ -206,6 +206,7 @@ var TableCategory = map[string]string{
 
 	// Chats.
 	"chats": CategoryChats, "chat_branches": CategoryChats, "message_reactions": CategoryChats,
+	"agent_operations": CategoryChats, "chat_entity_refs": CategoryChats, // durable card history and its receipt parents
 	"message_feedback": CategoryChats, "chat_participants": CategoryChats, "chat_read_cursors": CategoryChats,
 	"captain_chats": CategoryChats, "workspace_conversations": CategoryChats,
 	"workspace_conversation_direct_pairs": CategoryChats, "workspace_conversation_members": CategoryChats,
@@ -217,7 +218,8 @@ var TableCategory = map[string]string{
 	"attachments": CategoryAtt,
 
 	// Routines, schedules and run history.
-	"pipelines": CategoryRoutines, "pipeline_versions": CategoryRoutines, "pipeline_drafts": CategoryRoutines,
+	"execution_origins": categoryAnchor, // required admission fences; never omit a referenced origin or imply autonomous work
+	"pipelines":         CategoryRoutines, "pipeline_versions": CategoryRoutines, "pipeline_drafts": CategoryRoutines,
 	"pipeline_schedules": CategoryRoutines, "pipeline_webhooks": CategoryRoutines, "pipeline_runs": CategoryRoutines,
 	"pipeline_step_executions": CategoryRoutines, "pipeline_run_artifacts": CategoryRoutines,
 	"pipeline_run_step_outputs": CategoryRoutines, "pipeline_routine_state": CategoryRoutines,
@@ -278,9 +280,11 @@ var TableCategory = map[string]string{
 	"issue_counters": categoryWorkOnly, "issue_agent_sessions": categoryWorkOnly, "assignments": categoryWorkOnly,
 	"approvals_queue": categoryWorkOnly, "mission_tasks": categoryWorkOnly, "mission_activity": categoryWorkOnly,
 	"mission_comments": categoryWorkOnly, "mission_comment_mentions": categoryWorkOnly,
-	"mission_labels": categoryWorkOnly, "mission_proposals": categoryWorkOnly, "mission_relations": categoryWorkOnly,
+	"issue_mutation_outbox": categoryWorkOnly,
+	"mission_labels":        categoryWorkOnly, "mission_proposals": categoryWorkOnly, "mission_relations": categoryWorkOnly,
 	"mission_code_links": categoryWorkOnly, "labels": categoryWorkOnly, "milestones": categoryWorkOnly,
-	"projects": categoryWorkOnly, "subscriptions": categoryWorkOnly, "inbox_items": categoryWorkOnly,
+	"project_guest_issue_intake": categoryWorkOnly,
+	"projects":                   categoryWorkOnly, "subscriptions": categoryWorkOnly, "inbox_items": categoryWorkOnly,
 	"inbox_item_reads": categoryWorkOnly, "triage_rules": categoryWorkOnly, "saved_views": categoryWorkOnly,
 }
 

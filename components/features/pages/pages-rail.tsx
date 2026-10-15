@@ -347,7 +347,10 @@ export function PagesRail({
   // Which row's "⋯" menu is open, by page slug. Owned here rather than by
   // each row so the list-level key handler can open it for the focused row.
   const [menuFor, setMenuFor] = React.useState<string | null>(null)
-  const rowMenus = Boolean(onMovePage || onRemoveFromFolder)
+  const folderAuthority = React.useMemo(() => new Map((folders ?? []).map(folder => [folder.slug, folder])), [folders])
+  const canMoveRow = (page: PageView) => Boolean(onMovePage && page.canMove === true)
+  const canRemoveRow = (page: PageView) => Boolean(onRemoveFromFolder && page.folder && page.canRemoveFromFolder === true)
+  const rowMenus = (page: PageView) => canMoveRow(page) || canRemoveRow(page)
 
   // ── Select mode (#2533) ───────────────────────────────────────────────────
   // A row in Select mode toggles instead of opening — click, Enter and Space
@@ -355,18 +358,19 @@ export function PagesRail({
   // free. Shift is read off the click on its way down (`onClickCapture`),
   // because `onSelect` carries no event; the range runs in the order the rows
   // are on screen, from the last row toggled to this one.
-  const selectable = foldersKnown && Boolean(onMovePages)
+  const selectable = foldersKnown && Boolean(onMovePages) && pages.some(page => page.canMove === true)
   const [selecting, setSelecting] = React.useState(false)
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(() => new Set())
   const anchor = React.useRef<string | null>(null)
   const shiftHeld = React.useRef(false)
-  const visibleOrder = React.useMemo(() => groups.flatMap((g) => g.pages.map((p) => p.slug)), [groups])
+  const visibleOrder = React.useMemo(() => groups.flatMap((g) => g.pages.filter(p => p.canMove === true).map((p) => p.slug)), [groups])
   const leaveSelectMode = () => {
     setSelecting(false)
     setSelected(new Set())
     anchor.current = null
   }
   const toggleSelected = (slug: string, range: boolean) => {
+    if (!visibleOrder.includes(slug)) return
     setSelected((prev) => {
       const next = new Set(prev)
       const from = anchor.current
@@ -388,7 +392,7 @@ export function PagesRail({
     })
     anchor.current = slug
   }
-  const chosenPages = React.useMemo(() => pages.filter((p) => selected.has(p.slug)), [pages, selected])
+  const chosenPages = React.useMemo(() => pages.filter((p) => p.canMove === true && selected.has(p.slug)), [pages, selected])
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
   // One handler on the list, not one per row: the rows already answer Enter
@@ -407,9 +411,10 @@ export function PagesRail({
 
     if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
       const slug = target.dataset.pageSlug
-      if (rowMenus && slug) {
+      const page = pages.find(page => page.slug === slug)
+      if (page && rowMenus(page)) {
         e.preventDefault()
-        setMenuFor(slug)
+        setMenuFor(page.slug)
       }
       return
     }
@@ -622,7 +627,7 @@ export function PagesRail({
       {selecting && (
         <div data-slot="pages-select-bar" className="flex items-center gap-2 border-b border-foreground/[0.06] px-3 py-1.5">
           <span className="type-nav-sub min-w-0 flex-1 truncate text-muted-foreground" aria-live="polite">
-            {selected.size} selected
+            {chosenPages.length} selected
           </span>
           <button
             type="button"
@@ -709,12 +714,12 @@ export function PagesRail({
               // header shows when the pointer is over the folder.
               className="group/section"
               actions={
-                group.kind === "folder" && group.folder && (onEditFolder || onDeleteFolder || onShareFolder) ? (
+                group.kind === "folder" && group.folder && ((folderAuthority.get(group.folder.slug)?.canRename === true && onEditFolder) || (folderAuthority.get(group.folder.slug)?.canDelete === true && onDeleteFolder) || (folderAuthority.get(group.folder.slug)?.canShare === true && onShareFolder)) ? (
                   <FolderHeaderMenu
                     folderName={group.label}
-                    onRename={() => onEditFolder?.(group.folder!.slug)}
-                    onShare={onShareFolder ? () => onShareFolder(group.folder!.slug) : undefined}
-                    onDelete={() => onDeleteFolder?.(group.folder!.slug)}
+                    onRename={folderAuthority.get(group.folder.slug)?.canRename === true && onEditFolder ? () => onEditFolder(group.folder!.slug) : undefined}
+                    onShare={folderAuthority.get(group.folder.slug)?.canShare === true && onShareFolder ? () => onShareFolder(group.folder!.slug) : undefined}
+                    onDelete={folderAuthority.get(group.folder.slug)?.canDelete === true && onDeleteFolder ? () => onDeleteFolder(group.folder!.slug) : undefined}
                   />
                 ) : undefined
               }
@@ -740,7 +745,7 @@ export function PagesRail({
                       className="overflow-hidden"
                       onClickCapture={selecting ? (e) => void (shiftHeld.current = e.shiftKey) : undefined}
                       onContextMenu={
-                        rowMenus && !selecting
+                        rowMenus(page) && !selecting
                           ? (e) => {
                               e.preventDefault()
                               setMenuFor(page.slug)
@@ -765,7 +770,8 @@ export function PagesRail({
                           // Enter, Space), and a second control inside it that
                           // also toggled would toggle twice on one click.
                           <Checkbox
-                            checked={selected.has(page.slug)}
+                            checked={selected.has(page.slug) && page.canMove === true}
+                            disabled={page.canMove !== true}
                             tabIndex={-1}
                             aria-hidden
                             className="pointer-events-none"
@@ -807,14 +813,14 @@ export function PagesRail({
                             {page.tally.total}
                           </span>
                         )}
-                        {rowMenus && !selecting && (
+                        {rowMenus(page) && !selecting && (
                           <PageRowMenu
                             pageName={page.name}
                             inFolder={inFolder && Boolean(onRemoveFromFolder)}
                             open={menuFor === page.slug}
                             onOpenChange={(open) => setMenuFor(open ? page.slug : null)}
-                            onMove={() => onMovePage?.(page)}
-                            onRemoveFromFolder={() => onRemoveFromFolder?.(page)}
+                            onMove={canMoveRow(page) ? () => onMovePage?.(page) : undefined}
+                            onRemoveFromFolder={canRemoveRow(page) ? () => onRemoveFromFolder?.(page) : undefined}
                           />
                         )}
                       </SidebarRow>

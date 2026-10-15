@@ -1,7 +1,10 @@
 // Owned synthetic Router/static-export fixture only; never a shared server.
-import { readFile } from 'node:fs/promises'
+import { readFile, mkdtemp } from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
 import { chromium, expect } from '@playwright/test'
 const fixture = JSON.parse(await readFile(process.env.CREWSHIP_INVITATION_FIXTURE, 'utf8'))
+const output=await mkdtemp(join(tmpdir(),'crewship-guest-invitation-browser-'))
 const browser = await chromium.launch({ headless: true })
 try {
   for (const kind of ['new', 'existing']) {
@@ -34,12 +37,25 @@ try {
       await expect(page.getByRole('heading', { name: 'Accept invitation' })).toBeVisible()
       const accepted = page.waitForResponse(r => r.url().endsWith('/api/v1/auth/invitation/accept') && r.request().method() === 'POST')
       await page.getByRole('button', { name: 'Accept invitation' }).click()
-      expect((await accepted).status()).toBe(200)
+      const initialStatus=(await accepted).status()
+      if(kind==='existing'){
+        expect(initialStatus).toBe(400)
+        await expect(page.getByRole('status')).toContainText('entire account across all workspaces')
+        const confirmed=page.waitForResponse(r=>r.url().endsWith('/api/v1/auth/invitation/accept')&&r.request().method()==='POST')
+        await page.getByRole('button',{name:'Accept Guest restrictions'}).click()
+        expect((await confirmed).status()).toBe(200)
+      } else expect(initialStatus).toBe(200)
       // Same cookie session sees the joined workspace through the real API.
       const response = await context.request.get(`${fixture.server}/api/v1/workspaces`)
       expect(response.status()).toBe(200)
-      expect((await response.json()).some(w => w.id === fixture.workspace)).toBe(true)
-      console.log(`PASS ${kind} invitation -> sign in -> explicit accept -> same-session workspace`)
+      const workspaces=await response.json()
+      expect(workspaces.some(w => w.id === fixture.workspace&&w.currentUserAccessMode==='restricted')).toBe(true)
+      expect(workspaces.every(w=>w.restricted_session===true)).toBe(true)
+      await page.goto(fixture.server+'/credentials')
+      await expect(page.getByText('Not available with your access',{exact:true})).toBeVisible()
+      await expect(page.getByRole('link',{name:'Settings',exact:true}).first()).toBeVisible()
+      await page.screenshot({path:join(output,`${kind}-guest-access.png`),fullPage:true})
+      console.log(`PASS ${kind} Guest invitation -> sign in -> explicit acceptance -> initial grants/account ceiling; screenshot ${join(output,`${kind}-guest-access.png`)}`)
     } finally { await context.close() }
   }
 } finally { await browser.close() }

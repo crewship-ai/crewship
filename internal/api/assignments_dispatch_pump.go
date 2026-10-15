@@ -39,13 +39,14 @@ func (h *AssignmentHandler) dispatchByID(ctx context.Context, assignmentID strin
 		authorAgentID   sql.NullString
 		createdByUserID sql.NullString
 		leadPlanning    bool
+		chatOriginID    string
 	)
 	err := h.db.QueryRowContext(ctx, `
 		SELECT workspace_id, chat_id, assigned_by_id, assigned_to_id, task,
-		       mission_id, author_agent_id, created_by_user_id, lead_planning
+		       mission_id, author_agent_id, created_by_user_id, lead_planning, COALESCE(chat_origin_id,'')
 		FROM assignments
 		WHERE id = ?`, assignmentID).Scan(&workspaceID, &chatID, &assignedByID, &assignedToID, &task,
-		&missionID, &authorAgentID, &createdByUserID, &leadPlanning)
+		&missionID, &authorAgentID, &createdByUserID, &leadPlanning, &chatOriginID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("dispatchByID: assignment %s not found", assignmentID)
@@ -99,11 +100,12 @@ func (h *AssignmentHandler) dispatchByID(ctx context.Context, assignmentID strin
 	}
 
 	body := createAssignmentBody{
-		TargetSlug:  target.Slug,
-		Task:        task,
-		CrewID:      crewID,
-		WorkspaceID: workspaceID,
-		ChatID:      chatID,
+		ChatOriginID: chatOriginID,
+		TargetSlug:   target.Slug,
+		Task:         task,
+		CrewID:       crewID,
+		WorkspaceID:  workspaceID,
+		ChatID:       chatID,
 		// mission_id, author_agent_id, created_by_user_id, lead_planning are
 		// read straight off the row rather than assumed from group_id (see
 		// the 20260901221102 migration's doc for why that assumption was

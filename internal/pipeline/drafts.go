@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -26,6 +27,9 @@ func (e *ScheduleDraftConflict) Error() string {
 func (e *ScheduleDraftConflict) Unwrap() error { return ErrDraftConflict }
 
 type Draft struct {
+	ChatOriginID   string          `json:"-"`
+	SourceRunID    string          `json:"-"`
+	SourceAgentID  string          `json:"-"`
 	ID             string          `json:"id"`
 	WorkspaceID    string          `json:"workspace_id"`
 	Slug           string          `json:"slug"`
@@ -50,23 +54,40 @@ type DraftPublication struct {
 func scanDraft(row interface{ Scan(...any) error }) (*Draft, error) {
 	var d Draft
 	var document string
-	err := row.Scan(&d.ID, &d.WorkspaceID, &d.Slug, &d.Revision, &d.BasePipelineID, &d.BaseRevision, &document, &d.UpdatedBy, &d.CreatedAt, &d.UpdatedAt)
+	err := row.Scan(&d.ID, &d.WorkspaceID, &d.Slug, &d.Revision, &d.BasePipelineID, &d.BaseRevision, &document, &d.UpdatedBy, &d.CreatedAt, &d.UpdatedAt, &d.ChatOriginID)
 	d.Document = json.RawMessage(document)
 	return &d, err
 }
 
-const draftColumns = `id, workspace_id, slug, revision, base_pipeline_id, base_revision, document_json, updated_by, created_at, updated_at`
+const draftColumns = `id, workspace_id, slug, revision, base_pipeline_id, base_revision, document_json, updated_by, created_at, updated_at, COALESCE(chat_origin_id,'')`
+
+type draftRowReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
 
 // A missing draft returns a revision-zero baseline from a single published-row
 // read. Clients edit this document, then create the draft with that exact base.
 func (s *Store) GetDraft(ctx context.Context, ws, slug string) (*Draft, error) {
-	d, err := scanDraft(s.db.QueryRowContext(ctx, `SELECT `+draftColumns+` FROM pipeline_drafts WHERE workspace_id=? AND slug=?`, ws, slug))
+	return s.getDraft(ctx, s.db, ws, slug)
+}
+
+// GetDraftIn reads the collaborative draft and its published baseline in the
+// caller's snapshot. The caller owns authorization and transaction lifetime.
+func (s *Store) GetDraftIn(ctx context.Context, tx *sql.Tx, ws, slug string) (*Draft, error) {
+	if tx == nil {
+		return nil, errors.New("draft transaction required")
+	}
+	return s.getDraft(ctx, tx, ws, slug)
+}
+
+func (s *Store) getDraft(ctx context.Context, q draftRowReader, ws, slug string) (*Draft, error) {
+	d, err := scanDraft(q.QueryRowContext(ctx, `SELECT `+draftColumns+` FROM pipeline_drafts WHERE workspace_id=? AND slug=?`, ws, slug))
 	if !errors.Is(err, sql.ErrNoRows) {
 		return d, err
 	}
 	d = &Draft{WorkspaceID: ws, Slug: slug}
 	var definition, name, description, crew, agent string
-	err = s.db.QueryRowContext(ctx, `SELECT id, publication_revision, definition_json, name, COALESCE(description,''), COALESCE(author_crew_id,''), COALESCE(author_agent_id,'') FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, ws, slug).Scan(&d.BasePipelineID, &d.BaseRevision, &definition, &name, &description, &crew, &agent)
+	err = q.QueryRowContext(ctx, `SELECT id, publication_revision, definition_json, name, COALESCE(description,''), COALESCE(author_crew_id,''), COALESCE(author_agent_id,'') FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, ws, slug).Scan(&d.BasePipelineID, &d.BaseRevision, &definition, &name, &description, &crew, &agent)
 	if errors.Is(err, sql.ErrNoRows) {
 		d.Document = json.RawMessage(`{}`)
 		return d, nil
@@ -82,30 +103,71 @@ func (s *Store) SaveDraft(ctx context.Context, d Draft) (*Draft, error) {
 	if d.WorkspaceID == "" || d.Slug == "" || d.UpdatedBy == "" || !json.Valid(d.Document) || d.Revision < 0 {
 		return nil, errors.New("invalid draft")
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	saved, err := s.SaveDraftIn(ctx, tx, d)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return saved, nil
+}
+
+// SaveDraftIn keeps the existing revision/base/origin checks and leaves commit
+// to the caller, so live resource authority and audit can share the write.
+func (s *Store) SaveDraftIn(ctx context.Context, tx *sql.Tx, d Draft) (*Draft, error) {
+	if d.WorkspaceID == "" || d.Slug == "" || d.UpdatedBy == "" || !json.Valid(d.Document) || d.Revision < 0 {
+		return nil, errors.New("invalid draft")
+	}
+	if tx == nil {
+		return nil, errors.New("draft transaction required")
+	}
+
+	if d.SourceRunID != "" {
+		o, e := runauthority.CaptureOrigin(ctx, tx, d.SourceRunID, d.SourceAgentID, d.WorkspaceID)
+		if e != nil {
+			return nil, e
+		}
+		d.ChatOriginID = o.ID
+	}
+	if d.ChatOriginID == "" && d.ID == "" {
+		e := tx.QueryRowContext(ctx, `SELECT COALESCE(chat_origin_id,'') FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, d.WorkspaceID, d.Slug).Scan(&d.ChatOriginID)
+		if e != nil && !errors.Is(e, sql.ErrNoRows) {
+			return nil, e
+		}
+	}
 	now := tsformat.Format(s.now().UTC())
 	var saved *Draft
 	var err error
 	if d.ID == "" && d.Revision == 0 {
 		d.ID = generatePipelineID()
-		saved, err = scanDraft(s.db.QueryRowContext(ctx, `INSERT INTO pipeline_drafts (`+draftColumns+`) SELECT ?,?,?,1,?,?,?,?,?,? WHERE COALESCE((SELECT id FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL),'')=? AND COALESCE((SELECT publication_revision FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL),0)=? ON CONFLICT(workspace_id,slug) DO NOTHING RETURNING `+draftColumns, d.ID, d.WorkspaceID, d.Slug, d.BasePipelineID, d.BaseRevision, string(d.Document), d.UpdatedBy, now, now, d.WorkspaceID, d.Slug, d.BasePipelineID, d.WorkspaceID, d.Slug, d.BaseRevision))
+		saved, err = scanDraft(tx.QueryRowContext(ctx, `INSERT INTO pipeline_drafts (id,workspace_id,slug,revision,base_pipeline_id,base_revision,document_json,updated_by,created_at,updated_at,chat_origin_id) SELECT ?,?,?,1,?,?,?,?,?,?,? WHERE COALESCE((SELECT id FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL),'')=? AND COALESCE((SELECT publication_revision FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL),0)=? ON CONFLICT(workspace_id,slug) DO NOTHING RETURNING `+draftColumns, d.ID, d.WorkspaceID, d.Slug, d.BasePipelineID, d.BaseRevision, string(d.Document), d.UpdatedBy, now, now, nullableStr(d.ChatOriginID), d.WorkspaceID, d.Slug, d.BasePipelineID, d.WorkspaceID, d.Slug, d.BaseRevision))
 	} else {
 		// Only unpublished drafts can move to an unused slug. Preserve the ID,
 		// revision CAS and base metadata so renaming cannot orphan an old draft
 		// or turn an edit of a published recipe into a new recipe.
-		saved, err = scanDraft(s.db.QueryRowContext(ctx, `UPDATE pipeline_drafts
-          SET slug=?,document_json=?,revision=revision+1,updated_by=?,updated_at=?
+		saved, err = scanDraft(tx.QueryRowContext(ctx, `UPDATE pipeline_drafts
+          SET slug=?,document_json=?,revision=revision+1,updated_by=?,updated_at=?,chat_origin_id=COALESCE(?,chat_origin_id)
           WHERE id=? AND workspace_id=? AND revision=?
           AND (slug=? OR (base_pipeline_id='' AND NOT EXISTS (
             SELECT 1 FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL)))
           AND NOT EXISTS (SELECT 1 FROM pipeline_drafts other WHERE other.workspace_id=? AND other.slug=? AND other.id<>?)
-          RETURNING `+draftColumns, d.Slug, string(d.Document), d.UpdatedBy, now, d.ID, d.WorkspaceID, d.Revision, d.Slug, d.WorkspaceID, d.Slug, d.WorkspaceID, d.Slug, d.ID))
+          RETURNING `+draftColumns, d.Slug, string(d.Document), d.UpdatedBy, now, nullableStr(d.ChatOriginID), d.ID, d.WorkspaceID, d.Revision, d.Slug, d.WorkspaceID, d.Slug, d.WorkspaceID, d.Slug, d.ID))
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDraftConflict
 	}
 	// RETURNING reads the exact written revision and immutable base metadata,
 	// never a subsequent edit or caller-supplied replacement of that base.
-	return saved, err
+	if err != nil {
+		return nil, err
+	}
+	return saved, nil
 }
 
 func (s *Store) DeleteDraft(ctx context.Context, ws, slug, id string, revision int) error {

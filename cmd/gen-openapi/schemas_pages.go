@@ -121,8 +121,11 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale."},
 		"created_at": timeString(), "updated_at": timeString(),
 	})
+	for _, field := range []string{"can_rename", "can_share", "can_delete", "can_accept_pages"} {
+		folder["properties"].(map[string]any)[field] = map[string]any{"type": "boolean", "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply."}
+	}
 	folder["required"] = []string{"id", "slug", "name", "icon", "color", "owner", "owner_crew_name",
-		"page_count", "shared", "acl_version", "created_at", "updated_at"}
+		"page_count", "shared", "acl_version", "created_at", "updated_at", "can_rename", "can_share", "can_delete", "can_accept_pages"}
 
 	// Inherited permissions (#2533, pages_folder_acl.go).
 	folderACLEntry := obj(map[string]any{
@@ -181,10 +184,12 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	pageRow := obj(map[string]any{
-		"has_artifact":     boolean(),
-		"artifact_summary": obj(map[string]any{"head_rev": map[string]any{"type": "integer", "minimum": 1}, "author_user_id": str(), "author_name": str(), "author_agent_id": str(), "author_agent_name": str(), "author_run_id": str(), "published_at": timeString(), "last_activity_at": timeString()}),
-		"has_board":        boolean(),
-		"has_project":      map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
+		"has_artifact":           boolean(),
+		"artifact_summary":       obj(map[string]any{"head_rev": map[string]any{"type": "integer", "minimum": 1}, "author_user_id": str(), "author_name": str(), "author_agent_id": str(), "author_agent_name": str(), "author_run_id": str(), "published_at": timeString(), "last_activity_at": timeString()}),
+		"has_board":              boolean(),
+		"can_move":               map[string]any{"type": "boolean", "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them."},
+		"can_remove_from_folder": map[string]any{"type": "boolean", "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer."},
+		"has_project":            map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": str(), "owner_crew_slug": str(),
 		"panel_count": map[string]any{"type": "integer",

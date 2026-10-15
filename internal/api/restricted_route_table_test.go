@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -31,6 +32,8 @@ var restrictedAllowedPatterns = []string{
 	"DELETE /api/v1/auth/cli-tokens/{tokenId}",
 	"DELETE /api/v1/chats/{chatId}/restricted-memory/{entryId}",
 	"DELETE /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{fileId}",
+	"DELETE /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
+	"DELETE /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}",
 	"GET /api/v1/agents",
 	"GET /api/v1/agents/{agentId}",
 	"GET /api/v1/agents/{agentId}/chats",
@@ -47,14 +50,29 @@ var restrictedAllowedPatterns = []string{
 	"GET /api/v1/chats/{chatId}/restricted-files/{fileId}/download",
 	"GET /api/v1/pages/{slug}/application/actions/{pendingId}",
 	"GET /api/v1/workspaces",
+	"GET /api/v1/workspaces/{workspaceId}/access/me",
 	"GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files",
 	"GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{versionId}/download",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issues",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/deletion",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-pages",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routines",
+	"PATCH /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
 	"POST /api/v1/agents/{agentId}/chats",
 	"POST /api/v1/agents/{agentId}/restricted-cli-chats",
+	"POST /api/v1/auth/cli-token",
+	"POST /api/v1/auth/invitation/accept",
 	"POST /api/v1/auth/sessions/{id}/revoke",
 	"POST /api/v1/chats/{chatId}/restricted-cli-run",
 	"POST /api/v1/chats/{chatId}/restricted-memory",
@@ -65,6 +83,12 @@ var restrictedAllowedPatterns = []string{
 	"POST /api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight",
 	"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run",
 	"POST /api/v1/workspaces/{workspaceId}/projects/{projectId}/files",
+	"POST /api/v1/workspaces/{workspaceId}/restricted-issues",
+	"POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
+	"POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones",
+	"PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
+	"PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}",
+	"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
 }
 
 // restrictedAgentCheckedPatterns are the allowlisted patterns that are not a
@@ -147,6 +171,12 @@ func (f restrictedRouteFixture) restrictedDecision(t *testing.T, user, pattern, 
 	}
 	req := httptest.NewRequest(method, "/restricted-route-table-probe", nil)
 	req.Pattern = pattern
+	if pattern == "POST /api/v1/auth/cli-token" {
+		// The snapshot models an interactive Guest session. The real
+		// signature/session and bearer-denial paths have separate tests.
+		ctx := withUser(req.Context(), &AuthUser{ID: user, SessionID: "synthetic-verified-session"})
+		req = req.WithContext(context.WithValue(ctx, ctxAuthKind, AuthKindSession))
+	}
 	req.SetPathValue("agentId", agentID)
 	rr := httptest.NewRecorder()
 	ok := f.router.authMw.restrictedRequest(rr, req, user)
@@ -216,7 +246,7 @@ func TestRestrictedAllowlistPatternsAreRegistered(t *testing.T) {
 		registered[p] = true
 	}
 	// The declared table must be exactly the golden list, and only the
-	// grant-checked entries may carry a check.
+	// explicitly declared agent/session entries may carry a check.
 	golden := map[string]bool{}
 	for _, p := range restrictedAllowedPatterns {
 		golden[p] = true
@@ -225,6 +255,7 @@ func TestRestrictedAllowlistPatternsAreRegistered(t *testing.T) {
 	for _, p := range restrictedAgentCheckedPatterns {
 		checked[p] = true
 	}
+	checked["POST /api/v1/auth/cli-token"] = true
 	for p, rule := range restrictedRoutes {
 		if !golden[p] {
 			t.Errorf("restrictedRoutes entry %q is missing from the golden list", p)

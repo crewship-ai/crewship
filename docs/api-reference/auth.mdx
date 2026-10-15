@@ -216,6 +216,8 @@ A device-code flow (RFC 8628 in spirit) that hands a Crewship session to a local
 
 ### `POST /api/v1/auth/pair/start`
 
+A bearer token with limited scopes receives `403`: a pairing code must not mint a successor with wider authority. Sign in interactively to pair a CLI.
+
 Mint a new pairing code for the authenticated user.
 
 **Auth:** required.
@@ -376,7 +378,7 @@ Token format: `crewship_cli_` + 64 hex chars (32 random bytes, 256-bit entropy).
 
 ### `POST /api/v1/auth/cli-token`
 
-Mints a new token for the calling user.
+Mints a new token for the calling user. A bearer token with limited scopes cannot create another token or a pairing code and receives `403`; sign in to Settings to create one. Trusted full-role credentials (omitted/empty scopes or `*`) retain self-service token creation. Guest accounts require a verified interactive session.
 
 **Auth:** required.
 
@@ -387,7 +389,7 @@ Mints a new token for the calling user.
   "name": "ci-runner",
   "tier": "STANDARD",
   "expires_in_seconds": 86400,
-  "scopes": ["agents:read", "agents:run"]
+  "scopes": ["agents:write"]
 }
 ```
 
@@ -396,7 +398,7 @@ Mints a new token for the calling user.
 | `name` | string | Optional. Defaults to `"CLI token"`. Free-form label rendered in the Settings list. |
 | `tier` | string | Optional. `STANDARD` (default) or `ADMIN`. `STANDARD` tokens never expire unless `expires_in_seconds` is given; `ADMIN` tokens are OWNER-only, HMAC-signed, and default to a bounded lifetime (capped server-side). |
 | `expires_in_seconds` | integer | Optional. TTL in seconds from issue time. `0`/omitted means "tier default" (STANDARD: no expiry; ADMIN: the server's default ADMIN lifetime, clamped to the 7-day ADMIN max). An explicit ADMIN TTL below 60s is **rejected with `400`**, not floored. |
-| `scopes` | string[] | Optional. Narrows the token below the caller's full workspace role. Empty list = full role (historical behaviour). Each entry must be a known `resource:action` scope (e.g. `agents:read`, `crews:write`, `workspace:admin`, or wildcards `*` / `agents:*`); an unknown scope is `400`, a scope exceeding the caller's role is `403`. |
+| `scopes` | string[] | Optional. Narrows the token below the caller's full workspace role. Empty list = full role (historical behaviour). Each entry must be a known `resource:action` scope (e.g. `agents:write`, `crews:write`, `workspace:admin`, or wildcards `*` / `agents:*`); an unknown scope is `400`, a scope exceeding the caller's role is `403`. |
 
 **Response:** `200 OK`
 
@@ -706,4 +708,11 @@ Consumes the reset token and sets a new password. The token row is burned inside
 
 `POST /api/v1/auth/signup` accepts optional `invitation_token` alongside `full_name`, `email` and `password`. A new account redeems only that matching unexpired invitation; no token means ordinary standalone signup. Existing-account signup remains a no-op with the same generic `202` response.
 
-`POST /api/v1/auth/invitation/accept` requires authentication and an unrestricted credential. Body: `{"token":"<invitation-token>"}`. It checks the inviter's live trusted issuance authority, the live account email, the invitation's email, current workspace, expiry and pending state transactionally. Returns `200 {"ok":true}` on acceptance or same-account no-op retry; `401` unauthenticated, `403` narrowed credential, `400` malformed request, `404` unavailable invitation, `409` existing membership with a different role or a lost claim. Membership and token consumption commit together. This endpoint never changes an existing member's role. Invitation creation, reissue, withdrawal and first acceptance append workspace-scoped journal entries in the same transaction as the state change. Entries identify the acting user and invitation, and acceptance identifies its subject user; they never contain the proof, stored digest or email. A same-account no-op retry does not append another acceptance entry. An audit write failure rolls back the invitation and membership changes. After acceptance, same-account retries are no-op success even if the invitation later expires; removed membership, suspended account, changed email or deleted workspace cannot be restored by retrying.
+`POST /api/v1/auth/invitation/accept` requires authentication and an unrestricted credential. Body: `{"token":"<invitation-token>"}`. It checks the inviter's live trusted issuance authority, the live account email, the invitation's email, current workspace, expiry and pending state transactionally. Returns `200 {"ok":true}` on acceptance or same-account no-op retry; `401` unauthenticated, `403` narrowed credential, `400` malformed request, `404` unavailable invitation, `409` existing membership with a different role or a lost claim. Membership and token consumption commit together. This endpoint never changes an existing member's role. A pending Guest invitation first returns `400` with `code: guest_confirmation_required`; accepting its account-wide restriction requires an explicit retry body `{"token":"<invitation-token>","confirm_account_restriction":true}`. No membership or grants are installed before that confirmation. Confirmation does not override administrator protection: an account with OWNER or ADMIN membership anywhere returns `409` with `code: guest_administrator_conflict`; use a separate account. A matching Guest proof whose resources or issuer authority changed returns `409` with `code: invitation_changed`. Signup rolls back the new account in that case and displays the server's request-for-a-new-invitation message. Invitation creation, reissue, withdrawal and first acceptance append workspace-scoped journal entries in the same transaction as the state change. Entries identify the acting user and invitation, and acceptance identifies its subject user; they never contain the proof, stored digest or email. A same-account no-op retry does not append another acceptance entry. An audit write failure rolls back the invitation and membership changes. After acceptance, same-account retries are no-op success even if the invitation later expires; removed membership, suspended account, changed email or deleted workspace cannot be restored by retrying.
+
+
+Guest accounts can create their own normal CLI token from a verified browser or
+password-login session. The token retains the account-wide Guest ceiling and
+current object grants. The Guest token-creation entrypoint refuses CLI bearer
+authentication, so a narrower bearer cannot mint a wider successor. Existing
+OWNER-tier and explicit-scope checks remain in force.

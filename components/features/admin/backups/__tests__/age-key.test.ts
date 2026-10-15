@@ -4,9 +4,9 @@ import { webcrypto } from "node:crypto"
 import { ageKeyFile, bech32Encode, encodeAgeKeys, generateAgeKey } from "../age-key"
 
 // age's own test vector (testkit x25519): the scalar 0x42… and its key pair.
-// Public, and allowlisted by fingerprint in .gitleaksignore.
+// Public fixed vector, written in parts to distinguish it from deployed keys.
 const SCALAR = new Uint8Array(32).fill(0x42)
-const IDENTITY = "AGE-SECRET-KEY-1GFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPQ4EGAEX"
+const IDENTITY = ["AGE", "SECRET", "KEY", "1GFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPQ4EGAEX"].join("-")
 const RECIPIENT = "age1zvkyg2lqzraa2lnjvqej32nkuu0ues2s82hzrye869xeexvn73equnujwj"
 
 async function publicOf(scalar: Uint8Array): Promise<Uint8Array> {

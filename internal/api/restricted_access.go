@@ -21,6 +21,16 @@ type restrictedRule struct {
 // restrictedPass is the rule for patterns whose handlers enforce their own authority.
 var restrictedPass = restrictedRule{}
 
+// Only a verified interactive session can bootstrap a Guest CLI token. A
+// bearer token must not mint an unscoped successor that widens its scopes.
+var restrictedSessionTokenCreation = restrictedRule{check: func(m *AuthMiddleware, store access.Store, r *http.Request, userID string) error {
+	user := UserFromContext(r.Context())
+	if AuthKindFromContext(r.Context()) != AuthKindSession || user == nil || user.ID != userID || user.SessionID == "" {
+		return access.ErrDenied
+	}
+	return nil
+}}
+
 // restrictedAgentChatGrant requires a current agent/chat grant on {agentId}, checked
 // in the (live) agent's own workspace.
 var restrictedAgentChatGrant = restrictedRule{check: func(m *AuthMiddleware, store access.Store, r *http.Request, userID string) error {
@@ -38,6 +48,26 @@ var restrictedAgentChatGrant = restrictedRule{check: func(m *AuthMiddleware, sto
 // with an acceptance test, and update restrictedAllowedPatterns in
 // restricted_route_table_test.go in the same change.
 var restrictedRoutes = map[string]restrictedRule{
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects":                                   restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}":                             restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones":                  restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}":    restrictedPass,
+	"POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones":                 restrictedPass,
+	"PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}":    restrictedPass,
+	"DELETE /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}": restrictedPass,
+	"PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}":                             restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/access/me":                                                   restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issues":                                           restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}":                                 restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments":                        restrictedPass,
+	"POST /api/v1/workspaces/{workspaceId}/restricted-issues":                                          restrictedPass,
+	"POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments":                       restrictedPass,
+	"PATCH /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}":                               restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/deletion":                        restrictedPass,
+	"DELETE /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}":                              restrictedPass,
+
+	"POST /api/v1/auth/invitation/accept": restrictedPass,
+	"POST /api/v1/auth/cli-token":         restrictedSessionTokenCreation,
 	// Native private-chat source projection enforces its own exact resource rights.
 	"GET /api/v1/chats/{chatId}/project-input-options": restrictedPass,
 
@@ -77,14 +107,18 @@ var restrictedRoutes = map[string]restrictedRule{
 	"POST /api/v1/agents/{agentId}/chats": restrictedAgentChatGrant,
 
 	// Restricted pages, routines and pipeline runs.
-	"GET /api/v1/workspaces/{workspaceId}/restricted-pages":                restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routines":             restrictedPass,
-	"GET /api/v1/pages/{slug}/application/actions/{pendingId}":             restrictedPass,
-	"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run":           restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}": restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs":         restrictedPass,
-	"POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}":        restrictedPass,
-	"POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId}":   restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-pages":                             restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft": restrictedPass,
+	"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft": restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library":                   restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}":       restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routines":                          restrictedPass,
+	"GET /api/v1/pages/{slug}/application/actions/{pendingId}":                          restrictedPass,
+	"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run":                        restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}":              restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs":                      restrictedPass,
+	"POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}":                     restrictedPass,
+	"POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId}":                restrictedPass,
 
 	// Exact audience and server admission are enforced by these handlers.
 	"GET /api/v1/agents/{agentId}/run-profile":           restrictedPass,

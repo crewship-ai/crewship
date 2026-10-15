@@ -811,6 +811,9 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 		pinned.DefinitionHash = v.DefinitionHash
 		p = &pinned
 	}
+	if err := e.bindRunOrigin(ctx, &in, p); err != nil {
+		return nil, err
+	}
 	dsl, err := Parse([]byte(p.DefinitionJSON))
 	if err != nil {
 		return nil, fmt.Errorf("executor: parse stored DSL: %w", err)
@@ -1062,6 +1065,7 @@ func (e *Executor) RunDefinition(ctx context.Context, dsl *DSL, in RunInput) (*R
 // The unexported pipeline + dsl fields are populated internally by
 // Run / RunDefinition; callers leave them zero.
 type RunInput struct {
+	ChatOriginID string `json:"-"` // Server-owned inherited chat authority; never authored metadata.
 	// OnStarted runs after the run row is durable, before the first step.
 	OnStarted func(runID string)
 
@@ -1336,6 +1340,10 @@ func cancelledRunMessage(current, failedAtStep string) string {
 }
 
 func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *RunResult, err error) {
+	if in.pipeline != nil {
+		in.AuthorCrewID = in.pipeline.AuthorCrewID
+		in.AuthorAgentID = in.pipeline.AuthorAgentID
+	}
 	if err := e.checkInvokingUser(ctx, in); err != nil {
 		// Run may already have reserved an idempotency key. No run row exists
 		// yet at this boundary, so a revoked caller must not leave a ghost
@@ -2154,6 +2162,7 @@ func (e *Executor) runAgentStep(
 		}
 		req := AgentStepRequest{
 			WorkspaceID:      in.WorkspaceID,
+			ChatOriginID:     in.ChatOriginID,
 			AuthorCrewID:     in.AuthorCrewID,
 			AgentSlug:        step.AgentSlug,
 			Adapter:          am.Adapter,
@@ -2379,6 +2388,9 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 
 	nestedIn := buildNestedRunInput(parent, target, dsl, nestedInputs, parentRunID,
 		childRemainingBudget(parent, priorCostUSD), callStack, chainDepth)
+	if err := e.bindRunOrigin(ctx, &nestedIn, target); err != nil {
+		return "", 0, 0, err
+	}
 	// depth+1 so the runtime safety ceiling fires for legitimately
 	// deep chains (A→B→C→...). Save-time cycle detection catches
 	// loops; this ceiling catches accidental long chains.
@@ -2497,6 +2509,7 @@ func buildNestedRunInput(parent RunInput, target *Pipeline, dsl *DSL, nestedInpu
 		InvokingCrewID:      parent.AuthorCrewID, // parent's author IS the invoker for the nested call
 		InvokingAgentID:     parent.AuthorAgentID,
 		InvocationAuthority: parent.InvocationAuthority,
+		ChatOriginID:        parent.ChatOriginID,
 		InvokingUserID:      parent.InvokingUserID, // 3.7 — propagate the human trigger
 		TierOverride:        parent.TierOverride,   // 3.7 — propagate the batch/eval tier override
 		TriggeredVia:        TriggeredViaCallPipeline,
@@ -2635,6 +2648,7 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		InvokingCrewID:      in.InvokingCrewID,
 		InvokingAgentID:     in.InvokingAgentID,
 		InvocationAuthority: in.InvocationAuthority,
+		ChatOriginID:        in.ChatOriginID,
 		InvokingUserID:      in.InvokingUserID,
 		IdempotencyKey:      in.IdempotencyKey,
 		InputsJSON:          string(inputsRaw),

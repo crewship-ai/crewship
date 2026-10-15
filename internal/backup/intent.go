@@ -86,6 +86,10 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"agent_slug_reservations":            IntentInclude, // restored crew data under a slug stays out of reach of a new agent
 	"crew_members":                       IntentInclude,
 	"chats":                              IntentInclude,
+	"agent_operations":                   IntentInclude, // durable mutation results and provenance; not a bearer authority
+	"issue_mutation_outbox":              IntentInclude, // source-transaction delivery intent; forks never resume effects
+	"chat_entity_refs":                   IntentInclude, // durable chat cards, including human deletion receipts
+	"execution_origins":                  IntentInclude, // durable provenance; a fork strips its admission receipt
 	"agent_mcp_bindings":                 IntentInclude,
 	"journal_entries":                    IntentInclude,
 	// Replay receipts authenticate execution against this installation's
@@ -272,9 +276,10 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// recovery entry able to name what it is closing.
 	"page_panel_alerts": IntentInclude,
 	// `hooks` used to sit here; the table is hooks_config (#2274).
-	"labels":     IntentInclude,
-	"milestones": IntentInclude,
-	"projects":   IntentInclude,
+	"labels":                     IntentInclude,
+	"milestones":                 IntentInclude,
+	"projects":                   IntentInclude,
+	"project_guest_issue_intake": IntentInclude,
 
 	// === Eval / training (round-trip) =========================
 	"eval_runs":           IntentInclude,

@@ -148,6 +148,11 @@ func TestManagerOwnerLockAndUnsafeStateDirectories(t *testing.T) {
 				if err := os.Mkdir(state, 0755); err != nil {
 					t.Fatal(err)
 				}
+				// Preserve the deliberately unsafe test case independently
+				// of the build host's directory creation mask.
+				if err := os.Chmod(state, 0755); err != nil {
+					t.Fatal(err)
+				}
 			case "symlink":
 				if err := os.Symlink(root, state); err != nil {
 					t.Fatal(err)

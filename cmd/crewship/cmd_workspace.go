@@ -704,10 +704,11 @@ func sendWorkspaceInvitation(cmd *cobra.Command, email, role string) error {
 
 	client := newAPIClient()
 	wsID := client.GetWorkspaceID()
-	resp, err := client.Post("/api/v1/workspaces/"+wsID+"/invitations", map[string]string{
-		"email": email,
-		"role":  role,
-	})
+	body := map[string]any{"email": email, "role": role}
+	if err := addGuestPolicy(cmd, body); err != nil {
+		return err
+	}
+	resp, err := client.Post("/api/v1/workspaces/"+wsID+"/invitations", body)
 	if err != nil {
 		return err
 	}
@@ -865,6 +866,8 @@ func init() {
 	workspaceDeleteCmd.Flags().String("confirm", "", "Workspace slug, re-typed to confirm deletion (required)")
 	workspaceDeleteCmd.Flags().BoolP("yes", "y", false, "Skip the interactive confirmation prompt")
 
+	addGuestPolicyFlags(workspaceInviteCreateCmd)
+	addGuestPolicyFlags(workspaceInviteCmd)
 	workspaceInviteCreateCmd.Flags().String("role", "MEMBER", "Role: ADMIN|MANAGER|MEMBER|VIEWER")
 	// Mirror the role flag on the parent so `workspace invite <email> --role ADMIN` works.
 	workspaceInviteCmd.Flags().String("role", "MEMBER", "Role: ADMIN|MANAGER|MEMBER|VIEWER")

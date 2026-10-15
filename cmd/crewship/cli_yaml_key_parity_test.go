@@ -36,6 +36,9 @@ import (
 // field is covered even though a populated document would drop it.
 func yamlParityTypes() []any {
 	return []any{
+		sharedProjectMilestone{}, sharedProjectDetails{}, sharedIssue{}, sharedIssueProject{}, sharedIssueComment{}, projectGuestIntake{}, issueComment{},
+		// cmd_share.go
+		objectShareRow{},
 		// cmd_doctor_cleanup.go
 		localCleanupSnapshot{},
 		// cmd_config.go
@@ -133,6 +136,7 @@ func yamlParityTypes() []any {
 		PageFolderJSON{},
 		pageFoldersJSON{},
 		pageFolderShowJSON{},
+		sharedRoutine{},
 		// cmd_work.go — the durable work ledger's read surface. workItemDetail
 		// embeds WorkItemRow, so its json and yaml key sets can only agree
 		// while that embed is inline in both.

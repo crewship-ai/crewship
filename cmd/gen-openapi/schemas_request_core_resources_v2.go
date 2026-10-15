@@ -99,7 +99,8 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 		"routine_id": nullable(str()), "routine_inputs": freeObject(),
 	}, "title"))
 	request("CoreIssueUpdateRequestV2", object(map[string]any{
-		"title": nullable(str()), "description": nullable(str()), "status": nullable(enum("BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "DONE", "CANCELLED", "DUPLICATE", "FAILED")), "priority": nullable(str()),
+		"expected_revision": map[string]any{"type": "integer", "minimum": 1, "description": "Optional compare-and-set revision; stale values return 409 revision_conflict. Required by chat card editors."},
+		"title":             nullable(str()), "description": nullable(str()), "status": nullable(enum("BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "DONE", "CANCELLED", "DUPLICATE", "FAILED")), "priority": nullable(str()),
 		"assignee_type": nullable(enum("user", "agent")), "assignee_id": nullable(str()), "due_date": nullable(str()), "project_id": nullable(str()), "estimate": nullable(integer()), "parent_issue_id": nullable(str()), "milestone_id": nullable(str()), "sort_order": nullable(number()), "labels": nullable(stringArray),
 		"routine_id": nullable(str()), "routine_inputs": nullable(freeObject()),
 	}))

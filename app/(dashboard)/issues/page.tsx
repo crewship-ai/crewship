@@ -1,5 +1,7 @@
 "use client"
 
+import { useAccessMode } from "@/hooks/use-access-mode"
+import { RestrictedIssues } from "@/components/features/issues/restricted-issues"
 import { Suspense } from "react"
 import { OrchestrationPageShell } from "@/components/features/orchestration/orchestration-page-shell"
 
@@ -9,5 +11,8 @@ import { OrchestrationPageShell } from "@/components/features/orchestration/orch
 // Graph/Timeline/Feed now live on /activity, and Routines lives on
 // /routines as a top-level page in its own right.
 export default function IssuesPage() {
+  const mode = useAccessMode()
+  if (mode === "loading") return null
+  if (mode === "restricted") return <RestrictedIssues />
   return <Suspense><OrchestrationPageShell mode="issues" /></Suspense>
 }

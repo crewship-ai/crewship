@@ -1,7 +1,6 @@
 -- Final durable Board foundations, including source pins, comments, jobs and audit.
 -- Present in the Artifact delivery layer for shared storage/restore compatibility;
 -- API/editor availability is controlled by the subsequent Board product delivery.
--- Existing objects are accepted only after Migrate's exact prerelease preflight.
 
 CREATE TABLE IF NOT EXISTS page_boards (
   page_id TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,

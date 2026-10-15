@@ -26,6 +26,7 @@ export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: {
   const [copyRevision, setCopyRevision] = useState<number | null>(null)
   const [copyResult, setCopyResult] = useState<string | null>(null)
   const [view, setView] = useState<"preview" | "source" | "history" | "compare">("preview")
+  const [comparison, setComparison] = useState<{ before: number; after: number } | null>(null)
   const [pickingPoint, setPickingPoint] = useState(false)
   const [point, setPoint] = useState<{ revision: number; anchor: Extract<ArtifactAnchor, { type: "point" }> } | null>(null)
   const [selectedAnchor, setSelectedAnchor] = useState<{ revision: number; anchor: ArtifactAnchor } | null>(null)
@@ -95,7 +96,11 @@ export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: {
       <span className="mr-auto text-sm font-medium">HTML artifact {artifact.head_rev > 0 && <span className="ml-2 text-xs font-normal text-muted-foreground">Revision {artifact.revision}{artifact.revision !== artifact.head_rev ? ` · latest ${artifact.head_rev}` : " · latest"}</span>}</span>
       {([["preview", Eye, "Static preview"], ["source", Code2, "Source"], ["history", History, "History"]] as const).map(([id, Icon, label]) => <Button key={id} variant={view === id ? "secondary" : "ghost"} size="sm" className="coarse:h-12" onClick={() => setView(id)} aria-pressed={view === id}><Icon className="mr-1.5 h-4 w-4" />{label}</Button>)}
       {pageId && artifact.head_rev > 0 && <ContentPresence context={{ kind: "artifact", pageId, revision: artifact.revision }} />}
-      {artifact.revisions.length > 1 && <Button variant={view === "compare" ? "secondary" : "ghost"} size="sm" className="coarse:h-12" aria-pressed={view === "compare"} onClick={() => setView("compare")}><Columns2 className="mr-1.5 h-4 w-4" />Compare</Button>}
+      {artifact.revisions.length > 1 && <Button variant={view === "compare" ? "secondary" : "ghost"} size="sm" className="coarse:h-12" aria-pressed={view === "compare"} onClick={() => {
+        const newest = Math.max(...artifact.revisions.map(item => item.revision))
+        setComparison({ before: artifact.revision !== newest ? artifact.revision : [...artifact.revisions].sort((a, b) => b.revision - a.revision)[1]?.revision ?? newest, after: newest })
+        setView("compare")
+      }}><Columns2 className="mr-1.5 h-4 w-4" />Compare</Button>}
       {artifact.head_rev > 0 && <ArtifactSendButton />}
       {artifact.can_copy && artifact.head_rev > 0 && <Button variant="ghost" size="sm" className="coarse:h-12" onClick={() => { copy.reset(); setCopyRevision(artifact.revision) }}><Copy className="mr-1.5 h-4 w-4" />Copy</Button>}
       {artifact.head_rev > 0 && <Button variant={commentsOpen ? "secondary" : "ghost"} size="sm" className="coarse:h-12" aria-pressed={commentsOpen} onClick={() => { setCommentsVisited(true); setCommentsOpen(open => !open) }}><MessageSquare className="mr-1.5 h-4 w-4" />Comments</Button>}
@@ -125,7 +130,7 @@ export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: {
       onEdit={() => { setDraftBaseRev(artifact.head_rev); setDraft(artifact.html) }}
       onDownload={downloadSource}
     />}
-    {view === "compare" && <ArtifactCompare workspaceId={workspaceId} slug={slug} revisions={artifact.revisions.map(item => item.revision)} selected={artifact.revision} />}
+    {view === "compare" && comparison && <ArtifactCompare workspaceId={workspaceId} slug={slug} revisions={artifact.revisions.map(item => item.revision)} comparison={comparison} onComparisonChange={setComparison} />}
     {view === "history" && <ArtifactHistory
       artifact={artifact} pending={save.isPending}
       onView={selected => { setRevision(selected); setView("preview") }}
@@ -139,5 +144,5 @@ export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: {
     {artifact.head_rev > 0 && <ArtifactAgentRequests />}
     {commentsVisited && artifact.head_rev > 0 && <div hidden={!commentsOpen}><ArtifactComments workspaceId={workspaceId} slug={slug} revision={artifact.revision} onViewRevision={selected => { setRevision(selected); setView("preview") }} onDirtyChange={setCommentsDirty} selectedAnchor={selectedAnchor} onAnchorConsumed={() => setSelectedAnchor(null)} onViewAnchor={(selected, anchor) => { setRevision(selected); setView("preview"); setPickingPoint(false); setPoint(anchor.type === "point" ? { revision: selected, anchor } : null) }} /></div>}
   </section>
-  return artifact.head_rev > 0 ? <ArtifactAgentWorkProvider workspaceId={workspaceId} slug={slug} revision={artifact.revision} head={artifact.head_rev} onViewRevision={selected => { setRevision(selected); setView("preview") }} onDirtyChange={setAgentDraftDirty}>{content}</ArtifactAgentWorkProvider> : content
+  return artifact.head_rev > 0 ? <ArtifactAgentWorkProvider workspaceId={workspaceId} slug={slug} revision={artifact.revision} head={artifact.head_rev} onViewRevision={selected => { setRevision(selected); setView("preview") }} onCompareRevisions={(before, after) => { setComparison({ before, after }); setView("compare") }} onDirtyChange={setAgentDraftDirty}>{content}</ArtifactAgentWorkProvider> : content
 }

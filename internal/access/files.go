@@ -100,7 +100,7 @@ func currentFileAudience(ctx context.Context, q contextQuery, user, workspace, a
 		Scan(&a.ChatGeneration, &a.ChatRevision); err != nil {
 		return Attempt{}, ErrDenied
 	}
-	rows, err := q.QueryContext(ctx, `SELECT resource_kind,COALESCE(agent_id,project_id),operation FROM access_grants WHERE member_id=?`, m.ID)
+	rows, err := q.QueryContext(ctx, `SELECT resource_kind,COALESCE(agent_id,project_id,routine_id),operation FROM live_access_grants WHERE member_id=?`, m.ID)
 	if err != nil {
 		return Attempt{}, err
 	}

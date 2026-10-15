@@ -11,6 +11,9 @@ import (
 // host code may issue or carry it. A client-provided receipt grants no access.
 // Every use must compare it to a freshly authorized database snapshot.
 type Receipt struct {
+	Kind           string `json:"kind,omitempty"`
+	ResourceID     string `json:"resource_id,omitempty"`
+	CrewID         string `json:"crew_id,omitempty"`
 	UserID         string `json:"user_id"`
 	ChatID         string `json:"chat_id"`
 	WorkspaceID    string `json:"workspace_id"`
@@ -35,15 +38,28 @@ func ReceiptFromContext(ctx context.Context) *Receipt {
 
 // CaptureTrusted authorizes and captures the epoch in one SQL snapshot. An
 // expected receipt fences retries: re-admission cannot silently refresh it.
+type Queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 func CaptureTrusted(ctx context.Context, db *sql.DB, chat, user string, expected *Receipt) (*Receipt, error) {
+	if db == nil {
+		return nil, nil
+	}
+	return CaptureTrustedQuery(ctx, db, chat, user, expected)
+}
+
+// CaptureTrustedQuery allows admission to be fenced in the caller's write transaction.
+func CaptureTrustedQuery(ctx context.Context, db Queryer, chat, user string, expected *Receipt) (*Receipt, error) {
 	if db == nil || chat == "" || user == "" {
 		return nil, nil
 	}
 	r := Receipt{UserID: user, ChatID: chat}
-	args := []any{user, user, chat, user}
+	args := []any{user, chat, user}
 	args = append(args, Args(user)...)
 	err := db.QueryRowContext(ctx, `SELECT c.workspace_id,c.agent_id,wm.id,wm.access_revision,c.authority_generation,c.authority_revision
- FROM chats c JOIN users human ON human.id=? AND human.suspended_at IS NULL JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=?
+ FROM chats c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=?
+ JOIN users u ON u.id=wm.user_id AND u.suspended_at IS NULL
  JOIN workspaces w ON w.id=c.workspace_id AND w.deleted_at IS NULL
  JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL
  WHERE c.id=? AND NOT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=? AND access_mode='restricted')

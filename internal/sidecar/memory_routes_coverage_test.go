@@ -94,6 +94,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"GET /issue/":           guardHandlerIdentity,
 	"PATCH /issue/":         guardHandlerIdentity,
 	"POST /issue/ /comment": guardHandlerIdentity,
+	"POST /issue/ /show":    guardHandlerIdentity,
 	"POST /issue/ /work":    guardHandlerIdentity,
 	"GET /issue/ /comments": guardHandlerIdentity,
 	"POST /issue/ /link":    guardHandlerIdentity,
@@ -115,6 +116,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	// which keys on the ACTING agent — so this route must resolve identity or
 	// the grant model means nothing.
 	"POST /mcp/notify":            guardHandlerIdentity,
+	"POST /mcp/issues":            guardHandlerIdentity,
 	"POST /pipelines/save":        guardHandlerIdentity,
 	"POST /pipelines/ /run":       guardHandlerIdentity,
 	"POST /connections/ /message": guardHandlerIdentity,
@@ -142,7 +144,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	// existing (unchanged) trust boundary, not something this table papers
 	// over. Note it explicitly so a future reader does not read guardNone as
 	// "checked and safe for per-agent isolation".
-	"POST /mission/ /start":       guardNone,
+	"POST /mission/ /start":       guardHandlerIdentity,
 	"POST /pipelines/ /dry_run":   guardNone,
 	"GET /connections/ /messages": guardNone,
 	"GET /connections/ /files":    guardNone,
@@ -163,7 +165,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"PATCH /manifest":                 guardNone,
 	"GET /pipelines":                  guardNone,
 	"GET /pipelines/":                 guardNone,
-	"POST /routines/schedules/create": guardNone,
+	"POST /routines/schedules/create": guardHandlerIdentity,
 	"POST /skills/generate":           guardNone,
 	"POST /skills/author":             guardNone,
 	"POST /credentials/create":        guardNone,

@@ -29,6 +29,7 @@ func openResumeTestDB(t *testing.T) *sql.DB {
 	db := openStoreTestDB(t)
 	if _, err := db.ExecContext(context.Background(), `
 CREATE TABLE IF NOT EXISTS pipeline_runs (
+chat_origin_id TEXT,
     id                  TEXT PRIMARY KEY,
     workspace_id        TEXT NOT NULL,
     pipeline_id         TEXT NOT NULL,
