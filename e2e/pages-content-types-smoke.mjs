@@ -44,12 +44,20 @@ try {
   await expect(page.getByText(/unsupported or conflicting content format/)).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Attach an HTML artifact' })).toHaveCount(0)
   await expect(page.locator('iframe')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeDisabled()
+  await page.goto('/pages/registry-empty?mode=edit')
+  await expect(page.getByText(/unsupported or conflicting content format/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Share', exact: true })).toBeDisabled()
+  await expect(page.locator('[data-slot=page-editor]')).toHaveCount(0)
   // Keep the request listener attached through a bounded network quiet period,
   // including React effects after the unsupported state first becomes visible.
   await page.waitForLoadState('networkidle', { timeout: 10000 })
   await page.screenshot({ path: `${output}/${fixture.name}.png` })
   assert.deepEqual(forbiddenRequests, [], `${fixture.name}: content adapter fetched`)
-  checks.push(`${fixture.name}: no content adapter request/frame/initialization`)
+  checks.push(`${fixture.name}: no content adapter request/frame/initialization or active editor toolbar (including direct edit URL)`)
   await page.unroute('**/api/v1/pages/registry-empty?*')
   page.off('request', listener)
  }
