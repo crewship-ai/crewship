@@ -308,9 +308,22 @@ func TestPageAssetRealRouterAuthentication(t *testing.T) {
 
 func TestPageAssetRequiresMutationID(t *testing.T) {
 	h, _, _, ws, user, _ := artifactFixture(t)
-	w := uploadAsset(t, h, ws, user, "report", "", pageAssetPNG(t))
-	artifactExpect(t, w, 400)
-	if assetBlobFiles(t, h.artifactStoragePath) != 0 {
-		t.Fatal("missing identity published bytes")
+	for _, id := range []string{"", "bad.dot", strings.Repeat("a", 129)} {
+		w := uploadAsset(t, h, ws, user, "report", id, pageAssetPNG(t))
+		artifactExpect(t, w, 400)
+		if assetBlobFiles(t, h.artifactStoragePath) != 0 {
+			t.Fatal("invalid identity published bytes")
+		}
+	}
+}
+func TestPageAssetRetryIsActorBound(t *testing.T) {
+	h, _, _, ws, user, _ := artifactFixture(t)
+	raw := pageAssetPNG(t)
+	artifactExpect(t, uploadAsset(t, h, ws, user, "report", "actor-bound", raw), 201)
+	pagesSeedUser(t, h, ws, "asset-other-admin", "asset-other-admin@example.invalid", "ADMIN")
+	before := assetBlobFiles(t, h.artifactStoragePath)
+	artifactExpect(t, uploadAsset(t, h, ws, "asset-other-admin", "report", "actor-bound", raw), 409)
+	if assetBlobFiles(t, h.artifactStoragePath) != before {
+		t.Fatal("different actor retry published bytes")
 	}
 }
