@@ -77,6 +77,68 @@ for (const width of [1280, 390]) {
   })
 }
 
+// The production grid stays read only while mobile navigation returns the
+// selected source context to an actionable composer, without sending it.
+test.describe("mobile artifact selection", () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  test("Chat and Work uncover the composer; Ask selection preserves its draft", async ({ page }) => {
+    let sendAttempts = 0
+    const agent = { id: "entity-agent", slug: "_", name: "Jamie", status: "IDLE", crew_id: "crew", crew_name: "Platform", role: "lead", current_user_can_chat: true }
+    await page.route("**/api/**", async (route) => {
+      const request = route.request(), path = new URL(request.url()).pathname
+      let body: unknown = [], status = 200
+      if (request.method() === "POST" && path.includes("/chats/")) sendAttempts++
+      if (path === "/api/auth/session") body = { user: { id: "viewer", name: "Pavel", email: "pavel@example.test" }, expires: "2099-01-01T00:00:00Z" }
+      else if (path === "/api/v1/workspaces") body = [{ id: "test-workspace-id", name: "Test", slug: "test", currentUserRole: "ADMIN" }]
+      else if (path === "/api/v1/ws-token") { status = 404; body = {} }
+      else if (path === "/api/v1/conversations") body = { conversations: [], next_offset: null }
+      else if (path === "/api/v1/agents") body = [agent]
+      else if (path === "/api/v1/crews") body = [{ id: "crew", name: "Platform", slug: "platform" }]
+      else if (path === "/api/v1/agents/entity-agent") body = agent
+      else if (path === "/api/v1/agents/entity-agent/chats") body = [{ id: "chat-1", title: "Table selection", mode: "private", kind: "direct", status: "active", message_count: 1, started_at: "2026-10-13T09:00:00Z", updated_at: "2026-10-13T09:00:00Z" }]
+      else if (path.endsWith("/execution-profile")) body = { mode: "trusted" }
+      else if (path.endsWith("/messages")) body = { messages: [{ id: "trigger-message", role: "user", content: "Read the output", ts: "2026-10-13T09:00:00Z" }] }
+      else if (path.endsWith("/entity-refs")) body = { contract_version: 1, reset: true, snapshot_id: "empty", refs: [], has_more: false, snapshot_complete: true, next_cursor: "" }
+      else if (path === "/api/v1/agents/entity-agent/files") body = [{ name: "selection.csv", path: "runs/msg_test/selection.csv", is_dir: false, size: 33 }]
+      else if (path === "/api/v1/agents/entity-agent/files/download") return route.fulfill({ contentType: "application/octet-stream", body: "Region,Revenue\nNorth,10\nSouth,20\n" })
+      await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
+    })
+    await page.goto("/chat/_?session=chat-1")
+    const composer = page.getByPlaceholder("Message Jamie...")
+    await expect(composer).toBeVisible({ timeout: 30_000 })
+    await composer.fill("Keep this existing draft.")
+    const tabs = page.getByRole("tablist", { name: "Chat panel", exact: true })
+    const artifacts = tabs.getByRole("tab", { name: "Artifacts", exact: true })
+    const chat = tabs.getByRole("tab", { name: "Chat", exact: true })
+    await artifacts.click()
+    await page.getByRole("button", { name: /^selection\.csv/ }).click()
+    const grid = page.getByRole("region", { name: "Spreadsheet preview", exact: true })
+    await expect(grid).toBeVisible({ timeout: 30_000 })
+    await chat.click()
+    await expect(page.getByRole("complementary", { name: "Live artifact", exact: true })).toHaveCount(0)
+    await composer.click({ trial: true })
+    await expect(composer).toHaveValue("Keep this existing draft.")
+    await artifacts.click()
+    await expect(grid).toBeVisible()
+    await tabs.getByRole("tab", { name: "Work", exact: true }).click()
+    await expect(page.getByRole("complementary", { name: "Live artifact", exact: true })).toHaveCount(0)
+    await artifacts.click()
+    await expect(grid).toBeVisible()
+    await grid.getByRole("checkbox", { name: "Select source row 2", exact: true }).check()
+    await grid.getByRole("button", { name: "Ask about selection (1)", exact: true }).focus()
+    await page.keyboard.press("Enter")
+    await expect(chat).toHaveAttribute("aria-selected", "true")
+    await expect(page.getByRole("complementary", { name: "Live artifact", exact: true })).toHaveCount(0)
+    await composer.click({ trial: true })
+    await expect(composer).toHaveValue(/Keep this existing draft\.[\s\S]*A2:B2/)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    const draft = await composer.inputValue()
+    await page.reload()
+    await expect(composer).toHaveValue(draft, { timeout: 30_000 })
+    expect(sendAttempts).toBe(0)
+  })
+})
+
 for (const width of [1280,390]) {
   test(`Guest project Issues at ${width}px show only the authorized projection`,async({page})=>{
     await page.setViewportSize({width,height:900})

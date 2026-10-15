@@ -297,7 +297,13 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const artifactScope = JSON.stringify([currentUserId, workspaceId, agentId, sessionId])
   const artifactContextNonce = useRef(0)
   const [artifactContext, setArtifactContext] = useState<{ id: number; text: string; scope: string } | null>(null)
-  const askArtifactSelection = useCallback((text: string) => setArtifactContext({ id: ++artifactContextNonce.current, text: `Source agent: ${agentId} · workspace: ${workspaceId}\n${text}`, scope: artifactScope }), [agentId, workspaceId, artifactScope])
+  const askArtifactSelection = useCallback((text: string) => {
+    setArtifactContext({ id: ++artifactContextNonce.current, text: `Source agent: ${agentId} · workspace: ${workspaceId}\n${text}`, scope: artifactScope })
+    if (mobilePanel) {
+      useArtifactStore.getState().setOpen(false)
+      onMobilePanelChange?.("chat")
+    }
+  }, [agentId, workspaceId, artifactScope, mobilePanel, onMobilePanelChange])
   // A restricted account has no WebSocket in any workspace (#2861).
   const sessionRealtime = useAccessMode() === "trusted"
   const canChat = sessionRealtime || agentMeta?.current_user_can_chat === true
@@ -1067,7 +1073,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           initialTab={mobilePanel}
           style={{ width: "100%", height: "100%" }}
         />
-        {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
+        {mobilePanel === "artifacts" && executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
       </div>
     )
   }
@@ -1164,7 +1170,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         )}
         <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
         <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
-        {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
       </div>
     )
   }
