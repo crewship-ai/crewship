@@ -432,6 +432,7 @@ func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByR
 		return "", "", "", fmt.Errorf("writing Dockerfile: %w", err)
 	}
 
+	stagedFeatures := make([]*ResolvedFeature, 0, len(features))
 	for _, f := range features {
 		if f == nil {
 			continue
@@ -441,14 +442,17 @@ func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByR
 			cleanup()
 			return "", "", "", fmt.Errorf("staging feature %s: %w", f.Metadata.ID, err)
 		}
+		staged := *f
+		staged.Dir = dst
+		stagedFeatures = append(stagedFeatures, &staged)
 	}
 
 	// Derive the tag from the Dockerfile AND the staged feature contents. The
 	// Dockerfile alone only captures base image + refs + options; hashing the
-	// actual feature files means a feature that republishes new content under
+	// actual staged feature files means a feature that republishes new content under
 	// the same mutable ref (e.g. ":2") yields a new tag and a clean rebuild,
 	// instead of the exact-tag fast path silently reusing a stale image.
-	contentHash, err := hashBuildInputs(dockerfile, features)
+	contentHash, err := hashBuildInputs(dockerfile, stagedFeatures)
 	if err != nil {
 		cleanup()
 		return "", "", "", fmt.Errorf("hashing build inputs: %w", err)

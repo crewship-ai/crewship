@@ -85,6 +85,12 @@ an unpinned build would land the image on one daemon while the container create
 looked for it on another. Your `docker context` is yours; it has no effect on
 where Crewship builds.
 
+Concurrent cold downloads of the same feature cache key coordinate across
+downloader instances, so one build cannot replace files another has resolved.
+Different feature keys can download independently, and a cancelled waiting
+build exits without cancelling the active download. Image content hashes are
+computed from the staged build context rather than rereading the shared cache.
+
 Intermediate per-feature layers are tagged `crewship-feat:{hash}` (regenerable,
 never referenced directly); the final per-crew image is still tagged
 `crewship-cache:{hash[:12]}`. The transition is transparent: if BuildKit is

@@ -198,3 +198,32 @@ func TestProvision_BuildKitBuildErrorSurfaces(t *testing.T) {
 		t.Fatal("expected build error to surface, got nil")
 	}
 }
+
+// The image tag must describe files actually sent to BuildKit. File creation
+// permissions can differ from source permissions under the process umask; no
+// test changes that umask. Rehashing the shared source gives a different tag.
+func TestStageBuildContextTagMatchesStagedSnapshot(t *testing.T) {
+	featureDir := t.TempDir()
+	path := filepath.Join(featureDir, "install.sh")
+	if err := os.WriteFile(path, []byte("echo staged"), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	feature := &ResolvedFeature{Ref: "ghcr.io/example/features/snapshot:1", Dir: featureDir, Metadata: FeatureMetadata{ID: "snapshot"}}
+	dir, dockerfile, tag, err := stageBuildContext("ubuntu:22.04", []*ResolvedFeature{feature}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	staged := *feature
+	staged.Dir = filepath.Join(dir, featureContextDir, feature.Metadata.ID)
+	hash, err := hashBuildInputs(dockerfile, []*ResolvedFeature{&staged})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := FeatureImageTagPrefix + hash[:12]; tag != want {
+		t.Fatalf("tag %s describes shared cache rather than staged snapshot %s", tag, want)
+	}
+}
