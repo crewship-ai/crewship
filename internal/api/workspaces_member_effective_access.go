@@ -126,7 +126,7 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 		} else if right.Kind == "routine" {
 			decision.State = "conditional"
 			decision.Reason = "Routine and agent grants are current; inputs, budget and runtime readiness are checked at invocation."
-		} else if right.Kind == "project" && right.Operation == "contribute" {
+		} else if right.Kind == "project" && (right.Operation == "contribute" || right.Operation == "manage") {
 			readErr := store.Check(r.Context(), user, workspace, access.Right{Kind: "project", ID: right.ID, Operation: "read"})
 			if readErr != nil && !errors.Is(readErr, access.ErrDenied) {
 				h.memberAccessError(w, readErr)
@@ -135,6 +135,11 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 			if readErr != nil {
 				decision.State = "denied"
 				decision.Reason = "Project contribution also requires a current Read grant."
+				if right.Operation == "manage" {
+					decision.Reason = "Project management also requires a current Read grant."
+				}
+			} else if right.Operation == "manage" {
+				decision.Reason = "Read and Manage permit changing this project's name and description. Milestones, deletion, file writes and administration remain separate."
 			} else {
 				decision.State = "conditional"
 				decision.Reason = "Read and Contribute are current. Shared comments and intake arrangement are allowed; new requests also require configured project intake. Trusted execution and review remain separate."

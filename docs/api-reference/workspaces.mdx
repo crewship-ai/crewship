@@ -721,7 +721,7 @@ POST /api/v1/workspaces/{workspaceId}/invitations
 `access_mode` is optional: `trusted` (default) or `restricted` (Guest).
 `rights` is an optional array of `{kind,id,operation}` resource grants, empty
 by default. Supported kinds are agent, routine and project; a routine supports
-View/Run, agents support discover/chat/run/delegate, and projects list/read/contribute/write/delete.
+View/Run, agents support discover/chat/run/delegate, and projects list/read/contribute/manage/write/delete.
 Trusted invitations require empty rights; Guest invitations cannot grant ADMIN.
 The server revalidates resources and issuer authority during redemption and
 installs membership and grants atomically. Existing accounts must explicitly
@@ -2078,7 +2078,7 @@ query parameters are required.
 
 `rights` is an explicit array, including when empty. Agent operations are
 `discover`, `chat`, `run`, `delegate`; project operations are `list`, `read`,
-`contribute`, `write`, `delete`; routine operations are `view` and `run`. Grants do not open application routes whose restricted
+`contribute`, `manage`, `write`, `delete`; routine operations are `view` and `run`. Grants do not open application routes whose restricted
 runtime integration is incomplete.
 
 | Status | Condition |
@@ -2251,8 +2251,8 @@ GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects
 ```
 
 Authenticated Guest only. Returns projects with a live `project.list` grant,
-including empty projects: `id`, `name`, `can_contribute`, `intake_ready`.
-Contribution requires both live `project.read` and `project.contribute`.
+including empty projects: `id`, `name`, `can_contribute`, `can_manage`, `intake_ready`.
+Contribution requires both live `project.read` and `project.contribute`. Management requires live `project.read` and `project.manage`; both mutation hints also reflect token scopes.
 Intake readiness discloses a boolean, never the receiving crew or agent.
 Statuses: 200 filtered array; 401 authentication; 403 workspace gate;
 404 unavailable membership; 500 database error. CLI: `crewship issue shared projects`.
@@ -2392,3 +2392,35 @@ Statuses: 200 authorized projection; 401 authentication; 403 workspace/token
 scope; 404 absent/foreign/deleted/revoked definition or non-Guest membership;
 500 unavailable data. No execution runtime is needed for View.
 CLI: `crewship routine shared [routine-id-or-slug]`.
+
+## Guest project details
+
+### `GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}`
+
+Requires the authenticated Guest's current project Read and Manage shares. Manage explicitly shares the project description; existing Read shares retain their prior issue/file projection. Returns only
+`id`, `name`, `description` (empty when unset), `version` and `can_manage`.
+`version` is an opaque content/updated-time snapshot used to prevent overwriting
+changes, including edits through the trusted project API. `can_manage` intersects
+live Manage authority with the credential's existing mutation scope. No lead,
+crew, credential, other-member identity or private activity is returned.
+
+**Response:** `200 OK`
+
+```json
+{"id":"project_123","name":"Client delivery","description":"Reviewed client scope","version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","can_manage":true}
+```
+
+### `PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}`
+
+Requires Read and Manage, an active account and current trusted grant issuers,
+checked in the same transaction as the update and audit. Body contains exactly
+`name`, `description` and the reviewed `version`. Name must be nonblank and at most
+4096 UTF-8 bytes; description is a required string up to 65536 bytes, and empty
+clears it. Unknown fields are refused. Manage here supports basic project details;
+milestones, deletion, file writes and intake configuration remain separate.
+
+Both routes return 200 with the thin details projection; 400 invalid request,
+401 unauthenticated, 404 unavailable local project/grant,
+500 storage/audit failure. PUT additionally returns 403 for a limited mutation credential and 409 on changed details, with no update;
+reload, review and explicitly resubmit. Audit failure rolls back the update.
+CLI equivalents are `project shared` and `project shared update`.

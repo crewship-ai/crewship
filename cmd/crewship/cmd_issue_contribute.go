@@ -11,6 +11,7 @@ import (
 )
 
 type sharedIssueProject struct {
+	CanManage     bool   `json:"can_manage" yaml:"can_manage"`
 	ID            string `json:"id" yaml:"id"`
 	Name          string `json:"name" yaml:"name"`
 	CanContribute bool   `json:"can_contribute" yaml:"can_contribute"`
@@ -71,9 +72,9 @@ func newSharedIssueProjectsCmd() *cobra.Command {
 		}
 		rows := [][]string{}
 		for _, item := range items {
-			rows = append(rows, []string{item.ID, item.Name, fmt.Sprint(item.CanContribute), fmt.Sprint(item.IntakeReady)})
+			rows = append(rows, []string{item.ID, item.Name, fmt.Sprint(item.CanContribute), fmt.Sprint(item.CanManage), fmt.Sprint(item.IntakeReady)})
 		}
-		return newFormatter().Auto(items, []string{"PROJECT", "NAME", "CONTRIBUTE", "INTAKE READY"}, rows)
+		return newFormatter().Auto(items, []string{"PROJECT", "NAME", "CONTRIBUTE", "MANAGE", "INTAKE READY"}, rows)
 	}}
 }
 

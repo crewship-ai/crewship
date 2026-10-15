@@ -138,6 +138,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access/effective", authed(wsCtx(http.HandlerFunc(ws.GetMemberEffectiveAccess))))
 	// openapi: responses 200,400,401,403,404,409,500
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/access/me", authed(wsCtx(http.HandlerFunc(ws.GetOwnEffectiveAccess))))
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}", authed(wsCtx(http.HandlerFunc(r.restrictedProjectDetails))))
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}", roleInline, r.restrictedProjectDetails)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues", authed(wsCtx(http.HandlerFunc(r.restrictedIssues))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}", authed(wsCtx(http.HandlerFunc(r.restrictedIssues))))
 	// openapi: responses 200,400,401,403,404,500

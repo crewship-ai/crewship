@@ -32,8 +32,8 @@ Supported commands are `share <routine|project> <resource-id>`,
 `unshare <routine|project> <resource-id>`. `share` and `unshare` require `--with`
 and `--operation`; operations are repeatable or comma-separated. Routine
 operations support `view` and `run`; project operations support independent
-`list`, `read` and `contribute`. Routine Run also requires all agent grants and a qualified
-installed runtime. Routine output sharing/Edit and full project Manage remain separate work.
+`list`, `read`, `contribute` and `manage`. Routine Run also requires all agent grants and a qualified
+installed runtime. Routine output sharing/Edit, milestones and issue deletion are outside this increment.
 
 Each mutation reads the selected member's current snapshot once and submits
 its membership ID and revision. Other objects, operations and unchanged
@@ -50,7 +50,7 @@ list. Use `workspace member access get` for a complete member policy.
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--with <member>` | required | Existing membership ID, user ID or exact email. |
-| `--operation <operation>` | required | Routine `view` or `run`; project `list`, `read` or `contribute`. Repeat or use comma-separated values. |
+| `--operation <operation>` | required | Routine `view` or `run`; project `list`, `read`, `contribute` or `manage`. Repeat or use comma-separated values. |
 | `--reissue` | `false` | Explicitly reissue the selected rights as the authenticated administrator. |
 
 ## `share list <routine|project> <resource-id>`
@@ -65,3 +65,5 @@ arrangement. It also requires `read`; `list` is needed to browse the project.
 An administrator configures new-request routing with `crewship project guest-intake`.
 
 Routine shares also accept `--operation view` to expose that definition without execution. View and Run are independent; review prompts and defaults before adding View. Existing Run shares do not expand automatically.
+Project `manage` with `read` permits editing the project name and description. It
+does not imply Contribute, source-file writes, intake configuration or grant administration.

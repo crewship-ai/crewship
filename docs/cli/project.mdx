@@ -223,3 +223,32 @@ snapshot returns 409 without retry. The chosen crew must be active in the same
 workspace and have a live LEAD agent. Its ID, name and configuration revision
 appear only in this administrative view. New requests start unassigned in
 Backlog; configuring intake does not grant agent or routine execution access.
+
+
+## `crewship project shared <project-id>`
+
+Read basic name and description shared with your Guest account. Requires current
+project Read and Manage; the response includes `can_manage` and an opaque snapshot `version`.
+JSON and YAML use the same field names. Other projects, leads and private activity
+are not included. Use `crewship issue shared projects` to list shared project IDs.
+
+```sh
+crewship project shared PROJECT_ID --format json
+```
+
+## `crewship project shared update <project-id>`
+
+Update the shared project's name and description with live Read and Manage shares.
+Use the version you reviewed; the command does not fetch a newer version or retry
+409 conflicts. Guest management does not grant project-file writes, milestones,
+issue deletion, intake configuration or access administration.
+
+| Flag | Meaning |
+| --- | --- |
+| `--name` | Required complete project name. |
+| `--description` | Required complete description; empty clears it. |
+| `--version` | Required snapshot version returned by `project shared`. |
+
+```sh
+crewship project shared update PROJECT_ID --name "Client delivery" --description "Reviewed scope" --version REVIEWED_VERSION
+```
