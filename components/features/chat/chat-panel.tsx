@@ -980,11 +980,11 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     requestAnimationFrame(() => { if (issueOpener.current?.isConnected) issueOpener.current.focus() })
   }, [])
   useEffect(() => {
-    if (!issueTarget || isMobile) return
+    if (!issueTarget || isMobile || drawerActiveTab !== "work") return
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) closeIssue() }
     window.addEventListener("keydown", escape)
     return () => window.removeEventListener("keydown", escape)
-  }, [issueTarget, isMobile, closeIssue])
+  }, [issueTarget, isMobile, drawerActiveTab, closeIssue])
   const selectedRef = entities.refs.find((r) => r.entity.id === issueTarget?.id && !r.entity.deleted)
   const anchors = useMemo(() => anchorEntityRefs(turns, entities.slots), [turns, entities.slots])
   useEffect(() => { setIssueTarget(null) }, [sessionId, workspaceId, currentUserId])
