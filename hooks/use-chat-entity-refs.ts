@@ -21,9 +21,10 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
   const client = useQueryClient()
   const key = chatEntityKeys.refs(workspaceId, chatId, userId)
   const cursor = useRef<string | undefined>(undefined)
+  const lastSlots = useRef<EntityRef[]>([])
   const scope = JSON.stringify(key)
   const priorScope = useRef(scope)
-  if (priorScope.current !== scope) { cursor.current = undefined; priorScope.current = scope }
+  if (priorScope.current !== scope) { cursor.current = undefined; lastSlots.current = []; priorScope.current = scope }
   const active = enabled && !!workspaceId && !!chatId && !!userId
   const status = useRealtimeStatusSafe()
   useRealtimeChannelSafe(active ? `session:${chatId}` : null)
@@ -34,6 +35,8 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
     queryFn: async ({ signal }) => {
       // A replacement is an authorization boundary. The renderer also hides
       // data while fetching, including in the gap before page one arrives.
+      lastSlots.current = client.getQueryData<{ refs: EntityRef[] }>(key)?.refs ?? lastSlots.current
+      client.setQueryData(key, { refs: [], checkedAt: 0 })
       client.removeQueries({ queryKey: chatEntityKeys.detail(workspaceId, chatId, userId) })
       let next = cursor.current
       let snapshot: string | undefined
@@ -71,7 +74,12 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
   useRealtimeEventSafe("issue.revision_changed", (event) => { if (event.payload.contract_version === 1) reconcile() })
   // Existing access hints are intentionally broad and data-free to this reader.
   useRealtimeEventSafe("workspace.updated", reconcile)
-  useEffect(() => { if (status === "connected") reconcile() }, [status, reconcile])
+  const previousStatus = useRef(status)
+  useEffect(() => {
+    const previous = previousStatus.current
+    previousStatus.current = status
+    if (status === "connected" && previous !== "connected") reconcile()
+  }, [status, reconcile])
   useEffect(() => {
     const visible = () => { if (document.visibilityState === "visible") reconcile() }
     document.addEventListener("visibilitychange", visible)
@@ -90,7 +98,7 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
   const rechecking = active && (query.isFetching || query.isPending || !!query.error)
   return {
     refs: unavailable || rechecking ? [] : query.data?.refs ?? [],
-    slots: unavailable ? [] : query.data?.refs ?? [],
+    slots: unavailable ? [] : rechecking ? lastSlots.current : query.data?.refs ?? [],
     state: unavailable ? "unavailable" as const : rechecking ? "rechecking" as const : "ready" as const,
     checkedAt: query.data?.checkedAt,
     live: active && !rechecking && !query.error && status === "connected" && Date.now() - (query.data?.checkedAt ?? 0) < RECHECK_MS,

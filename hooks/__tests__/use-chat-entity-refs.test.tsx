@@ -41,6 +41,7 @@ describe("authorized chat entity snapshots", () => {
     act(() => result.current.reconcile())
     await waitFor(() => expect(result.current.state).toBe("rechecking"))
     expect(result.current.refs).toEqual([])
+    expect(client.getQueryData(chatEntityKeys.refs(props.workspaceId, props.chatId, props.userId))).toMatchObject({ refs: [] })
     expect(client.getQueriesData({ queryKey: chatEntityKeys.detail(props.workspaceId, props.chatId, props.userId) })).toEqual([])
     await act(async () => complete(response(empty)))
     await waitFor(() => expect(result.current.state).toBe("ready"))
