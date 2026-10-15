@@ -246,8 +246,9 @@ request returns `404` instead. A database failure returns `503`; an authority ch
 ### Client reconciliation
 
 1. Load the first page without a cursor.
-2. On `reset`, immediately remove the previous displayed list and stale
-   authorized detail data; append subsequent pages only to this `snapshot_id`.
+2. On `reset`, gather a replacement separately; append subsequent pages only
+   to this `snapshot_id`. Keep the last verified display mounted while checking,
+   so a successful refresh preserves focused editors and IME composition.
 3. Follow `next_cursor` while `has_more` is true.
 4. Reconcile cached entities against the complete replacement list only when
    `snapshot_complete` is true. Absence from the first page does not prove that
@@ -256,8 +257,9 @@ request returns `404` instead. A database failure returns `503`; an authority ch
 
 Keep unsaved editor drafts separate from authorized display data. A reset must
 not silently destroy a draft, but a draft grants no permission to keep displaying
-old server data or submit an action. Independently reauthorize a selected detail
-before displaying it again. Failed synchronization must never be labelled live.
+server data after a failed check or submit an unauthorized action. Independently
+reauthorize a selected detail after a completed snapshot. Failed synchronization
+hides protected views and must never be labelled live.
 
 ### WebSocket invalidation hints
 
@@ -531,7 +533,9 @@ and is never labelled live. Restricted and Guest sessions show only a generic
 
 Opening a card reuses `IssueDetailSurface` in the right panel, or a focus-trapped
 sheet on phones. A completed snapshot independently reauthorizes that detail
-and clears its previous server data. Detail freshness is its own fetch time;
+while preserving mounted editors and their local drafts during a pending check.
+Successful checks replace server values atomically; failed checks hide protected
+views. Detail freshness is its own fetch time;
 run and automation data have separate fetches. Allowed actions are intersected
 with the detail's current server permissions and govern individual controls.
 Legacy detail callers retain the existing `editable` fallback. Direct work
@@ -542,10 +546,17 @@ does not implement a budget or approval preflight for starting work from chat.
 Chat field editors and comments send stable idempotency keys. Fields additionally
 send the revision captured when editing began. Validation retains input;
 conflicts require explicit reload while retaining the draft. Unknown transport
-outcomes freeze the intent, check an operation receipt when its ID is known,
+outcomes persist the exact intent and key in viewer/workspace/issue-scoped
+session storage before sending, including across panel close and page reload.
+If recovery storage cannot be written, no new request is sent. Recovery checks
+an operation receipt when its ID is known,
 then allow retry with the same key and exact request. New intent is blocked
 until that result is resolved. Local drafts are separate from authorized server
-data and survive reconciliation without keeping protected fields displayed.
+data and survive successful reconciliation without remounting focused editors.
+Field and comment drafts clear independently after their own successful write.
+Conflict comparison shows current server values alongside the retained draft;
+explicit reload accepts a fresh revision, adopts server changes to untouched
+fields, and keeps only actual local edits for the next write.
 
 Browser acceptance uses the production static export with handler-verified
 reference fixtures: `pnpm exec playwright test --config=playwright.restricted.config.ts`.
