@@ -17,7 +17,16 @@ of command arguments, generated HTML, screenshots and replies. Do not substitute
 a crew token or another run's identity when the server refuses access.
 
 The current artifact preview is **static**. Build a self-contained UTF-8 HTML
-document, with inline CSS and local data images, at most 10 MiB. Scripts, external
+document, with inline CSS and validated local PNG/JPEG data images, at most
+10 MiB. Use canonical `data:image/png;base64,...` or
+`data:image/jpeg;base64,...`, at most 1 MiB per image, 4 MiB of image bytes,
+32 image occurrences and 8,388,608 total pixels; neither dimension may exceed
+2048. PNG must use at most 8-bit channels and must not be animated. JPEG must
+be baseline or progressive 8-bit. Invalid, truncated or undecodable content is
+not displayed. Remote images, srcset, SVG and CSS image-loading functions,
+loading/unknown at-rules and escapes are refused. Static @media, @supports,
+@layer and keyframe rules are supported. Downloads preserve original HTML; unsupported
+content is not converted automatically. Scripts, external
 resources, forms and navigation do not execute in the preview. Use semantic HTML,
 readable text and responsive layout. For charts, render a static representation.
 Do not promise a working React application or interactive controls while this

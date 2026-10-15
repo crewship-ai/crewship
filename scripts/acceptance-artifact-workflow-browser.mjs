@@ -10,6 +10,14 @@ const output = process.env.CREWSHIP_ARTIFACT_WORKFLOW_OUTPUT ?? await mkdtemp(jo
 await mkdir(output, { recursive: true })
 const browser = await chromium.launch({ headless: true })
 const results = []
+const rasters = JSON.parse(await readFile(new URL('../e2e/artifact-runtime/raster-fixtures.json', import.meta.url), 'utf8'))
+const rasterHTML = `<img id="f0-png" alt="PNG fixture" src="${rasters.png}"><img id="f0-jpeg" alt="JPEG fixture" src="${rasters.jpeg}"><img id="f0-remote" src="https://f0-egress.invalid/image" srcset="https://f0-egress.invalid/srcset 2x"><style>@import 'https://f0-egress.invalid/import';body{background:url('https://f0-egress.invalid/background')}</style>`
+const externalAttempts = []
+async function expectRasters(frame, phase) {
+  for (const id of ['f0-png', 'f0-jpeg']) await expect.poll(() => frame.locator(`#${id}`).evaluate(node => [node.naturalWidth, node.naturalHeight])).toEqual([2, 3])
+  await expect(frame.locator('#f0-remote[src],[srcset],script')).toHaveCount(0)
+  await check(`F0 native PNG/JPEG decode and hostile removal: ${phase}`, true)
+}
 async function check(name, condition, detail = {}) {
   results.push({ name, status: condition ? 'PASS' : 'FAIL', ...detail })
   await writeFile(join(output, 'results.json'), JSON.stringify({ execution: 'real Router/DB/static frontend with synthetic preauthenticated sessions; no HTTP mocks or agent execution', results }, null, 2))
@@ -88,6 +96,7 @@ export async function transferBoardOwnership(image) {
 try {
   for (const actor of ['owner', 'commenter']) {
     contexts[actor] = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+    contexts[actor].on('request', request => { if (request.url().startsWith('https://f0-egress.invalid/')) externalAttempts.push(request.url()) })
     await contexts[actor].addCookies([{ name: 'authjs.session-token', value: fixture.tokens[fixture[actor]], url: fixture.server, httpOnly: true, sameSite: 'Lax' }])
     await contexts[actor].addInitScript(id => localStorage.setItem('crewship.workspaceId', id), fixture.workspace)
     pages[actor] = await contexts[actor].newPage()
@@ -97,7 +106,7 @@ try {
   const owner = pages.owner
   await owner.goto(`${fixture.server}/pages/browser-report`)
   await expect(owner.getByRole('region', { name: 'HTML artifact', exact: true })).toBeVisible()
-  const firstSource = '<h1>First saved report</h1>' + Array.from({ length: 80 }, (_, index) => `<p>Scroll fixture row ${index + 1}</p>`).join('') + '<script>window.__artifactExecuted=true</script>'
+  const firstSource = '<h1>First saved report</h1>' + rasterHTML + Array.from({ length: 80 }, (_, index) => `<p>Scroll fixture row ${index + 1}</p>`).join('') + '<script>window.__artifactExecuted=true</script>'
   await owner.getByLabel('Upload HTML', { exact: true }).setInputFiles({ name: 'report.html', mimeType: 'text/html', buffer: Buffer.from(firstSource) })
   await expect(owner.getByLabel('HTML for the next revision')).toBeVisible()
   const firstSave = owner.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/artifact/revisions'))
@@ -107,6 +116,9 @@ try {
   await owner.getByRole('button', { name: 'Static preview', exact: true }).click()
   await expect(owner.frameLocator('iframe[title="Artifact static preview"]').getByRole('heading', { name: 'First saved report' })).toBeVisible()
   const preview = owner.frameLocator('iframe[title="Artifact static preview"]')
+  await expectRasters(preview, 'initial Page')
+  await owner.reload()
+  await expectRasters(preview, 'Page reload')
   await expect(preview.locator('script')).toHaveCount(0)
   await check('static preview strips submitted script and leaves its execution marker absent', !(await preview.locator('body').evaluate(() => window.__artifactExecuted)))
   response = await contexts.owner.request.put(endpoint('/grants'), { data: { subject_type: 'user', subject: fixture.commenter, level: 'comment' } })
@@ -184,6 +196,7 @@ try {
   await owner.getByRole('button', { name: 'Restore as new revision', exact: true }).click()
   response = await restore
   await check('restore creates revision three rather than rewriting history', response.status() === 201 && (await response.json()).revision === 3)
+  await expectRasters(preview, 'restored Page revision3')
   await expect(owner.frameLocator('iframe[title="Artifact static preview"]').getByRole('heading', { name: 'First saved report' })).toBeVisible()
   response = await contexts.owner.request.get(endpoint('/artifact/threads'))
   const discussion = await response.json()
@@ -367,6 +380,18 @@ try {
   await check('owner reads the real canonical raster through its authorized route', response.status() === 200 && response.headers()['content-type'] === 'image/png')
   response = await contexts.commenter.request.get(boardEndpoint(`/board/files/${encodeURIComponent(uploaded.file_id)}`))
   await check('revoked participant cannot read Board image bytes', [403, 404].includes(response.status()))
+  await owner.reload()
+  await owner.getByRole('button', { name: 'Pin artifact', exact: true }).click()
+  await owner.getByLabel('Artifact', { exact: true }).selectOption('browser-report')
+  await owner.getByLabel('Saved revision', { exact: true }).selectOption('3')
+  const pinnedResponse = owner.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/board/placements'))
+  await owner.getByRole('button', { name: 'Pin saved revision', exact: true }).click()
+  await check('F0 pins restored source revision through actual UI and Router', (await pinnedResponse).status() === 201)
+  const pinFrame = owner.frameLocator('iframe[title="Static artifact: Browser report"]')
+  await expectRasters(pinFrame, 'Board pin')
+  await owner.reload()
+  await expectRasters(pinFrame, 'Board pin reload')
+  await check('F0 sanitization and all real frames attempted no external image/CSS request', externalAttempts.length === 0, { external_attempts: externalAttempts })
   await transferBoardOwnership(uploaded)
   console.log(`Artifact workflow browser passed ${results.length} checks; evidence: ${output}`)
 } catch (error) {

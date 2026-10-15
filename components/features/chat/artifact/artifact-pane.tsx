@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import { motion } from "motion/react"
 import { ArrowLeft, Download, Eye, FileCode2, FileSpreadsheet, FileText, Maximize2, Minimize2, Pause, Play, X } from "lucide-react"
-import { marked } from "marked"
+import { ArtifactHTMLPreview } from "./artifact-html-preview"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -45,17 +45,7 @@ function ArtifactPreview({ path, snapshot, url, revision, onClose, onAskSelectio
     // Existing viewer validates signatures and renders PDFs with pdfjs.
     return <FilePreview key={revision} url={`${url}&revision=${revision}`} name={path.split("/").pop() ?? path} onClose={onClose} showHeader={false} bytes={snapshot.bytes} />
   }
-  if (/\.md$/i.test(path)) {
-    // The opaque, script-free frame keeps agent-authored markup out of the app DOM.
-    const csp = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; font-src data:; form-action \'none\'; base-uri \'none\'">'
-    const style = '<style>body{box-sizing:border-box;max-width:800px;min-height:100%;margin:0 auto;padding:40px 48px;background:#fff;color:#242932;font:15px/1.6 system-ui,sans-serif}h1,h2,h3{line-height:1.25}h1{font-size:28px}h2{font-size:20px;margin-top:30px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d9dfe6;padding:7px;text-align:left}blockquote{border-left:3px solid #4c9aff;padding-left:12px;color:#526070}code{background:#f1f3f6;padding:2px 4px}a{color:#276ac2}</style>'
-    return <iframe title={`Preview ${path}`} sandbox="" referrerPolicy="no-referrer" className="h-full w-full bg-[#242629]" srcDoc={csp + style + marked.parse(text, { async: false })} />
-  }
-  if (/\.html?$/i.test(path)) {
-    // Agent HTML has an opaque origin, no scripts and no network access.
-    const csp = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; font-src data:; form-action \'none\'; base-uri \'none\'">'
-    return <iframe title={`Preview ${path}`} sandbox="" referrerPolicy="no-referrer" className="h-full w-full bg-white" srcDoc={csp + text} />
-  }
+  if (/\.(md|html?)$/i.test(path)) return <ArtifactHTMLPreview path={path} text={text} />
   if (/\.(csv|tsv)$/i.test(path)) return <TablePreview bytes={snapshot.bytes} path={path} onAskSelection={onAskSelection} />
   return <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs">{text}</pre>
 }

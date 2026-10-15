@@ -4,7 +4,7 @@ import { Excalidraw, convertToExcalidrawElements, exportToBlob, exportToSvg } fr
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import '@excalidraw/excalidraw/index.css'
-import { staticArtifactDocument } from '../../lib/pages/artifact-static'
+import { useStaticArtifactDocument } from '../../hooks/use-static-artifact-document'
 
 // Test-only source registry. This exercises rendering, not product ACL.
 const source = '<h1>Shared source secret marker</h1><script>fetch("https://blocked.example/script")</script><img src="https://blocked.example/image"><style>@import url("https://blocked.example/style");</style>'
@@ -15,13 +15,17 @@ const initial = convertToExcalidrawElements([
   { type: 'rectangle', id: 'external', x: 800, y: 100, width: 240, height: 220 },
 ], { regenerateIds: false }).map(element => ({ ...element, type: 'embeddable', link: element.id === 'external' ? 'https://blocked.example/embed' : `https://artifact.invalid/${element.id}` })) as ExcalidrawElement[]
 
-createRoot(document.getElementById('root')!).render(<div style={{ height: '750px', width: '1200px' }}><Excalidraw
+function Fixture() {
+const document = useStaticArtifactDocument(source)
+return <div style={{ height: '750px', width: '1200px' }}><Excalidraw
   initialData={{ elements: initial }}
   validateEmbeddable={link => safeLinks.has(link)}
-  renderEmbeddable={element => safeLinks.has(element.link ?? '') ? <iframe title={`Artifact ${element.id}`} sandbox="" srcDoc={staticArtifactDocument(source)} style={{ width: '100%', height: '100%', pointerEvents: 'none', border: 0 }} /> : <div>External embed blocked</div>}
+  renderEmbeddable={element => safeLinks.has(element.link ?? '') ? <iframe key={document ? "ready" : "pending"} title={`Artifact ${element.id}`} sandbox="" srcDoc={document} style={{ width: '100%', height: '100%', pointerEvents: 'none', border: 0 }} /> : <div>External embed blocked</div>}
   UIOptions={{ canvasActions: { loadScene: false, export: false, saveToActiveFile: false } }}
   excalidrawAPI={api => installAPI(api)}
-/></div>)
+/></div>
+}
+createRoot(document.getElementById('root')!).render(<Fixture />)
 
 function installAPI(api: ExcalidrawImperativeAPI) {
   Object.assign(window, { boardEmbed: {
