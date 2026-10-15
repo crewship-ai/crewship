@@ -95,3 +95,39 @@ func TestDocumentInitializeCannotOverwriteExistingPage(t *testing.T) {
 		t.Fatal(v, e)
 	}
 }
+
+func TestDocumentSchemaTwoCheckpointExactRetryAfterEngineRecovery(t *testing.T) {
+	s, db, _ := fixture(t, Options{})
+	k := Key{WorkspaceID: key.WorkspaceID, PageID: "page-c"}
+	if _, err := s.InitRequest(ctx, k, "schema-two-init", "init-fingerprint", 2, []byte("schema-two-snapshot"), projection, allow); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := s.Acquire(ctx, k, "first-engine", allow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation := int64(0)
+	original, err := s.CheckpointRequestAtGeneration(ctx, k, lease, "schema-two-checkpoint", "checkpoint-fingerprint", []byte("schema-two-snapshot"), 0, &generation, allow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecoverEngine(ctx, "replacement-engine-boot"); err != nil {
+		t.Fatal(err)
+	}
+	// Call the store directly: the Node service's receipt lookup must not mask
+	// a schema-two rejection at the durable checkpoint retry boundary.
+	retried, err := s.CheckpointRequestAtGeneration(ctx, k, lease, "schema-two-checkpoint", "checkpoint-fingerprint", []byte("schema-two-snapshot"), 0, &generation, allow)
+	if err != nil {
+		t.Fatalf("exact confirmed checkpoint retry rejected after recovery: %v", err)
+	}
+	if retried.ID != original.ID || retried.Rev != original.Rev || retried.Schema != 2 || string(retried.Snapshot) != string(original.Snapshot) {
+		t.Fatalf("checkpoint identity or payload changed: original=%+v retry=%+v", original, retried)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM document_receipts WHERE workspace_id=? AND page_id=? AND kind='checkpoint'`, k.WorkspaceID, k.PageID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("checkpoint retry changed durable receipt count: %d, %v", count, err)
+	}
+	if _, err := s.CheckpointRequestAtGeneration(ctx, k, lease, "schema-two-checkpoint", "changed-fingerprint", []byte("schema-two-snapshot"), 0, &generation, allow); !errors.Is(err, ErrDuplicate) {
+		t.Fatalf("changed request reused confirmed checkpoint ID: %v", err)
+	}
+}

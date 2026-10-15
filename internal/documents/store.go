@@ -479,7 +479,7 @@ func (s *Store) CheckpointRequestAtGeneration(ctx context.Context, k Key, l Leas
 			if err != nil {
 				return err
 			}
-			if current.Schema != 1 {
+			if current.Schema != 1 && current.Schema != 2 {
 				return ErrSchema
 			}
 			c = existing
