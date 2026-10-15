@@ -14,6 +14,7 @@ CREATE TABLE page_assets (
  expires_at TEXT NOT NULL,
  UNIQUE(page_id,mutation_id)
 );
+CREATE INDEX idx_page_assets_author ON page_assets(author_user_id);
 CREATE INDEX idx_page_assets_digest ON page_assets(sha256);
 CREATE INDEX idx_page_assets_expiry ON page_assets(state,expires_at);
 CREATE TRIGGER page_asset_immutable BEFORE UPDATE OF page_id,sha256,content_type,width,height,byte_size,mutation_id,request_digest,created_at,expires_at ON page_assets
