@@ -90,6 +90,9 @@ func (h *PageHandler) checkArtifactRunDelegation(ctx context.Context, pageID str
 	if err := h.checkArtifactRunPrincipal(ctx, a); err != nil {
 		return err
 	}
+	if err := h.checkDocumentRunPageScope(ctx, pageID, a); err != nil {
+		return err
+	}
 	q := h.pageAuthReader(ctx)
 	var expiry string
 	var revoked sql.NullString

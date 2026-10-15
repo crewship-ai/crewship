@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
@@ -240,9 +241,19 @@ func TestDocumentSelectedRunCannotUseOtherPageGenericDelegation(t *testing.T) {
 		if reset {
 			execOrFatal(t, h.db, `UPDATE document_requests SET run_id=NULL,status='failed',receipt_json='{}' WHERE id=?`, id)
 		}
-		if err = h.checkArtifactRun(t.Context(), "other-doc", a); err != nil {
-			t.Fatalf("generic authority fixture changed: %v", err)
+		if err = h.checkArtifactRunPrincipal(t.Context(), a); err != nil {
+			t.Fatalf("principal fixture changed: %v", err)
 		}
+		if err = h.checkArtifactRun(t.Context(), "other-doc", a); err == nil {
+			t.Fatal("shared cross-format authorization escaped Doc Page")
+		}
+		if err = h.checkArtifactRunDelegation(t.Context(), "other-doc", a); err == nil {
+			t.Fatal("direct discussion delegation escaped Doc Page")
+		}
+		if err = h.checkStandaloneArtifactCreation(t.Context(), a); err == nil {
+			t.Fatal("bound Doc run admitted standalone artifact creation")
+		}
+
 		if err = h.checkDocumentRequestAuthority(t.Context(), "other-doc", a); err == nil {
 			t.Fatal("bound run escaped to another Page")
 		}
@@ -297,5 +308,51 @@ func TestDocumentSelectedRunCannotUseOtherPageGenericDelegation(t *testing.T) {
 	r.SetPathValue("operation", "commit")
 	if _, err = store.Acquire(r.Context(), key, "deleted-escape", authority.authorize(r, key, true, false)); err == nil {
 		t.Fatal("post-delete cross-Page mutation authority succeeded")
+	}
+}
+
+func TestDocumentSelectedRunCannotPublishDifferentFormatPage(t *testing.T) {
+	h, workspace, user, page := documentRequestFixture(t)
+	artifactExpect(t, artifactCreationOptIn(t, h, workspace, user, "POST"), 201)
+	unbound := &artifactRunAuthority{WorkspaceID: workspace, AgentID: "artifact-agent", CrewID: "artifact-crew", RunID: "artifact-run", HumanUserID: user, ChatID: "artifact-chat", MessageID: "artifact-message"}
+	if err := h.checkStandaloneArtifactCreation(t.Context(), unbound); err != nil {
+		t.Fatalf("generic standalone creation fixture invalid: %v", err)
+	}
+	for _, other := range []string{"other-html", "other-board"} {
+		execOrFatal(t, h.db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) SELECT ?,workspace_id,?, ?,owner_user_id,spec_json FROM pages WHERE id=?`, other, other, other, page)
+		execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) SELECT ?,subject_type,subject_id,level,granted_by_user_id,granted_at FROM page_grants WHERE page_id=?`, other, page)
+		execOrFatal(t, h.db, `INSERT INTO page_artifact_run_delegations(page_id,run_id,granted_by_user_id,expires_at,granted_at) SELECT ?,run_id,granted_by_user_id,expires_at,granted_at FROM page_artifact_run_delegations WHERE page_id=?`, other, page)
+	}
+	execOrFatal(t, h.db, `INSERT INTO page_boards(page_id,seq,format) VALUES('other-board',0,'crewship-board-excalidraw-0.18.1-v1')`)
+	id := createDocumentRequestTest(t, h, workspace, user, documentRequestBody, 202)
+	execOrFatal(t, h.db, `UPDATE document_requests SET status='running' WHERE id=?`, id)
+	receipt, err := chataudience.CaptureTrusted(t.Context(), h.db, "artifact-chat", user, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = bindDocumentRequestRun(httptest.NewRequest("POST", "/", nil), h.db, id, "artifact-run", receipt); err != nil {
+		t.Fatal(err)
+	}
+	a := &artifactRunAuthority{WorkspaceID: workspace, AgentID: "artifact-agent", CrewID: "artifact-crew", RunID: "artifact-run", HumanUserID: user, ChatID: "artifact-chat", MessageID: "artifact-message"}
+	if err = h.checkArtifactRun(t.Context(), "other-board", a); err == nil {
+		t.Fatal("Doc-bound run admitted Board page")
+	}
+	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, "artifact-crew"), workspace, "artifact-agent", "artifact-run")
+	r := httptest.NewRequest("POST", "/", strings.NewReader(`{"html":"<p>escaped</p>","base_rev":0,"mutation_id":"escape"}`))
+	r.SetPathValue("slug", "other-html")
+	r.Header.Set("Authorization", "Bearer "+token)
+	ctx := context.WithValue(r.Context(), ctxInternalTokenWS, workspace)
+	ctx = context.WithValue(ctx, ctxInternalTokenCrew, "artifact-crew")
+	w := httptest.NewRecorder()
+	h.PublishArtifactAgent(w, r.WithContext(ctx))
+	artifactExpect(t, w, 403)
+	artifactExpect(t, artifactCreateAgent(t, h, workspace, token, creationBody), 403)
+	var creations int
+	if err = h.db.QueryRow(`SELECT count(*) FROM page_artifact_creations WHERE run_id='artifact-run'`).Scan(&creations); err != nil || creations != 0 {
+		t.Fatalf("boundrun createdotherPage=%d error=%v", creations, err)
+	}
+	var revisions int
+	if err = h.db.QueryRow(`SELECT count(*) FROM page_artifact_revisions WHERE page_id='other-html'`).Scan(&revisions); err != nil || revisions != 0 {
+		t.Fatalf("crossformat rejection wrote revisions=%d error=%v", revisions, err)
 	}
 }

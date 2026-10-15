@@ -398,6 +398,9 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 // The Artifacts layer cannot consume an authorization admitted by a Board job.
 // Keeping its durable association prevents an older binary expanding authority.
 func (h *PageHandler) checkStandaloneArtifactCreation(ctx context.Context, a *artifactRunAuthority) error {
+	if err := h.checkDocumentRunPageScope(ctx, "", a); err != nil {
+		return err
+	}
 	var linked string
 	if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT COALESCE(board_request_id,'') FROM artifact_creation_authorizations WHERE run_id=?`, a.RunID).Scan(&linked); err != nil {
 		return err

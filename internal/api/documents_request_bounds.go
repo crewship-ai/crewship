@@ -107,3 +107,14 @@ func (h *PageHandler) documentRequestGuard(rctx context.Context, page, operation
 		return nil
 	}
 }
+
+// checkDocumentRunPageScope applies the immutable Doc Page boundary to every
+// format sharing a run principal. An empty Page ID means standalone creation.
+func (h *PageHandler) checkDocumentRunPageScope(ctx context.Context, page string, a *artifactRunAuthority) error {
+	var other int
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM document_requests WHERE run_id=? AND page_id<>?) OR EXISTS(SELECT 1 FROM page_artifact_run_delegations WHERE run_id=? AND document_request_id IS NOT NULL AND page_id<>?)`, a.RunID, page, a.RunID, page).Scan(&other)
+	if err != nil || other != 0 {
+		return errDocumentAccess
+	}
+	return nil
+}
