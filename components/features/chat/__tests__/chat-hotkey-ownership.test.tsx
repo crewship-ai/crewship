@@ -38,7 +38,10 @@ vi.mock("@/hooks/use-auth", () => ({
   }),
   useSessionSafe: () => ({ data: { user: { id: "user-1" } } }), useSession: () => ({ data: { user: { id: "user-1" } } }),
 }))
-vi.mock("@/hooks/use-realtime", () => ({ useRealtime: () => ({ status: "connected" }) }))
+vi.mock("@/hooks/use-realtime", () => ({
+  useRealtimeStatusSafe: () => "connected",
+  useRealtimeChannelSafe: () => {},
+  useRealtimeEventSafe: () => {}, useRealtime: () => ({ status: "connected" }) }))
 vi.mock("@/hooks/use-engine-status", () => ({ useEngineStatus: () => ({ status: "connected" }) }))
 vi.mock("@/hooks/use-crews-status", () => ({ useCrewsStatus: () => null }))
 vi.mock("@/hooks/use-provisioning-status", () => ({ useProvisioningStatus: () => null }))

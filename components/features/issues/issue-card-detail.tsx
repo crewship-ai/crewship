@@ -150,6 +150,8 @@ interface Props {
    */
   onSubmitComment?: (body: string, options?: { guestVisible: boolean; expectedProjectId: string }) => boolean | Promise<boolean>
   /** Initial for the composer's author bubble. */
+  commentDraft?: string
+  onCommentDraft?: (value: string) => void
   viewerInitial?: string
   /**
    * Makes the card writable. Absent, every property renders as text — which
@@ -205,6 +207,7 @@ export function IssueCardDetail({
   agents,
   onSubmitComment,
   viewerInitial,
+  commentDraft, onCommentDraft,
   edit,
   subIssues = [],
   codeLinks = [],
@@ -257,9 +260,10 @@ export function IssueCardDetail({
                   <StatusIcon status={issue.status} className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
-                  {edit ? (
+                  {edit && allowsEdit(edit, "edit_fields") ? (
                     <TitleEditor
                       title={issue.title}
+                      onDraftChange={edit.onTitleDraft}
                       onSave={(next) => void edit.patch({ title: next })}
                     />
                   ) : (
@@ -359,7 +363,7 @@ export function IssueCardDetail({
         <div className="flex flex-col gap-4 xl:col-span-2 2xl:col-span-3">
           <Appear order={2}>
             <DetailCard title="Description" subtitle={issue.description ? undefined : "empty"}>
-              {edit ? (
+              {edit && allowsEdit(edit, "edit_fields") ? (
                 <DescriptionEditor
                   key={issue.id}
                   description={issue.description ?? ""}
@@ -464,6 +468,8 @@ export function IssueCardDetail({
                 <CommentComposer
                   agents={agents ?? []}
                   onSubmit={onSubmitComment}
+                  draftValue={commentDraft}
+                  onDraftChange={onCommentDraft}
                   allowGuestSharing={Boolean(project)}
                   guestProject={project}
                   authorInitial={viewerInitial ?? "U"}
@@ -507,7 +513,7 @@ export function IssueCardDetail({
                   ? String(relations.length + subIssues.length)
                   : undefined
               }
-              action={edit ? <AddRelationPicker edit={edit} /> : undefined}
+              action={edit && allowsEdit(edit, "link") ? <AddRelationPicker edit={edit} /> : undefined}
             >
               {relations.length === 0 && subIssues.length === 0 ? (
                 <p className="text-[12px] text-muted-foreground">
@@ -531,7 +537,7 @@ export function IssueCardDetail({
                           {rel.target_title ?? "Untitled"}
                         </span>
                       </Link>
-                      {edit && (
+                      {edit && allowsEdit(edit, "link") && (
                         <RemoveRelationButton
                           identifier={rel.target_identifier ?? rel.target_id.slice(0, 8)}
                           onRemove={() => void edit.removeRelation(rel.id)}
@@ -571,7 +577,7 @@ export function IssueCardDetail({
               links={codeLinks}
               // Gated on `edit` as well: a read-only card must not carry a
               // live delete just because the host handed one over.
-              edit={edit ? codeLinkEdit : undefined}
+              edit={edit && allowsEdit(edit, "link") ? codeLinkEdit : undefined}
             />
           </Appear>
 
@@ -624,22 +630,22 @@ export function IssueCardDetail({
                 {edit ? (
                   <>
                     <EditRow icon={CircleDot} label="Status">
-                      <StatusPicker issue={issue} edit={edit} />
+                      {allowsEdit(edit, "change_status") ? <StatusPicker issue={issue} edit={edit} /> : <span className="text-xs">{statusLabel[issue.status] ?? issue.status}</span>}
                     </EditRow>
                     <EditRow icon={Flag} label="Priority">
-                      <PriorityPicker issue={issue} edit={edit} />
+                      {allowsEdit(edit, "edit_fields") ? <PriorityPicker issue={issue} edit={edit} /> : <span className="text-xs">{priorityLabel[issue.priority ?? "none"]}</span>}
                     </EditRow>
                     <EditRow icon={UserCircle2} label="Assignee">
-                      <AssigneePicker issue={issue} edit={edit} />
+                      {allowsEdit(edit, "assign") ? <AssigneePicker issue={issue} edit={edit} /> : <span className="text-xs">{issue.assignee_name ?? "Unassigned"}</span>}
                     </EditRow>
                     <EditRow icon={Clock} label="Due">
-                      <DueDatePicker issue={issue} edit={edit} />
+                      {allowsEdit(edit, "edit_fields") ? <DueDatePicker issue={issue} edit={edit} /> : <span className="text-xs">{issue.due_date ?? "Not set"}</span>}
                     </EditRow>
                     <EditRow icon={Hash} label="Estimate">
-                      <EstimatePicker issue={issue} edit={edit} />
+                      {allowsEdit(edit, "edit_fields") ? <EstimatePicker issue={issue} edit={edit} /> : <span className="text-xs">{issue.estimate ?? "Not set"}</span>}
                     </EditRow>
                     <EditRow icon={MilestoneIcon} label="Milestone">
-                      <MilestonePicker issue={issue} edit={edit} />
+                      {allowsEdit(edit, "edit_fields") ? <MilestonePicker issue={issue} edit={edit} /> : <span className="text-xs">{issue.milestone_id ?? "Not set"}</span>}
                     </EditRow>
                     <EditRow icon={Users} label="Crew">
                       {issue.crew_name ? <CrewLink issue={issue} /> : <Muted>Unassigned</Muted>}
@@ -712,7 +718,7 @@ export function IssueCardDetail({
               }
             >
               <div className="space-y-2">
-                {edit ? (
+                {edit && allowsEdit(edit, "change_workflow") ? (
                   <RoutinePicker issue={issue} edit={edit}>
                     <GitBranch className="h-3.5 w-3.5 shrink-0 text-purple" />
                     <span className="truncate text-[12px]">
@@ -785,7 +791,7 @@ export function IssueCardDetail({
           <Appear order={8}>
             <DetailCard title="Project" icon={FolderKanban}>
               <div className="space-y-2.5">
-                {edit ? (
+                {edit && allowsEdit(edit, "edit_fields") ? (
                   <ProjectPicker issue={issue} edit={edit}>
                     <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
                     <span className="truncate text-[12px]">
@@ -812,7 +818,7 @@ export function IssueCardDetail({
                     <span className="tabular-nums">
                       {project.done_count}/{project.issue_count}
                     </span>
-                    {edit && (
+                    {edit && allowsEdit(edit, "edit_fields") && (
                       <Link
                         href={`/issues?project=${encodeURIComponent(project.id)}`}
                         className="shrink-0 text-primary hover:underline"
@@ -831,7 +837,7 @@ export function IssueCardDetail({
               title="Labels"
               icon={Tag}
               subtitle={labels.length > 0 ? String(labels.length) : undefined}
-              action={edit ? <LabelsPicker issue={issue} edit={edit} /> : undefined}
+              action={edit && allowsEdit(edit, "edit_fields") ? <LabelsPicker issue={issue} edit={edit} /> : undefined}
             >
               {labels.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
@@ -1167,4 +1173,8 @@ function Fact({ label, value, mono }: { label: string; value: string; mono?: boo
       <dd className={cn("truncate text-foreground/85", mono && "font-mono text-[10px]")}>{value}</dd>
     </div>
   )
+}
+
+function allowsEdit(edit: IssueCardEdit, action: string): boolean {
+  return !edit.allowedActions || edit.allowedActions.some((a) => a === action)
 }

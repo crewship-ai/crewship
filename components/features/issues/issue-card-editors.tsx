@@ -86,6 +86,8 @@ export interface PickableRoutine {
  * viewer-role reader should still get.
  */
 export interface IssueCardEdit {
+  onTitleDraft?: (value: string) => void
+  allowedActions?: readonly import("@/lib/chat-entity-cards").IssueAction[]
   /** Assignable agents — crew-scoped where the host can narrow it. */
   agents: PickableAgent[]
   /** Every label in the workspace, for the add/remove picker. */
@@ -767,14 +769,17 @@ export function RemoveRelationButton({
 export function TitleEditor({
   title,
   onSave,
+  onDraftChange,
 }: {
   title: string
+  onDraftChange?: (value: string) => void
   /** Hands the edited title to the page's draft (its Save bar commits it).
    *  Called when the field is left — Enter or a click away — never per key. */
   onSave: (next: string) => void
 }) {
   const [editing, setEditing] = React.useState(false)
   const [draft, setDraft] = React.useState(title)
+  const initialTitle = React.useRef(title)
 
   // Leaving the field keeps what was typed: it becomes part of the page's
   // draft. Clicking away used to throw the edit away without a word.
@@ -790,7 +795,7 @@ export function TitleEditor({
         autoFocus
         aria-label="Issue title"
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => { setDraft(e.target.value); onDraftChange?.(e.target.value) }}
         onBlur={leave}
         onKeyDown={(e) => {
           // Mid-composition Enter and Escape belong to the IME candidate,
@@ -802,7 +807,8 @@ export function TitleEditor({
           }
           if (e.key === "Escape") {
             e.preventDefault()
-            setDraft(title)
+            setDraft(initialTitle.current)
+            onDraftChange?.(initialTitle.current)
             setEditing(false)
           }
         }}
@@ -818,6 +824,7 @@ export function TitleEditor({
         type="button"
         aria-label="Edit title"
         onClick={() => {
+          initialTitle.current = title
           setDraft(title)
           setEditing(true)
         }}
@@ -847,19 +854,22 @@ export function IssueWorkflowActions({
   issue,
   onAction,
   busy,
+  allowedActions,
 }: {
   issue: Mission
+  allowedActions?: readonly import("@/lib/chat-entity-cards").IssueAction[]
   onAction: (action: WorkflowAction, comment?: string) => void | Promise<void>
   busy?: boolean
 }) {
   const [asking, setAsking] = React.useState(false)
   const [reason, setReason] = React.useState("")
 
-  const canStart = (issue.status === "BACKLOG" || issue.status === "TODO") && hasIssueAgentDelegate(issue)
-  const canStop = issue.status === "IN_PROGRESS"
-  const canReview = issue.status === "REVIEW"
+  const allows = (action: string) => !allowedActions || allowedActions.some((a) => a === action)
+  const canStart = allows("start_work") && (issue.status === "BACKLOG" || issue.status === "TODO") && hasIssueAgentDelegate(issue)
+  const canStop = allows("change_workflow") && issue.status === "IN_PROGRESS"
+  const canReview = allows("change_workflow") && issue.status === "REVIEW"
   const canReopen =
-    issue.status === "DONE" || issue.status === "CANCELLED" || issue.status === "COMPLETED"
+    allows("change_workflow") && (issue.status === "DONE" || issue.status === "CANCELLED" || issue.status === "COMPLETED")
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -917,7 +927,7 @@ export function IssueWorkflowActions({
         </Button>
       )}
 
-      {asking && (
+      {asking && canReview && (
         <div className="mt-2 w-[280px] max-w-full space-y-2 rounded-lg border border-warn/30 bg-card p-2.5">
           <textarea
             aria-label="What needs to change"

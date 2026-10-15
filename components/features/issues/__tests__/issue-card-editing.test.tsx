@@ -355,3 +355,13 @@ describe("IssueCardDetail — the editors write", () => {
     expect(screen.getByRole("link", { name: /A child/ })).toHaveAttribute("href", "/issues/ENG-9")
   })
 })
+
+it("gates each issue property with the viewer's concrete actions", () => {
+  renderCard({ edit: edit({ allowedActions: ["view", "assign", "change_status"] }) })
+  expect(screen.getByRole("button", { name: "Change status" })).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Change assignee" })).toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "Edit title" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Change priority" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Add link" })).toBeNull()
+  expect(screen.queryByLabelText("Description")).toBeNull()
+})
