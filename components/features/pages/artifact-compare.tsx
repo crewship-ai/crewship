@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { PageArtifactError, usePageArtifact } from "@/hooks/use-page-artifact"
 import { ArtifactSourceDiff } from "./artifact-source-diff"
 import { staticArtifactDocument } from "@/lib/pages/artifact-static"
@@ -23,14 +23,12 @@ function RevisionPanel({ workspaceId, slug, revision }: { workspaceId: string; s
   </div>
 }
 
-export function ArtifactCompare({ workspaceId, slug, revisions, selected }: { workspaceId: string; slug: string; revisions: number[]; selected: number }) {
-  const newest = Math.max(...revisions)
-  const [left, setLeft] = useState(selected !== newest ? selected : [...revisions].sort((a, b) => b - a)[1] ?? newest)
-  const [right, setRight] = useState(newest)
+export function ArtifactCompare({ workspaceId, slug, revisions, comparison, onComparisonChange }: { workspaceId: string; slug: string; revisions: number[]; comparison: { before: number; after: number }; onComparisonChange: (comparison: { before: number; after: number }) => void }) {
+  const { before: left, after: right } = comparison
   return <div className="space-y-3 p-4">
     <p className="text-sm text-muted-foreground">Compare two saved revisions side by side. Both previews use the same static safety rules; scripts do not run.</p>
     <div className="grid gap-4 md:grid-cols-2">
-      {([{ side: "Earlier", value: left, change: setLeft }, { side: "Later", value: right, change: setRight }] as const).map(({ side, value, change }) => <div key={side} className="min-w-0 space-y-3">
+      {([{ side: "Earlier", value: left, change: (before: number) => onComparisonChange({ ...comparison, before }) }, { side: "Later", value: right, change: (after: number) => onComparisonChange({ ...comparison, after }) }] as const).map(({ side, value, change }) => <div key={side} className="min-w-0 space-y-3">
         <label className="flex items-center gap-2 text-sm">{side} revision<select aria-label={`${side} revision`} value={value} onChange={event => change(Number(event.target.value))} className="rounded-md border bg-background px-3 py-2 coarse:min-h-12">{[...revisions].sort((a, b) => b - a).map(revision => <option key={revision} value={revision}>Revision {revision}</option>)}</select></label>
         <RevisionPanel workspaceId={workspaceId} slug={slug} revision={value} />
       </div>)}

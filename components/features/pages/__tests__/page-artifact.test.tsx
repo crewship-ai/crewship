@@ -1,11 +1,12 @@
 import DOMPurify from "dompurify"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { NewArtifactDialog } from "../new-artifact-dialog"
 import { PageArtifactView } from "../page-artifact"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { apiFetch } from "@/lib/api-fetch"
+import type { ArtifactAgentRequest } from "@/hooks/use-artifact-requests"
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search) }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: vi.fn() }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
@@ -17,6 +18,8 @@ let commentable = false
 let fail = 0
 let readFail = 0
 let source = "<h1>Saved report</h1><script>alert(1)</script>"
+let requests: ArtifactAgentRequest[] = []
+let sources: Record<number, string> = {}
 const calls: { path: string; body: Record<string, unknown> }[] = []
 function mount(onDirtyChange?: (dirty: boolean) => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -28,6 +31,7 @@ beforeEach(() => {
   DOMPurify.isSupported = false
   vi.mocked(useRealtimeEventSafe).mockClear()
   head = 1; copyable = false; writable = true; commentable = false; fail = 0; readFail = 0; source = "<h1>Saved report</h1><script>alert(1)</script>"; calls.length = 0
+  requests = []; sources = {}
   vi.mocked(apiFetch).mockImplementation(async (path, options) => {
     if (options?.method === "POST") {
       const body = JSON.parse(String(options.body)); calls.push({ path: String(path), body })
@@ -36,11 +40,11 @@ beforeEach(() => {
       head++; if (typeof body.html === "string") source = body.html
       return new Response(JSON.stringify({ head_rev: head, revision: head }))
     }
-    if (String(path).includes("/requests")) return new Response(JSON.stringify({ requests: [], eligible_chats: [], can_dispatch: false }))
+    if (String(path).includes("/requests")) return new Response(JSON.stringify({ requests, eligible_chats: [], can_dispatch: false }))
     if (String(path).includes("/threads")) return new Response(JSON.stringify({ can_comment: true, can_resolve: true, threads: [{ id: "thread1", revision: 1, status: "open", version: 1, anchor: { schema_version: 1, type: "document" }, comments: [{ id: "comment1", body: "Discuss this revision", author_user_id: "user1", author_name: "Alice", created_at: "2026-10-13T00:00:00Z" }] }] }))
     if (readFail) return new Response(JSON.stringify({ error: "Access denied" }), { status: readFail })
     const selected = new URL(String(path), "https://studio.test").searchParams.get("revision")
-    return new Response(JSON.stringify({ head_rev: head, revision: selected ? Number(selected) : head, html: source, can_copy: copyable, can_write: writable, can_comment: commentable, revisions: Array.from({ length: head }, (_, i) => ({ revision: i + 1, created_at: "2026-10-13T00:00:00Z", author_user_id: "user1" })) }))
+    return new Response(JSON.stringify({ head_rev: head, revision: selected ? Number(selected) : head, html: sources[Number(selected ?? head)] ?? source, can_copy: copyable, can_write: writable, can_comment: commentable, revisions: Array.from({ length: head }, (_, i) => ({ revision: i + 1, created_at: "2026-10-13T00:00:00Z", author_user_id: "user1" })) }))
   })
 })
 afterEach(() => { cleanup(); DOMPurify.isSupported = supported })
@@ -119,6 +123,50 @@ describe("human page artifact", () => {
     await act(async () => { (callback as (() => void))() })
     await waitFor(() => expect(screen.queryByTitle("Compare revision 1")).toBeNull())
     expect(screen.queryByTitle("Compare revision 2")).toBeNull()
+  })
+
+  it.each(["request card", "thread result"])("compares the exact saved request pair from a %s even after newer revisions and manual selection", async entry => {
+    head = 5
+    sources = { 1: "<h1>Original request source</h1>", 2: "<h1>First agent result</h1>", 3: "<h1>Second agent result</h1>", 4: "<h1>Unrelated later edit</h1>", 5: "<h1>Latest unrelated edit</h1>" }
+    const request: ArtifactAgentRequest = { id: "first-result", chat_id: "chat", agent_id: "agent", thread_id: "thread1", instruction: "Clarify", base_rev: 1, result_revision: 2, result_kind: "revision", status: "succeeded", created_at: "2026-10-13T12:00:00Z", updated_at: "2026-10-13T12:00:00Z" }
+    requests = [request, { ...request, id: "second-result", base_rev: 2, result_revision: 3, result_kind: undefined }]
+    mount()
+    await screen.findByRole("button", { name: "Compare revisions 1 and 2" })
+    if (entry === "thread result") {
+      fireEvent.click(screen.getByRole("button", { name: "Comments", exact: true }))
+      await screen.findByLabelText("Thread agent requests")
+    }
+    const result = () => within(entry === "thread result" ? screen.getByLabelText("Thread agent requests") : screen.getByRole("region", { name: "Agent requests" }))
+    fireEvent.click(screen.getByRole("button", { name: "Compare", exact: true }))
+    expect(await screen.findByLabelText("Earlier revision")).toHaveValue("4")
+    expect(screen.getByLabelText("Later revision")).toHaveValue("5")
+    fireEvent.click(result().getByRole("button", { name: "Compare revisions 1 and 2" }))
+    expect(screen.getByLabelText("Earlier revision")).toHaveValue("1")
+    expect(screen.getByLabelText("Later revision")).toHaveValue("2")
+    expect((await screen.findByTitle("Compare revision 1")).getAttribute("srcdoc")).toContain("Original request source")
+    expect((await screen.findByTitle("Compare revision 2")).getAttribute("srcdoc")).toContain("First agent result")
+    fireEvent.change(screen.getByLabelText("Earlier revision"), { target: { value: "4" } })
+    fireEvent.change(screen.getByLabelText("Later revision"), { target: { value: "5" } })
+    fireEvent.click(result().getByRole("button", { name: "Compare revisions 1 and 2" }))
+    expect(screen.getByLabelText("Earlier revision")).toHaveValue("1")
+    expect(screen.getByLabelText("Later revision")).toHaveValue("2")
+    fireEvent.click(result().getByRole("button", { name: "Compare revisions 2 and 3" }))
+    expect(screen.getByLabelText("Earlier revision")).toHaveValue("2")
+    expect(screen.getByLabelText("Later revision")).toHaveValue("3")
+    expect((await screen.findByTitle("Compare revision 3")).getAttribute("srcdoc")).toContain("Second agent result")
+    expect(calls).toHaveLength(0)
+  })
+
+  it("offers no request comparison for replies, incomplete work or unavailable results", async () => {
+    head = 3
+    const request: ArtifactAgentRequest = { id: "reply", chat_id: "chat", agent_id: "agent", thread_id: "thread1", instruction: "Analyze", base_rev: 1, status: "succeeded", result_kind: "reply", result_revision: 2, reply: { body: "Reply only", run_id: "run", created_at: "2026-10-13T12:00:00Z" }, created_at: "2026-10-13T12:00:00Z", updated_at: "2026-10-13T12:00:00Z" }
+    requests = [request, { ...request, id: "running", status: "running", result_kind: "revision" }, { ...request, id: "missing", result_kind: "revision", result_revision: undefined }]
+    mount()
+    await screen.findByText("Reply received")
+    fireEvent.click(screen.getByRole("button", { name: "Comments", exact: true }))
+    await screen.findByLabelText("Thread agent requests")
+    expect(screen.queryByRole("button", { name: /Compare revisions/ })).toBeNull()
+    expect(calls).toHaveLength(0)
   })
 
   it("reuses a publication identity after an uncertain server failure", async () => {

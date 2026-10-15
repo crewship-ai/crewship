@@ -17,16 +17,18 @@ interface AgentWorkContext {
   acceptedId: string | null
   open: (source: RequestSource) => void
   viewRevision: (revision: number) => void
+  compareRevisions: (before: number, after: number) => void
 }
 const AgentWorkContext = createContext<AgentWorkContext | null>(null)
 export function useArtifactAgentWork() { return useContext(AgentWorkContext) }
 
-export function ArtifactAgentWorkProvider({ workspaceId, slug, revision, head, onViewRevision, onDirtyChange, children }: {
+export function ArtifactAgentWorkProvider({ workspaceId, slug, revision, head, onViewRevision, onCompareRevisions, onDirtyChange, children }: {
   workspaceId: string
   slug: string
   revision: number
   head: number
   onViewRevision: (revision: number) => void
+  onCompareRevisions: (before: number, after: number) => void
   onDirtyChange: (dirty: boolean) => void
   children: ReactNode
 }) {
@@ -54,7 +56,7 @@ export function ArtifactAgentWorkProvider({ workspaceId, slug, revision, head, o
     }
     setOpen(true)
   }
-  return <AgentWorkContext.Provider value={{ service, revision, head, canDispatch, pending, acceptedId, open: start, viewRevision: onViewRevision }}>
+  return <AgentWorkContext.Provider value={{ service, revision, head, canDispatch, pending, acceptedId, open: start, viewRevision: onViewRevision, compareRevisions: onCompareRevisions }}>
     {children}
     {draft && <ArtifactRequestDialog
       open={open} onOpenChange={value => { if (!pending) setOpen(value) }}
@@ -96,6 +98,7 @@ export function ArtifactAgentRequests() {
     onCancel={async id => { try { await work.service.cancel.mutateAsync(id) } catch { /* Server state is refreshed; never invent cancellation. */ } }}
     onRetry={(request: ArtifactAgentRequest) => work.open({ base_rev: work.head, thread_id: request.base_rev === work.head ? request.thread_id : undefined, instruction: request.instruction, chat_id: request.chat_id, retry_of_request_id: request.id, result_kind: request.result_kind })}
     onViewRevision={work.viewRevision}
+    onCompareRevisions={work.compareRevisions}
   />
 }
 
@@ -107,6 +110,7 @@ export function ArtifactThreadRequests({ threadId }: { threadId: string }) {
     {requests.slice(0, 3).map(request => <div key={request.id} className="flex flex-wrap items-center gap-2 text-xs">
       <span>Agent request</span><ArtifactRequestStatus request={request} />
       {request.status === "succeeded" && request.result_revision && <Button size="sm" variant="ghost" className="coarse:h-12" onClick={() => work.viewRevision(request.result_revision!)}>View result revision {request.result_revision}</Button>}
+      {request.status === "succeeded" && request.result_kind !== "reply" && request.result_revision && <Button size="sm" variant="ghost" className="coarse:h-12" onClick={() => work.compareRevisions(request.base_rev, request.result_revision!)}>Compare revisions {request.base_rev} and {request.result_revision}</Button>}
     </div>)}
   </div>
 }

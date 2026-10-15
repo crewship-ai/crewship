@@ -27,7 +27,7 @@ afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear())
 function mount(head = 1, revision = 1) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); clients.push(client)
   const dirty = vi.fn()
-  const content = (h: number) => <QueryClientProvider client={client}><ArtifactAgentWorkProvider workspaceId="ws" slug="report" revision={revision} head={h} onDirtyChange={dirty} onViewRevision={vi.fn()}><ArtifactSendButton /><ArtifactAgentRequests /></ArtifactAgentWorkProvider></QueryClientProvider>
+  const content = (h: number) => <QueryClientProvider client={client}><ArtifactAgentWorkProvider workspaceId="ws" slug="report" revision={revision} head={h} onDirtyChange={dirty} onViewRevision={vi.fn()} onCompareRevisions={vi.fn()}><ArtifactSendButton /><ArtifactAgentRequests /></ArtifactAgentWorkProvider></QueryClientProvider>
   const view = render(content(head))
   return { client, dirty, head: (h: number) => view.rerender(content(h)) }
 }
