@@ -52,7 +52,8 @@ import (
 // listener, WebSocket hub, orchestrator, scheduler, and all supporting services.
 
 type Server struct {
-	containerCleanup *resourcelifecycle.Controller
+	documentsStartupErr error
+	containerCleanup    *resourcelifecycle.Controller
 
 	recoveredStopsMu        sync.Mutex
 	recoveredStopsCursor    string
@@ -1033,9 +1034,15 @@ func (s *Server) mountAPIRouter(
 	ratelimitcfg.SetGlobal(rateLimitStore)
 	opts = append(opts, goapi.WithRateLimitStore(rateLimitStore))
 
+	if cfg.Documents.Enabled {
+		opts = append(opts, goapi.WithDocumentAuthority(cfg.Documents.AuthoritySocket, cfg.Documents.ServiceTokenFile))
+	}
 	apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 	if err != nil {
 		logger.Error("failed to create API router", "error", err)
+		if cfg.Documents.Enabled {
+			s.documentsStartupErr = err
+		}
 	} else {
 		s.apiRouter = apiRouter
 		// Provider-login refresh (docs/prd/provider-logins.md §5.3) rides the
