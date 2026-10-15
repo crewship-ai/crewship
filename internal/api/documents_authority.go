@@ -29,6 +29,8 @@ type documentAuthority struct {
 
 var errDocumentAccess = errors.New("document access denied")
 
+const documentEngineProtocol = 2
+
 // DocumentAuthority constructs the private authority. It is never registered
 // on r.mux. Boot fencing runs only after the caller owns its Unix listener.
 func (r *Router) DocumentAuthority(ctx context.Context, secret string) (http.Handler, error) {
@@ -50,13 +52,14 @@ func (h *documentAuthority) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method == "GET" && r.URL.Path == "/health/ready" {
-		writeJSON(w, 200, map[string]int{"protocol": 1, "schema": 2})
+		writeJSON(w, 200, map[string]int{"protocol": documentEngineProtocol, "schema": 2})
 		return
 	}
 	if r.Method == "POST" && r.URL.Path == "/internal/docs/v1/engine/recover" {
 		r.Body = http.MaxBytesReader(w, r.Body, 1024)
 		var input struct {
-			Boot string `json:"boot"`
+			Boot     string `json:"boot"`
+			Protocol int    `json:"protocol"`
 		}
 		d := json.NewDecoder(r.Body)
 		d.DisallowUnknownFields()
@@ -64,11 +67,15 @@ func (h *documentAuthority) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 400, "bounded boot identity required")
 			return
 		}
+		if input.Protocol != documentEngineProtocol {
+			replyError(w, 409, "unsupported document engine protocol")
+			return
+		}
 		if err := h.store.RecoverEngine(r.Context(), input.Boot); err != nil {
 			documentAuthorityError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]bool{"recovered": true})
+		writeJSON(w, 200, map[string]any{"recovered": true, "protocol": documentEngineProtocol})
 		return
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")

@@ -20,7 +20,7 @@ carry `X-Workspace-ID` and the original `Authorization: Bearer …`; Go decides
 whether the live human or agent run has permission, including whether raw
 human updates are allowed. Never expose the service directly to users.
 
-`GET /health/live` and `/health/ready` return protocol 1, schema 2 and a SHA-256
+`GET /health/live` and `/health/ready` return protocol 2, schema 2 and a SHA-256
 build identity over the lockfile, schema and service. `POST /drain` stops new
 admission and waits for pending work and lease releases. SIGTERM drains and
 closes. Drain waits at most 30 seconds, then reports failure. Document requests are `POST /v1/documents/{page}/{operation}` with JSON:
@@ -109,3 +109,5 @@ The native suite also holds an authority response until explicitly released,
 proves the 32-operation per-document queue rejects overflow, and verifies that
 drain waits for all admitted failed responses. This is controlled downstream
 backpressure and failure injection, not a slow-disk throughput measurement.
+
+Private protocol 2 requires an explicit protocol-2 recovery request and acknowledgement before admission. Older Go/Node pairs fail startup without fencing or acknowledging edits; the content schema remains 2.

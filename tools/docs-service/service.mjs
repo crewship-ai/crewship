@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
 import { VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
 
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
 const fault = (status, message,code) => Object.assign(new Error(message), { status,...(code?{code}:{}) });
 const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 const readOperations = new Set(['read', 'verify-targets', 'comments', 'checkpoints', 'checkpoint-read', 'export']);
@@ -178,7 +178,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       }
       if (req.method === 'POST' && req.url === '/drain') { await drain(); return reply(200, { drained: true }); }
       if(draining){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'service draining');}
-      if(!ready)throw fault(503,'engine recovering');
+      if(!ready){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'engine recovering');}
       const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(initialize|read|verify-targets|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
       if (req.method !== 'POST' || !match) throw fault(404, 'unknown operation');
       const context = { workspace: req.headers['x-workspace-id'], authorization: req.headers.authorization };
@@ -196,9 +196,9 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     try{await lstat(socket);throw new Error('service socket already exists')}catch(error){if(error.code!=='ENOENT')throw error}
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socket,resolve)});bound=true;
     await chmod(socket,0o600);
-    const recovered=await go('engine','recover',{workspace:''},{boot:owner});
-    if(!recovered.recovered)throw new Error('authority did not confirm engine recovery');ready=true;
-  }catch(error){clearInterval(timer);if(bound)await new Promise(resolve=>server.close(resolve));throw error}
+    const recovered=await go('engine','recover',{workspace:''},{boot:owner,protocol:PROTOCOL});
+    if(!recovered.recovered || recovered.protocol!==PROTOCOL)throw new Error('authority did not confirm compatible engine recovery');ready=true;
+  }catch(error){clearInterval(timer);if(bound){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}throw error}
   return { identity, socket, drain, async close() { await drain(); clearInterval(timer); await new Promise(resolve => server.close(resolve)); } };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

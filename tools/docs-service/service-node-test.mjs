@@ -4,7 +4,7 @@ import http from 'node:http';
 import { mkdtemp, writeFile, stat, chmod, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { startService } from './service.mjs';
+import { startService, PROTOCOL } from './service.mjs';
 import { create, snapshot, initialJSON } from './schema.mjs';
 const secret = 'a'.repeat(48);
 function call(socket, path, data, headers = {}) {
@@ -39,8 +39,8 @@ function authorityModel() {
   const model = { state: initialState(), receipts: new Map(), seen: [], boots: new Set(), recoveries: 0, acquisitions: 0, releases: 0, commits: 0, checkpoints: 0, restores: 0, compatible: true, rejectCommit: false, revoked: new Set() };
   model.handle = async (op, data, req, res) => {
     model.seen.push({ op, data, bearer: req.headers.authorization });
-    if (op === 'recover') { assert.equal(typeof data.boot, 'string'); if (!model.boots.has(data.boot)) { model.boots.add(data.boot); model.recoveries++; model.state.generation++; model.state.epoch++; } return { recovered: true }; }
-    if (op === 'ready') return { protocol: model.compatible ? 1 : 99, schema: 2 };
+    if (op === 'recover') { assert.equal(typeof data.boot, 'string'); if (!model.boots.has(data.boot)) { model.boots.add(data.boot); model.recoveries++; model.state.generation++; model.state.epoch++; } return { recovered: true, protocol: PROTOCOL }; }
+    if (op === 'ready') return { protocol: model.compatible ? PROTOCOL : 99, schema: 2 };
     assert.ok(req.headers.authorization?.startsWith('Bearer '));
     if (model.revoked.has(req.headers.authorization)) { res.writeHead(403); return { error: 'revoked principal' }; }
     if (op === 'state') return model.state;
@@ -136,7 +136,7 @@ test('Unix service validates transport and acknowledges only durable receipts', 
 });
 test('initialization bootstraps without document state or lease', async () => {
   const seen = []; const f = await fixture((op, data, req, res) => {
-    seen.push(op); if (op === 'recover') return { recovered: true };
+    seen.push(op); if (op === 'recover') return { recovered: true, protocol: PROTOCOL };
     if (op === 'receipt') { res.writeHead(404); return { error: 'not found' }; }
     assert.equal(op, 'initialize'); assert.equal(data.schema, 2); assert.ok(data.snapshot); return { rev: 1, epoch: 0 };
   }); await f.start();
@@ -158,6 +158,18 @@ test('startup rejects unsafe secrets and noncanonical socket paths', async () =>
     await assert.rejects(startService({ socket: tokenFile, authoritySocket: join(dir, 'a'), tokenFile }), /distinct/);
   } finally { await rm(dir, { recursive: true }); }
 });
+test('startup rejects an old Go recovery acknowledgement before admitting requests', async () => {
+  let calls = 0;
+  const f = await fixture((op, data) => {
+    calls++; assert.equal(op, 'recover'); assert.equal(data.protocol, PROTOCOL);
+    return { recovered: true, protocol: 1 };
+  });
+  try {
+    await assert.rejects(f.start(), /compatible engine recovery/);
+    assert.equal(calls, 1);
+    await assert.rejects(call(f.socket, '/v1/documents/p/read', {}));
+  } finally { await f.close(); }
+});
 test('checkpoint and restore retry receipts survive generation changes; readiness checks live authority', async () => {
   const model = authorityModel(), f = await fixture(model.handle); await f.start();
   try {
@@ -177,8 +189,8 @@ test('checkpoint and restore retry receipts survive generation changes; readines
 test('blocked persistence bounds document queue and drain waits for all failed acknowledgements', async () => {
   const blocked = deferred(), started = deferred(); let calls = 0;
   const f = await fixture(async (op, data, req, res) => {
-    if (op === 'recover') return { recovered: true };
-    if (op === 'ready') return { protocol: 1, schema: 2 };
+    if (op === 'recover') return { recovered: true, protocol: PROTOCOL };
+    if (op === 'ready') return { protocol: PROTOCOL, schema: 2 };
     calls++; started.resolve(); await blocked.promise; res.writeHead(503); return { error: 'controlled persistence failure' };
   }); await f.start(); const pending = [];
   try {
@@ -203,7 +215,7 @@ test('duplicate socket bind cannot recover or fence the existing engine', async 
 test('recovery gates all admission and failure closes its socket; a fresh boot can retry', async () => {
   const entered = deferred(), proceed = deferred(); let reject = true, boots = [];
   const f = await fixture(async (op, data, req, res) => {
-    if (op === 'recover') { boots.push(data.boot); entered.resolve(); await proceed.promise; if (reject) { res.writeHead(503); return { error: 'recovery failed' }; } return { recovered: true }; }
+    if (op === 'recover') { boots.push(data.boot); entered.resolve(); await proceed.promise; if (reject) { res.writeHead(503); return { error: 'recovery failed' }; } return { recovered: true, protocol: PROTOCOL }; }
     assert.fail('recovery must gate document authority calls');
   });
   const starting = f.start(); const rejected = assert.rejects(starting, /recovery failed/);
@@ -215,6 +227,29 @@ test('recovery gates all admission and failure closes its socket; a fresh boot c
     await assert.rejects(stat(f.socket), { code: 'ENOENT' });
     reject = false; await f.start(); assert.equal(boots.length, 2); assert.notEqual(boots[0], boots[1]);
   } finally { proceed.resolve(); await f.close(); }
+});
+test('pending recovery rejects an incomplete body and closes it before startup failure', { timeout: 5000 }, async () => {
+  const entered = deferred(), proceed = deferred();
+  const f = await fixture(async (op, data, req, res) => {
+    assert.equal(op, 'recover'); entered.resolve(); await proceed.promise;
+    res.writeHead(409); return { error: 'incompatible engine recovery' };
+  });
+  const starting = f.start(); starting.catch(() => {}); let request;
+  try {
+    await entered.promise;
+    request = http.request({ socketPath: f.socket, path: '/v1/documents/p/read', method: 'POST', headers: {
+      'X-Crewship-Docs-Service': secret, Authorization: 'Bearer human', 'Content-Length': 5000,
+    } });
+    request.on('error', () => {});
+    const closed = new Promise(resolve => request.once('close', resolve));
+    const response = new Promise(resolve => request.once('response', res => { res.resume(); res.once('end', () => resolve(res.statusCode)); }));
+    request.write('{');
+    assert.equal(await response, 503);
+    let timer;
+    try { await Promise.race([closed, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('startup rejection kept incomplete body open')), 1000); })]); }
+    finally { clearTimeout(timer); }
+    proceed.resolve(); await assert.rejects(starting, /incompatible engine recovery/);
+  } finally { request?.destroy(); proceed.resolve(); await Promise.allSettled([starting]); await f.close(); }
 });
 test('cached writer lease rechecks each principal and releases on idle and drain', async () => {
   const model = authorityModel(), f = await fixture(model.handle, { idleMs: 500 }); await f.start();
@@ -294,8 +329,8 @@ test('slow incomplete bodies consume bounded admission while health remains resp
 test('drain aborts existing body readers and promptly closes new incomplete requests while persistence waits', { timeout: 10000 }, async () => {
   const blocked = deferred(), entered = deferred();
   const f = await fixture(async (op, data, req, res) => {
-    if (op === 'recover') return { recovered: true };
-    if (op === 'ready') return { protocol: 1, schema: 2 };
+    if (op === 'recover') return { recovered: true, protocol: PROTOCOL };
+    if (op === 'ready') return { protocol: PROTOCOL, schema: 2 };
     entered.resolve(); await blocked.promise; res.writeHead(503); return { error: 'controlled persistence failure' };
   }); await f.start();
   const held = [];

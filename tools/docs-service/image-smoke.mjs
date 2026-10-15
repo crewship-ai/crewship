@@ -24,9 +24,9 @@ let available = true;
 const authority = http.createServer(async (req, res) => {
   assert.equal(req.headers['x-crewship-docs-service'], secret);
   for await (const chunk of req) void chunk;
-  if (req.url.endsWith('/recover')) { state.generation++; state.epoch++; return res.end(JSON.stringify({ recovered: true })); }
+  if (req.url.endsWith('/recover')) { state.generation++; state.epoch++; return res.end(JSON.stringify({ recovered: true, protocol: 2 })); }
   if (!available) { res.writeHead(503); return res.end(JSON.stringify({ error: 'controlled unavailable authority' })); }
-  if (req.method === 'GET') return res.end(JSON.stringify({ protocol: 1, schema: 2 }));
+  if (req.method === 'GET') return res.end(JSON.stringify({ protocol: 2, schema: 2 }));
   assert.equal(req.headers.authorization, 'Bearer smoke');
   assert.equal(req.headers['x-workspace-id'], 'smoke');
   if (req.url.endsWith('/receipt')) return res.end(JSON.stringify({ found: false }));
