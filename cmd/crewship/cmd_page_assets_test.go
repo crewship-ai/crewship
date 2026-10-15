@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"net/http"
-	"strings"
 	"testing"
 )
 
@@ -31,20 +29,20 @@ func TestPageAssetsCLIRequests(t *testing.T) {
 			} else {
 				stub.OnGet(tc.path, handler)
 			}
-			cmd := newPageAssetsCommand()
-			cmd.SetIn(strings.NewReader(tc.input))
-			var out bytes.Buffer
-			cmd.SetOut(&out)
-			cmd.SetErr(&out)
-			cmd.SetArgs(tc.args)
-			if err := cmd.Execute(); err != nil {
+			old := findSubcommand(pageCmd.Commands(), "assets")
+			fresh := newPageAssetsCommand()
+			pageCmd.RemoveCommand(old)
+			pageCmd.AddCommand(fresh)
+			t.Cleanup(func() { pageCmd.RemoveCommand(fresh); pageCmd.AddCommand(old) })
+			out, err := runPageCLI(t, tc.input, append([]string{"page", "assets"}, tc.args...)...)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if len(stub.CallsFor(tc.method, tc.path)) != 1 {
 				t.Fatal("wrong route")
 			}
-			if tc.args[0] == "download" && out.String() != tc.response {
-				t.Fatalf("bytes modified: %q", out.String())
+			if tc.args[0] == "download" && out != tc.response {
+				t.Fatalf("bytes modified: %q", out)
 			}
 		})
 	}

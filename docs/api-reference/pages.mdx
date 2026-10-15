@@ -44,6 +44,31 @@ metadata before selecting a viewer. Missing metadata alone permits compatibility
 with an older server. Empty human Pages still offer Attach HTML through the
 existing authorized creation path.
 
+## Private staged PNG/JPEG assets
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/v1/pages/{slug}/assets?mutation_id=ID` | Upload raw PNG/JPEG under current human Page write authority |
+| GET | `/api/v1/pages/{slug}/assets/{assetId}` | Read immutable metadata under current Page read authority |
+| GET | `/api/v1/pages/{slug}/assets/{assetId}/bytes` | Read canonical private PNG/JPEG bytes |
+
+Metadata contains `id`, `page_id`, `sha256`, `content_type`, `width`, `height`,
+`byte_size`, `state`, `created_at`, `expires_at`. New uploads are staged for24h;
+expired staged rows read404. Same author/input/mutation retries return200 with
+the original ID; changed input is409 and expired uncollected receipts410.
+`mutation_id` contains1–128 letters/digits/underscore/hyphen. No digest endpoint,
+public-link access or agent authority is provided. Canonical bytes use no-store,
+nosniff and same-origin resource policy. Missing or corrupt blobs return503.
+
+Hard limits:5MiB input,8MiB canonical output,2048/dimension,4,194,304pixels,
+2 concurrent decodes and4reads;64assets/64MiB per Page. Only actual decoded
+PNG/JPEG is reencoded. EXIF orientations2–8 explicitly return422; unsupported
+SVG/animation/malformed images return422, excessive input413. Quota refusal409
+does not publish bytes. Asset rows pin shared attachment blobs and participate
+in workspace backup/fork with Page ownership. Staging expiry stays absolute.
+This foundation provides no Docs/Slides image insertion or revision restore;
+future immutable revision attachment must be atomic and separately qualified.
+
 ## Static HTML artifacts
 
 A human-owned empty Page can hold versioned HTML instead of panels or an App.
