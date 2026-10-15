@@ -43,3 +43,22 @@ it("signals reauthorization without accepting a denied action", async () => {
   expect(unauthorized).toHaveBeenCalledOnce()
   expect(changed).not.toHaveBeenCalled()
 })
+
+it.each([401, 403, 404])("retains an uncertain write after a retry is denied with %s", async (status) => {
+  fetch.mockRejectedValueOnce(new Error("lost acknowledgement"))
+  const { result, unauthorized, changed } = setup()
+  await act(async () => { await result.current.submit("/issue?workspace_id=w", "POST", { body: "One comment" }) })
+  const original = fetch.mock.calls[0]
+  fetch.mockResolvedValueOnce(new Response("{}", { status }))
+  await act(async () => { await result.current.retry() })
+  expect(result.current.state).toBe("unknown")
+  expect(unauthorized).toHaveBeenCalledOnce()
+  await act(async () => { expect(await result.current.submit("/issue?workspace_id=w", "POST", { body: "One comment" })).toBe(false) })
+  expect(fetch).toHaveBeenCalledTimes(2)
+  fetch.mockResolvedValueOnce(new Response("{}"))
+  await act(async () => { await result.current.retry() })
+  expect(fetch.mock.calls[1]).toEqual(original)
+  expect(fetch.mock.calls[2]).toEqual(original)
+  expect(result.current.state).toBe("saved")
+  expect(changed).toHaveBeenCalledOnce()
+})
