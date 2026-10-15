@@ -193,8 +193,9 @@ func TestDockerBuilderImageSelection(t *testing.T) {
 		{name: "labelled image enables", lookups: 1, image: labelled, builder: func(n *int) *DockerBuilder {
 			return &DockerBuilder{Resolver: &ImageResolver{Lookup: func(context.Context) ([]string, error) { *n++; return []string{labelled}, nil }}}
 		}},
-		// The refusal is looked up again uncached so enable needs no restart.
-		{name: "no labelled image", notEnabled: true, lookups: 2, builder: func(n *int) *DockerBuilder {
+		// One lookup; the short negative TTL, not a second lookup, lets
+		// enable take effect without a restart.
+		{name: "no labelled image", notEnabled: true, lookups: 1, builder: func(n *int) *DockerBuilder {
 			return &DockerBuilder{Resolver: &ImageResolver{Lookup: func(context.Context) ([]string, error) { *n++; return nil, nil }}}
 		}},
 	} {

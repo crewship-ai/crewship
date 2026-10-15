@@ -47,14 +47,14 @@ type fakePageDocker struct {
 
 func (f *fakePageDocker) install(t *testing.T) {
 	t.Helper()
-	saved := []any{pageDockerPing, pageLabeledImages, pageDockerBuild, pageDockerRemove, pageLoadConfig, pageProfileFinger, pageDockerHost, pageConfirm}
+	saved := []any{pageDockerPing, pageLabeledImages, pageDockerBuild, pageDockerRemove, pageLoadConfig, pageImageFinger, pageDockerHost, pageConfirm}
 	t.Cleanup(func() {
 		pageDockerPing = saved[0].(func(context.Context) error)
 		pageLabeledImages = saved[1].(func(context.Context, string) ([]string, error))
 		pageDockerBuild = saved[2].(func(context.Context, string, string, string, string, io.Writer) error)
 		pageDockerRemove = saved[3].(func(context.Context, string, io.Writer) error)
 		pageLoadConfig = saved[4].(func(string) (*config.Config, error))
-		pageProfileFinger = saved[5].(func() string)
+		pageImageFinger = saved[5].(func() string)
 		pageDockerHost = saved[6].(func() string)
 		pageConfirm = saved[7].(func(*cobra.Command, string) error)
 	})
@@ -98,7 +98,7 @@ func (f *fakePageDocker) install(t *testing.T) {
 		return nil
 	}
 	pageLoadConfig = func(string) (*config.Config, error) { return f.cfg, f.cfgErr }
-	pageProfileFinger = func() string { return fakeFingerprint }
+	pageImageFinger = func() string { return fakeFingerprint }
 	pageDockerHost = func() string { return f.dockerEnv }
 	pageConfirm = func(cmd *cobra.Command, _ string) error {
 		if yes, _ := cmd.Flags().GetBool("yes"); yes {
@@ -262,10 +262,24 @@ func runDisableForTest(t *testing.T, args ...string) (string, string, error) {
 }
 
 func TestPageDisable(t *testing.T) {
-	t.Run("removes every Pages image", func(t *testing.T) {
+	t.Run("keeps other versions' images by default", func(t *testing.T) {
 		f := &fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint, fakeOldID: "old"}, order: []string{fakeCurrentID, fakeOldID}}
 		f.install(t)
-		stdout, stderr, err := runDisableForTest(t, "--yes")
+		stdout, _, err := runDisableForTest(t, "--yes")
+		if err != nil {
+			t.Fatalf("disable: %v", err)
+		}
+		if stdout != fakeCurrentID+"\n" {
+			t.Errorf("stdout = %q, want only this version's image", stdout)
+		}
+		if _, kept := f.images[fakeOldID]; !kept || len(f.images) != 1 {
+			t.Errorf("images left: %v, want only the other version's", f.images)
+		}
+	})
+	t.Run("--all removes every Pages image", func(t *testing.T) {
+		f := &fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint, fakeOldID: "old"}, order: []string{fakeCurrentID, fakeOldID}}
+		f.install(t)
+		stdout, stderr, err := runDisableForTest(t, "--yes", "--all")
 		if err != nil {
 			t.Fatalf("disable: %v", err)
 		}
@@ -300,7 +314,7 @@ func TestPageDisable(t *testing.T) {
 	t.Run("an image in use is reported and fails the command", func(t *testing.T) {
 		f := &fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint, fakeOldID: "old"}, order: []string{fakeCurrentID, fakeOldID}, removeErr: map[string]error{fakeCurrentID: errors.New("image is being used by running container")}}
 		f.install(t)
-		stdout, stderr, err := runDisableForTest(t, "--yes")
+		stdout, stderr, err := runDisableForTest(t, "--yes", "--all")
 		if err == nil || !strings.Contains(err.Error(), "1 of 2") {
 			t.Fatalf("err = %v", err)
 		}

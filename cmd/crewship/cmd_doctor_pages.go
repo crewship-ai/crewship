@@ -25,7 +25,7 @@ func runCheckPagesApps(ctx context.Context) checkResult {
 	if err := pageDockerPing(ctx); err != nil {
 		return checkResult{name: pagesCheckName, status: "INFO", detail: "not checked: Docker is not reachable (Pages Apps need Docker)"}
 	}
-	current, err := pageLabeledImages(ctx, pageProfileFinger())
+	current, err := pageLabeledImages(ctx, pageImageFinger())
 	if err != nil {
 		return checkResult{name: pagesCheckName, status: "WARN", detail: "could not list Pages compiler images: " + err.Error()}
 	}

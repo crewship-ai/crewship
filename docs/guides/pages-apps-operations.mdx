@@ -18,7 +18,7 @@ crewship page enable
 ```
 
 The binary carries the compiler's build context. `enable` builds the Pages tools
-image from it and labels it `ai.crewship.pages.profile=<profile fingerprint>`. It
+image from it and labels it `ai.crewship.pages.image=<build context fingerprint>`. It
 needs Docker access, and network access only during this step (base image and
 compiler dependencies). It prints only the immutable `sha256:…` image ID on stdout;
 progress and hints go to stderr. Running it again with the same release does
@@ -36,7 +36,8 @@ ID. After each build the server verifies that the image's SDK/compiler/dependenc
 fingerprint matches its own; a mismatch is an installation error that asks you to
 run `crewship page enable`.
 
-To turn Pages applications off again, remove every Pages-labelled image:
+To turn Pages applications off again, remove this version's Pages image
+(`--all` also removes the images of other versions on the same Docker host):
 
 ```bash
 crewship page disable
@@ -206,7 +207,7 @@ matching image; do not disable the check or change the lockfile to work around i
 
 `enable` keeps older Pages images, so rolling back to the previous binary finds its
 own image again without a rebuild. Remove images you no longer need with
-`docker rmi`, or all of them with `crewship page disable`, which also turns Pages
+`docker rmi`, or all of them with `crewship page disable --all`, which also turns Pages
 applications off until the next `enable`. If you pin `CREWSHIP_PAGE_BUILD_IMAGE`,
 update it together with the binary.
 

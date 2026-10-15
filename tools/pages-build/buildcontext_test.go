@@ -54,3 +54,24 @@ func TestWriteBuildContextCoversDockerfile(t *testing.T) {
 		}
 	}
 }
+
+// The image label must change with anything that changes the built image. The
+// worker-reported Fingerprint() leaves out the Dockerfile, so a base image
+// digest bump would otherwise keep reusing the old, unpatched image.
+func TestImageFingerprintCoversWholeBuildContext(t *testing.T) {
+	if ImageFingerprint() == Fingerprint() {
+		t.Fatal("image fingerprint equals the worker profile fingerprint; the Dockerfile is not covered")
+	}
+	for _, name := range []string{"Dockerfile", "pnpm-workspace.yaml"} {
+		found := false
+		for _, file := range buildContextFiles {
+			found = found || file == name
+		}
+		if !found {
+			t.Fatalf("%s is not part of the image fingerprint", name)
+		}
+	}
+	if len(ImageFingerprint()) != 64 {
+		t.Fatalf("fingerprint %q is not a sha256 hex digest", ImageFingerprint())
+	}
+}

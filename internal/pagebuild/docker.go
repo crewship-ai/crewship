@@ -52,15 +52,10 @@ func (d *DockerBuilder) image(ctx context.Context) (string, error) {
 	return d.Resolver.Image(ctx)
 }
 
-// Available reports whether a build could start now. Only `docker image ls`
-// runs here. A negative answer is looked up once more, uncached, so a
-// `crewship page enable` takes effect on the next request without a restart.
+// Available reports whether a build could start now. At most one
+// `docker image ls` runs per resolver TTL, however many requests ask.
 func (d *DockerBuilder) Available(ctx context.Context) error {
 	_, err := d.image(ctx)
-	if errors.Is(err, ErrNotEnabled) && d.Image == "" && d.Resolver != nil {
-		d.Resolver.Invalidate()
-		_, err = d.Resolver.Image(ctx)
-	}
 	return err
 }
 

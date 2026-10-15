@@ -95,7 +95,7 @@ exception in the other direction: it prints YAML unless you ask for
 | `project fsck <slug>` | Verify a Page's source, checkpoint and artifact integrity |
 | `project compact` | Reclaim Page storage across the workspace |
 | `enable` | Build the Pages Apps compiler image on this Docker host (turns Pages Apps on) |
-| `disable --yes` | Remove every Pages Apps compiler image from this Docker host (turns Pages Apps off) |
+| `disable --yes [--all]` | Remove this version's Pages Apps compiler image from this Docker host (turns Pages Apps off) |
 
 ---
 
@@ -1323,7 +1323,7 @@ crewship page enable --config /etc/crewship/config.yaml
 ```
 
 Builds the isolated compiler image Pages Apps use on the **local Docker
-daemon**, labelled `ai.crewship.pages.profile=<profile fingerprint>` for this
+daemon**, labelled `ai.crewship.pages.image=<build context fingerprint>` for this
 crewship version. The server resolves its build image by that label, so the
 image's existence *is* the opt-in: a running server picks it up within about
 10 seconds, with no restart and no configuration change. The command does not
@@ -1335,7 +1335,7 @@ needs.
 2. If an image for this version already exists, prints `Pages Apps already
    enabled` to stderr and its ID to stdout, and builds nothing.
 3. Otherwise writes the build context embedded in this binary to a temporary
-   directory, runs `docker build --label ai.crewship.pages.profile=<fingerprint>
+   directory, runs `docker build --label ai.crewship.pages.image=<fingerprint>
    --tag crewship-pages-build:<fingerprint prefix> --iidfile …` (build output
    streams to stderr), checks the result is an
    immutable `sha256:` ID carrying the label, and removes the temporary
@@ -1375,15 +1375,17 @@ and `docker load` it on the target; no further step is needed.
 crewship page disable --yes
 ```
 
-Removes every local image labelled `ai.crewship.pages.profile` — for this and
-every other crewship version — with `docker image rm`. Prints each removed ID
+Removes the local image labelled `ai.crewship.pages.image` for this crewship
+version with `docker image rm`. Images of other versions are kept: on a Docker
+host shared by several installations, or kept for rollback, they belong to
+another server. `--all` removes every version's image. Prints each removed ID
 on stdout and the explanation on stderr. Within about 10 seconds the server
 stops finding a compiler and refuses new Page application builds with
 `page_apps_not_enabled`; **published applications keep serving**, because they
 are static artifacts that need no compiler. Turn Pages Apps back on with
 `crewship page enable`.
 
-Asks for confirmation unless `--yes` is given. With no Pages images it says
+Asks for confirmation unless `--yes` is given. With no matching image it says
 Pages Apps are not enabled and exits `0` without asking. An image used by a
 running build cannot be removed: it is reported, the others are still removed,
 and the command exits `1` — retry when the build finishes.
@@ -1391,6 +1393,7 @@ and the command exits `1` — retry when the build finishes.
 | Flag | Required | Description |
 |---|:---:|---|
 | `--yes`, `-y` | | Skip the interactive confirmation prompt. |
+| `--all` | | Also remove the compiler images of other crewship versions on this Docker host. |
 
 Every `page project` subcommand prints the server's document — JSON unless
 `--format yaml` or `ndjson` asks otherwise; there is no table form — except

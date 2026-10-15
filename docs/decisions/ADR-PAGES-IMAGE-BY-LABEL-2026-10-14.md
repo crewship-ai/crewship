@@ -29,13 +29,18 @@ stay an explicit operator act.
 1. The binary embeds the tools image build context
    (`tools/pages-build/profile.go`, `WriteBuildContext`).
    `crewship page enable` builds it and labels the result
-   `ai.crewship.pages.profile=<profile fingerprint>`; `crewship page disable`
-   removes every image carrying that label.
+   `ai.crewship.pages.image=<build context fingerprint>`. The fingerprint covers
+   the whole build context, Dockerfile and base image digest included, so a
+   patched base image is never satisfied by an older image. `crewship page
+   disable` removes this version's image; `--all` removes every labelled image.
 2. When `CREWSHIP_PAGE_BUILD_IMAGE` is set, it wins, as before, and must still
    be an immutable ID or digest.
 3. Otherwise the server uses the newest local image whose label equals its own
-   profile fingerprint (`internal/pagebuild/resolve.go`), re-checked about every
-   10 seconds, so `enable` takes effect without a restart. An image labelled for
+   build context fingerprint (`internal/pagebuild/resolve.go`). A found image is
+   reused for 10 seconds and "not enabled" for 2 seconds, so `enable` takes
+   effect without a restart while a disabled server runs at most one bounded
+   (5 s) `docker image ls` per 2 seconds, not one per request. The post-build
+   profile fingerprint check is unchanged. An image labelled for
    another fingerprint is ignored.
 4. No such image means Pages Apps are disabled: no Pages container is started.
 

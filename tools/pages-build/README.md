@@ -24,11 +24,11 @@ crewship page enable
 
 The binary embeds this directory's build context (`profile.go`,
 `WriteBuildContext`). `enable` builds the image from it, labels it
-`ai.crewship.pages.profile=<profile fingerprint>` and prints only the `sha256:…`
+`ai.crewship.pages.image=<build context fingerprint>` and prints only the `sha256:…`
 image ID on stdout. The server picks up the labelled image for its own
 fingerprint within seconds, without a restart; with no such image, Pages Apps
-are disabled and no Pages container starts. `crewship page disable` removes all
-Pages-labelled images. Mutable tags are rejected and the worker never pulls. The
+are disabled and no Pages container starts. `crewship page disable` removes this
+version's image (`--all`: every Pages-labelled image). Mutable tags are rejected and the worker never pulls. The
 image and server must come from the same release: a post-build fingerprint check
 refuses a mismatch. Air-gapped hosts and Docker Compose deployments are covered in
 the [operations guide](../../docs/guides/pages-apps-operations.mdx).

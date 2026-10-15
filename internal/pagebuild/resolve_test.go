@@ -61,7 +61,7 @@ func TestImageResolver(t *testing.T) {
 		if _, err := r.Image(t.Context()); !errors.Is(err, ErrNotEnabled) || calls != 1 {
 			t.Fatalf("cached result not reused: %v, %d lookups", err, calls)
 		}
-		now = now.Add(11 * time.Second)
+		now = now.Add(3 * time.Second)
 		if got, err := r.Image(t.Context()); err != nil || got != newer {
 			t.Fatalf("got %q, %v", got, err)
 		}
@@ -69,6 +69,58 @@ func TestImageResolver(t *testing.T) {
 		r.Invalidate()
 		if _, err := r.Image(t.Context()); !errors.Is(err, ErrNotEnabled) {
 			t.Fatalf("invalidate ignored: %v", err)
+		}
+	})
+	t.Run("found image is reused for the TTL", func(t *testing.T) {
+		now := time.Unix(0, 0)
+		calls := 0
+		r := &ImageResolver{Lookup: func(context.Context) ([]string, error) { calls++; return []string{newer}, nil }, Now: func() time.Time { return now }}
+		for range 3 {
+			now = now.Add(3 * time.Second)
+			if _, err := r.Image(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if calls != 1 {
+			t.Fatalf("%d lookups within the TTL, want 1", calls)
+		}
+	})
+	t.Run("not enabled is not re-checked per request", func(t *testing.T) {
+		calls := 0
+		r := &ImageResolver{Lookup: func(context.Context) ([]string, error) { calls++; return nil, nil }}
+		for range 50 {
+			if _, err := r.Image(t.Context()); !errors.Is(err, ErrNotEnabled) {
+				t.Fatalf("got %v", err)
+			}
+		}
+		if calls != 1 {
+			t.Fatalf("%d docker lookups for 50 requests, want 1", calls)
+		}
+	})
+	t.Run("a cancelled request does not decide for others", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		r := &ImageResolver{Lookup: func(ctx context.Context) ([]string, error) {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return []string{newer}, nil
+		}}
+		if got, err := r.Image(ctx); err != nil || got != newer {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	})
+	t.Run("a hung daemon is bounded", func(t *testing.T) {
+		r := &ImageResolver{LookupTimeout: 20 * time.Millisecond, Lookup: func(ctx context.Context) ([]string, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}}
+		start := time.Now()
+		if _, err := r.Image(t.Context()); !errors.Is(err, ErrNotEnabled) {
+			t.Fatalf("got %v", err)
+		}
+		if time.Since(start) > 2*time.Second {
+			t.Fatal("lookup was not bounded")
 		}
 	})
 }

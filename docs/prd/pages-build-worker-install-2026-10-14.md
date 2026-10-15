@@ -74,7 +74,7 @@ instalace při startu je proto vyloučena; zapnutí musí být výslovný krok.
 ### 4.1 Image se hledá podle štítku, ne podle konfigurace
 
 `crewship page enable` postaví image a označí ho štítkem
-`ai.crewship.pages.profile=<pageprofile.Fingerprint()>`.
+`ai.crewship.pages.image=<pageprofile.ImageFingerprint()>`.
 
 Server hledá image takto:
 
@@ -126,7 +126,7 @@ protože služba nemůže zapisovat do `/var/lib`. Když se adresář vytvořit 
 
 ```text
 crewship page enable     # postaví a označí image kompilátoru pro tuto verzi
-crewship page disable    # odstraní image s Pages štítkem (vypne Pages Apps)
+crewship page disable    # odstraní image této verze (vypne Pages Apps); --all odstraní všechny verze
 ```
 
 `enable`:
@@ -134,7 +134,7 @@ crewship page disable    # odstraní image s Pages štítkem (vypne Pages Apps)
 1. Ověří Docker (stejná detekce jako `crewship doctor`).
 2. Když image pro aktuální otisk existuje, vypíše „already enabled“ a skončí.
 3. Zapíše embedovaný build context do dočasného adresáře a spustí
-   `docker build --label ai.crewship.pages.profile=<otisk> --iidfile …`.
+   `docker build --label ai.crewship.pages.image=<otisk> --iidfile …`.
    Síť je potřeba jen teď (base image, pnpm), ne při buildech stránek.
 4. Na stdout vypíše jen ID image (pro skripty: `image=$(crewship page enable)`),
    vše ostatní na stderr. Starší Pages image ponechá kvůli rollbacku a vypíše,
@@ -219,7 +219,7 @@ Kroky 1–3 mají hodnotu samy o sobě a lze je mergnout dřív než zbytek.
 | Změna pravidla „digest v konfiguraci“ | Krok 0: rozhodnutí; explicitní env zůstává a má přednost |
 | `enable` uvnitř Docker Compose nasazení selže, socket proxy má `BUILD=0` (`docker/docker-compose.prod.yml:108-114`) | Dokumentovat spuštění `crewship page enable` na hostiteli se stejnou verzí; rozšíření proxy jen výslovně |
 | Hostitel nesmí do `/var/lib` | systemd `StateDirectory`; jinak jasná zpráva v `doctor` |
-| Stará image po upgradech zabírají místo | `enable` je vypíše; `disable` je odstraní; správce rozhoduje kvůli rollbacku |
+| Stará image po upgradech zabírají místo | `enable` je vypíše; `disable --all` je odstraní; správce rozhoduje kvůli rollbacku |
 
 ## 8. Odloženo
 

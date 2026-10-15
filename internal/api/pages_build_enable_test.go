@@ -177,7 +177,8 @@ func TestPageBuildEnableWithoutRestart(t *testing.T) {
 	h, _, _, ws, user := newPagesFixture(t)
 	h.SetProjectStore(&pages.ProjectStore{Directory: storageDir(t)})
 	labels := &labelLookup{}
-	h.SetBuildWorker(&pagebuild.DockerBuilder{Resolver: &pagebuild.ImageResolver{Lookup: labels.lookup}}, &pagebuild.Store{Directory: storageDir(t)})
+	clock := time.Unix(0, 0)
+	h.SetBuildWorker(&pagebuild.DockerBuilder{Resolver: &pagebuild.ImageResolver{Lookup: labels.lookup, Now: func() time.Time { return clock }}}, &pagebuild.Store{Directory: storageDir(t)})
 	pagesCreate(t, h, ws, user, "health")
 	if w := projectPut(t, h, ws, user, "OWNER", "health", 0, pageprofile.Source()); w.Code != 200 {
 		t.Fatal(w.Body.String())
@@ -186,6 +187,7 @@ func TestPageBuildEnableWithoutRestart(t *testing.T) {
 		t.Fatalf("before enable: %d", w.Code)
 	}
 	labels.set("sha256:" + strings.Repeat("d", 64))
+	clock = clock.Add(3 * time.Second) // past the short "not enabled" TTL
 	if w := buildRequest(t, h, "POST", "/", ws, user, "OWNER", `{"expected_revision":1}`); w.Code != 202 {
 		t.Fatalf("after enable: %d %s", w.Code, w.Body.String())
 	}
@@ -219,7 +221,8 @@ func TestPagePreviewWhenNotEnabled(t *testing.T) {
 	h, _, _, ws, user := newPagesFixture(t)
 	h.SetProjectStore(&pages.ProjectStore{Directory: storageDir(t)})
 	labels := &labelLookup{}
-	h.SetBuildWorker(&pagebuild.DockerBuilder{Resolver: &pagebuild.ImageResolver{Lookup: labels.lookup}}, &pagebuild.Store{Directory: storageDir(t)})
+	clock := time.Unix(0, 0)
+	h.SetBuildWorker(&pagebuild.DockerBuilder{Resolver: &pagebuild.ImageResolver{Lookup: labels.lookup, Now: func() time.Time { return clock }}}, &pagebuild.Store{Directory: storageDir(t)})
 	pagesCreate(t, h, ws, user, "health")
 
 	w := buildRequest(t, h, "GET", "/", ws, user, "OWNER", "")
@@ -227,6 +230,7 @@ func TestPagePreviewWhenNotEnabled(t *testing.T) {
 		t.Fatalf("offer probe while not enabled: %d %s", w.Code, w.Body.String())
 	}
 	labels.set("sha256:" + strings.Repeat("d", 64))
+	clock = clock.Add(3 * time.Second) // past the short "not enabled" TTL
 	if w := buildRequest(t, h, "GET", "/", ws, user, "OWNER", ""); w.Code != 404 {
 		t.Fatalf("offer probe once enabled: %d %s", w.Code, w.Body.String())
 	}

@@ -41,7 +41,7 @@ var (
 	pageDockerBuild   = pageDockerBuildCLI
 	pageDockerRemove  = pageDockerRemoveCLI
 	pageLoadConfig    = loadPagesServerConfig
-	pageProfileFinger = pageprofile.Fingerprint
+	pageImageFinger   = pageprofile.ImageFingerprint
 	pageWriteBuildCtx = pageprofile.WriteBuildContext
 	pageDockerHost    = func() string { return os.Getenv("DOCKER_HOST") }
 )
@@ -218,7 +218,7 @@ func runPageEnable(ctx context.Context, stdout, stderr io.Writer, configFile str
 	if err := pageDockerPing(ctx); err != nil {
 		return fmt.Errorf("cannot enable Pages Apps: %w", err)
 	}
-	fingerprint := pageProfileFinger()
+	fingerprint := pageImageFinger()
 	current, err := pageLabeledImages(ctx, fingerprint)
 	if err != nil {
 		return err
@@ -339,12 +339,16 @@ func reportPageEnableFollowUps(ctx context.Context, stderr io.Writer, id, config
 func newPageDisableCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "disable",
-		Short: "Remove every Pages Apps compiler image from this Docker host (turns Pages Apps off)",
-		Long: `Remove every local image labelled ` + pageprofile.ImageLabel + `, for this
-and every other crewship version. The server stops finding a compiler within
-about 10 seconds and refuses new Page application builds with
-page_apps_not_enabled. Already published applications keep serving: they are
-static artifacts and need no compiler.
+		Short: "Remove this version's Pages Apps compiler image from this Docker host (turns Pages Apps off)",
+		Long: `Remove the local image labelled ` + pageprofile.ImageLabel + ` for this
+crewship version. The server stops finding a compiler within about 10 seconds
+and refuses new Page application builds with page_apps_not_enabled. Already
+published applications keep serving: they are static artifacts and need no
+compiler.
+
+Images of other crewship versions are kept: on a Docker host shared by several
+installations, or kept for rollback, they belong to another server. Pass --all
+to remove every version's image.
 
 Turn Pages Apps back on with ` + "`crewship page enable`" + `.`,
 		Args: cobra.NoArgs,
@@ -353,6 +357,7 @@ Turn Pages Apps back on with ` + "`crewship page enable`" + `.`,
 		},
 	}
 	cmd.Flags().BoolP("yes", "y", false, "Skip the interactive confirmation prompt")
+	cmd.Flags().Bool("all", false, "Also remove compiler images of other crewship versions on this Docker host")
 	return cmd
 }
 
@@ -367,12 +372,21 @@ func runPageDisable(cmd *cobra.Command, stdout, stderr io.Writer) error {
 	if err := pageDockerPing(ctx); err != nil {
 		return fmt.Errorf("cannot disable Pages Apps: %w", err)
 	}
-	images, err := pageLabeledImages(ctx, "")
+	all, _ := cmd.Flags().GetBool("all")
+	fingerprint := pageImageFinger()
+	if all {
+		fingerprint = ""
+	}
+	images, err := pageLabeledImages(ctx, fingerprint)
 	if err != nil {
 		return err
 	}
 	if len(images) == 0 {
-		fmt.Fprintln(stderr, "Pages Apps are not enabled: no compiler images on this Docker host.")
+		if all {
+			fmt.Fprintln(stderr, "Pages Apps are not enabled: no compiler images on this Docker host.")
+		} else {
+			fmt.Fprintln(stderr, "Pages Apps are not enabled for this version: no compiler image for it on this Docker host.")
+		}
 		return nil
 	}
 	if err := pageConfirm(cmd, fmt.Sprintf("Remove %d Pages compiler image(s) and turn Pages Apps off?", len(images))); err != nil {
