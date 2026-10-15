@@ -94,7 +94,7 @@ func TestArtifactWorkflowBrowser(t *testing.T) {
 		t.Fatal("preauthenticated artifact workflow browser", err)
 	}
 	var boardSeq, boardElements int
-	if err = db.QueryRow(`SELECT b.seq,(SELECT COUNT(*) FROM page_board_elements e WHERE e.board_page_id=b.page_id AND e.element_json IS NOT NULL) FROM page_boards b JOIN pages p ON p.id=b.page_id WHERE p.slug='browser-board' AND p.workspace_id=?`, workspace).Scan(&boardSeq, &boardElements); err != nil || boardSeq != 8 || boardElements != 2 {
+	if err = db.QueryRow(`SELECT b.seq,(SELECT COUNT(*) FROM page_board_elements e WHERE e.board_page_id=b.page_id AND e.element_json IS NOT NULL) FROM page_boards b JOIN pages p ON p.id=b.page_id WHERE p.slug='browser-board' AND p.workspace_id=?`, workspace).Scan(&boardSeq, &boardElements); err != nil || boardSeq != 9 || boardElements != 2 {
 		t.Fatalf("real Board DB seq=%d elements=%d err=%v", boardSeq, boardElements, err)
 	}
 	var head, threads, requests int

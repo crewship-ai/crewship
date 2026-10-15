@@ -1,21 +1,20 @@
 "use client"
 
-import { useMemo } from "react"
 import { PageArtifactError, usePageArtifact } from "@/hooks/use-page-artifact"
 import { ArtifactSourceDiff } from "./artifact-source-diff"
-import { staticArtifactDocument } from "@/lib/pages/artifact-static"
+import { useStaticArtifactDocument } from "@/hooks/use-static-artifact-document"
 
 function RevisionPanel({ workspaceId, slug, revision }: { workspaceId: string; slug: string; revision: number }) {
   const { query } = usePageArtifact(workspaceId, slug, revision)
   // Historical placeholder data must never appear under a different label.
   const data = query.data?.revision === revision ? query.data : undefined
   const denied = query.error instanceof PageArtifactError && [401, 403, 404].includes(query.error.status)
-  const document = useMemo(() => data && !denied ? staticArtifactDocument(data.html) : "", [data, denied])
+  const document = useStaticArtifactDocument(data && !denied ? data.html : undefined)
   if (query.error) return <p role="alert" className="p-4 text-sm">Revision {revision}: {query.error.message}</p>
   if (!data) return <p role="status" className="p-4 text-sm">Loading revision {revision}…</p>
   const sourceLimit = 200000
   return <div className="min-w-0 overflow-hidden rounded-lg border">
-    <iframe title={`Compare revision ${revision}`} sandbox="" referrerPolicy="no-referrer" srcDoc={document} className="h-96 w-full border-0 bg-white" />
+    <iframe key={document ? "ready" : "pending"} title={`Compare revision ${revision}`} sandbox="" referrerPolicy="no-referrer" srcDoc={document} className="h-96 w-full border-0 bg-white" />
     <details className="border-t p-3"><summary className="cursor-pointer text-sm">Source · revision {revision}</summary>
       {data.html.length > sourceLimit && <p className="py-2 text-xs text-muted-foreground">Showing the first {sourceLimit.toLocaleString()} characters. Open this revision in Source to download the complete document.</p>}
       <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-all text-xs">{data.html.slice(0, sourceLimit)}</pre>

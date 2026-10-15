@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Local PNG/JPEG images now survive static previews in chat, Pages and Board pins.** All HTML/Markdown preview surfaces use one bounded raster validator and native decode check; remote images, SVG, srcset and network-bearing CSS remain unavailable. Original source downloads are preserved.
+
+
 - **Saved Board drawings keep their layer order after undo and refresh (#3069).** Canonical records are ordered by their saved fractional indexes before loading Excalidraw, preventing false unsaved drafts that disabled further saved undo. Selected PNG previews use the same layer order.
 
 - **Saved Board undo works through repeated edits of the same drawing or pin (#3069).** Successful undo receipts advance earlier local commands to the restored server revisions, while intervening foreign edits still prevent undo even when geometry matches. Uncertain undo retries keep their original batch and identity; saved undo deadlines do not extend.
