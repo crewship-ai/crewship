@@ -71,6 +71,34 @@ describe("authorized chat entity snapshots", () => {
     await waitFor(() => expect(result.current.state).toBe("ready"))
     expect(result.current.refs).toEqual([])
   })
+  it("activates the same viewer key after execution-profile bootstrap", async () => {
+    const { result, rerender, client } = setup({ ...props, enabled: false })
+    expect(result.current.state).toBe("unavailable")
+    let complete!: (r: Response) => void
+    let signal!: AbortSignal
+    fetch.mockImplementationOnce((_path, init) => { signal = init.signal; return new Promise<Response>((resolve) => { complete = resolve }) })
+    rerender(props)
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    expect(signal.aborted).toBe(false)
+    await act(async () => complete(response({ ...page, has_more: false, snapshot_complete: true })))
+    await waitFor(() => expect(result.current.state).toBe("ready"))
+    expect(result.current.refs).toHaveLength(2)
+    expect(client.getQueryData<{ refs: unknown[] }>(chatEntityKeys.refs(props.workspaceId, props.chatId, props.userId))?.refs).toHaveLength(2)
+  })
+  it("keeps an activation started by a layout effect attached to its cache observer", async () => {
+    fetch.mockResolvedValue(response({ ...page, has_more: false, snapshot_complete: true }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}><React.StrictMode>{children}</React.StrictMode></QueryClientProvider>
+    const { result } = renderHook(() => {
+      const [enabled, setEnabled] = React.useState(false)
+      const refs = useChatEntityRefs({ ...props, enabled })
+      React.useLayoutEffect(() => setEnabled(true), [])
+      return refs
+    }, { wrapper })
+    await waitFor(() => expect(result.current.state).toBe("ready"))
+    expect(result.current.refs).toHaveLength(2)
+    expect(client.getQueryData<{ refs: unknown[] }>(chatEntityKeys.refs(props.workspaceId, props.chatId, props.userId))?.refs).toHaveLength(2)
+  })
   it("rejects mixed pages and unknown contracts instead of publishing partial cards", async () => {
     fetch.mockResolvedValueOnce(response(page)).mockResolvedValueOnce(response({ ...continuation, snapshot_id: "different" }))
     const { result } = setup()
