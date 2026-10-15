@@ -575,6 +575,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"mission_tasks":            IntentInclude,
 	"peer_card_audit":          IntentExcludeOperational, // audit trail
 	"peer_cards":               IntentInclude,
+	"agent_user_preferences":   IntentInclude,
 	// pending_runs holds deferred/debounced triggers waiting to fire
 	// (delay/ttl/priority). A pending row is a scheduled future run —
 	// durable, like a waitpoint; dropping it on restore loses queued work.

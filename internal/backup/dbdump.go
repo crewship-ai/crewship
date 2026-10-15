@@ -235,6 +235,7 @@ var BackupTables = []string{
 	// Chat sub-entities
 	"chat_branches",
 	"message_reactions",
+	"agent_user_preferences", // restore tombstones before feedback triggers can recreate candidates
 	"message_feedback",
 	// Memory / mission sub-entities
 	"memory_relations",

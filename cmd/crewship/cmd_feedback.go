@@ -16,15 +16,22 @@ import (
 
 // feedbackRow mirrors the wire shape of /api/v1/feedback rows.
 type feedbackRow struct {
-	ID          string  `json:"id" yaml:"id"`
-	WorkspaceID string  `json:"workspace_id" yaml:"workspace_id"`
-	MessageID   string  `json:"message_id" yaml:"message_id"`
-	ChatID      *string `json:"chat_id,omitempty" yaml:"chat_id,omitempty"`
-	TraceID     *string `json:"trace_id,omitempty" yaml:"trace_id,omitempty"`
-	Signal      string  `json:"signal" yaml:"signal"`
-	Reason      *string `json:"reason,omitempty" yaml:"reason,omitempty"`
-	UserID      *string `json:"user_id,omitempty" yaml:"user_id,omitempty"`
-	CreatedAt   string  `json:"created_at" yaml:"created_at"`
+	ID          string         `json:"id" yaml:"id"`
+	WorkspaceID string         `json:"workspace_id" yaml:"workspace_id"`
+	MessageID   string         `json:"message_id" yaml:"message_id"`
+	ChatID      *string        `json:"chat_id,omitempty" yaml:"chat_id,omitempty"`
+	TraceID     *string        `json:"trace_id,omitempty" yaml:"trace_id,omitempty"`
+	Signal      string         `json:"signal" yaml:"signal"`
+	Reason      *string        `json:"reason,omitempty" yaml:"reason,omitempty"`
+	UserID      *string        `json:"user_id,omitempty" yaml:"user_id,omitempty"`
+	CreatedAt   string         `json:"created_at" yaml:"created_at"`
+	Revision    int            `json:"revision" yaml:"revision"`
+	Memory      feedbackMemory `json:"memory" yaml:"memory"`
+}
+
+type feedbackMemory struct {
+	Status  string `json:"status" yaml:"status"`
+	EntryID string `json:"entry_id,omitempty" yaml:"entry_id,omitempty"`
 }
 
 var feedbackCmd = &cobra.Command{
@@ -77,17 +84,20 @@ var feedbackCreateCmd = &cobra.Command{
 		// The server returns only the persisted row id; echo the inputs
 		// back so machine output is self-describing.
 		var created struct {
-			ID string `json:"id" yaml:"id"`
+			ID       string         `json:"id" yaml:"id"`
+			Revision int            `json:"revision" yaml:"revision"`
+			Memory   feedbackMemory `json:"memory" yaml:"memory"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
 		}
 		f := newFormatter()
-		out := map[string]string{"id": created.ID, "message_id": messageID, "signal": signal}
+		out := map[string]any{"id": created.ID, "message_id": messageID, "signal": signal, "revision": created.Revision, "memory": created.Memory}
 		pairs := [][]string{
 			{"ID", created.ID},
 			{"Message", messageID},
 			{"Signal", signal},
+			{"Memory", created.Memory.Status},
 		}
 		return f.AutoDetail(out, pairs)
 	},
@@ -135,14 +145,14 @@ var feedbackListCmd = &cobra.Command{
 			rows = []feedbackRow{} // "[]", never "null"
 		}
 		f := newFormatter()
-		headers := []string{"ID", "WORKSPACE", "MESSAGE", "SIGNAL", "REASON", "CREATED"}
+		headers := []string{"ID", "WORKSPACE", "MESSAGE", "SIGNAL", "REASON", "MEMORY", "CREATED"}
 		table := make([][]string, 0, len(rows))
 		for _, r := range rows {
 			reason := ""
 			if r.Reason != nil {
 				reason = *r.Reason
 			}
-			table = append(table, []string{r.ID, r.WorkspaceID, r.MessageID, r.Signal, reason, r.CreatedAt})
+			table = append(table, []string{r.ID, r.WorkspaceID, r.MessageID, r.Signal, reason, r.Memory.Status, r.CreatedAt})
 		}
 		return f.Auto(rows, headers, table)
 	},
@@ -198,4 +208,86 @@ func init() {
 	feedbackCmd.AddCommand(feedbackListCmd)
 	feedbackCmd.AddCommand(feedbackDeleteCmd)
 	rootCmd.AddCommand(feedbackCmd)
+}
+
+func init() {
+	for _, operation := range []string{"preferences", "edit-preference", "delete-preference"} {
+		op := operation
+		c := &cobra.Command{Use: op, Short: "Inspect or change your explicit agent preferences", RunE: func(cmd *cobra.Command, _ []string) error {
+			client, err := requireAuthAndWorkspace()
+			if err != nil {
+				return err
+			}
+			agent, _ := cmd.Flags().GetString("agent")
+			if agent == "" {
+				return fmt.Errorf("--agent is required")
+			}
+			path := "/api/v1/agents/" + url.PathEscape(agent) + "/peers"
+			if op == "preferences" {
+				resp, err := client.Get(path)
+				if err != nil {
+					return err
+				}
+				defer resp.Body.Close()
+				if err = cli.CheckError(resp); err != nil {
+					return err
+				}
+				var out struct {
+					Preferences []map[string]any `json:"preferences" yaml:"preferences"`
+				}
+				if err = cli.ReadJSON(resp, &out); err != nil {
+					return err
+				}
+				rows := [][]string{}
+				for _, p := range out.Preferences {
+					rows = append(rows, []string{fmt.Sprint(p["id"]), fmt.Sprint(p["revision"]), fmt.Sprint(p["status"]), fmt.Sprint(p["reason"])})
+				}
+				return newFormatter().Auto(out.Preferences, []string{"ID", "REVISION", "STATUS", "REASON"}, rows)
+			}
+			entry, _ := cmd.Flags().GetString("entry")
+			revision, _ := cmd.Flags().GetInt("revision")
+			if entry == "" || revision < 1 {
+				return fmt.Errorf("--entry and --revision are required")
+			}
+			resp, err := client.Get("/api/v1/users/me/peer-consent")
+			if err != nil {
+				return err
+			}
+			if err = cli.CheckError(resp); err != nil {
+				return err
+			}
+			var subject struct {
+				UserID string `json:"user_id" yaml:"user_id"`
+			}
+			if err = cli.ReadJSON(resp, &subject); err != nil {
+				return err
+			}
+			entryPath := "/api/v1/agents/" + url.PathEscape(agent) + "/peers/" + url.PathEscape(subject.UserID)
+			if op == "delete-preference" {
+				q := url.Values{"entry_id": {entry}, "revision": {fmt.Sprint(revision)}}
+				resp, err = client.Delete(entryPath + "?" + q.Encode())
+			} else {
+				reason, _ := cmd.Flags().GetString("reason")
+				resp, err = client.Patch(entryPath, map[string]any{"entry_id": entry, "revision": revision, "reason": reason})
+			}
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if err = cli.CheckError(resp); err != nil {
+				return err
+			}
+			cli.PrintSuccess("Preference updated.")
+			return nil
+		}}
+		c.Flags().String("agent", "", "agent id (required)")
+		if op != "preferences" {
+			c.Flags().String("entry", "", "preference entry id (required)")
+			c.Flags().Int("revision", 0, "expected entry revision (required)")
+		}
+		if op == "edit-preference" {
+			c.Flags().String("reason", "", "exact explicit preference from catalogue v1")
+		}
+		feedbackCmd.AddCommand(c)
+	}
 }
