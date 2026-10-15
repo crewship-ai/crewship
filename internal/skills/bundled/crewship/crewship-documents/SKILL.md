@@ -27,6 +27,9 @@ outline block IDs and hashes. POST `/patch` with JSON
 `{id,schema:2,epoch,target,text,ifRev,ifHash}` replaces the chosen block's text.
 Keep all preconditions from the read. Raw CRDT updates are for human editors.
 Read fresh state before another operation because leases advance epochs.
+A selection-bound request permits one semantic patch against the original
+selected baseline, followed by its exact checkpoint. Do not issue a second
+semantic patch with fresh preconditions, even after your own successful edit.
 For a selection-bound request, refresh only transport epoch/receipts and validate
 its fixed baseline; reading does not authorize rebasing. After your confirmed
 patch, checkpoint only its exact resulting revision. Another writer's intervening

@@ -120,7 +120,9 @@ Discard a stale draft and explicitly select again. Exact transport retries retai
 the entire body and submission ID, including the original base and targets.
 The selected private chat must belong to this human, and its agent needs an
 explicit Page write grant. A `202` response means queued work, not completion.
-Success requires the admitted agent's durable semantic patch and checkpoint.
+Success requires the admitted agent's one durable semantic patch against the
+original selected baseline and its exact resulting checkpoint. This does not
+claim multi-block or multiple-patch completion.
 
 ## crewship doc request-list
 
