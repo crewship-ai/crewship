@@ -106,3 +106,27 @@ func TestAcceptanceGuestRoutineResultsRejectInvalidOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestAcceptanceGuestRoutineResultsTableQuotesControls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/workspaces" {
+			_, _ = io.WriteString(w, `[{"id":"ws_test","slug":"ws_test"}]`)
+			return
+		}
+		if r.Method != "GET" || r.URL.Path != "/api/v1/workspaces/ws_test/restricted-routine-library/shared/runs/run-1" {
+			t.Errorf("unexpected %s %s", r.Method, r.URL)
+			w.WriteHeader(404)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"run_id": "run-1", "routine_id": "routine-1", "status": "completed", "mode": "run", "started_at": "2026-10-15", "ended_at": nil, "output": "SAFE\n\x1b]X\a", "step_outputs": map[string]string{"answer": "safe"}})
+	}))
+	defer server.Close()
+	output, err := runGuestCLI(t, server.URL, "", "routine", "shared-runs", "shared", "run-1", "--format", "table")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output, "\x1b]") || strings.Contains(output, "\a") || !strings.Contains(output, "SAFE") || !strings.Contains(output, `\n`) {
+		t.Fatalf("table must quote output controls: %q", output)
+	}
+}

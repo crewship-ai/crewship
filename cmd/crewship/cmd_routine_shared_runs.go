@@ -10,7 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type sharedRoutineRun struct {
+// SharedRoutineRun is the same metadata projection in JSON and YAML.
+type SharedRoutineRun struct {
 	ID        string  `json:"run_id" yaml:"run_id"`
 	RoutineID string  `json:"routine_id" yaml:"routine_id"`
 	Status    string  `json:"status" yaml:"status"`
@@ -20,7 +21,7 @@ type sharedRoutineRun struct {
 }
 
 type sharedRoutineRunResult struct {
-	sharedRoutineRun `yaml:",inline"`
+	SharedRoutineRun `yaml:",inline"`
 	Output           *string           `json:"output" yaml:"output"`
 	StepOutputs      map[string]string `json:"step_outputs" yaml:"step_outputs"`
 }
@@ -66,7 +67,7 @@ func newRoutineSharedRunsCommand() *cobra.Command {
 			return err
 		}
 		columns := []string{"RUN", "STATUS", "MODE", "STARTED"}
-		row := func(item sharedRoutineRun) []string { return []string{item.ID, item.Status, item.Mode, item.StartedAt} }
+		row := func(item SharedRoutineRun) []string { return []string{item.ID, item.Status, item.Mode, item.StartedAt} }
 		if len(args) == 2 {
 			var item sharedRoutineRunResult
 			if err = cli.ReadJSON(response, &item); err != nil {
@@ -75,17 +76,17 @@ func newRoutineSharedRunsCommand() *cobra.Command {
 			if item.ID != args[1] || item.RoutineID == "" || item.StepOutputs == nil {
 				return fmt.Errorf("incomplete or mismatched routine result")
 			}
-			output := ""
-			if item.Output != nil {
-				output = *item.Output
+			output, err := json.Marshal(item.Output)
+			if err != nil {
+				return err
 			}
 			steps, err := json.Marshal(item.StepOutputs)
 			if err != nil {
 				return err
 			}
-			return newFormatter().Auto(item, append(columns, "OUTPUT", "STEP OUTPUTS"), [][]string{append(row(item.sharedRoutineRun), output, string(steps))})
+			return newFormatter().Auto(item, append(columns, "OUTPUT", "STEP OUTPUTS"), [][]string{append(row(item.SharedRoutineRun), string(output), string(steps))})
 		}
-		items := []sharedRoutineRun{}
+		items := []SharedRoutineRun{}
 		if err = cli.ReadJSON(response, &items); err != nil {
 			return err
 		}
