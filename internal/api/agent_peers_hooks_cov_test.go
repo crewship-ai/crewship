@@ -7,7 +7,7 @@ package api
 //
 //   agent_peers.go
 //     - ListAgentPeers: missing workspace ctx (401), agent not found
-//       (404), agent w/o crew (409), list query failure (500)
+//       (404), agent w/o crew (empty structured list), list query failure (500)
 //     - GetAgentPeer:   storage not configured (503), agent not found
 //       (404), agent w/o crew (409)
 //     - DeleteAgentPeer: storage not configured (503), agent not found
@@ -93,12 +93,19 @@ func TestCovPH2ListAgentPeers_AgentNotFound(t *testing.T) {
 
 func TestCovPH2ListAgentPeers_AgentNoCrew(t *testing.T) {
 	h, db, userID, wsID, _ := covPH2PeerHandler(t)
-	// Solo agent — no crew_id — must map to 409 Conflict.
+	// Solo agents have structured preferences even without a Markdown peer directory.
 	solo := seedAgentRow(t, db, "agent-solo", wsID, "", "Solo", "solo", "COORDINATOR")
 	rec := httptest.NewRecorder()
 	h.ListAgentPeers(rec, covPH2PeerReq(http.MethodGet, wsID, userID, map[string]string{"agentId": solo}))
-	if rec.Code != http.StatusConflict {
-		t.Errorf("crewless agent: code = %d, want 409 (%s)", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("crewless agent: code = %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Peers       []any `json:"peers"`
+		Preferences []any `json:"preferences"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.Peers == nil || out.Preferences == nil || len(out.Peers)+len(out.Preferences) != 0 {
+		t.Fatalf("solo list should contain two empty arrays: %s; decode=%v", rec.Body.String(), err)
 	}
 }
 

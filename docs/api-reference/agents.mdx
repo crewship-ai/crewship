@@ -2120,7 +2120,8 @@ Get messages for a specific chat session. Proxied through crewshipd. Supports `?
 to the authenticated subject in the selected workspace. Each entry has `id`,
 `revision`, `feedback_id`, `source_revision`, `chat_id`, `message_id`, `reason`,
 `value`, `status` and `source_type` (`feedback_reason`). Only currently accessible
-private sources qualify. Existing `peers` records are unchanged.
+private sources qualify. Existing `peers` records are unchanged. Solo agents also
+return this list, with an empty `peers` array because they have no crew Markdown directory.
 
 `PATCH /api/v1/agents/{agentId}/peers/{userId}` corrects one own preference:
 
