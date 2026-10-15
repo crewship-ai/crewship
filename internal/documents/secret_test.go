@@ -1,17 +1,17 @@
+//go:build !windows
+
 package documents
 
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
 
+// Every case depends on ReadServiceSecret's POSIX mode-0600 gate, including
+// content bounds; Windows does not implement this service-file contract.
 func TestReadServiceSecretFileBoundary(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix permission bits and service transport")
-	}
 	for _, tc := range []struct {
 		name, content string
 		mode          os.FileMode
