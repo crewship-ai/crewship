@@ -6444,7 +6444,8 @@
                         "list",
                         "read",
                         "write",
-                        "delete"
+                        "delete",
+                        "contribute"
                       ],
                       "type": "string"
                     }
@@ -6643,7 +6644,8 @@
                         "list",
                         "read",
                         "write",
-                        "delete"
+                        "delete",
+                        "contribute"
                       ],
                       "type": "string"
                     }
@@ -142126,7 +142128,8 @@
                                   "list",
                                   "read",
                                   "write",
-                                  "delete"
+                                  "delete",
+                                  "contribute"
                                 ],
                                 "type": "string"
                               }
@@ -142227,7 +142230,8 @@
                                   "list",
                                   "read",
                                   "write",
-                                  "delete"
+                                  "delete",
+                                  "contribute"
                                 ],
                                 "type": "string"
                               }
@@ -142521,7 +142525,8 @@
                                 "list",
                                 "read",
                                 "write",
-                                "delete"
+                                "delete",
+                                "contribute"
                               ],
                               "type": "string"
                             }
@@ -142622,7 +142627,8 @@
                                 "list",
                                 "read",
                                 "write",
-                                "delete"
+                                "delete",
+                                "contribute"
                               ],
                               "type": "string"
                             }
@@ -142788,7 +142794,8 @@
                                   "list",
                                   "read",
                                   "write",
-                                  "delete"
+                                  "delete",
+                                  "contribute"
                                 ],
                                 "type": "string"
                               }
@@ -142889,7 +142896,8 @@
                                   "list",
                                   "read",
                                   "write",
-                                  "delete"
+                                  "delete",
+                                  "contribute"
                                 ],
                                 "type": "string"
                               }

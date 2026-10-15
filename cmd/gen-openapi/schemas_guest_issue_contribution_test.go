@@ -33,3 +33,22 @@ func TestGuestContributionSchemasExcludeAuthoritySelectors(t *testing.T) {
 		t.Fatal("creation lacks documented 201")
 	}
 }
+
+func TestGuestContributeIsDocumentedInMemberPolicySchema(t *testing.T) {
+	rights := memberAccessPolicySchema()["properties"].(map[string]any)["rights"].(map[string]any)["items"].(map[string]any)["oneOf"].([]any)
+	for _, variant := range rights {
+		properties := variant.(map[string]any)["properties"].(map[string]any)
+		kind := properties["kind"].(map[string]any)["enum"].([]string)
+		if len(kind) != 1 || kind[0] != "project" {
+			continue
+		}
+		operations := properties["operation"].(map[string]any)["enum"].([]string)
+		for _, operation := range operations {
+			if operation == "contribute" {
+				return
+			}
+		}
+		t.Fatal("the API accepts project Contribute but OpenAPI rejects that grant")
+	}
+	t.Fatal("project grant schema is missing")
+}
