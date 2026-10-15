@@ -392,7 +392,7 @@ func TestPagesOwnerTransfer_RefusalBlocksRestOfErasure(t *testing.T) {
 }
 
 func TestPagesOwnerTransferHumanOnlyTypesOnDeparture(t *testing.T) {
-	for _, kind := range []string{"artifact", "board"} {
+	for _, kind := range []string{"artifact", "board", "document"} {
 		for _, erase := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/erase=%v", kind, erase), func(t *testing.T) {
 				r := pagesTransferSetup(t)
@@ -401,6 +401,8 @@ func TestPagesOwnerTransferHumanOnlyTypesOnDeparture(t *testing.T) {
 				r.seedPage(t, "human-page", "human-page", "Private output", r.userID, "")
 				if kind == "artifact" {
 					execOrFatal(t, r.db, `INSERT INTO page_artifacts(page_id,head_rev) VALUES('human-page',1)`)
+				} else if kind == "document" {
+					execOrFatal(t, r.db, `INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES(?,'human-page',1,X'01','[]')`, r.wsID)
 				} else {
 					execOrFatal(t, r.db, `INSERT INTO page_boards(page_id,seq,format) VALUES('human-page',0,'crewship-board-excalidraw-0.18.1-v1')`)
 				}
