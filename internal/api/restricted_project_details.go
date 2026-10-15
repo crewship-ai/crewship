@@ -12,6 +12,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // This intentionally small projection excludes leads, crews, credentials and
@@ -98,7 +99,7 @@ func (r *Router) restrictedProjectDetails(w http.ResponseWriter, req *http.Reque
 		replyError(w, 409, "Project details changed. Review the current version before saving.")
 		return
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now())
 	if _, err = tx.ExecContext(req.Context(), `UPDATE projects SET name=?,description=?,updated_at=? WHERE id=? AND workspace_id=?`, body.Name, *body.Description, now, project, workspace); err != nil {
 		guestProjectDetailsError(w, err)
 		return
