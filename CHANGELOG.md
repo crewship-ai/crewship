@@ -9,9 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Choose what an agent should remember from feedback.** Thumbs now offer optional explicit future preferences with verified memory status, and the chat Memory panel lets you inspect sources, change or forget preferences, and control personal memory.
+- Chat CSV/TSV artifacts gain bounded local-worker previews with sorting, filtering, virtual rows and source-preserving selection. Ask about selection appends a versioned reference to the draft without sending it. Access denial clears displayed artifact bytes; XLSX previews remain a separate delivery.
+- **Chat issue references stay scoped to the current viewer (#3068).** Reconciliation replaces complete snapshots, clears protected projections while access is checked, and preserves durable run anchors. Uncertain human writes retain the same revision and idempotency key through recovery, including a denied retry after a lost acknowledgement.
 
-- **Agents can remember explicitly stated feedback preferences.** Optional future preferences on thumbs feedback now have scoped, source-tracked storage, asynchronous status, CLI self-service edits and deletion, and private-session recall with consent checks. Bare thumbs remain feedback only.
 - **Chat issue cards can refresh sooner after successful writes.** Authorized chat sessions now receive content-free reference/revision invalidation hints; reference snapshots include `contract_version: 1`. Queued session delivery also rejects suspended users and deleted chat agents/workspaces.
 
 - Guests with explicit routine View and Edit draft shares can change collaborative drafts through UI and CLI with revision/base conflicts and atomic audit. Published recipes, execution authority and trusted testing/review gates remain intact; direct Guest publication is still separate work.
@@ -26,6 +26,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Guests with explicit project Read and Manage shares can edit shared project names and descriptions. UI and CLI preserve review snapshots and refuse conflicting saves; private project metadata and unrelated operations remain inaccessible.
 
 - **Agent chat transcripts survive workspace and crew backups (#3109).** Encrypted bundles include scoped structured history, remapped fork identities and stable message/run anchors. Damaged lines produce per-chat completeness warnings instead of blocking all backups. Collection only fences file pinning; restore fences publication and commit, preserving existing histories unless replacement is explicit. Cross-workspace chat collisions are refused. The search/feedback mirror and atomic hard-crash recovery across filesystem/DB publication remain separate limitations.
+
+- **Agents can remember explicitly stated feedback preferences.** Optional future preferences on thumbs feedback now have scoped, source-tracked storage, asynchronous status, CLI self-service edits and deletion, and private-session recall with consent checks. Bare thumbs remain feedback only.
+
+- **Choose what an agent should remember from feedback.** Thumbs now offer optional explicit future preferences with verified memory status, and the chat Memory panel lets you inspect sources, change or forget preferences, and control personal memory.
 
 - Pages folder and page menus now follow caller-specific server ACL decisions: readers see no mutation controls, folder editors can arrange, and page owners retain move access.
 - Guest accounts can complete CLI login by creating their own token from a verified interactive session. Minted tokens retain Guest restrictions; bearer credentials cannot remint a wider successor.

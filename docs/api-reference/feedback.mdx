@@ -51,7 +51,7 @@ Idempotent at the `(workspace_id, message_id, user_id, signal)` tuple. A re-subm
 **Response:** `201 Created`
 
 ```json
-{ "id": "fb_abc123" }
+{ "id": "fb_abc123", "revision": 1, "memory": { "status": "feedback_only" } }
 ```
 
 **Errors:**
@@ -62,7 +62,7 @@ Idempotent at the `(workspace_id, message_id, user_id, signal)` tuple. A re-subm
 | `401` | No authenticated user. Returned BEFORE any DB lookup so anonymous probes can't enumerate ids via response codes. |
 | `404` | `message_id` doesn't resolve to a row in `conversation_messages`, or it does but the caller isn't a member of that message's workspace. |
 | `413` | Request body exceeds the size cap (`http.MaxBytesReader`). |
-| `500` | DB write failure. The error body is `{"error":"internal"}` — details land in server logs. |
+| `500` | DB write failure, or the persisted source and revision cannot be verified after writing. No generated ID or memory success is reported. The error body is `{"error":"internal"}` — details land in server logs. |
 
 **Example:**
 
