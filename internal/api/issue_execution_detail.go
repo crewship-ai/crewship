@@ -86,16 +86,16 @@ func (h *IssueHandler) ReviewPolicy(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, 400, "revision and client_review_required are required")
 		return
 	}
-	res, err := h.db.ExecContext(r.Context(), `UPDATE issue_work SET client_review_required=?,revision=revision+1,updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE revision=? AND mission_id IN (SELECT id FROM missions WHERE identifier=? AND crew_id=? AND workspace_id=? AND status IN ('TODO','BACKLOG')) AND NOT EXISTS(SELECT 1 FROM assignments a WHERE a.mission_id=issue_work.mission_id AND a.status NOT IN ('COMPLETED','FAILED','CANCELLED','TIMEOUT'))`, *req.Required, *req.Revision, r.PathValue("identifier"), r.PathValue("crewId"), WorkspaceIDFromContext(r.Context()))
+	var id string
+	err := h.db.QueryRowContext(r.Context(), `UPDATE issue_work SET client_review_required=?,revision=revision+1,updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE revision=? AND mission_id IN (SELECT id FROM missions WHERE identifier=? AND crew_id=? AND workspace_id=? AND status IN ('TODO','BACKLOG')) AND NOT EXISTS(SELECT 1 FROM assignments a WHERE a.mission_id=issue_work.mission_id AND a.status NOT IN ('COMPLETED','FAILED','CANCELLED','TIMEOUT')) RETURNING mission_id`, *req.Required, *req.Revision, r.PathValue("identifier"), r.PathValue("crewId"), WorkspaceIDFromContext(r.Context())).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeProblem(w, r, 409, "Refresh the issue. Acceptance can change only before work starts.")
+		return
+	}
 	if err != nil {
 		internalError(w, r, h.logger, "review policy", err)
 		return
 	}
-	n, _ := res.RowsAffected()
-	if n != 1 {
-		writeProblem(w, r, 409, "Refresh the issue. Acceptance can change only before work starts.")
-		return
-	}
-	h.broadcastIssueEvent(WorkspaceIDFromContext(r.Context()), "issue.updated", map[string]string{"identifier": r.PathValue("identifier")})
+	h.broadcastIssueEvent(WorkspaceIDFromContext(r.Context()), "issue.updated", map[string]string{"id": id, "identifier": r.PathValue("identifier")})
 	writeJSON(w, 200, issueReviewPolicyResponse{Revision: *req.Revision + 1, ClientReviewRequired: *req.Required})
 }
