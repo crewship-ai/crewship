@@ -18,13 +18,15 @@ import (
 )
 
 const (
-	SchemaVersion = 1
-	MaxDeckBytes  = 2 << 20
-	MaxSlides     = 100
-	MaxElements   = 1000
-	MaxTextBytes  = 32 << 10
-	MaxNotesBytes = 16 << 10
-	HashDomain    = "crewship-slides-canonical-json/v1\n"
+	SchemaVersion         = 1
+	MaxDeckBytes          = 2 << 20
+	MaxSlides             = 100
+	MaxElements           = 1000
+	MaxTextBytes          = 32 << 10
+	MaxNotesBytes         = 16 << 10
+	MaxTableCellsPerDeck  = 10000
+	MaxTableCellsPerSlide = 2000
+	HashDomain            = "crewship-slides-canonical-json/v1\n"
 )
 
 var ErrSchema = errors.New("unsupported Slides schema")
@@ -190,7 +192,9 @@ func Validate(deck Deck) error {
 	ids := map[string]bool{}
 	slides := map[string]bool{}
 	count := 0
+	tableCells := 0
 	for _, slide := range deck.Slides {
+		slideCells := 0
 		if !identifier.MatchString(slide.ID) || ids[slide.ID] || slide.Elements == nil || !validText(slide.Notes, MaxNotesBytes) {
 			return errors.New("invalid slide identity, notes or elements")
 		}
@@ -226,6 +230,14 @@ func Validate(deck Deck) error {
 						return errors.New("nonrectangular table")
 					}
 					for _, cell := range row {
+						slideCells++
+						tableCells++
+						if slideCells > MaxTableCellsPerSlide {
+							return errors.New("slide exceeds 2000 total table cells")
+						}
+						if tableCells > MaxTableCellsPerDeck {
+							return errors.New("deck exceeds 10000 total table cells")
+						}
 						if !validText(cell, 4096) {
 							return errors.New("invalid table cell")
 						}

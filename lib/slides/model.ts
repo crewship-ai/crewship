@@ -1,6 +1,8 @@
 // Schema-1 wire contract for the Go Slides authority. This module does not
 // advertise a renderer or replace server admission/authorization.
 export const SLIDES_SCHEMA_VERSION = 1
+export const SLIDES_MAX_TABLE_CELLS = 10000
+export const SLIDES_MAX_TABLE_CELLS_PER_SLIDE = 2000
 export const SLIDES_HASH_DOMAIN = "crewship-slides-canonical-json/v1\n"
 export interface SlideText { value: string; font_family: string; font_size: number; color: string; align: "left" | "center" | "right" }
 export interface SlideShape { kind: "rectangle" | "ellipse"; fill: string; stroke: string; stroke_width: number }

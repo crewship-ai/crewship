@@ -40,11 +40,7 @@ func main() {
 			elements[element.ID] = h
 		}
 	}
-	if err = json.NewEncoder(os.Stdout).Encode(struct {
-		Canonical string            `json:"canonical_json"`
-		Hash      string            `json:"hash"`
-		Elements  map[string]string `json:"elements"`
-	}{string(canonical), hash, elements}); err != nil {
+	if err = json.NewEncoder(os.Stdout).Encode(map[string]any{"canonical_json": string(canonical), "hash": hash, "elements": elements, "table_cell_limits": map[string]int{"deck": slides.MaxTableCellsPerDeck, "slide": slides.MaxTableCellsPerSlide}}); err != nil {
 		panic(err)
 	}
 }
