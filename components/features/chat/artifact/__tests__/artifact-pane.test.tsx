@@ -289,7 +289,7 @@ describe("ArtifactPane — document and table editing", () => {
     openTab("doc", "reports/brief.md")
 
     const page = await screen.findByTitle("Preview reports/brief.md") as HTMLIFrameElement
-    expect(page.srcdoc).toContain("Copy site")
+    await waitFor(() => expect(page.srcdoc).toContain("Copy site"))
     expect(page.srcdoc).toContain("default-src 'none'")
     expect(screen.getByRole("link", { name: "Download artifact" })).toHaveAttribute("download", "brief.md")
     fireEvent.click(screen.getByRole("button", { name: "Editor" }))

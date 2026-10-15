@@ -33,7 +33,7 @@ export function ArtifactStaticPreview({ document, revision, picking, shown, onPi
   return <div>
     {(picking || anchor) && <p className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">Preview restarted at the top. A point describes this visible viewport only, not a DOM element or a scrolled document location.{anchor && !matching && " This viewport differs from the captured size; the point is not overlaid."}</p>}
     <div ref={container} className="relative h-[min(65vh,720px)] min-h-80">
-      <iframe key={`${revision}:${mode}`} title="Artifact static preview" sandbox="" referrerPolicy="no-referrer" srcDoc={document} onLoad={() => setReady(true)} className="h-full w-full border-0 bg-white" />
+      <iframe key={`${revision}:${mode}:${document ? "ready" : "pending"}`} title="Artifact static preview" sandbox="" referrerPolicy="no-referrer" srcDoc={document} onLoad={() => setReady(Boolean(document))} className="h-full w-full border-0 bg-white" />
       {(picking || anchor) && <div className="absolute inset-0" style={{ pointerEvents: "auto" }}>
         {picking && <button type="button" aria-label="Choose comment point in preview" disabled={!ready} className="absolute inset-0 h-full w-full cursor-crosshair focus-visible:outline-2 focus-visible:outline-primary" onClick={event => {
           const rect = event.currentTarget.getBoundingClientRect()

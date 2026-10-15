@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { Code2, Eye, History, MessageSquare, Upload, Columns2, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ArtifactAgentWorkProvider, ArtifactAgentRequests, ArtifactSendButton } from "./artifact-agent-work"
@@ -15,7 +15,7 @@ import { ArtifactCompare } from "./artifact-compare"
 import { ArtifactHistory } from "./artifact-history"
 import { PageArtifactError, usePageArtifact } from "@/hooks/use-page-artifact"
 import { useArtifactRevision } from "@/hooks/use-artifact-revision"
-import { staticArtifactDocument } from "@/lib/pages/artifact-static"
+import { useStaticArtifactDocument } from "@/hooks/use-static-artifact-document"
 
 const MAX_BYTES = 10 * 1024 * 1024
 export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: { workspaceId: string; slug: string; pageId?: string; onDirtyChange?: (dirty: boolean) => void }) {
@@ -67,7 +67,7 @@ export function PageArtifactView({ workspaceId, slug, pageId, onDirtyChange }: {
   useEffect(() => {
     if (artifact?.can_copy === false) { setCopyRevision(null); cancelCopy() }
   }, [artifact?.can_copy, cancelCopy])
-  const document = useMemo(() => artifact ? staticArtifactDocument(artifact.html) : "", [artifact])
+  const document = useStaticArtifactDocument(artifact?.html)
   const error = fileError ?? save.error?.message
   async function upload(file?: File) {
     if (!file) return

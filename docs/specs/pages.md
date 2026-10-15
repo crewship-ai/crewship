@@ -254,7 +254,29 @@ The stored original is delivered as JSON text, never inserted directly into
 Studio. Static preview sanitizes it with DOMPurify, then renders it in an
 iframe with no sandbox permissions and a restrictive CSP. Scripts, navigation,
 forms, nested frames and external resources are disabled. This deliberately
-limits visual fidelity (including images and downloaded fonts). An unsupported
+limits visual fidelity (including unsupported images and downloaded fonts). Local
+canonical base64 `data:image/png` and `data:image/jpeg` images use the same
+validated static profile in chat HTML/Markdown previews, Pages, comparisons,
+gallery previews and Board pins. Before native decoding, PNG containers require
+valid CRCs, bounded IHDR dimensions and ordered chunks; APNG and 16-bit channels
+are refused. JPEG accepts 8-bit baseline/progressive frames, bounded dimensions,
+complete marker framing and no secondary frame or height redefinition. MIME
+labels alone never authorize an image. Native decoding must succeed; decoded
+dimensions must match the admitted dimensions (or swap under EXIF orientation).
+A missing native decoder removes image sources without weakening sanitization.
+
+Limits: 1 MiB per image, 4 MiB of admitted image bytes, 32 images and 8,388,608
+pixels per document; either image dimension is at most 2048. Limits count each
+occurrence, including repeated images, before native decoding. The existing
+10 MiB UTF-8 source limit remains. Invalid/unsupported/over-budget images lose
+`src`; original HTML and downloads are unchanged. Remote `src`, every `srcset`,
+SVG, font loads and CSS with loading/unknown at-rules, escapes or image-loading functions are
+removed. Static `@media`, `@supports`, `@layer` and keyframe rules remain supported;
+a nested `@import` still rejects its containing stylesheet. The opaque iframe retains no scripts or external networking; `img-src
+data:` is only used after IMG-only format, budget and decode validation. Preview
+replacement waits for validation and never keeps an older source visible.
+
+An unsupported
 sanitizer environment displays escaped source. Source download is plain text
 with an `.html.txt` filename. This static presentation boundary does not claim
 to safely execute arbitrary interactive HTML.
