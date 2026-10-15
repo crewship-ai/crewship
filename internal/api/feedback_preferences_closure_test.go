@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -74,5 +75,28 @@ func TestFeedbackClosureRestrictedTransitionDoesNotResurrect(t *testing.T) {
 				t.Fatalf("withdrawn source: %s %q source%d rev%d %v", status, reason, source, revision, err)
 			}
 		})
+	}
+}
+
+func TestFeedbackClosureMigrationWithdrawsExistingRestrictedSubjects(t *testing.T) {
+	b := savedClosurePreference(t)
+	// Recreate the pre-upgrade state: recall is hidden but the saved value remains.
+	execOrFatal(t, b.h.db, `DROP TRIGGER feedback_preference_restricted_insert`)
+	execOrFatal(t, b.h.db, `DROP TRIGGER feedback_preference_restricted_update`)
+	execOrFatal(t, b.h.db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE user_id=?`, b.userID)
+	migration, err := os.ReadFile("../database/migrations/20261015165023_withdraw_restricted_preferences.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	execOrFatal(t, b.h.db, string(migration))
+	execOrFatal(t, b.h.db, `UPDATE workspace_members SET access_mode='trusted' WHERE user_id=?`, b.userID)
+	body, err := usermodel.ReadFeedbackPreferences(t.Context(), b.h.db, b.wsID, "agent-fb", b.userID)
+	if err != nil || body != "" {
+		t.Fatalf("upgrade resurrected preference: %q %v", body, err)
+	}
+	var status string
+	var source, revision int
+	if err := b.h.db.QueryRow(`SELECT status,source_revision,revision FROM agent_user_preferences`).Scan(&status, &source, &revision); err != nil || status != "withdrawn" || source != 1 || revision != 2 {
+		t.Fatalf("backfilled tombstone: %s source%d rev%d %v", status, source, revision, err)
 	}
 }
