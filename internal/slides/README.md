@@ -18,7 +18,7 @@ Limits: 2 MiB input and canonical bytes, JSON nesting32, 1–100 slides, at most
 1,000 total elements, IDs1–128 ASCII letters/digits/underscore/hyphen,
 64–4096px deck axes, positive element size within the deck, integer coordinates.
 Text32KiB, notes16KiB and table cells4KiB are UTF-8 budgets. Tables are rectangular
-1–30rows by1–20columns. Text permits LF/tab but no CR, C0 controls or DEL.
+1–30rows by1–20columns, with at most2,000 total cells per slide and10,000 per deck across all table elements. Empty cells count too. Text permits LF/tab but no CR, C0 controls or DEL.
 Font names are1–128 UTF-8 bytes without LF/tab, font size1–160 integer pixels,
 colors exact six-digit hex, shapes rectangle/ellipse with stroke0–16px.
 Overflowing text remains content; rendering/export overflow is a later gate.

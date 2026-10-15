@@ -2,6 +2,7 @@ package slides
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -92,5 +93,64 @@ func TestModelRejectsUnsupportedAndAmbiguousInput(t *testing.T) {
 				t.Fatal("invalid semantic input accepted")
 			}
 		})
+	}
+}
+
+func TestAggregateTableRenderingBudget(t *testing.T) {
+	fixture, _, _ := modelFixture(t)
+	deck := Deck{SchemaVersion: 1, DeckID: "table_budget", Width: 960, Height: 540, Theme: fixture.Theme, SlideOrder: []string{"tables"}, Slides: []Slide{{ID: "tables", Elements: []Element{}}}}
+	cells := make([][]string, 30)
+	for i := range cells {
+		cells[i] = make([]string, 20)
+	}
+	for i := 0; i < 900; i++ {
+		deck.Slides[0].Elements = append(deck.Slides[0].Elements, Element{ID: fmt.Sprintf("table_%d", i), Type: "table", Width: 1, Height: 1, Table: &Table{Cells: cells, FontFamily: "Arial", FontSize: 12, Color: "#112233", Fill: "#FFFFFF", Border: "#445566"}})
+	}
+	raw, err := Canonical(deck)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("900 admitted-size tables: %d canonical bytes, %d cells", len(raw), 900*30*20)
+	if len(raw) > MaxDeckBytes {
+		t.Fatal("focused fixture must fit byte budget")
+	}
+	if err = Validate(deck); err == nil {
+		t.Fatal("540000-cell rendering workload accepted below 2MiB")
+	}
+}
+
+func TestTableCellBudgetsCountAllTablesAndSlides(t *testing.T) {
+	fixture, _, _ := modelFixture(t)
+	makeTable := func(id string, rows, columns int) Element {
+		cells := make([][]string, rows)
+		for i := range cells {
+			cells[i] = make([]string, columns)
+		}
+		return Element{ID: id, Type: "table", Width: 1, Height: 1, Table: &Table{Cells: cells, FontFamily: "Arial", FontSize: 12, Color: "#112233", Fill: "#FFFFFF", Border: "#445566"}}
+	}
+	deck := Deck{SchemaVersion: 1, DeckID: "table_boundaries", Width: 960, Height: 540, Theme: fixture.Theme, SlideOrder: []string{}, Slides: []Slide{}}
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("slide_%d", i)
+		slide := Slide{ID: id, Elements: []Element{makeTable(id+"_a", 30, 20), makeTable(id+"_b", 30, 20), makeTable(id+"_c", 30, 20), makeTable(id+"_d", 10, 20)}}
+		deck.Slides = append(deck.Slides, slide)
+		deck.SlideOrder = append(deck.SlideOrder, id)
+	}
+	if err := Validate(deck); err != nil {
+		t.Fatal("exact10000/deck and2000/slide should fit", err)
+	}
+	deck.Slides = append(deck.Slides, Slide{ID: "one_more_slide", Elements: []Element{makeTable("one_more_cell", 1, 1)}})
+	deck.SlideOrder = append(deck.SlideOrder, "one_more_slide")
+	if err := Validate(deck); err == nil || !strings.Contains(err.Error(), "10000") {
+		t.Fatalf("deck aggregate should reject10001 cells: %v", err)
+	}
+	deck.Slides = deck.Slides[:1]
+	deck.SlideOrder = deck.SlideOrder[:1]
+	deck.Slides[0].Elements = append(deck.Slides[0].Elements, makeTable("one_more_slide_cell", 1, 1))
+	if err := Validate(deck); err == nil || !strings.Contains(err.Error(), "2000") {
+		t.Fatalf("slide aggregate should reject2001 cells: %v", err)
+	}
+	deck.Slides[0].Elements = deck.Slides[0].Elements[:1]
+	if err := Validate(deck); err != nil {
+		t.Fatal("basic600-cell table must remain valid", err)
 	}
 }
