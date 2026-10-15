@@ -138,7 +138,7 @@ try {
   const editor = alice.locator('[contenteditable="true"][aria-label="Document editor"]')
   await expect(editor).toBeVisible()
   await editor.fill('Shared starting paragraph')
-  const saved = page => expect(page.getByRole('region', { name: 'Doc page', exact: true }).getByRole('status')).toHaveText('Saved', { timeout: 30000 })
+  const saved = page => expect(page.getByRole('region', { name: 'Doc page', exact: true }).locator('[role="status"][aria-live="polite"]')).toHaveText('Saved', { timeout: 30000 })
   await saved(alice)
   const path = '/api/v1/pages/d1b-acceptance/document'
   const state = () => api(owner, 'GET', path, undefined, workspace)
