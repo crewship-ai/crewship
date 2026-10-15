@@ -49,6 +49,29 @@ service.stdout.on('data', data => { serviceLog += data })
 service.stderr.on('data', data => { serviceLog += data })
 const serviceExit = new Promise(resolve => service.once('exit', (code, signal) => resolve({ code, signal })))
 let browser, failurePage
+const routeTasks = new Set(), routeFailures = [], routeReleases = []
+const patchPattern = '**/api/v1/pages/d1b-acceptance/document/patch?*'
+async function interceptPatch(page, handler) {
+  await page.route(patchPattern, route => {
+    const task = handler(route).catch(error => { routeFailures.push(error.message) })
+    routeTasks.add(task); task.finally(() => routeTasks.delete(task))
+    return task
+  })
+}
+async function finishRoutes() { for (const release of routeReleases.splice(0)) release(); await Promise.all([...routeTasks]) }
+async function moveToEnd(editor) {
+  await editor.focus()
+  await editor.press('Control+End', { delay: 50 })
+  await expect.poll(() => editor.evaluate(element => {
+    const selection = window.getSelection()
+    if (!selection?.isCollapsed || !selection.rangeCount || !element.contains(selection.anchorNode)) return false
+    const remaining = document.createRange()
+    remaining.selectNodeContents(element)
+    remaining.setStart(selection.anchorNode, selection.anchorOffset)
+    return remaining.toString().length === 0
+  })).toBe(true)
+}
+function assertRoutes() { if (routeFailures.length) throw new Error(`Transport fixture failure: ${routeFailures.join('; ')}`) }
 try {
   await expect.poll(async () => { try { return (await stat(options.service)).isSocket() } catch { return false } }, { timeout: 30000 }).toBe(true)
   const serviceSecret = (await readFile(options.token, 'utf8')).trim()
@@ -117,18 +140,18 @@ try {
   // Hold each actual update request until both independent editors have edited
   // the same saved block. Responses are never fabricated or altered.
   const barriers = []
-  for (const page of [alice, bob]) await page.route('**/api/v1/pages/d1b-acceptance/document/patch?*', async route => {
-    if (route.request().method() === 'POST') await new Promise(resolve => barriers.push(resolve))
+  for (const page of [alice, bob]) await interceptPatch(page, async route => {
+    if (route.request().method() === 'POST') await new Promise(resolve => { barriers.push(resolve); routeReleases.push(resolve) })
     await route.continue()
   })
-  await editor.click(); await editor.press('Control+End'); await alice.keyboard.insertText(' ALPHA')
-  await editorB.click(); await editorB.press('Control+End'); await bob.keyboard.insertText(' BETA')
+  await moveToEnd(editor); await alice.keyboard.insertText(' ALPHA')
+  await moveToEnd(editorB); await bob.keyboard.insertText(' BETA')
   await expect.poll(() => barriers.length, { timeout: 15000 }).toBe(2)
   await expect(doc.getByRole('status')).toHaveText('Saving…')
   await expect(bob.getByRole('region', { name: 'Doc page', exact: true }).getByRole('status')).toHaveText('Saving…')
-  for (const release of barriers.splice(0)) release()
-  await alice.unroute('**/api/v1/pages/d1b-acceptance/document/patch?*')
-  await bob.unroute('**/api/v1/pages/d1b-acceptance/document/patch?*')
+  await finishRoutes(); assertRoutes()
+  await alice.unroute(patchPattern)
+  await bob.unroute(patchPattern)
   await saved(alice); await saved(bob)
   await expect(editor).toContainText('ALPHA', { timeout: 15000 }); await expect(editor).toContainText('BETA', { timeout: 15000 })
   await expect(editorB).toContainText('ALPHA', { timeout: 15000 }); await expect(editorB).toContainText('BETA', { timeout: 15000 })
@@ -138,20 +161,21 @@ try {
   // recover the exact durable operation instead of inventing a second edit.
   let lostAttempt, retryAttempt
   const beforeLostReply = await state()
-  await alice.route('**/api/v1/pages/d1b-acceptance/document/patch?*', async route => {
+  await interceptPatch(alice, async route => {
     if (!lostAttempt) { lostAttempt = route.request().postData(); await route.fetch(); await route.abort('failed') }
     else { retryAttempt = route.request().postData(); await route.continue() }
   })
-  await editor.click(); await editor.press('Control+End'); await alice.keyboard.insertText(' LOSTACK')
+  await moveToEnd(editor); await alice.keyboard.insertText(' LOSTACK')
   await expect(doc.getByRole('status')).toHaveText('Disconnected · changes are unsaved', { timeout: 20000 })
   await saved(alice)
-  await alice.unroute('**/api/v1/pages/d1b-acceptance/document/patch?*')
+  await finishRoutes(); assertRoutes()
+  await alice.unroute(patchPattern)
   if (!retryAttempt || retryAttempt !== lostAttempt) throw new Error('Lost-reply retry changed operation identity or payload')
   const afterLostReply = await state()
   if (afterLostReply.rev !== beforeLostReply.rev + 1) throw new Error('Lost-reply retry duplicated a durable edit')
   record('Lost acknowledgement preserves unsaved status and exact retry recovers one durable edit')
 
-  await editor.click(); await editor.press('Control+Home'); await editor.press('Home'); await editor.press('Shift+ArrowRight'); await editor.press('Shift+ArrowRight'); await editor.press('Shift+ArrowRight')
+  await editor.click(); await editor.press('Control+Home', { delay: 50 }); await editor.press('Home', { delay: 50 }); await editor.press('Shift+ArrowRight', { delay: 50 }); await editor.press('Shift+ArrowRight', { delay: 50 }); await editor.press('Shift+ArrowRight', { delay: 50 })
   await doc.getByRole('button', { name: 'Comment on selected text', exact: true }).click()
   await doc.getByLabel('Comment text').fill('Please preserve this shared introduction.')
   await doc.getByRole('button', { name: 'Add comment', exact: true }).click()
@@ -159,11 +183,13 @@ try {
   await expect(doc.getByRole('region', { name: 'Document comments' }).getByText('attached', { exact: true })).toBeVisible()
   record('Selection-anchored comment saved through production authority')
 
-  await editor.click(); await editor.press('Control+End'); await editor.press('Enter')
-  await doc.getByRole('button', { name: 'Heading 2', exact: true }).click(); await alice.keyboard.insertText('Acceptance heading')
-  await editor.press('Enter'); await doc.getByRole('button', { name: 'Bullet list', exact: true }).click(); await alice.keyboard.insertText('Acceptance list item')
+  await moveToEnd(editor); await editor.press('Enter')
+  await doc.getByRole('button', { name: 'Heading 2', exact: true }).click(); await expect(editor).toBeFocused(); await alice.keyboard.insertText('Acceptance heading')
+  await editor.press('Enter'); await doc.getByRole('button', { name: 'Bullet list', exact: true }).click(); await expect(editor).toBeFocused(); await alice.keyboard.insertText('Acceptance list item')
   await editor.press('Enter'); await editor.press('Enter'); await doc.getByRole('button', { name: 'Table', exact: true }).click()
   await saved(alice)
+  await expect(editor).toContainText('Shared starting paragraph')
+  await expect(editor).toContainText('ALPHA'); await expect(editor).toContainText('BETA'); await expect(editor).toContainText('LOSTACK')
   await expect(editor.locator('h2')).toContainText('Acceptance heading')
   await expect(editor.locator('ul')).toContainText('Acceptance list item')
   await expect(editor.locator('table')).toBeVisible()
@@ -203,10 +229,12 @@ try {
   if (errors.length) throw new Error(`Browser errors: ${errors.join('; ')}`)
   report.result = 'passed'; console.log(`Model acceptance NOT PERFORMED: ${report.modelRun.reason}`)
 } catch (error) {
-  report.result = 'failed'; report.error = error.message
+  await finishRoutes()
+  report.result = 'failed'; report.error = error.message; report.transportErrors = routeFailures
   await failurePage?.screenshot({ path: join(output, 'failure.png'), fullPage: true }).catch(() => {})
   throw error
 } finally {
+  await finishRoutes()
   await browser?.close()
   service.kill('SIGTERM')
   let shutdownTimer
