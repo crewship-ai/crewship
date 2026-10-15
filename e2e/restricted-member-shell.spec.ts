@@ -201,6 +201,11 @@ for (const width of [1280, 390]) {
       else if (path === "/api/v1/agents") body = [agent]
       else if (path === "/api/v1/crews") body = [{ id: "crew", name: "Platform", slug: "platform" }]
       else if (path === "/api/v1/agents/entity-agent") body = agent
+      else if (path.endsWith("/peers")) body = { peers: [], preferences: [] }
+      else if (path.endsWith("/peer-consent")) body = { opted_out: false }
+      else if (path === "/api/v1/feedback") body = request.method() === "POST"
+        ? { id: "detail-feedback", workspace_id: "test-workspace-id", user_id: "viewer", message_id: "reply", signal: "helpful", revision: 1, memory: { status: "feedback_only" } }
+        : { feedback: [] }
       else if (path === "/api/v1/agents/entity-agent/chats") body = [{ id: "chat-1", title: "Issue cards", mode: "private", kind: "direct", status: "active", message_count: 2, started_at: "2026-10-13T09:00:00Z", updated_at: "2026-10-13T09:01:00Z" }]
       else if (path.endsWith("/execution-profile")) body = { mode: "trusted" }
       else if (path.endsWith("/messages")) body = { messages: [
@@ -244,6 +249,27 @@ for (const width of [1280, 390]) {
     await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Change status" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Change priority" })).toHaveCount(0)
+    if (width === 1280) {
+      // An open Issue belongs to Work and must not cover other side panels.
+      await page.getByRole("tab", { name: "Artifacts", exact: true }).click()
+      await expect(page.getByText("No artifacts yet. Documents, sheets and pages the agent writes appear here.")).toBeVisible()
+      await expect(page.getByRole("button", { name: "Back to Work" })).toHaveCount(0)
+      await page.getByRole("tab", { name: "Work", exact: true }).click()
+      await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()
+      await page.getByRole("tab", { name: "Memory", exact: true }).click()
+      await expect(page.getByRole("region", { name: "Your preferences for this agent" })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Back to Work" })).toHaveCount(0)
+      await page.getByRole("tab", { name: "Work", exact: true }).click()
+      await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()
+      await page.getByRole("button", { name: "Good response", exact: true }).click()
+      await page.getByRole("button", { name: /What should change next time/ }).click()
+      await page.getByRole("button", { name: "Manage my preferences", exact: true }).click()
+      await expect(page.getByRole("region", { name: "Your preferences for this agent" })).toBeVisible()
+      await page.getByRole("tab", { name: "Work", exact: true }).focus()
+      await page.keyboard.press("Enter")
+      await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()
+      await expect(page.getByRole("button", { name: "Change status" })).toBeVisible()
+    }
     if (width === 390) {
       await expect(page.getByRole("dialog", { name: "Issue detail" })).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
