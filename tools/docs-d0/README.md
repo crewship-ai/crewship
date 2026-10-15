@@ -50,11 +50,16 @@ use `-run '^$'`. Normal CI does not execute this browser acceptance.
    editor and server use the same pinned `@tiptap/y-tiptap` conversion engine.
    Supported content is heading level 1, paragraph, text and a simple table.
    Unsupported nodes, attributes, raw Yjs metadata and marks are rejected before
-   normalization can discard them. This is not the issues Markdown roundtrip.
+   normalization can discard them. Validation also inspects retained Yjs Items,
+   including deleted nodes, removed attributes and removed formatting; `gc:false`
+   history cannot hide unsupported payloads. Supported deleted text and old IDs
+   remain available to comment anchors. This is not the issues Markdown roundtrip.
    The qualified binding is `@tiptap/y-tiptap` 3.0.7. Tested 3.0.10 structural
    operations added an auxiliary position-migration root outside this contract
    and were rejected; upgrading requires an explicit metadata/anchor contract,
-   not allowing arbitrary opaque roots or disabling validation.
+   not allowing arbitrary opaque roots or disabling validation. Retained validation
+   depends on the internal Item/content representation of pinned Yjs 13.6.33;
+   any Yjs upgrade must review that representation and rerun these regressions.
 2. The browser edits optimistically and combines its transactions for 35 ms.
    Its custom WebSocket provider sends a request ID, schema, epoch and binary
    update. It displays `Ukládám`; provider sync alone never displays `Uloženo`.

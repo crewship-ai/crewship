@@ -55,3 +55,35 @@ test('raw binary validation rejects metadata and deltas omitted or normalized by
   const doc = create(); find(doc, 'cell-a').setAttribute('colspan', 2);
   assert.throws(() => validate(doc), /simple table only/); doc.destroy();
 });
+
+test('retained binary rejects deleted unsupported content after snapshot reload', () => {
+  const cases = [
+    doc => { const text = textNode(doc, 'intro'); text.setAttribute('future', 'hidden'); text.removeAttribute('future'); },
+    doc => { const text = textNode(doc, 'intro'); text.format(0, 1, { bold: 'hidden' }); text.format(0, 1, { bold: null }); },
+    doc => { const root = doc.getXmlFragment('default'); root.insert(root.length, [new Y.XmlElement('futureNode')]); root.delete(root.length - 1, 1); },
+    doc => { const map = doc.getMap('pastRoot'); map.set('payload', 'hidden'); map.delete('payload'); },
+    doc => { const block = find(doc, 'intro'); block.setAttribute('future', 'hidden'); block.removeAttribute('future'); },
+    doc => { const block = find(doc, 'intro'); block.setAttribute('id', { hidden: true }); block.setAttribute('id', 'intro'); },
+    doc => { const text = textNode(doc, 'intro'); text.insertEmbed(0, { hidden: true }); text.delete(0, 1); },
+    doc => { const root = doc.getXmlFragment('default'); root.insert(root.length, [new Y.Map()]); root.delete(root.length - 1, 1); },
+    doc => { const map = new Y.Map(); map.set('subdocument', new Y.Doc()); const root = doc.getXmlFragment('default'); root.insert(root.length, [map]); root.delete(root.length - 1, 1); },
+  ];
+  for (const mutate of cases) {
+    const doc = create(); mutate(doc);
+    const restored = load(snapshot(doc));
+    assert.throws(() => validate(restored), /unsupported/);
+    restored.destroy(); doc.destroy();
+  }
+});
+test('retained supported text and deleted blocks preserve IDs and anchors', () => {
+  const doc = create(); const thread = anchor(doc, 'intro', 0, 8, 'retained-comment', 1);
+  const text = textNode(doc, 'intro'); text.delete(0, 8); text.insert(0, 'Replacement');
+  const root = doc.getXmlFragment('default'); root.delete(root.toArray().indexOf(find(doc, 'intro')), 1);
+  const restored = load(snapshot(doc));
+  assert.doesNotThrow(() => validate(restored));
+  assert.equal(resolve(restored, thread).status, 'detached');
+  assert.ok(Buffer.from(Y.encodeStateAsUpdate(restored)).includes(Buffer.from('Replacement')));
+  const original = create(); const old = find(original, 'intro'); old.setAttribute('id', 'historic-id'); old.setAttribute('id', 'intro');
+  const renamed = load(snapshot(original)); assert.doesNotThrow(() => validate(renamed));
+  for (const d of [doc, restored, original, renamed]) d.destroy();
+});

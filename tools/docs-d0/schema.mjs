@@ -86,6 +86,41 @@ export function validateJSON(json) {
   if (JSON.stringify(json).length > 500000) throw new Error('document limit');
   return json;
 }
+// Yjs 13.6.33's retained Item/content classes are part of this experiment's
+// binary contract. Upgrades must rerun the retained-content regressions.
+function validateRetained(doc) {
+  const root = doc.getXmlFragment('default');
+  const supportedType = type => type === root || type instanceof Y.XmlText ||
+    (type instanceof Y.XmlElement && types.includes(type.nodeName));
+  for (const structs of doc.store.clients.values()) for (const item of structs) {
+    // GC carries no recoverable payload. Deleted Items still do.
+    if (item instanceof Y.GC) continue;
+    if (!(item instanceof Y.Item) || !supportedType(item.parent)) throw new Error('unsupported retained Yjs parent');
+    const content = item.content;
+    if (item.parentSub !== null) {
+      const parent = item.parent;
+      if (!(parent instanceof Y.XmlElement)) throw new Error('unsupported retained text attributes');
+      const key = item.parentSub;
+      const cell = ['tableCell', 'tableHeader'].includes(parent.nodeName);
+      const allowed = key === 'id' || (key === 'level' && parent.nodeName === 'heading') ||
+        (cell && ['colspan', 'rowspan', 'colwidth', 'align'].includes(key));
+      if (!allowed) throw new Error('unsupported retained attributes');
+      if (content instanceof Y.ContentDeleted) continue;
+      if (!(content instanceof Y.ContentAny) || content.arr.length !== 1) throw new Error('unsupported retained attribute content');
+      const value = content.arr[0];
+      const valid = key === 'id' ? value === null || (typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)) :
+        ['level', 'colspan', 'rowspan'].includes(key) ? value === 1 : value === null;
+      if (!valid) throw new Error('unsupported retained attribute value');
+    } else if (content instanceof Y.ContentType) {
+      if (item.parent instanceof Y.XmlText || !supportedType(content.type) || content.type === root) throw new Error('unsupported retained Yjs type');
+    } else if (content instanceof Y.ContentString) {
+      if (!(item.parent instanceof Y.XmlText)) throw new Error('unsupported retained string parent');
+    } else if (!(content instanceof Y.ContentDeleted)) {
+      // Includes formatting (even removed marks), embeds, binary and subdocs.
+      throw new Error('unsupported retained Yjs content');
+    }
+  }
+}
 export function validate(doc) {
   // Projection serializers omit some raw Yjs metadata. Validate the binary
   // tree as well so omitted attributes cannot bypass the content contract.
@@ -103,6 +138,7 @@ export function validate(doc) {
   if (Y.encodeStateAsUpdate(doc).length > 1 << 20) throw new Error('document limit');
   // Prevent opaque client-controlled Yjs roots from becoming a covert payload.
   if ([...doc.share.keys()].some(k => k !== 'default')) throw new Error('unsupported Yjs root');
+  validateRetained(doc);
   return json;
 }
 export async function outline(doc) {
