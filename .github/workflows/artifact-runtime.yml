@@ -46,6 +46,11 @@ jobs:
         env:
           CREWSHIP_TEST_RUNTIME_BINARY: ${{ runner.temp }}/pagebuild.test
         run: pnpm exec playwright test --config=playwright.artifact-runtime.config.ts --project=${{ matrix.browser }}
+      - name: Verify Excalidraw public API integration
+        timeout-minutes: 8
+        run: |
+          node scripts/prepare-board-assets.mjs
+          pnpm exec playwright test --config=playwright.board-editor.config.ts --project=${{ matrix.browser }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         timeout-minutes: 3
         if: always()
@@ -55,7 +60,7 @@ jobs:
           if-no-files-found: error
 
   production-workflow:
-    name: Artifact production Router workflow
+    name: Artifact and Board production Router workflows
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -78,6 +83,9 @@ jobs:
       - name: Verify durable Artifact publication boundaries
         timeout-minutes: 6
         run: go test ./internal/api -run '^Test(PageArtifactCrashAfterCommitBeforeResponseRetriesOnce|PageArtifactPublishGCAndSharedAttachmentLifetime|PageArtifactAllRetainedRevisionsPinnedRejectsPublishAndRestore|PageArtifacts_ConcurrentCASAndPageTypeBoundary)$' -count=1 -timeout 4m
+      - name: Verify Board conversion and job authorization boundaries
+        timeout-minutes: 6
+        run: go test ./internal/api -run '^Test(BoardRequestInsertTamperedPayloadIsAtomicAndHumanAttributed|BoardRequestAssetsRequireExactJobSelectionAndCurrentSourceGrant|BoardRequestCompletionAfterWriteGrantRevocationRetainsPrivateUnpinnedArtifact)$' -count=1 -timeout 4m
       - name: Build the production frontend
         timeout-minutes: 10
         env:
@@ -88,11 +96,15 @@ jobs:
         env:
           CREWSHIP_ARTIFACT_WORKFLOW_BROWSER: '1'
           CREWSHIP_ARTIFACT_WORKFLOW_OUTPUT: ${{ runner.temp }}/artifact-production-workflow
-        run: go test -tags artifact_workflow_browser ./internal/api -run '^TestArtifactWorkflowBrowser$' -count=1 -timeout 6m
+          CREWSHIP_BOARD_MERMAID_BROWSER: '1'
+          CREWSHIP_BOARD_MERMAID_OUTPUT: ${{ runner.temp }}/board-mermaid-workflow
+        run: go test -tags 'artifact_workflow_browser board_mermaid_workflow_browser' ./internal/api -run '^(TestArtifactWorkflowBrowser|TestBoardMermaidWorkflowBrowser)$' -count=1 -timeout 6m
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         timeout-minutes: 3
         if: always()
         with:
           name: artifact-production-workflow
-          path: ${{ runner.temp }}/artifact-production-workflow/
+          path: |
+            ${{ runner.temp }}/artifact-production-workflow/
+            ${{ runner.temp }}/board-mermaid-workflow/
           if-no-files-found: error

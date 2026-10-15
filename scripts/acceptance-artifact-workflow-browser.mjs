@@ -17,6 +17,14 @@ async function check(name, condition, detail = {}) {
 }
 const contexts = {}, pages = {}
 const endpoint = path => `${fixture.server}/api/v1/pages/browser-report${path}?workspace_id=${encodeURIComponent(fixture.workspace)}`
+async function captureBoardDraft(page) {
+  const button = page.getByRole('button', { name: 'Export unsaved draft', exact: true })
+  if (!await button.isVisible()) return false
+  const pending = page.waitForEvent('download', { timeout: 5000 })
+  await button.click()
+  await (await pending).saveAs(join(output, 'owner-board-draft.json'))
+  return true
+}
 async function transferOutputThroughSettings(slug, name, type) {
   const ownershipURL = `${fixture.server}/api/v1/workspaces/${encodeURIComponent(fixture.workspace)}/page-ownership?workspace_id=${encodeURIComponent(fixture.workspace)}`
   const beforeResponse = await contexts.owner.request.get(ownershipURL)
@@ -204,12 +212,168 @@ try {
   const artifactAfterTransfer = await artifactHistory()
   const threadsAfterTransfer = (await (await contexts.owner.request.get(endpoint('/artifact/threads'))).json()).threads
   await check('Artifact custody transfer preserves all retained source revisions, manifests, authors and comment anchors', JSON.stringify(artifactAfterTransfer) === JSON.stringify(artifactBeforeTransfer) && artifactAfterTransfer.every(revision => revision.head_rev === 3) && JSON.stringify(threadsAfterTransfer) === JSON.stringify(threadsBeforeTransfer) && threadsAfterTransfer[0]?.revision === 1 && JSON.stringify(threadsAfterTransfer[0]?.anchor) === JSON.stringify(capturedAnchor))
-  await expect(owner.getByRole('button', { name: 'New board', exact: true })).toHaveCount(0)
-  response = await contexts.owner.request.get(endpoint('/board'))
-  await check('Artifacts delivery omits Board editor and Board HTTP route', response.status() === 404)
+  const boardEndpoint = path => `${fixture.server}/api/v1/pages/browser-board${path}?workspace_id=${encodeURIComponent(fixture.workspace)}`
+  response = await contexts.owner.request.post(`${fixture.server}/api/v1/pages?workspace_id=${fixture.workspace}`, { data: { slug: 'browser-board', name: 'Browser Board', panels: [], allow_empty: true } })
+  await check('owner creates Board source through real route', response.status() === 201)
+  const boardPage = await response.json()
+  response = await contexts.owner.request.post(boardEndpoint('/board'), { data: { mutation_id: 'browser-board-init' } })
+  await check('Board initializes in migrated database', response.status() === 200)
+  response = await contexts.owner.request.put(boardEndpoint('/grants'), { data: { subject_type: 'user', subject: fixture.commenter, level: 'comment' } })
+  await check('Board commenter has explicit live grant', response.status() === 200)
+  const snapshots = { owner: [], commenter: [] }
+  for (const actor of ['owner', 'commenter']) {
+    pages[actor].on('websocket', socket => socket.on('framereceived', ({ payload }) => {
+      try { const frame = JSON.parse(String(payload)); if (frame.type === 'presence.snapshot' && frame.channel === `board:${boardPage.id}`) snapshots[actor].push(frame) } catch { /* Ignore protocol/non-JSON frames. */ }
+    }))
+    await pages[actor].goto(`${fixture.server}/pages/browser-board`)
+    await expect(pages[actor].getByRole('region', { name: 'Board', exact: true })).toBeVisible()
+  }
+  await owner.getByRole('button', { name: 'More tools', exact: true }).click()
+  await expect(owner.getByRole('button', { name: /Mermaid to Excalidraw/i })).toBeHidden()
+  await owner.locator('[data-testid="toolbar-embeddable"]').filter({ hasText: 'Mermaid to Excalidraw' }).dispatchEvent('click')
+  await expect(owner.locator('.ttd-dialog')).toHaveCount(0)
+  await owner.keyboard.press('Escape')
+  await check('actual product Board cannot mount native Studio Mermaid converter', true)
+  await expect.poll(() => snapshots.owner.some(frame => frame.payload.members.some(member => member.user_id === fixture.commenter)), { timeout: 15000 }).toBe(true)
+  await expect.poll(() => snapshots.commenter.some(frame => frame.payload.members.some(member => member.user_id === fixture.owner)), { timeout: 15000 }).toBe(true)
+  await check('real authenticated WebSocket room exposes authorized Board participants', true)
+  const drawBoard = async (offset) => {
+    const canvas = owner.locator('.excalidraw__canvas.interactive')
+    await canvas.click({ position: { x: 700, y: 350 } })
+    await owner.keyboard.press('r')
+    const bounds = await canvas.boundingBox()
+    if (!bounds) throw new Error('Board canvas unavailable')
+    await owner.mouse.move(bounds.x + 280 + offset, bounds.y + 180)
+    await owner.mouse.down(); await owner.mouse.move(bounds.x + 380 + offset, bounds.y + 260, { steps: 8 }); await owner.mouse.up()
+    await expect(owner.getByRole('button', { name: 'Save board', exact: true })).toBeEnabled()
+    const saved = owner.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/board/batches'))
+    await owner.getByRole('button', { name: 'Save board', exact: true }).click()
+    const result = await saved
+    await check('real Board drawing commits through server batch validation', result.status() === 201)
+  }
+  await owner.getByRole('button', { name: 'Zoom in', exact: true }).click()
+  const zoomBeforeSave = await owner.locator('.reset-zoom-button').innerText()
+  await drawBoard(0)
+  await expect(owner.getByText('Board · Saved sequence 1', { exact: true })).toBeVisible()
+  await expect(owner.locator('.reset-zoom-button')).toHaveText(zoomBeforeSave)
+  await check('saving the real Board preserves its zoom across canonical editor replacement', zoomBeforeSave !== '100%')
+  response = await contexts.commenter.request.get(boardEndpoint('/board'))
+  const savedBoard = await response.json()
+  await check('separate commenter reads actual committed drawing', response.status() === 200 && savedBoard.seq === 1 && savedBoard.records.length === 1 && !savedBoard.can_write)
+  response = await contexts.commenter.request.post(boardEndpoint('/board/batches'), { data: { mutation_id: 'commenter-forgery', base_seq: 1, deletes: [{ id: savedBoard.records[0].element_id, expected_rev: savedBoard.records[0].element_rev }] } })
+  await check('commenter cannot submit a Board edit directly', response.status() === 403)
+  response = await contexts.owner.request.post(boardEndpoint('/board/batches'), { data: { mutation_id: 'stale-batch', base_seq: 0, deletes: [{ id: savedBoard.records[0].element_id, expected_rev: savedBoard.records[0].element_rev + 1 }] } })
+  await check('real server atomically rejects stale Board batch', response.status() === 409, { http_status: response.status() })
+  response = await contexts.owner.request.get(boardEndpoint('/board'))
+  await check('rejected batch preserves sequence and saved drawing', response.status() === 200 && (await response.json()).seq === 1)
+  response = await contexts.owner.request.delete(`${boardEndpoint('/grants')}&subject_type=user&subject=${encodeURIComponent(fixture.commenter)}`)
+  await check('owner revokes Board access through real grant route', response.status() === 200)
+  await drawBoard(140)
+  await expect(owner.getByText('Board · Saved sequence 2', { exact: true })).toBeVisible()
+  await expect.poll(() => snapshots.owner.some(frame => frame.payload.members.some(member => member.board_seq === 2)), { timeout: 15000 }).toBe(true)
+  await check('idle revoked connection receives no new sequence/cursor snapshot', !snapshots.commenter.some(frame => frame.payload.members.some(member => member.board_seq === 2)))
+  response = await contexts.commenter.request.get(boardEndpoint('/board'))
+  await check('revoked participant loses Board HTTP access too', [403, 404].includes(response.status()))
+  response = await contexts.owner.request.get(boardEndpoint('/board'))
+  const beforeMoves = await response.json()
+  const moveSavedDrawings = async () => {
+    const canvas = owner.locator('.excalidraw__canvas.interactive')
+    await canvas.click({ position: { x: 700, y: 350 } })
+    await owner.keyboard.press('v')
+    await owner.keyboard.press('ControlOrMeta+a')
+    await owner.keyboard.press('Shift+ArrowRight')
+    await expect(owner.getByRole('button', { name: 'Save board', exact: true })).toBeEnabled()
+    const committed = owner.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/board/batches'))
+    await owner.getByRole('button', { name: 'Save board', exact: true }).click()
+    await check('selected real drawings move through an explicit saved batch', (await committed).status() === 201)
+  }
+  await moveSavedDrawings()
+  await expect(owner.getByText('Board · Saved sequence 3', { exact: true })).toBeVisible()
+  await moveSavedDrawings()
+  await expect(owner.getByText('Board · Saved sequence 4', { exact: true })).toBeVisible()
+  const dirtyNotice = owner.getByText('Unsaved drawing changes. Save preserves the revisions you started from.', { exact: true })
+  const assertCleanBoard = async name => {
+    const canvas = owner.locator('.excalidraw__canvas.interactive')
+    await expect(canvas).toBeVisible()
+    // Let the remounted real editor deliver initialization callbacks before
+    // asserting that accepted local inverses did not become unsaved drafts.
+    await canvas.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await expect(owner.getByRole('button', { name: 'Save board', exact: true })).toBeDisabled()
+    await expect(dirtyNotice).toHaveCount(0)
+    await check(name, true)
+  }
+  for (const sequence of [5, 6]) {
+    const committed = owner.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/board/batches'))
+    await owner.getByRole('button', { name: 'Undo last saved change', exact: true }).click()
+    await check('consecutive saved undo commits with current server revisions', (await committed).status() === 201)
+    await expect(owner.getByText(`Board · Saved sequence ${sequence}`, { exact: true })).toBeVisible()
+    await assertCleanBoard(`saved undo at sequence ${sequence} settles without an unsaved drawing`)
+  }
+  response = await contexts.owner.request.get(boardEndpoint('/board'))
+  const afterUndos = await response.json()
+  const geometry = board => board.records.filter(r => !r.deleted && r.element).map(r => ({ id: r.element_id, x: r.element.x, y: r.element.y, width: r.element.width, height: r.element.height })).sort((a, b) => a.id.localeCompare(b.id))
+  await check('two saved undos restore real server geometry to the original baseline', JSON.stringify(geometry(afterUndos)) === JSON.stringify(geometry(beforeMoves)))
+  const foreignTarget = afterUndos.records.find(record => record.element_id !== savedBoard.records[0].element_id && !record.deleted && record.element)
+  if (!foreignTarget) throw new Error('Second saved drawing unavailable for foreign-edit regression')
+  await assertCleanBoard('Board remains clean immediately before the independent foreign edit')
+  const foreignX = foreignTarget.element.x + 30
+  response = await contexts.owner.request.post(boardEndpoint('/board/batches'), { data: { mutation_id: 'other-tab-change', base_seq: afterUndos.seq, upserts: [{ element: { ...foreignTarget.element, x: foreignX }, expected_rev: foreignTarget.element_rev }] } })
+  await check('independent real server edit changes the older undo target', response.status() === 201)
+  response = await contexts.owner.request.get(boardEndpoint('/board'))
+  const foreignScene = await response.json()
+  await expect(owner.getByText('Board · Saved sequence 7', { exact: true })).toBeVisible()
+  const undo = owner.getByRole('button', { name: 'Undo last saved change', exact: true })
+  const conflict = owner.getByText('This saved change can no longer be undone because connected content changed remotely.', { exact: true })
+  const undoStatuses = []
+  const observeUndo = response => {
+    if (response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/board/batches')) undoStatuses.push(response.status())
+  }
+  owner.on('response', observeUndo)
+  let undoOutcome
+  try {
+    // A refresh can leave an unsaved editor draft and disable saved undo.
+    // The clean checkpoints above fence this from own-undo hydration. Preserve
+    // evidence of a refresh-created draft as a UX gap, while checking safety.
+    // Inspect and invoke atomically to avoid a race with that canonical refresh.
+    const invoked = await undo.evaluate(button => {
+      if (button.disabled) return false
+      button.click()
+      return true
+    })
+    if (invoked) {
+      await expect.poll(async () => await conflict.isVisible() || undoStatuses.includes(409)).toBe(true)
+      undoOutcome = undoStatuses.includes(409) ? 'server_conflict' : 'local_conflict'
+    } else {
+      await expect(undo).toBeDisabled()
+      undoOutcome = 'disabled_guard'
+      if (await dirtyNotice.isVisible()) {
+        await captureBoardDraft(owner)
+        await writeFile(join(output, 'owner-board-canonical.json'), JSON.stringify(foreignScene, null, 2))
+      }
+    }
+  } finally { owner.off('response', observeUndo) }
+  response = await contexts.owner.request.get(boardEndpoint('/board'))
+  const afterRefusal = await response.json()
+  await check('older saved undo refuses a foreign edit and preserves canonical content', response.status() === 200 && afterRefusal.seq === 7 && afterRefusal.seq === foreignScene.seq && JSON.stringify(afterRefusal.records) === JSON.stringify(foreignScene.records) && afterRefusal.records.find(record => record.element_id === foreignTarget.element_id)?.element?.x === foreignX && undoStatuses.every(status => status === 409), { undo_outcome: undoOutcome, undo_http_statuses: undoStatuses, unsaved_draft_after_foreign_refresh: await dirtyNotice.isVisible() })
+  const imageURL = `${boardEndpoint('/board/files')}&base_seq=7&mutation_id=browser-raster-upload`
+  const imageBody = Buffer.from(fixture.image_png, 'base64')
+  response = await contexts.owner.request.post(imageURL, { data: imageBody, headers: { 'Content-Type': 'image/png' } })
+  const uploaded = await response.json()
+  await check('real streamed Board upload stores an authorized canonical raster', response.status() === 201 && uploaded.seq === 8 && uploaded.width === 2 && uploaded.height === 2 && uploaded.content_type === 'image/png')
+  response = await contexts.owner.request.post(imageURL, { data: imageBody, headers: { 'Content-Type': 'image/png' } })
+  const retryImage = await response.json()
+  await check('exact raster retry preserves file identity and Board sequence', response.status() === 200 && retryImage.seq === 8 && retryImage.file_id === uploaded.file_id)
+  response = await contexts.owner.request.get(boardEndpoint(`/board/files/${encodeURIComponent(uploaded.file_id)}`))
+  await check('owner reads the real canonical raster through its authorized route', response.status() === 200 && response.headers()['content-type'] === 'image/png')
+  response = await contexts.commenter.request.get(boardEndpoint(`/board/files/${encodeURIComponent(uploaded.file_id)}`))
+  await check('revoked participant cannot read Board image bytes', [403, 404].includes(response.status()))
+  await transferBoardOwnership(uploaded)
   console.log(`Artifact workflow browser passed ${results.length} checks; evidence: ${output}`)
 } catch (error) {
   await writeFile(join(output, 'failure.txt'), String(error))
+  await captureBoardDraft(pages.owner).catch(() => {})
+  const canonical = contexts.owner ? await contexts.owner.request.get(`${fixture.server}/api/v1/pages/browser-board/board?workspace_id=${encodeURIComponent(fixture.workspace)}`, { timeout: 5000 }).catch(() => null) : null
+  if (canonical?.ok()) await writeFile(join(output, 'owner-board-canonical.json'), JSON.stringify(await canonical.json(), null, 2))
   if (pages.owner) await pages.owner.locator('#settings-card-artifact-and-board-ownership').ariaSnapshot({ timeout: 1000 }).then(snapshot => writeFile(join(output, 'owner-custody-card.yml'), snapshot)).catch(() => {})
   for (const [actor, page] of Object.entries(pages)) await page.screenshot({ path: join(output, `${actor}-failure.png`) }).catch(() => {})
   throw error

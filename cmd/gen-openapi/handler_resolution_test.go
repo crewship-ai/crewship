@@ -327,6 +327,8 @@ var requiredQueryParametersInSpec = []string{
 	"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff ?from",
 	"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff ?to",
 	"POST /api/v1/connectors/{connectorId}/install ?workspace_id",
+	"POST /api/v1/pages/{slug}/board/files ?base_seq",
+	"POST /api/v1/pages/{slug}/board/files ?mutation_id",
 	"PUT /api/v1/agents/{agentId}/files/save ?path",
 	"PUT /api/v1/crews/{crewId}/files/save ?path",
 }

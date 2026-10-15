@@ -332,7 +332,7 @@ filter lives in one place — and carries no page data of its own.
 
 #### Private artifact and Board presence
 
-Human clients may subscribe to `artifact:{page_id}`.
+Human clients may subscribe to `artifact:{page_id}` or `board:{page_id}`.
 Unlike the ID-only `page:` channel, these rooms require current read access to
 the specific Page. Access is checked before each delivery and revoked
 subscriptions are removed by the reauthorization sweep. WebSocket tickets
@@ -341,10 +341,10 @@ cannot be minted with acting-agent credentials.
 A Board update uses the existing socket envelope:
 
 ```json
-{"type":"presence","channel":"artifact:page-id","payload":{"schema_version":1,"revision":4}}
+{"type":"presence","channel":"board:page-id","payload":{"schema_version":1,"board_seq":4,"cursor":{"coordinate_space":"board","x":120,"y":80}}}
 ```
 
-Artifact updates contain a positive `revision`; their optional
+Artifact updates replace `board_seq` with a positive `revision`; their optional
 cursor uses `coordinate_space: "viewport"` and includes `viewport_width` and
 `viewport_height`. Coordinates are bounded; identity/content fields are refused.
 The UI currently emits Board cursors and artifact viewer presence, without a

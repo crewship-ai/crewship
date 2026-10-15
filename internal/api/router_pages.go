@@ -121,6 +121,53 @@ func (r *Router) registerPageRoutes() {
 	// Request notices are opaque pointers; the resolver rechecks current human access.
 	// openapi: responses 200,401,403,404,500
 	r.mux.Handle("GET /api/v1/page-request-results/{kind}/{requestId}", authed(wsCtx(http.HandlerFunc(p.ResolvePageRequestResult))))
+	// Boards share Page ACLs; every mutation rechecks authority under the writer fence.
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/board", authed(wsCtx(http.HandlerFunc(p.GetBoard))))
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board", roleSelf, p.InitBoard)
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/batches", roleSelf, p.ApplyBoardBatch)
+	// openapi: responses 200,201,202,400,401,403,404,409,413,422,429,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/board/requests", authed(wsCtx(http.HandlerFunc(p.ListBoardRequests))))
+	// openapi: responses 200,201,202,400,401,403,404,409,413,422,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/requests", roleSelf, p.CreateBoardRequest)
+	// openapi: responses 200,201,202,400,401,403,404,409,413,422,429,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/board/requests/{requestId}", authed(wsCtx(http.HandlerFunc(p.GetBoardRequest))))
+	// openapi: responses 200,201,202,400,401,403,404,409,413,422,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/requests/{requestId}/cancel", roleSelf, p.CancelBoardRequest)
+	// openapi: responses 200,201,202,400,401,403,404,409,413,422,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/requests/{requestId}/insert", roleSelf, p.InsertBoardRequest)
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/placements", roleSelf, p.AddBoardPlacement)
+	// openapi: responses 200,400,401,403,404,409,413,422,429,500
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/board/placements/{placementId}", roleSelf, p.DeleteBoardPlacement)
+	// openapi: query base_seq:integer! mutation_id:string!; responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/files", roleSelf, p.UploadBoardFile)
+	// openapi: responses 200,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/board/files/{fileId}", authed(wsCtx(http.HandlerFunc(p.GetBoardFile))))
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/board/threads", authed(wsCtx(http.HandlerFunc(p.ListBoardThreads))))
+	// openapi: responses 200,201,400,401,403,404,409,413,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/threads", roleSelf, p.CreateBoardThread)
+	// openapi: responses 200,201,400,401,403,404,409,413,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/threads/{threadId}/comments", roleSelf, p.ReplyBoardThread)
+	// openapi: responses 200,400,401,403,404,409,413,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/threads/{threadId}/resolve", roleSelf, p.ResolveBoardThread)
+	r.authedMut("PATCH", "/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}", roleSelf, p.EditBoardComment)
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}", roleSelf, p.DeleteBoardComment)
+	r.authedMut("PUT", "/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/reactions/{emoji}", roleSelf, p.ReactBoardComment)
+	r.mux.Handle("GET /api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/history", authed(wsCtx(http.HandlerFunc(p.GetBoardCommentHistory))))
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/board/element-permissions", authed(wsCtx(http.HandlerFunc(p.ListBoardElementPermissions))))
+	// openapi: responses 200,201,400,401,403,404,409,413,429,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/element-permissions", roleSelf, p.GrantBoardElementPermission)
+	// openapi: responses 204,401,403,404,500
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/board/element-permissions/{permissionId}", roleSelf, p.RevokeBoardElementPermission)
+	// openapi: responses 200,201,400,401,403,404,413,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/board/delegations", roleSelf, p.GrantBoardRun)
+	// openapi: responses 204,401,403,404,500
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/board/delegations/{runId}", roleSelf, p.RevokeBoardRun)
 	// openapi: query revision:integer; responses 200,400,401,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/artifact", authed(wsCtx(http.HandlerFunc(p.GetArtifact))))
 	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
@@ -219,6 +266,9 @@ func (r *Router) registerPageRoutes() {
 	r.registerPageTransferRoutes()
 	// openapi: responses 200,404
 	r.mux.Handle("GET /api/v1/pages/runtime/bootstrap", http.HandlerFunc(p.PageRuntime))
+	// Public constant converter bootstrap. Private input is authorized separately.
+	// openapi: responses 200,404
+	r.mux.Handle("GET /api/v1/pages/runtime/board-converter", http.HandlerFunc(p.BoardConverter))
 	// openapi: responses 200,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/project", authed(wsCtx(http.HandlerFunc(p.GetProject))))
 	// openapi: responses 200,401,403,404,500,503

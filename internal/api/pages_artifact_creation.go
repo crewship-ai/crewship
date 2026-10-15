@@ -48,7 +48,7 @@ func (h *PageHandler) checkArtifactCreationPublication(ctx context.Context, page
 	if err != nil || !time.Now().Before(deadline) || revoked.Valid {
 		return errors.New("creation authorization expired or revoked")
 	}
-	return h.checkStandaloneArtifactCreation(ctx, a)
+	return h.checkBoardJobCreation(ctx, a, true)
 }
 
 func (h *PageHandler) humanCreationAuthorizationTx(w http.ResponseWriter, r *http.Request) (*sql.Tx, *http.Request, *artifactRunAuthority, string, bool) {
@@ -304,7 +304,7 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 		artifactCommentError(w, 403, "creation_authorization_required", "artifact creation authorization expired or revoked")
 		return
 	}
-	if err := h.checkStandaloneArtifactCreation(ctx, a); err != nil {
+	if err := h.checkBoardJobCreation(ctx, a, true); err != nil {
 		replyError(w, 403, err.Error())
 		return
 	}
@@ -387,23 +387,18 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 		replyInternalError(w, h.logger, "consume artifact creation authorization", err)
 		return
 	}
+	if err := h.completeBoardJobCreation(r.WithContext(ctx), tx, a, pageID); err != nil {
+		replyInternalError(w, h.logger, "complete board artifact job", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit agent artifact creation", err)
 		return
 	}
 	broadcastWorkspaceEvent(h.hub, a.WorkspaceID, "page.updated", map[string]any{"page_id": pageID})
+	var updatedBoard string
+	if h.db.QueryRowContext(r.Context(), `SELECT board_page_id FROM page_board_requests WHERE run_id=? AND result_page_id=? AND pin_status='pinned'`, a.RunID, pageID).Scan(&updatedBoard) == nil {
+		broadcastWorkspaceEvent(h.hub, a.WorkspaceID, "page.updated", map[string]any{"page_id": updatedBoard})
+	}
 	writeJSON(w, 201, map[string]any{"page_id": pageID, "slug": req.Slug, "revision": 1, "head_rev": 1, "url": "/pages/" + req.Slug})
-}
-
-// The Artifacts layer cannot consume an authorization admitted by a Board job.
-// Keeping its durable association prevents an older binary expanding authority.
-func (h *PageHandler) checkStandaloneArtifactCreation(ctx context.Context, a *artifactRunAuthority) error {
-	var linked string
-	if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT COALESCE(board_request_id,'') FROM artifact_creation_authorizations WHERE run_id=?`, a.RunID).Scan(&linked); err != nil {
-		return err
-	}
-	if linked != "" {
-		return errors.New("Board request authority requires the Board delivery")
-	}
-	return nil
 }

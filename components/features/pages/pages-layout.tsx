@@ -63,6 +63,7 @@ import { PagesRail } from "@/components/features/pages/pages-rail"
 import { ArtifactGallery } from "./artifact-gallery"
 import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
+import { NewBoardDialog } from "./new-board-dialog"
 import { NewArtifactDialog } from "./new-artifact-dialog"
 import { PageEditor } from "@/components/features/pages/page-editor"
 import { PageImportDialog } from "@/components/features/pages/page-import-dialog"
@@ -86,6 +87,7 @@ export interface PagesLayoutProps {
 
 export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const isMobile = useIsMobile()
+  const [creatingBoard, setCreatingBoard] = React.useState(false)
   const [creatingArtifact, setCreatingArtifact] = React.useState(false)
 
   // WHICH PAGE IS OPEN, WHETHER THE EDITOR IS OPEN, AND WHICH SECTION IT SHOWS
@@ -115,7 +117,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
 
   const canCreatePage = usePageCreationAccess(workspaceId)
   const canCreateFolder = usePageFolderCreationAccess(workspaceId)
-  React.useEffect(() => { if (!canCreatePage) { setCreatingArtifact(false) } }, [canCreatePage])
+  React.useEffect(() => { if (!canCreatePage) { setCreatingBoard(false); setCreatingArtifact(false) } }, [canCreatePage])
   const [importing, setImporting] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
   const [search, setSearch] = React.useState("")
@@ -360,6 +362,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
             </SubBarSecondary>}
+            {canCreatePage && <SubBarSecondary icon={FilePlus2} onClick={() => canCreatePage && setCreatingBoard(true)}>
+              New board
+            </SubBarSecondary>}
             {canCreatePage && <SubBarSecondary icon={FilePlus2} onClick={() => canCreatePage && setCreatingArtifact(true)}>
               New artifact
             </SubBarSecondary>}
@@ -586,6 +591,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           existing Page's document belongs to the editor's Content section,
           beside the panels it changes. */}
       {!editing && <UnsavedWorkDialog pending={nav.pending} onDiscard={() => {}} onReturnFocus={() => viewHeadingNode.current?.focus()} />}
+      {canCreatePage && creatingBoard && <NewBoardDialog workspaceId={workspaceId} onClose={() => setCreatingBoard(false)} onCreated={openPage} />}
       {canCreatePage && creatingArtifact && <NewArtifactDialog workspaceId={workspaceId} onClose={() => setCreatingArtifact(false)} onCreated={openPage} />}
       {creating && (
         <PageEditor

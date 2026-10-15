@@ -166,6 +166,63 @@ func TestPageRequestRetryParentScopeIsNotAuthority(t *testing.T) {
 	}
 }
 
+func TestBoardRequestRetryAndReadyNotice(t *testing.T) {
+	h, workspace, user, parent, _ := lifecycleFixture(t, "board")
+	lifecycleBindDuringDispatch(t, h, "board", parent, nil)
+	execOrFatal(t, h.db, `UPDATE page_board_requests SET status='failed' WHERE id=?`, parent)
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(boardDiagramRequest), &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload["submission_id"] = "board-explicit-retry"
+	payload["retry_of_request_id"] = parent
+	raw, _ := json.Marshal(payload)
+	response := boardJobCall(t, h, workspace, user, "", string(raw), h.CreateBoardRequest)
+	artifactExpect(t, response, 202)
+	var child map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &child); err != nil {
+		t.Fatal(err)
+	}
+	if child["id"] == parent || child["retry_of_request_id"] != parent || child["retry_warning"] != pageRequestRetryWarning {
+		t.Fatalf("board retry response=%s", response.Body.String())
+	}
+	artifactExpect(t, boardJobCall(t, h, workspace, user, "", string(raw), h.CreateBoardRequest), 202)
+	// Ready-to-insert is a reviewable result, not an invented successful job.
+	h2, ws2, user2, id, token := lifecycleFixture(t, "board")
+	lifecycleBindDuringDispatch(t, h2, "board", id, nil)
+	source := `{"source":"flowchart TD\nA[Private diagram 83642]","mutation_id":"ready-notice","dialect":"flowchart-v1","converter_version":"2.2.2"}`
+	artifactExpect(t, boardJobAgentCall(t, h2, ws2, token, id, source, h2.PublishBoardRequestMermaid), 201)
+	lifecycleJobState(t, h2, "board", id, "ready_to_insert")
+	artifactExpect(t, boardJobAgentCall(t, h2, ws2, token, id, source, h2.PublishBoardRequestMermaid), 200)
+	var n int
+	var text string
+	if err := h2.db.QueryRow(`SELECT COUNT(*),MAX(body_md||payload_json) FROM inbox_items WHERE source_id=?`, "page-request:board:"+id).Scan(&n, &text); err != nil || n != 1 || strings.Contains(text, "83642") {
+		t.Fatalf("board notice=%d %s %v", n, text, err)
+	}
+	artifactExpect(t, requestResultCall(t, h2, ws2, user2, "board", id), 200)
+}
+
+func TestBoardRequestNoticeResolvesPrivateOutputAfterSourceDeletion(t *testing.T) {
+	h, workspace, user, id, token := lifecycleFixture(t, "board")
+	execOrFatal(t, h.db, `UPDATE page_board_requests SET kind='artifact' WHERE id=?`, id)
+	lifecycleBindDuringDispatch(t, h, "board", id, nil)
+	execOrFatal(t, h.db, `DELETE FROM pages WHERE id=(SELECT board_page_id FROM page_board_requests WHERE id=?)`, id)
+	artifactExpect(t, artifactCreateAgent(t, h, workspace, token, creationBody), 201)
+	result := requestResultCall(t, h, workspace, user, "board", id)
+	artifactExpect(t, result, 200)
+	var wire map[string]any
+	if err := json.Unmarshal(result.Body.Bytes(), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire["page_slug"] != "agent-created" || wire["revision"] != float64(1) {
+		t.Fatalf("detached output unresolved: %s", result.Body.String())
+	}
+	var n int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id=? AND target_user_id=?`, "page-request:board:"+id, user).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("detached output notice=%d %v", n, err)
+	}
+}
+
 func TestPageRequestNoticeRecoveryCursorDoesNotStarveLaterNotices(t *testing.T) {
 	h, _, _, parent, _ := lifecycleFixture(t, "artifact")
 	for i := 0; i < 101; i++ {
