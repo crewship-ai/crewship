@@ -1343,7 +1343,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
       {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
-        {issuePanel ?? <RightPanel
+        {(drawerActiveTab === "work" ? issuePanel : null) ?? <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
