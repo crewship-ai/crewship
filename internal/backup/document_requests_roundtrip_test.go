@@ -27,7 +27,7 @@ func TestDocumentRequestsEncryptedHistoryRoundtrip(t *testing.T) {
 	exec(`INSERT INTO agents(id,workspace_id,crew_id,name,slug) VALUES('doc-agent',?,'doc-crew','Agent','doc-agent')`, ws)
 	exec(`INSERT INTO chats(id,workspace_id,agent_id,title) VALUES('doc-chat',?,'doc-agent','Private')`, ws)
 	exec(`INSERT INTO users(id,email,full_name) VALUES('doc-former-human','doc-former@example.test','Former member')`)
-	const anchor = `{"id":"comment","block":"stable-block","quote":"retained quote","checkpoint":2,"start":"relative-start","end":"relative-end"}`
+	const anchor = `{"id":"comment","block":"stable-block","quote":"retained quote","checkpoint":2,"start":"relative-start","end":"relative-end","spans":[{"start":"relative-start","end":"relative-first-end"},{"start":"relative-second-start","end":"relative-end"}]}`
 	exec(`INSERT INTO document_comments(workspace_id,page_id,id,body,anchor_json,actor,rev,version,resolved) VALUES(?,'request-doc','comment','Retained discussion',?,'user:u_admin',2,3,1)`, ws, anchor)
 	for _, status := range []string{"queued", "running", "succeeded", "failed"} {
 		exec(`INSERT INTO document_requests(id,page_id,human_user_id,chat_id,agent_id,base_rev,submission_id,fingerprint,instruction,receipt_json,status,run_id,result_revision,checkpoint_id,error,created_at,updated_at) VALUES(?,'request-doc','u_admin','doc-chat','doc-agent',2,?,'digest','Retained instructions','LIVE AUTHORITY',?,'source-live-run',2,'original-checkpoint','Historical failure','2026-10-15T16:00:00Z','2026-10-15T16:01:00Z')`, "doc-request-"+status, status, status)
