@@ -38,6 +38,8 @@ export function virtualChatEnabled(): boolean {
 interface VirtualConversationProps {
   canChat?: boolean
   turns: ChatTurn[]
+  workspaceId?: string
+  renderEntityCards?: (turn: ChatTurn) => React.ReactNode
   sessionId: string
   agentId: string
   agentName?: string
@@ -76,6 +78,8 @@ const VIRTUOSO_COMPONENTS = { Footer: VirtuosoFooter }
 export function VirtualConversation({
   canChat = true,
   turns,
+  workspaceId,
+  renderEntityCards,
   sessionId,
   agentId,
   agentName,
@@ -131,6 +135,8 @@ export function VirtualConversation({
           <div className="mx-auto w-full max-w-3xl px-4 pb-8">
             <TurnRenderer
               turn={turn}
+              workspaceId={workspaceId}
+              entityCards={renderEntityCards?.(turn)}
               onCopy={onCopy}
               onFileClick={onFileClick}
               isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}

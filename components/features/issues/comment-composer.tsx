@@ -34,6 +34,8 @@ const MAX_MATCHES = 8
 
 interface Props {
   /** Agents that may be mentioned here — the workspace roster. */
+  draftValue?: string
+  onDraftChange?: (value: string) => void
   agents: readonly MentionAgent[]
   /**
    * Posts the comment. Resolve `true` to clear the draft; anything else keeps
@@ -51,6 +53,7 @@ interface Props {
 
 export function CommentComposer({
   agents,
+  draftValue, onDraftChange,
   onSubmit,
   allowGuestSharing = false,
   guestProject,
@@ -63,7 +66,9 @@ export function CommentComposer({
   const listId = `${baseId}-mentions`
   const boxRef = React.useRef<HTMLTextAreaElement>(null)
 
-  const [value, setValue] = React.useState("")
+  const [localValue, setLocalValue] = React.useState("")
+  const value = draftValue ?? localValue
+  const setValue = (next: string) => { setLocalValue(next); onDraftChange?.(next) }
   const [guestVisible, setGuestVisible] = React.useState(false)
   const [audience, setAudience] = React.useState<{ id: string; name: string } | null>(null)
   const audienceChanged = guestVisible && (!audience || !allowGuestSharing || audience.id !== guestProject?.id)

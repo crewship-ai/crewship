@@ -8,7 +8,7 @@ import { defineConfig } from "@playwright/test"
 // every PR alongside playwright.reveal/pool-ui — the nightly GATE_SPECS
 // classification alone left PR #2874 executing the spec zero times.
 export default defineConfig({
-  testDir: "./e2e", testMatch: "restricted-member-shell.spec.ts", workers: 1,
+  testDir: "./e2e", testMatch: ["restricted-member-shell.spec.ts", "chat-issue-cards.spec.ts"], workers: 1,
   reporter: "list", timeout: 60000, retries: 0,
   use: {
     baseURL: "http://127.0.0.1:3912", headless: true,

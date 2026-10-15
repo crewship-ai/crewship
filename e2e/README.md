@@ -14,7 +14,7 @@ authenticated-server and isolated-fixture tests.
 | [playwright.nightly.config.ts](../playwright.nightly.config.ts) | Authenticated seeded instance; workflow selects gate/drift buckets | [nightly-e2e.yml](../.github/workflows/nightly-e2e.yml) |
 | [playwright.reveal.config.ts](../playwright.reveal.config.ts) | `credential-reveal.spec.ts`; isolated fixture server on port 3914 | `playwright-pr` in [ci.yml](../.github/workflows/ci.yml) |
 | [playwright.pool-ui.config.ts](../playwright.pool-ui.config.ts) | `provider-pools.spec.ts`; isolated fixture server on port 3913, no provider request | `playwright-pr` in [ci.yml](../.github/workflows/ci.yml) |
-| [playwright.restricted.config.ts](../playwright.restricted.config.ts) | `restricted-member-shell.spec.ts`; isolated fixture server on port 3912, every API response mocked | `playwright-pr` in [ci.yml](../.github/workflows/ci.yml); gate guarded by [restricted-shell-gate-test.sh](../scripts/restricted-shell-gate-test.sh) |
+| [playwright.restricted.config.ts](../playwright.restricted.config.ts) | `restricted-member-shell.spec.ts` and `chat-issue-cards.spec.ts`; isolated fixture server on port 3912, every API response mocked | `playwright-pr` in [ci.yml](../.github/workflows/ci.yml); gate guarded by [restricted-shell-gate-test.sh](../scripts/restricted-shell-gate-test.sh) |
 
 The three isolated UI suites serve the built static export; follow their CI
 build prerequisites when reproducing them. Their fixed ports are separate

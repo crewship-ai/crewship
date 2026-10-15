@@ -1,8 +1,8 @@
 # Chat entity references
 
 This contract covers durable Issue operations, their reference API and CLI.
-It supplies data for chat cards; it does not provide a frontend card renderer,
-proposal confirmation or dedicated entity WebSocket events.
+It supplies data for chat cards and their viewer-scoped frontend. Proposal
+confirmation remains outside this contract.
 Mutation producers must persist operations and references through the host's
 verified authority checks; these read endpoints never create or execute work.
 
@@ -476,3 +476,40 @@ exhausted journal projections require operator diagnosis and have no requeue API
 Bulk status/priority/assignment audit is transactional; bulk label/project fields,
 internal relation changes, workflow and Inbox mutation doors are not covered by
 this PR's durable audit guarantee.
+
+## Chat issue cards
+
+The chat transcript renders authorized Issue references behind the last message
+of their durable run. Runs without an assistant reply anchor behind their
+triggering user message and show the durable run status. Both ordinary and
+virtualized transcripts use the same card renderer.
+
+Cards reconcile complete replacement snapshots on session invalidation hints,
+reconnect, foreground return and every 60 seconds while visible. The E1 hint
+contract uses `chat.entity_refs_changed` and `issue.revision_changed` with
+`{ "contract_version": 1 }`; hints carry no object data. A client also accepts
+unversioned E0 snapshot responses, and rejects unsupported version markers.
+The current batch projection is the card's freshness source; no per-card
+revision requests are necessary. Failed reconciliation hides protected fields
+and is never labelled live. Restricted and Guest sessions show only a generic
+“Unavailable” capability state and make no card/object requests.
+
+Opening a card reuses `IssueDetailSurface` in the right panel, or a focus-trapped
+sheet on phones. A completed snapshot independently reauthorizes that detail
+and clears its previous server data. Detail freshness is its own fetch time;
+run and automation data have separate fetches. Allowed actions are intersected
+with the detail's current server permissions and govern individual controls.
+Legacy detail callers retain the existing `editable` fallback.
+
+Chat field editors and comments send stable idempotency keys. Fields additionally
+send the revision captured when editing began. Validation retains input;
+conflicts require explicit reload while retaining the draft. Unknown transport
+outcomes freeze the intent, check an operation receipt when its ID is known,
+then allow retry with the same key and exact request. New intent is blocked
+until that result is resolved. Local drafts are separate from authorized server
+data and survive reconciliation without keeping protected fields displayed.
+
+Browser acceptance uses the production static export with handler-verified
+reference fixtures: `pnpm exec playwright test --config=playwright.restricted.config.ts e2e/chat-issue-cards.spec.ts`.
+It requires a preceding frontend build and an installed Chromium, and contacts
+no live application or model provider.
