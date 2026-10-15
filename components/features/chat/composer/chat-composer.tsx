@@ -70,6 +70,9 @@ interface ChatComposerProps {
   onSent?: () => void
   /** Pre-populate the input on mount / when it changes. */
   initialInput?: string
+  /** Explicit user-selected reference; append visibly and never submit automatically. */
+  contextRequest?: { id: number; text: string }
+  onContextApplied?: () => void
   /** Known participants for @mention autocomplete on desktop and mobile. */
   mentionMembers?: CrewMember[]
   /** The ask form the user opened from the chip rail, or null. The sheet is
@@ -126,6 +129,8 @@ export function ChatComposer({
   onSend,
   onSent,
   initialInput,
+  contextRequest,
+  onContextApplied,
   mentionMembers,
   askForm,
   onCloseAskForm,
@@ -151,6 +156,16 @@ export function ChatComposer({
     setInput(text)
     if (draftKey) setDraft(draftKey, text)
   }, [draftKey, setDraft, setInput])
+
+  const appliedContext = useRef<string | null>(null)
+  useEffect(() => {
+    if (!contextRequest) return
+    const key = JSON.stringify([inputScope, contextRequest.id])
+    if (appliedContext.current === key) return
+    appliedContext.current = key
+    updateInput(input.trim() ? `${input}\n\n${contextRequest.text}` : contextRequest.text)
+    onContextApplied?.()
+  }, [contextRequest, inputScope, input, updateInput, onContextApplied])
 
   // A handoff may arrive after the composer mounts. Preserve anything the
   // person already typed, including a restored draft for this identity.
