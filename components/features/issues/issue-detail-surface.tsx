@@ -526,6 +526,10 @@ export function IssueDetailSurface({
   // its corner toast and keeps the draft.
   const commit = React.useCallback(async (body: Record<string, unknown>) => {
     if (!base) throw new Error("This issue is still loading.")
+    if (write) {
+      if (!await patch(body)) throw new Error("The change has not been saved. Your draft is kept.")
+      return
+    }
     setBusy(true)
     try {
       const res = await apiFetch(`${base}?${qs}`, {
@@ -542,7 +546,7 @@ export function IssueDetailSurface({
     } finally {
       setBusy(false)
     }
-  }, [base, qs, refresh])
+  }, [base, qs, refresh, write, patch])
 
   // A status that sets something off, or a new assignee, asks first.
   const [confirm, setConfirm] = React.useState<{ body: Record<string, unknown>; done: () => void } | null>(null)
@@ -563,7 +567,7 @@ export function IssueDetailSurface({
   const draftCount = Object.keys(draft).filter((k) => k !== "assignee_type").length
   const inPage = usePageSave({
     label: `Issue ${identifier}`,
-    count: draftCount,
+    count: write ? 0 : draftCount,
     saving: busy && draftCount > 0,
     save,
     discard: () => setDraft({}),

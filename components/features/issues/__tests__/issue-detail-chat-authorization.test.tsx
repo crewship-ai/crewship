@@ -2,6 +2,7 @@ import React from "react"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import type { IssueAction } from "@/lib/chat-entity-cards"
+import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
 import { IssueDetailSurface } from "../issue-detail-surface"
 
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: () => {} }))
@@ -23,16 +24,18 @@ it("retains local fields through authorization refresh and sends the original ed
   mockServer()
   const patch = vi.fn(async () => false), comment = vi.fn(async () => false)
   const write = { patch, comment }
-  const { rerender } = render(<IssueDetailSurface workspaceId="ws" identifier="ENG-1" actions={actions} authorizationKey={1} write={write} />)
+  const view = (key: number, rechecking = false) => <PageSaveProvider><IssueDetailSurface workspaceId="ws" identifier="ENG-1" actions={actions} authorizationKey={key} rechecking={rechecking} write={write} /><PageSaveBar /></PageSaveProvider>
+  const { rerender } = render(view(1))
   await screen.findByRole("button", { name: "Edit title" })
   fireEvent.click(screen.getByRole("button", { name: "Edit title" }))
   fireEvent.change(screen.getByRole("textbox", { name: "Issue title" }), { target: { value: "Local draft" } })
   await screen.findByRole("button", { name: "Save changes" })
+  expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
   revision = 2
-  rerender(<IssueDetailSurface workspaceId="ws" identifier="ENG-1" actions={actions} authorizationKey={2} rechecking write={write} />)
+  rerender(view(2, true))
   expect(screen.queryByText("Server title")).toBeNull()
   expect(screen.queryByDisplayValue("Local draft")).toBeNull()
-  rerender(<IssueDetailSurface workspaceId="ws" identifier="ENG-1" actions={actions} authorizationKey={2} write={write} />)
+  rerender(view(2))
   await screen.findByRole("heading", { name: "Local draft" })
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save changes" })))
   expect(patch).toHaveBeenCalledWith(expect.any(String), { title: "Local draft" }, 1)
