@@ -32,6 +32,7 @@ var restrictedAllowedPatterns = []string{
 	"DELETE /api/v1/auth/cli-tokens/{tokenId}",
 	"DELETE /api/v1/chats/{chatId}/restricted-memory/{entryId}",
 	"DELETE /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{fileId}",
+	"DELETE /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}",
 	"GET /api/v1/agents",
 	"GET /api/v1/agents/{agentId}",
 	"GET /api/v1/agents/{agentId}/chats",
@@ -57,6 +58,8 @@ var restrictedAllowedPatterns = []string{
 	"GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-pages",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs",
@@ -79,7 +82,9 @@ var restrictedAllowedPatterns = []string{
 	"POST /api/v1/workspaces/{workspaceId}/projects/{projectId}/files",
 	"POST /api/v1/workspaces/{workspaceId}/restricted-issues",
 	"POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
+	"POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones",
 	"PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
+	"PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}",
 }
 
 // restrictedAgentCheckedPatterns are the allowlisted patterns that are not a

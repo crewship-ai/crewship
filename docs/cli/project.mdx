@@ -252,3 +252,52 @@ issue deletion, intake configuration or access administration.
 ```sh
 crewship project shared update PROJECT_ID --name "Client delivery" --description "Reviewed scope" --version REVIEWED_VERSION
 ```
+
+
+## `crewship project shared milestones <project-id> [milestone-id]`
+
+List or read milestones with current project Read and Manage shares. Responses
+contain only milestone metadata, current action flags and an opaque version.
+Use `--limit` (default100, 1–500) and `--offset` (default0) for the collection.
+JSON and YAML use the same keys.
+
+```sh
+crewship project shared milestones PROJECT_ID --limit 100 --offset 0 --format json
+crewship project shared milestones PROJECT_ID MILESTONE_ID --format yaml
+```
+
+## `crewship project shared milestones create <project-id>`
+
+Create an ordered milestone. The authenticated account and audit come from the
+server; this command cannot select a workspace actor or issue execution context.
+
+| Flag | Meaning |
+| --- | --- |
+| `--name` | Required milestone name. |
+| `--description` | Description; default empty. |
+| `--target-date` | YYYY-MM-DD; default empty. |
+| `--status` | active (default), completed or cancelled. |
+
+## `crewship project shared milestones update <project-id> <milestone-id>`
+
+Replace a reviewed metadata snapshot. All flags are required; empty description
+or target date clears that field. A409 is returned without refresh or retry.
+
+| Flag | Meaning |
+| --- | --- |
+| `--name` | Complete milestone name. |
+| `--description` | Complete description. |
+| `--target-date` | YYYY-MM-DD or empty. |
+| `--status` | active, completed, cancelled, or the unchanged legacy status. |
+| `--position` | Ordering position, 0–1000000. |
+| `--version` | Exact reviewed version from milestones read/list. |
+
+## `crewship project shared milestones delete <project-id> <milestone-id>`
+
+Remove an empty milestone. Linked issue work is preserved: removal returns409
+until a trusted workspace administrator resolves those links.
+
+| Flag | Meaning |
+| --- | --- |
+| `--version` | Required reviewed version. |
+| `--confirm` | Required explicit confirmation; no request is sent without it. |

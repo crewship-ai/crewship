@@ -320,3 +320,18 @@ This is a first Manage increment. Milestone management, issue deletion and the
 remaining project settings still require separate scoped enforcement. The original
 PRD's level hierarchy remains a target: current operations are explicit, additive
 shares, so administrators must choose the lower operations they intend to share.
+
+
+## Guest milestone management
+
+Project Read+Manage also authorizes milestone metadata through dedicated scoped
+routes. Each write uses current account, local grants, live issuers, a reviewed
+version and atomic journal. Lists are paginated with a filtered total and current
+credential mutation hint. These routes never expose issue internals or member
+identity. Only empty milestones can be deleted: linked issue work, including
+legacy cross-project references, is never unlinked by a Guest. Full issue deletion,
+project settings and original PRD level inheritance remain open.
+
+UI edits preserve drafts, block stale snapshots and pin a deletion confirmation
+to the version actually reviewed. CLI drives the same projection and requires
+version/confirmation for deletion, with no conflict refresh or retry.

@@ -1,6 +1,7 @@
 "use client"
 
 import { useId, useState } from "react"
+import { SharedProjectMilestones } from "./shared-project-milestones"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { z } from "zod"
 import { useSession } from "@/hooks/use-auth"
@@ -47,6 +48,7 @@ function ProjectDetails({ workspaceId, projectId, userId }: { workspaceId: strin
     {!lost && query.data && (query.data.can_manage
       ? <ProjectDetailsForm value={query.data} path={path} disabled={query.isError || query.isFetching} onConflict={() => void query.refetch()} onSaved={value => { client.setQueryData(key, value); void client.invalidateQueries({ queryKey: ["restricted-issue-projects", userId, workspaceId] }); void client.invalidateQueries({ queryKey: ["restricted-issues", userId, workspaceId] }) }} />
       : <div><h3 className="font-medium">{query.data.name}</h3><p className="whitespace-pre-wrap text-sm">{query.data.description || "No project description."}</p></div>)}
+    {!lost && query.data && <SharedProjectMilestones key={`${userId}:${workspaceId}:${projectId}`} workspaceId={workspaceId} projectId={projectId} userId={userId} />}
   </section>
 }
 

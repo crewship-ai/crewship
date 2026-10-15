@@ -98,6 +98,7 @@ DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags/{tag} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust/{grantId} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/projects/{projectId}/files/{fileId} roleCreate
+DELETE /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId} roleInline
 DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId} roleManage
 GET /api/v1/approvals roleManage
 GET /api/v1/approvals/{id} roleManage
@@ -383,6 +384,7 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust roleCreate
 POST /api/v1/workspaces/{workspaceId}/projects/{projectId}/files roleCreate
 POST /api/v1/workspaces/{workspaceId}/restricted-issues roleInline
 POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments roleInline
+POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones roleInline
 POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
@@ -440,3 +442,4 @@ PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override ro
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags roleCreate
 PUT /api/v1/workspaces/{workspaceId}/projects/{projectId}/guest-intake roleManage
 PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId} roleInline
+PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId} roleInline

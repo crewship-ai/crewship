@@ -139,7 +139,7 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 					decision.Reason = "Project management also requires a current Read grant."
 				}
 			} else if right.Operation == "manage" {
-				decision.Reason = "Read and Manage permit changing this project's name and description. Milestones, deletion, file writes and administration remain separate."
+				decision.Reason = "Read and Manage permit changing this project's name, description and milestones. Only empty milestones can be removed; issue deletion, file writes and administration remain separate."
 			} else {
 				decision.State = "conditional"
 				decision.Reason = "Read and Contribute are current. Shared comments and intake arrangement are allowed; new requests also require configured project intake. Trusted execution and review remain separate."

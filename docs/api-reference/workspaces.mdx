@@ -2424,3 +2424,73 @@ Both routes return 200 with the thin details projection; 400 invalid request,
 500 storage/audit failure. PUT additionally returns 403 for a limited mutation credential and 409 on changed details, with no update;
 reload, review and explicitly resubmit. Audit failure rolls back the update.
 CLI equivalents are `project shared` and `project shared update`.
+
+
+## Guest milestone management
+
+All routes require the authenticated Guest's live project Read and Manage shares,
+a current local membership and active account/issuers. Writes also require the
+existing mutation credential scope. Metadata writes and audit commit together;
+audit failure rolls back the write. Unknown fields and foreign resources are
+refused. No crew, agent, member identity or private issue data is exposed.
+
+### `GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones`
+
+`limit` defaults to100 (1–500), `offset` to0. `X-Total-Count` is the filtered project
+total; `X-Can-Manage` is the current credential's mutation eligibility, including
+for an empty list. Row `can_delete` is true only for a removable empty milestone.
+
+**Response:** `200 OK`
+
+```json
+[{"id":"milestone_1","project_id":"project_1","name":"Client release","description":"Reviewed scope","target_date":"2026-11-01","status":"active","position":1,"version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","can_manage":true,"can_delete":true}]
+```
+
+### `GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}`
+
+**Response:** `200 OK`, the same single milestone object, scoped to this project.
+
+```json
+{"id":"milestone_1","project_id":"project_1","name":"Client release","description":"Reviewed scope","target_date":"","status":"active","position":1,"version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","can_manage":true,"can_delete":true}
+```
+
+### `POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones`
+
+Requires `name`, `description` and `target_date` strings. Name is nonblank and
+at most4096 UTF-8 bytes; description at most65536 bytes. Target date is empty or
+a valid YYYY-MM-DD. Status is active (default), completed or cancelled. The server
+chooses the ID and next position. Version/position overrides are refused.
+
+```json
+{"name":"Client release","description":"Reviewed scope","target_date":"2026-11-01","status":"active"}
+```
+
+**Response:** `201 Created`, the new milestone object above.
+
+### `PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}`
+
+Requires the reviewed `version` and complete `name`, `description`, `target_date`,
+`status` and `position` (0–1000000). The unchanged legacy status may be preserved;
+new status values use active/completed/cancelled. A trusted edit also invalidates
+an old version. Conflicts return409 without changing content.
+
+```json
+{"name":"Client release","description":"Updated scope","target_date":"","status":"completed","position":2,"version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+```
+
+**Response:** `200 OK`, the updated object with a new version.
+
+### `DELETE /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}`
+
+The body contains only the reviewed version. Removal is empty-only: no issue is
+unlinked or changed, including stale references from another project.
+
+```json
+{"version":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+```
+
+**Response:** `204 No Content`. Changed versions or linked work return409.
+All routes may return400 invalid input,401 authentication,403 credential access,
+404 unavailable local membership/project/milestone or grants,500 storage/audit
+failure. CLI equivalents are `project shared milestones` and its create/update/delete
+subcommands. The UI keeps failed drafts and requires explicit review after conflicts.
