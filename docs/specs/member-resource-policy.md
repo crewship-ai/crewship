@@ -128,11 +128,11 @@ Supported operations:
 | Resource | Operations | Current scope |
 | --- | --- | --- |
 | Agent | discover, chat, run, delegate | Discovery is separate from conversation and execution authority. |
-| Routine | run | Explicit root-routine grant **and** run on every resolved agent; cross-agent delegation additionally needs delegate. Nested definitions are frozen dependencies. |
-| Project | list, read, write, delete | List exposes issue metadata, read exposes issue detail and project source files. Write/delete apply to project files with their existing role floor; guest issue mutations are not integrated. |
+| Routine | view, run, edit | Explicit root-routine grant **and** run on every resolved agent; cross-agent delegation additionally needs delegate. Nested definitions are frozen dependencies. View exposes the stored definition; Edit with View allows collaborative draft changes, with trusted testing/review before publication. |
+| Project | list, read, contribute, manage, delete_issues, write, delete | List exposes issue metadata; Read exposes shared issue details/comments and project source files. Contribute with Read permits configured intake requests, shared comments and arranging intake work. Manage with Read explicitly shares editable project details and milestones. Delete issues additionally requires Read/Manage and reviewed disposable work. Write/delete apply to project source files with their existing role floor. |
 
 Routine grants replace the workspace-wide `routine.run` requirement for Guests.
-They do not grant edit access to definitions. A new migration preserves existing
+Run alone does not grant definition or draft access. A new migration preserves existing
 agent/project grants and trusted memberships, while advancing restricted member
 revisions to fence jobs admitted before routine authority was bound. Operators
 must explicitly add routine grants to existing Guests; no automatic broad grant
@@ -297,7 +297,7 @@ Run keeps the existing root-routine plus every agent/provider dependency checks.
 | View without Run | Kept for definition inspection | A reviewer can understand a routine without execution authority or a runtime. |
 | Run automatically implies definition View | Changed for existing operations | Existing Run shares deliberately exposed only a minimal invocation contract. Automatically revealing prompts/defaults would expand their disclosure without administrator review; View is explicit. |
 | View includes other participants’ private outputs | Deferred to an explicit result-audience contract | A routine share must not grant access to another client’s private execution/chat. Existing private run receipts keep their current actor and execution fences. |
-| Edit and version publication | Deferred to a separate increment | Author provenance and unattended execution require protection when a Guest changes executable content. |
+| Edit and version publication | Draft editing delivered; direct Guest publication deferred | The collaborative draft shares current View/Edit authority. Trusted publication retains testing, exact revision review, author provenance and unattended execution protections. |
 
 `GET /workspaces/{workspaceId}/restricted-routine-library` returns only live
 routine View/Run shares, with `can_view`, current graph `can_run`, and runtime
@@ -352,3 +352,39 @@ Attachment storage cleanup follows commit and targets exact orphaned digests.
 | Project managers may remove disposable issues | Kept with current Backlog/Cancelled and active-work guards | Preserves the ordinary issue lifecycle and avoids interrupting trusted execution. |
 | Manage automatically includes deletion | Changed to explicit `delete_issues` | The earlier Manage increment was presented as metadata editing; a destructive capability requires a deliberate new share. |
 | A single inherited project-level preset | Deferred | Current explicit operations preserve saved grant provenance; a later level UI must describe and apply its full bundle deliberately. |
+
+
+## Shared routine draft editing
+
+An explicit routine `edit` share supplements `view`. It shares the existing
+collaborative unpublished draft with that editor, including unfinished prompts
+and defaults. View alone continues to expose only the published definition.
+Existing Run grants gain neither disclosure nor editing rights automatically.
+
+- `GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft`
+- `PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft`
+
+The projection contains `draft_id`, `revision`, `base_revision`, `name`,
+`description`, `definition` and the credential's `can_edit` hint. No author,
+issuer, execution origin, trigger or gate-override metadata is returned. PUT
+accepts only the six content/snapshot fields; it does not accept `can_edit`.
+Current local Guest membership, active account, live issuers and both rights
+are read with the draft write and content-free journal event in one transaction.
+PUT additionally requires the existing `workspace:admin` token scope.
+
+A missing draft starts at revision zero against the published recipe. Every
+save checks the exact draft ID/revision and publication base. A stale editor or
+changed published base receives 409 without automatic refresh or retry; an audit
+failure rolls back the edit. Saving does not change executable bytes or version
+history, create a trigger, run a test or approve risk. Server-owned draft metadata
+and origin remain intact. The trusted authoring workflow must review and test the
+exact revision before publishing. Direct Guest publication and full Routine Edit
+acceptance remain unfinished PRD work.
+
+The Guest definition view offers **Edit shared draft** only with current View,
+Edit and mutation scope. Transient errors/conflicts retain local work; hard
+access loss clears the editor. The CLI reads the same JSON snapshot with
+`crewship routine shared-draft ROUTINE` and saves it with
+`crewship routine shared-draft save ROUTINE --file draft.json` (or `--file -`).
+Read-only `can_edit` is removed before PUT; the CLI performs no hidden GET or
+conflict retry.

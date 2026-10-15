@@ -43,3 +43,19 @@ it("rejects a malformed or mismatched definition response", async () => {
   await screen.findByRole("alert")
   expect(screen.queryByText(/FOREIGN_DEFINITION_CANARY/)).toBeNull()
 })
+
+
+it("retains a mounted draft on transient directory and definition refresh errors", async () => {
+  let unavailable = false
+  const editable = { ...item, can_edit: true }
+  api.mockImplementation(async (url: string) => unavailable ? response({}, 500) : response(url.endsWith("/draft") ? { draft_id: "d1", revision: 1, base_revision: 1, name: "Shared recipe", description: "", definition: {}, can_edit: true } : url.endsWith("/r1") ? { ...editable, definition: { steps: [] }, definition_hash: "hash", version: 1 } : [editable]))
+  show()
+  await screen.findByRole("option", { name: "Shared recipe" })
+  fireEvent.change(screen.getByRole("combobox"), { target: { value: "r1" } })
+  fireEvent.click(await screen.findByRole("button", { name: "Edit shared draft" }))
+  fireEvent.change(await screen.findByRole("textbox", { name: "Draft name" }), { target: { value: "Keep local draft" } })
+  unavailable = true
+  fireEvent.click(screen.getByRole("button", { name: "Refresh definitions" }))
+  await screen.findByText("Could not refresh shared definitions. Showing the last successful check.")
+  expect(screen.getByRole("textbox", { name: "Draft name" })).toHaveValue("Keep local draft")
+})

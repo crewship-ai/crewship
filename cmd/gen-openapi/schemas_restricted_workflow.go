@@ -22,8 +22,8 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		"RestrictedRoutine":            obj(map[string]any{"slug": str(), "name": str(), "definition_hash": str(), "execution_hash": str(), "inputs": arr(ref("RestrictedRoutineInput"))}, "slug", "name", "definition_hash", "execution_hash", "inputs"),
 	}
 
-	libraryProperties := map[string]any{"id": str(), "slug": str(), "name": str(), "status": str(), "can_view": map[string]any{"type": "boolean"}, "can_run": map[string]any{"type": "boolean"}, "runtime_ready": map[string]any{"type": "boolean"}}
-	libraryRequired := []string{"id", "slug", "name", "status", "can_view", "can_run", "runtime_ready"}
+	libraryProperties := map[string]any{"id": str(), "slug": str(), "name": str(), "status": str(), "can_view": map[string]any{"type": "boolean"}, "can_edit": map[string]any{"type": "boolean"}, "can_run": map[string]any{"type": "boolean"}, "runtime_ready": map[string]any{"type": "boolean"}}
+	libraryRequired := []string{"id", "slug", "name", "status", "can_view", "can_edit", "can_run", "runtime_ready"}
 	components["RestrictedRoutineLibraryItem"] = obj(libraryProperties, libraryRequired...)
 	detailProperties := map[string]any{}
 	for key, value := range libraryProperties {
@@ -33,6 +33,16 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	detailProperties["definition_hash"] = str()
 	detailProperties["version"] = map[string]any{"type": "integer"}
 	components["RestrictedRoutineDefinition"] = obj(detailProperties, append(libraryRequired, "definition", "definition_hash", "version")...)
+
+	draftProperties := map[string]any{"draft_id": str(), "revision": map[string]any{"type": "integer", "minimum": 0}, "base_revision": map[string]any{"type": "integer", "minimum": 0}, "name": str(), "description": str(), "definition": map[string]any{"type": "object", "additionalProperties": true}}
+	draftRequired := []string{"draft_id", "revision", "base_revision", "name", "description", "definition"}
+	components["RestrictedRoutineDraftRequest"] = obj(draftProperties, draftRequired...)
+	draftResponse := map[string]any{}
+	for key, value := range draftProperties {
+		draftResponse[key] = value
+	}
+	draftResponse["can_edit"] = map[string]any{"type": "boolean"}
+	components["RestrictedRoutineDraft"] = obj(draftResponse, append(draftRequired, "can_edit")...)
 
 	components["RestrictedPageInput"] = obj(map[string]any{"name": str(), "label": str(), "type": map[string]any{"type": "string", "enum": []string{"text", "textarea", "number", "boolean", "select"}}, "required": map[string]any{"type": "boolean"}, "options": arr(str())}, "name", "type", "required")
 	components["RestrictedPageConfirmation"] = obj(map[string]any{"title": str(), "body": str(), "confirm_label": str(), "cancel_label": str()}, "title", "body")
@@ -47,6 +57,8 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 
 	routes["GET "+prefix+"restricted-routine-library"] = DomainSchema{Response: arr(ref("RestrictedRoutineLibraryItem")), SuccessStatuses: []string{"200"}}
 	routes["GET "+prefix+"restricted-routine-library/{routineId}"] = DomainSchema{Response: ref("RestrictedRoutineDefinition"), SuccessStatuses: []string{"200"}}
+	routes["GET "+prefix+"restricted-routine-library/{routineId}/draft"] = DomainSchema{Response: ref("RestrictedRoutineDraft"), SuccessStatuses: []string{"200"}}
+	routes["PUT "+prefix+"restricted-routine-library/{routineId}/draft"] = DomainSchema{RequestRequired: true, Request: ref("RestrictedRoutineDraftRequest"), Response: ref("RestrictedRoutineDraft"), SuccessStatuses: []string{"200"}}
 	routes["GET "+prefix+"restricted-pages"] = DomainSchema{Response: arr(ref("RestrictedPage")), SuccessStatuses: []string{"200"}, SuccessHeaders: map[string]any{"X-Total-Count": map[string]any{"description": "Number of Pages with currently authorized executable actions", "schema": map[string]any{"type": "integer", "minimum": 0}}}}
 	// Reuse the existing route's trusted response rather than narrowing its
 	// behavior when the authenticated member uses the trusted execution mode.

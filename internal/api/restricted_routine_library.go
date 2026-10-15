@@ -19,6 +19,7 @@ type guestRoutineLibraryItem struct {
 	Slug         string `json:"slug"`
 	Name         string `json:"name"`
 	Status       string `json:"status"`
+	CanEdit      bool   `json:"can_edit"`
 	CanView      bool   `json:"can_view"`
 	CanRun       bool   `json:"can_run"`
 	RuntimeReady bool   `json:"runtime_ready"`
@@ -68,9 +69,10 @@ func (r *Router) restrictedRoutineLibrary(w http.ResponseWriter, req *http.Reque
 	}
 	id := req.PathValue("routineId")
 	rows, err := tx.QueryContext(req.Context(), `SELECT p.id,p.slug,p.name,p.status,p.definition_hash,
-       EXISTS(SELECT 1 FROM live_access_grants v WHERE v.member_id=? AND v.resource_kind='routine' AND v.routine_id=p.id AND v.operation='view')
+       EXISTS(SELECT 1 FROM live_access_grants v WHERE v.member_id=? AND v.resource_kind='routine' AND v.routine_id=p.id AND v.operation='view'),
+       EXISTS(SELECT 1 FROM live_access_grants e WHERE e.member_id=? AND e.resource_kind='routine' AND e.routine_id=p.id AND e.operation='edit')
        FROM pipelines p WHERE p.workspace_id=? AND p.deleted_at IS NULL AND (?='' OR p.id=? OR p.slug=?)
-       AND EXISTS(SELECT 1 FROM live_access_grants g WHERE g.member_id=? AND g.resource_kind='routine' AND g.routine_id=p.id AND g.operation IN ('view','run')) ORDER BY p.slug`, m.ID, workspace, id, id, id, m.ID)
+       AND EXISTS(SELECT 1 FROM live_access_grants g WHERE g.member_id=? AND g.resource_kind='routine' AND g.routine_id=p.id AND g.operation IN ('view','run')) ORDER BY p.slug`, m.ID, m.ID, workspace, id, id, id, m.ID)
 	if err != nil {
 		replyError(w, 500, "Routine unavailable")
 		return
@@ -79,9 +81,10 @@ func (r *Router) restrictedRoutineLibrary(w http.ResponseWriter, req *http.Reque
 	for rows.Next() {
 		var item guestRoutineLibraryItem
 		var hash string
-		if err = rows.Scan(&item.ID, &item.Slug, &item.Name, &item.Status, &hash, &item.CanView); err != nil {
+		if err = rows.Scan(&item.ID, &item.Slug, &item.Name, &item.Status, &hash, &item.CanView, &item.CanEdit); err != nil {
 			break
 		}
+		item.CanEdit = item.CanEdit && item.CanView && canScope(req.Context(), "workspace:admin")
 		item.CanRun = authorized[item.ID] != "" && authorized[item.ID] == hash && canScope(req.Context(), "workspace:admin")
 		item.RuntimeReady = r.restrictedWorkflow != nil
 		items = append(items, item)

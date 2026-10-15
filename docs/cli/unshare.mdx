@@ -24,7 +24,11 @@ crewship unshare project PROJECT_ID --with MEMBER_ID --operation read
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--with <member>` | required | Existing membership ID, user ID or exact email. |
-| `--operation <operation>` | required | Routine `run`; project `list` or `read`. Repeat or use comma-separated values. |
+| `--operation <operation>` | required | Routine `view`, `run` or `edit`; project `list`, `read`, `contribute`, `manage` or `delete_issues`. Repeat or use comma-separated values. |
+
+Removing `edit` revokes collaborative draft access while preserving an existing
+View share on the published definition. Removing View also prevents draft reads
+and writes, even if Edit remains stored. Direct Guest publication is separate.
 
 Use [`share list`](./share) to inspect the
 current shares. [`share`](./share) adds operations or explicitly reissues them.

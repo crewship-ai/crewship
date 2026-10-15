@@ -107,16 +107,18 @@ var restrictedRoutes = map[string]restrictedRule{
 	"POST /api/v1/agents/{agentId}/chats": restrictedAgentChatGrant,
 
 	// Restricted pages, routines and pipeline runs.
-	"GET /api/v1/workspaces/{workspaceId}/restricted-pages":                       restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library":             restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}": restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routines":                    restrictedPass,
-	"GET /api/v1/pages/{slug}/application/actions/{pendingId}":                    restrictedPass,
-	"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run":                  restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}":        restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs":                restrictedPass,
-	"POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}":               restrictedPass,
-	"POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId}":          restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-pages":                             restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft": restrictedPass,
+	"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft": restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library":                   restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}":       restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routines":                          restrictedPass,
+	"GET /api/v1/pages/{slug}/application/actions/{pendingId}":                          restrictedPass,
+	"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run":                        restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}":              restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs":                      restrictedPass,
+	"POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}":                     restrictedPass,
+	"POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId}":                restrictedPass,
 
 	// Exact audience and server admission are enforced by these handlers.
 	"GET /api/v1/agents/{agentId}/run-profile":           restrictedPass,
