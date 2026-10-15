@@ -80,6 +80,13 @@ func (h *CliPairHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Redemption creates an independent full-role token. A limited bearer
+	// must not widen its authority through a pairing code either.
+	if AuthKindFromContext(r.Context()) == AuthKindCLIToken && limitedChatToken(r.Context()) {
+		replyError(w, http.StatusForbidden, "Tokens with limited scopes cannot create pairing codes. Sign in to pair a CLI.")
+		return
+	}
+
 	var req pairStartRequest
 	// Body is optional — UI may not send anything. ReadJSON tolerates
 	// empty body via the existing helper conventions.

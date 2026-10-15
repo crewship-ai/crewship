@@ -251,13 +251,9 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// A narrowed credential cannot mint a full-role successor or manufacture
 	// a separate credential lifetime. Full credentials retain self-service.
-	if AuthKindFromContext(r.Context()) == AuthKindCLIToken && r.Context().Value(ctxTokenScopes) != nil {
-		scopes, ok := r.Context().Value(ctxTokenScopes).(stringSet)
-		_, full := scopes["*"]
-		if !ok || !full {
-			replyError(w, http.StatusForbidden, "Tokens with limited scopes cannot create other tokens. Sign in to Settings to create a token.")
-			return
-		}
+	if AuthKindFromContext(r.Context()) == AuthKindCLIToken && limitedChatToken(r.Context()) {
+		replyError(w, http.StatusForbidden, "Tokens with limited scopes cannot create other tokens. Sign in to Settings to create a token.")
+		return
 	}
 
 	var body createTokenRequest

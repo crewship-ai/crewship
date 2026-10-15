@@ -216,6 +216,8 @@ A device-code flow (RFC 8628 in spirit) that hands a Crewship session to a local
 
 ### `POST /api/v1/auth/pair/start`
 
+A bearer token with limited scopes receives `403`: a pairing code must not mint a successor with wider authority. Sign in interactively to pair a CLI.
+
 Mint a new pairing code for the authenticated user.
 
 **Auth:** required.
@@ -376,7 +378,7 @@ Token format: `crewship_cli_` + 64 hex chars (32 random bytes, 256-bit entropy).
 
 ### `POST /api/v1/auth/cli-token`
 
-Mints a new token for the calling user. A bearer token with limited scopes cannot create another token and receives `403`; sign in to Settings to create one. Trusted full-role credentials (omitted/empty scopes or `*`) retain self-service token creation. Guest accounts require a verified interactive session.
+Mints a new token for the calling user. A bearer token with limited scopes cannot create another token or a pairing code and receives `403`; sign in to Settings to create one. Trusted full-role credentials (omitted/empty scopes or `*`) retain self-service token creation. Guest accounts require a verified interactive session.
 
 **Auth:** required.
 

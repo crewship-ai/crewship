@@ -29,6 +29,17 @@ func TestScopedBearerCannotMintSuccessorCLITokens(t *testing.T) {
 					t.Fatalf("scoped bearer issued a successor: HTTP %d, want403", rr.Code)
 				}
 			}
+			pair := httptest.NewRequest("POST", "/api/v1/auth/pair/start", strings.NewReader(`{}`))
+			pair.Header.Set("Authorization", "Bearer "+token)
+			paired := httptest.NewRecorder()
+			router.ServeHTTP(paired, pair)
+			if paired.Code != 403 {
+				t.Fatalf("scoped bearer created a full-role pairing code: HTTP %d", paired.Code)
+			}
+			var pairCount int
+			if err = db.QueryRow(`SELECT COUNT(*) FROM cli_pairings WHERE user_id=?`, owner).Scan(&pairCount); err != nil || pairCount != 0 {
+				t.Fatalf("unexpected pairing persisted: %d %v", pairCount, err)
+			}
 			var count int
 			if err = db.QueryRow(`SELECT COUNT(*) FROM cli_tokens WHERE user_id=?`, owner).Scan(&count); err != nil || count != 1 {
 				t.Fatalf("unexpected credentials persisted: %d %v", count, err)
