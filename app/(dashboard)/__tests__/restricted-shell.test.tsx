@@ -260,7 +260,7 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     mount(<SettingsLayout />)
     expect(await screen.findByText("Account security")).toBeInTheDocument()
     await settle(500)
-    expect(screen.queryByRole("button", { name: /New token/ })).toBeNull()
+    expect(screen.getByRole("button", { name: /New token/ })).toBeEnabled()
     // Profile picture and name are not editable; the password is.
     expect(screen.queryByRole("button", { name: "Upload" })).toBeNull()
     expect(screen.queryByRole("textbox", { name: "Full name" })).toBeNull()

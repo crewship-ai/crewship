@@ -142,8 +142,8 @@ const EXPIRY_PRESETS: Array<{ label: string; value: number }> = [
 interface SessionsSectionProps {
   sessionExpires?: string | null
   onSignOut?: () => void
-  /** A restricted session (#2861): revoking is on its allowlist, issuing a
-   *  token is not, so "New token" is not offered. */
+  /** A restricted session (#2861): own token creation is allowed only
+   *  from a verified interactive session; elevated tier/scopes are not offered. */
   restricted?: boolean
 }
 
@@ -200,8 +200,8 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
       // unrestricted (no scope-vs-role check fires), expires_in_seconds=0
       // is "default" (no expiry for STANDARD, 24h for ADMIN).
       const body: Record<string, unknown> = { name: tokenName.trim() }
-      if (tokenTier === "ADMIN") body.tier = "ADMIN"
-      if (tokenScopes.size > 0) body.scopes = Array.from(tokenScopes)
+      if (!restricted && tokenTier === "ADMIN") body.tier = "ADMIN"
+      if (!restricted && tokenScopes.size > 0) body.scopes = Array.from(tokenScopes)
       if (tokenExpirySeconds > 0) body.expires_in_seconds = tokenExpirySeconds
 
       const res = await apiFetch("/api/v1/auth/cli-token", {
@@ -350,7 +350,7 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
           <span className="text-micro uppercase tracking-[0.1em] text-muted-foreground-soft font-semibold">
             CLI tokens
           </span>
-          {!showCreateForm && !restricted && (
+          {!showCreateForm && (
             <Button size="sm" variant="ghost" className="h-6 px-2 gap-1.5 text-label" onClick={() => setShowCreateForm(true)}>
               <Plus className="size-3" />New token
             </Button>
@@ -378,8 +378,8 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
                 </div>
 
                 {/* Tier + expiry on one row — both are short-list selects */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
+                <div className={restricted ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                  {!restricted && <div className="space-y-1">
                     <Label className="text-label flex items-center gap-1.5">
                       Tier
                       <TooltipProvider delayDuration={0}>
@@ -410,7 +410,7 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
                         </SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
+                  </div>}
 
                   <div className="space-y-1">
                     <Label className="text-label">Expires</Label>
@@ -424,9 +424,9 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
                       <SelectContent>
                         {EXPIRY_PRESETS
                           // ADMIN can't choose Never — backend rejects with 400.
-                          .filter((p) => tokenTier !== "ADMIN" || p.value !== 0)
+                          .filter((p) => restricted || tokenTier !== "ADMIN" || p.value !== 0)
                           // ADMIN can't exceed 7d ceiling.
-                          .filter((p) => tokenTier !== "ADMIN" || p.value <= 7 * 24 * 60 * 60)
+                          .filter((p) => restricted || tokenTier !== "ADMIN" || p.value <= 7 * 24 * 60 * 60)
                           .map((p) => (
                             <SelectItem key={p.value} value={String(p.value)} className="text-xs">
                               {p.label}
@@ -442,7 +442,7 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
                     Selecting <resource>:* implicitly grants every action under
                     that resource; the per-action checkboxes stay enabled so the
                     user can mix-and-match (backend's canScope handles both shapes). */}
-                <div className="space-y-1.5">
+                {!restricted && <div className="space-y-1.5">
                   <Label className="text-label flex items-center justify-between">
                     <span>Scopes {tokenScopes.size > 0 && <span className="text-muted-foreground">({tokenScopes.size} selected)</span>}</span>
                     {tokenScopes.size > 0 && (
@@ -501,7 +501,8 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
                       </div>
                     ))}
                   </div>
-                </div>
+                </div>}
+                {restricted && <p className="text-xs text-muted-foreground">This token uses your current Guest grants. It cannot open resources your account cannot access.</p>}
 
                 {/* Inline error from backend (unknown scope, OWNER-only, etc.) */}
                 {createError && (

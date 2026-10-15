@@ -39,6 +39,7 @@ var restrictedSurfaces = []restrictedSurface{
 		"GET /api/v1/auth/sessions",
 		"POST /api/v1/auth/sessions/{id}/revoke",
 		"GET /api/v1/auth/cli-tokens",
+		"POST /api/v1/auth/cli-token",
 		"DELETE /api/v1/auth/cli-tokens/{tokenId}",
 		"POST /api/v1/users/me/password",
 	}},
