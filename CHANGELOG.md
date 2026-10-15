@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Native Slides UI primitives support typed text, shapes, tables and keyboard Present (#3201).** This component delivery emits unsaved drafts; Pages persistence, images, comments and export remain pending.
+
 - **Local PNG/JPEG images now survive static previews in chat, Pages and Board pins.** All HTML/Markdown preview surfaces use one bounded raster validator and native decode check; remote images, SVG, srcset and network-bearing CSS remain unavailable. Original source downloads are preserved.
 
 
