@@ -31,6 +31,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Agent chat transcripts survive workspace and crew backups (#3109).** Encrypted bundles include scoped structured history, remapped fork identities and stable message/run anchors. Damaged lines produce per-chat completeness warnings instead of blocking all backups. Collection only fences file pinning; restore fences publication and commit, preserving existing histories unless replacement is explicit. Cross-workspace chat collisions are refused. The search/feedback mirror and atomic hard-crash recovery across filesystem/DB publication remain separate limitations.
 
+- **Agents can remember explicitly stated feedback preferences.** Optional future preferences on thumbs feedback now have scoped, source-tracked storage, asynchronous status, CLI self-service edits and deletion, and private-session recall with consent checks. Bare thumbs remain feedback only.
+
 - Pages folder and page menus now follow caller-specific server ACL decisions: readers see no mutation controls, folder editors can arrange, and page owners retain move access.
 - Guest accounts can complete CLI login by creating their own token from a verified interactive session. Minted tokens retain Guest restrictions; bearer credentials cannot remint a wider successor.
 
