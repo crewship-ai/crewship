@@ -199,6 +199,13 @@ func TestAcceptance_Feedback_PreferenceRoundTrip(t *testing.T) {
 	if err := usermodel.ProcessFeedbackPreferences(t.Context(), db); err != nil {
 		t.Fatal(err)
 	}
+	// A fork remaps the entry and feedback IDs independently.
+	if _, err := db.Exec(`UPDATE agent_user_preferences SET id='independent-entry'`); err != nil {
+		t.Fatal(err)
+	}
+	if got := run("feedback", "list", "--message", msg, "--format", "json"); !strings.Contains(got, "independent-entry") {
+		t.Fatalf("feedback returned source ID as entry ID: %s", got)
+	}
 	listed := run("feedback", "preferences", "--agent", "fb-agent", "--format", "json")
 	var entries []usermodel.FeedbackPreference
 	if err := json.Unmarshal([]byte(listed), &entries); err != nil || len(entries) != 1 || entries[0].Status != "saved" || entries[0].SourceType != "feedback_reason" {

@@ -176,7 +176,7 @@ func TestFeedbackPreferenceFailedWriteRetriesSameSource(t *testing.T) {
 	if err := b.h.db.QueryRow(`SELECT status FROM agent_user_preferences`).Scan(&status); err != nil || status != "failed" {
 		t.Fatalf("status=%s err=%v", status, err)
 	}
-	if _, err := b.h.db.Exec(`DROP TRIGGER fail_preference_audit`); err != nil {
+	if _, err := b.h.db.Exec(`DROP TRIGGER fail_preference_audit; UPDATE agent_user_preferences SET retry_after=''`); err != nil {
 		t.Fatal(err)
 	}
 	if err := usermodel.ProcessFeedbackPreferences(t.Context(), b.h.db); err != nil {
@@ -216,5 +216,100 @@ func TestFeedbackPreferenceUndoPreservesIndependentSource(t *testing.T) {
 	body, err := usermodel.ReadFeedbackPreferences(t.Context(), b.h.db, b.wsID, "agent-fb", b.userID)
 	if err != nil || strings.Count(body, "prefers concise answers") != 1 {
 		t.Fatalf("independent source lost or duplicated: %q %v", body, err)
+	}
+}
+
+func TestFeedbackPreferenceLiveScopeAndDisabledValues(t *testing.T) {
+	for _, tc := range []struct {
+		name, mutation, want string
+		before, alreadySaved bool
+	}{
+		{"new feedback while opted out", `INSERT INTO user_peer_consent(user_id,workspace_id,opted_out) SELECT created_by,workspace_id,1 FROM chats`, "disabled", true, false},
+		{"new feedback with agent memory off", `UPDATE agents SET memory_enabled=0`, "disabled", true, false},
+		{"new feedback with profile off", `INSERT INTO app_settings(key,value) VALUES('memory.user_model_profile','off')`, "disabled", true, false},
+		{"suspension before worker", `UPDATE users SET suspended_at=''`, "not_eligible", false, false},
+		{"deleted workspace before worker", `UPDATE workspaces SET deleted_at=datetime('now')`, "not_eligible", false, false},
+		{"restriction elsewhere before worker", `UPDATE workspace_members SET role='MEMBER'; INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) SELECT 'restricted-elsewhere','ws-other-fb',created_by,'MEMBER','restricted' FROM chats`, "not_eligible", false, false},
+		{"suspension after save", `UPDATE users SET suspended_at=''`, "saved", false, true},
+		{"deleted workspace after save", `UPDATE workspaces SET deleted_at=datetime('now')`, "saved", false, true},
+		{"restriction elsewhere after save", `UPDATE workspace_members SET role='MEMBER'; INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) SELECT 'restricted-elsewhere','ws-other-fb',created_by,'MEMBER','restricted' FROM chats`, "saved", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := setupFeedbackTestBed(t)
+			for _, q := range []string{`UPDATE agents SET memory_enabled=1`, `UPDATE conversation_messages SET role='assistant'`} {
+				if _, err := b.h.db.Exec(q); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mutate := func() {
+				t.Helper()
+				if _, err := b.h.db.Exec(tc.mutation); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.before {
+				mutate()
+			}
+			rec := httptest.NewRecorder()
+			b.h.Create(rec, feedbackReq("POST", "/api/v1/feedback", fmt.Sprintf(`{"message_id":%q,"signal":"helpful","reason":"Next time, keep answers concise."}`, b.messageID), b.userID))
+			if rec.Code != 201 {
+				t.Fatal(rec.Body)
+			}
+			if tc.alreadySaved {
+				if err := usermodel.ProcessFeedbackPreferences(t.Context(), b.h.db); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !tc.before {
+				mutate()
+			}
+			if err := usermodel.ProcessFeedbackPreferences(t.Context(), b.h.db); err != nil {
+				t.Fatal(err)
+			}
+			var status, value string
+			if err := b.h.db.QueryRow(`SELECT status,value FROM agent_user_preferences`).Scan(&status, &value); err != nil || status != tc.want {
+				t.Fatalf("status=%s value=%q error=%v", status, value, err)
+			}
+			if !tc.alreadySaved && value != "" {
+				t.Fatalf("disabled/refused value retained: %q", value)
+			}
+			body, err := usermodel.ReadFeedbackPreferences(t.Context(), b.h.db, b.wsID, "agent-fb", b.userID)
+			if err != nil || body != "" {
+				t.Fatalf("revoked recall: %q %v", body, err)
+			}
+			entries, err := usermodel.ListFeedbackPreferences(t.Context(), b.h.db, b.wsID, "agent-fb", b.userID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.want != "disabled" && len(entries) != 0 {
+				t.Fatalf("revoked source listed: %+v", entries)
+			}
+		})
+	}
+}
+
+func TestFeedbackPreferencePoisonDoesNotBlockOtherSources(t *testing.T) {
+	b := setupFeedbackTestBed(t)
+	for _, q := range []string{`UPDATE agents SET memory_enabled=1`, `UPDATE conversation_messages SET role='assistant'`,
+		`CREATE TRIGGER fail_only_poison BEFORE INSERT ON peer_card_audit WHEN json_extract(NEW.metadata,'$.feedback_id')='poison' BEGIN SELECT RAISE(ABORT,'poison source'); END;`} {
+		if _, err := b.h.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, id := range []string{"poison", "healthy"} {
+		signal := []string{"helpful", "not_helpful"}[i]
+		if _, err := b.h.db.Exec(`INSERT INTO message_feedback(id,workspace_id,chat_id,message_id,user_id,signal,reason) VALUES(?,?,?,?,?,?,'Next time, keep answers concise.')`, id, b.wsID, b.chatID, b.messageID, b.userID, signal); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := usermodel.ProcessFeedbackPreferences(t.Context(), b.h.db); err == nil {
+		t.Fatal("poison failure hidden")
+	}
+	var status string
+	if err := b.h.db.QueryRow(`SELECT status FROM agent_user_preferences WHERE id='healthy'`).Scan(&status); err != nil || status != "saved" {
+		t.Fatalf("healthy source starved: %s %v", status, err)
+	}
+	if err := usermodel.ProcessFeedbackPreferences(t.Context(), b.h.db); err != nil {
+		t.Fatalf("failed source ignored backoff: %v", err)
 	}
 }

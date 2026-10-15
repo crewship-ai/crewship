@@ -38,10 +38,18 @@ type FeedbackPreference struct {
 // can give feedback, but do not acquire personal memory through that source.
 const preferenceAudience = ` EXISTS (SELECT 1 FROM chats c
  JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL
+ JOIN users u ON u.id=p.user_id AND u.suspended_at IS NULL
+ JOIN workspaces w ON w.id=c.workspace_id AND w.deleted_at IS NULL
  JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=p.user_id AND wm.access_mode='trusted'
  JOIN conversation_messages m ON m.id=p.message_id AND m.session_id=c.id AND m.role='assistant'
  WHERE c.id=p.chat_id AND c.workspace_id=p.workspace_id AND c.agent_id=p.agent_id
- AND c.created_by=p.user_id AND c.visibility='private') `
+ AND c.created_by=p.user_id AND c.visibility='private'
+ AND EXISTS(SELECT 1 FROM message_feedback f WHERE f.id=p.feedback_id AND f.workspace_id=p.workspace_id AND f.user_id=p.user_id AND f.revision=p.source_revision AND COALESCE(f.reason,'')=p.reason)
+ AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=p.user_id AND restricted.access_mode='restricted')) `
+
+const preferenceEnabled = ` NOT EXISTS(SELECT 1 FROM user_peer_consent c WHERE c.workspace_id=p.workspace_id AND c.user_id=p.user_id AND c.opted_out=1)
+ AND NOT EXISTS(SELECT 1 FROM agents a WHERE a.id=p.agent_id AND a.memory_enabled=0)
+ AND NOT EXISTS(SELECT 1 FROM app_settings WHERE key='memory.user_model_profile' AND value NOT IN ('stated-technical','')) `
 
 func preferenceProfile(ctx context.Context, db *sql.DB) (Profile, error) {
 	var name string
@@ -60,7 +68,7 @@ func ProcessFeedbackPreferences(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id,revision,source_revision,reason FROM agent_user_preferences WHERE status IN ('processing','failed') LIMIT 100`)
+	rows, err := db.QueryContext(ctx, `SELECT id,revision,source_revision,reason FROM agent_user_preferences WHERE status='processing' OR (status='failed' AND attempts<5 AND retry_after<=strftime('%Y-%m-%dT%H:%M:%fZ','now')) ORDER BY CASE status WHEN 'processing' THEN 0 ELSE 1 END,updated_at LIMIT 100`)
 	if err != nil {
 		return err
 	}
@@ -82,6 +90,7 @@ func ProcessFeedbackPreferences(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	var processingErr error
 	for _, p := range batch {
 		status, value := "not_eligible", ""
 		if !profile.Writes() {
@@ -92,20 +101,18 @@ func ProcessFeedbackPreferences(ctx context.Context, db *sql.DB) error {
 				status, value = "saved", facts[0].Value
 			}
 		}
-		_, err = db.ExecContext(ctx, `UPDATE agent_user_preferences AS p SET value=CASE WHEN `+preferenceAudience+` THEN ? ELSE '' END,
-   status=CASE WHEN NOT (`+preferenceAudience+`) THEN 'not_eligible'
-    WHEN EXISTS(SELECT 1 FROM user_peer_consent c WHERE c.workspace_id=p.workspace_id AND c.user_id=p.user_id AND c.opted_out=1) THEN 'disabled'
-    WHEN EXISTS(SELECT 1 FROM agents a WHERE a.id=p.agent_id AND a.memory_enabled=0) THEN 'disabled'
- WHEN EXISTS(SELECT 1 FROM app_settings WHERE key=? AND value NOT IN ('stated-technical','')) THEN 'disabled' ELSE ? END,
+		_, err = db.ExecContext(ctx, `UPDATE agent_user_preferences AS p SET
+   value=CASE WHEN (`+preferenceAudience+`) AND (`+preferenceEnabled+`) AND ?='saved' THEN ? ELSE '' END,
+   status=CASE WHEN NOT (`+preferenceAudience+`) THEN 'not_eligible' WHEN NOT (`+preferenceEnabled+`) THEN 'disabled' ELSE ? END,
    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
    WHERE id=? AND revision=? AND source_revision=? AND status IN ('processing','failed')
-   AND EXISTS(SELECT 1 FROM message_feedback f WHERE f.id=p.feedback_id AND f.revision=p.source_revision AND COALESCE(f.reason,'')=p.reason)`, value, SettingProfile, status, p.id, p.revision, p.source)
+   AND EXISTS(SELECT 1 FROM message_feedback f WHERE f.id=p.feedback_id AND f.workspace_id=p.workspace_id AND f.user_id=p.user_id AND f.revision=p.source_revision AND COALESCE(f.reason,'')=p.reason)`, status, value, status, p.id, p.revision, p.source)
 		if err != nil {
-			_, _ = db.ExecContext(ctx, `UPDATE agent_user_preferences SET status='failed' WHERE id=? AND revision=? AND source_revision=? AND status IN ('processing','failed')`, p.id, p.revision, p.source)
-			return err
+			_, _ = db.ExecContext(ctx, `UPDATE agent_user_preferences SET status='failed',attempts=attempts+1,retry_after=strftime('%Y-%m-%dT%H:%M:%fZ','now','+1 minute') WHERE id=? AND revision=? AND source_revision=? AND status IN ('processing','failed')`, p.id, p.revision, p.source)
+			processingErr = err
 		}
 	}
-	return nil
+	return processingErr
 }
 
 func StartFeedbackPreferenceWorker(db *sql.DB, logger *slog.Logger, stop <-chan struct{}, wg *sync.WaitGroup) {

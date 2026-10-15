@@ -353,10 +353,13 @@ func insertPeerAudit(_ context.Context, db *sql.DB, logger *slog.Logger, row pee
 }
 
 const ownPreferenceSQL = ` FROM agent_user_preferences p JOIN agents a ON a.id=p.agent_id AND a.workspace_id=p.workspace_id AND a.deleted_at IS NULL
+ JOIN users u ON u.id=p.user_id AND u.suspended_at IS NULL
+ JOIN workspaces w ON w.id=p.workspace_id AND w.deleted_at IS NULL
  JOIN workspace_members wm ON wm.workspace_id=p.workspace_id AND wm.user_id=p.user_id AND wm.access_mode='trusted'
  JOIN chats c ON c.id=p.chat_id AND c.workspace_id=p.workspace_id AND c.agent_id=p.agent_id AND c.created_by=p.user_id AND c.visibility='private'
  JOIN conversation_messages m ON m.id=p.message_id AND m.session_id=c.id AND m.role='assistant'
- WHERE p.id=? AND p.workspace_id=? AND p.agent_id=? AND p.user_id=?`
+ WHERE p.id=? AND p.workspace_id=? AND p.agent_id=? AND p.user_id=?
+ AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=p.user_id AND restricted.access_mode='restricted')`
 
 // PatchAgentPeer corrects a single explicit preference with optimistic concurrency.
 // PATCH /api/v1/agents/{agentId}/peers/{userId}

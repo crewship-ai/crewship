@@ -315,12 +315,9 @@ ON CONFLICT(workspace_id, message_id, user_id, signal) DO UPDATE SET
 	var persistedID string
 	var revision int
 	var state feedbackMemory
-	if err := h.db.QueryRowContext(r.Context(), `SELECT f.id,f.revision,`+feedbackStatusSQL+` FROM message_feedback f LEFT JOIN agent_user_preferences p ON p.feedback_id=f.id WHERE f.workspace_id=? AND f.message_id=? AND f.user_id=? AND f.signal=?`, workspaceID, body.MessageID, user.ID, body.Signal).Scan(&persistedID, &revision, &state.Status); err != nil {
+	if err := h.db.QueryRowContext(r.Context(), `SELECT f.id,f.revision,`+feedbackStatusSQL+`,COALESCE(p.id,'') FROM message_feedback f LEFT JOIN agent_user_preferences p ON p.feedback_id=f.id AND p.workspace_id=f.workspace_id WHERE f.workspace_id=? AND f.message_id=? AND f.user_id=? AND f.signal=?`, workspaceID, body.MessageID, user.ID, body.Signal).Scan(&persistedID, &revision, &state.Status, &state.EntryID); err != nil {
 		replyError(w, http.StatusInternalServerError, "internal")
 		return
-	}
-	if state.Status != "feedback_only" {
-		state.EntryID = persistedID
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": persistedID, "revision": revision, "memory": state})
 }
@@ -468,7 +465,8 @@ func (h *MessageFeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 	// cross-tenant data.
 	const baseQuery = `
 SELECT id, workspace_id, message_id, chat_id, trace_id, signal, reason, user_id, created_at, revision,
- COALESCE((SELECT ` + feedbackStatusSQL + ` FROM agent_user_preferences p WHERE p.feedback_id=message_feedback.id),'feedback_only')
+ COALESCE((SELECT ` + feedbackStatusSQL + ` FROM agent_user_preferences p WHERE p.feedback_id=message_feedback.id AND p.workspace_id=message_feedback.workspace_id),'feedback_only'),
+ COALESCE((SELECT id FROM agent_user_preferences p WHERE p.feedback_id=message_feedback.id AND p.workspace_id=message_feedback.workspace_id),'')
 FROM message_feedback
 WHERE user_id = ?
   AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = ?)
@@ -498,13 +496,10 @@ WHERE user_id = ?
 	for rows.Next() {
 		var fr feedbackRow
 		if err := rows.Scan(&fr.ID, &fr.WorkspaceID, &fr.MessageID, &fr.ChatID, &fr.TraceID,
-			&fr.Signal, &fr.Reason, &fr.UserID, &fr.CreatedAt, &fr.Revision, &fr.Memory.Status); err != nil {
+			&fr.Signal, &fr.Reason, &fr.UserID, &fr.CreatedAt, &fr.Revision, &fr.Memory.Status, &fr.Memory.EntryID); err != nil {
 			h.logger.Error("list feedback scan", "err", err)
 			replyError(w, http.StatusInternalServerError, "internal")
 			return
-		}
-		if fr.Memory.Status != "feedback_only" {
-			fr.Memory.EntryID = fr.ID
 		}
 		out = append(out, fr)
 	}

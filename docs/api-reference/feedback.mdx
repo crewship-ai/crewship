@@ -204,7 +204,7 @@ POST responses and GET rows add `revision` and
 `memory: {"status":"processing","entry_id":"…"}`. Repeating the same reason
 keeps the revision. Changing it advances the source revision and clears the old
 preference immediately. Statuses are `feedback_only`, `processing`, `saved`,
-`not_eligible`, `disabled`, `failed` and `withdrawn`. Failed writes retry the same revision. Processing is durable and asynchronous;
+`not_eligible`, `disabled`, `failed` and `withdrawn`. Failed writes retry the same revision at one-minute intervals, up to five attempts; correcting the entry starts a fresh attempt. Processing is durable and asynchronous;
 a storage failure never reports saved. `saved` means the structural stated-only
 verifier admitted the exact authenticated reason, with `source_type: feedback_reason`.
 The reason is not falsely attributed to a conversation message.
@@ -215,3 +215,8 @@ peer-card Markdown. Feedback deletion withdraws its derived entry; opting out al
 withdraws current entries, and opting back in does not recreate them. The next
 eligible private prompt uses only its `OpenedByUserID`, checks source access,
 agent memory setting, consent and profile again, and includes source provenance.
+
+Workspace backups include preferences and tombstones, with their agent, user, chat
+and feedback references remapped on forks. Recall remains suppressed until the
+source message exists in the destination search mirror; restoring a preference
+alone never supplies authority or recreates an unavailable private source.
