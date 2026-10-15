@@ -52,6 +52,7 @@ let browser, failurePage
 const routeTasks = new Set(), routeFailures = [], routeReleases = []
 const diagnosticTasks = new Set()
 report.failedPatches = []
+report.requestSnapshots = []
 const patchPattern = '**/api/v1/pages/d1b-acceptance/document/patch?*'
 async function interceptPatch(page, handler) {
   await page.route(patchPattern, route => {
@@ -88,6 +89,11 @@ try {
   const owner = await browser.newContext({ baseURL, acceptDownloads: true })
   const colleague = await browser.newContext({ baseURL, acceptDownloads: true })
   for (const [actor, context] of [['owner', owner], ['colleague', colleague]]) context.on('response', response => {
+    if (response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/document/requests')) {
+      const body = response.request().postDataJSON()
+      report.requestSnapshots.push({ actor, status: response.status(), page_id: body.page_id, base_rev: body.base_rev,
+        submission_id: body.submission_id, targets: body.targets })
+    }
     if (response.request().method() !== 'POST' || !new URL(response.url()).pathname.endsWith('/document/patch') || response.ok()) return
     const task = (async () => {
       const request = response.request()
