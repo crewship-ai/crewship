@@ -26,7 +26,7 @@ export function ArtifactRequestStatus({ request }: { request: ArtifactAgentReque
       : STATUS[request.status] ?? { label: "Unknown state", icon: CircleAlert, className: STATUS_STYLES.gray }
   return <StatusIconBadge entry={entry} />
 }
-export function ArtifactRequestsPanel({ data, error, writeError, loading, pending, head, acceptedId, onRefresh, onCancel, onRetry, onViewRevision }: {
+export function ArtifactRequestsPanel({ data, error, writeError, loading, pending, head, acceptedId, onRefresh, onCancel, onRetry, onViewRevision, onCompareRevisions }: {
   data: ArtifactRequestsResult | undefined
   error: string | null
   writeError: string | null
@@ -38,6 +38,7 @@ export function ArtifactRequestsPanel({ data, error, writeError, loading, pendin
   onCancel: (id: string) => void
   onRetry: (request: ArtifactAgentRequest) => void
   onViewRevision: (revision: number) => void
+  onCompareRevisions: (before: number, after: number) => void
 }) {
   const [all, setAll] = useState(false)
   if (!data && error) return <div role="alert" className="space-y-2 border-t p-4 text-sm text-destructive"><p>{error}</p><Button size="sm" variant="outline" onClick={onRefresh}>Retry agent requests</Button></div>
@@ -68,6 +69,7 @@ export function ArtifactRequestsPanel({ data, error, writeError, loading, pendin
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="ghost" className="coarse:h-12" onClick={() => onViewRevision(request.base_rev)}>View source revision {request.base_rev}</Button>
           {request.status === "succeeded" && request.result_revision && <Button size="sm" variant="outline" className="coarse:h-12" onClick={() => onViewRevision(request.result_revision!)}>View result revision {request.result_revision}</Button>}
+          {request.status === "succeeded" && request.result_kind !== "reply" && request.result_revision && <Button size="sm" variant="outline" className="coarse:h-12" onClick={() => onCompareRevisions(request.base_rev, request.result_revision!)}>Compare revisions {request.base_rev} and {request.result_revision}</Button>}
           {agentSlug && <Button asChild size="sm" variant="ghost" className="coarse:h-12"><a href={`/chat/${encodeURIComponent(agentSlug)}?${new URLSearchParams({ session: request.chat_id })}`}>Open agent chat</a></Button>}
           {data.can_dispatch && active && <Button size="sm" variant="outline" className="coarse:h-12" disabled={pending} onClick={() => onCancel(request.id)}>Cancel request</Button>}
           {data.can_dispatch && retryable && request.instruction && <Button size="sm" variant="outline" className="coarse:h-12" disabled={pending} onClick={() => onRetry(request)}>Retry as new request</Button>}
