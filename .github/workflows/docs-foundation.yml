@@ -1,0 +1,59 @@
+name: Docs foundation
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - '.github/workflows/docs-foundation.yml'
+      - 'tools/docs-service/**'
+      - 'internal/documents/**'
+      - 'internal/backup/**'
+      - 'internal/database/**'
+      - 'internal/api/**'
+      - 'internal/config/**'
+      - 'internal/server/**'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-foundation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  persistence:
+    name: Docs persistence and process recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: '1.27.2'
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: '10.11.0'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.21.0'
+      - name: Install frozen service dependencies
+        run: pnpm --dir tools/docs-service install --frozen-lockfile
+      - name: Validate retained schema and service protocol
+        run: pnpm --dir tools/docs-service test
+      - name: Store, configuration, backup and authority regressions
+        run: |
+          go test ./internal/documents ./internal/config ./internal/backup -count=1 -timeout 10m
+          go test ./internal/api ./internal/server -run 'TestDocument' -count=1 -timeout 5m
+      - name: Real Go and Node crashes, replay and bounded history
+        env:
+          CREWSHIP_DOCS_FOUNDATION: '1'
+          CREWSHIP_DOCS_FOUNDATION_OUTPUT: ${{ runner.temp }}/docs-foundation.json
+        run: go test -tags docs_foundation ./internal/api -run '^TestDocumentsFoundationRealProcesses$' -count=1 -timeout 5m
+      - name: Preserve measurement conditions and results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: docs-foundation-evidence
+          path: ${{ runner.temp }}/docs-foundation.json
+          if-no-files-found: error

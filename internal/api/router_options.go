@@ -27,6 +27,12 @@ import (
 
 type RouterOption func(*Router)
 
+// WithDocumentAuthority enables only the private persistence socket, never a
+// public document editor or API. Empty paths leave the foundation disabled.
+func WithDocumentAuthority(socket, secretFile string) RouterOption {
+	return func(r *Router) { r.documentsSocket = socket; r.documentsSecretFile = secretFile }
+}
+
 // WithSocketPath sets the Unix socket path used for IPC with the sidecar.
 func WithSocketPath(path string) RouterOption {
 	return func(r *Router) {
