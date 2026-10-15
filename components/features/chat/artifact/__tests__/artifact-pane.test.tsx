@@ -18,6 +18,7 @@ import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-libra
 
 // These tests exercise authenticated IO and refresh. Worker/table behavior has its own suite.
 vi.mock("../table-preview", () => ({ TablePreview: ({ bytes }: { bytes: Uint8Array }) => <div aria-label="Spreadsheet preview">{new TextDecoder().decode(bytes)}</div> }))
+vi.mock("../xlsx-preview", () => ({ XlsxPreview: () => <div aria-label="Workbook preview">Saved worksheet values</div> }))
 
 let viewer = "user-a"
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: viewer } } }) }))
@@ -283,6 +284,18 @@ describe("ArtifactPane — live revisions", () => {
 })
 
 describe("ArtifactPane — document and table editing", () => {
+  it("previews XLSX read-only and keeps legacy/macro-enabled formats download-only", async () => {
+    apiFetch.mockReturnValue(response({ body: "workbook bytes", contentType: "application/octet-stream" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("xlsx", "reports/budget.xlsx")
+    expect(await screen.findByLabelText("Workbook preview")).toHaveTextContent("Saved worksheet")
+    expect(screen.queryByRole("button", { name: "Editor" })).toBeNull()
+    for (const extension of ["xls", "xlsm"]) {
+      openTab(extension, `reports/budget.${extension}`)
+      expect(await screen.findByText(/Legacy and macro-enabled workbooks/)).toBeInTheDocument()
+      expect(screen.queryByTestId("editor-code")).toBeNull()
+    }
+  })
   it("previews a Markdown document as a page and opens its source for editing", async () => {
     apiFetch.mockReturnValue(response({ body: "# Copy site\n\nA draft.\n", contentType: "application/octet-stream" }))
     render(<ArtifactPane agentId="agent-1" />)

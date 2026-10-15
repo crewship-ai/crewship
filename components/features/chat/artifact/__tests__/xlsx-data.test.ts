@@ -56,8 +56,14 @@ describe("bounded local XLSX data", () => {
   })
   it("refuses DTDs, macros and external relationships", async () => {
     await expect(parseXlsxWorkbook(workbook([""] , { "xl/workbook.xml": '<!DOCTYPE workbook [<!ENTITY payload "unsafe">]><workbook/>' }))).rejects.toThrow("declarations")
+    await expect(parseXlsxWorkbook(workbook([""], { "xl/theme/unused.xml": '<!DOCTYPE theme><theme/>' }))).rejects.toThrow("declarations")
     await expect(parseXlsxWorkbook(workbook([""], { "xl/vbaProject.bin": "macro" }))).rejects.toThrow("Macros")
     await expect(parseXlsxWorkbook(workbook([""], { "xl/worksheets/_rels/sheet0.xml.rels": '<Relationships><Relationship Id="link" TargetMode="External" Target="https://untrusted.test"/></Relationships>' }))).rejects.toThrow("External")
+  })
+  it("bounds ignored XML complexity and rejects cells outside worksheet rows", async () => {
+    await expect(parseXlsxWorkbook(workbook([""], { "xl/theme/unused.xml": "<a>".repeat(65) + "</a>".repeat(65) }))).rejects.toThrow("complexity")
+    await expect(parseXlsxWorkbook(workbook(['<c r="A1"><v>1</v></c>']))).rejects.toThrow("cell structure")
+    await expect(parseXlsxWorkbook(workbook([""], { "xl/theme/unused.xml": "<a/><b/>" }))).rejects.toThrow("multiple roots")
   })
 })
 

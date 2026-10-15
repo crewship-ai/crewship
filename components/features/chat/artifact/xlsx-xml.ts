@@ -19,12 +19,14 @@ export function inspectWorkbookXml(bytes: Uint8Array, budget: XmlBudget, hooks: 
   catch { throw workbookRefusal("Workbook XML is not valid UTF-8.") }
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw workbookRefusal("Workbook XML declarations are not supported.")
   const stack: string[] = []
+  let roots = 0
   const parser = new Parser()
   parser.on("error", () => { throw workbookRefusal("Workbook XML is corrupt.") })
   parser.on("warn", () => { throw workbookRefusal("Workbook XML is malformed.") })
   parser.on("attention", () => { throw workbookRefusal("Workbook XML declarations are not supported.") })
   parser.on("openTag", (rawName, getAttributes, decode) => {
     const name = localName(rawName)
+    if (!stack.length && ++roots > 1) throw workbookRefusal("Workbook XML has multiple roots.")
     if (++budget.nodes > XLSX_LIMITS.xmlNodes || stack.length >= XLSX_LIMITS.xmlDepth) throw workbookRefusal("Workbook XML exceeds the complexity limit.")
     const source = getAttributes(), attributes: Record<string, string> = Object.create(null)
     if (Object.keys(source).length > 64) throw workbookRefusal("Workbook XML exceeds the attribute limit.")
@@ -44,11 +46,12 @@ export function inspectWorkbookXml(bytes: Uint8Array, budget: XmlBudget, hooks: 
     stack.pop()
   })
   const text = (value: string) => {
+    if (!stack.length && value.trim()) throw workbookRefusal("Workbook XML has text outside its root.")
     if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value)) throw workbookRefusal("Workbook XML text is unsupported.")
     hooks.text?.(value, stack)
   }
   parser.on("text", (value, decode) => text(decode(value)))
   parser.on("cdata", text)
   parser.parse(xml)
-  if (stack.length) throw workbookRefusal("Workbook XML is incomplete.")
+  if (stack.length || roots !== 1) throw workbookRefusal("Workbook XML is incomplete.")
 }

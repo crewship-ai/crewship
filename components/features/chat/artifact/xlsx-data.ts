@@ -199,6 +199,9 @@ export async function parseXlsxWorkbook(bytes: Uint8Array): Promise<WorkbookData
     canonical[`xl/worksheets/sheet${index}.xml`] = normalized.bytes
     return { rows: normalized.rows, columns: normalized.columns }
   })
+  // Ignored drawings/themes must not hide DTDs or unbounded XML structures.
+  const inspected = new Set(["[Content_Types].xml", "xl/workbook.xml", shared, style, ...sheets.map(sheet => sheet.path)])
+  for (const [path, part] of files) if (path.endsWith(".xml") && !inspected.has(path)) inspectWorkbookXml(part, xmlBudget)
   // Stored entries require no further inflate allocation or nested workers.
   if (Object.values(canonical).reduce((total, part) => total + part.byteLength, 0) > XLSX_LIMITS.expandedBytes) throw workbookRefusal("Normalized workbook exceeds the 20 MiB preview limit.")
   const safe = zipSync(canonical, { level: 0 })

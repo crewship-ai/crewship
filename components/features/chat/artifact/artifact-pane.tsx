@@ -22,6 +22,7 @@ import { FilePreview } from "../files/file-preview"
 import { ArtifactUnavailable, ArtifactContentRefused, artifactDownloadUrl, readArtifactSnapshot, readArtifactVersion, saveArtifactFile, type ArtifactSnapshot } from "./artifact-file-io"
 
 import { TablePreview } from "./table-preview"
+import { XlsxPreview } from "./xlsx-preview"
 
 const FileEditor = dynamic(
   () => import("@/components/features/files/file-editor").then((m) => m.FileEditor),
@@ -29,7 +30,8 @@ const FileEditor = dynamic(
 )
 
 const BINARY = /\.(pdf|png|jpe?g|webp)$/i
-const WORKBOOK = /\.xlsx?$/i
+const WORKBOOK = /\.(xls|xlsx|xlsm)$/i
+const UNSUPPORTED_WORKBOOK = /\.(xls|xlsm)$/i
 const PREVIEW = /\.(html?|csv|tsv|md)$/i
 const INTERVAL = 5000
 
@@ -40,7 +42,7 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 function ArtifactPreview({ path, snapshot, url, revision, onClose, onAskSelection }: { path: string; snapshot: ArtifactSnapshot; url: string; revision: number; onClose: () => void; onAskSelection?: (context: string) => void }) {
-  const text = useMemo(() => /\.(csv|tsv)$/i.test(path) ? "" : new TextDecoder().decode(snapshot.bytes), [snapshot, path])
+  const text = useMemo(() => /\.(csv|tsv|xlsx)$/i.test(path) ? "" : new TextDecoder().decode(snapshot.bytes), [snapshot, path])
   if (BINARY.test(path)) {
     // Existing viewer validates signatures and renders PDFs with pdfjs.
     return <FilePreview key={revision} url={`${url}&revision=${revision}`} name={path.split("/").pop() ?? path} onClose={onClose} showHeader={false} bytes={snapshot.bytes} />
@@ -56,6 +58,7 @@ function ArtifactPreview({ path, snapshot, url, revision, onClose, onAskSelectio
     const csp = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; font-src data:; form-action \'none\'; base-uri \'none\'">'
     return <iframe title={`Preview ${path}`} sandbox="" referrerPolicy="no-referrer" className="h-full w-full bg-white" srcDoc={csp + text} />
   }
+  if (/\.xlsx$/i.test(path)) return <XlsxPreview bytes={snapshot.bytes} path={path} onAskSelection={onAskSelection} />
   if (/\.(csv|tsv)$/i.test(path)) return <TablePreview bytes={snapshot.bytes} path={path} onAskSelection={onAskSelection} />
   return <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs">{text}</pre>
 }
@@ -218,8 +221,8 @@ function ScopedArtifactPane({ agentId, width = 540, expanded = false, onAskSelec
     <div className="relative min-h-0 flex-1 overflow-hidden">
       {loading && !loaded && <div className="flex h-full items-center justify-center"><Spinner className="size-5" /></div>}
       {!loading && !loaded && !error && <p className="p-4 text-sm text-muted-foreground">No artifact open</p>}
-      {loaded && WORKBOOK.test(path) && <div className="p-4 text-sm text-muted-foreground">Spreadsheet preview supports CSV and TSV. <AuthenticatedDownload href={url} download={active?.title || "artifact"} className="text-primary underline">Download this workbook</AuthenticatedDownload> to open it.</div>}
-      {loaded && !WORKBOOK.test(path) && (view === "preview" || binary) && <ArtifactPreview onAskSelection={onAskSelection} path={path} snapshot={loaded} url={url} revision={revision} onClose={() => { if (guardDirty()) setOpen(false) }} />}
+      {loaded && UNSUPPORTED_WORKBOOK.test(path) && <div className="p-4 text-sm text-muted-foreground">Legacy and macro-enabled workbooks are download only. <AuthenticatedDownload href={url} download={active?.title || "artifact"} className="text-primary underline">Download this workbook</AuthenticatedDownload> to open it.</div>}
+      {loaded && !UNSUPPORTED_WORKBOOK.test(path) && (view === "preview" || binary) && <ArtifactPreview onAskSelection={onAskSelection} path={path} snapshot={loaded} url={url} revision={revision} onClose={() => { if (guardDirty()) setOpen(false) }} />}
       {loaded && text !== null && view === "editor" && <FileEditor key={`${activeId}:${revision}`} code={text} language={active?.language ?? getEditorLanguage(active?.title ?? path)} onSave={handleSave} onDirtyChange={(v) => { setDirty(v); if (v) setFollowing(false) }} />}
     </div>
   </motion.aside>
