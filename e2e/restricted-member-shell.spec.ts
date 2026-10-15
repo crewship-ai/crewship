@@ -340,7 +340,7 @@ for (const width of [1280, 390]) {
     const panelComment = page.getByPlaceholder("Write a comment.  @ to bring in an agent.")
     await panelComment.fill("Comment survives a field save")
     await page.getByRole("button", { name: "Change status", exact: true }).click()
-    await page.getByRole("option", { name: "Done", exact: true }).click()
+    await page.getByRole("button", { name: "Done", exact: true }).click()
     await page.getByRole("button", { name: "Save changes", exact: true }).click()
     await expect(page.getByRole("button", { name: "Save changes", exact: true })).toHaveCount(0)
     await expect(panelComment).toHaveValue("Comment survives a field save")
