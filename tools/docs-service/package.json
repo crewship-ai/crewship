@@ -1,0 +1,21 @@
+{
+  "name": "crewship-docs-service",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "start": "node service.mjs",
+    "test": "node --test *-node-test.mjs"
+  },
+  "dependencies": {
+    "@tiptap/core": "3.32.0",
+    "@tiptap/extension-collaboration": "3.32.0",
+    "@tiptap/extension-table": "3.32.0",
+    "@tiptap/pm": "3.32.0",
+    "@tiptap/y-tiptap": "3.0.7",
+    "yjs": "13.6.33"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}

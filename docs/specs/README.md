@@ -48,6 +48,9 @@ public contract here. Superseded a spec? Move it to
 
 ## Pages and project files
 
+- [Docs persistence foundation](documents.md): opt-in private Go/Node persistence,
+  writer fencing, bounded history and backup contract; no public Docs editor.
+
 - [Pages](pages.md): panel schemas, static HTML artifact revisions, permissions, data model and
   API/CLI surface. Code references its section anchors; preserve them.
   Explicit historical design sections are not claims of current implementation.

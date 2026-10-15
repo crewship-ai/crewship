@@ -103,6 +103,9 @@ const scopeSelf = "self"
 // enumeration test fails the build, and requireRoleScopeMW denies scoped
 // tokens at runtime.
 func scopeForRoute(pattern string) string {
+	if strings.HasPrefix(pattern, "/api/v1/pages/{slug}/document") {
+		return "pages:write"
+	}
 	segs := strings.Split(strings.TrimPrefix(pattern, "/api/v1/"), "/")
 	if len(segs) == 0 || segs[0] == "" {
 		return ""
@@ -249,7 +252,7 @@ func (r *Router) requireRoleScopeMW(role, scope string, h http.HandlerFunc) http
 // through.
 func (r *Router) authedMut(method, pattern, role string, h http.HandlerFunc) {
 	scope := scopeForRoute(pattern)
-	if role == roleSelf {
+	if role == roleSelf && !strings.HasPrefix(pattern, "/api/v1/pages/{slug}/document") {
 		// Self-scoped: gated by ownership in the handler, not a resource
 		// capability. Mark scope-exempt regardless of the path's family.
 		scope = scopeSelf

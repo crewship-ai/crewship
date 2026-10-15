@@ -356,6 +356,13 @@ POST /api/v1/pages/{slug}/board/requests/{requestId}/insert roleSelf
 POST /api/v1/pages/{slug}/board/threads roleSelf
 POST /api/v1/pages/{slug}/board/threads/{threadId}/comments roleSelf
 POST /api/v1/pages/{slug}/board/threads/{threadId}/resolve roleSelf
+POST /api/v1/pages/{slug}/document/checkpoint roleSelf
+POST /api/v1/pages/{slug}/document/comments roleSelf
+POST /api/v1/pages/{slug}/document/comments/resolve roleSelf
+POST /api/v1/pages/{slug}/document/initialize roleSelf
+POST /api/v1/pages/{slug}/document/patch roleSelf
+POST /api/v1/pages/{slug}/document/requests roleSelf
+POST /api/v1/pages/{slug}/document/restore roleSelf
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
 POST /api/v1/pages/{slug}/project/build roleSelf
 POST /api/v1/pages/{slug}/project/check roleSelf

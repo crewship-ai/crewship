@@ -592,6 +592,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			}
 			switch {
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/pages/") && strings.Contains(r.URL.Path, "/document"):
+				s.handleDocument(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/pages/") && strings.Contains(r.URL.Path, "/document"):
+				s.handleDocument(w, r)
+				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/artifact-requests/"):
 				s.handleArtifactRequestContext(w, r)
 				return

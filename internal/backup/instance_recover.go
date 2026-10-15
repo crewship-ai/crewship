@@ -705,6 +705,54 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 				rep.RuntimeReset = append(rep.RuntimeReset, fmt.Sprintf("%s (%d)", r.what, n))
 			}
 		}
+		// Physical instance bundles include document bytes and their source leases.
+		// Preserve content/history, fence every source engine before first boot.
+		var documentsExist bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents')`).Scan(&documentsExist); err != nil {
+			return err
+		} else if documentsExist {
+			// Older D1a physical bundles predate the editor generation column.
+			query := `UPDATE documents SET epoch=epoch+1,writer='',owner='',lease_until=0`
+			columns, err := db.QueryContext(ctx, `PRAGMA table_info(documents)`)
+			if err != nil {
+				return err
+			}
+			for columns.Next() {
+				var cid, notnull, pk int
+				var name, kind string
+				var def any
+				if err := columns.Scan(&cid, &name, &kind, &notnull, &def, &pk); err != nil {
+					columns.Close()
+					return err
+				}
+				if name == "generation" {
+					query = `UPDATE documents SET epoch=epoch+1,generation=generation+1,writer='',owner='',lease_until=0`
+				}
+			}
+			if err := columns.Err(); err != nil {
+				columns.Close()
+				return err
+			}
+			columns.Close()
+			if _, err := db.ExecContext(ctx, query); err != nil {
+				return fmt.Errorf("backup: reset document writer leases: %w", err)
+			}
+			rep.RuntimeReset = append(rep.RuntimeReset, "document writer leases and epochs")
+		}
+		var documentRequestsExist bool
+		if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='document_requests')`).Scan(&documentRequestsExist); err != nil {
+			return err
+		} else if documentRequestsExist {
+			for _, table := range []string{"page_artifact_run_delegations", "artifact_run_principals"} {
+				if _, err := db.ExecContext(ctx, `DELETE FROM `+table+` WHERE run_id IN (SELECT run_id FROM document_requests WHERE run_id IS NOT NULL)`); err != nil {
+					return fmt.Errorf("backup: reset document run authority: %w", err)
+				}
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE document_requests SET receipt_json='{}',run_id=NULL,error=CASE WHEN status IN ('queued','running') THEN 'Agent work suspended by backup restore; send a new request to run again' ELSE error END,status=CASE WHEN status IN ('queued','running') THEN 'failed' ELSE status END`); err != nil {
+				return fmt.Errorf("backup: reset document request dispatch authority: %w", err)
+			}
+			rep.RuntimeReset = append(rep.RuntimeReset, "document agent request dispatch authority")
+		}
 		// Backup runs that were in flight (or queued) on the source when the
 		// bundle was taken — the run that took it, usually — are not this
 		// server's to finish: left "running", the scheduler would treat them

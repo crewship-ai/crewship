@@ -1409,6 +1409,12 @@ var startCmd = &cobra.Command{
 							ph.RunArtifactRequests(artifactCtx, quiesce.SchedulerGate(schedulerLease))
 						}()
 						defer func() { stopArtifacts(); <-artifactsDone }()
+						documentsDone := make(chan struct{})
+						go func() {
+							defer close(documentsDone)
+							ph.RunDocumentRequestWorker(artifactCtx, quiesce.SchedulerGate(schedulerLease))
+						}()
+						defer func() { stopArtifacts(); <-documentsDone }()
 						logger.Info("pages freshness sweeper wired (on_failure → issue; 1m tick)")
 					}
 				}

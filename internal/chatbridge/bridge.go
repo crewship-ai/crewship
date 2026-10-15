@@ -1179,6 +1179,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		"artifact_human_receipt":    info.HumanAuthority,
 		"artifact_human_message_id": triggerMessageID,
 		"artifact_request_id":       msgOpt.ArtifactRequestID,
+		"document_request_id":       msgOpt.DocumentRequestID,
 		"board_request_id":          msgOpt.BoardRequestID,
 	}
 	ctx = runauthority.WithTriggerMessage(ctx, triggerMessageID)

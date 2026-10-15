@@ -271,3 +271,28 @@ crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHI
 Build the real static export first. Missing Chromium, export or opt-in fails;
 `CREWSHIP_BOARD_MERMAID_OUTPUT` selects the evidence directory. Synthetic session
 credentials remain in a private temporary file removed by the Go fixture.
+## Docs D1b production traversal
+
+`docs-d1b-acceptance.mjs` runs the embedded application and the managed Node
+Docs service through the approved throwaway helper. Build a complete release
+bundle first: the selected `crewship` binary needs adjacent `crewship-sidecar`
+and `entrypoint.sh`, plus a real embedded static export. In an isolated worktree:
+
+```bash
+crewship-heavy make build
+crewship-heavy env D1B_ACCEPTANCE_BINARY="$PWD/crewship" \
+  D1B_ACCEPTANCE_OUTPUT=/tmp/crewship-docs-d1b-evidence \
+  node e2e/docs-d1b-acceptance.mjs
+```
+
+Use your own output directory. The installed Playwright Chromium must be
+available. The harness creates its own users, sessions, private sockets and
+service secret; it never uses a development environment's sessions. It covers
+Page creation, concurrent human edits, a lost response with exact retry,
+comments, simple formatting, checkpoint comparison/restore, Markdown export
+and unchanged Page identity. HTTP barriers delay real requests without
+fabricating responses. Reports identify the binary hash and actual Node build.
+
+This traversal explicitly does not perform a model-backed agent request.
+A genuine user-to-agent-to-result-card run requires a separately authorized
+model/runtime configuration; human semantic API edits are not its substitute.

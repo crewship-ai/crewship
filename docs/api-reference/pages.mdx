@@ -2997,3 +2997,15 @@ terminal request state and private completion notice. List responses include
 `result_kind`, optional `agent_reported_phase:{phase,message,reported_at}` and
 optional `reply:{body,agent_id,run_id,on_behalf_of_user_id,created_at}`. Deleted
 identity references may be omitted. Existing Page read authorization still applies.
+
+## Collaborative documents
+
+The opt-in Docs API, CLI and service lifecycle are described in the
+[Docs contract](../specs/documents.md). It preserves Page identity and grants.
+Use `crewship doc read <slug>` or `crewship doc outline <slug>` to obtain the
+current durable revision, opaque epoch and target hash. Submit an exact JSON
+operation with `crewship doc patch <slug> --file patch.json`. Conflicts require
+rereading the target and an explicit new operation; transport retries reuse the
+original operation ID and body. `crewship doc checkpoint`, `crewship doc restore`
+and `crewship doc request` likewise accept `--file`; `crewship doc export <slug>`
+writes Markdown. See each command's `--help` for the bounded operation contract.

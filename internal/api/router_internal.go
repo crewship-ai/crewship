@@ -66,6 +66,9 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// (Router.DrainVerdicts). Otherwise `internal` is local to this func.
 	r.internalHandler = internal
 	internalAuth := func(next http.Handler) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
+	r.mux.Handle("GET /api/v1/internal/documents/{slug}", internalAuth(http.HandlerFunc(r.pages.DocumentAgent)))
+	r.mux.Handle("POST /api/v1/internal/documents/{slug}/patch", internalAuth(http.HandlerFunc(r.pages.DocumentAgent)))
+	r.mux.Handle("POST /api/v1/internal/documents/{slug}/checkpoint", internalAuth(http.HandlerFunc(r.pages.DocumentAgent)))
 	// Crew transport authentication is only the outer boundary: the handler
 	// also validates the per-run bearer and a live human artifact delegation.
 	r.mux.Handle("GET /api/v1/internal/artifacts/{slug}/threads", internalAuth(http.HandlerFunc(r.pages.ListArtifactThreadsAgent)))

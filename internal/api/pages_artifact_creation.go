@@ -48,7 +48,7 @@ func (h *PageHandler) checkArtifactCreationPublication(ctx context.Context, page
 	if err != nil || !time.Now().Before(deadline) || revoked.Valid {
 		return errors.New("creation authorization expired or revoked")
 	}
-	return h.checkBoardJobCreation(ctx, a, true)
+	return h.checkScopedArtifactCreation(ctx, a)
 }
 
 func (h *PageHandler) humanCreationAuthorizationTx(w http.ResponseWriter, r *http.Request) (*sql.Tx, *http.Request, *artifactRunAuthority, string, bool) {
@@ -304,7 +304,7 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 		artifactCommentError(w, 403, "creation_authorization_required", "artifact creation authorization expired or revoked")
 		return
 	}
-	if err := h.checkBoardJobCreation(ctx, a, true); err != nil {
+	if err := h.checkScopedArtifactCreation(ctx, a); err != nil {
 		replyError(w, 403, err.Error())
 		return
 	}
@@ -401,4 +401,12 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 		broadcastWorkspaceEvent(h.hub, a.WorkspaceID, "page.updated", map[string]any{"page_id": updatedBoard})
 	}
 	writeJSON(w, 201, map[string]any{"page_id": pageID, "slug": req.Slug, "revision": 1, "head_rev": 1, "url": "/pages/" + req.Slug})
+}
+
+// Both request families restrict creation; neither may borrow the other's scope.
+func (h *PageHandler) checkScopedArtifactCreation(ctx context.Context, a *artifactRunAuthority) error {
+	if err := h.checkDocumentRunPageScope(ctx, "", a); err != nil {
+		return err
+	}
+	return h.checkBoardJobCreation(ctx, a, true)
 }

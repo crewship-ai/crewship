@@ -36,6 +36,14 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"documents":             IntentInclude,
+	"document_comments":     IntentInclude,
+	"document_requests":     IntentInclude, // durable history; restore clears live dispatch authority
+	"document_updates":      IntentInclude,
+	"document_receipts":     IntentInclude,
+	"document_checkpoints":  IntentInclude,
+	"document_writer_fence": IntentExcludeRuntime, // installation-local SQL serialization singleton
+
 	"artifact_workspace_writes":             IntentExcludeRuntime, // per-installation rolling write-rate receipts are initialized anew on restore
 	"artifact_creation_authorizations":      IntentExcludeRuntime, // explicit live-run creation opt-in must not survive restore
 	"page_artifact_request_updates":         IntentInclude,        // immutable typed progress/reply history, never live authority
