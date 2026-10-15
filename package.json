@@ -18,6 +18,7 @@
     "test:coverage": "vitest run --coverage",
     "test:coverage:full": "vitest run --coverage --config vitest.full-coverage.config.ts",
     "test:watch": "vitest",
+    "test:page-types": "node scripts/check-page-content-types.mjs",
     "test:chat-worker": "node scripts/check-chat-table-worker.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",

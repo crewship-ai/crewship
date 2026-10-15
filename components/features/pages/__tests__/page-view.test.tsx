@@ -168,3 +168,19 @@ describe("PageView", () => {
     expect(container.querySelectorAll("[data-slot='skeleton']").length).toBe(3)
   })
 })
+
+
+describe("compiled content dispatch", () => {
+  beforeEach(() => cleanup())
+  it("does not render panels or initialize HTML for explicit unknown format", () => {
+    const page = toPageView({ ...WIRE, owner: "user/test", content_descriptor: { type_id: "future", schema_version: 1, supported: true } })
+    renderPage({ page, workspaceId: "workspace" })
+    expect(screen.getByText(/unsupported or conflicting content format/)).toBeInTheDocument()
+    expect(screen.queryByText("Jede to?")).not.toBeInTheDocument()
+    expect(page.artifactEligible).toBe(false)
+  })
+  it("preserves empty human Page attachment eligibility", () => {
+    const page = toPageView({ ...WIRE, owner: "user/test", panels: [], content_descriptor: { type_id: "panels", schema_version: 1, supported: true } })
+    expect(page.artifactEligible).toBe(true)
+  })
+})

@@ -530,7 +530,7 @@ function PageBody({
         )}
       </div>
 
-      {page.hasDocument && workspaceId ? <PageDocument key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} pageId={page.id === slug ? undefined : page.id} onDirtyChange={onArtifactDirtyChange} /> : page.hasBoard ? <p className="p-6 text-sm text-muted-foreground">This drawing is unavailable in this version.</p> : workspaceId && (page.hasArtifact || page.artifactEligible) ? <PageArtifactView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} pageId={page.id === slug ? undefined : page.id} onDirtyChange={onArtifactDirtyChange} /> : panels.length === 0 ? (
+      {page.contentSupported === false ? <p role="status" className="p-6 text-sm text-muted-foreground">This Page uses an unsupported or conflicting content format. Its content cannot be opened in this version.</p> : page.hasDocument && workspaceId ? <PageDocument key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} pageId={page.id === slug ? undefined : page.id} onDirtyChange={onArtifactDirtyChange} /> : page.hasBoard ? <p className="p-6 text-sm text-muted-foreground">This drawing is unavailable in this version.</p> : workspaceId && (page.hasArtifact || page.artifactEligible) ? <PageArtifactView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} pageId={page.id === slug ? undefined : page.id} onDirtyChange={onArtifactDirtyChange} /> : panels.length === 0 ? (
         <EmptyState
           icon={CONCEPT_ICON.pages}
           title="This page declares no panels"
