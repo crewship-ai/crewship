@@ -36,3 +36,13 @@ UTF-16/rune-index translation is implied.
 actual Go and TypeScript canonical deck/element hashes against the shared
 fixture. TypeScript hashing consumes admitted typed data and is not a substitute
 for Go validation or live Page authorization.
+
+
+Patch operations run in order on a private candidate. Every `if_hash` refers to
+that candidate after previous operations in the same request, rather than always
+to the initial snapshot. For two changes to one target, compute the second hash
+from the first result; the old hash is rejected atomically. Whole-revision CAS
+still checks the persisted starting revision, and structural slide operations
+also require the separate order version. Deleted IDs remain reserved for the
+Page in persistence; insertion cannot retarget a historical identity. Explicit
+restore may revive the original object from its retained revision.
