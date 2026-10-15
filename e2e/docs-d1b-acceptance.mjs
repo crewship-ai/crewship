@@ -50,6 +50,8 @@ service.stderr.on('data', data => { serviceLog += data })
 const serviceExit = new Promise(resolve => service.once('exit', (code, signal) => resolve({ code, signal })))
 let browser, failurePage
 const routeTasks = new Set(), routeFailures = [], routeReleases = []
+const diagnosticTasks = new Set()
+report.failedPatches = []
 const patchPattern = '**/api/v1/pages/d1b-acceptance/document/patch?*'
 async function interceptPatch(page, handler) {
   await page.route(patchPattern, route => {
@@ -85,6 +87,20 @@ try {
   browser = await chromium.launch({ headless: true })
   const owner = await browser.newContext({ baseURL, acceptDownloads: true })
   const colleague = await browser.newContext({ baseURL, acceptDownloads: true })
+  for (const [actor, context] of [['owner', owner], ['colleague', colleague]]) context.on('response', response => {
+    if (response.request().method() !== 'POST' || !new URL(response.url()).pathname.endsWith('/document/patch') || response.ok()) return
+    const task = (async () => {
+      const request = response.request()
+      let payload
+      try { payload = request.postDataJSON() } catch { payload = { malformedBody: true } }
+      // This payload contains only our throwaway document's Yjs update/CAS
+      // fields. Never capture request headers, cookies or browser storage.
+      const diagnostic = { actor, status: response.status(), payload, body: await response.text() }
+      report.failedPatches.push(diagnostic)
+      console.error(`FAILED DOCUMENT PATCH ${JSON.stringify(diagnostic)}`)
+    })().catch(error => { report.failedPatches.push({ actor, diagnosticError: error.message }) })
+    diagnosticTasks.add(task); task.finally(() => diagnosticTasks.delete(task))
+  })
   async function api(context, method, path, body, workspace) {
     const url = path + (workspace ? `${path.includes('?') ? '&' : '?'}workspace_id=${workspace}` : '')
     const response = await context.request.fetch(url, { method, data: body, headers: { Origin: baseURL, ...(workspace ? { 'X-Workspace-ID': workspace } : {}) } })
@@ -235,6 +251,7 @@ try {
   throw error
 } finally {
   await finishRoutes()
+  await Promise.all([...diagnosticTasks])
   await browser?.close()
   service.kill('SIGTERM')
   let shutdownTimer
