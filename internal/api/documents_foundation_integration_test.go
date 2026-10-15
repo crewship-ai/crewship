@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
@@ -383,7 +385,161 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 	public("/checkpoints", "DocumentCheckpoints", nil)
 	public("/checkpoints/checkpoint-one", "DocumentCheckpoint", nil)
 
-	// Bounded representative history measurement: six documents total, one
+	// Real Node computes/validates Yjs and sends semantic metadata across the
+	// private HTTP bridge; Go enforces selection bounds in its writer transaction.
+	// Fixture admission identities are synthetic, not a model-completion claim.
+	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'agent','artifact-agent','write',?,?)`, second, user, now.Format(time.RFC3339))
+	boundCall := func(page, operation, token string, body map[string]any, want int) map[string]any {
+		t.Helper()
+		result := call(page, operation, token, body, want)
+		t.Logf("selected-request actual HTTP page=%s operation=%s status=%d request=%s response=%s", page, operation, want, mustDocumentsJSON(t, body), mustDocumentsJSON(t, result))
+		return result
+	}
+	for scenarioIndex, scenario := range []string{"selected success", "fresh rebase", "revoked grant"} {
+		scenarioRun := fmt.Sprintf("bound-run-%d", scenarioIndex)
+		execOrFatal(t, h.db, `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) SELECT ?,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`, scenarioRun)
+		execOrFatal(t, h.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES(?,?,'artifact-crew','artifact-agent','run.started','system','fixture',?)`, scenarioRun+"-started", workspace, scenarioRun)
+		scenarioAgent := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, "artifact-crew"), workspace, "artifact-agent", scenarioRun)
+		if scenarioIndex == 0 {
+			execOrFatal(t, h.db, `INSERT INTO page_artifact_run_delegations(page_id,run_id,granted_by_user_id,expires_at,granted_at) SELECT ?,?,granted_by_user_id,expires_at,granted_at FROM page_artifact_run_delegations WHERE page_id=?`, second, scenarioRun, page)
+		}
+		slug := "bound-" + strings.ReplaceAll(scenario, " ", "-")
+		created := httptest.NewRecorder()
+		h.Create(created, pagesGrantRequest(t, "POST", "/api/v1/pages", workspace, user, "OWNER", string(mustDocumentsJSON(t, map[string]any{"slug": slug, "name": scenario, "panels": []any{}, "allow_empty": true}))))
+		if created.Code != 201 {
+			t.Fatalf("bound create: %d %s", created.Code, created.Body.String())
+		}
+		var createdPage struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(created.Body.Bytes(), &createdPage); err != nil {
+			t.Fatal(err)
+		}
+		p := createdPage.ID
+		execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'agent','artifact-agent','write',?,?)`, p, user, now.Format(time.RFC3339))
+		body := map[string]any{"type": "doc", "content": []any{map[string]any{"type": "paragraph", "attrs": map[string]any{"id": "bound-intro"}, "content": []any{map[string]any{"type": "text", "text": "Hello world"}}}, map[string]any{"type": "paragraph", "attrs": map[string]any{"id": "bound-other"}, "content": []any{map[string]any{"type": "text", "text": "Preserve other block"}}}}}
+		boundCall(p, "initialize", human, map[string]any{"id": "init-" + p, "schema": 2, "body": body}, 200)
+		baseline := read(p, human)
+		first := baseline["outline"].([]any)[0].(map[string]any)
+		admission := map[string]any{"page_id": p, "chat_id": "artifact-chat", "instruction": "Revise only selected text", "base_rev": baseline["rev"], "submission_id": "selected-" + p, "targets": []any{map[string]any{"id": "bound-intro", "hash": first["hash"], "from": 2, "to": 5, "quote": "llo"}}}
+		req := pagesGrantRequest(t, "POST", "/", workspace, user, "OWNER", string(mustDocumentsJSON(t, admission)))
+		req.SetPathValue("slug", slug)
+		req.Header.Set("Authorization", "Bearer "+human)
+		UserFromContext(req.Context()).SessionID = "docs-session"
+		queued := httptest.NewRecorder()
+		h.CreateDocumentRequest(queued, req)
+		if queued.Code != 202 {
+			t.Fatalf("actual canonical admission: %d %s", queued.Code, queued.Body.String())
+		}
+		var job DocumentRequestCreateResponse
+		if err := json.Unmarshal(queued.Body.Bytes(), &job); err != nil {
+			t.Fatal(err)
+		}
+		execOrFatal(t, h.db, `UPDATE document_requests SET status='running' WHERE id=?`, job.ID)
+		trusted, err := chataudience.CaptureTrusted(t.Context(), h.db, "artifact-chat", user, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = bindDocumentRequestRun(httptest.NewRequest("POST", "/", nil), h.db, job.ID, scenarioRun, trusted); err != nil {
+			t.Fatal(err)
+		}
+		current := read(p, scenarioAgent)
+		patch := map[string]any{"id": "bound-patch-" + p, "schema": 2, "epoch": current["epoch"], "target": "bound-intro", "text": "HeNEW world", "ifRev": current["rev"], "ifHash": first["hash"]}
+		assertNoMutation := func(wantRev any) {
+			t.Helper()
+			if got := read(p, human)["rev"]; got != wantRev {
+				t.Fatalf("rejected bound patch advanced rev: %v want %v", got, wantRev)
+			}
+			var receipts, checkpoints, results int
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM document_receipts WHERE page_id=?`, p).Scan(&receipts); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM document_checkpoints WHERE page_id=?`, p).Scan(&checkpoints); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM document_requests WHERE id=? AND (status='succeeded' OR result_revision IS NOT NULL OR checkpoint_id IS NOT NULL)`, job.ID).Scan(&results); err != nil {
+				t.Fatal(err)
+			}
+			// Initialization has its own receipt; only human edits may add another.
+			if receipts != 1+int(wantRev.(float64)) || checkpoints != 0 || results != 0 {
+				t.Fatalf("rejected request persisted receipt/checkpoint/result: %d/%d/%d", receipts, checkpoints, results)
+			}
+		}
+		switch scenario {
+		case "fresh rebase":
+			boundCall(p, "patch", human, map[string]any{"id": "intervening-" + p, "schema": 2, "epoch": current["epoch"], "target": "bound-intro", "text": "Hello HUMAN world", "ifRev": current["rev"], "ifHash": first["hash"]}, 200)
+			fresh := read(p, scenarioAgent)
+			freshBlock := fresh["outline"].([]any)[0].(map[string]any)
+			patch["epoch"] = fresh["epoch"]
+			patch["ifRev"] = fresh["rev"]
+			patch["ifHash"] = freshBlock["hash"]
+			boundCall(p, "patch", scenarioAgent, patch, 409)
+			assertNoMutation(fresh["rev"])
+		case "revoked grant":
+			execOrFatal(t, h.db, `DELETE FROM page_grants WHERE page_id=? AND subject_type='agent'`, p)
+			boundCall(p, "patch", scenarioAgent, patch, 403)
+			assertNoMutation(baseline["rev"])
+		case "selected success":
+			otherState := read(second, human)
+			otherBlock := otherState["outline"].([]any)[0].(map[string]any)
+			var beforeOtherReceipts int
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM document_receipts WHERE page_id=?`, second).Scan(&beforeOtherReceipts); err != nil {
+				t.Fatal(err)
+			}
+			boundCall(second, "read", scenarioAgent, map[string]any{}, 403)
+			boundCall(second, "patch", scenarioAgent, map[string]any{"id": "cross-page-forbidden", "schema": 2, "epoch": otherState["epoch"], "target": otherBlock["id"], "text": "Cross-page escape", "ifRev": otherState["rev"], "ifHash": otherBlock["hash"]}, 403)
+			var afterOtherReceipts int
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM document_receipts WHERE page_id=?`, second).Scan(&afterOtherReceipts); err != nil {
+				t.Fatal(err)
+			}
+			if read(second, human)["rev"] != otherState["rev"] || beforeOtherReceipts != afterOtherReceipts {
+				t.Fatal("cross-page rejection mutated other document")
+			}
+			patch["text"] = "CHANGED EVERYTHING"
+			boundCall(p, "patch", scenarioAgent, patch, 409)
+			assertNoMutation(baseline["rev"])
+			patch["target"] = "bound-other"
+			patch["ifHash"] = baseline["outline"].([]any)[1].(map[string]any)["hash"]
+			patch["text"] = "HeNEW world"
+			boundCall(p, "patch", scenarioAgent, patch, 409)
+			assertNoMutation(baseline["rev"])
+			patch["target"] = "bound-intro"
+			patch["ifHash"] = first["hash"]
+			ack := boundCall(p, "patch", scenarioAgent, patch, 200)
+			if ack["rev"] != baseline["rev"].(float64)+1 {
+				t.Fatal("bound patch did not advance once")
+			}
+			if boundCall(p, "patch", scenarioAgent, patch, 200)["duplicate"] != true {
+				t.Fatal("bound patch exact retry not durable")
+			}
+			fresh := read(p, scenarioAgent)
+			checkpoint := map[string]any{"id": job.ID + "-checkpoint", "schema": 2, "epoch": fresh["epoch"], "ifRev": fresh["rev"]}
+			boundCall(p, "checkpoint", scenarioAgent, checkpoint, 200)
+			boundCall(p, "checkpoint", scenarioAgent, checkpoint, 200)
+			freshBlock := fresh["outline"].([]any)[0].(map[string]any)
+			patch["id"] = "second-forbidden-" + p
+			patch["ifRev"] = fresh["rev"]
+			patch["ifHash"] = freshBlock["hash"]
+			patch["epoch"] = fresh["epoch"]
+			boundCall(p, "patch", scenarioAgent, patch, 409)
+			if got := read(p, human)["rev"]; got != fresh["rev"] {
+				t.Fatal("second bound patch changed saved revision")
+			}
+			execOrFatal(t, h.db, `UPDATE document_requests SET run_id=NULL WHERE id=?`, job.ID)
+			execOrFatal(t, h.db, `DELETE FROM document_requests WHERE id=?`, job.ID)
+			var principals int
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM artifact_run_principals WHERE run_id=?`, scenarioRun).Scan(&principals); err != nil || principals != 1 {
+				t.Fatalf("deletion fixture must retain principal: %d %v", principals, err)
+			}
+			boundCall(second, "read", scenarioAgent, map[string]any{}, 403)
+			boundCall(second, "patch", scenarioAgent, map[string]any{"id": "deleted-request-cross-page", "schema": 2, "epoch": otherState["epoch"], "target": otherBlock["id"], "text": "Deleted request escape", "ifRev": otherState["rev"], "ifHash": otherBlock["hash"]}, 403)
+			if read(second, human)["rev"] != otherState["rev"] {
+				t.Fatal("deleted request escaped to other document")
+			}
+		}
+	}
+
+	// Bounded representative history measurement: nine documents total, one
 	// 200-paragraph document with forty small edits crossing compaction at 32.
 	readRSS := func() int {
 		b, e := os.ReadFile(fmt.Sprintf("/proc/%d/status", nodeChild.Process.Pid))
@@ -466,7 +622,7 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 			}
 		}
 	}
-	report := map[string]any{"protocol": 1, "schema": 2, "documents": 6, "representativeHistory": representativeReport, "commitMilliseconds": float64(commitDuration.Microseconds()) / 1000, "writerContentionMilliseconds": float64(contentionDuration.Microseconds()) / 1000, "simulatedWriterHoldMilliseconds": 50, "snapshotBytes": snapshotBytes, "replayUpdates": updates, "replayBytes": updateBytes, "nodeRSSKiB": nodeRSSKB, "nodeCrashRestart": true, "goCrashRestart": true, "durableReplay": true}
+	report := map[string]any{"protocol": 1, "schema": 2, "documents": 9, "selectedRequestRealHTTP": map[string]any{"scenarios": []string{"selected success", "fresh rebase", "revoked grant"}, "rangeAndTargetRejection": 409, "crossPageGenericDelegationRejection": 403, "deletedRequestAfterRunResetRejection": 403, "freshRebaseRejection": 409, "revokedGrantRejection": 403, "onePatchExactCheckpoint": true, "exactPatchRetry": true, "noRejectedMutationReceiptsOrResults": true, "modelRun": false}, "representativeHistory": representativeReport, "commitMilliseconds": float64(commitDuration.Microseconds()) / 1000, "writerContentionMilliseconds": float64(contentionDuration.Microseconds()) / 1000, "simulatedWriterHoldMilliseconds": 50, "snapshotBytes": snapshotBytes, "replayUpdates": updates, "replayBytes": updateBytes, "nodeRSSKiB": nodeRSSKB, "nodeCrashRestart": true, "goCrashRestart": true, "durableReplay": true}
 	reportPath := os.Getenv("CREWSHIP_DOCS_FOUNDATION_OUTPUT")
 	if reportPath == "" {
 		reportPath = filepath.Join(t.TempDir(), "acceptance.json")
