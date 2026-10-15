@@ -70,7 +70,7 @@ access first. A role change cannot silently remove or bypass the restriction.
 | --- | --- | --- |
 | New GUEST workspace role | Changed: restricted access mode, Guest in UI, account-wide | The current global route fence has no mixed-mode bypass. Keeping one account ceiling avoids granting trusted routes through another workspace while per-resource integration is incomplete. Separate workspace-scoped guest accounts remain a future migration. |
 | New resource_grants registry | Changed: extend versioned access_grants | Reuse the shipped membership revision, resource foreign keys and execution revocation fences rather than introduce two authorities. Pages moves last as originally planned. |
-| Per-object sharing and meaningful type levels | Kept as target; agent operations, routine Run, definition View and project read/contribute delivered | Full View/Edit and crew/credential subjects need separate enforcement and UI work. Routine/project Share dialogs reuse the versioned member policy. |
+| Per-object sharing and meaningful type levels | Kept as target; agent operations, routine Run, definition View, explicit regular Results and project read/contribute supported | Full ordered View/Run/Edit, private-queue result audiences and crew/credential subjects need separate enforcement and UI work. Routine/project Share dialogs reuse the versioned member policy. |
 | Pages model migration | Deferred, as in original phases | Preserve current Pages ACL, issuer checks and data during the first routine/project slice. |
 
 Guest invitation acceptance, restricted provisioning and direct member policy
@@ -165,7 +165,7 @@ or run history. Foreign and revoked details return 404. The shared issue board,
 search, statistics and mutation routes remain closed to Guests. Collection
 `X-Total-Count` counts the filtered total before pagination; the next-offset header supports pagination.
 
-Crews, credentials, routine Edit and shared-output audiences, full Issues Manage, explicit
+Crews, credentials, direct routine publication, private restricted-output audiences, full Issues Manage, explicit
 Page-action selection and a Pages grant migration remain separate work. This
 contract does not claim complete resource-access PRD or release-1.0 acceptance.
 
@@ -296,11 +296,12 @@ Run keeps the existing root-routine plus every agent/provider dependency checks.
 | --- | --- | --- |
 | View without Run | Kept for definition inspection | A reviewer can understand a routine without execution authority or a runtime. |
 | Run automatically implies definition View | Changed for existing operations | Existing Run shares deliberately exposed only a minimal invocation contract. Automatically revealing prompts/defaults would expand their disclosure without administrator review; View is explicit. |
+| Regular routine run history and outputs | Kept through deliberate Results with View | Existing definition-only and invocation-only shares are not widened. The new share exposes past/future regular results while retaining every inherited private conversation audience. |
 | View includes other participants’ private outputs | Deferred to an explicit result-audience contract | A routine share must not grant access to another client’s private execution/chat. Existing private run receipts keep their current actor and execution fences. |
 | Edit and version publication | Draft editing delivered; direct Guest publication deferred | The collaborative draft shares current View/Edit authority. Trusted publication retains testing, exact revision review, author provenance and unattended execution protections. |
 
 `GET /workspaces/{workspaceId}/restricted-routine-library` returns only live
-routine View/Run shares, with `can_view`, current graph `can_run`, and runtime
+routine View/Run shares, with `can_view`, `can_results` eligibility, current graph `can_run`, and runtime
 installation metadata. The detail route adds definition/hash/version only with
 a live View share. Both use the authenticated Guest and selected workspace;
 the envelope includes no issuer/member identity or run records. Stored definition literals are deliberately shared as authored; vault credentials are never resolved. Revoked,
