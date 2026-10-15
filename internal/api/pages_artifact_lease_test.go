@@ -126,7 +126,11 @@ func TestArtifactLeaseRejectsCorruptCanonicalMetadata(t *testing.T) {
 
 func TestArtifactLeaseGloballyRestrictedMembershipCannotBypassHostCeiling(t *testing.T) {
 	h, _, _, ws, user, _ := artifactFixture(t)
+	// Guest accounts cannot administer any workspace. Page ownership still
+	// permits this MEMBER to publish/read before the other-workspace ceiling.
+	execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE user_id=?`, user)
 	artifactExpect(t, artifactSave(t, h, ws, user, "private", "lease", 0), 201)
+	artifactExpect(t, artifactLeaseCall(t, h, ws, user, "?revision=1"), 200)
 	execOrFatal(t, h.db, `INSERT INTO workspaces(id,name,slug) VALUES('lease-restricted-ws','Restricted','lease-restricted-ws')`)
 	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('lease-restricted-member','lease-restricted-ws',?,'MEMBER','restricted')`, user)
 	artifactExpect(t, artifactLeaseCall(t, h, ws, user, "?revision=1"), 403)

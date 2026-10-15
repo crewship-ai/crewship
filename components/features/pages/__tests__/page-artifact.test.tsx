@@ -133,11 +133,11 @@ describe("human page artifact", () => {
     mount()
     await screen.findByRole("button", { name: "Compare revisions 1 and 2" })
     if (entry === "thread result") {
-      fireEvent.click(screen.getByRole("button", { name: "Comments", exact: true }))
+      fireEvent.click(screen.getByRole("button", { name: "Comments" }))
       await screen.findByLabelText("Thread agent requests")
     }
     const result = () => within(entry === "thread result" ? screen.getByLabelText("Thread agent requests") : screen.getByRole("region", { name: "Agent requests" }))
-    fireEvent.click(screen.getByRole("button", { name: "Compare", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }))
     expect(await screen.findByLabelText("Earlier revision")).toHaveValue("4")
     expect(screen.getByLabelText("Later revision")).toHaveValue("5")
     fireEvent.click(result().getByRole("button", { name: "Compare revisions 1 and 2" }))
@@ -163,7 +163,7 @@ describe("human page artifact", () => {
     requests = [request, { ...request, id: "running", status: "running", result_kind: "revision" }, { ...request, id: "missing", result_kind: "revision", result_revision: undefined }]
     mount()
     await screen.findByText("Reply received")
-    fireEvent.click(screen.getByRole("button", { name: "Comments", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Comments" }))
     await screen.findByLabelText("Thread agent requests")
     expect(screen.queryByRole("button", { name: /Compare revisions/ })).toBeNull()
     expect(calls).toHaveLength(0)

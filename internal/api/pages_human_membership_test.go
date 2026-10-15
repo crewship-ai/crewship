@@ -11,6 +11,9 @@ func revokeContentCeiling(t *testing.T, h *PageHandler, workspace, user, kind st
 	t.Helper()
 	switch kind {
 	case "restricted":
+		// This helper is also used by Board writes. Make the transition legal
+		// under the account-wide Guest/admin invariant before restricting it.
+		execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE user_id=?`, user)
 		execOrFatal(t, h.db, `INSERT INTO workspaces(id,name,slug) VALUES('ceiling-other','Other','ceiling-other')`)
 		execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('ceiling-restricted','ceiling-other',?,'MEMBER','restricted')`, user)
 	case "workspace-deleted":
@@ -28,6 +31,11 @@ func TestArtifactWritesRecheckHumanCeilingAfterBodyRead(t *testing.T) {
 		for _, change := range []string{"restricted", "workspace-deleted", "member-removed", "suspended"} {
 			t.Run(operation+"/"+change, func(t *testing.T) {
 				h, _, _, workspace, user, page := artifactFixture(t)
+				if change == "restricted" {
+					// Guest/admin roles are mutually exclusive. Publish first as a
+					// MEMBER Page owner, proving demotion alone permits this write.
+					execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE user_id=?`, user)
+				}
 				artifactExpect(t, artifactSave(t, h, workspace, user, "original", "first", 0), 201)
 				body := `{"html":"must not publish","base_rev":1,"mutation_id":"denied"}`
 				if operation == "comment" {
