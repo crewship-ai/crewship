@@ -328,8 +328,15 @@ WHERE id = ?`,
 			}
 		}
 
+		notify, err := s.finalizeDraftPublication(ctx, tx, in, existingID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("pipeline: finalize publication review: %w", err)
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, nil, fmt.Errorf("pipeline: commit: %w", err)
+		}
+		if notify != nil {
+			notify()
 		}
 		p, err := s.GetByID(ctx, existingID)
 		return p, sched, err
@@ -408,8 +415,15 @@ INSERT INTO pipelines (
 		return nil, nil, fmt.Errorf("pipeline: save trigger (insert): %w", err)
 	}
 
+	notify, err := s.finalizeDraftPublication(ctx, tx, in, id)
+	if err != nil {
+		return nil, nil, fmt.Errorf("pipeline: finalize publication review: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, fmt.Errorf("pipeline: commit (insert): %w", err)
+	}
+	if notify != nil {
+		notify()
 	}
 	_ = existingCreatedAt // silence unused (kept for future audit log surface)
 

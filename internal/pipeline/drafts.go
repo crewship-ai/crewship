@@ -45,6 +45,9 @@ type Draft struct {
 // DraftPublication is internal to the validated publication path. The document
 // must be exactly the one the handler validated, not a newer edit of the draft.
 type DraftPublication struct {
+	// Finalize is a server-owned receipt/audit hook. It runs after all save gates
+	// in the publication transaction and returns a post-commit notification.
+	Finalize    func(context.Context, *sql.Tx, string, int) (func(), error) `json:"-"`
 	ApproveRisk bool
 	ID          string
 	Revision    int
@@ -287,4 +290,15 @@ WHERE wake_pipeline_id=? AND enabled=1 AND deleted_at IS NULL ORDER BY id`, pipe
 		return fmt.Errorf("schedule preset gate: iterate schedules: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) finalizeDraftPublication(ctx context.Context, tx *sql.Tx, in SaveInput, id string) (func(), error) {
+	if in.Publication == nil || in.Publication.Finalize == nil {
+		return nil, nil
+	}
+	var version int
+	if err := tx.QueryRowContext(ctx, `SELECT head_version FROM pipelines WHERE id=? AND workspace_id=?`, id, in.WorkspaceID).Scan(&version); err != nil {
+		return nil, err
+	}
+	return in.Publication.Finalize(ctx, tx, id, version)
 }

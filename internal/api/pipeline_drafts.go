@@ -2,6 +2,8 @@ package api
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -186,5 +188,16 @@ func (h *PipelineHandler) PublishDraft(w http.ResponseWriter, r *http.Request) {
 	request := r.Clone(r.Context())
 	request.Body = io.NopCloser(bytes.NewReader(encoded))
 	request.ContentLength = int64(len(encoded))
-	h.saveWithPublication(w, request, &pipeline.DraftPublication{ID: d.ID, Revision: d.Revision, Document: string(d.Document), ApproveRisk: body.ApproveRisk})
+	publication := &pipeline.DraftPublication{ID: d.ID, Revision: d.Revision, Document: string(d.Document), ApproveRisk: body.ApproveRisk}
+	if h.finalizeDraftReview != nil {
+		user := UserFromContext(r.Context())
+		if user == nil {
+			replyError(w, 401, "auth required")
+			return
+		}
+		publication.Finalize = func(ctx context.Context, tx *sql.Tx, id string, version int) (func(), error) {
+			return h.finalizeDraftReview(ctx, tx, d, user.ID, id, version)
+		}
+	}
+	h.saveWithPublication(w, request, publication)
 }

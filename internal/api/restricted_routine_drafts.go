@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -75,24 +76,10 @@ func (r *Router) restrictedRoutineDraft(w http.ResponseWriter, req *http.Request
 		return
 	}
 	defer tx.Rollback()
-	if _, err = guestRoutineMember(req.Context(), tx, user.ID, workspace); err != nil {
-		guestRoutineDraftError(w, err)
-		return
-	}
-	var routineID, slug string
-	var publishedRevision int
-	id := req.PathValue("routineId")
-	err = tx.QueryRowContext(req.Context(), `SELECT id,slug,publication_revision FROM pipelines WHERE workspace_id=? AND (id=? OR slug=?) AND deleted_at IS NULL`, workspace, id, id).Scan(&routineID, &slug, &publishedRevision)
+	routineID, slug, publishedRevision, err := r.guestRoutineDraftResourceIn(req.Context(), tx, user.ID, workspace, req.PathValue("routineId"))
 	if err != nil {
 		guestRoutineDraftError(w, err)
 		return
-	}
-	store := access.Store{DB: r.db}
-	for _, operation := range []string{"view", "edit"} {
-		if err = store.CheckIn(req.Context(), tx, user.ID, workspace, access.Right{Kind: "routine", ID: routineID, Operation: operation}); err != nil {
-			guestRoutineDraftError(w, err)
-			return
-		}
 	}
 	drafts := pipeline.NewStore(r.db)
 	current, err := drafts.GetDraftIn(req.Context(), tx, workspace, slug)
@@ -158,4 +145,23 @@ func (r *Router) restrictedRoutineDraft(w http.ResponseWriter, req *http.Request
 	}
 	body.DraftID, body.Revision = saved.ID, saved.Revision
 	writeJSON(w, 200, guestRoutineDraft{guestRoutineDraftContent: body, CanEdit: true})
+}
+
+// Shared draft reads and mutations use the same live local View+Edit ceiling.
+// Resolving the resource does not claim that an old draft or review is current.
+func (r *Router) guestRoutineDraftResourceIn(ctx context.Context, tx *sql.Tx, user, workspace, reference string) (id, slug string, publishedRevision int, err error) {
+	if _, err = guestRoutineMember(ctx, tx, user, workspace); err != nil {
+		return
+	}
+	err = tx.QueryRowContext(ctx, `SELECT id,slug,publication_revision FROM pipelines WHERE workspace_id=? AND (id=? OR slug=?) AND deleted_at IS NULL`, workspace, reference, reference).Scan(&id, &slug, &publishedRevision)
+	if err != nil {
+		return
+	}
+	store := access.Store{DB: r.db}
+	for _, operation := range []string{"view", "edit"} {
+		if err = store.CheckIn(ctx, tx, user, workspace, access.Right{Kind: "routine", ID: id, Operation: operation}); err != nil {
+			return
+		}
+	}
+	return
 }

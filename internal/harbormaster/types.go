@@ -25,6 +25,8 @@ const (
 	KindDestructiveOp     Kind = "destructive_op"
 	KindTargetEnvironment Kind = "target_environment"
 	KindCustom            Kind = "custom"
+	// Routine draft reviews are fulfilled only by tested exact-draft publication.
+	KindRoutineDraftReview Kind = "routine_draft_review"
 	// KindEphemeralHire is a guided-autonomy ephemeral hire waiting for an
 	// operator decision (issue #1209). Unlike the other kinds it is NOT
 	// enqueued by Gate() — the Hire endpoint writes it directly so hire

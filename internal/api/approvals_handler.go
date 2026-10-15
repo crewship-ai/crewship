@@ -191,6 +191,31 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var draftReviewNotify func()
+	// A generic decision has no tested recipe or version to publish. Roll back
+	// its CAS and direct the reviewer to the normal exact-draft publication flow.
+	if row != nil && row.Kind == harbormaster.KindRoutineDraftReview && status == harbormaster.StatusApproved {
+		replyError(w, http.StatusConflict, "Review and test the exact routine draft before publishing it")
+		return
+	}
+
+	if row != nil && row.Kind == harbormaster.KindRoutineDraftReview {
+		allowed, authErr := routineReviewAuthorityIn(r.Context(), tx, workspaceID, user.ID, true)
+		if authErr != nil {
+			replyError(w, http.StatusInternalServerError, "decide failed")
+			return
+		}
+		if !allowed {
+			replyError(w, http.StatusForbidden, "current trusted administrator authority required")
+			return
+		}
+		draftReviewNotify, err = appendProjectIssueAudit(r.Context(), tx, h.journal, journal.Entry{WorkspaceID: workspaceID, Type: journal.EntryApprovalDenied, ActorType: journal.ActorUser, ActorID: user.ID, Summary: "Routine draft publication review declined", Payload: map[string]any{"approval_id": id, "kind": harbormaster.KindRoutineDraftReview}})
+		if err != nil {
+			replyError(w, http.StatusInternalServerError, "decide failed")
+			return
+		}
+	}
+
 	// Ephemeral-hire rows carry an agent-side transition (issue #1209):
 	// approved releases the PENDING_REVIEW gate, denied ghosts the staged
 	// agent. It rides this transaction, so the decision and the agent
@@ -238,7 +263,13 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 
 	// Post-commit tail: journal, reward history, audit and broadcast
 	// describe durable state only.
-	harbormaster.AfterDecide(r.Context(), h.db, h.journal, row, status, user.ID, body.Comment)
+	if row != nil && row.Kind == harbormaster.KindRoutineDraftReview {
+		if draftReviewNotify != nil {
+			draftReviewNotify()
+		}
+	} else {
+		harbormaster.AfterDecide(r.Context(), h.db, h.journal, row, status, user.ID, body.Comment)
+	}
 	if effect != nil {
 		effect.emit(r.Context(), h.db, h.journal, h.hub, workspaceID, user.ID)
 	}
@@ -296,6 +327,17 @@ func (h *ApprovalsHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusBadRequest, "unexpected data after JSON body")
 			return
 		}
+	}
+
+	var kind string
+	lookupErr := h.db.QueryRowContext(r.Context(), `SELECT kind FROM approvals_queue WHERE workspace_id=? AND id=?`, workspaceID, id).Scan(&kind)
+	if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+		replyError(w, http.StatusInternalServerError, "cancel failed")
+		return
+	}
+	if kind == string(harbormaster.KindRoutineDraftReview) {
+		h.cancelRoutineDraftReview(w, r, workspaceID, id, user.ID, body.Reason)
+		return
 	}
 
 	err := harbormaster.Cancel(r.Context(), h.db, nil, workspaceID, id, body.Reason)

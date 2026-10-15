@@ -30,6 +30,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
 	pipes.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	pipes.storagePath = r.storagePath
+	pipes.finalizeDraftReview = r.finalizeRoutineDraftReviewTx
 	// The routine detail's `files` member reads the author crew's shared
 	// volume over the same crewshipd socket the Files panel proxies to.
 	crewSocket := r.socketPath
@@ -67,6 +68,12 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineDraft))))
 	// openapi: responses 200,400,401,403,404,409,500
 	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft", roleInline, r.restrictedRoutineDraft)
+	// openapi: responses 202,400,401,403,404,409,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/reviews", roleInline, r.restrictedRoutineDraftReview)
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/reviews", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineDraftReview))))
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/reviews/{reviewId}", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineDraftReview))))
 	// 503 carries code restricted_runtime_unavailable when no private runtime is installed (#2877).
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routines", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineCatalog))))

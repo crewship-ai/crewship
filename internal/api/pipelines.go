@@ -68,7 +68,8 @@ type PipelineHandler struct {
 	// see PIPELINES.md §17 threat model). When unset, save falls back
 	// to the timestamp-based gate. Production wiring sets this to the
 	// process internal token at boot.
-	saveTokenSecret []byte
+	saveTokenSecret     []byte
+	finalizeDraftReview func(context.Context, *sql.Tx, *pipeline.Draft, string, string, int) (func(), error)
 
 	// lifecycleCtx is the context background webhook-dispatched runs
 	// derive from — the server's run context in production (cancelled

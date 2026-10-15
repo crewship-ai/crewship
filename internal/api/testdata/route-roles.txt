@@ -386,6 +386,7 @@ POST /api/v1/workspaces/{workspaceId}/projects/{projectId}/files roleCreate
 POST /api/v1/workspaces/{workspaceId}/restricted-issues roleInline
 POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments roleInline
 POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones roleInline
+POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/reviews roleInline
 POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
