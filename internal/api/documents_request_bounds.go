@@ -37,8 +37,12 @@ func (h *PageHandler) documentRequestGuard(rctx context.Context, page, operation
 			return errDocumentAccess
 		}
 		if request == "" {
-			return nil
-		} // Generic explicitly delegated agent runs retain their separate contract.
+			var bound int
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM document_requests WHERE run_id=?) OR EXISTS(SELECT 1 FROM page_artifact_run_delegations WHERE run_id=? AND document_request_id IS NOT NULL)`, a.RunID, a.RunID).Scan(&bound); err != nil || bound != 0 {
+				return errDocumentAccess
+			}
+			return nil // Only genuinely unbound generic runs retain their separate contract.
+		}
 		var base int64
 		var raw, status, run string
 		if err := tx.QueryRowContext(ctx, `SELECT base_rev,targets_json,status,COALESCE(run_id,'') FROM document_requests WHERE id=? AND page_id=?`, request, page).Scan(&base, &raw, &status, &run); err != nil || status != "running" || run != a.RunID {

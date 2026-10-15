@@ -168,7 +168,7 @@ func TestDocumentSelectedRequestWorkerCertifiesOnlyBoundDurableResult(t *testing
 			h, workspace, user, page := documentRequestFixture(t)
 			id := createDocumentRequestTest(t, h, workspace, user, documentRequestBody, 202)
 			h.artifactDispatch = func(_ context.Context, _, _, prompt string, opts ws.ChatMessageOption) error {
-				if !strings.Contains(prompt, `"quote":"llo"`) || !strings.Contains(prompt, `"text":"Hello world"`) {
+				if !strings.Contains(prompt, `"page_id":"`+page+`"`) || !strings.Contains(prompt, `"base_rev":0`) || !strings.Contains(prompt, `"targets":[`) || !strings.Contains(prompt, `"quote":"llo"`) || !strings.Contains(prompt, `"text":"Hello world"`) {
 					t.Fatal("trusted prompt lost immutable selection")
 				}
 				if err := bindDocumentRequestRun(httptest.NewRequest("POST", "/", nil), h.db, id, "artifact-run", opts.HumanAuthority); err != nil {
@@ -211,5 +211,61 @@ func TestDocumentSelectedRequestWorkerCertifiesOnlyBoundDurableResult(t *testing
 				t.Fatalf("durable result missing %s %s %d", status, checkpoint, revision)
 			}
 		})
+	}
+}
+
+func TestDocumentSelectedRunCannotUseOtherPageGenericDelegation(t *testing.T) {
+	h, workspace, user, page := documentRequestFixture(t)
+	execOrFatal(t, h.db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) SELECT 'other-doc',workspace_id,'other-doc','Other',owner_user_id,spec_json FROM pages WHERE id=?`, page)
+	execOrFatal(t, h.db, `INSERT INTO documents(workspace_id,page_id,schema_version,head_rev,snapshot,projection) VALUES(?,'other-doc',2,0,X'01',CAST('[{"id":"intro","hash":"h1"},{"id":"other","hash":"h2"}]' AS BLOB))`, workspace)
+	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) SELECT 'other-doc',subject_type,subject_id,level,granted_by_user_id,granted_at FROM page_grants WHERE page_id=?`, page)
+	execOrFatal(t, h.db, `INSERT INTO page_artifact_run_delegations(page_id,run_id,granted_by_user_id,expires_at,granted_at) SELECT 'other-doc',run_id,granted_by_user_id,expires_at,granted_at FROM page_artifact_run_delegations WHERE page_id=?`, page)
+	a := &artifactRunAuthority{WorkspaceID: workspace, AgentID: "artifact-agent", CrewID: "artifact-crew", RunID: "artifact-run", HumanUserID: user, ChatID: "artifact-chat", MessageID: "artifact-message"}
+	if err := h.checkArtifactRun(t.Context(), "other-doc", a); err != nil {
+		t.Fatalf("other Page must have live generic grant: %v", err)
+	}
+	if err := h.checkDocumentRequestAuthority(t.Context(), "other-doc", a); err != nil {
+		t.Fatalf("unbound generic grant unexpectedly denied: %v", err)
+	}
+	id := createDocumentRequestTest(t, h, workspace, user, documentRequestBody, 202)
+	execOrFatal(t, h.db, `UPDATE document_requests SET status='running' WHERE id=?`, id)
+	receipt, err := chataudience.CaptureTrusted(t.Context(), h.db, "artifact-chat", user, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = bindDocumentRequestRun(httptest.NewRequest("POST", "/", nil), h.db, id, "artifact-run", receipt); err != nil {
+		t.Fatal(err)
+	}
+	for _, reset := range []bool{false, true} {
+		if reset {
+			execOrFatal(t, h.db, `UPDATE document_requests SET run_id=NULL,status='failed',receipt_json='{}' WHERE id=?`, id)
+		}
+		if err = h.checkArtifactRun(t.Context(), "other-doc", a); err != nil {
+			t.Fatalf("generic authority fixture changed: %v", err)
+		}
+		if err = h.checkDocumentRequestAuthority(t.Context(), "other-doc", a); err == nil {
+			t.Fatal("bound run escaped to another Page")
+		}
+		r := pagesGrantRequest(t, "POST", "/", workspace, user, "OWNER", "")
+		r = r.WithContext(context.WithValue(r.Context(), artifactRunKey{}, a))
+		key := documents.Key{WorkspaceID: workspace, PageID: "other-doc"}
+		store := documents.New(h.db, documents.Options{})
+		authority := &documentAuthority{pages: h}
+		r.SetPathValue("operation", "state")
+		if _, err = store.Read(r.Context(), key, authority.authorize(r, key, false, false)); err == nil {
+			t.Fatal("cross-Page read succeeded")
+		}
+		r.SetPathValue("operation", "commit")
+		if _, err = store.Acquire(r.Context(), key, "escape-owner", authority.authorize(r, key, true, false)); err == nil {
+			t.Fatal("cross-Page mutation authority succeeded")
+		}
+		var rev int64
+		var receipts, successes int
+		_ = h.db.QueryRow(`SELECT head_rev FROM documents WHERE page_id='other-doc'`).Scan(&rev)
+		_ = h.db.QueryRow(`SELECT count(*) FROM document_receipts WHERE page_id='other-doc'`).Scan(&receipts)
+		_ = h.db.QueryRow(`SELECT count(*) FROM document_requests WHERE status='succeeded'`).Scan(&successes)
+		if rev != 0 || receipts != 0 || successes != 0 {
+			t.Fatalf("scope rejection mutated history %d %d %d", rev, receipts, successes)
+		}
 	}
 }
