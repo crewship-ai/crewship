@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Simultaneous crew builds keep shared devcontainer feature files available (#3155).** Cold downloads of the same feature now coordinate across downloader instances instead of replacing files another build is staging. Feature image tags describe the staged build snapshot.
+
 - Chat Artifacts includes supported files in the canonical per-run output folder while retaining internal, hidden-directory and attachment filters.
 - **Mobile table selections return to Chat without covering the draft.** Asking about selected rows closes the artifact overlay and preserves existing draft text. Switching between Chat, Work and Artifacts keeps previews within the selected panel and retains their tabs.
 
