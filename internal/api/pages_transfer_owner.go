@@ -15,7 +15,7 @@ package api
 // whole erasure refuses rather than proceeding halfway when a page cannot be
 // resolved.
 //
-// Artifacts and Boards always refuse until an administrator explicitly transfers
+// Docs, Artifacts and Boards always refuse until an administrator explicitly transfers
 // them through WorkspaceHandler.TransferPageOwnership. The automatic rule below
 // applies only to regular panel Pages.
 //
@@ -92,7 +92,7 @@ type ErrPagesNeedManualTransfer struct {
 
 func (e *ErrPagesNeedManualTransfer) Error() string {
 	return fmt.Sprintf(
-		"cannot erase this user: page(s) %s require ownership resolution — regular Pages require a panel-owning or member crew; Artifacts and Boards require an explicit human successor selection. %s",
+		"cannot erase this user: page(s) %s require ownership resolution — regular Pages require a panel-owning or member crew; Docs, Artifacts and Boards require an explicit human successor selection. %s",
 		strings.Join(e.Pages, ", "), pageOwnershipHelp)
 }
 
@@ -162,7 +162,7 @@ func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID 
 	}
 	var pages []pageRow
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, slug, name, EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id) OR EXISTS(SELECT 1 FROM page_boards WHERE page_id=pages.id) FROM pages WHERE workspace_id = ? AND owner_user_id = ?`,
+		`SELECT id, slug, name, EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id) OR EXISTS(SELECT 1 FROM page_boards WHERE page_id=pages.id) OR EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id) FROM pages WHERE workspace_id = ? AND owner_user_id = ?`,
 		wsID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("select user-owned pages: %w", err)

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Removing a Doc owner now explains the required human handoff (#3186).** Owners who belonged to a crew previously received a server error when leaving the workspace. Docs now follow the explicit human-successor flow while preserving content and membership until ownership is resolved.
+
 - Opt-in Docs in Pages with collaborative text, range comments, checkpoints, Markdown export and delegated semantic agent work (D1b; deployment qualification remains separate).
 
 - **Docs have an opt-in persistence foundation (#3161).** A private Go authority and separate Node engine store bounded binary updates, audit receipts and pinned checkpoints, fence stale writers across restart/restore, and include document bytes in workspace and instance backups. The foundation is disabled by default and adds no public editor or document API.
