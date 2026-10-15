@@ -7,11 +7,11 @@ import continuation from "@/internal/api/testdata/chat-entity-refs/continuation.
 import empty from "@/internal/api/testdata/chat-entity-refs/empty.json"
 import { chatEntityKeys, useChatEntityRefs } from "../use-chat-entity-refs"
 
-const { fetch, events } = vi.hoisted(() => ({ fetch: vi.fn(), events: new Map<string, (e: { payload: Record<string, unknown> }) => void>() }))
+const { fetch, events } = vi.hoisted(() => ({ fetch: vi.fn(), events: new Map<string, (e: { channel?: string; payload: Record<string, unknown> }) => void>() }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetch }))
 vi.mock("@/hooks/use-realtime", () => ({
   useRealtimeChannelSafe: vi.fn(), useRealtimeStatusSafe: () => "connected",
-  useRealtimeEventSafe: (type: string, callback: (e: { payload: Record<string, unknown> }) => void) => { events.set(type, callback) },
+  useRealtimeEventSafe: (type: string, callback: (e: { channel?: string; payload: Record<string, unknown> }) => void) => { events.set(type, callback) },
 }))
 const props = { workspaceId: "test-workspace-id", chatId: "chat-1", userId: "viewer", enabled: true }
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status })
@@ -31,18 +31,19 @@ describe("authorized chat entity snapshots", () => {
     expect(fetch.mock.calls[1][0]).toContain("cursor=%3Copaque+cursor%3E")
     expect(result.current.live).toBe(true)
   })
-  it("immediately hides old data during reset and removes protected detail cache", async () => {
+  it("keeps the verified snapshot and detail cache mounted during recheck", async () => {
     fetch.mockResolvedValueOnce(response({ ...page, has_more: false, snapshot_complete: true }))
     const { result, client } = setup()
     await waitFor(() => expect(result.current.refs).toHaveLength(2))
+    client.setQueryDefaults(chatEntityKeys.detail(props.workspaceId, props.chatId, props.userId), { gcTime: Infinity })
     client.setQueryData([...chatEntityKeys.detail(props.workspaceId, props.chatId, props.userId), "entity-1"], { title: "protected" })
     let complete!: (r: Response) => void
     fetch.mockImplementationOnce(() => new Promise<Response>((resolve) => { complete = resolve }))
     act(() => result.current.reconcile())
     await waitFor(() => expect(result.current.state).toBe("rechecking"))
-    expect(result.current.refs).toEqual([])
-    expect(client.getQueryData(chatEntityKeys.refs(props.workspaceId, props.chatId, props.userId))).toMatchObject({ refs: [] })
-    expect(client.getQueriesData({ queryKey: chatEntityKeys.detail(props.workspaceId, props.chatId, props.userId) })).toEqual([])
+    expect(result.current.refs).toHaveLength(2)
+    expect(client.getQueryData(chatEntityKeys.refs(props.workspaceId, props.chatId, props.userId))).toMatchObject({ refs: expect.any(Array) })
+    expect(client.getQueriesData({ queryKey: chatEntityKeys.detail(props.workspaceId, props.chatId, props.userId) })).toHaveLength(1)
     await act(async () => complete(response(empty)))
     await waitFor(() => expect(result.current.state).toBe("ready"))
     expect(result.current.refs).toEqual([])
@@ -57,7 +58,7 @@ describe("authorized chat entity snapshots", () => {
     expect(fetch.mock.calls[2][0]).not.toContain("cursor=")
     await waitFor(() => expect(result.current.state).toBe("ready"))
     fetch.mockResolvedValueOnce(response({}, 404))
-    act(() => events.get("chat.entity_refs_changed")?.({ payload: { contract_version: 1 } }))
+    act(() => events.get("chat.entity_refs_changed")?.({ channel: "chat-hints:chat-1", payload: { contract_version: 1 } }))
     await waitFor(() => expect(result.current.state).toBe("unavailable"))
     expect(result.current.refs).toEqual([])
     expect(result.current.live).toBe(false)
@@ -107,4 +108,17 @@ describe("authorized chat entity snapshots", () => {
     expect(result.current.refs).toEqual([])
     expect(result.current.live).toBe(false)
   })
+})
+
+it("filters hints by exact chat channel and coalesces an invalidation burst", async () => {
+  fetch.mockResolvedValue(response(empty))
+  const { result } = setup()
+  await waitFor(() => expect(result.current.state).toBe("ready"))
+  const before = fetch.mock.calls.length
+  act(() => events.get("chat.entity_refs_changed")?.({ channel: "chat-hints:another-chat", payload: { contract_version: 1 } }))
+  expect(fetch).toHaveBeenCalledTimes(before)
+  act(() => {
+    for (let i = 0; i < 5; i++) events.get("chat.entity_refs_changed")?.({ channel: "chat-hints:chat-1", payload: { contract_version: 1 } })
+  })
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(before + 1))
 })

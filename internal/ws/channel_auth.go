@@ -35,15 +35,6 @@ func NewDBChannelAuthorizer(db *sql.DB) *DBChannelAuthorizer {
 // Empty-channel frames are protocol control messages; they still enforce the
 // restricted-profile ceiling. Errors deny delivery rather than retain a cache.
 func (a *DBChannelAuthorizer) CanDeliver(ctx context.Context, userID, channel string) (bool, error) {
-	if strings.HasPrefix(channel, "session:") {
-		if a == nil || a.db == nil {
-			return false, nil
-		}
-		// Match the HTTP trusted projection, including suspended accounts and
-		// deleted workspaces/agents, immediately before a queued frame is sent.
-		receipt, err := chataudience.CaptureTrusted(ctx, a.db, strings.TrimPrefix(channel, "session:"), userID, nil)
-		return receipt != nil && err == nil, err
-	}
 	if channel != "" {
 		return a.CanSubscribe(ctx, userID, channel)
 	}
@@ -84,7 +75,7 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 
 	// Token/replay frames dominate delivery checks. Resolve both the global
 	// ceiling and exact audience in one indexed SQL snapshot, without a cache.
-	if chType == "session" {
+	if chType == "session" || chType == "chat-hints" {
 		return a.isSessionOwner(ctx, userID, chID)
 	}
 	restricted, err := (access.Store{DB: a.db}).HasRestrictedMembership(ctx, userID)
@@ -222,5 +213,6 @@ func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userI
 }
 
 func (a *DBChannelAuthorizer) isSessionOwner(ctx context.Context, userID, chatID string) (bool, error) {
-	return chataudience.CanReadTrusted(ctx, a.db, chatID, userID)
+	receipt, err := chataudience.CaptureTrusted(ctx, a.db, chatID, userID, nil)
+	return receipt != nil && err == nil, err
 }

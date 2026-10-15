@@ -1008,13 +1008,13 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     if (!group) return null
     return <div className="min-w-0">
       {group.withoutReply && entities.state === "ready" && <p className="mt-2 text-xs text-muted-foreground" role="status">{group.refs[0]?.anchor.run_status === "running" ? "Run in progress" : group.refs[0]?.anchor.run_status ? `Run ended without a reply · ${group.refs[0].anchor.run_status}` : "Run without a reply · status unknown"}</p>}
-      {group.refs.map((ref) => <IssueEntityCard key={ref.event_id} reference={ref} chatId={sessionId} userId={currentUserId ?? undefined}
+      {group.refs.map((ref) => <IssueEntityCard key={`${workspaceId}:${currentUserId}:${ref.event_id}`} reference={ref} chatId={sessionId} userId={currentUserId ?? undefined}
         rechecking={entities.state !== "ready"} live={entities.live} checkedAt={entities.checkedAt} onOpen={openIssue} reconcile={entities.reconcile} />)}
     </div>
   }
   const entityStatus = accessMode === "loading" || executionProfile === "pending" ? null : entities.state === "unavailable" ? <p role="status" className="px-4 py-2 text-xs text-muted-foreground">Unavailable</p>
     : entities.state === "rechecking" && !entities.slots.length ? <p role="status" className="px-4 py-2 text-xs text-muted-foreground">Checking current access…</p> : null
-  const issuePanel = issueTarget && entities.state !== "unavailable" ? <ChatIssuePanel key={issueTarget.id} target={issueTarget} reference={selectedRef}
+  const issuePanel = issueTarget && selectedRef && entities.state !== "unavailable" ? <ChatIssuePanel userId={currentUserId ?? undefined} key={`${workspaceId}:${currentUserId}:${issueTarget.id}`} target={issueTarget} reference={selectedRef}
     rechecking={entities.state !== "ready"} checkedAt={entities.checkedAt} reconcile={entities.reconcile} onClose={closeIssue} /> : null
   const mobileIssuePanel = isMobile ? <Sheet open={!!issueTarget && entities.state !== "unavailable"} onOpenChange={(open) => { if (!open) closeIssue() }}>
     <SheetContent side="right" onCloseAutoFocus={(event) => { event.preventDefault(); if (issueOpener.current?.isConnected) issueOpener.current.focus() }} className="w-full max-w-full gap-0 p-0 sm:max-w-full"><SheetTitle className="sr-only">Issue detail</SheetTitle>{issuePanel}</SheetContent>

@@ -21,23 +21,19 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
   const client = useQueryClient()
   const key = chatEntityKeys.refs(workspaceId, chatId, userId)
   const cursor = useRef<string | undefined>(undefined)
-  const lastSlots = useRef<EntityRef[]>([])
   const scope = JSON.stringify(key)
   const priorScope = useRef(scope)
-  if (priorScope.current !== scope) { cursor.current = undefined; lastSlots.current = []; priorScope.current = scope }
+  if (priorScope.current !== scope) { cursor.current = undefined; priorScope.current = scope }
   const active = enabled && !!workspaceId && !!chatId && !!userId
   const status = useRealtimeStatusSafe()
-  useRealtimeChannelSafe(active ? `session:${chatId}` : null)
+  useRealtimeChannelSafe(active ? `chat-hints:${chatId}` : null)
   const query = useQuery({
     queryKey: key, enabled: active, retry: false, gcTime: 0, staleTime: 0,
     refetchInterval: RECHECK_MS, refetchIntervalInBackground: false,
     refetchOnWindowFocus: "always", refetchOnReconnect: "always",
     queryFn: async ({ signal }) => {
-      // A replacement is an authorization boundary. The renderer also hides
-      // data while fetching, including in the gap before page one arrives.
-      lastSlots.current = client.getQueryData<{ refs: EntityRef[] }>(key)?.refs ?? lastSlots.current
-      client.setQueryData(key, { refs: [], checkedAt: 0 })
-      client.removeQueries({ queryKey: chatEntityKeys.detail(workspaceId, chatId, userId) })
+      // Keep the last verified snapshot mounted while checking. A failed check
+      // hides it below; a successful check atomically replaces it.
       let next = cursor.current
       let snapshot: string | undefined
       const refs = new Map<string, EntityRef>()
@@ -70,8 +66,14 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
     if (!active) return
     void client.invalidateQueries({ queryKey: chatEntityKeys.refs(workspaceId, chatId, userId) })
   }, [active, client, workspaceId, chatId, userId])
-  useRealtimeEventSafe("chat.entity_refs_changed", (event) => { if (event.payload.contract_version === 1) reconcile() })
-  useRealtimeEventSafe("issue.revision_changed", (event) => { if (event.payload.contract_version === 1) reconcile() })
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hint = (event: { channel?: string; payload: Record<string, unknown> }) => {
+    if (event.channel !== `chat-hints:${chatId}` || event.payload.contract_version !== 1 || hintTimer.current) return
+    hintTimer.current = setTimeout(() => { hintTimer.current = null; reconcile() }, 100)
+  }
+  useEffect(() => () => { if (hintTimer.current) clearTimeout(hintTimer.current); hintTimer.current = null }, [scope])
+  useRealtimeEventSafe("chat.entity_refs_changed", hint)
+  useRealtimeEventSafe("issue.revision_changed", hint)
   // Existing access hints are intentionally broad and data-free to this reader.
   useRealtimeEventSafe("workspace.updated", reconcile)
   const previousStatus = useRef(status)
@@ -97,8 +99,8 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
   const unavailable = !active || query.error instanceof RefError && query.error.unavailable
   const rechecking = active && (query.isFetching || query.isPending || !!query.error)
   return {
-    refs: unavailable || rechecking ? [] : query.data?.refs ?? [],
-    slots: unavailable ? [] : rechecking ? lastSlots.current : query.data?.refs ?? [],
+    refs: unavailable || query.error ? [] : query.data?.refs ?? [],
+    slots: unavailable || query.error ? [] : query.data?.refs ?? [],
     state: unavailable ? "unavailable" as const : rechecking ? "rechecking" as const : "ready" as const,
     checkedAt: query.data?.checkedAt,
     live: active && !rechecking && !query.error && status === "connected" && Date.now() - (query.data?.checkedAt ?? 0) < RECHECK_MS,
