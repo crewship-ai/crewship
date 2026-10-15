@@ -99,7 +99,7 @@ warning instead of reporting the refused proposal as saved.
 
 ## Why this transport
 
-`hocuspocus.test.mjs` uses two real Hocuspocus 4.7.1 providers and a latched
+`hocuspocus-node-test.mjs` uses two real Hocuspocus 4.7.1 providers and a latched
 `onStoreDocument`. A receives a live broadcast, is revoked before storage, and
 the storage callback refuses its batch. B already contains that text. B's later
 authorized update persists both texts because storage sees the merged document
