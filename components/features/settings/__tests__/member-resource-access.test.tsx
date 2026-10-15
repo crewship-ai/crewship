@@ -145,6 +145,7 @@ describe("member resource access", () => {
     mockPolicy(); show(); fireEvent.click(screen.getByRole("button", {name:"Edit resource access"}))
     await screen.findByLabelText("Resource kind")
     fireEvent.change(screen.getByLabelText("Resource kind"), {target:{value:"routine"}})
+    fireEvent.change(screen.getByLabelText("Resource operation"), {target:{value:"run"}})
     await screen.findByRole("option", {name:"Other agent"})
     fireEvent.change(screen.getByLabelText("Resource"), {target:{value:"agent-2"}})
     fireEvent.click(screen.getByRole("button", {name:"Add grant"}))

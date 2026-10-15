@@ -6472,6 +6472,7 @@
                     },
                     "operation": {
                       "enum": [
+                        "view",
                         "run"
                       ],
                       "type": "string"
@@ -6672,6 +6673,7 @@
                     },
                     "operation": {
                       "enum": [
+                        "view",
                         "run"
                       ],
                       "type": "string"
@@ -12644,6 +12646,55 @@
         ],
         "type": "object"
       },
+      "RestrictedRoutineDefinition": {
+        "additionalProperties": false,
+        "properties": {
+          "can_run": {
+            "type": "boolean"
+          },
+          "can_view": {
+            "type": "boolean"
+          },
+          "definition": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "definition_hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "runtime_ready": {
+            "type": "boolean"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "status",
+          "can_view",
+          "can_run",
+          "runtime_ready",
+          "definition",
+          "definition_hash",
+          "version"
+        ],
+        "type": "object"
+      },
       "RestrictedRoutineInput": {
         "additionalProperties": false,
         "properties": {
@@ -12666,6 +12717,42 @@
           "name",
           "type",
           "required"
+        ],
+        "type": "object"
+      },
+      "RestrictedRoutineLibraryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "can_run": {
+            "type": "boolean"
+          },
+          "can_view": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "runtime_ready": {
+            "type": "boolean"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "status",
+          "can_view",
+          "can_run",
+          "runtime_ready"
         ],
         "type": "object"
       },
@@ -142156,6 +142243,7 @@
                               },
                               "operation": {
                                 "enum": [
+                                  "view",
                                   "run"
                                 ],
                                 "type": "string"
@@ -142258,6 +142346,7 @@
                               },
                               "operation": {
                                 "enum": [
+                                  "view",
                                   "run"
                                 ],
                                 "type": "string"
@@ -142553,6 +142642,7 @@
                             },
                             "operation": {
                               "enum": [
+                                "view",
                                 "run"
                               ],
                               "type": "string"
@@ -142655,6 +142745,7 @@
                             },
                             "operation": {
                               "enum": [
+                                "view",
                                 "run"
                               ],
                               "type": "string"
@@ -142822,6 +142913,7 @@
                               },
                               "operation": {
                                 "enum": [
+                                  "view",
                                   "run"
                                 ],
                                 "type": "string"
@@ -142924,6 +143016,7 @@
                               },
                               "operation": {
                                 "enum": [
+                                  "view",
                                   "run"
                                 ],
                                 "type": "string"
@@ -158723,6 +158816,303 @@
           }
         ],
         "summary": "List workspace restricted pages",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/restricted-routine-library": {
+      "get": {
+        "description": "Get workspace restricted routine library (GET /api/v1/workspaces/{workspaceId}/restricted-routine-library).",
+        "operationId": "get_api_v1_workspaces_workspaceId_restricted-routine-library",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RestrictedRoutineLibraryItem"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace restricted routine library",
+        "tags": [
+          "workspaces"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}": {
+      "get": {
+        "description": "Get workspace restricted routine library (GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}).",
+        "operationId": "get_api_v1_workspaces_workspaceId_restricted-routine-library_routineId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "routineId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestrictedRoutineDefinition"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get workspace restricted routine library",
         "tags": [
           "workspaces"
         ],

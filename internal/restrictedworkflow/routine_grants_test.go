@@ -90,3 +90,37 @@ func TestRoutineGrantsSelectThreeOfTenAndFenceRevocation(t *testing.T) {
 		t.Fatalf("routine bypassed agent ceiling: %+v %v", list, err)
 	}
 }
+
+func TestRoutineViewCannotAdmitExecutionWithAgentRunGrant(t *testing.T) {
+	s, _ := fixture(t)
+	store := access.Store{DB: s.db}
+	member, err := store.Membership(t.Context(), "h1", "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rights := []access.Right{{Kind: "routine", ID: "routine", Operation: "view"}, {Kind: "agent", ID: "agent", Operation: "run"}}
+	if _, err = store.Replace(t.Context(), "owner", "h1", "w", "restricted", member, rights); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Check(t.Context(), "h1", "w", rights[0]); err != nil {
+		t.Fatal("View unavailable", err)
+	}
+	if _, err = s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "not authorized to execute"}, "", 0); err == nil {
+		t.Fatal("View-only routine grant admitted execution")
+	}
+	catalog, err := s.Catalog(t.Context(), "h1", "w")
+	if err != nil || len(catalog) != 0 {
+		t.Fatalf("View entered invocation catalog: %+v %v", catalog, err)
+	}
+	member, err = store.Membership(t.Context(), "h1", "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rights = append(rights, access.Right{Kind: "routine", ID: "routine", Operation: "run"})
+	if _, err = store.Replace(t.Context(), "owner", "h1", "w", "restricted", member, rights); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "explicitly authorized"}, "", 0); err != nil {
+		t.Fatal("Run control was not executable", err)
+	}
+}

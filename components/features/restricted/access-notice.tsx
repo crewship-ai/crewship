@@ -46,7 +46,7 @@ export function useAccessContext(): AccessContext {
 const SURFACES: Record<RestrictedSurface, { label: string; detail: string; icon: LucideIcon }> = {
   issues: { label:"Issues", detail:"Read issues in projects shared with you",icon:LayoutGrid },
   chat: { label: "Chat", detail: "Discover agents shared with you", icon: MessageSquare },
-  routines: { label: "Routines", detail: "Run routines shared with you", icon: Workflow },
+  routines: { label: "Routines", detail: "View or run routines shared with you", icon: Workflow },
   pages: { label: "Pages", detail: "Open Pages and run their actions", icon: LayoutGrid },
   account_security: { label: "Settings", detail: "Your account and sign-in security", icon: Settings },
 }

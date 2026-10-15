@@ -10,6 +10,8 @@ import { AccessNotice, type AccessContext } from "@/components/features/restrict
 import { SubBar, SubBarSecondary } from "@/components/layout/sub-bar"
 import { RESTRICTED_RUNTIME_MISSING_MESSAGE, restrictedCatalogFailure, type RestrictedCatalogState } from "@/lib/restricted-catalog"
 
+import { RestrictedRoutineDefinitions } from "./restricted-routine-definitions"
+
 interface RoutineInput { name: string; type: string; required: boolean }
 interface Routine { slug: string; name: string; definition_hash: string; execution_hash: string; inputs: RoutineInput[] }
 interface Result { run_id: string; status: string; step_outputs: Record<string, string> }
@@ -97,9 +99,10 @@ export function RestrictedRoutines({ workspaceId, access }: { workspaceId: strin
     <SubBar icon={Workflow} title="Private routines" ariaLabel="Private routines" description={catalogState === "ready" ? `${catalog.length} available to you` : "Restricted access"} actions={<SubBarSecondary icon={RotateCw} disabled={catalogState === "loading" || active || !!request.current} onClick={() => setReload(n => n + 1)}>Check again</SubBarSecondary>} />
     <div className="min-h-0 flex-1 overflow-auto p-4">
     <div className={notice ? "space-y-5" : "mx-auto w-full max-w-3xl space-y-5"}>
+    <RestrictedRoutineDefinitions key={workspaceId} workspaceId={workspaceId} />
     {!notice && <p className="text-sm text-muted-foreground">Run an allowed routine. Its results are visible to you.</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    {catalogState === "loading" ? <p>Loading routines…</p> : catalogState === "runtime_missing" ? <AccessNotice kind="not-installed" title="Private routines aren't set up here" description={RESTRICTED_RUNTIME_MISSING_MESSAGE} context={access} current="routines" /> : catalogState === "unavailable" ? <AccessNotice kind="unavailable" title="Routine catalog unavailable." description="The list of what you can run could not be loaded." context={access} current="routines" onRetry={() => setReload(n => n + 1)} /> : catalog.length === 0 ? <AccessNotice kind="no-access" title="No routines shared with you yet" description="No routines are available with your current access." context={access} current="routines" /> : <>
+    {catalogState === "loading" ? <p>Loading routines…</p> : catalogState === "runtime_missing" ? <AccessNotice kind="not-installed" title="Routine execution isn't set up here" description={RESTRICTED_RUNTIME_MISSING_MESSAGE} context={access} current="routines" /> : catalogState === "unavailable" ? <AccessNotice kind="unavailable" title="Routine catalog unavailable." description="The list of what you can run could not be loaded." context={access} current="routines" onRetry={() => setReload(n => n + 1)} /> : catalog.length === 0 ? <AccessNotice kind="no-access" title="No executable routines shared with you yet" description="No routines can currently be run with your access. Shared definitions appear above." context={access} current="routines" /> : <>
       <label className="block space-y-2"><span>Routine</span><select aria-label="Routine" className="min-h-10 w-full rounded-md border bg-background p-2 coarse:min-h-12" value={selected} disabled={active || !!request.current} onChange={event => { setSelected(event.target.value); setValues({}); setRun(null); setError("") }}><option value="">Choose a routine</option>{catalog.map(item => <option key={item.slug} value={item.slug}>{item.name}</option>)}</select></label>
       {routine && <form className="space-y-4" onSubmit={event => { event.preventDefault(); void submit() }}>
         {routine.inputs.map(field => <label key={field.name} className="block space-y-2"><span>{field.name}{field.required ? " (required)" : ""}</span><Input aria-label={field.name} disabled={active || !!request.current} value={values[field.name] ?? ""} onChange={event => setValues(current => ({ ...current, [field.name]: event.target.value }))} /></label>)}

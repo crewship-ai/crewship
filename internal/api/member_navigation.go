@@ -39,6 +39,11 @@ func (h *WorkspaceHandler) memberRestrictedSurfaces(ctx context.Context, user, w
 			return nil, err
 		}
 	}
+	var viewRoutine bool
+	if err = h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_members wm JOIN live_access_grants g ON g.member_id=wm.id JOIN pipelines p ON p.id=g.routine_id AND p.workspace_id=wm.workspace_id WHERE wm.user_id=? AND wm.workspace_id=? AND g.resource_kind='routine' AND g.operation='view' AND p.deleted_at IS NULL)`, user, workspace).Scan(&viewRoutine); err != nil {
+		return nil, err
+	}
+	routines = routines || viewRoutine
 	var issues bool
 	if err = h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM live_access_grants g JOIN workspace_members wm ON wm.id=g.member_id JOIN projects p ON p.id=g.project_id AND p.workspace_id=wm.workspace_id WHERE wm.user_id=? AND wm.workspace_id=? AND g.resource_kind='project' AND g.operation='list')`, user, workspace).Scan(&issues); err != nil {
 		return nil, err
