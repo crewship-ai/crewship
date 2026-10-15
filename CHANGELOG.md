@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Chat CSV/TSV artifacts gain bounded local-worker previews with sorting, filtering, virtual rows and source-preserving selection. Ask about selection appends a versioned reference to the draft without sending it. Access denial clears displayed artifact bytes; XLSX previews remain a separate delivery.
+
 - Guests with explicit routine View and Edit draft shares can change collaborative drafts through UI and CLI with revision/base conflicts and atomic audit. Published recipes, execution authority and trusted testing/review gates remain intact; direct Guest publication is still separate work.
 
 - Guest project managers can create and edit milestones with reviewed versions and atomic audit. Empty-only removal preserves linked issue work; UI and CLI enforce current action flags and conflict review.

@@ -39,6 +39,9 @@ export class ArtifactContentRefused extends Error {
   }
 }
 
+/** Access denial or disappearance invalidates already displayed bytes. */
+export class ArtifactUnavailable extends Error {}
+
 export interface ArtifactFile {
   /** The path the bytes were read from. Callers bind bytes to path with it. */
   path: string
@@ -60,7 +63,7 @@ export async function readArtifactSnapshot(opts: {
 }): Promise<ArtifactSnapshot> {
   const url = artifactDownloadUrl(opts.agentId, opts.workspaceId, opts.path)
   const res = await apiFetch(url, { signal: opts.signal, cache: "no-store" })
-  if (!res.ok) throw new Error(`Failed to load: HTTP ${res.status}`)
+  if (!res.ok) throw [401, 403, 404].includes(res.status) ? new ArtifactUnavailable(`Artifact unavailable (HTTP ${res.status})`) : new Error(`Failed to load: HTTP ${res.status}`)
   assertFileResponse(res, url)
   const maxBytes = 20 * 1024 * 1024
   if (Number(res.headers.get("content-length")) > maxBytes) {
@@ -162,7 +165,7 @@ export async function readArtifactFile(opts: {
 }): Promise<ArtifactFile> {
   const url = artifactDownloadUrl(opts.agentId, opts.workspaceId, opts.path)
   const res = await apiFetch(url, { signal: opts.signal })
-  if (!res.ok) throw new Error(`Failed to load: HTTP ${res.status}`)
+  if (!res.ok) throw [401, 403, 404].includes(res.status) ? new ArtifactUnavailable(`Artifact unavailable (HTTP ${res.status})`) : new Error(`Failed to load: HTTP ${res.status}`)
   assertFileResponse(res, url)
   return { path: opts.path, text: await res.text() }
 }
@@ -191,7 +194,7 @@ export async function readArtifactVersion(opts: { agentId: string; workspaceId: 
   const params = new URLSearchParams({ workspace_id: opts.workspaceId })
   if (slash >= 0) params.set("subdir", opts.relativePath.slice(0, slash))
   const response = await apiFetch(`/api/v1/agents/${encodeURIComponent(opts.agentId)}/files?${params}`, { signal: opts.signal, cache: "no-store" })
-  if (!response.ok) throw new Error(`Could not check artifact (${response.status})`)
+  if (!response.ok) throw [401, 403, 404].includes(response.status) ? new ArtifactUnavailable(`Artifact unavailable (HTTP ${response.status})`) : new Error(`Could not check artifact (${response.status})`)
   const rows: unknown = await response.json()
   if (!Array.isArray(rows)) return null
   const row = rows.find((entry) => entry?.name === name && entry?.is_dir === false)
