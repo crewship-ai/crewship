@@ -148,7 +148,9 @@ for (const width of [1280, 390]) {
     })
     await page.goto("/chat/_?session=chat-1")
     const card = page.locator("section").filter({ has: page.getByRole("heading", { name: "Synthetic title", exact: true }) })
-    await expect(card).toBeVisible()
+    // Cold static-export hydration includes profile, history and reference requests.
+    // Keep this startup budget separate from the default bounded mutation/revocation checks.
+    await expect(card).toBeVisible({ timeout: 30_000 })
     await expect(page.locator('[data-turn-id="trigger-message"] + div').getByText("ENG-1")).toBeVisible()
     await expect(page.getByText("Run ended without a reply · failed")).toBeVisible()
     // Permission controls come from the viewer projection, including in detail.

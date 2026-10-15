@@ -13,12 +13,15 @@ import { cn } from "@/lib/utils"
 import { isManagerTier } from "@/lib/permissions/tiers"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useSessionSafe } from "@/hooks/use-auth"
 import { useChatAgent } from "../chat-agent-context"
 import { relativeToAgent } from "../files/file-scope"
 import { getEditorLanguage } from "../chat-tree-row"
 import { AuthenticatedDownload } from "../files/authenticated-download"
 import { FilePreview } from "../files/file-preview"
-import { ArtifactContentRefused, artifactDownloadUrl, readArtifactSnapshot, readArtifactVersion, saveArtifactFile, type ArtifactSnapshot } from "./artifact-file-io"
+import { ArtifactUnavailable, ArtifactContentRefused, artifactDownloadUrl, readArtifactSnapshot, readArtifactVersion, saveArtifactFile, type ArtifactSnapshot } from "./artifact-file-io"
+
+import { TablePreview } from "./table-preview"
 
 const FileEditor = dynamic(
   () => import("@/components/features/files/file-editor").then((m) => m.FileEditor),
@@ -36,37 +39,8 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return true
 }
 
-function CsvPreview({ text, separator }: { text: string; separator: string }) {
-  const rows = useMemo(() => {
-    const result: string[][] = []
-    let row: string[] = [], cell = "", quoted = false
-    for (let i = 0; i < text.length && result.length < 100; i++) {
-      const c = text[i]
-      if (c === '"') {
-        if (quoted && text[i + 1] === '"') { cell += '"'; i++ }
-        else quoted = !quoted
-      } else if (c === separator && !quoted) { row.push(cell); cell = "" }
-      else if ((c === "\n" || c === "\r") && !quoted) {
-        if (c === "\r" && text[i + 1] === "\n") i++
-        row.push(cell); result.push(row); row = []; cell = ""
-      } else cell += c
-    }
-    if (row.length || cell) { row.push(cell); result.push(row) }
-    return result
-  }, [text, separator])
-  return <div className="h-full overflow-auto p-3" aria-label="Spreadsheet preview">
-    <table className="w-full border-collapse text-left text-xs"><tbody>
-      {rows.map((row, i) => <tr key={i} className="border-b border-border/50">
-        <th scope="row" className="sticky left-0 bg-background px-2 py-1 font-normal text-muted-foreground">{i + 1}</th>
-        {row.slice(0, 30).map((cell, j) => <td key={j} className="min-w-24 max-w-72 truncate border-l border-border/50 px-2 py-1" title={cell}>{cell}</td>)}
-      </tr>)}
-    </tbody></table>
-    {rows.length === 100 && <p className="py-3 text-xs text-muted-foreground">Showing the first 100 rows.</p>}
-  </div>
-}
-
-function ArtifactPreview({ path, snapshot, url, revision, onClose }: { path: string; snapshot: ArtifactSnapshot; url: string; revision: number; onClose: () => void }) {
-  const text = useMemo(() => new TextDecoder().decode(snapshot.bytes), [snapshot])
+function ArtifactPreview({ path, snapshot, url, revision, onClose, onAskSelection }: { path: string; snapshot: ArtifactSnapshot; url: string; revision: number; onClose: () => void; onAskSelection?: (context: string) => void }) {
+  const text = useMemo(() => /\.(csv|tsv)$/i.test(path) ? "" : new TextDecoder().decode(snapshot.bytes), [snapshot, path])
   if (BINARY.test(path)) {
     // Existing viewer validates signatures and renders PDFs with pdfjs.
     return <FilePreview key={revision} url={`${url}&revision=${revision}`} name={path.split("/").pop() ?? path} onClose={onClose} showHeader={false} bytes={snapshot.bytes} />
@@ -82,12 +56,26 @@ function ArtifactPreview({ path, snapshot, url, revision, onClose }: { path: str
     const csp = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; font-src data:; form-action \'none\'; base-uri \'none\'">'
     return <iframe title={`Preview ${path}`} sandbox="" referrerPolicy="no-referrer" className="h-full w-full bg-white" srcDoc={csp + text} />
   }
-  if (/\.(csv|tsv)$/i.test(path)) return <CsvPreview text={text} separator={/\.tsv$/i.test(path) ? "\t" : ","} />
+  if (/\.(csv|tsv)$/i.test(path)) return <TablePreview bytes={snapshot.bytes} path={path} onAskSelection={onAskSelection} />
   return <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs">{text}</pre>
 }
 
 /** Inline workspace: its parent places this beside the transcript. */
-export function ArtifactPane({ agentId, width = 540, expanded = false }: { agentId: string; width?: number; expanded?: boolean }) {
+type ArtifactPaneProps = { agentId: string; width?: number; expanded?: boolean; onAskSelection?: (context: string) => void; scopeKey?: string }
+
+export function ArtifactPane(props: ArtifactPaneProps) {
+  const { workspaceId } = useWorkspace()
+  const { data } = useSessionSafe()
+  const owner = JSON.stringify([data?.user?.id ?? null, workspaceId])
+  const currentOwner = useArtifactStore(state => state.ownerScope)
+  const setOwner = useArtifactStore(state => state.setOwnerScope)
+  useEffect(() => { setOwner(owner) }, [owner, setOwner])
+  // Hide titles, paths and bytes immediately, before the identity-reset effect.
+  if (currentOwner !== owner) return null
+  return <ScopedArtifactPane key={JSON.stringify([owner, props.agentId, props.scopeKey])} {...props} />
+}
+
+function ScopedArtifactPane({ agentId, width = 540, expanded = false, onAskSelection }: { agentId: string; width?: number; expanded?: boolean; onAskSelection?: (context: string) => void }) {
   const { workspaceId, role } = useWorkspace()
   const agent = useChatAgent()
   const canEdit = isManagerTier(role)
@@ -150,7 +138,10 @@ export function ArtifactPane({ agentId, width = 540, expanded = false }: { agent
         }
         setError("")
       } catch (cause) {
-        if (!controller.signal.aborted) setError(cause instanceof ArtifactContentRefused ? cause.message : "Could not refresh this artifact")
+        if (!controller.signal.aborted) {
+          if (cause instanceof ArtifactUnavailable) { previousRef.current = null; setSnapshot(null); setDirty(false) }
+          setError(cause instanceof ArtifactContentRefused || cause instanceof ArtifactUnavailable ? cause.message : "Could not refresh this artifact")
+        }
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false); first = false
@@ -228,7 +219,7 @@ export function ArtifactPane({ agentId, width = 540, expanded = false }: { agent
       {loading && !loaded && <div className="flex h-full items-center justify-center"><Spinner className="size-5" /></div>}
       {!loading && !loaded && !error && <p className="p-4 text-sm text-muted-foreground">No artifact open</p>}
       {loaded && WORKBOOK.test(path) && <div className="p-4 text-sm text-muted-foreground">Spreadsheet preview supports CSV and TSV. <AuthenticatedDownload href={url} download={active?.title || "artifact"} className="text-primary underline">Download this workbook</AuthenticatedDownload> to open it.</div>}
-      {loaded && !WORKBOOK.test(path) && (view === "preview" || binary) && <ArtifactPreview path={path} snapshot={loaded} url={url} revision={revision} onClose={() => { if (guardDirty()) setOpen(false) }} />}
+      {loaded && !WORKBOOK.test(path) && (view === "preview" || binary) && <ArtifactPreview onAskSelection={onAskSelection} path={path} snapshot={loaded} url={url} revision={revision} onClose={() => { if (guardDirty()) setOpen(false) }} />}
       {loaded && text !== null && view === "editor" && <FileEditor key={`${activeId}:${revision}`} code={text} language={active?.language ?? getEditorLanguage(active?.title ?? path)} onSave={handleSave} onDirtyChange={(v) => { setDirty(v); if (v) setFollowing(false) }} />}
     </div>
   </motion.aside>
