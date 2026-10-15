@@ -27,6 +27,7 @@
  *     basis to compute, and there is no third glyph).
  */
 
+import { resolvePageContent } from "@/lib/pages/content-types"
 import { useCallback, useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -139,6 +140,8 @@ export interface ArtifactSummary {
 }
 
 export interface WirePage {
+  content_descriptor?: unknown
+  application_descriptor?: unknown
   artifact_summary?: ArtifactSummary
   has_document?: boolean
   has_board?: boolean
@@ -484,6 +487,8 @@ function emptyTally(): PanelTally {
 
 /** A page as every Pages surface consumes it. */
 export interface PageView {
+  contentSupported?: boolean
+  contentType?: string
   artifactSummary?: ArtifactSummary
   hasDocument?: boolean
   hasBoard?: boolean
@@ -632,7 +637,10 @@ export function toPageView(raw: WirePage): PageView {
     : toDate(raw.last_produced_at)
 
   const slug = trimmed(raw.slug) ?? ""
+  const content = resolvePageContent({ ...raw, has_panels: tally.total > 0, human_owned: Boolean(raw.owner?.startsWith("user/")) })
   return {
+    contentSupported: content.supported,
+    contentType: content.primary?.type_id,
     id: trimmed(raw.id) ?? slug,
     slug,
     name: trimmed(raw.name) ?? slug,
@@ -641,7 +649,7 @@ export function toPageView(raw: WirePage): PageView {
     hasBoard: raw.has_board === true,
     hasArtifact: raw.has_artifact === true,
     artifactSummary: raw.artifact_summary,
-    artifactEligible: Boolean(raw.owner?.startsWith("user/") && tally.total === 0 && !raw.has_application && !raw.has_project && !raw.has_board && !raw.has_document),
+    artifactEligible: content.supported && (raw.has_artifact === true || content.canInitializeContent),
     ownerRef: ownerRefOf(raw),
     ownerLabel: ownerLabelOf(raw),
     reach: reachOf(raw),

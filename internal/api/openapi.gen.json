@@ -111085,6 +111085,30 @@
                       "description": "The pages in this folder the caller reaches, as index rows.",
                       "items": {
                         "properties": {
+                          "application_descriptor": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "reason": {
+                                "type": "string"
+                              },
+                              "schema_version": {
+                                "type": "integer"
+                              },
+                              "supported": {
+                                "type": "boolean"
+                              },
+                              "type_id": {
+                                "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type_id",
+                              "schema_version",
+                              "supported"
+                            ],
+                            "type": "object"
+                          },
                           "artifact_summary": {
                             "properties": {
                               "author_agent_id": {
@@ -111128,6 +111152,30 @@
                           "color": {
                             "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                             "type": "string"
+                          },
+                          "content_descriptor": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "reason": {
+                                "type": "string"
+                              },
+                              "schema_version": {
+                                "type": "integer"
+                              },
+                              "supported": {
+                                "type": "boolean"
+                              },
+                              "type_id": {
+                                "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type_id",
+                              "schema_version",
+                              "supported"
+                            ],
+                            "type": "object"
                           },
                           "created_at": {
                             "format": "date-time",
@@ -112425,6 +112473,30 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "application_descriptor": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "reason": {
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "type": "integer"
+                            },
+                            "supported": {
+                              "type": "boolean"
+                            },
+                            "type_id": {
+                              "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type_id",
+                            "schema_version",
+                            "supported"
+                          ],
+                          "type": "object"
+                        },
                         "artifact_summary": {
                           "properties": {
                             "author_agent_id": {
@@ -112468,6 +112540,30 @@
                         "color": {
                           "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                           "type": "string"
+                        },
+                        "content_descriptor": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "reason": {
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "type": "integer"
+                            },
+                            "supported": {
+                              "type": "boolean"
+                            },
+                            "type_id": {
+                              "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type_id",
+                            "schema_version",
+                            "supported"
+                          ],
+                          "type": "object"
                         },
                         "created_at": {
                           "format": "date-time",
@@ -112793,6 +112889,30 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "application_descriptor": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "reason": {
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "type": "integer"
+                            },
+                            "supported": {
+                              "type": "boolean"
+                            },
+                            "type_id": {
+                              "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type_id",
+                            "schema_version",
+                            "supported"
+                          ],
+                          "type": "object"
+                        },
                         "artifact_summary": {
                           "properties": {
                             "author_agent_id": {
@@ -112836,6 +112956,30 @@
                         "color": {
                           "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                           "type": "string"
+                        },
+                        "content_descriptor": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "reason": {
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "type": "integer"
+                            },
+                            "supported": {
+                              "type": "boolean"
+                            },
+                            "type_id": {
+                              "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type_id",
+                            "schema_version",
+                            "supported"
+                          ],
+                          "type": "object"
                         },
                         "created_at": {
                           "format": "date-time",
@@ -113173,6 +113317,30 @@
                     "pages": {
                       "items": {
                         "properties": {
+                          "application_descriptor": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "reason": {
+                                "type": "string"
+                              },
+                              "schema_version": {
+                                "type": "integer"
+                              },
+                              "supported": {
+                                "type": "boolean"
+                              },
+                              "type_id": {
+                                "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type_id",
+                              "schema_version",
+                              "supported"
+                            ],
+                            "type": "object"
+                          },
                           "artifact_summary": {
                             "properties": {
                               "author_agent_id": {
@@ -113216,6 +113384,30 @@
                           "color": {
                             "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                             "type": "string"
+                          },
+                          "content_descriptor": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "reason": {
+                                "type": "string"
+                              },
+                              "schema_version": {
+                                "type": "integer"
+                              },
+                              "supported": {
+                                "type": "boolean"
+                              },
+                              "type_id": {
+                                "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type_id",
+                              "schema_version",
+                              "supported"
+                            ],
+                            "type": "object"
                           },
                           "created_at": {
                             "format": "date-time",
@@ -113801,6 +113993,30 @@
                 "schema": {
                   "items": {
                     "properties": {
+                      "application_descriptor": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "reason": {
+                            "type": "string"
+                          },
+                          "schema_version": {
+                            "type": "integer"
+                          },
+                          "supported": {
+                            "type": "boolean"
+                          },
+                          "type_id": {
+                            "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type_id",
+                          "schema_version",
+                          "supported"
+                        ],
+                        "type": "object"
+                      },
                       "artifact_summary": {
                         "properties": {
                           "author_agent_id": {
@@ -113844,6 +114060,30 @@
                       "color": {
                         "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                         "type": "string"
+                      },
+                      "content_descriptor": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "reason": {
+                            "type": "string"
+                          },
+                          "schema_version": {
+                            "type": "integer"
+                          },
+                          "supported": {
+                            "type": "boolean"
+                          },
+                          "type_id": {
+                            "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type_id",
+                          "schema_version",
+                          "supported"
+                        ],
+                        "type": "object"
                       },
                       "created_at": {
                         "format": "date-time",
@@ -114217,9 +114457,57 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "application_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
+                    },
+                    "content_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
                     },
                     "created_at": {
                       "format": "date-time",
@@ -114439,9 +114727,57 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "application_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
+                    },
+                    "content_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
                     },
                     "created_at": {
                       "format": "date-time",
@@ -115290,9 +115626,57 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "application_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
+                    },
+                    "content_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
                     },
                     "created_at": {
                       "format": "date-time",
@@ -115512,9 +115896,57 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "application_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
+                    },
+                    "content_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
                     },
                     "created_at": {
                       "format": "date-time",
@@ -116259,9 +116691,57 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "application_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
+                    },
+                    "content_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
                     },
                     "created_at": {
                       "format": "date-time",
@@ -116743,9 +117223,57 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "application_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
+                    },
+                    "content_descriptor": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "reason": {
+                          "type": "string"
+                        },
+                        "schema_version": {
+                          "type": "integer"
+                        },
+                        "supported": {
+                          "type": "boolean"
+                        },
+                        "type_id": {
+                          "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type_id",
+                        "schema_version",
+                        "supported"
+                      ],
+                      "type": "object"
                     },
                     "created_at": {
                       "format": "date-time",
@@ -141965,9 +142493,57 @@
                     },
                     "page": {
                       "properties": {
+                        "application_descriptor": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "reason": {
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "type": "integer"
+                            },
+                            "supported": {
+                              "type": "boolean"
+                            },
+                            "type_id": {
+                              "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type_id",
+                            "schema_version",
+                            "supported"
+                          ],
+                          "type": "object"
+                        },
                         "color": {
                           "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                           "type": "string"
+                        },
+                        "content_descriptor": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "reason": {
+                              "type": "string"
+                            },
+                            "schema_version": {
+                              "type": "integer"
+                            },
+                            "supported": {
+                              "type": "boolean"
+                            },
+                            "type_id": {
+                              "description": "Derived format identity, not a writable discriminator or permission. Unknown values fail closed in clients.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type_id",
+                            "schema_version",
+                            "supported"
+                          ],
+                          "type": "object"
                         },
                         "created_at": {
                           "format": "date-time",

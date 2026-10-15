@@ -1,5 +1,6 @@
 "use client"
 
+import { resolvePageContent } from "@/lib/pages/content-types"
 import { usePageCreationAccess, usePageFolderCreationAccess } from "@/hooks/use-page-creation-access"
 
 import { PageApplicationView } from "./page-application"
@@ -259,7 +260,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // refusal must be visible where the action was, not turned into an absence
   // that reads as "this product cannot do that".
   const grants = usePageGrants(workspaceId, selectedSlug, editing)
-  const capabilities = usePageCapabilities(detail.raw, {
+  const contentSupported = detail.raw == null || resolvePageContent({ ...detail.raw, has_panels: Array.isArray(detail.raw.panels) && detail.raw.panels.length > 0 }).supported
+  const capabilities = usePageCapabilities(contentSupported ? detail.raw : null, {
     mayManageAccess: grants.refusal === null,
   })
 
@@ -442,7 +444,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               inside it — the rail beside it is not, so it never participates in
               the transition and never blinks. */}
           <AnimatePresence mode="wait">
-            {editing && selectedSlug ? (
+            {editing && selectedSlug && contentSupported ? (
               <motion.div
                 key={`editor-${selectedSlug}`}
                 // The editor arrives from the right edge and leaves the same
@@ -479,7 +481,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 flex flex-col overflow-hidden"
               >
-                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={
+                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error || !contentSupported ? null : detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={
                 <PageView
                   headingRef={viewHeading}
                   page={detail.page}
