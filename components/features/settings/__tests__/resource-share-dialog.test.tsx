@@ -96,6 +96,18 @@ describe("resource Share", () => {
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(JSON.parse(String(writes()[0][1].body))).toEqual({ membership_id: "member-1", revision: 7, mode: "restricted", rights: [...policy.rights, { kind: "project", id: "routine-1", operation: "list" }] })
   })
+  it("labels routine draft editing explicitly and preserves independent Run authority", async () => {
+    mockApi(); show(); fireEvent.click(screen.getByRole("button", { name: "Share" }))
+    fireEvent.click(await screen.findByLabelText("Edit draft"))
+    expect(screen.queryByLabelText("Read issues")).toBeNull()
+    expect(screen.getByLabelText("Run")).toBeChecked()
+    fireEvent.click(screen.getByLabelText("View definition"))
+    fireEvent.click(screen.getByRole("button", { name: "Save access for Client One" }))
+    await waitFor(() => expect(writes()).toHaveLength(1))
+    expect(JSON.parse(String(writes()[0][1].body)).rights).toEqual(expect.arrayContaining([
+      policy.rights[0], policy.rights[1], { kind: "routine", id: "routine-1", operation: "edit" }, { kind: "routine", id: "routine-1", operation: "view" },
+    ]))
+  })
   it("preserves unknown operations and refuses account conversion or invalid reissue", () => {
     const extended = { ...policy, rights: [...policy.rights, { kind: "routine" as const, id: "routine-1", operation: "future-operation" }] }
     expect(resourceShareReplacement(extended, resource, [], []).rights).toEqual([policy.rights[0], extended.rights[2]])

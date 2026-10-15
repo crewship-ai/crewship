@@ -116,7 +116,7 @@ function ShareMember({ workspaceId, resource, policy, label, onSaved, disabled, 
         <label className="flex min-h-9 items-center gap-2 coarse:min-h-12"><input type="checkbox" checked={selected.includes(operation)} onChange={event => {
           setSelected(event.target.checked ? [...selected, operation] : selected.filter(op => op !== operation))
           if (!event.target.checked) setReissue(reissue.filter(op => op !== operation))
-        }} />{operation === "view" ? "View definition" : operation === "run" ? "Run" : operation === "list" ? "List in Issues" : operation === "contribute" ? "Contribute to issues" : operation === "delete_issues" ? "Delete issues" : operation === "manage" ? "Manage project" : "Read issues"}</label>
+        }} />{operation === "view" ? "View definition" : operation === "edit" ? "Edit draft" : operation === "run" ? "Run" : operation === "list" ? "List in Issues" : operation === "contribute" ? "Contribute to issues" : operation === "delete_issues" ? "Delete issues" : operation === "manage" ? "Manage project" : "Read issues"}</label>
         {detail && <p className="text-xs text-muted-foreground">{detail.live ? "Active" : "Inactive — issuer no longer has authority"} · Issued by {detail.issuer_name || detail.issuer_id}</p>}
         {detail && !detail.live && selected.includes(operation) && <label className="flex min-h-9 items-center gap-2 text-xs coarse:min-h-12"><input type="checkbox" checked={reissue.includes(operation)} onChange={event => setReissue(event.target.checked ? [...reissue, operation] : reissue.filter(op => op !== operation))} />Reissue {operation} as me</label>}
       </div>
