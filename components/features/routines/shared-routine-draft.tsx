@@ -12,6 +12,7 @@ type Draft = z.infer<typeof draftSchema>
 
 export function SharedRoutineDraft({ url, userId }: { url: string; userId: string }) {
   const [open, setOpen] = useState(false)
+  const [reloadGeneration, setReloadGeneration] = useState(0)
   const key = ["shared-routine-draft", userId, url]
   const query = useQuery({
     queryKey: key, enabled: open, retry: false, staleTime: Infinity, refetchOnWindowFocus: false,
@@ -30,8 +31,11 @@ export function SharedRoutineDraft({ url, userId }: { url: string; userId: strin
       {query.isError && <p role="alert">{query.error.message}</p>}
       {query.data === null && <p role="alert">Draft access is no longer available.</p>}
       {query.data && !query.data.can_edit && <p role="alert">This credential cannot edit the draft.</p>}
-      {query.data?.can_edit && <DraftForm key={`${url}:${userId}:${query.data.draft_id}:${query.data.revision}`} draft={query.data} url={url} queryKey={key} />}
-      <Button variant="outline" onClick={() => void query.refetch()}>Reload draft and discard local changes</Button>
+      {query.data?.can_edit && <DraftForm key={`${url}:${userId}:${query.data.draft_id}:${query.data.revision}:${reloadGeneration}`} draft={query.data} url={url} queryKey={key} />}
+      <Button variant="outline" disabled={query.isFetching} onClick={async () => {
+        const result = await query.refetch()
+        if (result.isSuccess) setReloadGeneration(generation => generation + 1)
+      }}>Reload draft and discard local changes</Button>
     </>}
   </section>
 }

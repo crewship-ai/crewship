@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Reloading a shared routine draft now discards local edits even when its saved revision has not changed.** A failed reload retains the local edits, and background refreshes of the same revision keep them.
+
 - Chat CSV/TSV artifacts gain bounded local-worker previews with sorting, filtering, virtual rows and source-preserving selection. Ask about selection appends a versioned reference to the draft without sending it. Access denial clears displayed artifact bytes; XLSX previews remain a separate delivery.
 - **Chat issue references stay scoped to the current viewer (#3068).** Reconciliation replaces complete snapshots, clears protected projections while access is checked, and preserves durable run anchors. Uncertain human writes retain the same revision and idempotency key through recovery, including a denied retry after a lost acknowledgement.
 
