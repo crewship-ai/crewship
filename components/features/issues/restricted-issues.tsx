@@ -19,6 +19,11 @@ const commentSchema = z.object({ id: z.string(), body: z.string(), author: z.str
 type Issue = z.infer<typeof issueSchema>
 type Project = z.infer<typeof projectSchema>
 
+class IssueReadError extends Error {
+  constructor(readonly status: number, message: string) { super(message) }
+}
+const accessLost = (error: unknown) => error instanceof IssueReadError && [401, 403, 404].includes(error.status)
+
 async function issueRequest(path: string, method: string, body: unknown) {
   const response = await apiFetch(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
   if (!response.ok) {
@@ -41,7 +46,7 @@ export function RestrictedIssues({ identifier }: { identifier?: string | null })
     queryFn: async ({ signal }) => {
       const path = identifier ? `${base}/${requireApiPathSegment(identifier)}` : `${base}?limit=100&offset=${offset}`
       const response = await apiFetch(path, { signal })
-      if (!response.ok) throw new Error(response.status === 404 ? "Access unavailable" : "Issues unavailable")
+      if (!response.ok) throw new IssueReadError(response.status, response.status === 404 ? "Access unavailable" : "Issues unavailable")
       const data = await response.json()
       return identifier ? [issueSchema.parse(data)] : z.array(issueSchema).parse(data)
     },
@@ -51,18 +56,19 @@ export function RestrictedIssues({ identifier }: { identifier?: string | null })
     enabled: !!base && !!session?.user.id && !identifier, retry: false, refetchInterval: 15_000,
     queryFn: async ({ signal }) => {
       const response = await apiFetch(`/api/v1/workspaces/${requireApiPathSegment(workspaceId!)}/restricted-issue-projects`, { signal })
-      if (!response.ok) throw new Error("Project access is unavailable")
+      if (!response.ok) throw new IssueReadError(response.status, "Project access is unavailable")
       return z.array(projectSchema).parse(await response.json())
     },
   })
   return <main className="mx-auto w-full max-w-4xl space-y-4 p-4 md:p-6">
     <div className="flex items-center justify-between"><h1 className="text-lg font-semibold">{identifier ? "Issue" : "Issues shared with you"}</h1>{identifier ? <Link href="/issues" className="text-sm text-primary">Back to issues</Link> : <Button variant="outline" onClick={() => { void query.refetch(); void projects.refetch() }}>Refresh</Button>}</div>
     <p className="text-sm text-muted-foreground">Your project grants decide which issues you can list, read and contribute to. Only comments explicitly shared with this project appear here.</p>
-    {!identifier && projects.data?.some(project => project.can_contribute) && <NewIssue key={`${session?.user.id}:${workspaceId}`} base={base} projects={projects.data} disabled={projects.isError} />}
+    {!identifier && !accessLost(projects.error) && projects.data?.some(project => project.can_contribute) && <NewIssue key={`${session?.user.id}:${workspaceId}`} base={base} projects={projects.data} disabled={projects.isError} />}
     {query.isPending && <p role="status">Loading shared issues…</p>}
-    {query.isError && <AccessNotice kind={query.error?.message === "Access unavailable" ? "no-access" : "unavailable"} title="Issues unavailable" description="Your access may have changed. Retry to check your current project grants." context={context} current="issues" onRetry={() => void query.refetch()} />}
-    {!query.isError && query.data?.length === 0 && <AccessNotice kind="no-access" title="No issues shared here" description="There are no issues in the projects shared with you on this page." context={context} current="issues" />}
-    {!query.isError && query.data?.map(issue => <IssueCard key={`${session?.user.id}:${workspaceId}:${issue.id}`} issue={issue} detail={!!identifier} base={base} userId={session?.user.id} />)}
+    {query.isError && (!query.data || accessLost(query.error)) && <AccessNotice kind={query.error?.message === "Access unavailable" ? "no-access" : "unavailable"} title="Issues unavailable" description="Your access may have changed. Retry to check your current project grants." context={context} current="issues" onRetry={() => void query.refetch()} />}
+    {(!query.isError || !accessLost(query.error)) && query.data?.length === 0 && <AccessNotice kind="no-access" title="No issues shared here" description="There are no issues in the projects shared with you on this page." context={context} current="issues" />}
+    {query.isError && query.data && !accessLost(query.error) && <p role="status" className="text-sm text-muted-foreground">Issues could not be refreshed. Your current view and drafts are kept; refresh before posting.</p>}
+    {(!query.isError || !accessLost(query.error)) && query.data?.map(issue => <IssueCard key={`${session?.user.id}:${workspaceId}:${issue.id}`} issue={issue} detail={!!identifier} mutationsDisabled={query.isError} base={base} userId={session?.user.id} />)}
     {!identifier && !query.isError && <div className="flex gap-2">
       <Button variant="outline" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 100))}>Previous</Button>
       <Button variant="outline" disabled={(query.data?.length ?? 0) < 100} onClick={() => setOffset(offset + 100)}>Next</Button>
@@ -96,7 +102,7 @@ function NewIssue({ base, projects, disabled }: { base: string; projects: Projec
   </details>
 }
 
-function IssueCard({ issue, detail, base, userId }: { issue: Issue; detail: boolean; base: string; userId?: string }) {
+function IssueCard({ issue, detail, base, userId, mutationsDisabled }: { issue: Issue; detail: boolean; base: string; userId?: string; mutationsDisabled: boolean }) {
   const client = useQueryClient()
   const [draft, setDraft] = useState("")
   const [audience, setAudience] = useState<{ id: string; name: string } | null>(null)
@@ -108,7 +114,7 @@ function IssueCard({ issue, detail, base, userId }: { issue: Issue; detail: bool
     retry: false, refetchInterval: 15_000,
     queryFn: async ({ signal }) => {
       const response = await apiFetch(`${path}/comments`, { signal })
-      if (!response.ok) throw new Error("Shared comments are unavailable. Refresh to check your access.")
+      if (!response.ok) throw new IssueReadError(response.status, "Shared comments are unavailable. Refresh to check your access.")
       const parsed = z.array(commentSchema).safeParse(await response.json())
       if (!parsed.success) throw new Error("Shared comments could not be confirmed. Refresh to try again.")
       return parsed.data
@@ -121,14 +127,14 @@ function IssueCard({ issue, detail, base, userId }: { issue: Issue; detail: bool
     <h2 className="font-medium">{!detail && issue.can_read ? <Link className="hover:underline" href={`/issues/${encodeURIComponent(issue.identifier)}`}>{issue.title}</Link> : issue.title}</h2>
     {detail && <p className="whitespace-pre-wrap text-sm">{issue.description || "No description."}</p>}
     {!detail && !issue.can_read && <p className="text-xs text-muted-foreground">Ask your administrator for project read access to open details.</p>}
-    {detail && issue.can_contribute && ["BACKLOG", "TODO"].includes(issue.status) && <div className="flex gap-2"><Button variant="outline" disabled={status.isPending} onClick={() => status.mutate(issue.status === "BACKLOG" ? "TODO" : "BACKLOG")}>{issue.status === "BACKLOG" ? "Move to To do" : "Move to Backlog"}</Button>{status.isError && <p role="alert" className="text-sm">{status.error.message}</p>}</div>}
+    {detail && issue.can_contribute && ["BACKLOG", "TODO"].includes(issue.status) && <div className="flex gap-2"><Button variant="outline" disabled={status.isPending || mutationsDisabled} onClick={() => status.mutate(issue.status === "BACKLOG" ? "TODO" : "BACKLOG")}>{issue.status === "BACKLOG" ? "Move to To do" : "Move to Backlog"}</Button>{status.isError && <p role="alert" className="text-sm">{status.error.message}</p>}</div>}
     {detail && <section className="space-y-3 border-t pt-3" aria-label="Shared comments"><h3 className="text-sm font-medium">Shared comments</h3>
       {comments.isPending && <p role="status">Loading shared comments…</p>}
-      {comments.isError && <p role="alert" className="text-sm">{comments.error.message}</p>}
-      {!comments.isError && comments.data?.map(comment => <div key={comment.id} className="rounded border p-3"><p className="text-xs text-muted-foreground">{comment.author}</p><p className="whitespace-pre-wrap text-sm">{comment.body}</p></div>)}
+      {comments.isError && <div><p role="alert" className="text-sm">{comments.error.message}</p><Button variant="outline" onClick={() => void comments.refetch()}>Retry comments</Button></div>}
+      {(!comments.isError || !accessLost(comments.error)) && comments.data?.map(comment => <div key={comment.id} className="rounded border p-3"><p className="text-xs text-muted-foreground">{comment.author}</p><p className="whitespace-pre-wrap text-sm">{comment.body}</p></div>)}
       {!comments.isError && comments.data?.length === 100 && <p className="text-xs text-muted-foreground">Showing the latest 100 shared comments.</p>}
       {!comments.isError && comments.data?.length === 0 && <p className="text-sm text-muted-foreground">No comments have been shared with this project.</p>}
-      {issue.can_contribute && <form className="space-y-2" onSubmit={event => { event.preventDefault(); if (draft.trim() && !send.isPending && !audienceChanged) send.mutate() }}><label htmlFor={commentId} className="text-sm">Comment shared with this project</label><Textarea id={commentId} value={draft} maxLength={32768} disabled={send.isPending} onChange={event => { if (!draft) setAudience({ id: issue.project_id, name: issue.project_name }); setDraft(event.target.value) }} required />{audienceChanged && <div role="alert" className="text-sm"><p>The project changed. Your draft was written for {audience?.name}. Review the new audience before posting.</p><Button type="button" variant="outline" onClick={() => setAudience({ id: issue.project_id, name: issue.project_name })}>Share this draft with {issue.project_name}</Button></div>}<Button type="submit" disabled={!draft.trim() || send.isPending || audienceChanged}>{send.isPending ? "Posting…" : "Post comment"}</Button>{send.isError && <p role="alert" className="text-sm">{send.error.message}</p>}</form>}
+      {issue.can_contribute && <form className="space-y-2" onSubmit={event => { event.preventDefault(); if (draft.trim() && !send.isPending && !audienceChanged && !mutationsDisabled && !comments.isError) send.mutate() }}><label htmlFor={commentId} className="text-sm">Comment shared with this project</label><Textarea id={commentId} value={draft} maxLength={32768} disabled={send.isPending} onChange={event => { if (!draft) setAudience({ id: issue.project_id, name: issue.project_name }); setDraft(event.target.value) }} required />{audienceChanged && <div role="alert" className="text-sm"><p>The project changed. Your draft was written for {audience?.name}. Review the new audience before posting.</p><Button type="button" variant="outline" onClick={() => setAudience({ id: issue.project_id, name: issue.project_name })}>Share this draft with {issue.project_name}</Button></div>}<Button type="submit" disabled={!draft.trim() || send.isPending || audienceChanged || mutationsDisabled || comments.isError}>{send.isPending ? "Posting…" : "Post comment"}</Button>{send.isError && <p role="alert" className="text-sm">{send.error.message}</p>}</form>}
     </section>}
   </article>
 }

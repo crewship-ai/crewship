@@ -379,6 +379,7 @@ func (r *Router) restrictedIssueProjects(w http.ResponseWriter, req *http.Reques
 		if err = rows.Scan(&item.ID, &item.Name, &item.CanContribute, &item.IntakeReady); err != nil {
 			break
 		}
+		item.CanContribute = item.CanContribute && canScope(req.Context(), "workspace:admin")
 		items = append(items, item)
 	}
 	rowErr := rows.Err()

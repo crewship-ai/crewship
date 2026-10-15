@@ -101,3 +101,31 @@ it("keeps a Guest draft with its original audience after a project move", async 
   expect(input).toHaveValue("Client one draft")
   expect(screen.getByRole("alert")).toHaveTextContent("project changed")
 })
+
+it("preserves a comment draft through a transient issue refresh failure", async () => {
+  let failed=false
+  fetchMock.mockImplementation(async (path:string)=>path.endsWith("/comments")?response([]):failed?response({},503):response({...row,can_contribute:true}))
+  const {client}=show("CLIENT-1")
+  const input=await screen.findByLabelText("Comment shared with this project")
+  fireEvent.change(input,{target:{value:"Keep this draft after polling"}})
+  failed=true
+  await act(async()=>{await client.invalidateQueries({queryKey:["restricted-issues"]})})
+  await screen.findByText(/current view and drafts are kept/)
+  expect(input).toHaveValue("Keep this draft after polling")
+  expect(screen.getByRole("button",{name:"Post comment"})).toBeDisabled()
+  failed=false
+  await act(async()=>{await client.invalidateQueries({queryKey:["restricted-issues"]})})
+  await waitFor(()=>expect(screen.getByRole("button",{name:"Post comment"})).toBeEnabled())
+  expect(input).toHaveValue("Keep this draft after polling")
+})
+
+it("hides a shared detail and thread when background refresh refuses access", async () => {
+  let refused=false
+  fetchMock.mockImplementation(async(path:string)=>refused?response({},403):response(path.endsWith("/comments")?[{id:"c",body:"OLD_THREAD_CANARY",author:"You",created_at:"2026-10-15T00:00:00Z"}]:{...row,can_contribute:true}))
+  const {client}=show("CLIENT-1")
+  await screen.findByText("OLD_THREAD_CANARY")
+  refused=true
+  await act(async()=>{await client.invalidateQueries({queryKey:["restricted-issues"]})})
+  await waitFor(()=>expect(screen.queryByText("OLD_THREAD_CANARY")).toBeNull())
+  expect(screen.queryByLabelText("Comment shared with this project")).toBeNull()
+})

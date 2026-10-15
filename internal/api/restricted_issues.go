@@ -92,6 +92,7 @@ func (r *Router) restrictedIssues(w http.ResponseWriter, req *http.Request) {
 		if description.Valid {
 			item.Description = &description.String
 		}
+		item.CanContribute = item.CanContribute && canScope(req.Context(), "workspace:admin")
 		items = append(items, item)
 	}
 	rowErr := rows.Err()

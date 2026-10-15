@@ -173,6 +173,15 @@ func TestGuestIssueContributeIsProjectScopedAndAudited(t *testing.T) {
 	if err = db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE mission_id=? AND entry_type='mission.comment'`, issue.ID).Scan(&projected); err != nil || projected != 4 {
 		t.Fatalf("missing/duplicate recovered journal %d %v", projected, err)
 	}
+	// Explicit mutation scopes narrow action hints and still gate writes.
+	execOrFatal(t, db, `UPDATE cli_tokens SET scopes='["agents:write"]' WHERE id='clt-contributor'`)
+	readonly := call("contributor", "GET", path, "", 200)
+	if !strings.Contains(readonly.Body.String(), `"can_contribute":false`) {
+		t.Fatal("Token without workspace mutation scope offered contribution", readonly.Body.String())
+	}
+	call("contributor", "GET", path+"/comments", "", 200)
+	call("contributor", "POST", path+"/comments", `{"project_id":"client-project","body":"Narrow token cannot contribute"}`, 403)
+	execOrFatal(t, db, `UPDATE cli_tokens SET scopes=NULL WHERE id='clt-contributor'`)
 	// Audit/outbox insertion is part of both comment transactions.
 	execOrFatal(t, db, `CREATE TRIGGER deny_guest_comment_audit BEFORE INSERT ON issue_mutation_outbox WHEN NEW.kind='journal' BEGIN SELECT RAISE(ABORT,'synthetic audit failure'); END`)
 	call("contributor", "POST", path+"/comments", `{"project_id":"client-project","body":"MUST_ROLL_BACK_COMMENT"}`, 500)
