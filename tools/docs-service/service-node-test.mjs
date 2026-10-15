@@ -13,52 +13,83 @@ function call(socket, path, data, headers = {}) {
     req.on('error', reject); req.end(data === undefined ? undefined : JSON.stringify(data));
   });
 }
-test('Unix service authenticates, validates and only acknowledges durable receipt', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'docs-service-')); const socket = join(dir, 'service.sock'); const authoritySocket = join(dir, 'authority.sock'); const tokenFile = join(dir, 'secret');
-  await writeFile(tokenFile, secret, { mode: 0o600 });
-  const doc = create(initialJSON()); let state = { schema: 1, rev: 1, epoch: 3, snapshot: snapshot(doc), updates: [] }; doc.destroy();
-  let rejectCommit = false; let commits = 0; let receipt;
+const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+async function fixture(handler, options = {}) {
+  const dir = await mkdtemp(join(tmpdir(), 'docs-service-'));
+  const paths = { socket: join(dir, 's'), authoritySocket: join(dir, 'a'), tokenFile: join(dir, 't') };
+  await writeFile(paths.tokenFile, secret, { mode: 0o600 });
   const authority = http.createServer(async (req, res) => {
-    if (req.method === 'GET' && req.url === '/health/ready') return res.end(JSON.stringify({ protocol: 1, schema: 1 }));
-    assert.equal(req.headers['x-crewship-docs-service'], secret); assert.equal(req.headers.authorization, 'Bearer human');
-    const chunks = []; for await (const c of req) chunks.push(c); const data = JSON.parse(Buffer.concat(chunks).toString());
-    const op = req.url.split('/').at(-1); let value = {};
-    if (op === 'state') value = state;
-    if (op === 'lease') { state = { ...state, epoch: state.epoch + 1 }; value = { token: 'lease', epoch: state.epoch }; }
-    if (op === 'receipt') value = receipt?.fingerprint === data.fingerprint ? { found: true, rev: receipt.rev } : { found: false };
-    if (op === 'commit') {
-      if (rejectCommit) { res.writeHead(403); return res.end(JSON.stringify({ error: 'revoked' })); }
-      assert.equal(data.epoch, state.epoch); assert.equal(data.leaseOwner.length, 36); assert.ok(data.update); commits++;
-      state = { ...state, rev: state.rev + 1, snapshot: data.snapshot }; receipt = { ...data, rev: state.rev }; value = { rev: state.rev, epoch: state.epoch };
-    }
-    res.end(JSON.stringify(value));
+    try {
+      assert.equal(req.headers['x-crewship-docs-service'], secret);
+      const chunks = []; for await (const chunk of req) chunks.push(chunk);
+      const data = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {};
+      const value = await handler(req.url.split('/').at(-1), data, req, res);
+      if (!res.writableEnded) res.end(JSON.stringify(value ?? {}));
+    } catch (error) { res.writeHead(500); res.end(JSON.stringify({ error: error.message })); }
   });
-  await new Promise(resolve => authority.listen(authoritySocket, resolve));
-  const service = await startService({ socket, authoritySocket, tokenFile, idleMs: 10 });
+  await new Promise(resolve => authority.listen(paths.authoritySocket, resolve));
+  let service;
+  return { ...paths, authority, async start() { service = await startService({ ...paths, ...options }); return service; },
+    async close() { if (service) await service.close(); await new Promise(resolve => authority.close(resolve)); await rm(dir, { recursive: true }); } };
+}
+function initialState() {
+  const doc = create(initialJSON()); const state = { schema: 2, rev: 1, epoch: 3, generation: 0, incarnation: 'go-boot', snapshot: snapshot(doc), updates: [] }; doc.destroy(); return state;
+}
+function authorityModel() {
+  const model = { state: initialState(), receipts: new Map(), seen: [], boots: new Set(), recoveries: 0, acquisitions: 0, releases: 0, commits: 0, checkpoints: 0, restores: 0, compatible: true, rejectCommit: false, revoked: new Set() };
+  model.handle = async (op, data, req, res) => {
+    model.seen.push({ op, data, bearer: req.headers.authorization });
+    if (op === 'recover') { assert.equal(typeof data.boot, 'string'); if (!model.boots.has(data.boot)) { model.boots.add(data.boot); model.recoveries++; model.state.generation++; model.state.epoch++; } return { recovered: true }; }
+    if (op === 'ready') return { protocol: model.compatible ? 1 : 99, schema: 2 };
+    assert.ok(req.headers.authorization?.startsWith('Bearer '));
+    if (model.revoked.has(req.headers.authorization)) { res.writeHead(403); return { error: 'revoked principal' }; }
+    if (op === 'state') return model.state;
+    if (op === 'receipt') { const receipt = model.receipts.get(data.id); return receipt && receipt.fingerprint === data.fingerprint ? { ...receipt, found: true } : { found: false }; }
+    if (op === 'lease') { model.acquisitions++; model.state.epoch++; return { token: `lease-${model.acquisitions}`, epoch: model.state.epoch, generation: model.state.generation, expiresAt: new Date(Date.now() + 30000).toISOString() }; }
+    if (op === 'renew') { assert.equal(data.epoch, model.state.epoch); return { expiresAt: new Date(Date.now() + 30000).toISOString() }; }
+    if (op === 'release') { model.releases++; return { released: true }; }
+    if (op === 'checkpoint-read') return { schema: model.state.schema, snapshot: model.state.snapshot };
+    if (op === 'commit') {
+      if (model.rejectCommit) { res.writeHead(403); return { error: 'revoked' }; }
+      assert.equal(data.epoch, model.state.epoch); assert.equal(data.generation, model.state.generation);
+      assert.equal(data.leaseOwner.length, 36); assert.ok(data.update); model.commits++;
+      model.state = { ...model.state, schema: data.schema, rev: model.state.rev + 1, snapshot: data.snapshot };
+    } else if (op === 'checkpoint') model.checkpoints++;
+    else if (op === 'restore') { model.restores++; model.state = { ...model.state, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1 }; }
+    const receipt = { id: data.id, rev: model.state.rev, epoch: model.state.epoch, fingerprint: data.fingerprint };
+    model.receipts.set(data.id, receipt); return receipt;
+  };
+  return model;
+}
+const read = (f, headers) => call(f.socket, '/v1/documents/p/read', {}, headers);
+function patchRequest(state, id, text = 'durable') {
+  return { id, schema: 2, epoch: state.epoch, target: 'intro', text, ifRev: state.rev, ifHash: state.outline.find(b => b.id === 'intro').hash };
+}
+test('Unix service validates transport and acknowledges only durable receipts', async () => {
+  const model = authorityModel(), f = await fixture(model.handle); await f.start();
   try {
-    assert.equal((await stat(socket)).mode & 0o777, 0o600);
-    assert.equal((await call(socket, '/health/ready')).body.protocol, 1);
-    assert.equal((await call(socket, '/health/live', undefined, { 'X-Crewship-Docs-Service': 'bad' })).status, 403);
-    const initial = await call(socket, '/v1/documents/page/read', {}); const block = initial.body.outline.find(b => b.id === 'intro');
-    const patch = { id: 'one', schema: 1, epoch: 3, target: 'intro', text: 'durable', ifRev: 1, ifHash: block.hash };
-    rejectCommit = true; assert.equal((await call(socket, '/v1/documents/page/patch', patch)).status, 403); assert.equal(state.rev, 1);
-    patch.epoch = state.epoch; rejectCommit = false; assert.equal((await call(socket, '/v1/documents/page/patch', patch)).body.rev, 2);
-    assert.equal((await call(socket, '/v1/documents/page/patch', patch)).body.duplicate, true); assert.equal(commits, 1);
-    assert.equal((await call(socket, '/drain', {})).status, 200);
-    assert.equal((await call(socket, '/health/ready')).status, 503);
-    assert.equal((await call(socket, '/v1/documents/page/read', {})).status, 503);
-  } finally { await service.close(); await new Promise(resolve => authority.close(resolve)); await rm(dir, { recursive: true }); }
+    assert.equal((await stat(f.socket)).mode & 0o777, 0o600);
+    assert.equal((await call(f.socket, '/health/ready')).body.schema, 2);
+    assert.equal((await call(f.socket, '/health/live', undefined, { 'X-Crewship-Docs-Service': 'bad' })).status, 403);
+    const state = (await read(f)).body; assert.equal(typeof state.epoch, 'string');
+    const request = patchRequest(state, 'one');
+    model.rejectCommit = true; assert.equal((await call(f.socket, '/v1/documents/p/patch', request)).status, 403); assert.equal(model.state.rev, 1);
+    model.rejectCommit = false; assert.equal((await call(f.socket, '/v1/documents/p/patch', request)).body.rev, 2);
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', request)).body.duplicate, true); assert.equal(model.commits, 1);
+    assert.equal(model.acquisitions, 1, 'lease acquisition is independent of public sync epoch');
+    assert.equal((await call(f.socket, '/drain', {})).status, 200); assert.equal(model.releases, 1);
+    assert.equal((await call(f.socket, '/health/ready')).status, 503);
+    assert.equal((await read(f)).status, 503);
+  } finally { await f.close(); }
 });
-test('initialization bootstraps through owner authority without state or lease', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'docs-bootstrap-')); const socket = join(dir, 's'); const authoritySocket = join(dir, 'a'); const tokenFile = join(dir, 't'); await writeFile(tokenFile, secret, { mode: 0o600 });
-  const seen = [];
-  const authority = http.createServer(async (req, res) => { const chunks = []; for await (const c of req) chunks.push(c); const data = JSON.parse(Buffer.concat(chunks).toString()); seen.push(req.url); if (req.url.endsWith('/receipt')) { res.writeHead(404); return res.end(JSON.stringify({error:'not found'})); } assert.equal(data.schema, 1); assert.ok(data.snapshot); res.end(JSON.stringify({ rev: 1, epoch: 1 })); });
-  await new Promise(resolve => authority.listen(authoritySocket, resolve));
-  const service = await startService({ socket, authoritySocket, tokenFile });
-  try {
-    const response = await call(socket, '/v1/documents/new/initialize', { id: 'init', schema: 1, body: initialJSON() });
-    assert.equal(response.status, 200); assert.deepEqual(seen, ['/internal/docs/v1/new/receipt', '/internal/docs/v1/new/initialize']);
-  } finally { await service.close(); await new Promise(resolve => authority.close(resolve)); await rm(dir, { recursive: true }); }
+test('initialization bootstraps without document state or lease', async () => {
+  const seen = []; const f = await fixture((op, data, req, res) => {
+    seen.push(op); if (op === 'recover') return { recovered: true };
+    if (op === 'receipt') { res.writeHead(404); return { error: 'not found' }; }
+    assert.equal(op, 'initialize'); assert.equal(data.schema, 2); assert.ok(data.snapshot); return { rev: 1, epoch: 0 };
+  }); await f.start();
+  try { assert.equal((await call(f.socket, '/v1/documents/new/initialize', { id: 'init', schema: 2, body: initialJSON() })).status, 200); assert.deepEqual(seen, ['recover', 'receipt', 'initialize']); }
+  finally { await f.close(); }
 });
 test('startup rejects unsafe secrets and noncanonical socket paths', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'docs-config-')); const tokenFile = join(dir, 'secret');
@@ -68,71 +99,142 @@ test('startup rejects unsafe secrets and noncanonical socket paths', async () =>
     await assert.rejects(startService({ socket: 'relative.sock', authoritySocket: join(dir, 'a'), tokenFile }), /absolute Unix/);
     await assert.rejects(startService({ socket: dir + '/sub/../s', authoritySocket: join(dir, 'a'), tokenFile }), /absolute Unix/);
     await chmod(tokenFile, 0o600); await writeFile(tokenFile, 'x'.repeat(513));
-    await assert.rejects(startService({ socket: join(dir,'s'), authoritySocket: join(dir,'a'), tokenFile }), /512 bytes/);
-    await writeFile(tokenFile, 'x'.repeat(257));
-    await assert.rejects(startService({ socket: join(dir,'s'), authoritySocket: join(dir,'a'), tokenFile }), /32..256/);
-    const link=join(dir,'link'); await symlink(tokenFile,link);
-    await assert.rejects(startService({ socket: join(dir,'s'), authoritySocket: join(dir,'a'), tokenFile:link }), /regular mode-0600/);
-    await assert.rejects(startService({ socket: tokenFile, authoritySocket: join(dir,'a'), tokenFile }), /distinct/);
+    await assert.rejects(startService({ socket: join(dir, 's'), authoritySocket: join(dir, 'a'), tokenFile }), /512 bytes/);
+    await writeFile(tokenFile, 'x'.repeat(257)); await assert.rejects(startService({ socket: join(dir, 's'), authoritySocket: join(dir, 'a'), tokenFile }), /32..256/);
+    const link = join(dir, 'link'); await symlink(tokenFile, link);
+    await assert.rejects(startService({ socket: join(dir, 's'), authoritySocket: join(dir, 'a'), tokenFile: link }), /regular mode-0600/);
+    await assert.rejects(startService({ socket: tokenFile, authoritySocket: join(dir, 'a'), tokenFile }), /distinct/);
   } finally { await rm(dir, { recursive: true }); }
 });
-test('checkpoint and restore retries return original durable receipt; authority readiness is live', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'docs-retry-')); const socket = join(dir,'s'); const authoritySocket = join(dir,'a'); const tokenFile = join(dir,'t'); await writeFile(tokenFile,secret,{mode:0o600});
-  const doc = create(initialJSON()); let state = {schema:1,rev:1,epoch:1,snapshot:snapshot(doc)}; doc.destroy();
-  const receipts = new Map(); let checkpoints = 0; let restores = 0; let compatible = true;
-  const authority = http.createServer(async (req,res) => {
-    if (req.method==='GET') return res.end(JSON.stringify({protocol:compatible?1:99,schema:1}));
-    const chunks=[];for await(const c of req) chunks.push(c);const data=JSON.parse(Buffer.concat(chunks).toString());const op=req.url.split('/').at(-1);let value={};
-    if(op==='state') value=state;
-    if(op==='receipt') value=receipts.has(data.id)?{...receipts.get(data.id),found:true}:{found:false};
-    if(op==='lease'){state={...state,epoch:state.epoch+1};value={token:'lease',epoch:state.epoch};}
-    if(op==='checkpoint-read')value={schema:1,snapshot:state.snapshot};
-    if(op==='checkpoint'){assert.equal(data.epoch,state.epoch);checkpoints++;value={id:data.id,rev:state.rev,epoch:state.epoch};receipts.set(data.id,value);}
-    if(op==='restore'){assert.equal(data.epoch,state.epoch);assert.equal(data.checkpoint,'cp');restores++;state={...state,rev:state.rev+1,epoch:state.epoch+1};value={id:data.id,rev:state.rev,epoch:state.epoch};receipts.set(data.id,value);}
-    res.end(JSON.stringify(value));
-  });await new Promise(resolve=>authority.listen(authoritySocket,resolve));const service=await startService({socket,authoritySocket,tokenFile});
+test('checkpoint and restore retry receipts survive generation changes; readiness checks live authority', async () => {
+  const model = authorityModel(), f = await fixture(model.handle); await f.start();
   try {
-    const cp={id:'cp',schema:1,epoch:1,ifRev:1};assert.equal((await call(socket,'/v1/documents/p/checkpoint',cp)).status,200);assert.equal((await call(socket,'/v1/documents/p/checkpoint',cp)).body.duplicate,true);
-    const restore={id:'restore',schema:1,epoch:state.epoch,ifRev:1,checkpoint:'cp'};assert.equal((await call(socket,'/v1/documents/p/restore',restore)).status,200);assert.equal((await call(socket,'/v1/documents/p/restore',restore)).body.duplicate,true);assert.equal(checkpoints,1);assert.equal(restores,1);
-    compatible=false;assert.equal((await call(socket,'/health/ready')).status,503);compatible=true;assert.equal((await call(socket,'/health/ready')).status,200);
-    await new Promise(resolve=>authority.close(resolve));assert.equal((await call(socket,'/health/ready')).status,503);
-  }finally{await service.close();await new Promise(resolve=>authority.close(resolve));await rm(dir,{recursive:true});}
+    const state = (await read(f)).body;
+    const cp = { id: 'cp', schema: 2, epoch: state.epoch, ifRev: state.rev };
+    assert.equal((await call(f.socket, '/v1/documents/p/checkpoint', cp)).status, 200);
+    assert.equal((await call(f.socket, '/v1/documents/p/checkpoint', cp)).body.duplicate, true);
+    const restore = { id: 'restore', schema: 2, epoch: state.epoch, ifRev: state.rev, checkpoint: 'cp' };
+    const restored = await call(f.socket, '/v1/documents/p/restore', restore); assert.equal(restored.status, 200); assert.notEqual(restored.body.epoch, state.epoch);
+    assert.equal((await call(f.socket, '/v1/documents/p/restore', restore)).body.duplicate, true);
+    assert.equal(model.checkpoints, 1); assert.equal(model.restores, 1);
+    model.compatible = false; assert.equal((await call(f.socket, '/health/ready')).status, 503);
+    model.compatible = true; assert.equal((await call(f.socket, '/health/ready')).status, 200);
+    await new Promise(resolve => f.authority.close(resolve)); assert.equal((await call(f.socket, '/health/ready')).status, 503);
+  } finally { await f.close(); }
+});
+test('blocked persistence bounds document queue and drain waits for all failed acknowledgements', async () => {
+  const blocked = deferred(), started = deferred(); let calls = 0;
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'recover') return { recovered: true };
+    if (op === 'ready') return { protocol: 1, schema: 2 };
+    calls++; started.resolve(); await blocked.promise; res.writeHead(503); return { error: 'controlled persistence failure' };
+  }); await f.start(); const pending = [];
+  try {
+    pending.push(read(f)); await started.promise;
+    for (let i = 1; i < 32; i++) pending.push(read(f));
+    assert.equal((await read(f)).status, 429); assert.equal(calls, 1);
+    assert.equal((await call(f.socket, '/health/ready')).status, 200);
+    let drained = false; const draining = call(f.socket, '/drain', {}).then(result => { drained = true; return result; });
+    assert.equal((await call(f.socket, '/health/ready')).status, 503); assert.equal((await read(f)).status, 503); assert.equal(drained, false);
+    blocked.resolve(); assert.ok((await Promise.all(pending)).every(result => result.status === 503));
+    assert.equal((await draining).status, 200); assert.equal(calls, 32);
+  } finally { blocked.resolve(); await Promise.allSettled(pending); await f.close(); }
+});
+test('duplicate socket bind cannot recover or fence the existing engine', async () => {
+  const model = authorityModel(), f = await fixture(model.handle); await f.start();
+  try {
+    const before = (await read(f)).body;
+    await assert.rejects(startService({ socket: f.socket, authoritySocket: f.authoritySocket, tokenFile: f.tokenFile }), /already exists/);
+    assert.equal(model.recoveries, 1); assert.equal((await read(f)).body.epoch, before.epoch);
+  } finally { await f.close(); }
+});
+test('recovery gates all admission and failure closes its socket; a fresh boot can retry', async () => {
+  const entered = deferred(), proceed = deferred(); let reject = true, boots = [];
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'recover') { boots.push(data.boot); entered.resolve(); await proceed.promise; if (reject) { res.writeHead(503); return { error: 'recovery failed' }; } return { recovered: true }; }
+    assert.fail('recovery must gate document authority calls');
+  });
+  const starting = f.start(); const rejected = assert.rejects(starting, /recovery failed/);
+  try {
+    await entered.promise;
+    assert.equal((await call(f.socket, '/health/ready')).status, 503);
+    assert.equal((await read(f)).status, 503);
+    proceed.resolve(); await rejected;
+    await assert.rejects(stat(f.socket), { code: 'ENOENT' });
+    reject = false; await f.start(); assert.equal(boots.length, 2); assert.notEqual(boots[0], boots[1]);
+  } finally { proceed.resolve(); await f.close(); }
+});
+test('cached writer lease rechecks each principal and releases on idle and drain', async () => {
+  const model = authorityModel(), f = await fixture(model.handle, { idleMs: 500 }); await f.start();
+  try {
+    const alice = { Authorization: 'Bearer alice' }, bob = { Authorization: 'Bearer bob' };
+    let state = (await read(f, alice)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'alice'), alice)).status, 200);
+    state = (await read(f, bob)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'bob'), bob)).status, 200);
+    assert.equal(model.acquisitions, 1);
+    assert.deepEqual(model.seen.filter(x => x.op === 'renew').map(x => x.bearer), ['Bearer alice', 'Bearer bob']);
+    model.revoked.add('Bearer bob');
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'revoked'), bob)).status, 403);
+    model.revoked.delete('Bearer bob');
+    for (let i = 0; i < 200 && model.releases === 0; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(model.releases, 1); assert.equal(model.seen.filter(x => x.op === 'release')[0].bearer, 'Bearer bob');
+    state = (await read(f, alice)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'after-idle'), alice)).status, 200);
+    assert.equal(model.acquisitions, 2);
+    await call(f.socket, '/drain', {}); assert.equal(model.releases, 2);
+  } finally { await f.close(); }
+});
+test('public epoch changes on either authority incarnation or engine boot even when generation rewinds', async () => {
+  const model = authorityModel(), f = await fixture(model.handle); let service = await f.start();
+  try {
+    const old = (await read(f)).body;
+    model.state.incarnation = 'restored-go-boot'; model.state.generation = 1;
+    const restored = (await read(f)).body;
+    assert.notEqual(restored.epoch, old.epoch);
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(old, 'stale'))).status, 409);
+    await service.close(); service = await f.start();
+    const rebooted = (await read(f)).body;
+    assert.notEqual(rebooted.epoch, restored.epoch);
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(restored, 'stale-node'))).status, 409);
+  } finally { await f.close(); }
 });
 
-test('blocked persistence bounds per-document queue and drain waits for failed acknowledgements', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'docs-backpressure-'));
-  const socket = join(dir, 's'), authoritySocket = join(dir, 'a'), tokenFile = join(dir, 't');
-  await writeFile(tokenFile, secret, { mode: 0o600 });
-  let unblock; const blocked = new Promise(resolve => { unblock = resolve; });
-  let entered; const started = new Promise(resolve => { entered = resolve; });
-  let calls = 0;
-  const authority = http.createServer(async (req, res) => {
-    for await (const chunk of req) void chunk;
-    if (req.method === 'GET') return res.end(JSON.stringify({ protocol: 1, schema: 1 }));
-    calls++; entered(); await blocked;
-    res.writeHead(503); res.end(JSON.stringify({ error: 'controlled persistence failure' }));
-  });
-  await new Promise(resolve => authority.listen(authoritySocket, resolve));
-  const service = await startService({ socket, authoritySocket, tokenFile });
-  const pending = [];
+test('slow incomplete bodies consume bounded admission while health remains responsive', { timeout: 10000 }, async () => {
+  const model = authorityModel(), f = await fixture(model.handle); await f.start();
+  const held = [];
   try {
-    pending.push(call(socket, '/v1/documents/p/read', {})); await started;
-    // Each admission completes body parsing before reaching the bounded queue.
-    for (let i = 1; i < 32; i++) pending.push(call(socket, '/v1/documents/p/read', {}));
-    // Socket ordering on one endpoint ensures this request follows those above.
-    assert.equal((await call(socket, '/v1/documents/p/read', {})).status, 429);
-    assert.equal(calls, 1, 'same-key operations must serialize behind blocked persistence');
-    assert.equal((await call(socket, '/health/ready')).status, 200);
-    let drained = false; const draining = call(socket, '/drain', {}).then(result => { drained = true; return result; });
-    assert.equal((await call(socket, '/health/ready')).status, 503);
-    assert.equal((await call(socket, '/v1/documents/other/read', {})).status, 503);
-    assert.equal(drained, false, 'drain must wait for outstanding authority acknowledgements');
-    unblock();
-    assert.ok((await Promise.all(pending)).every(result => result.status === 503));
-    assert.equal((await draining).status, 200);
-    assert.equal(calls, 32, 'failed acknowledgement must not poison subsequent queue operations');
-  } finally {
-    unblock(); await Promise.allSettled(pending); await service.close();
-    await new Promise(resolve => authority.close(resolve)); await rm(dir, { recursive: true });
-  }
+    for (let i = 0; i < 128; i++) {
+      const req = http.request({ socketPath: f.socket, path: '/v1/documents/p/read', method: 'POST', headers: {
+        'X-Crewship-Docs-Service': secret, 'X-Workspace-ID': 'workspace', Authorization: 'Bearer human',
+        'Content-Type': 'application/json', 'Content-Length': 10,
+      } });
+      req.on('error', () => {}); req.on('response', response => response.resume()); held.push(req);
+      await new Promise((resolve, reject) => { req.once('error', reject); req.write('{', error => error ? reject(error) : resolve()); });
+      // An independent health round trip lets each incomplete document request
+      // enter its body reader before the next connection is introduced.
+      assert.equal((await call(f.socket, '/health/ready')).status, 200);
+    }
+    assert.equal((await read(f)).status, 429);
+    assert.equal((await call(f.socket, '/health/live')).status, 200);
+    assert.equal(model.seen.filter(event => event.op === 'state').length, 0, 'partial bodies must not reach authority');
+    for (const req of held) req.destroy();
+    let recovered;
+    for (let i = 0; i < 100; i++) {
+      recovered = await read(f);
+      if (recovered.status === 200) break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(recovered.status, 200, 'disconnect must release admission slots');
+    const partial = http.request({ socketPath: f.socket, path: '/v1/documents/p/read', method: 'POST', headers: {
+      'X-Crewship-Docs-Service': secret, 'X-Workspace-ID': 'workspace', Authorization: 'Bearer human', 'Content-Length': 10,
+    } });
+    partial.on('error', () => {}); held.push(partial);
+    const closed = new Promise(resolve => partial.once('close', resolve));
+    await new Promise(resolve => partial.write('{', resolve));
+    assert.equal((await call(f.socket, '/health/ready')).status, 200);
+    assert.equal((await call(f.socket, '/drain', {})).status, 200);
+    await closed;
+    assert.equal((await read(f)).status, 503, 'drain must terminate partial-body admission');
+  } finally { for (const req of held) req.destroy(); await f.close(); }
 });

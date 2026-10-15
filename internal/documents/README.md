@@ -1,6 +1,6 @@
 # Document persistence boundary
 
-The trusted document service validates schema-1 Yjs snapshots, updates, and
+The trusted document service validates supported Yjs snapshots, updates, and
 ordered block projections before calling `Store`. Go treats binary state as
 opaque; it never attempts a CRDT merge. The service must keep Yjs garbage
 collection disabled so pinned checkpoint state remains restorable.
@@ -34,3 +34,10 @@ Default limits: 1 MiB current snapshot plus projection, 256 KiB replay log,
 16 MiB pinned checkpoint payloads per document, 10,000 initialization/commit/checkpoint/restore audit
 records per document, and 128 documents per database. `Stats` reports logical
 payload retention, excluding SQLite page allocation and WAL overhead.
+
+The editor generation is separate from writer lease epochs. Go-authority and
+Node-process identities additionally prevent a rolled-back physical backup from
+reusing an old public editor epoch. Service recovery fences all writer tokens
+only after Node owns its configured private listener; a bounded boot ID makes
+an uncertain recovery retry idempotent. All externally admitted document
+mutations pass the expected generation into the writer transaction.

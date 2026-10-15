@@ -314,6 +314,8 @@ var BackupTables = []string{
 	"document_updates",
 	"document_receipts",
 	"document_checkpoints",
+	"document_comments",
+	"document_requests",
 	"page_panels",     // FK page_id → pages; FK owner_crew_id → crews
 	"page_panel_data", // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
 	"page_versions",   // FK page_id → pages
@@ -495,7 +497,7 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 		return "workspace_id = ?", []any{workspaceID}, true
 	case "page_board_source_history", "page_board_write_audit", "page_board_files", "page_board_elements", "page_board_mutations", "page_board_artifact_placements":
 		return "board_page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "page_board_comment_history", "page_artifact_comment_history", "page_board_threads", "page_board_comment_mutations", "page_boards", "page_artifact_mutation_receipts", "page_artifact_requests", "page_artifact_creations", "page_artifact_threads", "page_artifact_comment_mutations", "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
+	case "document_requests", "page_board_comment_history", "page_artifact_comment_history", "page_board_threads", "page_board_comment_mutations", "page_boards", "page_artifact_mutation_receipts", "page_artifact_requests", "page_artifact_creations", "page_artifact_threads", "page_artifact_comment_mutations", "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
 		// Scope through the owning page, never the nullable (or cross-workspace) editor.
 		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "page_artifact_request_updates":
@@ -694,6 +696,15 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			}
 			if hasUpdates {
 				where = "(" + where + `) OR id IN (SELECT u.on_behalf_of_user_id FROM page_artifact_request_updates u JOIN page_artifact_requests q ON q.id=u.request_id JOIN pages p ON p.id=q.page_id WHERE p.workspace_id=? AND u.on_behalf_of_user_id IS NOT NULL)`
+				args = append(args, workspaceID)
+			}
+			// Document request attribution can also outlive membership.
+			hasDocumentRequests, err := tableExists(ctx, tx, "document_requests")
+			if err != nil {
+				return nil, fmt.Errorf("backup: probe document request attribution: %w", err)
+			}
+			if hasDocumentRequests {
+				where = "(" + where + `) OR id IN (SELECT q.human_user_id FROM document_requests q JOIN pages p ON p.id=q.page_id WHERE p.workspace_id=?)`
 				args = append(args, workspaceID)
 			}
 			where, args, err = includeDiscussionUsers(ctx, tx, workspaceID, where, args)
@@ -1278,7 +1289,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				return stats, err
 			}
 			if table == "documents" {
-				if _, err := tx.ExecContext(ctx, `UPDATE documents SET epoch=MAX(epoch+1,?),writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?`, row["epoch"], row["workspace_id"], row["page_id"]); err != nil {
+				if _, err := tx.ExecContext(ctx, `UPDATE documents SET epoch=MAX(epoch+1,?),generation=generation+1,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?`, row["epoch"], row["workspace_id"], row["page_id"]); err != nil {
 					return stats, fmt.Errorf("backup: fence existing document writer: %w", err)
 				}
 			}

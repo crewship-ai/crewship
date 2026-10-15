@@ -62,6 +62,9 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	documentsServiceSocket string
+	documentsServiceSecret string
+	documentsClient        *http.Client
 	documentsSocket        string
 	documentsSecretFile    string
 	documentsStop          func(context.Context) error
@@ -947,6 +950,7 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 			r.Shutdown()
 			return nil, fmt.Errorf("Docs service credential: %w", err)
 		}
+		r.documentsServiceSecret = secret
 		handler, err := r.DocumentAuthority(context.Background(), secret)
 		if err != nil {
 			r.Shutdown()
@@ -1003,6 +1007,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // reference to the DB handle or the Docker client.
 
 func (r *Router) Shutdown() {
+	if r.documentsClient != nil {
+		r.documentsClient.CloseIdleConnections()
+	}
 	r.documentsStopOnce.Do(func() {
 		if r.documentsStop != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

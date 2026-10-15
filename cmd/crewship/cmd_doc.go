@@ -1,0 +1,146 @@
+package main
+
+// GET /api/v1/pages/{slug}/document doc read, doc outline
+// POST /api/v1/pages/{slug}/document/patch doc patch
+// POST /api/v1/pages/{slug}/document/checkpoint doc checkpoint
+// POST /api/v1/pages/{slug}/document/restore doc restore
+// GET /api/v1/pages/{slug}/document/export doc export
+// POST /api/v1/pages/{slug}/document/requests doc request
+// GET /api/v1/documents/status doc status
+// POST /api/v1/pages/{slug}/document/initialize doc initialize
+// GET /api/v1/pages/{slug}/document/checkpoints doc checkpoints
+// GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint} doc checkpoint-read
+// GET /api/v1/pages/{slug}/document/comments doc comments
+// POST /api/v1/pages/{slug}/document/comments doc comment
+// POST /api/v1/pages/{slug}/document/comments/resolve doc comment-resolve
+// GET /api/v1/pages/{slug}/document/requests doc request-list
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+
+	"github.com/spf13/cobra"
+)
+
+func newDocCommand() *cobra.Command {
+	root := &cobra.Command{Use: "doc", Short: "Read and edit saved Page documents with semantic preconditions"}
+	for _, operation := range []string{"read", "outline", "patch", "checkpoint", "restore", "export", "request", "status", "initialize", "checkpoints", "checkpoint-read", "comments", "comment", "comment-resolve", "request-list"} {
+		operation := operation
+		cmd := &cobra.Command{Use: operation + " <page-slug>", Short: "Document " + operation, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := pageClient()
+			if err != nil {
+				return err
+			}
+			path := "/api/v1/documents/status"
+			if operation != "status" {
+				path = "/api/v1/pages/" + pagePathEscape(args[0]) + "/document"
+			}
+			var response *http.Response
+			switch operation {
+			case "read", "outline":
+				response, err = client.Get(path)
+			case "status":
+				response, err = client.Get(path)
+			case "checkpoints", "comments":
+				response, err = client.Get(path + "/" + operation)
+			case "checkpoint-read":
+				response, err = client.Get(path + "/checkpoints/" + pagePathEscape(args[1]))
+			case "request-list":
+				response, err = client.Get(path + "/requests")
+			case "export":
+				response, err = client.Get(path + "/export")
+			default:
+				filename, _ := cmd.Flags().GetString("file")
+				if filename == "" {
+					return fmt.Errorf("--file is required; use - for stdin")
+				}
+				var reader io.Reader = cmd.InOrStdin()
+				if filename != "-" {
+					file, openErr := os.Open(filename)
+					if openErr != nil {
+						return openErr
+					}
+					defer file.Close()
+					reader = file
+				}
+				data, readErr := io.ReadAll(io.LimitReader(reader, (2<<20)+1))
+				if readErr != nil {
+					return readErr
+				}
+				if len(data) > 2<<20 {
+					return fmt.Errorf("document request exceeds 2 MiB")
+				}
+				var body map[string]json.RawMessage
+				decoder := json.NewDecoder(bytes.NewReader(data))
+				if err := decoder.Decode(&body); err != nil || body == nil {
+					return fmt.Errorf("--file must contain one JSON object")
+				}
+				if decoder.Decode(new(any)) != io.EOF {
+					return fmt.Errorf("--file must contain one JSON object")
+				}
+				suffix := operation
+				if operation == "request" {
+					suffix = "requests"
+				}
+				if operation == "comment" {
+					suffix = "comments"
+				}
+				if operation == "comment-resolve" {
+					suffix = "comments/resolve"
+				}
+				response, err = client.Post(path+"/"+suffix, body)
+			}
+			if err != nil {
+				return err
+			}
+			if operation == "export" {
+				defer response.Body.Close()
+				if err := pageCheckError(response); err != nil {
+					return err
+				}
+				_, err := io.Copy(cmd.OutOrStdout(), io.LimitReader(response.Body, 4<<20))
+				return err
+			}
+			if operation != "outline" {
+				return printPageArtifactResponse(cmd, response)
+			}
+			defer response.Body.Close()
+			if err := pageCheckError(response); err != nil {
+				return err
+			}
+			var state struct {
+				Outline json.RawMessage `json:"outline"`
+			}
+			if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&state); err != nil {
+				return err
+			}
+			if len(state.Outline) == 0 {
+				return fmt.Errorf("server response has no document outline")
+			}
+			var outline any
+			if err := json.Unmarshal(state.Outline, &outline); err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(outline)
+		}}
+		if operation == "status" {
+			cmd.Use = "status"
+			cmd.Args = cobra.NoArgs
+		}
+		if operation == "checkpoint-read" {
+			cmd.Use = "checkpoint-read <page-slug> <checkpoint-id>"
+			cmd.Args = cobra.ExactArgs(2)
+		}
+		if operation == "patch" || operation == "checkpoint" || operation == "restore" || operation == "request" || operation == "initialize" || operation == "comment" || operation == "comment-resolve" {
+			cmd.Flags().String("file", "", "JSON request file; - reads stdin. Preserve operation IDs when retrying an exact request")
+		}
+		root.AddCommand(cmd)
+	}
+	return root
+}
+
+func init() { rootCmd.AddCommand(newDocCommand()) }

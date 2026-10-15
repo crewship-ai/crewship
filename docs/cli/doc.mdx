@@ -1,0 +1,118 @@
+---
+title: "Document Commands"
+description: "Read and revise collaborative Page documents, retain checkpoints, and request agent work."
+icon: "file-text"
+---
+
+# crewship doc
+
+Work with opt-in collaborative Docs on an existing human-owned Page. The current
+CLI profile supplies the workspace and exact human bearer. Page ACLs apply;
+scoped tokens need `pages:read` for reads and `pages:write` for mutations.
+`pages:*` grants both. These commands do not mint agent authority.
+
+Mutation JSON uses schema `2`, a stable unique `id`, and (except initialize) the
+opaque `epoch` returned by a fresh read. A transport retry reuses the exact ID
+and payload. A conflict requires rereading and human review; the CLI does not
+silently rebase. JSON input is one object, at most 2 MiB. See the
+[API contracts](/api-reference/documents) for every field.
+
+## crewship doc status
+
+`crewship doc status` checks `GET /api/v1/documents/status`. The `enabled` response
+reports server configuration; it does not certify a container image or model.
+
+## crewship doc read
+
+`crewship doc read report` reads `GET /api/v1/pages/{slug}/document`: confirmed
+revision, opaque epoch, binary snapshot/replay, JSON content, semantic outline
+and current permission flags.
+
+## crewship doc outline
+
+`crewship doc outline report` calls the same read endpoint and prints only its
+outline: actual block IDs, parents, types, text and hashes.
+
+## crewship doc initialize
+
+`crewship doc initialize report --file initialize.json` calls
+`POST /api/v1/pages/{slug}/document/initialize`. `--file` names a JSON file;
+`--file -` reads stdin. Body: `{id,schema:2,body:<schema-valid document tree>}`.
+Only an empty Page owned by the authenticated human may attach a Doc.
+
+## crewship doc patch
+
+`crewship doc patch report --file patch.json` calls
+`POST /api/v1/pages/{slug}/document/patch`. `--file` names a JSON file;
+`--file -` reads stdin. Semantic body:
+`{id,schema:2,epoch,target,text,ifRev,ifHash}`. Use the block ID/hash and revision
+from the outline. Raw editor updates use `{id,schema:2,epoch,kind:"human",update}`;
+agents cannot submit raw CRDT updates.
+
+## crewship doc checkpoint
+
+`crewship doc checkpoint report --file checkpoint.json` calls
+`POST /api/v1/pages/{slug}/document/checkpoint`. `--file` names a JSON file;
+`--file -` reads stdin. Body: `{id,schema:2,epoch,ifRev}`. Success pins a complete,
+confirmed state; it does not infer success from local editor content.
+
+## crewship doc checkpoints
+
+`crewship doc checkpoints report` calls
+`GET /api/v1/pages/{slug}/document/checkpoints` and lists up to 1000 retained checkpoints.
+
+## crewship doc checkpoint-read
+
+`crewship doc checkpoint-read report checkpoint-id` calls
+`GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}` to inspect the pinned
+content and outline without replacing the live document.
+
+## crewship doc restore
+
+`crewship doc restore report --file restore.json` calls
+`POST /api/v1/pages/{slug}/document/restore`. `--file` names a JSON file;
+`--file -` reads stdin. Body: `{id,schema:2,epoch,ifRev,checkpoint}`. Restore advances
+history generation, fences stale tabs and keeps the same Page and grants.
+
+## crewship doc export
+
+`crewship doc export report > report.md` calls
+`GET /api/v1/pages/{slug}/document/export` and writes Markdown of confirmed
+content. This command emits text rather than the usual JSON response envelope.
+
+## crewship doc comments
+
+`crewship doc comments report` calls
+`GET /api/v1/pages/{slug}/document/comments`. Anchor status is `attached`,
+`collapsed`, `detached` or `resolved`; detached text is never silently reattached.
+
+## crewship doc comment
+
+`crewship doc comment report --file comment.json` calls
+`POST /api/v1/pages/{slug}/document/comments`. `--file` names a JSON file;
+`--file -` reads stdin. Body:
+`{id,schema:2,epoch,ifRev,block,from,to,text}`. Offsets select text within one
+paragraph or heading. A comment does not dispatch an agent.
+
+## crewship doc comment-resolve
+
+`crewship doc comment-resolve report --file resolve.json` calls
+`POST /api/v1/pages/{slug}/document/comments/resolve`. `--file` names a JSON file;
+`--file -` reads stdin. Body:
+`{id,schema:2,epoch,ifRev,comment,version,resolved}`. `resolved:false` reopens the
+same comment; resolution requires current Page write access.
+
+## crewship doc request
+
+`crewship doc request report --file request.json` calls
+`POST /api/v1/pages/{slug}/document/requests`. `--file` names a JSON file;
+`--file -` reads stdin. Body: `{chat_id,instruction,base_rev,submission_id}`.
+The selected private chat must belong to this human, and its agent needs an
+explicit Page write grant. A `202` response means queued work, not completion.
+Success requires the admitted agent's durable semantic patch and checkpoint.
+
+## crewship doc request-list
+
+`crewship doc request-list report` calls
+`GET /api/v1/pages/{slug}/document/requests` for current request/result cards and
+eligible private agent chats. Results stay on the same Page.

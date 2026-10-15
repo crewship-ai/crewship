@@ -18,16 +18,18 @@ const socket = join(dir, 'service.sock');
 const authoritySocket = join(dir, 'authority.sock');
 const tokenFile = join(dir, 'token');
 const doc = create(initialJSON());
-const state = { schema: 1, rev: 1, epoch: 1, snapshot: snapshot(doc), updates: [] };
+const state = { schema: 2, rev: 1, epoch: 1, generation: 0, incarnation: 'image-smoke-go', snapshot: snapshot(doc), updates: [] };
 doc.destroy();
 let available = true;
 const authority = http.createServer(async (req, res) => {
   assert.equal(req.headers['x-crewship-docs-service'], secret);
   for await (const chunk of req) void chunk;
+  if (req.url.endsWith('/recover')) { state.generation++; state.epoch++; return res.end(JSON.stringify({ recovered: true })); }
   if (!available) { res.writeHead(503); return res.end(JSON.stringify({ error: 'controlled unavailable authority' })); }
-  if (req.method === 'GET') return res.end(JSON.stringify({ protocol: 1, schema: 1 }));
+  if (req.method === 'GET') return res.end(JSON.stringify({ protocol: 1, schema: 2 }));
   assert.equal(req.headers.authorization, 'Bearer smoke');
   assert.equal(req.headers['x-workspace-id'], 'smoke');
+  if (req.url.endsWith('/receipt')) return res.end(JSON.stringify({ found: false }));
   assert.ok(req.url.endsWith('/state'));
   res.end(JSON.stringify(state));
 });
@@ -57,7 +59,8 @@ try {
     '-e', 'CREWSHIP_DOCS_SERVICE_TOKEN_FILE=/run/docs/token', image);
   await waitReady();
   assert.equal((await stat(socket)).mode & 0o777, 0o600);
-  assert.equal((await call('/v1/documents/p/read', {})).body.rev, 1);
+  const original = (await call('/v1/documents/p/read', {})).body;
+  assert.equal(original.rev, 1); assert.equal(typeof original.epoch, 'string');
   await promisify(execFile)('docker', ['exec', name, 'node', 'healthcheck.mjs']);
   available = false; assert.equal((await call('/health/ready')).status, 503);
   available = true; assert.equal((await call('/health/ready')).status, 200);
@@ -67,7 +70,9 @@ try {
   docker('stop', '--time', '35', name);
   assert.equal(docker('inspect', '--format', '{{.State.ExitCode}}', name), '0');
   docker('start', name); await waitReady();
-  assert.equal((await call('/v1/documents/p/read', {})).body.rev, 1);
+  const rebooted = (await call('/v1/documents/p/read', {})).body;
+  assert.equal(rebooted.rev, 1); assert.notEqual(rebooted.epoch, original.epoch);
+  assert.equal((await call('/v1/documents/p/patch', { id: 'stale-boot', schema: 2, epoch: original.epoch })).status, 409);
   console.log(JSON.stringify({ image: docker('inspect', '--format', '{{.Image}}', name), socketMode: '0600', readinessFailure: true, drain: true, gracefulRestart: true, authority: 'controlled fixture, not Go persistence' }));
 } finally {
   try { docker('rm', '-f', name); } catch { /* absent after failed creation */ }

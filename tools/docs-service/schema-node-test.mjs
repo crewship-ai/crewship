@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
-import { create, load, snapshot, validate, project, initialJSON, outline, textNode, anchor, resolve, find } from './schema.mjs';
+import { create, load, snapshot, validate, project, initialJSON, outline, textNode, anchor, resolve, find, markdown } from './schema.mjs';
 test('binary reload and compaction preserve IDs, hashes and relative identities', async () => {
   const doc = create(), thread = anchor(doc, 'intro', 0, 8, 'thread', 1);
   const before = await outline(doc), restored = load(snapshot(doc));
@@ -19,7 +19,7 @@ test('validation rejects unknown content, duplicate IDs and opaque roots', () =>
   const duplicate = initialJSON(); duplicate.content[1].attrs.id = 'title'; assert.throws(() => create(duplicate), /duplicate block ID/);
   const unknown = initialJSON(); unknown.content.push({ type: 'unknown' }); assert.throws(() => create(unknown), /unsupported node/);
   const wrong = initialJSON(); wrong.content[1].content = [{ type: 'table', attrs: { id: 'nested' } }]; assert.throws(() => create(wrong));
-  const heading = initialJSON(); heading.content[0].attrs.level = 2; assert.throws(() => create(heading), /heading level/);
+  const heading = initialJSON(); heading.content[0].attrs.level = 4; assert.throws(() => create(heading), /heading level/);
   const doc = create(); doc.getMap('opaque').set('payload', 'hidden'); assert.throws(() => validate(doc), /unsupported Yjs root/); doc.destroy();
   const raw = create(); raw.getXmlFragment('default').insert(0, [new Y.XmlElement('unknown')]); assert.throws(() => validate(raw), /unsupported node/); raw.destroy();
 });
@@ -86,4 +86,37 @@ test('retained supported text and deleted blocks preserve IDs and anchors', () =
   const original = create(); const old = find(original, 'intro'); old.setAttribute('id', 'historic-id'); old.setAttribute('id', 'intro');
   const renamed = load(snapshot(original)); assert.doesNotThrow(() => validate(renamed));
   for (const d of [doc, restored, original, renamed]) d.destroy();
+});
+
+test('schema two round trips nested lists and heading levels without changing stable IDs', async () => {
+  const json = initialJSON(); json.content[0].attrs.level = 2;
+  const paragraph = (id, text) => ({ type: 'paragraph', attrs: { id }, content: [{ type: 'text', text }] });
+  json.content.push({ type: 'orderedList', attrs: { id: 'ordered', start: 3 }, content: [
+    { type: 'listItem', attrs: { id: 'item' }, content: [paragraph('item-text', 'First'),
+      { type: 'bulletList', attrs: { id: 'nested' }, content: [{ type: 'listItem', attrs: { id: 'nested-item' }, content: [paragraph('nested-text', 'Nested')] }] },
+    ] },
+  ] });
+  const doc = create(json), reloaded = load(snapshot(doc));
+  try {
+    assert.deepEqual(project(reloaded), project(doc));
+    assert.deepEqual(await outline(reloaded), await outline(doc));
+    assert.equal((await outline(reloaded)).find(block => block.id === 'nested-text').parent, 'nested-item');
+    const invalid = structuredClone(json); invalid.content.at(-1).attrs.start = 0;
+    assert.throws(() => create(invalid), /ordered list start/);
+  } finally { doc.destroy(); reloaded.destroy(); }
+});
+
+
+test('Markdown export preserves list numbering and simple tables while escaping inline syntax', () => {
+  const json = initialJSON();
+  json.content = [
+    { type: 'orderedList', attrs: { id: 'export-list', start: 3 }, content: [
+      { type: 'listItem', attrs: { id: 'export-item' }, content: [{ type: 'paragraph', attrs: { id: 'export-text' }, content: [{ type: 'text', text: 'literal [link](x) *star*' }] }] },
+    ] },
+    json.content[2],
+  ];
+  const exported = markdown(json);
+  assert.ok(exported.startsWith('3. literal \\[link\\](x) \\*star\\*'));
+  assert.ok(exported.includes('| A | B |\n| --- | --- |'));
+  assert.ok(exported.endsWith('\n'));
 });

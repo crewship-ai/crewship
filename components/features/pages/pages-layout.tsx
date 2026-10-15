@@ -361,7 +361,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               Import
             </SubBarSecondary>}
             {canCreatePage && <SubBarSecondary icon={FilePlus2} onClick={() => canCreatePage && setCreatingArtifact(true)}>
-              New artifact
+              New Doc or artifact
             </SubBarSecondary>}
             {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page

@@ -44,22 +44,24 @@ type Lease struct {
 	Owner, Writer string
 	Epoch         int64
 	ExpiresAt     time.Time
+	Generation    int64
 }
 type Update struct {
 	Rev     int64
 	Payload []byte
 }
 type State struct {
-	Schema                      int
-	HeadRev, Epoch, SnapshotRev int64
-	Snapshot                    []byte
-	Projection                  json.RawMessage
-	Updates                     []Update
+	Schema                                  int
+	HeadRev, Epoch, SnapshotRev, Generation int64
+	Snapshot                                []byte
+	Projection                              json.RawMessage
+	Updates                                 []Update
 }
 type Commit struct {
 	Lease                     Lease
 	ID, Fingerprint           string
 	IfRev                     int64
+	IfGeneration              *int64
 	Schema                    int
 	Update, CandidateSnapshot []byte
 	Projection                json.RawMessage
@@ -128,7 +130,7 @@ func (s *Store) tx(ctx context.Context, k Key, a Authorize, fn func(*sql.Tx, str
 	return t.Commit()
 }
 func state(ctx context.Context, t *sql.Tx, k Key) (v State, e error) {
-	e = t.QueryRowContext(ctx, "SELECT schema_version,head_rev,epoch,snapshot_rev,snapshot,projection FROM documents WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection)
+	e = t.QueryRowContext(ctx, "SELECT schema_version,head_rev,epoch,snapshot_rev,snapshot,projection,generation FROM documents WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection, &v.Generation)
 	if errors.Is(e, sql.ErrNoRows) {
 		e = ErrNotFound
 	}
@@ -168,7 +170,7 @@ func (s *Store) Read(ctx context.Context, k Key, a Authorize) (v State, e error)
 	return
 }
 func (s *Store) valid(schema int, snap []byte, p json.RawMessage) error {
-	if schema != 1 {
+	if schema != 1 && schema != 2 {
 		return ErrSchema
 	}
 	if len(snap) == 0 || !json.Valid(p) {
@@ -210,6 +212,11 @@ func (s *Store) InitRequest(ctx context.Context, k Key, id, fingerprint string, 
 			return lookupErr
 		}
 
+		if _, err := state(ctx, t, k); err == nil {
+			return ErrConflict
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
 		if err := s.valid(schema, snap, p); err != nil {
 			return err
 		}
@@ -246,7 +253,7 @@ func (s *Store) Acquire(ctx context.Context, k Key, owner string, a Authorize) (
 		if err != nil {
 			return err
 		}
-		if v.Schema != 1 {
+		if v.Schema != 1 && v.Schema != 2 {
 			return ErrSchema
 		}
 		var writer string
@@ -261,7 +268,7 @@ func (s *Store) Acquire(ctx context.Context, k Key, owner string, a Authorize) (
 		if err != nil {
 			return err
 		}
-		l = Lease{owner, w, v.Epoch + 1, time.Now().Add(s.opts.LeaseDuration)}
+		l = Lease{owner, w, v.Epoch + 1, time.Now().Add(s.opts.LeaseDuration), v.Generation}
 		_, err = t.ExecContext(ctx, "UPDATE documents SET epoch=?,writer=?,owner=?,lease_until=? WHERE workspace_id=? AND page_id=?", l.Epoch, l.Writer, l.Owner, l.ExpiresAt.UnixMilli(), k.WorkspaceID, k.PageID)
 		return err
 	})
@@ -290,10 +297,11 @@ func (s *Store) Renew(ctx context.Context, k Key, l Lease, a Authorize) (out Lea
 		if err != nil {
 			return err
 		}
-		if v.Schema != 1 {
+		if v.Schema != 1 && v.Schema != 2 {
 			return ErrSchema
 		}
 		out = l
+		out.Generation = v.Generation
 		out.ExpiresAt = time.Now().Add(s.opts.LeaseDuration)
 		_, err = t.ExecContext(ctx, "UPDATE documents SET lease_until=? WHERE workspace_id=? AND page_id=?", out.ExpiresAt.UnixMilli(), k.WorkspaceID, k.PageID)
 		return err
@@ -313,7 +321,7 @@ func (s *Store) Release(ctx context.Context, k Key, l Lease, a Authorize) error 
 // InvalidateLeases is a boot-only service operation; it fences every previous
 // process without resurrecting a token from snapshots or checkpoints.
 func (s *Store) InvalidateLeases(ctx context.Context) error {
-	_, e := s.db.ExecContext(ctx, "UPDATE documents SET epoch=epoch+1,writer='',owner='',lease_until=0")
+	_, e := s.db.ExecContext(ctx, "UPDATE documents SET epoch=epoch+1,generation=generation+1,writer='',owner='',lease_until=0")
 	return e
 }
 func digest(c Commit) (string, error) { // Include every semantic payload and precondition; never trust client digest alone.
@@ -384,10 +392,10 @@ func (s *Store) Commit(ctx context.Context, k Key, c Commit, a Authorize) (r Rec
 		if err != nil {
 			return err
 		}
-		if c.IfRev != v.HeadRev {
+		if c.IfRev != v.HeadRev || (c.IfGeneration != nil && *c.IfGeneration != v.Generation) {
 			return ErrConflict
 		}
-		if v.Schema != 1 || c.Schema != v.Schema {
+		if (v.Schema != 1 && v.Schema != 2) || c.Schema < v.Schema {
 			return ErrSchema
 		}
 		if err = s.valid(c.Schema, c.CandidateSnapshot, c.Projection); err != nil {
@@ -427,7 +435,7 @@ func (s *Store) Commit(ctx context.Context, k Key, c Commit, a Authorize) (r Rec
 				return err
 			}
 		}
-		_, err = t.ExecContext(ctx, "UPDATE documents SET head_rev=?,projection=? WHERE workspace_id=? AND page_id=?", r.Rev, []byte(c.Projection), k.WorkspaceID, k.PageID)
+		_, err = t.ExecContext(ctx, "UPDATE documents SET head_rev=?,projection=?,schema_version=? WHERE workspace_id=? AND page_id=?", r.Rev, []byte(c.Projection), c.Schema, k.WorkspaceID, k.PageID)
 		return err
 	})
 	return
@@ -437,7 +445,10 @@ func (s *Store) Checkpoint(ctx context.Context, k Key, l Lease, id string, snaps
 }
 
 // CheckpointRequest retains the original semantic fingerprint for service retries.
-func (s *Store) CheckpointRequest(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, a Authorize) (c Checkpoint, e error) {
+func (s *Store) CheckpointRequest(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, a Authorize) (Checkpoint, error) {
+	return s.CheckpointRequestAtGeneration(ctx, k, l, id, fingerprint, snapshot, ifRev, nil, a)
+}
+func (s *Store) CheckpointRequestAtGeneration(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, generation *int64, a Authorize) (c Checkpoint, e error) {
 	e = s.tx(ctx, k, a, func(t *sql.Tx, actor string) error {
 		if id == "" || len(id) > 256 || len(fingerprint) > 256 {
 			return errors.New("checkpoint id required")
@@ -485,7 +496,7 @@ func (s *Store) CheckpointRequest(ctx context.Context, k Key, l Lease, id, finge
 		if err != nil {
 			return err
 		}
-		if v.HeadRev != ifRev {
+		if v.HeadRev != ifRev || (generation != nil && *generation != v.Generation) {
 			return ErrConflict
 		}
 		if err = s.valid(v.Schema, snapshot, v.Projection); err != nil {
@@ -527,7 +538,10 @@ func (s *Store) Restore(ctx context.Context, k Key, l Lease, id string, ifRev in
 func (s *Store) RestoreRequest(ctx context.Context, k Key, l Lease, id, requestID string, ifRev int64, a Authorize) (Receipt, error) {
 	return s.RestoreRequestWithFingerprint(ctx, k, l, id, requestID, "internal-restore", ifRev, a)
 }
-func (s *Store) RestoreRequestWithFingerprint(ctx context.Context, k Key, l Lease, id, requestID, fingerprint string, ifRev int64, a Authorize) (r Receipt, e error) {
+func (s *Store) RestoreRequestWithFingerprint(ctx context.Context, k Key, l Lease, id, requestID, fingerprint string, ifRev int64, a Authorize) (Receipt, error) {
+	return s.RestoreRequestWithFingerprintAtGeneration(ctx, k, l, id, requestID, fingerprint, ifRev, nil, a)
+}
+func (s *Store) RestoreRequestWithFingerprintAtGeneration(ctx context.Context, k Key, l Lease, id, requestID, fingerprint string, ifRev int64, generation *int64, a Authorize) (r Receipt, e error) {
 	e = s.tx(ctx, k, a, func(t *sql.Tx, actor string) error {
 		if requestID == "" || len(requestID) > 256 || len(id) > 256 || len(fingerprint) > 256 {
 			return errors.New("restore request id required")
@@ -556,10 +570,10 @@ func (s *Store) RestoreRequestWithFingerprint(ctx context.Context, k Key, l Leas
 		if err != nil {
 			return err
 		}
-		if v.HeadRev != ifRev {
+		if v.HeadRev != ifRev || (generation != nil && *generation != v.Generation) {
 			return ErrConflict
 		}
-		if v.Schema != 1 {
+		if v.Schema != 1 && v.Schema != 2 {
 			return ErrSchema
 		}
 		var c Checkpoint
@@ -580,7 +594,7 @@ func (s *Store) RestoreRequestWithFingerprint(ctx context.Context, k Key, l Leas
 			return ErrQuota
 		}
 		r = Receipt{requestID, v.HeadRev + 1, v.Epoch + 1, actor, "restore"}
-		if _, err = t.ExecContext(ctx, "UPDATE documents SET head_rev=?,epoch=?,schema_version=?,snapshot=?,snapshot_rev=?,projection=?,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?", r.Rev, r.Epoch, c.Schema, c.Snapshot, r.Rev, []byte(c.Projection), k.WorkspaceID, k.PageID); err != nil {
+		if _, err = t.ExecContext(ctx, "UPDATE documents SET head_rev=?,epoch=?,generation=generation+1,schema_version=?,snapshot=?,snapshot_rev=?,projection=?,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?", r.Rev, r.Epoch, c.Schema, c.Snapshot, r.Rev, []byte(c.Projection), k.WorkspaceID, k.PageID); err != nil {
 			return err
 		}
 		if _, err = t.ExecContext(ctx, "DELETE FROM document_updates WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID); err != nil {

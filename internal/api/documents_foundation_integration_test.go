@@ -162,6 +162,7 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 			t.Fatal(e)
 		}
 		documentsWaitSocket(t, nodeSocket)
+		documentsWaitReady(t, nodeSocket, secret)
 	}
 	startGo()
 	startNode()
@@ -200,16 +201,35 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 	}
 	content := map[string]any{"type": "doc", "content": []any{map[string]any{"type": "paragraph", "attrs": map[string]any{"id": "intro"}, "content": []any{map[string]any{"type": "text", "text": "initial"}}}}}
 	for _, p := range []string{page, second} {
-		init := map[string]any{"id": "init-" + p, "schema": 1, "body": content}
-		call(p, "initialize", human, init, 200)
-		if call(p, "initialize", human, init, 200)["duplicate"] != true {
+		init := map[string]any{"id": "init-" + p, "schema": 2, "body": content}
+		initialized := call(p, "initialize", human, init, 200)
+		for _, field := range []string{"schema", "rev", "epoch", "generation", "incarnation", "snapshot", "snapshotRev", "updates", "blocks"} {
+			if _, ok := initialized[field]; !ok {
+				t.Fatalf("actual first initialize missing state field %s: %v", field, initialized)
+			}
+		}
+		for _, field := range []string{"id", "actor", "kind"} {
+			if _, ok := initialized[field]; ok {
+				t.Fatalf("actual first initialize unexpectedly contains receipt field %s", field)
+			}
+		}
+		if _, numeric := initialized["epoch"].(float64); !numeric {
+			t.Fatalf("actual first initialize epoch is not numeric: %T", initialized["epoch"])
+		}
+		retry := call(p, "initialize", human, init, 200)
+		for _, field := range []string{"id", "rev", "epoch", "actor", "kind", "found", "duplicate"} {
+			if _, ok := retry[field]; !ok {
+				t.Fatalf("actual initialize retry missing receipt field %s", field)
+			}
+		}
+		if retry["duplicate"] != true {
 			t.Fatal("initialize retry not deduplicated")
 		}
 	}
 	read := func(p, token string) map[string]any { return call(p, "read", token, map[string]any{}, 200) }
 	state := read(page, agent)
 	block := state["outline"].([]any)[0].(map[string]any)
-	patch := map[string]any{"id": "confirmed-agent", "schema": 1, "epoch": state["epoch"], "target": "intro", "text": "confirmed across crashes", "ifRev": state["rev"], "ifHash": block["hash"]}
+	patch := map[string]any{"id": "confirmed-agent", "schema": 2, "epoch": state["epoch"], "target": "intro", "text": "confirmed across crashes", "ifRev": state["rev"], "ifHash": block["hash"]}
 	commitStarted := time.Now()
 	ack := call(page, "patch", agent, patch, 200)
 	commitDuration := time.Since(commitStarted)
@@ -223,7 +243,7 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 	// An independent document proceeds through the same managed process.
 	s2 := read(second, human)
 	b2 := s2["outline"].([]any)[0].(map[string]any)
-	call(second, "patch", human, map[string]any{"id": "second-write", "schema": 1, "epoch": s2["epoch"], "target": "intro", "text": "independent", "ifRev": s2["rev"], "ifHash": b2["hash"]}, 200)
+	call(second, "patch", human, map[string]any{"id": "second-write", "schema": 2, "epoch": s2["epoch"], "target": "intro", "text": "independent", "ifRev": s2["rev"], "ifHash": b2["hash"]}, 200)
 	// Hold a real SQL writer for 50ms to measure bounded shared-file contention.
 	contentionState := read(second, human)
 	contentionBlock := contentionState["outline"].([]any)[0].(map[string]any)
@@ -238,24 +258,38 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 	released := make(chan struct{})
 	go func() { time.Sleep(50 * time.Millisecond); _ = held.Rollback(); close(released) }()
 	contentionStarted := time.Now()
-	call(second, "patch", human, map[string]any{"id": "contended-write", "schema": 1, "epoch": contentionState["epoch"], "target": "intro", "text": "independent after contention", "ifRev": contentionState["rev"], "ifHash": contentionBlock["hash"]}, 200)
+	call(second, "patch", human, map[string]any{"id": "contended-write", "schema": 2, "epoch": contentionState["epoch"], "target": "intro", "text": "independent after contention", "ifRev": contentionState["rev"], "ifHash": contentionBlock["hash"]}, 200)
 	contentionDuration := time.Since(contentionStarted)
 	<-released
+	beforeNodeRestart := read(page, agent)
 	kill(&nodeChild, nodeSocket)
 	startNode()
 	transport.CloseIdleConnections()
 	state = read(page, agent)
+	if state["epoch"] == beforeNodeRestart["epoch"] {
+		t.Fatal("Node restart reused the public synchronization epoch")
+	}
+	staleNode := map[string]any{"id": "unconfirmed-before-node-reboot", "schema": 2, "epoch": beforeNodeRestart["epoch"], "target": "intro", "text": "must not replay stale draft", "ifRev": beforeNodeRestart["rev"], "ifHash": beforeNodeRestart["outline"].([]any)[0].(map[string]any)["hash"]}
+	call(page, "patch", agent, staleNode, 409)
+	if call(page, "patch", agent, patch, 200)["duplicate"] != true {
+		t.Fatal("Node reboot lost confirmed original-request retry")
+	}
 	if !strings.Contains(string(mustDocumentsJSON(t, state["content"])), "confirmed across crashes") {
 		t.Fatal("Node restart lost confirmed content")
 	}
-	oldEpoch := state["epoch"].(float64)
+	oldEpoch := state["epoch"]
 	// Simulate an in-flight writer abandoned by abrupt Go process death.
 	execOrFatal(t, h.db, `UPDATE documents SET writer='abandoned-writer',owner='abandoned-process',lease_until=? WHERE workspace_id=? AND page_id=?`, time.Now().Add(time.Minute).UnixMilli(), workspace, page)
 	kill(&goChild, authoritySocket)
 	startGo()
 	state = read(page, agent)
-	if state["epoch"].(float64) <= oldEpoch {
+	if state["epoch"] == oldEpoch {
 		t.Fatal("Go restart failed to fence abandoned writer")
+	}
+	staleGo := map[string]any{"id": "unconfirmed-before-go-reboot", "schema": 2, "epoch": oldEpoch, "target": "intro", "text": "must not replay stale authority draft", "ifRev": state["rev"], "ifHash": state["outline"].([]any)[0].(map[string]any)["hash"]}
+	call(page, "patch", agent, staleGo, 409)
+	if call(page, "patch", agent, patch, 200)["duplicate"] != true {
+		t.Fatal("Go reboot lost confirmed original-request retry")
 	}
 	if state["rev"] != ack["rev"] {
 		t.Fatalf("Go restart lost revision: %v", state)
@@ -275,15 +309,15 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 	}
 	t.Logf("confirmed commit=%s snapshot=%dB replay=%d updates/%dB", commitDuration, snapshotBytes, updates, updateBytes)
 	call(page, "patch", human, map[string]any{"id": "future", "schema": 99, "epoch": state["epoch"]}, 409)
-	cp := map[string]any{"id": "checkpoint-one", "schema": 1, "epoch": state["epoch"], "ifRev": state["rev"]}
+	cp := map[string]any{"id": "checkpoint-one", "schema": 2, "epoch": state["epoch"], "ifRev": state["rev"]}
 	call(page, "checkpoint", human, cp, 200)
 	if call(page, "checkpoint", human, cp, 200)["duplicate"] != true {
 		t.Fatal("checkpoint retry not deduplicated")
 	}
-	changedCheckpoint := map[string]any{"id": "checkpoint-one", "schema": 1, "epoch": cp["epoch"], "ifRev": state["rev"].(float64) + 1}
+	changedCheckpoint := map[string]any{"id": "checkpoint-one", "schema": 2, "epoch": cp["epoch"], "ifRev": state["rev"].(float64) + 1}
 	call(page, "checkpoint", human, changedCheckpoint, 409)
 	state = read(page, human)
-	restore := map[string]any{"id": "restore-one", "schema": 1, "epoch": state["epoch"], "ifRev": state["rev"], "checkpoint": "checkpoint-one"}
+	restore := map[string]any{"id": "restore-one", "schema": 2, "epoch": state["epoch"], "ifRev": state["rev"], "checkpoint": "checkpoint-one"}
 	restored := call(page, "restore", human, restore, 200)
 	if restored["rev"] != state["rev"].(float64)+1 {
 		t.Fatal("restore did not advance exactly once")
@@ -335,7 +369,7 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 			representative = p.ID
 			body = map[string]any{"type": "doc", "content": paragraphs}
 		}
-		call(p.ID, "initialize", human, map[string]any{"id": "init-" + slug, "schema": 1, "body": body}, 200)
+		call(p.ID, "initialize", human, map[string]any{"id": "init-" + slug, "schema": 2, "body": body}, 200)
 	}
 	var initialSnapshotBytes int
 	if err = h.db.QueryRow(`SELECT length(snapshot) FROM documents WHERE workspace_id=? AND page_id=?`, workspace, representative).Scan(&initialSnapshotBytes); err != nil {
@@ -346,11 +380,11 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 		s := read(representative, human)
 		b := s["outline"].([]any)[0].(map[string]any)
 		started := time.Now()
-		call(representative, "patch", human, map[string]any{"id": fmt.Sprintf("history-%02d", i), "schema": 1, "epoch": s["epoch"], "target": "p000", "text": fmt.Sprintf("Edit %02d ", i) + strings.Repeat("Representative edited paragraph. ", 15), "ifRev": s["rev"], "ifHash": b["hash"]}, 200)
+		call(representative, "patch", human, map[string]any{"id": fmt.Sprintf("history-%02d", i), "schema": 2, "epoch": s["epoch"], "target": "p000", "text": fmt.Sprintf("Edit %02d ", i) + strings.Repeat("Representative edited paragraph. ", 15), "ifRev": s["rev"], "ifHash": b["hash"]}, 200)
 		latencies = append(latencies, float64(time.Since(started).Microseconds())/1000)
 	}
 	rs := read(representative, human)
-	call(representative, "checkpoint", human, map[string]any{"id": "representative-checkpoint", "schema": 1, "epoch": rs["epoch"], "ifRev": rs["rev"]}, 200)
+	call(representative, "checkpoint", human, map[string]any{"id": "representative-checkpoint", "schema": 2, "epoch": rs["epoch"], "ifRev": rs["rev"]}, 200)
 	var finalSnapshotBytes, finalProjectionBytes, representativeLogBytes, representativeLogCount, receiptBytes, receiptCount, checkpointBytes, checkpointCount, snapshotRev int
 	for _, q := range []struct {
 		sql  string
@@ -378,7 +412,7 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 			}
 		}
 	}
-	report := map[string]any{"protocol": 1, "schema": 1, "documents": 6, "representativeHistory": representativeReport, "commitMilliseconds": float64(commitDuration.Microseconds()) / 1000, "writerContentionMilliseconds": float64(contentionDuration.Microseconds()) / 1000, "simulatedWriterHoldMilliseconds": 50, "snapshotBytes": snapshotBytes, "replayUpdates": updates, "replayBytes": updateBytes, "nodeRSSKiB": nodeRSSKB, "nodeCrashRestart": true, "goCrashRestart": true, "durableReplay": true}
+	report := map[string]any{"protocol": 1, "schema": 2, "documents": 6, "representativeHistory": representativeReport, "commitMilliseconds": float64(commitDuration.Microseconds()) / 1000, "writerContentionMilliseconds": float64(contentionDuration.Microseconds()) / 1000, "simulatedWriterHoldMilliseconds": 50, "snapshotBytes": snapshotBytes, "replayUpdates": updates, "replayBytes": updateBytes, "nodeRSSKiB": nodeRSSKB, "nodeCrashRestart": true, "goCrashRestart": true, "durableReplay": true}
 	reportPath := os.Getenv("CREWSHIP_DOCS_FOUNDATION_OUTPUT")
 	if reportPath == "" {
 		reportPath = filepath.Join(t.TempDir(), "acceptance.json")
@@ -419,4 +453,32 @@ func mustDocumentsJSON(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// Listener custody precedes the engine recovery barrier; a bound pathname alone
+// is not evidence that this process can safely admit document operations.
+func documentsWaitReady(t *testing.T, socket, secret string) {
+	t.Helper()
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: time.Second}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://docs/health/ready", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Crewship-Docs-Service", secret)
+		if response, err := client.Do(req); err == nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("document engine did not acknowledge readiness after binding")
 }

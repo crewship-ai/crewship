@@ -165,7 +165,9 @@ type createTokenRequest struct {
 // The vocabulary is deliberately limited to scopes that actually gate a
 // route today (enforced by TestEveryMintableScopeMapsToARoute — every entry
 // here must be satisfiable against at least one recorded mutation route).
-// That is why there are no `<resource>:read` scopes and no `agents:run`:
+// Document pages:read is the explicit exception: its private authority
+// checks the token inside the read transaction. Other families have no read
+// scopes and there is no agents:run:
 // reads are not scope-gated in this pass (GET routes register outside the
 // mutation chokepoint), and the agent-invocation surface is currently
 // ownership-gated (scopeSelf) rather than resource-scoped. Offering those
@@ -174,6 +176,9 @@ type createTokenRequest struct {
 // lands and a route requires them — see scopeForRoute in rbac_routes.go.
 var knownScopes = map[string]struct{}{
 	"*":                 {},
+	"pages:read":        {},
+	"pages:write":       {},
+	"pages:*":           {},
 	"agents:*":          {},
 	"agents:write":      {},
 	"crews:*":           {},

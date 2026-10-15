@@ -338,6 +338,13 @@ POST /api/v1/pages/{slug}/artifact/restore roleSelf
 POST /api/v1/pages/{slug}/artifact/revisions roleSelf
 POST /api/v1/pages/{slug}/artifact/threads roleSelf
 POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies roleSelf
+POST /api/v1/pages/{slug}/document/checkpoint roleSelf
+POST /api/v1/pages/{slug}/document/comments roleSelf
+POST /api/v1/pages/{slug}/document/comments/resolve roleSelf
+POST /api/v1/pages/{slug}/document/initialize roleSelf
+POST /api/v1/pages/{slug}/document/patch roleSelf
+POST /api/v1/pages/{slug}/document/requests roleSelf
+POST /api/v1/pages/{slug}/document/restore roleSelf
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
 POST /api/v1/pages/{slug}/project/build roleSelf
 POST /api/v1/pages/{slug}/project/check roleSelf
