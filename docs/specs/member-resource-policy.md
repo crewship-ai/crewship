@@ -388,3 +388,29 @@ access loss clears the editor. The CLI reads the same JSON snapshot with
 `crewship routine shared-draft save ROUTINE --file draft.json` (or `--file -`).
 Read-only `can_edit` is removed before PUT; the CLI performs no hidden GET or
 conflict retry.
+
+### Publication review requests
+
+Editors may request review of a saved draft through
+`POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/reviews`.
+The body contains only draft ID/revision/base; current local Guest View+Edit,
+active account, live issuers and mutation scope remain required. The server
+binds content hashes and the actual human requester, enqueues the dedicated
+`routine_draft_review` kind and appends content-free audit in one transaction.
+The same pending snapshot is idempotent. A newer submitted revision atomically
+cancels earlier pending requests; a terminal snapshot requires a new saved
+revision. Requests expire after seven days.
+
+Latest and ID-scoped GET receipts disclose only the review/routine/draft IDs,
+revision/base, state and actual published version. They require current View
+and Edit; no requester, reviewer, private decision comment or document is
+projected. Latest absence is JSON null. Pending, denied, cancelled, expired and
+superseded receipts have version zero; only committed publication has a positive
+version. Generic Approve refuses this kind. Trusted review links bind exact
+draft ID/revision before structural testing; the existing publication gates,
+fresh publisher authority, executable write, queue decision and journal commit
+remain one transaction. An audit failure cannot report a successful publication.
+
+This optional collaboration workflow does not complete Routine Edit. Direct
+Guest publication with a constrained execution authority and result audiences
+remains required PRD work; request-only publication is not its substitute.

@@ -58,6 +58,7 @@ func newRoutineSharedDraftCommand() *cobra.Command {
 		return sharedRoutineDraftRequest(args[0], body)
 	}
 	command.AddCommand(save)
+	command.AddCommand(newRoutineDraftReviewCommand(), newRoutineDraftReviewStatusCommand())
 	return command
 }
 

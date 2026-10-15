@@ -81,6 +81,14 @@ describe("scheduleImpact", () => {
 })
 
 describe("<RoutinePublishDialog>", () => {
+  it("refuses a changed revision from an approval link before testing or publishing it", async () => {
+    mockServer()
+    render(<RoutinePublishDialog open expectedDraft="drf_1:1" onOpenChange={() => {}} workspaceId="ws" routine={routine} onPublished={() => {}} onDiscarded={() => {}} />)
+    await screen.findByText("The requested draft revision has changed. Open the latest publication request to review it.")
+    expect(h.fetcher.mock.calls).toHaveLength(1)
+    expect(h.fetcher.mock.calls[0][0]).toContain("/invoice-intake/draft")
+  })
+
   it("shows the title, the changes, the check and the impact, then publishes with the draft's id and revision", async () => {
     mockServer()
     h.schedules = [

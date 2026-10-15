@@ -18,6 +18,7 @@ import { KindBadge } from "./kind-badge"
 import { formatDateTime } from "@/lib/time"
 import { decideApproval } from "@/hooks/use-approvals"
 import type { ApprovalRow } from "@/lib/types/approvals"
+import { routineDraftReviewLink } from "@/lib/routine-draft-review-link"
 
 interface ApprovalDetailProps {
   row: ApprovalRow | null
@@ -62,6 +63,8 @@ export function ApprovalDetail({ row, open, onOpenChange, onDecided, workspaceId
 
   const isPending = row?.status === "pending"
   const payload = row?.payload
+  const isDraftReview = row?.kind === "routine_draft_review"
+  const draftReviewLink = isDraftReview ? routineDraftReviewLink(payload) : null
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -149,6 +152,7 @@ export function ApprovalDetail({ row, open, onOpenChange, onDecided, workspaceId
 
               {isPending && (
                 <section className="space-y-2">
+                  {isDraftReview && <p className="text-sm text-muted-foreground">Review and test the requested draft before publishing it. Publication records this decision with the actual published version. Decision comments stay private to the workspace.</p>}
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 font-semibold">
                     Comment
                   </div>
@@ -160,7 +164,7 @@ export function ApprovalDetail({ row, open, onOpenChange, onDecided, workspaceId
                     className="text-xs"
                   />
                   <div className="flex gap-2">
-                    <Button
+                    {!isDraftReview && <Button
                       size="sm"
                       className="flex-1 h-8"
                       onClick={() => handleDecide("approved")}
@@ -168,7 +172,9 @@ export function ApprovalDetail({ row, open, onOpenChange, onDecided, workspaceId
                     >
                       <Check className="h-3 w-3 mr-1.5" />
                       {submitting === "approved" ? "Approving…" : "Approve"}
-                    </Button>
+                    </Button>}
+                    {isDraftReview && draftReviewLink && <Button asChild size="sm" className="flex-1"><Link href={draftReviewLink}>Review draft for publication</Link></Button>}
+                    {isDraftReview && !draftReviewLink && <p role="alert">The requested draft reference is unavailable.</p>}
                     <Button
                       variant="outline"
                       size="sm"

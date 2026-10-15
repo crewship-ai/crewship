@@ -2279,3 +2279,37 @@ fields and incomplete snapshots fail locally. PUT requires the existing
 A 409 preserves the conflict for review; the CLI performs no hidden GET or retry.
 Saving changes only the collaborative draft. Trusted testing and exact-revision
 review/publication remain required; this command cannot publish or run it.
+
+## shared-draft request-review
+
+Request publication review of an exact saved collaborative draft:
+
+```bash
+crewship --format json routine shared-draft ROUTINE_ID > saved.json
+crewship routine shared-draft request-review ROUTINE_ID --file saved.json
+crewship routine shared-draft request-review ROUTINE_ID --file - < saved.json
+```
+
+`--file` is required and accepts one complete saved JSON snapshot; `-` reads
+stdin. Only `draft_id`, `revision` and `base_revision` are sent. The command
+does not save local file edits, run the routine or publish it. Both View and
+Edit grants plus `workspace:admin` token scope are required. A stale snapshot
+returns 409, without a hidden GET or automatic retry. The same pending request
+is idempotent; save a new revision after a terminal decision. Table, JSON and
+YAML output contain the request ID, draft revision, base, state and published
+version (zero until actual publication).
+
+## shared-draft review-status
+
+Read the latest publication receipt, or a specific receipt:
+
+```bash
+crewship routine shared-draft review-status ROUTINE_ID
+crewship --format json routine shared-draft review-status ROUTINE_ID REVIEW_ID
+```
+
+Both current View and Edit grants are required. The latest receipt is JSON
+`null` when no request exists. States are pending, published, denied, cancelled,
+expired and superseded. Only published has a positive published version.
+Reviewer identities and decision comments are not returned. Table, JSON and
+YAML output use the same projection.

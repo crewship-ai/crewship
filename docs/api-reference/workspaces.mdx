@@ -2563,3 +2563,40 @@ Statuses: 200 snapshot/saved draft; 400 malformed body; 401 authentication;
 Guest membership; 409 changed draft or published base; 500 unavailable storage or
 audit. Conflicts are not retried. Trusted review/testing/publication remain
 required after a Guest saves changes.
+
+## Guest draft publication review
+
+```http
+POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/reviews
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/reviews
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/reviews/{reviewId}
+```
+
+These authenticated routes require current local Guest membership, an active
+account and live routine View and Edit shares. POST additionally requires token
+scope `workspace:admin` and accepts only the saved snapshot
+`{"draft_id":"draft-id","revision":3,"base_revision":2}` (maximum 4096 bytes).
+It binds the current document and definition hashes on the server, creates a
+seven-day review request and journals it atomically. Repeating the same pending
+snapshot returns the same request. Submitting a newer saved revision cancels
+earlier pending reviews of that collaborative draft in the same transaction.
+No executable version, test proof or trigger is created.
+
+The receipt contains `id`, `routine_id`, `draft_id`, `revision`, `base_revision`,
+`state` and `published_version`. States are pending, published, denied, cancelled,
+expired and superseded. A positive published version is present only after the
+trusted exact-draft publication commits; otherwise its value is zero. Latest
+GET returns JSON `null` when no request exists. Foreign/unavailable request IDs
+return 404. Reviewer identities, private comments and unpublished documents are
+excluded; current grant authority is rechecked on every read.
+
+Generic approval cannot publish this kind and returns 409. Trusted reviewers
+review/test the exact draft through the existing publication workflow; its
+authority, risk, origin and test-proof gates still apply. Publication and the
+review decision/audit commit together. Changes to the document, revision or base
+invalidate the request. Denial and cancellation also audit atomically.
+
+Statuses: POST 202 pending receipt; GET 200 receipt or latest null; 400 malformed
+snapshot; 401 authentication; 403 workspace/token scope; 404 unavailable
+resource/authority; 409 changed or terminal snapshot; 500 storage/audit failure.
+Neither conflicts nor requests are automatically retried.

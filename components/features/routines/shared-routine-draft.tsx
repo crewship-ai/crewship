@@ -6,6 +6,7 @@ import { z } from "zod"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
+import { SharedRoutineReview } from "./shared-routine-review"
 
 const draftSchema = z.object({ draft_id: z.string(), revision: z.number().int().nonnegative(), base_revision: z.number().int().nonnegative(), name: z.string(), description: z.string(), definition: z.record(z.string(), z.unknown()), can_edit: z.boolean() })
 type Draft = z.infer<typeof draftSchema>
@@ -67,5 +68,7 @@ function DraftForm({ draft, url, queryKey }: { draft: Draft; url: string; queryK
     <label className="block space-y-1"><span>Draft definition JSON</span><textarea aria-label="Draft definition JSON" className="min-h-64 w-full rounded border bg-background p-2 font-mono text-xs" value={definition} disabled={mutation.isPending} onChange={event => setDefinition(event.target.value)} /></label>
     {error && <p role="alert">{error}</p>}
     <Button type="submit" disabled={mutation.isPending}>{mutation.isPending ? "Saving draft…" : "Save shared draft"}</Button>
+    <SharedRoutineReview url={url} draftKey={queryKey} snapshot={{ draft_id: draft.draft_id, revision: draft.revision, base_revision: draft.base_revision }}
+      dirty={name !== draft.name || description !== draft.description || definition !== JSON.stringify(draft.definition, null, 2)} saving={mutation.isPending} />
   </form>
 }

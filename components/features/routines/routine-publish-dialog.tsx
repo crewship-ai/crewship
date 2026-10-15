@@ -48,6 +48,8 @@ interface Props {
   routine: Pick<RoutineDetail, "slug" | "name" | "head_version" | "definition" | "draft" | "author_crew_id" | "id">
   /** Active (running/waiting) runs, which keep their version. */
   activeRuns?: number
+  /** Exact draft id:revision from a publication review link. */
+  expectedDraft?: string | null
   onPublished: (slug: string) => void
   onDiscarded: () => void
 }
@@ -121,7 +123,7 @@ export function publicationSummary(published: Record<string, unknown>, draft: Re
   }
 }
 
-export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine, activeRuns = 0, onPublished, onDiscarded }: Props) {
+export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine, activeRuns = 0, expectedDraft, onPublished, onDiscarded }: Props) {
   const { data: session } = useSessionSafe()
   const { schedules } = usePipelineSchedules(open ? workspaceId : null)
   const [draft, setDraft] = React.useState<RoutineDraft | null>(null)
@@ -147,6 +149,9 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
         const loaded = await loadRoutineDraft(workspaceId, routine.slug, controller.signal)
         if (controller.signal.aborted) return
         if (!loaded.id) throw new Error("There is no saved draft to publish.")
+        if (expectedDraft && `${loaded.id}:${loaded.revision}` !== expectedDraft) {
+          throw new Error("The requested draft revision has changed. Open the latest publication request to review it.")
+        }
         setDraft(loaded)
         const body: Record<string, unknown> = { definition: loaded.document.definition, sample_inputs: {} }
         const crew = loaded.document.author_crew_id ?? routine.author_crew_id
@@ -171,7 +176,7 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
       }
     })()
     return () => controller.abort()
-  }, [open, workspaceId, routine.slug, routine.author_crew_id, base])
+  }, [open, workspaceId, routine.slug, routine.author_crew_id, base, expectedDraft])
 
   const draftDefinition = draft && isRecord(draft.document.definition) ? draft.document.definition : null
   const summary = React.useMemo(() => {

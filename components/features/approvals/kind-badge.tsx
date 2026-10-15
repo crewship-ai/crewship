@@ -10,6 +10,7 @@ const KIND_CLASS: Record<string, string> = {
   target_environment: "bg-warn/15 text-warn border-warn/40",
   tool_call: "bg-info/15 text-info border-info/40",
   ephemeral_hire: "bg-purple/15 text-purple border-purple/40",
+  routine_draft_review: "bg-info/15 text-info border-info/40",
   custom: "bg-muted text-muted-foreground border-border",
 }
 

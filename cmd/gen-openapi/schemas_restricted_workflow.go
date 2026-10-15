@@ -43,6 +43,8 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	}
 	draftResponse["can_edit"] = map[string]any{"type": "boolean"}
 	components["RestrictedRoutineDraft"] = obj(draftResponse, append(draftRequired, "can_edit")...)
+	components["RestrictedRoutineDraftReviewRequest"] = obj(map[string]any{"draft_id": str(), "revision": map[string]any{"type": "integer", "minimum": 1}, "base_revision": map[string]any{"type": "integer", "minimum": 0}}, "draft_id", "revision", "base_revision")
+	components["RestrictedRoutineDraftReview"] = obj(map[string]any{"id": str(), "routine_id": str(), "draft_id": str(), "revision": map[string]any{"type": "integer", "minimum": 1}, "base_revision": map[string]any{"type": "integer", "minimum": 0}, "state": map[string]any{"type": "string", "enum": []string{"pending", "published", "denied", "cancelled", "expired", "superseded"}}, "published_version": map[string]any{"type": "integer", "minimum": 0}}, "id", "routine_id", "draft_id", "revision", "base_revision", "state", "published_version")
 
 	components["RestrictedPageInput"] = obj(map[string]any{"name": str(), "label": str(), "type": map[string]any{"type": "string", "enum": []string{"text", "textarea", "number", "boolean", "select"}}, "required": map[string]any{"type": "boolean"}, "options": arr(str())}, "name", "type", "required")
 	components["RestrictedPageConfirmation"] = obj(map[string]any{"title": str(), "body": str(), "confirm_label": str(), "cancel_label": str()}, "title", "body")
@@ -59,6 +61,10 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	routes["GET "+prefix+"restricted-routine-library/{routineId}"] = DomainSchema{Response: ref("RestrictedRoutineDefinition"), SuccessStatuses: []string{"200"}}
 	routes["GET "+prefix+"restricted-routine-library/{routineId}/draft"] = DomainSchema{Response: ref("RestrictedRoutineDraft"), SuccessStatuses: []string{"200"}}
 	routes["PUT "+prefix+"restricted-routine-library/{routineId}/draft"] = DomainSchema{RequestRequired: true, Request: ref("RestrictedRoutineDraftRequest"), Response: ref("RestrictedRoutineDraft"), SuccessStatuses: []string{"200"}}
+	reviewPath := prefix + "restricted-routine-library/{routineId}/draft/reviews"
+	routes["POST "+reviewPath] = DomainSchema{RequestRequired: true, Request: ref("RestrictedRoutineDraftReviewRequest"), Response: ref("RestrictedRoutineDraftReview"), SuccessStatuses: []string{"202"}}
+	routes["GET "+reviewPath] = DomainSchema{Response: map[string]any{"nullable": true, "allOf": []any{ref("RestrictedRoutineDraftReview")}}, SuccessStatuses: []string{"200"}}
+	routes["GET "+reviewPath+"/{reviewId}"] = DomainSchema{Response: ref("RestrictedRoutineDraftReview"), SuccessStatuses: []string{"200"}}
 	routes["GET "+prefix+"restricted-pages"] = DomainSchema{Response: arr(ref("RestrictedPage")), SuccessStatuses: []string{"200"}, SuccessHeaders: map[string]any{"X-Total-Count": map[string]any{"description": "Number of Pages with currently authorized executable actions", "schema": map[string]any{"type": "integer", "minimum": 0}}}}
 	// Reuse the existing route's trusted response rather than narrowing its
 	// behavior when the authenticated member uses the trusted execution mode.

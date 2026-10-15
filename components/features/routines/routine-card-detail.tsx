@@ -121,6 +121,7 @@ export function RoutineCardDetail({
   statusPills,
 }: Props) {
   const [selectedView, setView] = useUrlSelection("view")
+  const [reviewSnapshot, setReviewSnapshot] = useUrlSelection("draft_review")
   const view = ROUTINE_VIEWS.find((v) => v === selectedView) ?? "definition"
   const { role } = useAbilities()
   const canEdit = roleAtLeast(role, "MANAGER")
@@ -130,7 +131,10 @@ export function RoutineCardDetail({
   const editing = (selectedView === "edit" || selectedView === "settings") && canEdit
   const publishing = selectedView === "publish" && canEdit && !!routine.draft
   const openEditor = React.useCallback(() => setView("edit"), [setView])
-  const openPublish = React.useCallback(() => setView("publish"), [setView])
+  const openPublish = React.useCallback(() => {
+    setReviewSnapshot(null, { replace: true })
+    setView("publish")
+  }, [setView, setReviewSnapshot])
   const editButtonRef = React.useRef<HTMLButtonElement>(null)
   const wasEditing = React.useRef(editing)
   React.useEffect(() => {
@@ -140,8 +144,9 @@ export function RoutineCardDetail({
     wasEditing.current = editing
   }, [editing])
   const closeDialog = React.useCallback(() => {
+    setReviewSnapshot(null, { replace: true })
     setView(null, { replace: true })
-  }, [setView])
+  }, [setView, setReviewSnapshot])
   const [testedStep, setTestedStep] = React.useState<string | null>(null)
   // Cancelling a specific run lives in RoutineRunsTab, which has the
   // per-row buttons and the RBAC handling. Dropping the tab must not
@@ -477,6 +482,7 @@ export function RoutineCardDetail({
           workspaceId={workspaceId}
           routine={routine}
           activeRuns={activeRuns}
+          expectedDraft={reviewSnapshot}
           onPublished={onChanged}
           onDiscarded={onChanged}
         />
