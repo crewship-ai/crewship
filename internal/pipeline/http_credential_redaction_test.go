@@ -109,7 +109,9 @@ func TestHTTPStep_CredentialRefRedactsReflectedResponse(t *testing.T) {
 						t.Errorf("credential leaked through %T", surface)
 					}
 				}
-				if status == http.StatusOK && !strings.Contains(record.Output, secretRedactionMarker) {
+				// Persistence applies the generic step-output scrubber as well, which
+				// may normalize a resolved-credential marker to [REDACTED].
+				if status == http.StatusOK && !strings.Contains(record.Output, "[REDACTED") {
 					t.Fatal("reflected credential must be marked as redacted")
 				}
 			})

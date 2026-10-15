@@ -2581,19 +2581,27 @@ The collection accepts `limit` (1–500, default 100) and `offset` (0–1000000,
 default 0). It returns an array of `run_id`, `routine_id`, `status`, `mode`,
 `started_at` and nullable `ended_at`; `X-Total-Count` is the visible total
 before pagination. The detail adds nullable `output` and a `step_outputs`
-string map. Inputs, identities, errors, costs, transcripts and internal
-provenance are excluded. Detail rejects pagination parameters.
+string map. Inputs are not shown directly; outputs may contain them. Identities,
+errors, costs, transcripts and internal provenance are excluded. Detail rejects
+pagination parameters. Stored output content is limited to 256 KiB and the
+encoded response to 1 MiB; oversized detail returns 413. Credential-shaped
+content is scrubbed from final and step outputs, including historical reads.
 
 The explicit share covers this routine's past/future regular pipeline runs.
 A run's own, pinned-version and current-recipe private chat origins remain
 additional current read ceilings; absent or non-chat origins are unavailable
 through this projection. Both counts and rows apply these audiences before
-pagination. A foreign or hidden run returns the same 404. Private restricted
+pagination. Issue-triggered runs and their replays are excluded. NULL-origin
+runs require valid start-journal evidence and the shared autonomous-run
+predicate; recorded human authority, missing authority, malformed payloads,
+missing evidence and unknown-origin replays are hidden.
+A foreign or hidden run returns the same 404. Private restricted
 runtime jobs retain actor/attempt/proof checks on their existing own-result
 endpoint and are not exposed by reading raw job output columns.
 
 Statuses: 200 authorized projection; 400 invalid pagination; 401 authentication;
 403 workspace/token boundary; 404 absent/foreign/deleted routine or run, missing
-View/Results, inactive issuer, private origin or non-Guest; 500 unavailable data.
+View/Results, inactive issuer, private origin or non-Guest; 413 oversized detail;
+500 unavailable data.
 Responses are `Cache-Control: no-store`.
 CLI: `crewship routine shared-runs <routine-id-or-slug> [run-id]`.

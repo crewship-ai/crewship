@@ -2291,8 +2291,8 @@ crewship routine shared-runs client-report RUN_ID --format json
 List explicitly shared regular routine run history or inspect one selected
 result in table, JSON or YAML. Requires current View and Results shares;
 existing View/Run shares are unchanged. Lists return metadata only; detail
-includes final and step outputs without inputs, transcripts or requester
-identities. Private conversation origins remain additional read ceilings.
+includes final and step outputs. Inputs are not shown directly; outputs may
+contain them. Transcripts and requester identities are excluded. Private conversation origins remain additional read ceilings.
 Private restricted-runtime receipts keep their existing actor-scoped path.
 No runtime or agent execution rights are needed for this read.
 

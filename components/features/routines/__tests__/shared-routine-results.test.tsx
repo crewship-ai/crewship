@@ -58,3 +58,11 @@ it("clears the selected output when moving to another page", async () => {
   expect(screen.queryByText("FINAL_RESULT_CANARY")).toBeNull()
   expect(api.mock.calls.some(([url]) => url.endsWith("?limit=25&offset=25"))).toBe(true)
 })
+
+it("explains an oversized selected result", async () => {
+  api.mockImplementation(async (url: string) => response(url.endsWith("/run-1") ? {} : [run], url.endsWith("/run-1") ? 413 : 200))
+  show(); fireEvent.click(await screen.findByRole("button", { name: /Completed.*· run-1$/ }))
+  await screen.findByText("This result exceeds the shared result size limit.")
+  expect(screen.queryByText("FINAL_RESULT_CANARY")).toBeNull()
+  expect(screen.getByText(/Inputs are not shown directly; outputs may contain them/)).toBeInTheDocument()
+})

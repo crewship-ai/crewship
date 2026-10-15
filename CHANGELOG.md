@@ -9,7 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Guests can inspect explicitly shared routine history and outputs.** A new Results share with View exposes run metadata and selected outputs in UI and CLI, without execution authority, inputs or transcripts. Existing View/Run shares retain their previous scope; inherited private conversation audiences still constrain results.
+- **Shared routine results retain private provenance.** Replays preserve their source and trusted caller origins; issue runs, ambiguous legacy origins and malformed authority evidence stay hidden. Final outputs receive the same credential scrubbing as step outputs, including historical shared reads. Oversized selected results return 413.
+
+- **Guests can inspect explicitly shared routine history and outputs.** A new Results share with View exposes run metadata and selected outputs in UI and CLI, without execution authority or transcripts. Inputs are not shown directly; outputs may contain them. Existing View/Run shares retain their previous scope; inherited private conversation audiences still constrain results.
 
 ### Fixed
 - **Personal memory stays forgotten across access changes.** Clearing all preferences also works for agents without a crew. Switching an account to restricted access withdraws its stored preferences; restoring trusted access does not reactivate them.

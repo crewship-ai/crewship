@@ -86,6 +86,7 @@ func TestMemberNavigationBrowser(t *testing.T) {
 		{"nav-run-foreign", "nav-view-foreign", "BROWSER_FOREIGN_ROUTINE_OUTPUT"},
 	} {
 		execOrFatal(t, db, `INSERT INTO pipeline_runs(id,workspace_id,pipeline_id,pipeline_slug,status,started_at,output,inputs_json,error_message) VALUES(?,?,?,?,'completed','2026-10-15T00:00:00Z',?,'{"BROWSER_PRIVATE_RUN_INPUT":true}','BROWSER_PRIVATE_RUN_ERROR')`, run.id, ws, run.routine, run.routine, run.output)
+		execOrFatal(t, db, `INSERT INTO journal_entries(id,workspace_id,actor_id,entry_type,actor_type,summary,payload) VALUES(?,?,?,'pipeline.run.started','orchestrator','Autonomous fixture','{}')`, "proof-"+run.id, ws, run.id)
 		execOrFatal(t, db, `INSERT INTO pipeline_run_step_outputs(run_id,step_id,output,updated_at) VALUES(?,'answer',?,'2026-10-15T00:00:00Z')`, run.id, run.output+"_STEP")
 	}
 	router, err := NewRouter(db, secret, newTestLogger(), WithJournal(writer), WithInternalToken("synthetic-nav-internal-token"))

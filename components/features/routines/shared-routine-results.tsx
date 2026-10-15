@@ -34,6 +34,7 @@ export function SharedRoutineResults({ workspaceId, userId, routineId }: { works
     queryFn: async ({ signal }) => {
       const response = await apiFetch(`${base}/${requireApiPathSegment(selected)}`, { signal })
       if ([401, 403, 404].includes(response.status)) return null
+      if (response.status === 413) throw new Error("This result exceeds the shared result size limit.")
       if (!response.ok) throw new Error("Could not refresh this result. Showing the last successful check.")
       const parsed = resultSchema.parse(await response.json())
       if (parsed.run_id !== selected || parsed.routine_id !== routineId) throw new Error("The selected result could not be confirmed.")
@@ -42,7 +43,7 @@ export function SharedRoutineResults({ workspaceId, userId, routineId }: { works
   })
   return <section aria-label="Shared routine results" className="mt-4 space-y-3 border-t pt-4">
     <h3 className="font-medium">Runs and outputs</h3>
-    <p className="text-sm text-muted-foreground">Explicitly shared routine history. Private conversation audiences still apply. Inputs and transcripts are not shared here.</p>
+    <p className="text-sm text-muted-foreground">Explicitly shared routine history. Private conversation audiences still apply. Inputs are not shown directly; outputs may contain them. Transcripts are excluded.</p>
     {runs.isPending && <p role="status">Loading run history…</p>}
     {runs.isError && <p role="status">{runs.error.message}</p>}
     {runs.data === null && <p role="alert">Run history is no longer available. Ask your administrator for access.</p>}

@@ -2,17 +2,25 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 // Shared history is a deliberate additional audience. Definition-only and Run
-// grants retain their shipped semantics. Inputs, requester identities, errors,
+// grants retain their shipped semantics. Inputs are not shown directly; outputs
+// may contain them. Requester identities, errors,
 // costs, internal provenance and transcripts are never part of this projection.
+const maxGuestRoutineResultBytes = 1 << 20
+const maxGuestRoutineResultContentBytes = 256 << 10
+
+var guestRoutineResultScrubber = scrubber.New()
+
 type guestRoutineRun struct {
 	ID        string  `json:"run_id"`
 	RoutineID string  `json:"routine_id"`
@@ -75,6 +83,16 @@ func (r *Router) restrictedRoutineRunHistory(w http.ResponseWriter, req *http.Re
 	 LEFT JOIN pipeline_versions v ON v.pipeline_id=p.id AND v.version=pr.pipeline_version
 	 WHERE pr.workspace_id=? AND p.id=? AND p.deleted_at IS NULL
 	 AND (pr.pipeline_version IS NULL OR v.id IS NOT NULL)
+     AND COALESCE(pr.triggered_via,'')<>'issue'
+     AND (pr.chat_origin_id IS NOT NULL OR (
+       (` + autonomousPipelineRunSQL + `)
+       AND COALESCE(pr.is_replay,0)=0
+       AND EXISTS(SELECT 1 FROM journal_entries proof
+         WHERE proof.workspace_id=pr.workspace_id
+         AND ((proof.entry_type='run.started' AND proof.trace_id=pr.id)
+           OR (proof.entry_type='pipeline.run.started' AND proof.actor_id=pr.id))
+         AND CASE WHEN json_valid(proof.payload) THEN json_type(proof.payload)='object' ELSE 0 END)
+     ))
 	 AND NOT EXISTS (
 	   SELECT 1 FROM (SELECT pr.chat_origin_id AS origin_id UNION SELECT p.chat_origin_id UNION SELECT v.chat_origin_id) origins
 	   WHERE origins.origin_id IS NOT NULL AND NOT EXISTS (
@@ -115,6 +133,21 @@ func (r *Router) restrictedRoutineRunHistory(w http.ResponseWriter, req *http.Re
 		writeJSON(w, 200, items)
 		return
 	}
+	// Bound stored content before loading it into application memory. Include
+	// per-step JSON overhead, then enforce the encoded response ceiling too.
+	var contentBytes int64
+	err = tx.QueryRowContext(req.Context(), `SELECT
+      length(CAST(COALESCE(pr.output,'') AS BLOB)) +
+      COALESCE((SELECT SUM(length(CAST(output AS BLOB))+length(CAST(step_id AS BLOB))+16)
+        FROM pipeline_run_step_outputs WHERE run_id=pr.id),0)`+from+` AND pr.id=?`, append(args, runID)...).Scan(&contentBytes)
+	if err != nil {
+		guestRoutineResultsError(w, err)
+		return
+	}
+	if contentBytes > maxGuestRoutineResultContentBytes {
+		replyError(w, http.StatusRequestEntityTooLarge, "Routine result is too large")
+		return
+	}
 	result := guestRoutineRunResult{StepOutputs: map[string]string{}}
 	err = tx.QueryRowContext(req.Context(), `SELECT pr.id,p.id,pr.status,pr.mode,pr.started_at,pr.ended_at,pr.output`+from+` AND pr.id=?`, append(args, runID)...).Scan(&result.ID, &result.RoutineID, &result.Status, &result.Mode, &result.StartedAt, &result.EndedAt, &result.Output)
 	if err != nil {
@@ -131,7 +164,7 @@ func (r *Router) restrictedRoutineRunHistory(w http.ResponseWriter, req *http.Re
 		if err = rows.Scan(&step, &output); err != nil {
 			break
 		}
-		result.StepOutputs[step] = output
+		result.StepOutputs[step] = guestRoutineResultScrubber.Scrub(output)
 	}
 	rowErr := rows.Err()
 	rows.Close()
@@ -139,7 +172,20 @@ func (r *Router) restrictedRoutineRunHistory(w http.ResponseWriter, req *http.Re
 		replyError(w, 500, "Routine results unavailable")
 		return
 	}
-	writeJSON(w, 200, result)
+	if result.Output != nil {
+		output := guestRoutineResultScrubber.Scrub(*result.Output)
+		result.Output = &output
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		guestRoutineResultsError(w, err)
+		return
+	}
+	if len(encoded) > maxGuestRoutineResultBytes {
+		replyError(w, http.StatusRequestEntityTooLarge, "Routine result is too large")
+		return
+	}
+	writeJSON(w, 200, json.RawMessage(encoded))
 }
 
 func guestRoutineResultsError(w http.ResponseWriter, err error) {

@@ -399,7 +399,7 @@ View and Run shares are not widened or backfilled. Administrators can select
 current View and active issuers. The share exposes past and future regular
 pipeline run metadata and outputs for this routine, including runs invoked by
 other people or automation. Review authored/output content before sharing.
-It does not grant execution or disclose inputs, requester identities, errors,
+Inputs are not shown directly; outputs may contain them. It does not grant execution or disclose requester identities, errors,
 costs, transcripts, internal origin IDs or credentials resolved from the vault.
 
 Dedicated GET collection/detail routes under the Guest definition library use
@@ -420,3 +420,13 @@ storage through the history projection. Generalizing those result audiences,
 full ordered View/Run/Edit presets and direct Guest publication remain open.
 UI hard 401/403/404 responses remove result data, while transient refresh errors
 retain the last successful authorized projection with a notice.
+
+Shared history excludes issue-triggered runs and their replays. NULL-origin
+runs also require valid start-journal evidence and the common autonomous-run
+predicate; recorded human authority, missing requester authority, malformed
+payloads, missing evidence and unknown-origin replays are hidden. Replay
+preserves its original origin and any compatible trusted caller origin.
+Selected output content is capped at 256 KiB before loading; the encoded
+response is capped at 1 MiB. Oversized details return 413 while list metadata
+remains available. Final and step outputs are credential-scrubbed on read,
+including historical stored content; final output is also scrubbed on persist.

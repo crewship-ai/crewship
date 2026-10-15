@@ -34,6 +34,24 @@ func TestGuestRoutineResultsExplicitAudience(t *testing.T) {
 	seedRun("run-b", "shared-result", "", "2026-10-14T00:00:00Z")
 	seedRun("run-private", "shared-result", "result-origin", "2026-10-15T00:00:00Z")
 	seedRun("run-foreign", "other-result", "", "2026-10-16T00:00:00Z")
+	for _, id := range []string{"run-issue-canary", "run-legacy-human-canary", "run-invalid-journal-canary", "run-missing-authority-canary", "run-unproven-canary", "run-null-replay-canary"} {
+		seedRun(id, "shared-result", "", "2026-10-12T00:00:00Z")
+	}
+	project := seedProject(t, db, workspace, "unshared-result-project")
+	issue := seedIssue(t, db, workspace, "result-crew", "result-agent", "RESULT-1", "BACKLOG")
+	execOrFatal(t, db, `UPDATE missions SET project_id=? WHERE id=?`, project, issue)
+	execOrFatal(t, db, `UPDATE pipeline_runs SET triggered_via='issue',triggered_by_id='RESULT-1',metadata_json=?,output='PRIVATE_ISSUE_OUTPUT_CANARY' WHERE id='run-issue-canary'`, `{"issue_id":"`+issue+`"}`)
+	execOrFatal(t, db, `UPDATE pipeline_runs SET is_replay=1,replay_of='run-private' WHERE id='run-null-replay-canary'`)
+	for id, payload := range map[string]string{
+		"run-legacy-human-canary":      `{"human_authority":{"chat_id":"private-dm"}}`,
+		"run-invalid-journal-canary":   `{broken`,
+		"run-missing-authority-canary": `{"requester_authority_missing":true}`,
+	} {
+		execOrFatal(t, db, `INSERT INTO journal_entries(id,workspace_id,trace_id,entry_type,actor_type,summary,payload) VALUES(?,?,?,'run.started','orchestrator','Private legacy',?)`, "canary-"+id, workspace, id, payload)
+	}
+	for _, id := range []string{"run-a", "run-b"} {
+		execOrFatal(t, db, `INSERT INTO journal_entries(id,workspace_id,actor_id,entry_type,actor_type,summary,payload) VALUES(?,?,?,'pipeline.run.started','orchestrator','Autonomous run','{}')`, "proof-"+id, workspace, id)
+	}
 	store := access.Store{DB: db}
 	setRights := func(user string, rights ...access.Right) {
 		t.Helper()
@@ -93,9 +111,32 @@ func TestGuestRoutineResultsExplicitAudience(t *testing.T) {
 	if err = json.Unmarshal(detail.Body.Bytes(), &result); err != nil || result.Output == nil || *result.Output != "SHARED_FINAL_OUTPUT" || result.StepOutputs["answer"] != "SHARED_STEP_OUTPUT" {
 		t.Fatal("outputs", result, err)
 	}
+	secret := "ghp_" + strings.Repeat("a", 36)
+	execOrFatal(t, db, `UPDATE pipeline_runs SET output=? WHERE id='run-a'`, "Historical final "+secret)
+	execOrFatal(t, db, `UPDATE pipeline_run_step_outputs SET output=? WHERE run_id='run-a'`, "Historical step "+secret)
+	scrubbed := call("result-a", base+"/run-a", 200)
+	if strings.Contains(scrubbed.Body.String(), secret) {
+		t.Fatal("historical credential leaked")
+	}
+	execOrFatal(t, db, `UPDATE pipeline_runs SET output=? WHERE id='run-a'`, strings.Repeat("x", maxGuestRoutineResultContentBytes+1))
+	call("result-a", base+"/run-a", 413)
+	execOrFatal(t, db, `UPDATE pipeline_runs SET output='small' WHERE id='run-a'`)
+	execOrFatal(t, db, `UPDATE pipeline_run_step_outputs SET output=? WHERE run_id='run-a'`, strings.Repeat("x", maxGuestRoutineResultContentBytes+1))
+	call("result-a", base+"/run-a", 413)
+	execOrFatal(t, db, `UPDATE pipeline_run_step_outputs SET output='small' WHERE run_id='run-a'`)
+	execOrFatal(t, db, `UPDATE pipeline_runs SET output=? WHERE id='run-a'`, strings.Repeat("\x01", 200000))
+	call("result-a", base+"/run-a", 413) // JSON escaping also obeys the response ceiling.
+	execOrFatal(t, db, `UPDATE pipeline_runs SET output='SHARED_FINAL_OUTPUT' WHERE id='run-a'`)
+
 	for _, canary := range []string{"PRIVATE_INPUT_CANARY", "PRIVATE_ERROR_CANARY", owner, "PRIVATE_CHAT_TITLE_CANARY"} {
 		if strings.Contains(detail.Body.String(), canary) {
 			t.Fatal("detail leak", canary, detail.Body.String())
+		}
+	}
+	for _, id := range []string{"run-issue-canary", "run-legacy-human-canary", "run-invalid-journal-canary", "run-missing-authority-canary", "run-unproven-canary", "run-null-replay-canary"} {
+		call("result-a", base+"/"+id, 404)
+		if strings.Contains(list.Body.String(), id) {
+			t.Fatalf("private run listed: %s", id)
 		}
 	}
 	call("result-a", base+"/run-foreign", 404)
