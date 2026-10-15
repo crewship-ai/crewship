@@ -33,7 +33,7 @@ for (const adapter of [html, typed]) {
     assert.equal(session.resolve({ slideID: 'missing', elementID: target.id }), 'detached');
   });
   test(`${adapter.name}: rejects unsupported semantic data before normalization`, () => {
-    for (const change of [d => d.slides[0].elements[0].onclick = 'alert(1)', d => d.slides[0].elements[0].font = 'https://evil/font', d => d.slides[0].elements[0].text = 'a'.repeat(limits.text + 1), d => d.slides[0].elements[0].w = Infinity, d => d.slides[0].elements[1].id = d.slides[0].elements[0].id, d => d.slides[0].elements[0].size = 1000, d => d.assets[0].sha256 = 'no']) {
+    for (const change of [d => d.slides[0].elements[0].onclick = 'alert(1)', d => d.slides[0].elements[0].font = 'https://evil/font', d => d.slides[0].elements[0].text = 'a'.repeat(limits.text + 1), d => d.slides[0].elements[0].w = Infinity, d => d.slides[0].elements[0].x = 0.0000001, d => d.slides[0].elements[0].text = 'CR\rLF', d => d.slides[0].elements[1].id = d.slides[0].elements[0].id, d => d.slides[0].elements[0].size = 1000, d => d.assets[0].sha256 = 'no']) {
       const deck = fixture(); change(deck); assert.throws(() => adapter.encode(deck));
     }
   });

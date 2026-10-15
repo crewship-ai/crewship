@@ -67,7 +67,7 @@ model run or Crewship delegation/authorization proof.
 
 Dimensions: 960×540 CSS pixels. Deck ≤2 MiB serialized JSON; 1–20 slides;
 ≤50 elements per slide; 10,000 UTF-16 code units per text/cell/notes; unique IDs
-matching `[a-z][a-z0-9-]{0,63}` across deck/slides/elements. Finite geometry,
+matching `[a-z][a-z0-9-]{0,63}` across deck/slides/elements. Integer CSS-pixel geometry,
 positive width/height, nonnegative position, all boxes contained by the slide;
 coordinates ≤1920. Text can intentionally overflow its contained box.
 
@@ -82,8 +82,8 @@ Attributes are exactly `data-id,style` for text/table;
 only `data-id` for the section; none for table rows/cells/body. CSS is exactly
 `left,top,width,height` with nonnegative decimal `px`, plus
 `font-family,font-size,color` for text/table or `background-color` for shapes.
-No duplicate CSS declarations. Colors are uppercase six-digit hex. Fonts are
-`DejaVu Sans` and the deliberate `S0 Missing Font` fixture, size 8–72 CSS px.
+No duplicate CSS declarations. Numeric CSS resolves to integer pixel values; fractional geometry is rejected equally by both adapters. Colors are uppercase six-digit hex. Fonts are
+`DejaVu Sans` and the deliberate `S0 Missing Font` fixture, integer size 8–72 CSS px. Text uses LF line endings; CR and other control characters apart from tab/LF are rejected.
 Shapes are `rect` or `ellipse`; tables 1–10 equal-length rows and 1–6 columns.
 There are no author scripts, handlers, iframe/embed, SVG, URLs, font loads,
 CSS imports, classes, arbitrary styles, links, HTML plugins or runtime code.

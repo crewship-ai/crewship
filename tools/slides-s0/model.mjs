@@ -12,7 +12,7 @@ export function keys(value, required) {
   check(Object.keys(value).sort().join('|') === [...required].sort().join('|'), 'unknown or missing field');
 }
 const id = value => check(typeof value === 'string' && /^[a-z][a-z0-9-]{0,63}$/.test(value), 'invalid stable ID');
-const text = value => check(typeof value === 'string' && value.length <= limits.text && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value), 'invalid text');
+const text = value => check(typeof value === 'string' && value.length <= limits.text && !/[\u0000-\u0008\u000b-\u001f]/.test(value), 'invalid text');
 const color = value => check(typeof value === 'string' && /^[A-F0-9]{6}$/.test(value), 'invalid color');
 export function validate(deck) {
   check(Buffer.byteLength(JSON.stringify(deck)) <= limits.bytes, 'deck byte limit');
@@ -42,10 +42,10 @@ export function validate(deck) {
       const fields = { text: ['text', 'font', 'size', 'color'], shape: ['shape', 'fill'], image: ['asset'], table: ['rows', 'font', 'size', 'color'] }[element.type];
       check(fields, 'unsupported element type'); keys(element, ['id', 'type', 'x', 'y', 'w', 'h', ...fields]); id(element.id);
       check(!ids.has(element.id), 'duplicate element ID'); ids.add(element.id);
-      for (const field of ['x', 'y', 'w', 'h']) check(Number.isFinite(element[field]) && Math.abs(element[field]) <= 1920, 'invalid geometry');
+      for (const field of ['x', 'y', 'w', 'h']) check(Number.isInteger(element[field]) && Math.abs(element[field]) <= 1920, 'invalid geometry');
       check(element.x >= 0 && element.y >= 0 && element.w > 0 && element.h > 0 && element.x + element.w <= deck.width && element.y + element.h <= deck.height, 'element outside slide');
       if (element.type === 'text' || element.type === 'table') {
-        check(fonts.includes(element.font), 'font whitelist'); check(Number.isFinite(element.size) && element.size >= 8 && element.size <= 72, 'font size'); color(element.color);
+        check(fonts.includes(element.font), 'font whitelist'); check(Number.isInteger(element.size) && element.size >= 8 && element.size <= 72, 'font size'); color(element.color);
       }
       if (element.type === 'text') text(element.text);
       if (element.type === 'image') check(assets.has(element.asset), 'unknown asset');
