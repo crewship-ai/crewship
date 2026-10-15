@@ -114,6 +114,7 @@ var virtualForeignKeys = map[string][]foreignKeyEdge{
 	// Durable retry tombstones preserve deleted identities without DB FKs;
 	// identities still present in a fork follow their corresponding rows.
 	"page_artifact_mutation_receipts":   {{column: "author_user_id", refTable: "users", refColumn: "id"}, {column: "author_agent_id", refTable: "agents", refColumn: "id"}},
+	"agent_user_preferences":            {{column: "chat_id", refTable: "chats", refColumn: "id"}, {column: "feedback_id", refTable: "message_feedback", refColumn: "id"}},
 	"execution_origins":                 {{column: "chat_id", refTable: "chats", refColumn: "id"}},           // historical TEXT; follow an extant chat on fork
 	"issue_mutation_outbox":             {{column: "mission_id", refTable: "missions", refColumn: "id"}},     // historical audit target; an absent issue is valid
 	"pending_runs":                      {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}}, // legacy bare TEXT; queued provenance must follow its fork

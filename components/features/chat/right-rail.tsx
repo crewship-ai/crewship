@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { LayoutGrid, ListTodo } from "lucide-react"
+import { LayoutGrid, ListTodo, Brain } from "lucide-react"
 import { useHotkeys } from "react-hotkeys-hook"
 
 import { Button } from "@/components/ui/button"
@@ -20,6 +20,7 @@ interface RailItem {
 const RAIL_PANELS: Omit<RailItem, "shortcut">[] = [
   { id: "artifacts", label: "Files", icon: LayoutGrid },
   { id: "work", label: "Work", icon: ListTodo },
+  { id: "memory", label: "Memory", icon: Brain },
 ]
 
 const ITEMS: RailItem[] = RAIL_PANELS.map((item, i) => ({
@@ -42,6 +43,7 @@ export const DRAWER_TAB_LABELS: Record<DrawerTab, string> = {
   files: "Files",
   artifacts: "Files",
   work: "Work",
+  memory: "Memory",
   triggers: "Triggers",
   team: "Team",
   context: "Context",
@@ -70,7 +72,7 @@ export function RightRail({ className }: { className?: string }) {
   )
 
   useHotkeys(
-    ["mod+1", "mod+2"],
+    ["mod+1", "mod+2", "mod+3"],
     (_, info) => {
       const idx = Number(info.keys?.[0]) - 1
       if (idx >= 0 && idx < ITEMS.length) toggle(ITEMS[idx].id)

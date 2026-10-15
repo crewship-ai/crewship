@@ -54,6 +54,7 @@ import type {
 } from "@/components/features/issues/issue-code-links-card"
 import { codeLinkProblemMessage } from "@/lib/code-links"
 import type { MentionAgent } from "@/lib/mentions"
+import type { IssueAction } from "@/lib/chat-entity-cards"
 import type {
   IssueActivity,
   IssueCodeLink,
@@ -75,6 +76,23 @@ interface Props {
    * rather than a different, smaller one.
    */
   editable?: boolean
+  actions?: readonly IssueAction[]
+  /** Embedded chat keeps work execution on the canonical issue workflow. */
+  executionActions?: boolean
+  /** Chat hosts reauthorize every snapshot while retaining local drafts. */
+  authorizationKey?: number
+  rechecking?: boolean
+  onUnauthorized?: () => void
+  write?: {
+    resetKey?: number
+    onReloaded?: () => void
+    conflict?: boolean
+    saved?: "PATCH" | "POST"
+    blocked?: boolean
+    patch: (path: string, body: Record<string, unknown>, revision: number | undefined) => Promise<boolean>
+    comment: (path: string, body: Record<string, unknown>) => Promise<boolean>
+  }
+  feedback?: React.ReactNode
   /** Initial for the comment composer's author bubble. */
   viewerInitial?: string
   /** The host's list needs to know when a write landed. */
@@ -96,13 +114,21 @@ export function IssueDetailSurface({
   workspaceId,
   identifier,
   editable = true,
+  actions, executionActions = true, authorizationKey, rechecking, onUnauthorized, write, feedback,
   viewerInitial,
   onChanged,
   onNotFound,
 }: Props) {
   const [issue, setIssue] = React.useState<Mission | null>(null)
   const [loading, setLoading] = React.useState(true)
+  const draftBaseRevision = React.useRef<number | undefined>(undefined)
+  const [commentDraft, setCommentDraft] = React.useState("")
+  const [detailFetchedAt, setDetailFetchedAt] = React.useState<number | null>(null)
+  const [subFetchedAt, setSubFetchedAt] = React.useState<number | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+
+  const allowed = React.useMemo(() => actions ? actions.filter((a) => issue?.allowed_actions?.includes(a)) : undefined, [actions, issue?.allowed_actions])
+  const can = React.useCallback((action: IssueAction) => allowed ? allowed.includes(action) : editable, [allowed, editable])
 
   const [commentsHasMore, setCommentsHasMore] = React.useState(false)
   const [olderBusy, setOlderBusy] = React.useState(false)
@@ -174,6 +200,10 @@ export function IssueDetailSurface({
       const res = await apiFetch(`/api/v1/issues/${encodeURIComponent(identifier)}?${qs}`)
       if (mine !== issueReq.current) return
       if (!res.ok) {
+        if (authorizationKey && [401, 403, 404].includes(res.status)) {
+          setIssue(null)
+          onUnauthorized?.()
+        }
         setError(res.status === 404 ? "Issue not found" : "Failed to load issue")
         onNotFound?.()
         return
@@ -184,7 +214,9 @@ export function IssueDetailSurface({
       // wrong await for that, and it is the longer of the two gaps.
       if (mine !== issueReq.current) return
       setIssue(body)
+      setDetailFetchedAt(Date.now())
       setError(null)
+      return true
     } catch {
       if (mine !== issueReq.current) return
       setError("Failed to load issue")
@@ -194,7 +226,7 @@ export function IssueDetailSurface({
       // branch then renders "Issue not found" over an issue that exists.
       if (mine === issueReq.current) setLoading(false)
     }
-  }, [workspaceId, identifier, qs, onNotFound])
+  }, [workspaceId, identifier, qs, onNotFound, authorizationKey, onUnauthorized])
 
   // The issue's own sub-resources. Grouped because they all key on the same
   // crew + identifier and all go stale together on any write.
@@ -237,6 +269,7 @@ export function IssueDetailSurface({
     if (sub !== null) setSubIssues(Array.isArray(sub) ? sub : (sub?.subtasks ?? []))
     if (cl !== null) setCodeLinks(Array.isArray(cl) ? cl : [])
     setSubFailed(failed)
+    setSubFetchedAt(failed.length ? null : Date.now())
   }, [base, qs])
 
   React.useEffect(() => {
@@ -265,6 +298,16 @@ export function IssueDetailSurface({
     // fetchIssue already depends on workspaceId + identifier.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, identifier])
+
+  React.useEffect(() => {
+    if (authorizationKey) {
+      subReq.current++
+      setSubFetchedAt(null)
+      void fetchIssue(); void fetchSubResources()
+    }
+    // Only a completed authorization snapshot changes this key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authorizationKey])
 
   React.useEffect(() => {
     void fetchSubResources()
@@ -427,7 +470,13 @@ export function IssueDetailSurface({
 
   const patch = React.useCallback(
     async (body: Record<string, unknown>): Promise<boolean> => {
-      if (!base) return false
+      if (!base || rechecking) return false
+      if (write) {
+        if (!Object.keys(body).every((key) => can(issueFieldAction(key)))) return false
+        const saved = await write.patch(`${base}?${qs}`, body, draftBaseRevision.current ?? issue?.revision)
+        if (saved) { setDraft({}); draftBaseRevision.current = undefined; await refresh() }
+        return saved
+      }
       setBusy(true)
       try {
         const res = await apiFetch(`${base}?${qs}`, {
@@ -449,7 +498,7 @@ export function IssueDetailSurface({
         setBusy(false)
       }
     },
-    [base, qs, refresh],
+    [base, qs, refresh, write, issue?.revision, can, rechecking],
   )
 
   /* ---------------------------------------------------------------- *
@@ -464,10 +513,18 @@ export function IssueDetailSurface({
   const [draft, setDraft] = React.useState<Record<string, unknown>>({})
   const draftRef = React.useRef(draft)
   draftRef.current = draft
-  React.useEffect(() => { setDraft({}) }, [identifier])
+  React.useEffect(() => { setDraft({}); setCommentDraft(""); draftBaseRevision.current = undefined }, [workspaceId, identifier])
+  // Read current values for comparison without accepting them as a new base.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (write?.conflict) void fetchIssue() }, [write?.conflict])
+  // Only an explicit conflict reload may accept a fresh base revision.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (write?.resetKey) void fetchIssue().then((loaded) => { if (loaded) { draftBaseRevision.current = undefined; write.onReloaded?.() } }) }, [write?.resetKey])
+  React.useEffect(() => { if (write?.saved === "PATCH") { setDraft({}); draftBaseRevision.current = undefined } else if (write?.saved === "POST") setCommentDraft("") }, [write?.saved])
 
   const stage = React.useCallback(async (body: Record<string, unknown>): Promise<boolean> => {
     if (!issue) return false
+    if (draftBaseRevision.current == null) draftBaseRevision.current = issue.revision
     setDraft((cur) => withoutUnchanged({ ...cur, ...body }, issue))
     return true
   }, [issue])
@@ -476,6 +533,10 @@ export function IssueDetailSurface({
   // its corner toast and keeps the draft.
   const commit = React.useCallback(async (body: Record<string, unknown>) => {
     if (!base) throw new Error("This issue is still loading.")
+    if (write) {
+      if (!await patch(body)) throw new Error("The change has not been saved. Your draft is kept.")
+      return
+    }
     setBusy(true)
     try {
       const res = await apiFetch(`${base}?${qs}`, {
@@ -492,7 +553,7 @@ export function IssueDetailSurface({
     } finally {
       setBusy(false)
     }
-  }, [base, qs, refresh])
+  }, [base, qs, refresh, write, patch])
 
   // A status that sets something off, or a new assignee, asks first.
   const [confirm, setConfirm] = React.useState<{ body: Record<string, unknown>; done: () => void } | null>(null)
@@ -509,10 +570,11 @@ export function IssueDetailSurface({
   }, [commit])
   const confirmRun = React.useRef<(() => Promise<void>) | null>(null)
 
+  const canSaveDraft = Object.keys(draft).every((key) => can(issueFieldAction(key)))
   const draftCount = Object.keys(draft).filter((k) => k !== "assignee_type").length
   const inPage = usePageSave({
     label: `Issue ${identifier}`,
-    count: draftCount,
+    count: write ? 0 : draftCount,
     saving: busy && draftCount > 0,
     save,
     discard: () => setDraft({}),
@@ -520,7 +582,13 @@ export function IssueDetailSurface({
 
   const postComment = React.useCallback(
     async (body: string, options?: { guestVisible: boolean; expectedProjectId: string }): Promise<boolean> => {
-      if (!base) return false
+      if (!base || rechecking) return false
+      if (write) {
+        if (!can("comment")) return false
+        const saved = await write.comment(`${base}/comments?${qs}`, { body, ...(options?.guestVisible ? { guest_visible: true, expected_project_id: options.expectedProjectId } : {}) })
+        if (saved) await refresh()
+        return saved
+      }
       try {
         const res = await apiFetch(`${base}/comments?${qs}`, {
           method: "POST",
@@ -547,7 +615,7 @@ export function IssueDetailSurface({
         return false
       }
     },
-    [base, qs],
+    [base, qs, write, can, refresh, rechecking],
   )
 
   const createLabel = React.useCallback(
@@ -814,22 +882,27 @@ export function IssueDetailSurface({
    * ---------------------------------------------------------------- */
 
   const edit: IssueCardEdit | undefined = React.useMemo(() => {
-    if (!editable || !issue) return undefined
+    if ((!editable && !allowed?.length) || !issue) return undefined
     return {
+      allowedActions: allowed,
       agents: roster.agents,
       labels: roster.labels,
       projects: roster.projects,
       routines: pipelines.map((p) => ({ id: p.id, name: p.name, slug: p.slug })),
       milestones,
-      patch: inPage ? stage : patch,
-      createLabel,
+      patch: write || inPage ? stage : patch,
+      onTitleDraft: write ? (title) => { void stage({ title }) } : undefined,
+      createLabel: can("edit_fields") ? createLabel : undefined,
       addRelation,
       removeRelation,
-      runRoutine: issue.routine_slug ? runRoutine : undefined,
+      runRoutine: executionActions && can("start_work") && issue.routine_slug ? runRoutine : undefined,
       busy: busy || routineRunBusy,
     }
   }, [
     editable,
+    executionActions,
+    allowed,
+    can,
     issue,
     roster,
     pipelines,
@@ -837,6 +910,7 @@ export function IssueDetailSurface({
     patch,
     stage,
     inPage,
+    write,
     createLabel,
     addRelation,
     removeRelation,
@@ -847,13 +921,13 @@ export function IssueDetailSurface({
 
   const codeLinkEdit: CodeLinkEdit | undefined = React.useMemo(
     () =>
-      editable
+      can("link")
         ? { attach: attachCodeLink, remove: removeCodeLink, refresh: refreshCodeLink }
         : undefined,
-    [editable, attachCodeLink, removeCodeLink, refreshCodeLink],
+    [can, attachCodeLink, removeCodeLink, refreshCodeLink],
   )
 
-  if (loading) return <DetailSkeleton />
+  if (loading || rechecking && !issue) return <DetailSkeleton />
 
   if (error || !issue) {
     const notFound = error === "Issue not found" || !error
@@ -861,7 +935,7 @@ export function IssueDetailSurface({
       <div className="grid h-full place-items-center p-6 text-center">
         <div className="flex flex-col items-center gap-3">
           <p className="text-[13px] text-muted-foreground">
-            {notFound ? `No issue is called ${identifier} in this workspace.` : (error ?? "Issue not found")}
+            {authorizationKey ? "Unavailable" : notFound ? `No issue is called ${identifier} in this workspace.` : (error ?? "Issue not found")}
           </p>
           <div className="flex items-center gap-2">
             {!notFound && (
@@ -883,6 +957,11 @@ export function IssueDetailSurface({
 
   return (
     <>
+    {rechecking && <p role="status" className="px-4 pt-3 text-xs text-muted-foreground">Checking current access…</p>}
+    {feedback && <div className="px-4 pt-3">{feedback}</div>}
+    {(write?.conflict || write?.resetKey) && draftCount > 0 ? <div className="border-b p-3 text-xs" aria-label="Current server values"><p>Current server values (your draft is kept below)</p>{Object.keys(draft).map((field) => <p key={field}>{field}: {String(issue[field as keyof Mission] ?? "Unassigned")}</p>)}</div> : null}
+    {write && draftCount > 0 && <div className="flex items-center gap-2 border-b p-3 text-xs"><span className="flex-1">{!write.blocked && !canSaveDraft ? "Draft kept. Current access does not allow saving these changes." : "Unsaved changes"}</span><Button size="sm" className="coarse:min-h-12" disabled={write.blocked || rechecking || !canSaveDraft} onClick={() => void patch(draft)}>Save changes</Button><Button size="sm" variant="ghost" className="coarse:min-h-12" disabled={write.blocked} onClick={() => { setDraft({}); draftBaseRevision.current = undefined }}>Discard</Button></div>}
+    {authorizationKey && <p className="px-4 pt-3 text-xs text-muted-foreground">Detail fetched {detailFetchedAt ? new Date(detailFetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "not verified"} · Related data {subFetchedAt ? `fetched ${new Date(subFetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "not verified"} · Automation data fetched separately</p>}
     {subFailed.length > 0 && (
       <div
         role="alert"
@@ -896,10 +975,11 @@ export function IssueDetailSurface({
         </Button>
       </div>
     )}
+    <fieldset disabled={write?.blocked} className="min-w-0">
     <IssueCardDetail
       issue={shown}
-      filesPanel={<IssueFilesCard key={issue.id} issue={issue} editable={editable} />}
-      workPanel={<IssueWorkPanel key={issue.id} issue={issue} agents={roster.agents} editable={editable} onChanged={refresh} latestOutcome={runs[0]?.outcome} />}
+      filesPanel={<IssueFilesCard key={issue.id} issue={issue} editable={can("attach_files")} />}
+      workPanel={<IssueWorkPanel key={issue.id} issue={issue} agents={roster.agents} editable={executionActions && editable} allowedActions={executionActions ? allowed : []} onChanged={refresh} latestOutcome={runs[0]?.outcome} />}
       unavailable={subFailed}
       comments={comments}
       olderComments={commentsHasMore ? <Button size="sm" variant="outline" disabled={olderBusy} onClick={() => void loadOlderComments()}>{olderBusy ? "Loading…" : "Load older comments"}</Button> : undefined}
@@ -913,12 +993,14 @@ export function IssueDetailSurface({
       routineRuns={routineRuns}
       project={project}
       agents={roster.agents}
-      onSubmitComment={editable ? postComment : undefined}
+      onSubmitComment={can("comment") ? postComment : undefined}
+      commentDraft={write ? commentDraft : undefined}
+      onCommentDraft={write ? setCommentDraft : undefined}
       viewerInitial={viewerInitial}
       edit={edit}
       actions={
-        editable ? (
-          <IssueWorkflowActions issue={issue} onAction={runWorkflow} busy={busy} />
+        executionActions && (editable || !!allowed?.length) ? (
+          <IssueWorkflowActions issue={issue} onAction={runWorkflow} busy={busy} allowedActions={allowed} />
         ) : undefined
       }
       runActivity={
@@ -937,6 +1019,7 @@ export function IssueDetailSurface({
         />
       }
     />
+    </fieldset>
     {confirm && (
       <ConfirmDialog
         open
@@ -1086,4 +1169,8 @@ function consequencesOf(
   }
   out.push({ tone: "kept", text: "People following this issue are notified" })
   return out
+}
+
+function issueFieldAction(key: string): IssueAction {
+  return key === "status" ? "change_status" : key.startsWith("assignee_") ? "assign" : key.startsWith("routine_") ? "change_workflow" : "edit_fields"
 }

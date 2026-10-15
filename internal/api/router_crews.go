@@ -492,6 +492,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agents/{agentId}/peers", authed(wsCtx(http.HandlerFunc(peers.ListAgentPeers))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/peers/{userId}", authed(wsCtx(http.HandlerFunc(peers.GetAgentPeer))))
 	r.authedMut("DELETE", "/api/v1/agents/{agentId}/peers/{userId}", roleSelf, peers.DeleteAgentPeer)
+	r.authedMut("PATCH", "/api/v1/agents/{agentId}/peers/{userId}", roleSelf, peers.PatchAgentPeer)
 
 	// PR-E F6 — GDPR primitives. User-facing /users/me/* — every
 	// authenticated user can act on their own peer cards without

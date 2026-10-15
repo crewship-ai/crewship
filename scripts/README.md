@@ -21,6 +21,7 @@ it is safe against a shared development instance.
 | Plan repository merge policy | `python3 scripts/ci/repository-policy.py --output /tmp/policy-plan.json` | Reads the current main ruleset and prepares a preservation-first queue/CodeQL plan. Explicit `--apply --plan ... --documentation-commit ...` changes live rules only after review; see [the policy runbook](../docs/runbooks/ci-cd-implementation-2026-09-11.md#review-and-apply-repository-policy-2932) |
 | Plan repository merge policy | `python3 scripts/ci/repository-policy.py --output /tmp/policy-plan.json` | Reads the current main ruleset and prepares a preservation-first queue/CodeQL plan. Every `--apply --plan ...` requires `--analysis-commit ...` for reviewed source already on main and actual PR canary review; queue activation also requires `--documentation-commit ...`. See [the policy runbook](../docs/runbooks/ci-cd-implementation-2026-09-11.md#review-and-apply-repository-policy-2932) |
 | Documentation inventory | `make docs-inventory:strict` | Checks documented API/CLI references and writes ignored inventory reports |
+| Built chat XLSX worker | `pnpm test:chat-xlsx-worker` after `pnpm build` | Exercises the shipped local XLSX worker in Chromium with synthetic saved formulas, coordinates, corruption, macros and resource bounds |
 | Built chat table worker | `pnpm test:chat-worker` after `pnpm build` | Exercises the actual bundled worker in Chromium with synthetic quoted Unicode data, malformed input and resource bounds; requires the Playwright browser |
 | Browser tests | See [e2e/README.md](../e2e/README.md) | Selects the appropriate suite and target instance |
 
@@ -36,6 +37,7 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 | --- | --- |
 | [build-stamp.sh](build-stamp.sh) | Reads Git identity correctly in worktrees; supplies build metadata |
 | [embed-web-out.sh](embed-web-out.sh) | Stages/verifies the static export in `web/out/`; preserves the placeholder |
+| [check-chat-table-worker.mjs](check-chat-table-worker.mjs), [check-chat-xlsx-worker.mjs](check-chat-xlsx-worker.mjs) | Chromium acceptance of built `out/chat-workers` bundles with synthetic CSV/XLSX; runs through `pnpm test:chat-worker` / `pnpm test:chat-xlsx-worker` in CI Playwright PR subset; no live server or external parser |
 | [prepare-chat-workers.mjs](prepare-chat-workers.mjs) | Bundles chat preview workers as local JavaScript before frontend dev/build; public output is generated and ignored |
 | [prepare-pdf-assets.mjs](prepare-pdf-assets.mjs) | Prepares browser PDF assets; invoked by frontend dev/build commands |
 | [gen-avatar-fixtures.mjs](gen-avatar-fixtures.mjs) | Regenerates avatar validator test fixtures |

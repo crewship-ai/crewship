@@ -202,7 +202,7 @@ var TableCategory = map[string]string{
 	// Memory and its version history.
 	"memory_relations": CategoryMemory, "memory_proposals": CategoryMemory, "memory_versions": CategoryMemory,
 	"memory_health_snapshots": CategoryMemory, "peer_cards": CategoryMemory, "user_peer_consent": CategoryMemory,
-	"user_models": CategoryMemory, "user_model_provenance": CategoryMemory,
+	"user_models": CategoryMemory, "user_model_provenance": CategoryMemory, "agent_user_preferences": CategoryMemory,
 
 	// Chats.
 	"chats": CategoryChats, "chat_branches": CategoryChats, "message_reactions": CategoryChats,

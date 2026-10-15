@@ -1,6 +1,6 @@
 vi.mock("../artifact-result-cards", () => ({ ArtifactResultCards: () => null }))
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 
 const chatStub = vi.hoisted(() => ({
@@ -14,9 +14,12 @@ vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test" }) }))
 vi.mock("../right-rail", () => ({ RightRail: () => null }))
 vi.mock("../right-drawer", () => ({ RightDrawer: ({ children }: { children: ReactNode }) => children }))
-vi.mock("../artifact/artifact-pane", () => ({ ArtifactPane: () => null }))
+vi.mock("../artifact/artifact-pane", () => ({ ArtifactPane: ({ onAskSelection }: { onAskSelection?: (text: string) => void }) => {
+  const open = useArtifactStore((state) => state.open)
+  return open ? <div data-testid="artifact-pane"><button onClick={() => onAskSelection?.("Selected source A2:B2")}>Ask about test selection</button></div> : null
+} }))
 vi.mock("../composer/slash-palette", () => ({ SlashPalette: () => null }))
-vi.mock("../composer/chat-composer", () => ({ ChatComposer: () => null }))
+vi.mock("../composer/chat-composer", () => ({ ChatComposer: ({ contextRequest }: { contextRequest?: { text: string } }) => <output data-testid="composer-context">{contextRequest?.text}</output> }))
 vi.mock("../right-panel", () => ({ RightPanel: ({ initialTab }: { initialTab: string }) => <div data-testid="context-tab">{initialTab}</div> }))
 vi.mock("../turn-renderer", () => ({ TurnRenderer: ({ onFileClick }: { onFileClick: (path: string) => void }) => <>
   <button onClick={() => onFileClick("reports/result.pdf")}>Preview generated PDF</button>
@@ -59,6 +62,41 @@ describe("chat artifact entry points", () => {
   it("opens Work through the mobile Work page", async () => {
     render(<ChatPanel {...props} mobilePanel="work" />)
     expect(await screen.findByTestId("context-tab")).toHaveTextContent("work")
+  })
+  it("returns a mobile selection to the unobscured composer without losing its context", async () => {
+    const changePanel = vi.fn()
+    const view = render(<ChatPanel {...props} mobilePanel="artifacts" onMobilePanelChange={changePanel} />)
+    await screen.findByTestId("context-tab")
+    act(() => useArtifactStore.getState().openFile({ id: "source", agentId: "agent-1", path: "report.csv", title: "report.csv" }))
+    fireEvent.click(screen.getByRole("button", { name: "Ask about test selection" }))
+    expect(changePanel).toHaveBeenCalledWith("chat")
+    expect(useArtifactStore.getState().open).toBe(false)
+    expect(useArtifactStore.getState().tabs).toHaveLength(1)
+    view.rerender(<ChatPanel {...props} mobilePanel="chat" onMobilePanelChange={changePanel} />)
+    expect(screen.getByTestId("composer-context")).toHaveTextContent("Selected source A2:B2")
+    expect(screen.queryByTestId("artifact-pane")).not.toBeInTheDocument()
+  })
+  it.each(["chat", "work"] as const)("keeps an open artifact from covering the mobile %s panel", async (panel) => {
+    const view = render(<ChatPanel {...props} mobilePanel="artifacts" />)
+    await screen.findByTestId("context-tab")
+    act(() => useArtifactStore.getState().openFile({ id: "source", agentId: "agent-1", path: "report.csv", title: "report.csv" }))
+    expect(screen.getByTestId("artifact-pane")).toBeInTheDocument()
+    view.rerender(<ChatPanel {...props} mobilePanel={panel} />)
+    expect(screen.queryByTestId("artifact-pane")).not.toBeInTheDocument()
+    expect(useArtifactStore.getState().tabs).toHaveLength(1)
+    view.rerender(<ChatPanel {...props} mobilePanel="artifacts" />)
+    expect(screen.getByTestId("artifact-pane")).toBeInTheDocument()
+  })
+  it("keeps a desktop preview open when adding selected context", async () => {
+    const changePanel = vi.fn()
+    render(<ChatPanel {...props} onMobilePanelChange={changePanel} />)
+    await screen.findByTestId("context-tab")
+    act(() => useArtifactStore.getState().openFile({ id: "source", agentId: "agent-1", path: "report.csv", title: "report.csv" }))
+    fireEvent.click(screen.getByRole("button", { name: "Ask about test selection" }))
+    expect(useArtifactStore.getState().open).toBe(true)
+    expect(screen.getByTestId("artifact-pane")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-context")).toHaveTextContent("Selected source A2:B2")
+    expect(changePanel).not.toHaveBeenCalled()
   })
   it("opens a generated PDF in the artifact pane", async () => {
     chatStub.turns = [{ id: "turn-1", role: "assistant", parts: [], timestamp: new Date() }]

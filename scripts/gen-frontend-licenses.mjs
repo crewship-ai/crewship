@@ -32,6 +32,10 @@ const pnpmDir = "node_modules/.pnpm";
 // Adding an entry requires citing where the declaration is observable and a
 // review note; versions not listed here fail hard.
 const EXCEPTIONS = {
+  // XLSX dependency audit (2026-10-15): exact npm 0.1.20 tarball and upstream
+  // v0.1.20 tree contain no license text. package.json declares MIT; preserve
+  // that declaration honestly as an EXCEPTION-NOTICE, not invented copyright.
+  "worker-f@0.1.20": "package.json declares MIT; upstream v0.1.20 commit 32742a0f8a57f19968c73539a09ecb3606efa3f9 also ships no license text: https://gitlab.com/catamphetamine/worker-f/-/blob/32742a0f8a57f19968c73539a09ecb3606efa3f9/package.json",
   // Dependency refresh (2026-10-05): inspected the exact registry tarballs
   // linked in PR #2915 and checked their package.json license declarations.
   // None ships a package-level license text; provider-utils only includes a

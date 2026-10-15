@@ -7,7 +7,7 @@ import { persist, createJSONStorage } from "zustand/middleware"
 // older persisted user state may still hold it as activeTab. Keep it
 // in the union so persisted JSON deserialises cleanly; the rail just
 // doesn't render a button for it any more, and the rail migrates it to Artifacts.
-export type DrawerTab = "files" | "artifacts" | "work" | "triggers" | "team" | "context"
+export type DrawerTab = "files" | "artifacts" | "memory" | "work" | "triggers" | "team" | "context"
 export type DrawerMode = "overlay" | "push"
 
 interface DrawerState {

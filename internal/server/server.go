@@ -45,6 +45,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/terminal"
+	"github.com/crewship-ai/crewship/internal/usermodel"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -539,6 +540,9 @@ func (s *Server) mountAPIRouter(
 	orch.SetMemoryMetrics(newMemoryMetricsAdapter(deps.DB))
 	orch.SetPersonalizationAllowed(func(ctx context.Context, workspaceID, userID string) (bool, error) {
 		return memory.PersonalizationAllowed(ctx, deps.DB, workspaceID, userID)
+	})
+	orch.SetFeedbackPreferenceReader(func(ctx context.Context, workspaceID, agentID, userID string) (string, error) {
+		return usermodel.ReadFeedbackPreferences(ctx, deps.DB, workspaceID, agentID, userID)
 	})
 	orch.SetUserModelReader(func(ctx context.Context, workspaceID, userID string) (string, error) {
 		return memory.ReadIndexedUserModel(ctx, deps.DB, cfg.Storage.BasePath, workspaceID, userID)
