@@ -40,6 +40,7 @@ func (h *InboxHandler) takeOverIssue(w http.ResponseWriter, r *http.Request, wsI
 		issues := NewIssueHandler(h.db, h.hub, nil, h.logger)
 		issues.hardStopTargets(ctx, wsID, ident, targets)
 	}
+	broadcastIssueCardInvalidations(ctx, h.db, h.hub, wsID, missionID, false)
 	if h.hub != nil {
 		broadcastWorkspaceEvent(h.hub, wsID, "inbox.updated", map[string]string{"id": cardID, "state": "resolved"})
 		broadcastWorkspaceEvent(h.hub, wsID, "issue.updated", map[string]string{"id": missionID, "identifier": ident, "crew_id": crewID})

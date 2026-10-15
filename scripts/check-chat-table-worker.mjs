@@ -15,16 +15,21 @@ try {
  })
  const page = await context.newPage()
  await page.goto('http://crewship-worker.test/')
- const run = text => page.evaluate(text => new Promise((resolve, reject) => {
+ const run = source => page.evaluate(source => new Promise((resolve, reject) => {
   const worker = new Worker('/chat-workers/table-v1.js', { type: 'module' })
   const timer = setTimeout(() => { worker.terminate(); reject(new Error('Worker timed out')) }, 5000)
   worker.onerror = event => { clearTimeout(timer); worker.terminate(); reject(new Error(event.message)) }
   worker.onmessage = event => { clearTimeout(timer); worker.terminate(); resolve(event.data) }
-  const bytes = new TextEncoder().encode(text).buffer
+  const bytes = (typeof source === "string" ? new TextEncoder().encode(source) : new Uint8Array(source)).buffer
   worker.postMessage({ bytes, separator: ',' }, [bytes])
- }), text)
+ }), source)
  const valid = await run('Žofie,"a,b"\r\nsecond,"line\nnext"')
  assert.deepEqual(valid.table.rows, [['Žofie','a,b'],['second','line\nnext']])
+ const legacy = await run([0x8e, 0x6f, 0x66, 0x69, 0x65, 0x2c, 0xe8, 0x61, 0x73])
+ assert.deepEqual(legacy.table.rows, [['Žofie', 'čas']])
+ const utf16 = await run([0xff, 0xfe, 0x7d, 0x01, 0x2c, 0, 0x31, 0])
+ assert.deepEqual(utf16.table.rows, [['Ž', '1']])
+ assert.match((await run([0xff, 0xfe, 0x31])).error, /encoding.*Download/)
  const malformed = await run('"unterminated')
  assert.match(malformed.error, /Unterminated/)
  const bounded = await run(Array(102).fill('x').join(','))
