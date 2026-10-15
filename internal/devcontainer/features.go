@@ -263,6 +263,13 @@ func (d *FeatureDownloader) ClearCache() error {
 // resilience).
 func (d *FeatureDownloader) Download(ctx context.Context, ref string, options map[string]any) (*ResolvedFeature, error) {
 	dir := d.cachePathFor(ref)
+	// Recheck the cache after acquiring ownership: another crew may have
+	// completed this same cold pull while this caller was waiting.
+	unlock, err := lockFeatureCache(ctx, dir)
+	if err != nil {
+		return nil, fmt.Errorf("waiting for feature %s: %w", ref, err)
+	}
+	defer unlock()
 
 	// Fast path: cache hit.
 	if d.IsCached(ref) {
