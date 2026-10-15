@@ -396,12 +396,16 @@ test("Guest card capability is generic and never fetches identity or object data
       else if (path === "/api/v1/agents") body = [agent]
     else if (path === "/api/v1/agents/entity-agent") body = agent
     else if (path === "/api/v1/agents/entity-agent/chats") body = [{ id: "chat-1", title: "Chat", kind: "direct", status: "active", message_count: 1, started_at: "2026-10-13T09:00:00Z" }]
+    else if (path.endsWith("/restricted-files") || path.endsWith("/project-input-options")) body = { files: [], has_more: false }
+    else if (path.endsWith("/restricted-context")) body = { entries: [] }
     else if (path.endsWith("/execution-profile")) body = { mode: "restricted" }
     else if (path.endsWith("/messages")) body = { messages: [{ id: "trigger-message", role: "user", content: "Show the issue", ts: "2026-10-13T09:00:00Z" }] }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) })
   })
   await page.goto("/chat/_?session=chat-1")
+  await expect(page.getByText("Show the issue", { exact: true })).toBeVisible()
   await expect(page.getByText("Unavailable", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Something went wrong", exact: true })).toHaveCount(0)
   expect(protectedRequests).toEqual([])
   await expect(page.getByText("ENG-1", { exact: true })).toHaveCount(0)
   await expect(page.getByText("Synthetic title", { exact: true })).toHaveCount(0)
