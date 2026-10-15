@@ -169,7 +169,9 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	}
 
 	page := obj(map[string]any{
-		"has_project": map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
+		"has_artifact": boolean(),
+		"has_board":    boolean(),
+		"has_project":  map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": map[string]any{"type": "string",
 			"description": "`user/<id>` or `crew/<slug>` — exactly one of the two (§7.1 rule 1)."},
@@ -182,6 +184,9 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	pageRow := obj(map[string]any{
+		"has_artifact":           boolean(),
+		"artifact_summary":       obj(map[string]any{"head_rev": map[string]any{"type": "integer", "minimum": 1}, "author_user_id": str(), "author_name": str(), "author_agent_id": str(), "author_agent_name": str(), "author_run_id": str(), "published_at": timeString(), "last_activity_at": timeString()}),
+		"has_board":              boolean(),
 		"can_move":               map[string]any{"type": "boolean", "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them."},
 		"can_remove_from_folder": map[string]any{"type": "boolean", "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer."},
 		"has_project":            map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
@@ -272,7 +277,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"subject_type":       map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
 		"subject":            str(),
 		"subject_id":         str(),
-		"level":              map[string]any{"type": "string", "enum": []string{"read", "produce", "write"}},
+		"level":              map[string]any{"type": "string", "enum": []string{"read", "comment", "produce", "write"}},
 		"panels":             arr(str()),
 		"granted_by":         str(),
 		"granted_by_user_id": str(),
@@ -458,7 +463,145 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"ref":                               obj(map[string]any{"kind": str(), "id": str()}),
 	})
 
+	artifactRevision := obj(map[string]any{"revision": integer(), "created_at": timeString(), "author_user_id": str(), "author_agent_id": str(), "author_run_id": str(), "restored_from": integer()})
+	artifactRevision["required"] = []string{"revision", "created_at", "author_user_id"}
+	artifactMutation := obj(map[string]any{"html": map[string]any{"type": "string", "minLength": 1, "description": "Original UTF-8 HTML, at most 10 MiB in bytes. Returned only as JSON source; interactive execution is disabled."}, "base_rev": map[string]any{"type": "integer", "minimum": 0}, "mutation_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}})
+	artifactMutation["required"] = []string{"html", "base_rev", "mutation_id"}
+	artifactMutation["properties"].(map[string]any)["runtime_profile"] = map[string]any{"type": "string", "enum": []string{"static-html-v1"}}
+	artifactMutation["properties"].(map[string]any)["format_version"] = map[string]any{"type": "integer", "enum": []int{1}}
+	artifactMutation["additionalProperties"] = false
+	artifactRestore := obj(map[string]any{"revision": map[string]any{"type": "integer", "minimum": 1}, "base_rev": map[string]any{"type": "integer", "minimum": 0}, "mutation_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}})
+	artifactRestore["required"] = []string{"revision", "base_rev", "mutation_id"}
+	artifactRestore["properties"].(map[string]any)["runtime_profile"] = map[string]any{"type": "string", "enum": []string{"static-html-v1"}}
+	artifactRestore["properties"].(map[string]any)["format_version"] = map[string]any{"type": "integer", "enum": []int{1}}
+	artifactRestore["additionalProperties"] = false
+	artifactResult := obj(map[string]any{"revision": integer(), "head_rev": integer()})
+	artifactResult["required"] = []string{"revision", "head_rev"}
+	artifactExecution := obj(map[string]any{"enabled": map[string]any{"type": "boolean", "enum": []bool{false}}, "reason": map[string]any{"type": "string", "enum": []string{"feature_disabled"}}})
+	artifactExecution["required"] = []string{"enabled", "reason"}
+	artifactExecution["additionalProperties"] = false
+	artifactDocument := obj(map[string]any{"head_rev": integer(), "revision": integer(), "html": str(), "revisions": arr(artifactRevision), "can_write": boolean(), "can_comment": boolean()})
+	artifactDocument["properties"].(map[string]any)["execution"] = artifactExecution
+	artifactDocument["properties"].(map[string]any)["can_copy"] = boolean()
+	artifactDocument["properties"].(map[string]any)["copy_provenance"] = map[string]any{"type": "object", "nullable": true, "properties": map[string]any{"source_revision": integer(), "source": obj(map[string]any{"page_slug": str()})}, "required": []string{"source_revision"}}
+	artifactDocument["required"] = []string{"head_rev", "revision", "html", "revisions", "can_write", "can_comment", "can_copy", "copy_provenance", "execution"}
+	manifestFile := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"path", "mime", "size_bytes", "sha256"}, "properties": map[string]any{
+		"path": map[string]any{"type": "string", "enum": []string{"index.html"}}, "mime": map[string]any{"type": "string", "enum": []string{"text/html; charset=utf-8"}}, "size_bytes": map[string]any{"type": "integer", "minimum": 1, "maximum": 10 << 20}, "sha256": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"},
+	}}
+	artifactDocument["properties"].(map[string]any)["manifest"] = map[string]any{"type": "object", "nullable": true, "additionalProperties": false, "required": []string{"format_version", "runtime_profile", "entrypoint", "files", "source"}, "properties": map[string]any{
+		"format_version": map[string]any{"type": "integer", "enum": []int{1}}, "runtime_profile": map[string]any{"type": "string", "enum": []string{"static-html-v1"}}, "entrypoint": map[string]any{"type": "string", "enum": []string{"index.html"}}, "files": map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": manifestFile}, "source": map[string]any{"type": "object", "nullable": true, "enum": []any{nil}, "description": "Original project sources are not attached by the single-file publication contract."},
+	}}
+	artifactDocument["properties"].(map[string]any)["manifest_status"] = map[string]any{"type": "string", "enum": []string{"unpublished", "legacy_derived", "recorded"}}
+	artifactDocument["required"] = append(artifactDocument["required"].([]string), "manifest", "manifest_status")
+	documentAnchor := obj(map[string]any{"schema_version": map[string]any{"type": "integer", "enum": []int{1}}, "type": map[string]any{"type": "string", "enum": []string{"document"}}})
+	documentAnchor["required"] = []string{"schema_version", "type"}
+	documentAnchor["additionalProperties"] = false
+	pointAnchor := obj(map[string]any{"schema_version": map[string]any{"type": "integer", "enum": []int{1}}, "type": map[string]any{"type": "string", "enum": []string{"point"}}, "coordinate_space": map[string]any{"type": "string", "enum": []string{"viewport"}}, "x": map[string]any{"type": "number", "minimum": 0}, "y": map[string]any{"type": "number", "minimum": 0}, "viewport_width": map[string]any{"type": "number", "minimum": 1, "maximum": 16384}, "viewport_height": map[string]any{"type": "number", "minimum": 1, "maximum": 16384}})
+	pointAnchor["required"] = []string{"schema_version", "type", "coordinate_space", "x", "y", "viewport_width", "viewport_height"}
+	pointAnchor["additionalProperties"] = false
+	pointAnchor["description"] = "A visible viewport point, bounded by the captured dimensions. Not a DOM anchor or document-scroll coordinate. Always belongs to the specified immutable revision."
+	commentAnchor := map[string]any{"oneOf": []any{documentAnchor, pointAnchor}}
+	commentBody := map[string]any{"type": "string", "minLength": 1, "description": "Non-whitespace UTF-8 text, at most 4096 bytes. Mentions do not authorize or start an agent."}
+	reaction := obj(map[string]any{"emoji": map[string]any{"type": "string", "enum": []string{"👍", "❤️", "👀", "✅"}}, "count": integer(), "reacted_by_me": boolean()})
+	reaction["required"] = []string{"emoji", "count", "reacted_by_me"}
+	comment := obj(map[string]any{"id": str(), "body": str(), "author_user_id": str(), "author_name": str(), "author_agent_id": str(), "author_run_id": str(), "created_at": timeString(), "version": integer(), "edited_at": timeString(), "deleted_at": timeString(), "can_edit": boolean(), "can_delete": boolean(), "can_react": boolean(), "can_view_history": boolean(), "reactions": arr(reaction)})
+	comment["required"] = []string{"id", "body", "author_user_id", "author_name", "created_at", "version", "can_edit", "can_delete", "can_react", "can_view_history", "reactions"}
+
+	thread := obj(map[string]any{"id": str(), "revision": integer(), "anchor": commentAnchor, "status": map[string]any{"type": "string", "enum": []string{"open", "resolved"}}, "version": integer(), "created_by_user_id": str(), "created_by_name": str(), "created_at": timeString(), "updated_at": timeString(), "resolved_by_user_id": str(), "resolved_at": timeString(), "comments": arr(comment), "applied_version": integer()})
+	thread["required"] = []string{"id", "revision", "anchor", "status", "version", "created_by_user_id", "created_by_name", "created_at", "updated_at", "comments"}
+	threadList := obj(map[string]any{"threads": arr(thread), "can_comment": boolean(), "can_resolve": boolean()})
+	threadList["required"] = []string{"threads", "can_comment", "can_resolve"}
+	mutationID := map[string]any{"type": "string", "minLength": 1, "maxLength": 128}
+	positiveVersion := map[string]any{"type": "integer", "minimum": 1}
+	threadCreate := obj(map[string]any{"revision": positiveVersion, "anchor": commentAnchor, "body": commentBody, "mutation_id": mutationID})
+	threadCreate["required"] = []string{"revision", "anchor", "body", "mutation_id"}
+	threadCreate["additionalProperties"] = false
+	threadReply := obj(map[string]any{"base_version": positiveVersion, "body": commentBody, "mutation_id": mutationID})
+	threadReply["required"] = []string{"base_version", "body", "mutation_id"}
+	threadReply["additionalProperties"] = false
+	threadResolve := obj(map[string]any{"base_version": positiveVersion, "resolved": boolean(), "mutation_id": mutationID})
+	threadResolve["required"] = []string{"base_version", "resolved", "mutation_id"}
+	threadResolve["additionalProperties"] = false
+	commentDelete := obj(map[string]any{"base_version": positiveVersion, "mutation_id": mutationID})
+	commentDelete["required"] = []string{"base_version", "mutation_id"}
+	commentDelete["additionalProperties"] = false
+	commentReact := obj(map[string]any{"base_version": positiveVersion, "mutation_id": mutationID, "active": boolean()})
+	commentReact["required"] = []string{"base_version", "mutation_id", "active"}
+	commentReact["additionalProperties"] = false
+	commentHistory := obj(map[string]any{"history": arr(obj(map[string]any{"version": positiveVersion, "body": str(), "action": map[string]any{"type": "string", "enum": []string{"create", "edit", "delete"}}, "actor_user_id": str(), "created_at": timeString()}))})
+	commentHistory["required"] = []string{"history"}
+	delegation := obj(map[string]any{"run_id": str(), "expires_at": timeString()})
+	delegation["required"] = []string{"run_id", "expires_at"}
+	delegationRequest := obj(map[string]any{"run_id": map[string]any{"type": "string", "minLength": 1}})
+	delegationRequest["required"] = []string{"run_id"}
+	creationAuthorization := obj(map[string]any{"run_id": str(), "max_artifacts": map[string]any{"type": "integer", "enum": []int{1}}, "remaining": map[string]any{"type": "integer", "minimum": 0, "maximum": 1}, "expires_at": timeString(), "revoked": boolean()})
+	creationAuthorization["required"] = []string{"run_id", "max_artifacts", "remaining", "expires_at", "revoked"}
+	emptyCreationAuthorization := obj(map[string]any{})
+	emptyCreationAuthorization["additionalProperties"] = false
+	creationStatus := obj(map[string]any{"run_id": str(), "can_authorize": boolean(), "authorized": boolean(), "remaining": integer(), "expires_at": str(), "revoked": boolean()})
+	creationStatus["required"] = []string{"run_id", "can_authorize", "authorized", "remaining", "expires_at", "revoked"}
+	creationStatus["properties"].(map[string]any)["policy_allowed"] = boolean()
+	artifactRequest := obj(map[string]any{"id": str(), "chat_id": str(), "agent_id": str(), "thread_id": str(), "base_rev": positiveVersion, "status": map[string]any{"type": "string", "enum": []string{"queued", "running", "succeeded", "failed", "cancelled"}}, "run_id": str(), "result_revision": positiveVersion, "error": str(), "created_at": timeString(), "updated_at": timeString()})
+	artifactRequest["properties"].(map[string]any)["instruction"] = str()
+	resultKind := map[string]any{"type": "string", "enum": []string{"revision", "reply"}}
+	artifactRequest["properties"].(map[string]any)["result_kind"] = resultKind
+	artifactRequest["properties"].(map[string]any)["reply"] = obj(map[string]any{"body": str(), "agent_id": str(), "run_id": str(), "on_behalf_of_user_id": str(), "created_at": timeString()})
+	artifactRequest["properties"].(map[string]any)["reply"].(map[string]any)["required"] = []string{"body", "run_id", "created_at"}
+	artifactRequest["properties"].(map[string]any)["agent_reported_phase"] = obj(map[string]any{"phase": map[string]any{"type": "string", "enum": []string{"preparing", "waiting_for_input", "uploading", "finalizing"}}, "message": str(), "reported_at": timeString()})
+	artifactRequest["properties"].(map[string]any)["agent_reported_phase"].(map[string]any)["required"] = []string{"phase", "message", "reported_at"}
+	artifactRequest["properties"] = mergeProps(artifactRequest["properties"].(map[string]any), requestExecutionProperties())
+	artifactRequest["required"] = []string{"id", "chat_id", "agent_id", "instruction", "base_rev", "status", "result_kind", "created_at", "updated_at"}
+	artifactLease := obj(map[string]any{"page_id": str(), "revision": positiveVersion, "content_sha256": str(), "runtime_profile": map[string]any{"type": "string", "enum": []string{"static-html-v1"}}, "expires_at": timeString()})
+	artifactLease["properties"].(map[string]any)["execution"] = artifactExecution
+	artifactLease["required"] = []string{"page_id", "revision", "content_sha256", "runtime_profile", "expires_at", "execution"}
+	artifactRequestTarget := obj(map[string]any{"chat_id": str(), "title": str(), "agent_id": str(), "agent_name": str(), "agent_slug": str()})
+	artifactRequestTarget["required"] = []string{"chat_id", "title", "agent_id", "agent_name", "agent_slug"}
+	artifactRequestList := obj(map[string]any{"requests": arr(artifactRequest), "can_dispatch": boolean(), "eligible_chats": arr(artifactRequestTarget)})
+	artifactRequestList["required"] = []string{"requests", "can_dispatch", "eligible_chats"}
+	artifactRequestCreate := obj(map[string]any{"chat_id": str(), "thread_id": str(), "instruction": map[string]any{"type": "string", "minLength": 1, "description": "Explicit human instruction, at most 4096 UTF-8 bytes. Dispatch can incur agent usage costs."}, "base_rev": positiveVersion, "submission_id": mutationID, "retry_of_request_id": map[string]any{"type": "string", "maxLength": 128}})
+	artifactRequestCreate["properties"].(map[string]any)["result_kind"] = resultKind
+	artifactRequestCreate["required"] = []string{"chat_id", "instruction", "base_rev", "submission_id"}
+	artifactRequestCreate["additionalProperties"] = false
+	artifactRequestAccepted := obj(map[string]any{"id": str(), "retry_of_request_id": str(), "retry_warning": str()})
+	artifactRequestAccepted["required"] = []string{"id"}
+	artifactRequestCancelled := obj(map[string]any{"id": str(), "status": map[string]any{"type": "string", "enum": []string{"cancelled"}}})
+	artifactRequestCancelled["required"] = []string{"id", "status"}
+	createProps := mergeProps(writeBody["properties"].(map[string]any), map[string]any{"allow_empty": map[string]any{"type": "boolean", "description": "Stage an empty human-owned Page for its first HTML artifact revision. Requires human authentication, the normal page.create permission, no panels and self ownership."}})
+	createBody := obj(createProps)
+	artifactCopyRequest := obj(map[string]any{"source_revision": map[string]any{"type": "integer", "minimum": 1}, "slug": str(), "name": str(), "mutation_id": str()})
+	artifactCopyRequest["required"] = []string{"source_revision", "slug", "name", "mutation_id"}
+	artifactCopyResult := obj(map[string]any{"page_slug": str(), "revision": integer()})
+	artifactCopyResult["required"] = []string{"page_slug", "revision"}
 	return map[string]DomainSchema{
+		"GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy": {
+			Response: map[string]any{"type": "object", "required": []string{"enabled", "crew_ids", "version"}, "properties": map[string]any{"enabled": boolean(), "crew_ids": arr(str()), "version": map[string]any{"type": "integer", "minimum": 0}}},
+		},
+		"PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy": {
+			Request:  map[string]any{"type": "object", "additionalProperties": false, "required": []string{"enabled", "crew_ids", "base_version"}, "properties": map[string]any{"enabled": boolean(), "crew_ids": arr(str()), "base_version": map[string]any{"type": "integer", "minimum": 0}}},
+			Response: map[string]any{"type": "object", "required": []string{"enabled", "crew_ids", "version"}, "properties": map[string]any{"enabled": boolean(), "crew_ids": arr(str()), "version": map[string]any{"type": "integer", "minimum": 0}}},
+		},
+		"GET /api/v1/chats/{chatId}/artifact-creation-authorization":                                  {Response: creationStatus},
+		"POST /api/v1/artifact-creation-authorizations/{runId}":                                       {Request: emptyCreationAuthorization, RequestRequired: true, Response: creationAuthorization, SuccessStatuses: []string{"200", "201"}},
+		"DELETE /api/v1/artifact-creation-authorizations/{runId}":                                     {Response: obj(map[string]any{}), SuccessStatuses: []string{"204"}},
+		"GET /api/v1/chats/{chatId}/artifact-results":                                                 {Response: obj(map[string]any{"results": arr(obj(map[string]any{"page_slug": str(), "title": str(), "revision": integer(), "created_at": timeString(), "agent_id": str(), "agent_name": str(), "run_id": str(), "on_behalf_of_user_id": str()}))})},
+		"GET /api/v1/pages/{slug}/artifact/lease":                                                     {Response: artifactLease},
+		"GET /api/v1/pages/{slug}/artifact/requests":                                                  {Response: artifactRequestList},
+		"POST /api/v1/pages/{slug}/artifact/requests":                                                 {Request: artifactRequestCreate, RequestRequired: true, Response: artifactRequestAccepted, SuccessStatuses: []string{"202"}},
+		"POST /api/v1/pages/{slug}/artifact/requests/{requestId}/cancel":                              {Request: emptyCreationAuthorization, Response: artifactRequestCancelled, SuccessStatuses: []string{"200"}},
+		"GET /api/v1/pages/{slug}/artifact":                                                           {Response: artifactDocument},
+		"POST /api/v1/pages/{slug}/artifact/revisions":                                                {Request: artifactMutation, RequestRequired: true, Response: artifactResult, SuccessStatuses: []string{"200", "201"}},
+		"POST /api/v1/pages/{slug}/artifact/restore":                                                  {Request: artifactRestore, RequestRequired: true, Response: artifactResult, SuccessStatuses: []string{"200", "201"}},
+		"POST /api/v1/pages/{slug}/artifact/copies":                                                   {Request: artifactCopyRequest, RequestRequired: true, Response: artifactCopyResult, SuccessStatuses: []string{"200", "201"}},
+		"GET /api/v1/pages/{slug}/artifact/threads":                                                   {Response: threadList},
+		"POST /api/v1/pages/{slug}/artifact/threads":                                                  {Request: threadCreate, RequestRequired: true, Response: thread, SuccessStatuses: []string{"200", "201"}},
+		"POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies":                               {Request: threadReply, RequestRequired: true, Response: thread, SuccessStatuses: []string{"200", "201"}},
+		"PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}":                 {Request: threadReply, RequestRequired: true, Response: thread},
+		"DELETE /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}":                {Request: commentDelete, RequestRequired: true, Response: thread},
+		"PUT /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji}": {Request: commentReact, RequestRequired: true, Response: thread},
+		"GET /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/history":           {Response: commentHistory},
+		"PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}":                                      {Request: threadResolve, RequestRequired: true, Response: thread, SuccessStatuses: []string{"200"}},
+		"POST /api/v1/pages/{slug}/artifact/delegations":                                              {Request: delegationRequest, RequestRequired: true, Response: delegation, SuccessStatuses: []string{"201"}},
+		"DELETE /api/v1/pages/{slug}/artifact/delegations/{runId}":                                    {Response: obj(map[string]any{}), SuccessStatuses: []string{"204"}},
 		"GET /api/v1/pages": {
 			Response: arr(pageRow),
 		},
@@ -472,7 +615,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			Request: obj(map[string]any{
 				"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
 				"subject":      str(),
-				"level":        map[string]any{"type": "string", "enum": []string{"read", "produce", "write"}},
+				"level":        map[string]any{"type": "string", "enum": []string{"read", "comment", "produce", "write"}},
 				"panels": map[string]any{"type": "array", "items": str(),
 					"description": "Optional. Restricts a produce grant to named panels; omitted means every panel on the page."},
 			}),
@@ -645,7 +788,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			Response: page,
 		},
 		"POST /api/v1/pages": {
-			Request: writeBody, Response: page,
+			Request: createBody, Response: page,
 		},
 		"PATCH /api/v1/pages/{slug}": {
 			Request: writeBody, Response: page,

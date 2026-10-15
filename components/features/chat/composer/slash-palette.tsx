@@ -283,7 +283,7 @@ const COMMANDS: SlashCommand[] = [
   },
   {
     id: "open-artifacts",
-    label: "Open Artifacts panel",
+    label: "Open Files panel",
     icon: FileCode,
     shortcut: "⌘1",
     group: "view",

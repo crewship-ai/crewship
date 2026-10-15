@@ -547,3 +547,8 @@ describe("groupPagesByFolder", () => {
     expect(groupPagesByFolder([], [])).toEqual([])
   })
 })
+
+it("keeps Board pages distinct from empty pages eligible for HTML artifacts", () => {
+  expect(toPageView({ slug: "drawing", owner: "user/owner", panels: [], has_board: true })).toMatchObject({ hasBoard: true, hasArtifact: false, artifactEligible: false })
+  expect(toPageView({ slug: "empty", owner: "user/owner", panels: [] })).toMatchObject({ hasBoard: false, artifactEligible: true })
+})

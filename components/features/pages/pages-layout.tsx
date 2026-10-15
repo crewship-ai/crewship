@@ -60,14 +60,16 @@ import {
 } from "@/hooks/use-pages"
 import type { PanelState } from "@/components/features/pages/panels/types"
 import { PagesRail } from "@/components/features/pages/pages-rail"
+import { ArtifactGallery } from "./artifact-gallery"
 import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
+import { NewArtifactDialog } from "./new-artifact-dialog"
 import { PageEditor } from "@/components/features/pages/page-editor"
 import { PageImportDialog } from "@/components/features/pages/page-import-dialog"
 import { useEditorRoute } from "@/components/features/pages/editor/use-editor-route"
 import { usePageCapabilities } from "@/components/features/pages/editor/use-page-capabilities"
 import { usePageGrants } from "@/hooks/use-page-grants"
-import { PageEditorShell } from "@/components/features/pages/editor/page-editor-shell"
+import { PageEditorShell, UnsavedWorkDialog } from "@/components/features/pages/editor/page-editor-shell"
 import { usePageFolderMutations, usePageFolders } from "@/hooks/use-page-folders"
 import { FolderDeleteDialog, FolderEditDialog, MoveToFolderDialog } from "@/components/features/pages/folder-dialogs"
 import { FolderSharingDialog } from "@/components/features/pages/folder-sharing-dialog"
@@ -84,6 +86,7 @@ export interface PagesLayoutProps {
 
 export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const isMobile = useIsMobile()
+  const [creatingArtifact, setCreatingArtifact] = React.useState(false)
 
   // WHICH PAGE IS OPEN, WHETHER THE EDITOR IS OPEN, AND WHICH SECTION IT SHOWS
   // ARE ONE PIECE OF STATE, AND THE ADDRESS BAR IS ITS MIRROR.
@@ -112,6 +115,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
 
   const canCreatePage = usePageCreationAccess(workspaceId)
   const canCreateFolder = usePageFolderCreationAccess(workspaceId)
+  React.useEffect(() => { if (!canCreatePage) { setCreatingArtifact(false) } }, [canCreatePage])
   const [importing, setImporting] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
   const [search, setSearch] = React.useState("")
@@ -269,7 +273,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // Guessing a longer delay would only move the race. The callback ref fires
   // when the node actually attaches, which is the moment that matters.
   const wantsFocus = React.useRef(false)
+  const viewHeadingNode = React.useRef<HTMLHeadingElement | null>(null)
   const viewHeading = React.useCallback((node: HTMLHeadingElement | null) => {
+    viewHeadingNode.current = node
     if (node === null || !wantsFocus.current) return
     wantsFocus.current = false
     node.focus()
@@ -353,6 +359,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 door that existed only as a CLI command. */}
             {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
+            </SubBarSecondary>}
+            {canCreatePage && <SubBarSecondary icon={FilePlus2} onClick={() => canCreatePage && setCreatingArtifact(true)}>
+              New artifact
             </SubBarSecondary>}
             {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
@@ -477,6 +486,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   now={now}
                   workspaceId={workspaceId}
                   mayEditAvatar={capabilities.mayEditMetadata}
+                  onArtifactDirtyChange={nav.setDirty}
                   // Straight from the subscription `usePage` registered — the
                   // header indicator is lit only while this page's channel is
                   // on a live socket, never on a timer of its own (epic #1935).
@@ -493,7 +503,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 overflow-auto"
               >
-                <PagesOverview
+                {filters.content?.length === 1 && filters.content[0] === 'artifact' ? <ArtifactGallery workspaceId={workspaceId} pages={filtered} loading={loading} error={error} onSelect={openPage} onCreate={canCreatePage ? () => setCreatingArtifact(true) : undefined} onOpenChat={() => { window.location.assign('/chat') }} /> : <PagesOverview
                   pages={filtered}
                   allPages={pages}
                   loading={loading}
@@ -503,7 +513,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                     setFilters((f) => ({ ...f, states: togglePageFilter(f.states, state) }))
                   }
                   now={now}
-                />
+                />}
               </motion.div>
             )}
           </AnimatePresence>
@@ -575,6 +585,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
       {/* Only creation opens the document editor from here now. Editing an
           existing Page's document belongs to the editor's Content section,
           beside the panels it changes. */}
+      {!editing && <UnsavedWorkDialog pending={nav.pending} onDiscard={() => {}} onReturnFocus={() => viewHeadingNode.current?.focus()} />}
+      {canCreatePage && creatingArtifact && <NewArtifactDialog workspaceId={workspaceId} onClose={() => setCreatingArtifact(false)} onCreated={openPage} />}
       {creating && (
         <PageEditor
           workspaceId={workspaceId}

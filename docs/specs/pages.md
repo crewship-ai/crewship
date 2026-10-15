@@ -1,4 +1,4 @@
-# Pages — panel implementation reference
+# Pages — panels and HTML artifacts
 
 {/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 
@@ -8,6 +8,176 @@ that every feature shipped. The current custom-application contract is
 [Pages Apps](pages-apps.md), with [architecture context](../prd/pages-apps-architecture.md).
 Internal research, work allocation and session evidence are maintained in
 [private context](../development/private-context.md).
+
+## Delivery boundary
+
+**Artifacts 1.0 is static only:** this delivery exposes HTML artifacts, comments
+and agent requests. Interactive HTML execution, R1 runtime transport, DOM element
+anchors and the **Use** flow belong to Artifacts 1.1. Preparatory execution code
+remains dormant and reports `feature_disabled`; configuration or client input
+cannot activate it. Board editors,
+Board HTTP/CLI/MCP operations and Board job admission are delivered separately.
+Three consolidated migrations define comment grants, Artifacts and the shared
+Board storage schema. Dormant Board tables preserve the common storage and backup
+contract; their presence does not expose a drawing editor or authorize a Board
+job in this version. Interactive artifact execution remains disabled.
+
+## Private content presence
+
+Authenticated humans subscribe to dedicated `artifact:{page_id}` WebSocket rooms. The ordinary `page:` channel still carries
+identifiers only. A central Page resolver checks current workspace membership,
+Page type and live read grants at subscription and before every delivered
+frame; the existing reauthorization sweep removes revoked subscriptions within
+30 seconds. An agent context cannot mint a human WebSocket ticket.
+
+Clients send `presence` with `schema_version: 1` and the artifact `revision`.
+The server supplies connection/user identities and emits bounded
+`presence.snapshot` lists; client identity fields, content and arbitrary payload
+keys are rejected. Artifact presence shows viewers and their revision, without
+claiming cursor access inside a sandboxed iframe.
+
+Presence is ephemeral process memory: heartbeat every 5 seconds, expiry after
+15 seconds, at most 64 room members, four connections per user/room, eight
+content subscriptions per connection and 1,000 memberships overall. Updates are
+limited to 10/second per connection and user/room; snapshot fanout is bounded
+to 20/second per room and 200/second overall. Dropped transient updates recover
+on the next heartbeat. No cursor movement writes to the database. Multiple
+server replicas still require a shared presence transport and the platform's
+writer migration; these rooms do not make the current single-writer platform
+horizontally writable.
+
+## HTML artifacts: current first slice
+
+A human-owned empty Page can hold an immutable history of HTML documents.
+Pages exposes **New artifact**, an upload/source editor, static preview, revision
+history, side-by-side static comparison and restore. Revision links use `?revision=N`. The chat attachment tab is called **Files** to distinguish
+those files from these Pages artifacts. Existing panel Pages and Apps cannot
+be converted by uploading an artifact over them. The create request explicitly
+sets `allow_empty: true` with no panels and the authenticated human as owner;
+ordinary panel-page validation still requires a panel.
+
+The authenticated API lives under `/api/v1/pages/{slug}/artifact`:
+
+- `GET` returns the selected source (optional positive `revision`), current
+  `head_rev`, revision metadata and `can_write`.
+- `POST /revisions` accepts `html`, `base_rev` and `mutation_id`.
+- `POST /restore` accepts `revision`, `base_rev` and `mutation_id`; it appends
+  a new revision containing the selected older source.
+
+All routes require a human identity and the existing Page read/write checks.
+There is no public artifact-source endpoint. A separate internal agent route
+accepts only a verified live chat run with a human Page owner delegation and an
+explicit agent write grant; see [delegated updates](../api-reference/pages.mdx#delegated-agent-updates).
+Its revision records retain the actual agent/run and human on-behalf-of identity. A publication takes the database writer fence and rechecks current
+membership and Page permissions within that transaction. The expected head
+must match: a stale save returns 409. Replaying the same mutation ID by the
+same author with the same payload returns its original revision; reusing it
+for another request is rejected. The UI retains the draft and its original
+base until the editor explicitly chooses to use a newer revision as the base.
+
+Limits are 10 MiB of nonempty UTF-8 source, 200 retained source revisions per artifact,
+30 committed revisions per artifact per rolling hour and 200 per workspace per
+rolling hour. Restore counts as a revision. Old unpinned source revisions are
+pruned before admitting a new revision. Discussion, active jobs and active Board
+pins protect their original source. Restore provenance records the original
+revision number without permanently pinning another copy of its source. If all
+slots have active pins, publication is refused with a retention-specific error.
+Publication replay receipts are retained for at least 24 hours and while their
+source revision exists; an expired source returns 404. Expired receipts no longer
+consume a permanent lifetime quota.
+Workspace rate receipts survive Page deletion. Two upload slots bound concurrent
+JSON decoding, and the decoder reads the bounded request stream directly. Blobs use the existing attachment store; artifact references pin
+historical blobs against collection and are included in workspace backup and
+restore. Revision author, source digest and optional restored-from revision are
+stored with the revision. Workspace notifications contain identifiers only.
+
+The stored original is delivered as JSON text, never inserted directly into
+Studio. Static preview sanitizes it with DOMPurify, then renders it in an
+iframe with no sandbox permissions and a restrictive CSP. Scripts, navigation,
+forms, nested frames and external resources are disabled. This deliberately
+limits visual fidelity (including images and downloaded fonts). An unsupported
+sanitizer environment displays escaped source. Source download is plain text
+with an `.html.txt` filename. This static presentation boundary does not claim
+to safely execute arbitrary interactive HTML.
+
+Revision-bound discussion threads are stored separately from artifact source.
+Human Page commenters can start a revision-bound document or viewport-point thread and reply; editors can
+also resolve and reopen. Readers can view discussions. The `comment` grant is
+available to users, crews and the workspace, and never grants edit, production
+or agent-dispatch authority. Named-agent comment grants require a live verified human run and both the human’s and agent’s current comment authority. Thread writes require an expected version and an
+author-bound mutation ID, and recheck live Page rights inside the writer
+transaction. New artifact revisions preserve older threads with their original
+revision. UI drafts remain in memory, comments are escaped text, and mentions
+never start an agent or grant authority. See [the discussion API](../api-reference/pages.mdx#artifact-discussion-threads)
+for endpoint shapes and hard bounds. A human may edit or tombstone only their own
+human-authored comment; an agent reply made on their behalf is not theirs to edit.
+Edits retain immutable private version history, readable only by the original human
+author while they still have comment access. Reactions require current comment
+access and do not grant publication or dispatch rights.
+
+Editors can explicitly **Send to agent** from the artifact or a current-revision
+thread. Only server-filtered private, unshared chats owned by that editor with an existing
+agent write grant are eligible. Durable requests capture the source revision,
+comments and instruction, recheck authority at execution, and link success to an
+atomically published revision. Cancellation revokes publication and requests a
+run stop. Restored request history cannot restart old work. A separate live-chat
+control permits one private artifact from that specific trusted run; creation
+is off by default. Request-bound authority does not grant editors permission to
+manage grants. The discussion snapshot is fetched only after trusted run
+admission; it is not placed in the chat prompt beforehand. The agent's
+operational prompt and bundled `crewship-artifacts` skill document publication.
+
+The editor chooses an immutable expected result: a new revision (the default)
+or a text-only reply. A reply request cannot publish a revision; its verified
+run completes it with a bounded, plain-text reply and stored attribution.
+`artifact_request_update` also accepts bounded agent-reported phases. These
+are claims displayed separately from observed execution status: they do not
+renew the request deadline or count as runtime heartbeats. Each update has an
+immutable mutation receipt; an exact retry rechecks live authority and returns
+the originally accepted update, while the request read returns current state.
+Publication policy may disable publishing without disabling these reports.
+Backup preserves the discussion and attribution but never restores live run
+authority or pending completion notifications.
+
+A failed or cancelled request can be submitted again explicitly with
+`retry_of_request_id`. The server checks the same initiating human, workspace,
+source Page and job kind; it never resumes the original runtime. The new request
+captures the current revision or Board selection and gets a new submission ID.
+An unconfirmed previous run remains eligible but carries a duplicate-work
+warning. Transport retries still reuse the same submission ID and snapshot.
+
+Completion generates a generic private Inbox notice for the initiating human
+when they retain current access. Source completion and notice insertion share a
+transaction; a bounded recovery pass handles pending notices. Notices contain
+opaque pointers, no artifact content, titles or instructions, and do not fan out
+to external channels. Restores suppress pending notices. The authenticated
+`GET /api/v1/page-request-results/{kind}/{requestId}` resolves a current Page slug
+and an optional retained result revision only after checking the initiating
+human's live membership and Page access. Inbox pointers never grant access.
+
+DOM element anchors, interactive runtime, R1 transport and the **Use** flow
+are reserved for Artifacts 1.1 and are not part of the static 1.0 delivery. Static point capture reloads the preview
+to the top, records CSS viewport dimensions, and never silently repositions a
+point onto another revision or responsive layout. The runtime
+matrix measures known iframe unresponsiveness in Firefox/WebKit explicitly;
+a passing capability experiment is not authorization to enable scripts. The
+separate-tab experiment and sanitized production preview remain tested in all
+engines; an interactive separate-tab product flow still requires acceptance.
+
+`GET /api/v1/pages/{slug}/artifact/lease?revision=N` is a human-only metadata
+check for one retained revision. It rechecks the current database membership,
+role and Page ACL, returning the revision digest, supported profile and a
+15-second expiry. It is not a bearer capability and does not enable scripts.
+Interactive bootstrap, MessagePort and host teardown components remain
+disconnected from the product view until runtime acceptance. Agent credentials
+cannot use the lease endpoint. Both the artifact document and lease report
+`execution: {enabled: false, reason: "feature_disabled"}`. The product bootstrap
+handler remains unregistered and returns a no-store 404 under its single closed server feature gate. It cannot be activated by
+client input, a creation policy, or runtime domain configuration. The canonical
+bootstrap behind that gate still requires HTTPS on a separate registrable site.
+The separate-tab experiment does not establish a product handoff: Studio's
+`COOP: same-origin` can sever the opener, and the current bootstrap is iframe-only.
+Unsupported browsers retain static previews, comments and revision history.
 
 ## 0. Verdict
 
@@ -1278,5 +1448,132 @@ Public implementation references: `internal/pages/`, `internal/api/pages_*.go`,
 Market research and its bibliography are retained in private context; they
 are not required to build, test or use the product.
 
+### Agent replies in artifact threads
+
+The sidecar exposes `GET /artifacts/{slug}/threads` and
+`POST /artifacts/{slug}/threads/{threadId}/comments`. These require the current
+run credential, a live verified human principal, explicit unexpired and unrevoked
+Page/run delegation, that human's current comment permission and the agent's own
+live `comment` or `write` Page grant. A chat message alone is not delegation.
+Request-backed delegations additionally retain the initiator's current editor
+authority. Replies and their exact retries also obey the workspace/crew
+artifact publication policy; that ceiling does not withdraw separately granted
+source/discussion read access. A crew grant
+never substitutes for it. Reads paginate with `limit` (default 5, maximum 10),
+optional positive `revision`, and the returned `next_cursor` as `cursor`.
+
+Replies use the observed `base_version` and a stable `mutation_id`. The server
+records the human, agent and run; retries cannot transfer identity across runs.
+The UI distinguishes agent replies from the human who authorized the run.
+Comment authority does not create threads, resolve them, dispatch jobs, publish
+artifact revisions or grant additional rights.
+
+
+### Artifact and Board lifecycle maintenance
+
+Artifacts and Boards require an **explicit human ownership transfer** before
+member removal or workspace-scoped user erasure. No administrator is selected
+automatically. While the departing user owns any output, the entire departure
+returns 409 with `code: "page_ownership_transfer_required"` and a `pages` array
+of metadata (`id`, `slug`, `name`, `type`, `owner_user_id`, `owner_name` and an
+empty `eligible_successors` array). Ownership, source, scene, history, grants,
+membership and notices remain unchanged, including regular Pages that otherwise
+could transfer to a crew. GDPR preserves its existing failed-attempt audit row.
+Regular panel Pages otherwise continue to use their existing crew transfer rule.
+The instance-admin membership-removal route instead returns `pages: [{id}]` for
+all unresolved Pages and a generic administrator-guidance message after rechecking
+current instance authority; a revoked instance administrator receives 403 without
+Page IDs. Instance administration alone does not authorize private Page names,
+slugs, ownership or
+contacts. The workspace-admin removal route retains its authorized output metadata
+only after rechecking current workspace OWNER/ADMIN standing following custody
+refusal; a removed or demoted actor receives 403 without Page IDs.
+GDPR conflicts disclose those details only to a currently active, unrestricted
+workspace OWNER/ADMIN, rechecked after custody refusal; instance-only administrators
+and instance administrators with only MEMBER standing receive ID-only Pages and
+generic guidance only while canonical instance authority remains current. Without
+either authority GDPR returns 403 without Page IDs. GDPR retains `action_id`,
+`data_subject` and `workspace_id`, and its failed custody audit records the reason
+and opaque Page IDs without private Page
+names. Conflict messages direct administrators to Settings > General >
+Artifact and Board ownership; a regular member cannot use the admin-only removal
+endpoint as a self-service leave operation.
+
+Only a currently active, unrestricted human workspace OWNER or ADMIN can manage
+output custody through these workspace-scoped endpoints:
+
+- `GET /api/v1/workspaces/{workspaceId}/page-ownership`, optionally filtered by
+  `owner_user_id`, returns `{pages: [...]}`. Each summary includes the fields
+  above and `eligible_successors: [{user_id, name, email}]`. It exposes metadata
+  and workspace member contacts only, never HTML, scenes, specs or history.
+  Keyset pagination defaults to 25 outputs per request; `limit` accepts 1–100.
+  When more outputs remain, follow `next_cursor` as `cursor` with the same
+  workspace and owner filter. Invalid parameters return 400. Each request
+  evaluates current successor eligibility for at most 100 returned outputs;
+  it still scans current workspace members for each returned output. Eligibility
+  work therefore scales with returned outputs × workspace members. Batching these
+  canonical ACL checks is a performance follow-up; pagination and the default 25
+  limit bound each request without weakening live authorization.
+- `POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID}` accepts
+  `{expected_owner_user_id, successor_user_id}` and immediately transfers that
+  one Artifact or Board. Success returns 200 with the refreshed page summary
+  directly. A stale owner returns 409 with `code: "owner_changed"`; an ineligible
+  successor returns 403, and a foreign or ordinary panel Page returns 404.
+
+The successor must be another active, unrestricted human workspace member who
+already has current read access through the canonical Page ACL. This includes
+intrinsic administrator access, valid live Page grants and folder access; it
+does not create a grant. Actor rights, successor rights and expected ownership
+are rechecked under the same database writer fence. The ownership change and
+administrator Inbox notice commit together, followed by the existing journal
+audit emission. Repeated transfers refresh the existing administrator Inbox card
+for that output as unread, clearing global read/resolved markers and all per-user
+read markers. Opaque post-commit journal events retain individual transfer history
+under the existing best-effort contract, rather than a transactional outbox.
+Private content, revisions
+and stored grant rows are preserved.
+Effective access
+is re-evaluated: grants issued by a former MEMBER owner become inert when that
+human no longer owns or administers the Page. The transfer does not reissue
+those grants or preserve their former authority. The new human owner reads
+through ownership; other access continues only while its existing issuer
+standing remains valid.
+After the administrator confirms each explicit transfer, retry departure.
+No separate plan or pending ownership state is stored.
+
+Discussion replay receipts have a 24-hour minimum lifetime. Thread-creation
+receipts remain for the thread lifetime because creation has no version
+precondition; they do not consume the transient mutation receipt cap. The limit
+of 100 threads applies to open threads, including reopening. Resolution frees
+capacity without deleting comments or anchors. Bounded thread lists prioritize
+open discussions ahead of resolved history. Other expired mutation retries fail
+monotonic thread version preconditions. Comments, original revision anchors and
+private body history are preserved separately from replay receipts.
+
+Disposable terminal job history retains the newest 100 jobs per Page and 1,000
+Board jobs per workspace, with a minimum 24-hour replay window and maximum age
+of 90 days. Recent retry protection can temporarily retain more than those history
+counts within the existing quotas. Queued/running jobs and diagrams awaiting
+human insertion remain available. Inserted Mermaid source also remains while
+current drawings or their recent undo tombstones refer to the job. Expired job
+IDs cannot be used as explicit retry sources; this cleanup never authorizes runs.
+
+Completed jobs do not permanently pin HTML revisions: their historical result
+metadata can outlive the retained source. Head, discussion and active Board pins
+still retain their exact content. Under preview quota pressure, aged terminal
+illustrations may expire after the replay window without deleting the canonical
+job snapshot or result; active inputs and awaiting-insertion jobs are protected.
+
+Unused Board images expire after the 24-hour replay/undo window, measured from
+upload or the last confirmed scene change that used or removed the image. Current
+scene references, retained job snapshots and recent upload receipts protect them.
+SQL reference removal precedes ordinary blob GC; shared reachable bytes remain.
+Maintenance uses bounded batches in the existing Page worker and also runs before
+relevant write quotas. Upgrades give existing Board images a full grace window.
+
+The Excalidraw 0.18.1 native Web Embed/Mermaid toolbar items are hidden and their
+activation is intercepted by the Board adapter. Paste is disabled; Mermaid input
+uses the isolated product converter. Browser regression coverage renders the
+actual pinned package and asserts that the native dialog/converter never mounts.
 
 A Page grant issuer must also have an active trusted account and no restricted membership anywhere. Every non-NULL suspension value, including an empty string, makes its Page shares inactive at use time. Existing membership/ownership/crew conditions remain required; the administrative grants list preserves inactive metadata and explains account unavailability.

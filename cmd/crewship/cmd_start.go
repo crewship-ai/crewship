@@ -474,7 +474,10 @@ var startCmd = &cobra.Command{
 		}
 		defer closeRestricted()
 
-		resolver := chatbridge.NewIPCResolver(cfg.Auth.NextjsURL, cfg.Auth.InternalToken, logger)
+		// Chat and durable Page jobs use the daemon's internal API, including
+		// when the embedded UI is served without a Next.js development server.
+		// NextjsURL is a browser/auth origin, not a required IPC proxy.
+		resolver := chatbridge.NewIPCResolver(cfg.InternalAPIURL(), cfg.Auth.InternalToken, logger)
 		bridge := chatbridge.New(
 			srv.Orchestrator(),
 			deps.Container,
@@ -848,8 +851,7 @@ var startCmd = &cobra.Command{
 				// not be up yet, so a NextjsURL-based resolver fails the scheduled
 				// run at "resolve agent config" with connection-refused. This
 				// mirrors the loopback pick the webhook resolver already makes
-				// (#535/#538). Chat runs keep the NextjsURL resolver (the dashboard
-				// is up when a human drives them).
+				// (#535/#538) and the chat resolver above.
 				loopbackURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)
 				pipelineResolver := chatbridge.NewIPCResolver(loopbackURL, cfg.Auth.InternalToken, logger)
 				pipeRunner, err := pipeline.NewOrchestratorRunner(pipeline.OrchestratorRunnerDeps{
@@ -1400,6 +1402,13 @@ var startCmd = &cobra.Command{
 					if ph := apiRouter.Pages(); ph != nil {
 						ph.StartPanelFreshnessSweeper(ctx, 0)
 						ph.StartProjectRetention(ctx)
+						artifactCtx, stopArtifacts := context.WithCancel(ctx)
+						artifactsDone := make(chan struct{})
+						go func() {
+							defer close(artifactsDone)
+							ph.RunArtifactRequests(artifactCtx, quiesce.SchedulerGate(schedulerLease))
+						}()
+						defer func() { stopArtifacts(); <-artifactsDone }()
 						logger.Info("pages freshness sweeper wired (on_failure → issue; 1m tick)")
 					}
 				}

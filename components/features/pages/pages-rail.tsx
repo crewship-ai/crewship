@@ -466,8 +466,10 @@ export function PagesRail({
           panelClassName="w-[228px]"
           onClear={() => onFiltersChange(EMPTY_PAGE_FILTERS)}
         >
+          <SidebarFacet first label="Content" resetLabel="All content" resetActive={!filters.content?.length} onReset={() => onFiltersChange({ ...filters, content: [] })}>
+            {([['artifact', 'Artifacts']] as const).map(([kind, label]) => <SidebarFacetOption key={kind} active={filters.content?.includes(kind) ?? false} onToggle={() => onFiltersChange({ ...filters, content: togglePageFilter(filters.content ?? [], kind) })}><span>{label}</span><Count n={pages.filter(page => kind === 'artifact' ? page.hasArtifact : page.hasBoard).length} /></SidebarFacetOption>)}
+          </SidebarFacet>
           <SidebarFacet
-            first
             label="Status"
             resetLabel="All"
             resetActive={filters.states.length === 0}
@@ -594,6 +596,7 @@ export function PagesRail({
           two multi-select facets the count badge alone cannot say WHICH picks
           are active. */}
       <SidebarActiveChips>
+        {filters.content?.map(kind => <SidebarActiveChip key={kind} onRemove={() => onFiltersChange({ ...filters, content: filters.content?.filter(value => value !== kind) })}>{kind === 'artifact' ? 'Artifacts' : 'Boards'}</SidebarActiveChip>)}
         {filters.states.map((s) => (
           <SidebarActiveChip
             key={`state-${s}`}
@@ -799,6 +802,8 @@ export function PagesRail({
                         <span className="min-w-0 flex-1 truncate text-foreground/80" title={page.name}>
                           {page.name}
                         </span>
+                        {page.hasBoard && <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 type-page-meta font-medium text-muted-foreground" title="Drawing board">Board</span>}
+                        {page.hasArtifact && <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 type-page-meta font-medium text-muted-foreground" title="HTML artifact">HTML</span>}
                         {/* The badge is the panel count and only ever the
                             panel count. A badge that means one thing on some
                             rows and another on the rest is unreadable at a

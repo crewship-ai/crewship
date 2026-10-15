@@ -107,6 +107,13 @@ func newRemapCUID() string {
 // and add the real FK in a migration when one becomes possible — this map is a
 // bridge over a schema gap, not a substitute for the schema.
 var virtualForeignKeys = map[string][]foreignKeyEdge{
+	"page_board_requests":        {{column: "result_placement_id", refTable: "page_board_artifact_placements", refColumn: "id"}},
+	"page_board_request_sources": {{column: "placement_id", refTable: "page_board_artifact_placements", refColumn: "id"}},
+	"page_board_mutations":       {{column: "placement_id", refTable: "page_board_artifact_placements", refColumn: "id"}},
+	"page_artifact_requests":     {{column: "thread_id", refTable: "page_artifact_threads", refColumn: "id"}},
+	// Durable retry tombstones preserve deleted identities without DB FKs;
+	// identities still present in a fork follow their corresponding rows.
+	"page_artifact_mutation_receipts":   {{column: "author_user_id", refTable: "users", refColumn: "id"}, {column: "author_agent_id", refTable: "agents", refColumn: "id"}},
 	"agent_user_preferences":            {{column: "chat_id", refTable: "chats", refColumn: "id"}, {column: "feedback_id", refTable: "message_feedback", refColumn: "id"}},
 	"execution_origins":                 {{column: "chat_id", refTable: "chats", refColumn: "id"}},           // historical TEXT; follow an extant chat on fork
 	"issue_mutation_outbox":             {{column: "mission_id", refTable: "missions", refColumn: "id"}},     // historical audit target; an absent issue is valid
@@ -403,6 +410,9 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	remapPageRequestNotices(dump, idMap)
+	remapBoardPageReferences(dump, idMap)
+	remapArtifactCreationRuns(dump)
 	dump.chatTranscriptRemap = idMap
 	for source, chat := range dump.AgentChatTranscripts {
 		if mapped := idMap["chats"][chat]; mapped != "" {

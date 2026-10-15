@@ -431,7 +431,7 @@ describe("the card library", () => {
 // ── Everyone in this workspace (#2533) ─────────────────────────────────────
 
 describe("granting to everyone in this workspace", () => {
-  it("offers the workspace as a subject kind with no reference to type, read or write only, and sends no subject", async () => {
+  it("offers the workspace as a subject kind with no reference to type, read/comment/write, and sends no subject", async () => {
     const { mockFetch } = mount(USER_OWNED)
     await waitFor(() => expect(screen.getByLabelText("Subject kind")).toBeTruthy())
 
@@ -444,7 +444,7 @@ describe("granting to everyone in this workspace", () => {
 
     expect(screen.queryByLabelText("Subject")).toBeNull()
     const level = screen.getByLabelText("Level") as HTMLSelectElement
-    expect(Array.from(level.options).map((o) => o.value)).toEqual(["read", "write"])
+    expect(Array.from(level.options).map((o) => o.value)).toEqual(["read", "comment", "write"])
     expect(level.value).toBe("read")
     expect(screen.queryByLabelText("Panels")).toBeNull()
 

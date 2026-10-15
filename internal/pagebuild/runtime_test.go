@@ -1,6 +1,7 @@
 package pagebuild
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -48,6 +49,12 @@ func TestServeRuntimeBrowserHarness(t *testing.T) {
 		t.Skip("browser harness only")
 	}
 	studio := os.Getenv("CREWSHIP_TEST_STUDIO_ORIGIN")
+	artifactPreparation := os.Getenv("CREWSHIP_TEST_RUNTIME_PROFILE") == "artifact-preparation"
+	runtimeOrigin := os.Getenv("CREWSHIP_TEST_RUNTIME_ORIGIN")
+	runtimePath := RuntimePath
+	if artifactPreparation {
+		runtimePath = ArtifactRuntimePreparationPath
+	}
 	listener, err := net.Listen("tcp", "127.0.0.2:0")
 	if err != nil {
 		t.Fatal(err)
@@ -62,13 +69,20 @@ func TestServeRuntimeBrowserHarness(t *testing.T) {
 			w.WriteHeader(204)
 			return
 		}
-		ServeRuntime(w, studio)
+		if artifactPreparation {
+			ServeArtifactRuntimePreparation(w, r, runtimeOrigin, studio)
+		} else {
+			ServeRuntime(w, studio)
+		}
 	}), ReadHeaderTimeout: 5 * time.Second}
 	defer server.Close()
 	go server.Serve(listener)
-	if err := os.WriteFile(file, []byte("http://"+listener.Addr().String()+RuntimePath), 0600); err != nil {
+	if err := os.WriteFile(file, []byte("http://"+listener.Addr().String()+runtimePath), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// Parent-owned stdout exposes only the bound ephemeral loopback port.
+	// Preserve the URL file protocol for existing Pages runtime consumers.
+	fmt.Printf("CREWSHIP_RUNTIME_READY_PORT=%d\n", listener.Addr().(*net.TCPAddr).Port)
 	select {
 	case <-stop:
 	case <-time.After(45 * time.Second):
