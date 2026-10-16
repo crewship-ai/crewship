@@ -115,6 +115,19 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		body.FromSlug = slug
+		if body.Type == "" || body.Type == "TEXT" {
+			// Autonomous runs keep their legacy question path. A claimed USER
+			// source with malformed original proof must not downgrade to it.
+			eligible, sourceErr := escalationHasHumanSource(r.Context(), h.db, body.SourceRunID, agent, ws, chat)
+			if sourceErr != nil {
+				writeChatIssueError(w, sourceErr)
+				return
+			}
+			if !eligible {
+				body.SourceRunID = ""
+			}
+		}
+
 	}
 	if body.FromSlug == "" || body.Reason == "" || body.CrewID == "" || body.WorkspaceID == "" || body.ChatID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{

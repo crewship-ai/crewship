@@ -66,11 +66,13 @@ func (r *Router) escalationDecision(ctx context.Context, a chataudience.Receipt,
 		return ChatCardProjection{}, err
 	}
 	var origin struct {
-		Chat    string                `json:"chat_id"`
-		Trigger string                `json:"trigger_message_id"`
-		Human   *chataudience.Receipt `json:"human_authority"`
+		TriggerType string                `json:"trigger_type"`
+		ChatOrigin  string                `json:"chat_origin_id"`
+		Chat        string                `json:"chat_id"`
+		Trigger     string                `json:"trigger_message_id"`
+		Human       *chataudience.Receipt `json:"human_authority"`
 	}
-	if count != 1 || json.Unmarshal([]byte(raw), &origin) != nil || origin.Chat != s.Chat || origin.Trigger == "" || origin.Human == nil || origin.Human.ChatGeneration == "" || origin.Human.ChatGeneration != a.ChatGeneration || origin.Human.ChatID != a.ChatID || origin.Human.WorkspaceID != a.WorkspaceID || origin.Human.AgentID != a.AgentID {
+	if count != 1 || json.Unmarshal([]byte(raw), &origin) != nil || origin.TriggerType != "USER" || origin.ChatOrigin != "" || origin.Chat != s.Chat || origin.Trigger == "" || origin.Human == nil || origin.Human.ChatGeneration == "" || origin.Human.ChatGeneration != a.ChatGeneration || origin.Human.ChatID != a.ChatID || origin.Human.WorkspaceID != a.WorkspaceID || origin.Human.AgentID != a.AgentID {
 		return ChatCardProjection{}, sql.ErrNoRows
 	}
 	var role string
@@ -178,9 +180,13 @@ func (h *QueryHandler) resolveTextDecision(req *http.Request, id, workspace, use
 			return false, err
 		}
 		var proof struct {
-			Human *chataudience.Receipt `json:"human_authority"`
+			TriggerType string                `json:"trigger_type"`
+			ChatOrigin  string                `json:"chat_origin_id"`
+			Chat        string                `json:"chat_id"`
+			Trigger     string                `json:"trigger_message_id"`
+			Human       *chataudience.Receipt `json:"human_authority"`
 		}
-		if proofCount != 1 || json.Unmarshal([]byte(proofRaw), &proof) != nil || proof.Human == nil || proof.Human.ChatGeneration == "" || proof.Human.ChatGeneration != a.ChatGeneration || proof.Human.ChatID != a.ChatID || proof.Human.WorkspaceID != a.WorkspaceID || proof.Human.AgentID != a.AgentID {
+		if proofCount != 1 || json.Unmarshal([]byte(proofRaw), &proof) != nil || proof.TriggerType != "USER" || proof.ChatOrigin != "" || proof.Chat != source.Chat || proof.Trigger == "" || proof.Human == nil || proof.Human.ChatGeneration == "" || proof.Human.ChatGeneration != a.ChatGeneration || proof.Human.ChatID != a.ChatID || proof.Human.WorkspaceID != a.WorkspaceID || proof.Human.AgentID != a.AgentID {
 			return false, errDecisionDenied
 		}
 		var key, hash string
