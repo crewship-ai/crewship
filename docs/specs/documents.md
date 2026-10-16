@@ -28,7 +28,7 @@ for document operations, the original human or live-run bearer. These routes
 never mount on the public Router. The engine boot barrier is service-only and
 runs after exclusive ownership of its configured Unix socket. Its bounded boot
 identity makes retries idempotent. Go and Node must agree on protocol 3 before
-recovery can fence writers; schema 2 remains unchanged. Private agent state carries
+recovery can fence writers. The matched pair additionally requires explicit latest content capability3; missing/older/newer capability fails before recovery. Private agent state carries
 the immutable selected request scope and commits include the actual bounded
 UTF-16 edit interval. This metadata is excluded from public document reads.
 Until Go acknowledges recovery, Node rejects
@@ -42,26 +42,26 @@ Authenticated humans use `/api/v1/pages/{slug}/document` in their workspace:
 
 - `GET` returns schema, durable `rev`, opaque `epoch`, binary baseline/replay,
   JSON content, block outline with IDs/hashes, and current capability hints.
-- `POST /initialize` accepts `{id,schema:2,body}` on an empty human-owned Page.
-- `POST /patch` accepts `{id,schema:2,epoch,kind:"human",update}` for a bounded
-  binary update, or `{id,schema:2,epoch,target,text,ifRev,ifHash}` for semantic
+- `POST /initialize` accepts `{id,schema,page_id,body}` on an empty human-owned Page.
+- `POST /patch` accepts `{id,schema,page_id,epoch,kind:"human",update}` for a bounded
+  binary update, or `{id,schema,page_id,epoch,target,text,ifRev,ifHash}` for semantic
   text replacement. The unchanged prefix and suffix retain character identities.
   Bound requests compute the changed interval within their original selected
   range, including repeated text. Original operation IDs/payloads identify exact retries.
 - `GET /comments`; `POST /comments` accepts
-  `{id,schema:2,epoch,ifRev,block,from,to,text}`. Offsets are aggregate UTF-16 positions within one paragraph or heading,
+  `{id,schema,page_id,epoch,ifRev,block,from,to,text}`. Offsets are aggregate UTF-16 positions within one paragraph or heading,
   including multiple CRDT text children. New anchors retain at most 64 relative
   per-child spans and fit the existing 8192-byte durable anchor limit. Existing
   one-child anchors remain readable; an older reader detaches a new cross-child
   anchor rather than silently attaching it elsewhere.
   `POST /comments/resolve` accepts
-  `{id,schema:2,epoch,ifRev,comment,version,resolved}`. Read/comment/edit rights
+  `{id,schema,page_id,epoch,ifRev,comment,version,resolved}`. Read/comment/edit rights
   remain distinct. Anchors report attached, collapsed or detached positions;
   resolution is retained separately.
-- `POST /checkpoint` accepts `{id,schema:2,epoch,ifRev}`;
+- `POST /checkpoint` accepts `{id,schema,page_id,epoch,ifRev}`;
   `GET /checkpoints` lists retained states; `GET /checkpoints/{checkpoint}`
   returns validated content for comparison.
-- `POST /restore` accepts `{id,schema:2,epoch,ifRev,checkpoint}` and creates a
+- `POST /restore` accepts `{id,schema,page_id,epoch,ifRev,checkpoint}` and creates a
   new durable revision and resynchronization generation.
 - `GET /export` downloads escaped Markdown, including simple lists and tables.
 - `GET /requests` lists requests and eligible private agent chats;
@@ -100,7 +100,8 @@ Schema 2 adds bounded lists and heading levels 1–3 to paragraphs and simple
 tables. Every block has a stable ID. Node validates visible and retained Yjs
 structures, including tombstones, and rejects unknown metadata or unresolved
 CRDT dependencies. Tiptap 3.32.0, Yjs 13.6.33 and `@tiptap/y-tiptap` 3.0.7 are pinned.
-Existing schema-1 content can be read and upgraded on a validated commit;
+Existing schema1 content remains readable and keeps its legacy schema2-client commit compatibility. Explicit human CAS upgrade to3 binds Page ID/revision/epoch and preserves the original binary, while rotating generation. Schema3 adds closed HTTP(S) link/code marks and plain code blocks. Images are not part of3; future4 requires its own immutable logical-reference/pin contract. Unchanged text identities/marks survive semantic edits, inserted text is plain, and Go verifies full-tree subtree hashes/preorder against stored state and the original immutable selection. JSON comparison alone coalesces adjacent equal-mark text spans; binary/hashes are never normalized. Each private before/after proof is bounded500000UTF8 bytes within the existing3MiB HTTP envelope;
+
 unsupported future schemas fail closed. JSON/Markdown are projections, never
 Docs persistence. Yjs garbage collection remains disabled.
 

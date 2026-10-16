@@ -214,3 +214,56 @@ pending-migration warning without synthetic pins; schema2 without a pin table
 fails closed. Files-only restore has its existing separate contract. Native
 image UI qualification, Docs images, normal Page copy, crop/remote imports,
 image export embedding and pruning are separate from this API/storage cut.
+
+## Selected text agent requests
+
+Request protocol1 is independent of deck schema1/2. Human-only
+`POST /api/v1/pages/{slug}/slides/requests` admits one immutable Page ID, original
+base revision, text element hash, UTF16 range and exact quoted text, instruction
+and private chat audience. The server pins the full original revision/hash and
+original credential identity; it stores no bearer. Images, geometry, styles,
+ordering and comments are outside this capability. Listing uses bounded
+Page-bound cursor pagination; detail returns at most8 immutable history events.
+Human cancellation requires immutable `page_id`, protocol1, `mutation_id` and
+`if_version`. Retrying the exact submission or cancellation never starts new work.
+
+The managed worker claims once, checks the original head before binding a run,
+and delegates only the original text range. The protected
+`crewship slide agent read|replace` CLI uses the original run bearer through the
+fixed local sidecar at127.0.0.1:9119, with no proxy, redirect, human profile or
+server override fallback. Its replacement JSON contains only `page_id`,
+`request_schema_version:1`, `request_id` and `replacement`. The server preserves
+original prefix/suffix and element geometry/style, applies original whole-head
+CAS, and commits its one request-owned result revision in the content transaction.
+That revision is the checkpoint. Conflicts stop; neither re-read nor retry
+refreshes selection or preconditions. An exact retry can return the original
+owned result after a later human edit, while fresh writes and revoked credentials
+remain denied. Workspace invalidations contain no private identifiers or content.
+
+Every protected read, write and replay rechecks exact original credential,
+private audience, human and agent grants, live run and delegation. A retained
+principal origin prevents downgrade to generic HTML, Board, Docs, Slides or
+eligible Page capabilities even after its original Page/request is deleted.
+The public human CLI commands are `slide request create|list|get|cancel`.
+
+Startup interrupts captured pre-start active requests under version fences;
+new intake remains separate. The current worker executes one request at a time
+per instance. Default limits are3 active and30 admissions/hour per Page,
+2000 retained requests and64MiB request metadata per Page, and8 events/request.
+Admission wire JSON is bounded16KiB, instruction4096 UTF8 bytes, selection4096
+UTF16 units, replacement wire256KiB and replacement text32768 UTF8 bytes; final
+text and deck limits still apply. Protected snapshots/responses are bounded512KiB.
+
+Workspace restore, fork, Replace and offline instance recovery preserve original
+and owned-result revision pins and append interrupted history for active work.
+Restored requests are terminal and inert: live identities, credentials, audiences,
+run bindings and cancellation receipts are cleared. Fork remaps embedded Page
+and asset IDs once, then derives request base/result hashes from the rewritten
+immutable revisions; original selection/object IDs and historical actors remain
+provenance. Source replay capability never restarts a restored request. Physical
+recovery also drops selected source principals and their delegation graph before
+promotion. Chat/agent deletion retains request-owned content and history.
+
+These are storage/API/transport contracts. Native selected UI, actual queued
+chat/model execution and Office/export qualification have separate gates;
+semantic Store or deterministic dispatch tests do not demonstrate model execution.

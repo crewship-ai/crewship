@@ -141,3 +141,42 @@ remote imports and automatic pruning are unavailable in this storage cut.
 Image revisions also cap decoded pixels at33,554,432 across unique asset IDs;
 repeated placement of the same asset counts once. This is independent of the
 32MiB encoded byte and32asset limits, and is enforced on write and restore.
+
+## crewship slide request create
+
+`crewship slide request create report --file request.json` admits the exact
+immutable selected-text request. `--file -` reads stdin. Include original
+page_id/base_rev, protocol1, unique submission_id, private chat_id, instruction
+and text_range selection. On conflict stop; no refresh or automatic rebase.
+
+## crewship slide request list
+
+`crewship slide request list report --limit 25 --cursor CURSOR` reads bounded
+request summaries. `--limit` is1..100; omit `--cursor` for a fresh watermark.
+Follow `next_cursor` while `has_more`; every page rechecks current human access.
+
+## crewship slide request get
+
+`crewship slide request get report REQUEST` reads original request/history and
+any owned result revision. Credential and audience metadata are never returned.
+
+## crewship slide request cancel
+
+`crewship slide request cancel report REQUEST --file cancel.json` supplies
+`{page_id,schema_version:1,mutation_id,if_version}`. `--file -` reads stdin.
+Preserve exact JSON for uncertain retries; cancellation uses a separate receipt.
+
+## crewship slide agent read
+
+`crewship slide agent read report REQUEST` reads only the original frozen text
+through the local sidecar using the original run bearer. No human profile,
+server override, proxy or redirect fallback is permitted.
+
+## crewship slide agent replace
+
+`crewship slide agent replace report REQUEST --file replacement.json` sends
+`{page_id,request_schema_version:1,request_id,replacement}`. `--file -` reads stdin.
+Only the admitted UTF16 range changes; original prefix/suffix and style remain.
+Retry uncertain acknowledgement with exactly the same body. Stop on409/403;
+never refresh target, revision, selection or hash. The saved owned revision is
+its checkpoint; no second content write is needed.

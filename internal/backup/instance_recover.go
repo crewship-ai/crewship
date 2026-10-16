@@ -757,6 +757,11 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			}
 			rep.RuntimeReset = append(rep.RuntimeReset, "document agent request dispatch authority")
 		}
+		if fenced, err := fencePhysicalSelectedRequests(ctx, db.DB); err != nil {
+			return err
+		} else if fenced {
+			rep.RuntimeReset = append(rep.RuntimeReset, "Slides selected request dispatch authority")
+		}
 		// Backup runs that were in flight (or queued) on the source when the
 		// bundle was taken — the run that took it, usually — are not this
 		// server's to finish: left "running", the scheduler would treat them

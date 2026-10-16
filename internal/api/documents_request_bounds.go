@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"unicode/utf16"
 
@@ -25,6 +26,7 @@ type documentSemanticPatch struct {
 	Target string                `json:"target"`
 	Text   string                `json:"text"`
 	Edit   *documentSemanticEdit `json:"edit"`
+	Rich   *documentRichProof    `json:"rich,omitempty"`
 }
 
 func validDocumentTarget(t documentVerifiedTarget) bool {
@@ -134,11 +136,30 @@ func (h *PageHandler) documentRequestGuard(rctx context.Context, page, operation
 	}
 }
 
-// checkDocumentRunPageScope applies the immutable Doc Page boundary to every
+// checkDocumentRunPageScope applies immutable selected-job boundaries to every
 // format sharing a run principal. An empty Page ID means standalone creation.
 func (h *PageHandler) checkDocumentRunPageScope(ctx context.Context, page string, a *artifactRunAuthority) error {
+	q := h.pageAuthReader(ctx)
+	var selected string
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE(slides_request_origin,'') FROM artifact_run_principals WHERE run_id=?`, a.RunID).Scan(&selected); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return errDocumentAccess
+	}
+	var associated bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM slides_requests WHERE original_run_id=?) OR EXISTS(SELECT 1 FROM page_artifact_run_delegations WHERE run_id=? AND slides_request_id IS NOT NULL)`, a.RunID, a.RunID).Scan(&associated); err != nil {
+		return errDocumentAccess
+	}
+	if selected != "" || associated {
+		transport, ok := ctx.Value(slidesSelectedTransportKey{}).(slidesSelectedTransport)
+		if !ok || selected == "" || transport.RequestID != selected || transport.PageID != page {
+			return errDocumentAccess
+		}
+		var matches bool
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM slides_requests WHERE id=? AND page_id=? AND original_run_id=?)`, selected, page, a.RunID).Scan(&matches); err != nil || !matches {
+			return errDocumentAccess
+		}
+	}
 	var other int
-	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM document_requests WHERE run_id=? AND page_id<>?) OR EXISTS(SELECT 1 FROM page_artifact_run_delegations WHERE run_id=? AND document_request_id IS NOT NULL AND page_id<>?)`, a.RunID, page, a.RunID, page).Scan(&other)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM document_requests WHERE run_id=? AND page_id<>?) OR EXISTS(SELECT 1 FROM page_artifact_run_delegations WHERE run_id=? AND document_request_id IS NOT NULL AND page_id<>?)`, a.RunID, page, a.RunID, page).Scan(&other)
 	if err != nil || other != 0 {
 		return errDocumentAccess
 	}

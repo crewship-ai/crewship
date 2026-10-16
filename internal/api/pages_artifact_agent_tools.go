@@ -58,6 +58,10 @@ func (h *PageHandler) ListArtifactsAgent(w http.ResponseWriter, r *http.Request)
 		replyError(w, 403, err.Error())
 		return
 	}
+	if err := h.checkDocumentRunPageScope(ctx, "", a); err != nil {
+		replyError(w, 403, err.Error())
+		return
+	}
 	viewer, err := h.loadViewer(ctx, a.WorkspaceID, a.HumanUserID)
 	if err != nil {
 		h.boardError(w, err)

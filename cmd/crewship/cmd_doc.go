@@ -4,6 +4,7 @@ package main
 // POST /api/v1/pages/{slug}/document/patch doc patch
 // POST /api/v1/pages/{slug}/document/checkpoint doc checkpoint
 // POST /api/v1/pages/{slug}/document/restore doc restore
+// POST /api/v1/pages/{slug}/document/upgrade doc upgrade
 // GET /api/v1/pages/{slug}/document/export doc export
 // POST /api/v1/pages/{slug}/document/requests doc request
 // GET /api/v1/documents/status doc status
@@ -28,7 +29,7 @@ import (
 
 func newDocCommand() *cobra.Command {
 	root := &cobra.Command{Use: "doc", Short: "Read and edit saved Page documents with semantic preconditions"}
-	for _, operation := range []string{"read", "outline", "patch", "checkpoint", "restore", "export", "request", "status", "initialize", "checkpoints", "checkpoint-read", "comments", "comment", "comment-resolve", "request-list"} {
+	for _, operation := range []string{"read", "outline", "patch", "checkpoint", "restore", "upgrade", "export", "request", "status", "initialize", "checkpoints", "checkpoint-read", "comments", "comment", "comment-resolve", "request-list"} {
 		operation := operation
 		cmd := &cobra.Command{Use: operation + " <page-slug>", Short: "Document " + operation, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := pageClient()
@@ -85,6 +86,8 @@ func newDocCommand() *cobra.Command {
 					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/patch", body)
 				case "checkpoint":
 					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/checkpoint", body)
+				case "upgrade":
+					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/upgrade", body)
 				case "restore":
 					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/restore", body)
 				case "request":

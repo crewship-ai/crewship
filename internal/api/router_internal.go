@@ -25,6 +25,7 @@ import (
 func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestrationHandlers) {
 	// Internal routes (for crewshipd IPC, X-Internal-Token auth)
 	internal := NewInternalHandler(r.db, r.internalToken, r.logger)
+	internal.slidesPages = r.pages
 	internal.loginRefresher = r.loginRefresher
 	if r.hub != nil {
 		internal.SetHub(r.hub)
@@ -67,6 +68,8 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.internalHandler = internal
 	internalAuth := func(next http.Handler) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
 	r.mux.Handle("GET /api/v1/internal/documents/{slug}", internalAuth(http.HandlerFunc(r.pages.DocumentAgent)))
+	r.mux.Handle("GET /api/v1/internal/slides/{slug}/requests/{requestId}", internalAuth(http.HandlerFunc(r.pages.SelectedSlidesAgent)))
+	r.mux.Handle("POST /api/v1/internal/slides/{slug}/requests/{requestId}/replace", internalAuth(http.HandlerFunc(r.pages.SelectedSlidesAgent)))
 	r.mux.Handle("POST /api/v1/internal/documents/{slug}/patch", internalAuth(http.HandlerFunc(r.pages.DocumentAgent)))
 	r.mux.Handle("POST /api/v1/internal/documents/{slug}/checkpoint", internalAuth(http.HandlerFunc(r.pages.DocumentAgent)))
 	// Crew transport authentication is only the outer boundary: the handler

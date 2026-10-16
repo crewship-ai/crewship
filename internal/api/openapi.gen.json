@@ -4425,7 +4425,7 @@
         "type": "object"
       },
       "DocumentNode": {
-        "description": "Schema-2 bounded tree: depth \u003c=40 and \u003c=10000 nodes; stable unique IDs on blocks, headings levels1..3, no marks. Structural grammar and retained Yjs validation are enforced by the document engine.",
+        "description": "Versioned bounded tree: depth\u003c=40, nodes\u003c=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks and plain codeBlock. Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine.",
         "properties": {
           "attrs": {
             "properties": {
@@ -4480,9 +4480,60 @@
           },
           "marks": {
             "items": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "attrs": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "href": {
+                          "description": "Canonical HTTP(S) URL without credentials or control/space characters; engine enforces UTF8 byte bound2048.",
+                          "maxLength": 2048,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "href"
+                      ],
+                      "type": "object"
+                    },
+                    "type": {
+                      "enum": [
+                        "link"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "attrs"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "attrs": {
+                      "additionalProperties": false,
+                      "maxProperties": 0,
+                      "type": "object"
+                    },
+                    "type": {
+                      "enum": [
+                        "code"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "type": "object"
+                }
+              ]
             },
-            "maxItems": 0,
+            "maxItems": 1,
             "type": "array"
           },
           "text": {
@@ -4500,7 +4551,8 @@
               "table",
               "tableRow",
               "tableCell",
-              "tableHeader"
+              "tableHeader",
+              "codeBlock"
             ],
             "type": "string"
           }
@@ -16687,6 +16739,365 @@
           "kind",
           "mutation_id",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "SlideSelectedAdmission": {
+        "additionalProperties": false,
+        "properties": {
+          "duplicate": {
+            "type": "boolean"
+          },
+          "id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "request_id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "request_id",
+          "version",
+          "status",
+          "duplicate"
+        ],
+        "type": "object"
+      },
+      "SlideSelectedCancel": {
+        "additionalProperties": false,
+        "properties": {
+          "duplicate": {
+            "type": "boolean"
+          },
+          "mutation_id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "request_id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mutation_id",
+          "request_id",
+          "version",
+          "status",
+          "duplicate"
+        ],
+        "type": "object"
+      },
+      "SlideSelectedEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "queued",
+              "dispatched",
+              "bound",
+              "result",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "interrupted"
+            ],
+            "type": "string"
+          },
+          "mutation_id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "kind",
+          "actor",
+          "detail",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "SlideSelectedRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/SlideSelectedEvent"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "request": {
+            "$ref": "#/components/schemas/SlideSelectedSummary"
+          }
+        },
+        "required": [
+          "request",
+          "history"
+        ],
+        "type": "object"
+      },
+      "SlideSelectedRequests": {
+        "additionalProperties": false,
+        "properties": {
+          "can_cancel": {
+            "type": "boolean"
+          },
+          "can_dispatch": {
+            "type": "boolean"
+          },
+          "eligible_chats": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agent_id": {
+                  "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                  "type": "string"
+                },
+                "agent_name": {
+                  "type": "string"
+                },
+                "agent_slug": {
+                  "type": "string"
+                },
+                "chat_id": {
+                  "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "chat_id",
+                "title",
+                "agent_id",
+                "agent_name",
+                "agent_slug"
+              ],
+              "type": "object"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SlideSelectedSummary"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": "string"
+          },
+          "watermark": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor",
+          "watermark",
+          "has_more",
+          "can_dispatch",
+          "can_cancel",
+          "eligible_chats"
+        ],
+        "type": "object"
+      },
+      "SlideSelectedSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_actor": {
+            "type": "string"
+          },
+          "base_content_hash": {
+            "type": "string"
+          },
+          "base_revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "base_schema_version": {
+            "enum": [
+              1,
+              2
+            ],
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "human_actor": {
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "original_run_id": {
+            "type": "string"
+          },
+          "page_id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "restored": {
+            "type": "boolean"
+          },
+          "result_hash": {
+            "type": "string"
+          },
+          "result_revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/SlideSelectedTextRange"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "interrupted"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "page_id",
+          "schema_version",
+          "version",
+          "status",
+          "base_revision",
+          "base_schema_version",
+          "base_content_hash",
+          "selection",
+          "instruction",
+          "human_actor",
+          "agent_actor",
+          "original_run_id",
+          "error",
+          "restored",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "SlideSelectedTextRange": {
+        "additionalProperties": false,
+        "description": "Immutable nonempty UTF16 range, exact quote and original element hash; surrogate boundaries cannot split. No images or other element types.",
+        "properties": {
+          "element_hash": {
+            "type": "string"
+          },
+          "element_id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "from": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "text_range"
+            ],
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "selection_schema_version": {
+            "enum": [
+              1
+            ],
+            "type": "integer"
+          },
+          "slide_id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "to": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selection_schema_version",
+          "kind",
+          "slide_id",
+          "element_id",
+          "element_hash",
+          "from",
+          "to",
+          "quote"
         ],
         "type": "object"
       },
@@ -140156,6 +140567,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -140266,6 +140695,34 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "epoch": {
                     "type": "string"
@@ -140278,9 +140735,14 @@
                     "minimum": 0,
                     "type": "integer"
                   },
+                  "page_id": {
+                    "type": "string"
+                  },
                   "schema": {
                     "enum": [
-                      2
+                      1,
+                      2,
+                      3
                     ],
                     "type": "integer"
                   }
@@ -140397,6 +140859,24 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {
@@ -140612,6 +141092,24 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {
@@ -140836,6 +141334,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -141051,6 +141567,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -141159,6 +141693,34 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "block": {
                     "type": "string"
@@ -141178,9 +141740,14 @@
                     "minimum": 0,
                     "type": "integer"
                   },
+                  "page_id": {
+                    "type": "string"
+                  },
                   "schema": {
                     "enum": [
-                      2
+                      1,
+                      2,
+                      3
                     ],
                     "type": "integer"
                   },
@@ -141312,6 +141879,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -141422,6 +142007,34 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "comment": {
                     "type": "string"
@@ -141437,12 +142050,17 @@
                     "minimum": 0,
                     "type": "integer"
                   },
+                  "page_id": {
+                    "type": "string"
+                  },
                   "resolved": {
                     "type": "boolean"
                   },
                   "schema": {
                     "enum": [
-                      2
+                      1,
+                      2,
+                      3
                     ],
                     "type": "integer"
                   },
@@ -141566,6 +142184,24 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {
@@ -141765,6 +142401,42 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -141839,6 +142511,34 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "body": {
                     "$ref": "#/components/schemas/DocumentNode"
@@ -141847,9 +142547,13 @@
                     "pattern": "^[a-zA-Z0-9_-]{1,128}$",
                     "type": "string"
                   },
+                  "page_id": {
+                    "type": "string"
+                  },
                   "schema": {
                     "enum": [
-                      2
+                      2,
+                      3
                     ],
                     "type": "integer"
                   }
@@ -141973,6 +142677,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -142085,6 +142807,34 @@
                 "oneOf": [
                   {
                     "additionalProperties": false,
+                    "allOf": [
+                      {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "schema": {
+                                "enum": [
+                                  1,
+                                  2
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "schema": {
+                                "enum": [
+                                  3
+                                ]
+                              }
+                            },
+                            "required": [
+                              "page_id"
+                            ]
+                          }
+                        ]
+                      }
+                    ],
                     "properties": {
                       "epoch": {
                         "type": "string"
@@ -142099,9 +142849,14 @@
                         ],
                         "type": "string"
                       },
+                      "page_id": {
+                        "type": "string"
+                      },
                       "schema": {
                         "enum": [
-                          2
+                          1,
+                          2,
+                          3
                         ],
                         "type": "integer"
                       },
@@ -142122,6 +142877,34 @@
                   },
                   {
                     "additionalProperties": false,
+                    "allOf": [
+                      {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "schema": {
+                                "enum": [
+                                  1,
+                                  2
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "schema": {
+                                "enum": [
+                                  3
+                                ]
+                              }
+                            },
+                            "required": [
+                              "page_id"
+                            ]
+                          }
+                        ]
+                      }
+                    ],
                     "properties": {
                       "epoch": {
                         "type": "string"
@@ -142144,9 +142927,14 @@
                         ],
                         "type": "string"
                       },
+                      "page_id": {
+                        "type": "string"
+                      },
                       "schema": {
                         "enum": [
-                          2
+                          1,
+                          2,
+                          3
                         ],
                         "type": "integer"
                       },
@@ -142274,6 +143062,24 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {
@@ -142489,6 +143295,24 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {
@@ -142789,6 +143613,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -142881,6 +143723,34 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "checkpoint": {
                     "type": "string"
@@ -142896,9 +143766,14 @@
                     "minimum": 0,
                     "type": "integer"
                   },
+                  "page_id": {
+                    "type": "string"
+                  },
                   "schema": {
                     "enum": [
-                      2
+                      1,
+                      2,
+                      3
                     ],
                     "type": "integer"
                   }
@@ -143017,6 +143892,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -143102,6 +143995,306 @@
           }
         ],
         "summary": "Restore page document",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/document/upgrade": {
+      "post": {
+        "description": "Submit page document upgrade (POST /api/v1/pages/{slug}/document/upgrade).",
+        "operationId": "post_api_v1_pages_slug_document_upgrade",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "properties": {
+                  "epoch": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "ifRev": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "page_id": {
+                    "type": "string"
+                  },
+                  "schema": {
+                    "enum": [
+                      1,
+                      2
+                    ],
+                    "type": "integer"
+                  },
+                  "target_schema": {
+                    "enum": [
+                      3
+                    ],
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id",
+                  "schema",
+                  "epoch",
+                  "ifRev",
+                  "page_id",
+                  "target_schema"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page document upgrade",
         "tags": [
           "pages"
         ],
@@ -152160,6 +153353,815 @@
           }
         ],
         "summary": "Submit page slides reorder",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/slides/requests": {
+      "get": {
+        "description": "List page slides requests (GET /api/v1/pages/{slug}/slides/requests).",
+        "operationId": "get_api_v1_pages_slug_slides_requests",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "maxLength": 1024,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideSelectedRequests"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List page slides requests",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      },
+      "post": {
+        "description": "Create page slides requests (POST /api/v1/pages/{slug}/slides/requests).",
+        "operationId": "post_api_v1_pages_slug_slides_requests",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Strict case-sensitive keys, no duplicates, nulls or trailing JSON. Immutable page_id and original preconditions. Live original credential and permissions required, including exact replay.",
+                "properties": {
+                  "base_rev": {
+                    "format": "int64",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "chat_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "instruction": {
+                    "maxLength": 4096,
+                    "type": "string"
+                  },
+                  "page_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "schema_version": {
+                    "enum": [
+                      1
+                    ],
+                    "type": "integer"
+                  },
+                  "selection": {
+                    "$ref": "#/components/schemas/SlideSelectedTextRange"
+                  },
+                  "submission_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "type_id": {
+                    "enum": [
+                      "slides"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "page_id",
+                  "type_id",
+                  "schema_version",
+                  "base_rev",
+                  "submission_id",
+                  "chat_id",
+                  "instruction",
+                  "selection"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideSelectedAdmission"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create page slides requests",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/slides/requests/{requestId}": {
+      "get": {
+        "description": "Get page slides request (GET /api/v1/pages/{slug}/slides/requests/{requestId}).",
+        "operationId": "get_api_v1_pages_slug_slides_requests_requestId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideSelectedRequest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page slides request",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/slides/requests/{requestId}/cancel": {
+      "post": {
+        "description": "Cancel page slides request (POST /api/v1/pages/{slug}/slides/requests/{requestId}/cancel).",
+        "operationId": "post_api_v1_pages_slug_slides_requests_requestId_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Strict case-sensitive keys, no duplicates, nulls or trailing JSON. Immutable page_id and original preconditions. Live original credential and permissions required, including exact replay.",
+                "properties": {
+                  "if_version": {
+                    "format": "int64",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "mutation_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "page_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "schema_version": {
+                    "enum": [
+                      1
+                    ],
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "page_id",
+                  "schema_version",
+                  "mutation_id",
+                  "if_version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideSelectedCancel"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Cancel page slides request",
         "tags": [
           "pages"
         ],

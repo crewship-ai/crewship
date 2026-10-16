@@ -244,6 +244,7 @@ live WebSocket behavior. Keep this directory outside the public source tree.
 - `check-slide-mutations.ts` + `slide-mutation-contract/`: execute TS-planned native Slides mutations through actual Go strict decode/semantic apply/canonical output; run through `crewship-heavy pnpm exec tsx scripts/check-slide-mutations.ts`.
 - `acceptance-slides-workflow-browser.mjs`: opt-in `slides_workflow_browser` real Router/DB/production static native Slides human flow using owned synthetic sessions; not login/model acceptance. Captures private evidence under operator-selected output.
 
+- `acceptance-docs-rich-browser.mjs`: opt-in `docs_rich_browser` actual Router/SQLite/managed Node/static editor flow with two distinct synthetic human identities. Run after production export through `crewship-heavy env CREWSHIP_DOCS_RICH_BROWSER=1 go test -tags docs_rich_browser ./internal/api -run '^TestDocumentsRichBrowser$' -count=1 -timeout 6m`. Set `CREWSHIP_DOCS_RICH_OUTPUT` to an owned private evidence directory. Covers exact upgrade retry, durable links/code, schema2/3 checkpoint restore and revocation draft retention; no response mocks or model claim.
 - `acceptance-slides-comments-browser.mjs`: opt-in `slides_comments_browser` actual Router/SQLite/static native comments flow with distinct synthetic COMMENT and WRITE humans. Run after production export through `crewship-heavy env CREWSHIP_SLIDES_COMMENTS_BROWSER=1 go test -tags slides_comments_browser ./internal/api -run '^TestSlidesCommentsBrowser$' -count=1 -timeout 6m`. `CREWSHIP_SLIDES_COMMENTS_OUTPUT` selects a private owned evidence directory. Missing prerequisites fail; no shared login, response mocks or model claims.
 
 
@@ -292,3 +293,13 @@ Missing prerequisites fail. `CREWSHIP_PAGE_SEARCH_OUTPUT` selects an owned
 private output parent; each execution creates a fresh subdirectory. The script
 prints private report, filtered result JSON and full screenshot paths; no credentials are captured in evidence. The
 Go fixture owns and removes its 0600 credential input and private Node process.
+`acceptance-slides-selected-browser.mjs` runs only through the opt-in Linux
+`TestSlidesSelectedBrowser` fixture after a production static export. Run
+`CREWSHIP_SLIDES_SELECTED_BROWSER=1 go test -tags slides_selected_browser ./internal/api -run '^TestSlidesSelectedBrowser$'` through `crewship-heavy`, preserving the installed
+`PLAYWRIGHT_BROWSERS_PATH` when HOME is isolated. Optional
+`CREWSHIP_SLIDES_SELECTED_OUTPUT` selects owned evidence output. It serves real
+Router/SQLite/static UI with separate synthetic WRITE/READ sessions, verifies
+actual textarea selection, exact lost-ack retry, cancellation, original-revision
+conflicts and confirmed result preview. The production worker uses a deterministic
+trusted Store replacement instead of model dispatch; this is not model or new
+sidecar execution evidence. No execution containers or shared server are used.

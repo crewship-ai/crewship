@@ -12,7 +12,11 @@ import (
 // integration must remap image references HERE before this one hash pass.
 // Object IDs and tombstones are stable within the newly namespaced Page.
 func remapSlides(dump *DBDump, idMap map[string]map[string]string) error {
-	for _, table := range []string{"slides_heads", "slides_revisions", "slides_revision_assets", "slides_receipts", "slides_object_ids", "slides_comment_threads", "slides_comment_events", "slides_comment_receipts"} {
+	selected, err := selectedForkBindings(dump)
+	if err != nil {
+		return err
+	}
+	for _, table := range []string{"slides_heads", "slides_revisions", "slides_revision_assets", "slides_receipts", "slides_object_ids", "slides_comment_threads", "slides_comment_events", "slides_comment_receipts", "slides_requests", "slides_request_events", "slides_request_receipts"} {
 		for _, row := range dump.Tables[table] {
 			for column, anchor := range map[string]string{"workspace_id": "workspaces", "page_id": "pages"} {
 				if old, ok := row[column].(string); ok {
@@ -38,6 +42,11 @@ func remapSlides(dump *DBDump, idMap map[string]map[string]string) error {
 			hash, err := slides.DeckHash(deck)
 			if err != nil || hash != row["content_hash"] {
 				return fmt.Errorf("backup: %s Slides hash mismatch", table)
+			}
+			if table == "slides_revisions" {
+				if err := selected.validateSourceRevision(row, deck, hash); err != nil {
+					return err
+				}
 			}
 			mapped := idMap["pages"][deck.DeckID]
 			if mapped == "" || mapped != row["page_id"] {
@@ -65,7 +74,15 @@ func remapSlides(dump *DBDump, idMap map[string]map[string]string) error {
 				return err
 			}
 			row["canonical_json"], row["content_hash"] = string(encoded), hash
+			if table == "slides_revisions" {
+				if err := selected.recordRewrittenRevision(row); err != nil {
+					return err
+				}
+			}
 		}
+	}
+	if err := selected.remapRows(idMap); err != nil {
+		return err
 	}
 	// Replay receipts are scoped to the original Page/actor capability. Keep the
 	// immutable revision's mutation ID as a tombstone: replay in a fork gets409,
@@ -74,6 +91,7 @@ func remapSlides(dump *DBDump, idMap map[string]map[string]string) error {
 	// Comment replay capabilities are likewise cleared; immutable event mutation
 	// IDs remain historical tombstones in the newly namespaced Page.
 	dump.Tables["slides_comment_receipts"] = nil
+	dump.Tables["slides_request_receipts"] = nil
 	return nil
 }
 func validateSlidesRestoreRow(table string, row map[string]any) error {

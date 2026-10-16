@@ -174,7 +174,7 @@ func (s *Store) Read(ctx context.Context, k Key, a Authorize) (v State, e error)
 	return
 }
 func (s *Store) valid(schema int, snap []byte, p json.RawMessage) error {
-	if schema != 1 && schema != 2 {
+	if !supportedSchema(schema) {
 		return ErrSchema
 	}
 	if len(snap) == 0 || !json.Valid(p) {
@@ -257,7 +257,7 @@ func (s *Store) Acquire(ctx context.Context, k Key, owner string, a Authorize) (
 		if err != nil {
 			return err
 		}
-		if v.Schema != 1 && v.Schema != 2 {
+		if !supportedSchema(v.Schema) {
 			return ErrSchema
 		}
 		var writer string
@@ -301,7 +301,7 @@ func (s *Store) Renew(ctx context.Context, k Key, l Lease, a Authorize) (out Lea
 		if err != nil {
 			return err
 		}
-		if v.Schema != 1 && v.Schema != 2 {
+		if !supportedSchema(v.Schema) {
 			return ErrSchema
 		}
 		out = l
@@ -404,7 +404,7 @@ func (s *Store) Commit(ctx context.Context, k Key, c Commit, a Authorize) (r Rec
 				return err
 			}
 		}
-		if (v.Schema != 1 && v.Schema != 2) || c.Schema < v.Schema {
+		if !supportedSchema(v.Schema) || (c.Schema != v.Schema && !(v.Schema == 1 && c.Schema == 2)) {
 			return ErrSchema
 		}
 		if err = s.valid(c.Schema, c.CandidateSnapshot, c.Projection); err != nil {
@@ -491,7 +491,7 @@ func (s *Store) CheckpointRequestGuarded(ctx context.Context, k Key, l Lease, id
 			if err != nil {
 				return err
 			}
-			if current.Schema != 1 && current.Schema != 2 {
+			if !supportedSchema(current.Schema) {
 				return ErrSchema
 			}
 			c = existing
@@ -590,7 +590,7 @@ func (s *Store) RestoreRequestWithFingerprintAtGeneration(ctx context.Context, k
 		if v.HeadRev != ifRev || (generation != nil && *generation != v.Generation) {
 			return ErrConflict
 		}
-		if v.Schema != 1 && v.Schema != 2 {
+		if !supportedSchema(v.Schema) {
 			return ErrSchema
 		}
 		var c Checkpoint

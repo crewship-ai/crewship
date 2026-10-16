@@ -379,6 +379,8 @@ POST /api/v1/pages/{slug}/slides/comments/{threadId}/resolve roleSelf
 POST /api/v1/pages/{slug}/slides/initialize roleSelf
 POST /api/v1/pages/{slug}/slides/patch roleSelf
 POST /api/v1/pages/{slug}/slides/reorder roleSelf
+POST /api/v1/pages/{slug}/slides/requests roleSelf
+POST /api/v1/pages/{slug}/slides/requests/{requestId}/cancel roleSelf
 POST /api/v1/pages/{slug}/slides/restore roleSelf
 POST /api/v1/pages/{slug}/webhooks roleSelf
 POST /api/v1/projects roleCreate

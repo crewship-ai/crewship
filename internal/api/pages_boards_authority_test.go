@@ -138,7 +138,7 @@ func TestBoardAgentDelegationAuditAndCrossRunReceipt(t *testing.T) {
 	grantBoardRunForTest(t, h, workspace, user, "artifact-run", 201)
 	body := boardAgentBatch(t, "agent-first", 0, 0, boardAgentElement(t, "own", nil))
 	artifactExpect(t, boardAgentCall(t, h, workspace, token, "POST", body), 201)
-	execOrFatal(t, h.db, `INSERT INTO artifact_run_principals SELECT 'second-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
+	execOrFatal(t, h.db, `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) SELECT 'second-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
 	execOrFatal(t, h.db, `INSERT INTO journal_entries(id,workspace_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('second-start',?,'artifact-agent','run.started','system','second','second-run')`, workspace)
 	grantBoardRunForTest(t, h, workspace, user, "second-run", 201)
 	second := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, "artifact-crew"), workspace, "artifact-agent", "second-run")

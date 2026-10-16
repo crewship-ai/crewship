@@ -42,6 +42,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -67,6 +68,11 @@ type PageHandler struct {
 	artifactStoragePath              string
 	artifactMasterToken              string
 	artifactRequestCancels           sync.Map
+	slidesRequestCancels             sync.Map
+	slidesStartupRequests            []selectedStartupRequest
+	slidesStartupError               error
+	slidesStartupCaptured            bool
+	slidesRequestsUnavailable        atomic.Bool
 	artifactDispatch                 func(context.Context, string, string, string, ws.ChatMessageOption) error
 	projectStore                     *pages.ProjectStore
 	builds                           *pageBuildCoordinator
@@ -105,13 +111,15 @@ func (h *PageHandler) SetPolicyResolver(r *policy.Resolver) { h.policyResolver =
 
 // NewPageHandler builds the handler with the production clock.
 func NewPageHandler(db *sql.DB, hub *ws.Hub, logger *slog.Logger) *PageHandler {
-	return &PageHandler{
+	h := &PageHandler{
 		db:         db,
 		hub:        hub,
 		logger:     logger,
 		clock:      pages.SystemClock{},
 		pushLimits: pages.NewConfiguredPushLimiter(),
 	}
+	h.captureSelectedStartupRequests()
+	return h
 }
 
 // SetJournal wires the journal emitter. An unauthorised push is a signal, not

@@ -63,6 +63,9 @@ func bindBoardRequestRun(r *http.Request, db *sql.DB, id, run string, receipt *c
 	if err = ph.checkArtifactRunPrincipal(ctx, &a); err != nil {
 		return err
 	}
+	if err = ph.checkDocumentRunPageScope(ctx, board, &a); err != nil {
+		return err
+	}
 	if kind == "artifact" && !ph.artifactAgentPolicyAllows(ctx, workspace, a.CrewID) {
 		return errors.New("artifact creation policy revoked")
 	}
