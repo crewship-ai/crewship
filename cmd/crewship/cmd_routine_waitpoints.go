@@ -7,8 +7,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -171,7 +174,7 @@ var routineWaitpointsShowCmd = &cobra.Command{
 				fmt.Println(r.Prompt)
 			})
 		}
-		return cli.NotFoundf("waitpoint %s not found (already decided, expired, or wrong token)", args[0])
+		return cli.NotFoundf("waitpoint not found (already decided, expired, or wrong token)")
 	},
 }
 
@@ -233,6 +236,15 @@ func postWaitpointDecision(token string, approved bool, comment, action string, 
 		},
 	)
 	if err != nil {
+		// Transport errors include the request URL. Keep their type and cause,
+		// but do not repeat the capability the caller already supplied.
+		var connectionErr *cli.ConnectionError
+		var requestErr *url.Error
+		if token != "" && errors.As(err, &connectionErr) && errors.As(connectionErr.Err, &requestErr) {
+			redacted := *requestErr
+			redacted.URL = strings.ReplaceAll(redacted.URL, token, "[redacted]")
+			return &cli.ConnectionError{Err: &redacted}
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -240,9 +252,9 @@ func postWaitpointDecision(token string, approved bool, comment, action string, 
 		return err
 	}
 	if approved {
-		fmt.Printf("Approved waitpoint %s.\n", shortID(token))
+		fmt.Println("Approved waitpoint.")
 	} else {
-		fmt.Printf("Rejected waitpoint %s.\n", shortID(token))
+		fmt.Println("Rejected waitpoint.")
 	}
 	return nil
 }
