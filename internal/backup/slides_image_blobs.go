@@ -30,6 +30,21 @@ func validateRestoredSlideImageBlobs(ctx context.Context, tx *sql.Tx, root strin
 }
 
 func validateSlideImageBlobsForKeys(ctx context.Context, tx *sql.Tx, root string, keys map[slides.Key]bool) error {
+	var pinsPresent int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='slides_revision_assets'`).Scan(&pinsPresent); err != nil {
+		return err
+	}
+	if pinsPresent == 0 {
+		// Explicit older-v1/no-kit boundary, never swallow arbitrary SQL errors or
+		// accept schema2 with missing roots. Validate EVERY actual retained snapshot.
+		for key := range keys {
+			if err := slides.ValidateImagePageTx(ctx, tx, key); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	for key := range keys {
 		rows, err := tx.QueryContext(ctx, `SELECT DISTINCT a.sha256,a.byte_size,a.content_type,a.width,a.height FROM slides_revision_assets r JOIN page_assets a ON a.page_id=r.page_id AND a.id=r.asset_id AND a.sha256=r.expected_sha256 WHERE r.workspace_id=? AND r.page_id=?`, key.WorkspaceID, key.PageID)
 		if err != nil {

@@ -39,12 +39,24 @@ func ValidateImagePageTx(ctx context.Context, tx *sql.Tx, key Key) error {
 	if len(revisions) > 1000 {
 		return ErrQuota
 	}
+	var pinsPresent int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='slides_revision_assets'`).Scan(&pinsPresent); err != nil {
+		return err
+	}
 	for _, revision := range revisions {
 		state, err := readState(ctx, tx, key, revision)
 		if err != nil {
 			return err
 		}
 		expected := ImageReferences(state.Deck)
+		if pinsPresent == 0 {
+			// Older no-kit physical recovery may leave the additive migration
+			// pending. Only exact closed v1 snapshots need no image root table.
+			if state.SchemaVersion != SchemaVersion || len(expected) != 0 {
+				return errors.New("Slides image schema requires immutable asset pins")
+			}
+			continue
+		}
 		pins, err := tx.QueryContext(ctx, `SELECT p.asset_id,p.expected_sha256,a.sha256,a.state,a.byte_size FROM slides_revision_assets p JOIN page_assets a ON a.page_id=p.page_id AND a.id=p.asset_id WHERE p.workspace_id=? AND p.page_id=? AND p.rev=?`, key.WorkspaceID, key.PageID, revision)
 		if err != nil {
 			return err
