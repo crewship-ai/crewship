@@ -96,3 +96,40 @@ it.each(["confirmed-read-failure", "uncertain-write"])("keeps checkpoint acknowl
   }
   saved.destroy()
 })
+
+it("renders native schema3 links/code and normalizes only explicit user link input", async () => {
+  const {documentSchema}=await import("@/lib/documents/schema")
+  const saved=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"rich-paragraph"},content:[{type:"text",text:"linked",marks:[{type:"link",attrs:{href:"https://example.invalid/"}}]}]},{type:"codeBlock",attrs:{id:"rich-code"},content:[{type:"text",text:"<script>literal()</script>"}]}]},3)
+  request.mockImplementation(async(url:string)=>({ok:true,json:async()=>url.includes("/comments")?{comments:[],can_comment:false}:url.includes("/requests")?{requests:[],can_dispatch:false,eligible_chats:[]}:{page_id:"page",schema:3,rev:1,epoch:"go:node:1",can_write:true,snapshot:documentSchema.snapshot(saved)}}))
+  render(<PageDocument workspaceId="w" slug="notes" pageId="page" />)
+  expect(await screen.findByText("linked")).toHaveAttribute("href","https://example.invalid/")
+  expect(screen.getByText("<script>literal()</script>").closest("pre")).toBeInTheDocument()
+  expect(document.querySelector("script")).toBeNull()
+  const editor=(screen.getByLabelText("Document editor") as HTMLElement&{editor:Editor}).editor
+  await waitFor(()=>expect(editor.isEditable).toBe(true));act(()=>editor.commands.setTextSelection({from:1,to:7}))
+  fireEvent.change(screen.getByLabelText("Link address"),{target:{value:"https://example.com"}});fireEvent.click(screen.getByRole("button",{name:"Apply link"}))
+  expect(editor.getHTML()).toContain('href="https://example.com/"');expect(editor.getHTML()).toContain('rel="noopener noreferrer"')
+  saved.destroy()
+})
+it("freezes editing and retries the exact original Page/revision upgrade after uncertain acknowledgment",async()=>{
+  const {documentSchema}=await import("@/lib/documents/schema");const saved=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"upgrade-p"},content:[{type:"text",text:"Original plain document"}]}]},2);const submissions:unknown[]=[]
+  request.mockImplementation(async(url:string,init?:RequestInit)=>{if(url.includes("/upgrade")){submissions.push(JSON.parse(init!.body as string));return{ok:false,status:503,json:async()=>({error:"Lost upgrade acknowledgment"})}};return{ok:true,json:async()=>url.includes("/comments")?{comments:[],can_comment:false}:url.includes("/requests")?{requests:[],can_dispatch:false,eligible_chats:[]}:{page_id:"page",schema:2,rev:7,epoch:"go:node:1",can_write:true,snapshot:documentSchema.snapshot(saved)}}})
+  render(<PageDocument workspaceId="w" slug="notes" pageId="page" />);const start=await screen.findByRole("button",{name:"Enable links and code"});await waitFor(()=>expect(start).toBeEnabled());fireEvent.click(start)
+  const retry=await screen.findByRole("button",{name:"Retry upgrade"});await waitFor(()=>expect(retry).toBeEnabled());expect(screen.getByLabelText("Document editor")).toHaveAttribute("contenteditable","false");fireEvent.click(retry);await waitFor(()=>expect(submissions).toHaveLength(2));expect(submissions[1]).toEqual(submissions[0]);expect(submissions[0]).toMatchObject({schema:2,target_schema:3,page_id:"page",ifRev:7,epoch:"go:node:1"});expect(screen.getByText("Original plain document")).toBeInTheDocument();saved.destroy()
+})
+
+it("protects unsent comments and agent instructions before an upgrade reload",async()=>{
+ const {documentSchema}=await import("@/lib/documents/schema");const saved=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"draft-p"},content:[{type:"text",text:"Saved document"}]}]},2)
+ request.mockImplementation(async(url:string)=>({ok:true,json:async()=>url.includes("/comments")?{comments:[],can_comment:true,can_resolve:true}:url.includes("/requests")?{requests:[],can_dispatch:true,eligible_chats:[{chat_id:"chat",agent_name:"Agent"}]}:{page_id:"page",schema:2,rev:1,epoch:"go:node:1",can_write:true,snapshot:documentSchema.snapshot(saved)}}))
+ const dirty=vi.fn();render(<PageDocument workspaceId="w" slug="notes" pageId="page" onDirtyChange={dirty} />);const upgrade=await screen.findByRole("button",{name:"Enable links and code"});await waitFor(()=>expect(upgrade).toBeEnabled());fireEvent.change(await screen.findByLabelText("Comment text"),{target:{value:"Unsent comment"}});fireEvent.change(await screen.findByLabelText("Agent instructions"),{target:{value:"Unsent task"}});await waitFor(()=>expect(upgrade).toBeDisabled());expect(dirty).toHaveBeenLastCalledWith(true);fireEvent.click(screen.getByRole("button",{name:"Discard local comment draft"}));expect(upgrade).toBeDisabled();expect(screen.getByLabelText("Agent instructions")).toHaveValue("Unsent task");fireEvent.click(screen.getByRole("button",{name:"Discard draft"}));await waitFor(()=>expect(upgrade).toBeEnabled());saved.destroy()
+})
+
+it('retains local comment and agent drafts through epoch recovery and clears server content on access loss',async()=>{
+ const {documentSchema}=await import("@/lib/documents/schema");const saved=documentSchema.create({type:"doc",content:[{type:"paragraph",attrs:{id:"keep-p"},content:[{type:"text",text:"Private saved document"}]}]},2);let epoch='go:node:1',denied=false;
+ request.mockImplementation(async(url:string)=>denied?{ok:false,status:403,json:async()=>({error:'revoked'})}:{ok:true,json:async()=>url.includes('/comments')?{comments:[],can_comment:true,can_resolve:true}:url.includes('/requests')?{requests:[],can_dispatch:true,eligible_chats:[]}:{page_id:'page',schema:2,rev:1,epoch,can_write:true,snapshot:documentSchema.snapshot(saved)}});render(<PageDocument workspaceId="w" slug="notes" pageId="page"/>);fireEvent.change(await screen.findByLabelText('Comment text'),{target:{value:'Keep my local comment'}});fireEvent.change(await screen.findByLabelText('Agent instructions'),{target:{value:'Keep my local task'}});epoch='go:new:2';await screen.findByText(/Document history changed/);expect(screen.getByLabelText('Comment text')).toHaveValue('Keep my local comment');expect(screen.getByLabelText('Agent instructions')).toHaveValue('Keep my local task');
+ // A child-channel denial must clear the Page's server data, while own text stays recoverable.
+ denied=true;await waitFor(()=>expect(screen.getByLabelText('Retained local comment draft')).toHaveValue('Keep my local comment'),{timeout:6500});expect(screen.getByLabelText('Retained local agent instructions')).toHaveValue('Keep my local task');expect(screen.queryByText('Private saved document')).toBeNull();saved.destroy()
+});
+it('disables every agent input while a version upgrade is pending',async()=>{
+ const {documentSchema}=await import("@/lib/documents/schema");const saved=documentSchema.create({type:'doc',content:[{type:'paragraph',attrs:{id:'pending-p'},content:[{type:'text',text:'Saved'}]}]},2);request.mockImplementation(async(url:string)=>url.includes('/upgrade')?new Promise(()=>{}):{ok:true,json:async()=>url.includes('/comments')?{comments:[],can_comment:false}:url.includes('/requests')?{requests:[],can_dispatch:true,eligible_chats:[]}:{page_id:'page',schema:2,rev:1,epoch:'go:node:1',can_write:true,snapshot:documentSchema.snapshot(saved)}});render(<PageDocument workspaceId="w" slug="notes" pageId="page"/>);const button=await screen.findByRole('button',{name:'Enable links and code'});await screen.findByLabelText('Agent instructions');await waitFor(()=>expect(button).toBeEnabled());fireEvent.click(button);expect(screen.getByLabelText('Agent instructions')).toBeDisabled();expect(screen.getByLabelText('Private agent chat')).toBeDisabled();saved.destroy()
+});
