@@ -64,6 +64,7 @@ import { SlashActionModal } from "./composer/slash-action-modal"
 import type { SlashActionSchema as ServerSlashCommand } from "@/hooks/use-slash-commands"
 import { type CrewMember } from "./composer/mention-autocomplete"
 import { ChatComposer } from "./composer/chat-composer"
+import { RunPreflight } from "./run-preflight"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
@@ -367,6 +368,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   const [preparingProjectInputs, setPreparingProjectInputs] = useState(false)
   const [sharedRestrictedChat,setSharedRestrictedChat] = useState(false)
+  // Protected reads require a successful profile probe for this exact identity.
+  const chatReadScope = JSON.stringify([currentUserId, workspaceId, sessionId])
+  const [verifiedChatScope, setVerifiedChatScope] = useState<string | null>(null)
   const [executionProfile, setExecutionProfile] = useState<"trusted" | "restricted" | "pending">("pending")
   // Whether this session's mount-time profile probe has answered. A draft
   // has no row yet, so the probe answers 404 and the profile stays "pending"
@@ -375,6 +379,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   // ensureSessionForSend, so nothing is sent on a pending or denied profile.
   const [profileProbeSettled, setProfileProbeSettled] = useState(false)
   useEffect(() => {
+    setVerifiedChatScope(null)
     executionProfileRef.current = "pending"
     setExecutionProfile("pending")
     setProfileProbeSettled(false)
@@ -386,10 +391,12 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     void apiFetch(`/api/v1/chats/${sessionSegment}/execution-profile?workspace_id=${encodeURIComponent(workspaceId)}`,{signal:controller.signal}).then(async response => {
       if (!response.ok) return
       const profile = await response.json() as {mode:string;audience?:string}
+      if (controller.signal.aborted) return
+      if (profile.mode === "trusted") setVerifiedChatScope(chatReadScope)
       if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
     }).catch(() => {}).finally(() => { if (!controller.signal.aborted) setProfileProbeSettled(true) })
     return () => controller.abort()
-  }, [sessionId,workspaceId])
+  }, [sessionId,workspaceId,currentUserId,chatReadScope])
 
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
     canSend: canChat,
@@ -985,13 +992,14 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   const accessMode = useAccessMode()
   const isMobile = useIsMobile()
+  const verifiedChatReadScope = accessMode === "trusted" && executionProfile === "trusted" && verifiedChatScope === chatReadScope
   const entities = useChatEntityRefs({ workspaceId, chatId: sessionId, userId: currentUserId ?? undefined,
-    enabled: accessMode === "trusted" && executionProfile === "trusted" && canChat })
+    enabled: verifiedChatReadScope && canChat })
   const proposals = useChatE2Cards({ kind: "proposal", workspaceId, chatId: sessionId, userId: currentUserId ?? undefined,
-    enabled: accessMode === "trusted" && executionProfile === "trusted" && canChat })
+    enabled: verifiedChatReadScope && canChat })
   const proposalRefs = proposals.refs.filter((ref): ref is ProposalRef => ref.kind === "proposal")
   const decisions = useChatDecisions({ workspaceId, chatId: sessionId, userId: currentUserId ?? undefined,
-    enabled: accessMode === "trusted" && executionProfile === "trusted" && canChat })
+    enabled: verifiedChatReadScope && canChat })
   const decisionRefs = decisions.references
   const reconcileDecisions = decisions.reconcile
   const decisionKey = (ref: DecisionRef) => JSON.stringify([ref.decision.source.type, ref.decision.source.id])
@@ -1337,6 +1345,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
+        {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
         {canChat ? <ChatComposer
           agentId={agentId}
           sessionId={sessionId}
@@ -1466,6 +1475,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
+        {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
         {canChat ? <ChatComposer
           agentId={agentId}
           sessionId={sessionId}

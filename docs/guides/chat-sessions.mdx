@@ -717,3 +717,12 @@ participant count.
 - [User preferences API](/api-reference/preferences) — composer settings (default model, slash-palette behaviour).
 - [Conversations API](/api-reference/conversations) — message reactions, attachments, crew messaging, and the workspace rooms behind direct messages, groups and channels.
 - [Webhooks](/api-reference/webhooks) — programmatic chat-session creation (`origin=WEBHOOK`).
+
+### Advisory details before work
+
+The chat composer offers configured-model payer, remaining budget and gate details
+after checking the current viewer and chat execution profile. This collapsed
+section is available on desktop and mobile. It does not reserve funds or approve
+a run; the actual launch and provider admission checks remain authoritative.
+Price is unknown unless Paymaster can supply an estimate. Changing viewer, workspace
+or chat requires a new successful profile check before protected reads begin.
