@@ -673,3 +673,23 @@ participant count.
 - [User preferences API](/api-reference/preferences) — composer settings (default model, slash-palette behaviour).
 - [Conversations API](/api-reference/conversations) — message reactions, attachments, crew messaging, and the workspace rooms behind direct messages, groups and channels.
 - [Webhooks](/api-reference/webhooks) — programmatic chat-session creation (`origin=WEBHOOK`).
+
+## Budget and gate before work
+
+`crewship chat run-preflight <chat-id>` reads the current payer selected by the
+runtime for the chat agent's configured model, applicable Paymaster budget
+balances, and a predicted whole-run gate. The equivalent read-only endpoint is
+`GET /api/v1/chats/{chatId}/run-preflight`. Restricted accounts and guests do not
+receive this projection. Credential names retain their normal visibility rules;
+no credential secret is decrypted.
+
+The scope is `configured_chat_agent`: model/provider overrides are outside this
+snapshot. `estimate_state` is `unknown` and `estimate_usd` is null because there is
+no evidence for the complete run's token usage. A remaining balance is neither a
+reservation nor permission to spend. `gate.predicted_mode` uses current policy
+and reward history; the actual mode is recorded in the existing approval item
+when the gate runs. Async review is nonblocking. Prompt changes start a new gate
+check and cannot borrow an earlier run's approval. Provider admission rechecks
+live budget policy before each paid request, including after a human wait.
+Legacy proxy traffic under a hard budget requires the restricted broker even
+when a balance remains; preflight reports that existing constraint.

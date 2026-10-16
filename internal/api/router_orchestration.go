@@ -50,6 +50,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	wsCtx := r.authMw.RequireWorkspace
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/issue-mutation-outbox", authed(wsCtx(http.HandlerFunc(r.failedIssueMutationJobs))))
 	r.mux.Handle("GET /api/v1/chats/{chatId}/entity-refs", authed(wsCtx(http.HandlerFunc(r.chatEntityRefs))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/run-preflight", authed(wsCtx(http.HandlerFunc(r.chatRunPreflight))))
 	r.mux.Handle("GET /api/v1/operations/{operationId}", authed(wsCtx(http.HandlerFunc(r.chatEntityOperation))))
 	r.mux.Handle("GET /api/v1/issues/{identifier}/revision", authed(wsCtx(http.HandlerFunc(r.issueEntityRevision))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision", authed(wsCtx(http.HandlerFunc(r.issueEntityRevision))))
