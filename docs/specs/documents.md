@@ -63,7 +63,7 @@ Authenticated humans use `/api/v1/pages/{slug}/document` in their workspace:
   returns validated content for comparison.
 - `POST /restore` accepts `{id,schema,page_id,epoch,ifRev,checkpoint}` and creates a
   new durable revision and resynchronization generation.
-- `GET /export` downloads escaped Markdown, including simple lists and tables.
+- `GET /export` downloads escaped Markdown, including simple lists and tables. Unrepresentable inline line breaks, table code blocks and odd backslash runs before table-code pipes return actionable422 instead of changing content.
 - `GET /requests` lists requests and eligible private agent chats;
   `POST /requests` accepts `{page_id,targets,chat_id,instruction,base_rev,submission_id}`,
   with one server-verified paragraph/heading target `{id,hash,from,to,quote}`.

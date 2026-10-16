@@ -43,3 +43,20 @@ it("propagates table export context through nested lists for escaping and unsupp
  const rich=list([paragraph("a|b",[{type:"code",attrs:{}}])]);const html=parsed([table([rich])]);expect(html.querySelectorAll("th,td")).toHaveLength(1);expect(html.querySelector("code")?.textContent).toBe("a|b")
  const unsupported=doc([table([list([paragraph("before"),{type:"codeBlock",attrs:{id:"code"},content:[{type:"text",text:"a\nb"}]}])])]);engine.validateJSON(unsupported,3);expect(()=>engine.markdown(unsupported)).toThrow("code block inside a simple table")
 })
+
+const singleTable = (content: unknown[], nested = false) => ({type:"table",attrs:{id:"table"},content:[{type:"tableRow",attrs:{id:"row"},content:[{type:"tableCell",attrs:{id:"cell"},content:nested?[{type:"bulletList",attrs:{id:"list"},content:[{type:"listItem",attrs:{id:"item"},content:[{type:"paragraph",attrs:{id:"cell-text"},content}]}]}]:[{type:"paragraph",attrs:{id:"cell-text"},content}]}]}]})
+describe("Markdown backslash encoding follows the real GFM parser", () => {
+ it.each([0,1,2,3])("preserves code with %i backslashes or explicitly refuses an unrepresentable table pipe", count => {
+  for(const delimiter of ["|","`"]){const text="a"+"\\".repeat(count)+delimiter+"b",marks=[{type:"code",attrs:{}}];expect(parsed([paragraph(text,marks)]).querySelector("code")?.textContent).toBe(text)
+   for(const nested of [false,true]){const body=[singleTable([{type:"text",text,marks}],nested)];if(delimiter==="|"&&count%2){expect(()=>engine.markdown(doc(body))).toThrow("odd backslash run");continue}const html=parsed(body);expect(html.querySelectorAll("th,td")).toHaveLength(1);expect(html.querySelector("code")?.textContent).toBe(text)}
+  }
+ })
+ it.each([0,1,2,3])("preserves link label and decoded destination with %i query backslashes",count=>{
+  const text="label"+"\\".repeat(count)+"|`end &amp; &#124;",href="https://example.invalid/?q="+"\\".repeat(count)+"|value%2Fkept&literal=%255C&entity=&amp;",marks=[{type:"link",attrs:{href}}];expect(engine.validLinkHref(href)).toBe(true)
+  for(const content of [[paragraph(text,marks)],[singleTable([{type:"text",text,marks}])],[singleTable([{type:"text",text,marks}],true)]]){const html=parsed(content),anchor=html.querySelector("a")!;expect(anchor.textContent).toBe(text);const actual=new URL(anchor.getAttribute("href")!);expect(actual.origin+actual.pathname).toBe(new URL(href).origin+new URL(href).pathname);expect([...actual.searchParams]).toEqual([...new URL(href).searchParams]);expect(anchor.getAttribute("href")).toContain("%2Fkept");expect(anchor.getAttribute("href")).toContain("%255C");if(content[0].type==="table")expect(html.querySelectorAll("th,td")).toHaveLength(1)}
+ })
+ it("preserves padding and refuses inline CR/LF in direct and nested table code",()=>{
+  for(const text of [" ","  a\\\\|b ","`a\\\\|b`"]){const html=parsed([singleTable([{type:"text",text,marks:[{type:"code",attrs:{}}]}],true)]);expect(html.querySelector("code")?.textContent).toBe(text)}
+  for(const text of ["a\nb","a\rb"]){for(const body of [[paragraph(text,[{type:"code",attrs:{}}])],[singleTable([{type:"text",text,marks:[{type:"code",attrs:{}}]}],true)]])expect(()=>engine.markdown(doc(body))).toThrow("line breaks")}
+ })
+})

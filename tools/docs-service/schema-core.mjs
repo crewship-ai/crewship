@@ -335,12 +335,30 @@ function create(json = initialJSON(), version = VERSION) {
 }
 
 function markdown(json) {
-  const escape = text => text.replace(/([\\`*_{}\[\]<>#!|])/g, '\\$1');
+  const escape = text => text.replace(/([\\`*_{}\[\]<>#!|&])/g, '\\$1');
+  // GFM strips one escape before a pipe before parsing inline code. An odd
+  // original backslash run cannot survive that preprocessing without turning
+  // the pipe into a cell separator. Refuse rather than change the code text.
+  const tableCode = value => {
+    let result = '', backslashes = 0;
+    for (const char of value) {
+      if (char === '\\') { result += char; backslashes++; continue; }
+      if (char === '|') {
+        if (backslashes % 2) throw Object.assign(new Error('Markdown export cannot preserve inline code with an odd backslash run before a table pipe; move this code outside the table.'), {code:'unsupported_markdown'});
+        result += '\\|';
+      } else result += char;
+      backslashes = 0;
+    }
+    return result;
+  };
+  // URI percent encoding avoids both CommonMark destination escapes and GFM
+  // table delimiters. Preserve existing percent escapes and decoded URL data.
+  const destination = href => [...href].map(char => char === '\\' ? '%5C' : char === '|' ? '%7C' : char === '&' ? '&amp;' : char).join('');
   const visit = (node, depth=0, table = false) => {
     if (node.type==='text') {
       const value = node.text || '', mark = node.marks?.[0];
-      if (mark?.type === 'code') { if (/[\r\n]/.test(value)) throw Object.assign(new Error('Markdown export cannot preserve line breaks in inline code; use a code block.'), {code:'unsupported_markdown'}); const fence = '`'.repeat(Math.max(0, ...(value.match(/`+/g) || []).map(run => run.length)) + 1); const pad = !/^ +$/.test(value) && /^[ `]|[ `]$/.test(value) ? ' ' : ''; return fence + pad + (table ? value.replace(/\|/g, '\\|') : value) + pad + fence; }
-      if (mark?.type === 'link') return '[' + escape(value) + '](<' + (table ? mark.attrs.href.replace(/\|/g, '\\|') : mark.attrs.href) + '>)';
+      if (mark?.type === 'code') { if (/[\r\n]/.test(value)) throw Object.assign(new Error('Markdown export cannot preserve line breaks in inline code; use a code block.'), {code:'unsupported_markdown'}); const fence = '`'.repeat(Math.max(0, ...(value.match(/`+/g) || []).map(run => run.length)) + 1); const pad = !/^ +$/.test(value) && /^[ `]|[ `]$/.test(value) ? ' ' : ''; return fence + pad + (table ? tableCode(value) : value) + pad + fence; }
+      if (mark?.type === 'link') return '[' + escape(value) + '](<' + destination(mark.attrs.href) + '>)';
       return escape(value);
     }
     if (node.type==='codeBlock') { if (table) throw Object.assign(new Error('Markdown export cannot represent a code block inside a simple table; move it outside the table.'), {code:'unsupported_markdown'}); const value = textOf(node), fence = '`'.repeat(Math.max(2, ...(value.match(/`+/g) || []).map(run => run.length)) + 1); return fence + '\n' + value + '\n' + fence + '\n\n'; }

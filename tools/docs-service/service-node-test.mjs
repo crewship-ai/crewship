@@ -553,3 +553,12 @@ test('rich selection confirms plaintext and immutable schema while code blocks s
  assert.equal((await call(f.socket,'/v1/documents/p/verify-targets',{base_rev:state.rev,targets:[{id:'code',hash:state.outline[1].hash,from:0,to:7,quote:'literal'}]})).status,400);assert.equal(model.commits,0);assert.equal(model.acquisitions,0);
  }finally{await f.close()}
 });
+
+test('table code with an unrepresentable backslash pipe returns actionable 422 without a write',async()=>{
+ const model=authorityModel();
+ const paragraph={type:'paragraph',attrs:{id:'cell-text'},content:[{type:'text',text:'a\\|b',marks:[{type:'code',attrs:{}}]}]};
+ const cell={type:'tableCell',attrs:{id:'cell'},content:[paragraph]},row={type:'tableRow',attrs:{id:'row'},content:[cell]};
+ const body={type:'doc',content:[{type:'table',attrs:{id:'table'},content:[row]}]},doc=create(body,3);
+ model.state={...model.state,schema:3,snapshot:snapshot(doc)};doc.destroy();const f=await fixture(model.handle);await f.start();
+ try{const before=structuredClone(model.state),result=await call(f.socket,'/v1/documents/p/export',{});assert.equal(result.status,422);assert.equal(result.body.code,'unsupported_markdown');assert.match(result.body.error,/move this code outside the table/);assert.deepEqual(model.state,before);assert.equal(model.commits,0);assert.equal(model.receipts.size,0);assert.equal(model.acquisitions,0)}finally{await f.close()}
+});
