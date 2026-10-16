@@ -62,9 +62,11 @@ func (r *Router) resolveRunApprovalDecision(req *http.Request, op *decisionOpera
 	if s.version() != op.Version || s.Row.Status != harbormaster.StatusPending || (s.Row.TimeoutAt != nil && !s.Row.TimeoutAt.After(time.Now())) {
 		return errDecisionVersion
 	}
-	origin, err := runauthority.Resolve(ctx, conn, s.Run, a.AgentID, a.WorkspaceID)
-	if err != nil || origin.TriggerType != "USER" || origin.HumanAuthority == nil || *origin.HumanAuthority != s.Requester || origin.ChatID != a.ChatID || origin.TriggerMessageID != s.Trigger {
-		return errDecisionDenied
+	if answer.Action == "approve" {
+		origin, err := runauthority.Resolve(ctx, conn, s.Run, a.AgentID, a.WorkspaceID)
+		if err != nil || origin.TriggerType != "USER" || origin.HumanAuthority == nil || *origin.HumanAuthority != s.Requester || origin.ChatID != a.ChatID || origin.TriggerMessageID != s.Trigger {
+			return errDecisionDenied
+		}
 	}
 	status := harbormaster.StatusApproved
 	if answer.Action == "reject" {

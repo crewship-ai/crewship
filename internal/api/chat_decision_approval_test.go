@@ -237,8 +237,9 @@ func TestChatDecisionApprovalCurrentRequesterSeparateFromDecider(t *testing.T) {
 	d.a = *admin
 	version := d.read(t).Ref.Decision.Source.Version
 	execOrFatal(t, d.f.h.db, `UPDATE users SET suspended_at='2026-10-16' WHERE id=?`, d.f.user)
-	if _, err = d.r.runApprovalDecision(t.Context(), d.a, d.id); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("stale requester card visible: %v", err)
+	stale, err := d.r.runApprovalDecision(t.Context(), d.a, d.id)
+	if err != nil || fmt.Sprint(stale.Ref.Decision.AllowedActions) != "[view reject]" {
+		t.Fatalf("revoked requester rejection projection %+v %v", stale, err)
 	}
 	if err = d.resolve(t, version, "withdrawn-requester", "approve"); !errors.Is(err, errDecisionDenied) {
 		t.Fatalf("requester withdrawn: %v", err)
@@ -251,6 +252,16 @@ func TestChatDecisionApprovalCurrentRequesterSeparateFromDecider(t *testing.T) {
 		t.Fatal(row.Status)
 	}
 	if n := d.count(t, "gate_reward_history"); n != 0 {
+		t.Fatal(n)
+	}
+	if err = d.resolve(t, version, "refuse-withdrawn-requester", "reject"); err != nil {
+		t.Fatalf("authorized rejection must settle pending gate: %v", err)
+	}
+	row, _ = harbormaster.Get(t.Context(), d.f.h.db, d.f.workspace, d.id)
+	if row.Status != harbormaster.StatusDenied {
+		t.Fatal(row.Status)
+	}
+	if n := d.count(t, "gate_reward_history"); n != 1 {
 		t.Fatal(n)
 	}
 }
