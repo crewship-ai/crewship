@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 )
 
 func executeDocAgentCLI(t *testing.T, transport http.RoundTripper, stdin string, args ...string) (string, error) {
@@ -97,5 +99,25 @@ func TestDocAgentCLIRejectsFallbackOverridesRedirectAndSecretEcho(t *testing.T) 
 	output, err := executeDocAgentCLI(t, reflect, "", "read", "report")
 	if err == nil || strings.Contains(output, token) || strings.Contains(err.Error(), token) {
 		t.Fatal("bearer echoed", output, err)
+	}
+}
+
+func TestDocAgentCLIPreservesBoundedLiteralOperationsBytes(t *testing.T) {
+	t.Setenv("CREWSHIP_AGENT_TOKEN", internaltoken.DeriveAgentRunToken(strings.Repeat("x", 48), "workspace", "agent", "run"))
+	const prefix = `[{"op":"insert_after","after_id":"selected","node":{"type":"paragraph","content":[{"type":"text","text":"`
+	const suffix = `"}]}}]`
+	for _, filler := range []string{"<", "&", "\u2028"} {
+		size := docAgentIntentBytes - len(prefix) - len(suffix)
+		operations := prefix + strings.Repeat(filler, size/len(filler)) + strings.Repeat("x", size%len(filler)) + suffix
+		transport := selectedAgentRoundTrip(func(r *http.Request) (*http.Response, error) {
+			body, _ := io.ReadAll(r.Body)
+			if string(body) != `{"operations":`+operations+`}` {
+				t.Fatal("CLI inflated/changed valid bounded literal JSON")
+			}
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"rev":8}`)), Request: r}, nil
+		})
+		if _, err := executeDocAgentCLI(t, transport, operations, "apply", "report", "--operations-file", "-"); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

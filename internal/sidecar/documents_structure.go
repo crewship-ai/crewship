@@ -35,18 +35,22 @@ func (s *Server) handleDocumentStructure(w http.ResponseWriter, r *http.Request,
 		reply(status, raw)
 	}
 	var intent struct {
-		Operations []json.RawMessage `json:"operations"`
+		Operations json.RawMessage `json:"operations"`
 	}
 	if operation == "agent-apply" {
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, documentStructureIntentLimit+4096))
 		decoder.DisallowUnknownFields()
-		if decoder.Decode(&intent) != nil || decoder.Decode(new(any)) != io.EOF || len(intent.Operations) == 0 || len(intent.Operations) > 256 {
+		if decoder.Decode(&intent) != nil || decoder.Decode(new(any)) != io.EOF {
 			reject(400, "only 1..256 structural operations are accepted; identity and preconditions are supplied by the tool")
 			return
 		}
-		operations, err := json.Marshal(intent.Operations)
-		if err != nil || len(operations) > documentStructureIntentLimit {
+		if len(intent.Operations) > documentStructureIntentLimit {
 			reject(413, "structural operations exceed 256 KiB")
+			return
+		}
+		var operations []json.RawMessage
+		if json.Unmarshal(intent.Operations, &operations) != nil || len(operations) == 0 || len(operations) > 256 {
+			reject(400, "only 1..256 structural operations are accepted")
 			return
 		}
 	} else if operation == "agent-checkpoint" {
@@ -84,13 +88,18 @@ func (s *Server) handleDocumentStructure(w http.ResponseWriter, r *http.Request,
 		reply(200, body)
 		return
 	}
-	payload := map[string]any{"id": state.Request.RequestID + "-patch", "schema": 3, "page_id": state.Request.PageID, "request_id": state.Request.RequestID, "kind": "agent", "epoch": state.Epoch, "ifRev": state.Request.BaseRev, "operations": intent.Operations}
+	payload := map[string]any{"id": state.Request.RequestID + "-patch", "schema": 3, "page_id": state.Request.PageID, "request_id": state.Request.RequestID, "kind": "agent", "epoch": state.Epoch, "ifRev": state.Request.BaseRev}
 	suffix := "patch"
 	if operation == "agent-checkpoint" {
 		suffix = "checkpoint"
 		payload = map[string]any{"id": state.Request.RequestID + "-checkpoint", "schema": 3, "page_id": state.Request.PageID, "epoch": state.Epoch, "ifRev": state.Request.BaseRev + 1}
 	}
 	body, err := json.Marshal(payload)
+	if err == nil && operation == "agent-apply" {
+		// Only this already decoded, bounded JSON array is appended raw. All
+		// server-owned metadata is encoded normally; no model envelope survives.
+		body = append(append(append(body[:len(body)-1], []byte(`,"operations":`)...), intent.Operations...), '}')
+	}
 	if err != nil || len(body) > documentStructureIntentLimit+4096 {
 		reject(400, "bounded structural intent required")
 		return

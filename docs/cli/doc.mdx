@@ -160,9 +160,13 @@ These protected commands use only the original run's `CREWSHIP_AGENT_TOKEN`
 and fixed sidecar transport. They never load a human profile or accept server/
 workspace overrides. They require an admitted structural request.
 
+## crewship doc agent read
+
 `crewship doc agent read report` returns current text/outline plus the original
 server-owned request context, excluding binary Yjs snapshot/update bytes.
 Reading a newer head never authorizes rebasing.
+
+## crewship doc agent apply
 
 `crewship doc agent apply report --operations-file operations.json` accepts only
 a JSON **array** of1..256 operations, at most256KiB (or stdin with `-`):
@@ -178,6 +182,8 @@ computes hashes. Model input cannot override those values. The batch is atomic;
 failure publishes no partial update. Repeat unchanged operations after uncertain
 acknowledgement, including after transport epoch renewal, to recover the original
 receipt. A changed human revision without an existing receipt conflicts.
+
+## crewship doc agent checkpoint
 
 `crewship doc agent checkpoint report` takes no JSON envelope. It checkpoints
 only the original request's successful single patch at original base+1; no patch

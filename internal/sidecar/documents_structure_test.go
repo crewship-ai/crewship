@@ -160,21 +160,30 @@ func TestDocumentStructureToolsOperationsBudgetExcludesEnvelope(t *testing.T) {
 	s.ipc.BaseURL = host.URL
 	const prefix = `[{"op":"insert_after","after_id":"a","node":{"type":"paragraph","content":[{"type":"text","text":"`
 	const suffix = `"}]}}]`
-	for _, extra := range []int{0, 1} {
-		operations := prefix + strings.Repeat("x", documentStructureIntentLimit-len(prefix)-len(suffix)+extra) + suffix
-		r := httptest.NewRequest("POST", "/api/v1/pages/report/document/agent-apply", strings.NewReader(`{"operations":`+operations+`}`))
-		r.Header.Set("Authorization", "Bearer "+token)
-		w := httptest.NewRecorder()
-		s.handleDocument(w, r)
-		want := 200
-		if extra == 1 {
-			want = 413
-		}
-		if w.Code != want {
-			t.Fatalf("operations bytes %d: %d %s", len(operations), w.Code, w.Body.String())
+	for _, filler := range []string{"x", "<", "&", "\u2028"} {
+		for _, extra := range []int{0, 1} {
+			size := documentStructureIntentLimit - len(prefix) - len(suffix) + extra
+			operations := prefix + strings.Repeat(filler, size/len(filler)) + strings.Repeat("x", size%len(filler)) + suffix
+			r := httptest.NewRequest("POST", "/api/v1/pages/report/document/agent-apply", strings.NewReader(`{"operations":`+operations+`}`))
+			r.Header.Set("Authorization", "Bearer "+token)
+			w := httptest.NewRecorder()
+			s.handleDocument(w, r)
+			want := 200
+			if extra == 1 {
+				want = 413
+			}
+			if w.Code != want {
+				t.Fatalf("operations bytes %d: %d %s", len(operations), w.Code, w.Body.String())
+			}
+			if extra == 0 {
+				mcp := artifactMCPCall(t, s, token, "doc_apply", `{"slug":"report","operations":`+operations+`}`)
+				if strings.Contains(mcp.Body.String(), `"isError":true`) {
+					t.Fatalf("MCP inflated bounded operations: %s", mcp.Body.String())
+				}
+			}
 		}
 	}
-	if writes != 1 {
+	if writes != 8 {
 		t.Fatal("oversized operations reached writer", writes)
 	}
 }

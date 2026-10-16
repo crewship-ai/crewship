@@ -106,10 +106,10 @@ func newDocAgentCommandWithTransport(transport http.RoundTripper) *cobra.Command
 				if err = validateDocAgentOperations(raw); err != nil {
 					return err
 				}
-				raw, err = json.Marshal(map[string]json.RawMessage{"operations": raw})
-				if err != nil {
-					return errors.New("invalid operations JSON")
-				}
+				// The array is already validated JSON. Preserve its bytes: Marshal
+				// would HTML-escape '<', '&' and Unicode separators and could turn
+				// a valid bounded operations file into an oversized wire envelope.
+				raw = append(append([]byte(`{"operations":`), raw...), '}')
 				method = http.MethodPost
 				path = "/api/v1/pages/" + url.PathEscape(args[0]) + "/document/agent-apply"
 			} else if operation == "checkpoint" {

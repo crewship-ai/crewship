@@ -218,6 +218,12 @@ func (s *Server) respondArtifactMCPToolCall(w http.ResponseWriter, r *http.Reque
 		args = nil
 	}
 	payload, _ := json.Marshal(args)
+	if d.name == "doc_apply" {
+		// Preserve the validated JSON operations bytes and their256KiB budget;
+		// generic HTML escaping would inflate literal text before the shared
+		// protected adapter validates the actual operations envelope.
+		payload = append(append([]byte(`{"operations":`), args["operations"]...), '}')
+	}
 	if args == nil {
 		payload = nil
 	}
