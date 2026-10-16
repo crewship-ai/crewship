@@ -7,10 +7,12 @@ import { spawn } from 'node:child_process'
 import { randomBytes, randomUUID, createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { request as unixRequest } from 'node:http'
-import { mkdtemp, writeFile, readFile, rm, mkdir, stat } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve, join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readServiceSecret } from '../tools/docs-service/secret.mjs'
+import { evidenceRun, fixtureSockets, canonicalDirectory, boundedLog, writeEvidence, redactFixture, fixtureLog } from '../tools/docs-d0/fixture-boundaries.mjs'
 
 const script = fileURLToPath(import.meta.url)
 const repo = resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -20,9 +22,9 @@ if (!process.argv.includes('--inner')) {
   const directory = await mkdtemp(join(tmpdir(), 'd1b-'))
   const secret = join(directory, 'token')
   await writeFile(secret, randomBytes(32).toString('hex'), { mode: 0o600 })
-  const options = { authority: join(directory, 'authority.sock'), service: join(directory, 'service.sock'), token: secret }
-  const report = resolve(process.env.D1B_ACCEPTANCE_OUTPUT ?? join(tmpdir(), `docs-d1b-acceptance-${Date.now()}`))
-  await mkdir(report, { recursive: true, mode: 0o700 })
+  const options = { directory, authority: join(directory, 'authority.sock'), service: join(directory, 'service.sock'), token: secret }
+  const report = await evidenceRun(resolve(process.env.D1B_ACCEPTANCE_OUTPUT ?? join(tmpdir(), 'docs-d1b-acceptance')))
+  options.output = report
   const args = ['scripts/throwaway-server.sh', 'run', `d1b-${Date.now()}`, '--binary', binary,
     '--env', 'CREWSHIP_DOCUMENTS_ENABLED=true', '--env', `CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET=${options.authority}`,
     '--env', `CREWSHIP_DOCUMENTS_SERVICE_SOCKET=${options.service}`, '--env', `CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE=${options.token}`,
@@ -36,17 +38,22 @@ if (!process.argv.includes('--inner')) {
 
 const options = JSON.parse(process.argv[process.argv.indexOf('--inner') + 1])
 const output = process.argv[process.argv.indexOf('--inner') + 2]
+await fixtureSockets(options)
+if (output !== options.output) throw new Error('outer evidence directory required')
+await canonicalDirectory(output, true)
 const baseURL = process.env.CREWSHIP_SERVER
 if (!baseURL || !/^http:\/\/127\.0\.0\.1:81\d\d$/.test(baseURL)) throw new Error('Approved throwaway helper URL required')
 const binaryHash = createHash('sha256')
 for await (const chunk of createReadStream(process.env.D1B_ACCEPTANCE_BINARY ?? '/tmp/crewship-d1b')) binaryHash.update(chunk)
-const report = { binarySHA256: binaryHash.digest('hex'), qualification: 'Working tree binary; final release SHA requires its own rebuild and rerun', baseURL, checks: [], modelRun: { performed: false, reason: 'Not attempted: fresh own fixture has no configured model credential; runtime availability is recorded separately.' } }
+const report = { binarySHA256: binaryHash.digest('hex'), qualification: 'Traversal evidence for the recorded binary SHA256; this alone does not qualify a release or latest source', baseURL, checks: [], modelRun: { performed: false, reason: 'Not attempted: fresh own fixture has no configured model credential; runtime availability is recorded separately.' } }
 const record = name => { report.checks.push(name); console.log(`PASS ${name}`) }
-let serviceLog = ''
+const serviceLog = boundedLog()
+let serviceSecret = ''
+const fixtureSecrets = []
 const service = spawn(process.execPath, ['tools/docs-service/service.mjs'], { cwd: repo, env: { ...process.env,
   CREWSHIP_DOCS_SOCKET: options.service, CREWSHIP_DOCS_AUTHORITY_SOCKET: options.authority, CREWSHIP_DOCS_SERVICE_TOKEN_FILE: options.token }, stdio: ['ignore', 'pipe', 'pipe'] })
-service.stdout.on('data', data => { serviceLog += data })
-service.stderr.on('data', data => { serviceLog += data })
+service.stdout.on('data', data => { serviceLog.push(data) })
+service.stderr.on('data', data => { serviceLog.push(data) })
 const serviceExit = new Promise(resolve => service.once('exit', (code, signal) => resolve({ code, signal })))
 let browser, failurePage
 const routeTasks = new Set(), routeFailures = [], routeReleases = []
@@ -77,7 +84,8 @@ async function moveToEnd(editor) {
 function assertRoutes() { if (routeFailures.length) throw new Error(`Transport fixture failure: ${routeFailures.join('; ')}`) }
 try {
   await expect.poll(async () => { try { return (await stat(options.service)).isSocket() } catch { return false } }, { timeout: 30000 }).toBe(true)
-  const serviceSecret = (await readFile(options.token, 'utf8')).trim()
+  serviceSecret = await readServiceSecret(options.token)
+  fixtureSecrets.push(serviceSecret)
   await expect.poll(() => new Promise(resolve => {
     const req = unixRequest({ socketPath: options.service, path: '/health/ready', headers: { 'X-Crewship-Docs-Service': serviceSecret } }, response => {
       let body = ''; response.on('data', chunk => { body += chunk }); response.once('end', () => { if (response.statusCode === 200) { try { report.nodeIdentity = JSON.parse(body) } catch { resolve(502); return } }; resolve(response.statusCode) })
@@ -103,25 +111,28 @@ try {
       // fields. Never capture request headers, cookies or browser storage.
       const diagnostic = { actor, status: response.status(), payload, body: await response.text() }
       report.failedPatches.push(diagnostic)
-      console.error(`FAILED DOCUMENT PATCH ${JSON.stringify(diagnostic)}`)
+      fixtureLog(`FAILED DOCUMENT PATCH ${JSON.stringify(diagnostic)}`, fixtureSecrets, console.error)
     })().catch(error => { report.failedPatches.push({ actor, diagnosticError: error.message }) })
     diagnosticTasks.add(task); task.finally(() => diagnosticTasks.delete(task))
   })
   async function api(context, method, path, body, workspace) {
     const url = path + (workspace ? `${path.includes('?') ? '&' : '?'}workspace_id=${workspace}` : '')
-    const response = await context.request.fetch(url, { method, data: body, headers: { Origin: baseURL, ...(workspace ? { 'X-Workspace-ID': workspace } : {}) } })
+    const response = await context.request.fetch(url, { method, data: body, maxRedirects: 0, headers: { Origin: baseURL, ...(workspace ? { 'X-Workspace-ID': workspace } : {}) } })
     const raw = await response.text()
     if (!response.ok()) throw new Error(`${method} ${path}: ${response.status()} ${raw}`)
     return raw ? JSON.parse(raw) : null
   }
   const password = `D1b-${randomBytes(16).toString('hex')}!`
+  fixtureSecrets.push(password)
   const boot = await api(owner, 'POST', '/api/v1/bootstrap', { full_name: 'Document Owner', email: 'owner@d1b.example.com', password })
   const workspace = boot.workspace_id
   const member = await api(owner, 'POST', `/api/v1/workspaces/${workspace}/members/provision`, { full_name: 'Document Colleague', email: 'colleague@d1b.example.com', role: 'MEMBER', access_mode: 'trusted', create_only: true }, workspace)
   const setup = new URL(member.setup_url, baseURL).searchParams.get('token')
   if (!setup) throw new Error('Own colleague setup link missing')
+  fixtureSecrets.push(setup)
   await api(colleague, 'POST', '/api/v1/auth/reset', { token: setup, new_password: password })
   const csrf = await api(colleague, 'GET', '/api/auth/csrf')
+  fixtureSecrets.push(csrf.csrfToken)
   const login = await api(colleague, 'POST', '/api/auth/callback/credentials', { email: 'colleague@d1b.example.com', password, csrfToken: csrf.csrfToken, redirect: 'false' })
   if (login?.error) throw new Error('Own colleague login failed')
   report.runtime = await api(owner, 'GET', '/api/v1/system/runtime')
@@ -282,9 +293,9 @@ try {
   report.result = 'passed'; console.log(`Model acceptance NOT PERFORMED: ${report.modelRun.reason}`)
 } catch (error) {
   await finishRoutes()
-  report.result = 'failed'; report.error = error.message; report.transportErrors = routeFailures
+  report.result = 'failed'; report.error = redactFixture(String(error.message), fixtureSecrets); report.transportErrors = routeFailures
   await failurePage?.screenshot({ path: join(output, 'failure.png'), fullPage: true }).catch(() => {})
-  throw error
+  throw new Error(redactFixture(String(error.message), fixtureSecrets))
 } finally {
   await finishRoutes()
   await Promise.all([...diagnosticTasks])
@@ -294,7 +305,9 @@ try {
   const stopped = await Promise.race([serviceExit, new Promise(resolve => { shutdownTimer = setTimeout(() => resolve(null), 10000) })])
   clearTimeout(shutdownTimer)
   if (!stopped) { service.kill('SIGKILL'); await serviceExit }
-  await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2), { mode: 0o600 })
-  await writeFile(join(output, 'node-service.log'), serviceLog, { mode: 0o600 })
+  const captured = serviceLog.finish(fixtureSecrets)
+  report.serviceLogCapture = { retainedInputBytes: captured.retainedInputBytes, droppedInputBytes: captured.droppedInputBytes, truncated: captured.truncated }
+  await writeEvidence(output, 'report.json', redactFixture(JSON.stringify(report, null, 2), fixtureSecrets))
+  await writeEvidence(output, 'node-service.log', captured.text)
   console.log(`Acceptance evidence: ${output}`)
 }

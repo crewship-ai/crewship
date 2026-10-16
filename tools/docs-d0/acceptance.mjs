@@ -1,18 +1,33 @@
 // End-to-end D0 acceptance. Credentials stay in memory and never enter evidence.
 import assert from 'node:assert/strict';
-import { readFile, writeFile, mkdtemp } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
+import { loopbackOrigin, fixtureFetch, parseFixture, fixtureLog, evidenceRun, writeEvidence, boundedLog, redactFixture } from './fixture-boundaries.mjs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { chromium } from '@playwright/test';
 import WebSocket from 'ws';
 
 const fixturePath = process.argv[2];
-const f = JSON.parse(await readFile(fixturePath, 'utf8'));
+const f = parseFixture(await readFile(fixturePath, 'utf8'));
+const secrets = [f.owner, f.editor, f.agent, f.service];
+const requestedOutput = process.env.CREWSHIP_DOCS_D0_OUTPUT || join(tmpdir(), 'crewship-docs-d0-acceptance.json');
+const evidenceDirectory = await evidenceRun(requestedOutput);
+const output = join(evidenceDirectory, basename(requestedOutput));
 const report = { scenarios: [], measurements: {}, limits: { browserAckMs: 5000, representativeParagraphs: 200, snapshotBytes: 1048576, nodeServiceRSSBytes: 536870912, browserJSHeapBytes: 268435456 }, runtime: { node: process.version } };
 let child, browser, url, port;
 const browserDiagnostics = [];
+let diagnosticBytes = 0, droppedDiagnosticEvents = 0, droppedDiagnosticBytes = 0;
+function captureDiagnostic(type, text) {
+  if (browserDiagnostics.length >= 1000 || diagnosticBytes >= 256 * 1024) { droppedDiagnosticEvents++; droppedDiagnosticBytes += Buffer.byteLength(text); return; }
+  const capture = boundedLog(Math.min(8192, 256 * 1024 - diagnosticBytes));
+  capture.pushText(text);
+  const result = capture.finish(secrets);
+  diagnosticBytes += Buffer.byteLength(result.text);
+  droppedDiagnosticBytes += result.droppedInputBytes;
+  browserDiagnostics.push({ type, ...result });
+}
 const pause = ms => new Promise(r => setTimeout(r, ms));
 async function until(fn, label, timeout = 10000) {
   const end = Date.now() + timeout;
@@ -26,15 +41,15 @@ async function start() {
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('service startup timeout')), 15000);
     child.once('exit', () => { clearTimeout(timer); reject(new Error('service exited before ready')); });
-    child.stdout.on('data', chunk => { line += chunk; const end = line.indexOf('\n'); if (end >= 0) {
-      try { const ready = JSON.parse(line.slice(0, end)); url = ready.url; port = new URL(url).port; clearTimeout(timer); resolve(); }
+    child.stdout.on('data', chunk => { if (Buffer.byteLength(line) + chunk.length > 4096) { clearTimeout(timer); reject(new Error('service ready message limit')); return; } line += chunk; const end = line.indexOf('\n'); if (end >= 0) {
+      try { const ready = JSON.parse(line.slice(0, end)); url = loopbackOrigin(ready.url); port = new URL(url).port; clearTimeout(timer); resolve(); }
       catch { clearTimeout(timer); reject(new Error('invalid service ready message')); }
     } });
   });
 }
 async function kill() { if (child?.exitCode === null && child.signalCode === null) { const ended = once(child, 'exit'); child.kill('SIGKILL'); await ended; } }
 async function request(path, token = f.owner, body, expected = 200) {
-  const res = await fetch(url + path, { method: body === undefined ? 'GET' : 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-D0-Service': f.service }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const res = await fixtureFetch(url, path, { method: body === undefined ? 'GET' : 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-D0-Service': f.service }, body: body === undefined ? undefined : JSON.stringify(body) });
   assert.equal(res.status, expected, `${path} HTTP status`);
   return res.status === 204 ? {} : res.json();
 }
@@ -42,7 +57,7 @@ let seq = 0;
 const op = (kind, fields = {}, token = f.owner, expected = 200) => request('/op', token, { id: `accept-${++seq}`, kind, schema: 1, ...fields }, expected);
 const state = () => request('/state');
 async function control(action) {
-  const res = await fetch(`${f.authority}/control?action=${action}`, { method: 'POST', headers: { 'X-D0-Service': f.service, Authorization: `Bearer ${f.owner}`, 'X-Workspace-ID': f.workspace } });
+  const res = await fixtureFetch(f.authority, `/control?action=${action}`, { method: 'POST', headers: { 'X-D0-Service': f.service, Authorization: `Bearer ${f.owner}`, 'X-Workspace-ID': f.workspace } });
   assert.equal(res.status, 200, `control ${action}`); return res.json();
 }
 async function scenario(name, fn) {
@@ -61,8 +76,8 @@ async function openHuman(token, schema = 1) {
   });
   await context.addInitScript(({ token, schema }) => { localStorage.setItem('d0-token', token); localStorage.setItem('d0-schema', String(schema)); }, { token, schema });
   const page = await context.newPage();
-  page.on('console', message => { if (['warning', 'error'].includes(message.type())) browserDiagnostics.push({ type: message.type(), text: message.text() }); });
-  page.on('pageerror', error => browserDiagnostics.push({ type: 'pageerror', text: error.message }));
+  page.on('console', message => { if (['warning', 'error'].includes(message.type())) captureDiagnostic(message.type(), message.text()); });
+  page.on('pageerror', error => captureDiagnostic('pageerror', error.message));
   await page.goto(url);
   await page.waitForFunction(() => window.d0?.state);
   return page;
@@ -125,7 +140,7 @@ try {
     const body = { id: 'retry-fixed', kind: 'agent', schema: 1, target: block.id, text: 'Retry title', ifRev: s.rev, ifHash: block.hash };
     await request('/test/hold', f.owner, { phase: 'after' });
     const abort = new AbortController();
-    const timed = fetch(url + '/op', { method: 'POST', headers: { Authorization: `Bearer ${f.agent}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: abort.signal }).catch(() => null);
+    const timed = fixtureFetch(url, '/op', { method: 'POST', headers: { Authorization: `Bearer ${f.agent}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: abort.signal }).catch(() => null);
     await until(async () => (await request('/test/status')).held, 'timeout after durable commit');
     abort.abort(); await timed;
     await request('/test/release', f.owner, {});
@@ -208,7 +223,7 @@ try {
   });
   await scenario('agent raw CRDT transport is rejected', async () => {
     const before = await state();
-    const ws = new WebSocket(url.replace('http:', 'ws:') + '/ws');
+    const ws = new WebSocket(loopbackOrigin(url).replace('http:', 'ws:') + '/ws');
     await once(ws, 'open');
     const closed = once(ws, 'close'); ws.send(JSON.stringify({ kind: 'auth', token: f.agent, schema: 1 }));
     await Promise.race([closed, pause(3000).then(() => { throw new Error('agent socket accepted'); })]);
@@ -216,7 +231,7 @@ try {
   });
   await scenario('representative document latency memory and restart', async () => {
     const baselineService = await request('/test/status');
-    if (process.env.CREWSHIP_DOCS_D0_OUTPUT) { const screenshot = process.env.CREWSHIP_DOCS_D0_OUTPUT + '.before.png'; await a.screenshot({ path: screenshot, fullPage: false }); report.beforeBenchmarkScreenshot = screenshot; }
+    if (process.env.CREWSHIP_DOCS_D0_OUTPUT) { const screenshot = output + '.before.png'; await a.screenshot({ path: screenshot, fullPage: false }); report.beforeBenchmarkScreenshot = screenshot; }
     await readyPM(a);
     await a.evaluate(() => {
       const json = window.d0.editor.getJSON();
@@ -244,17 +259,18 @@ try {
     report.measurements = { goCommitSamples: commitSamples.length, goWriterFenceAuthSQLCommitP50Micros: percentile(commitGoMicros, .5), goWriterFenceAuthSQLCommitP95Micros: percentile(commitGoMicros, .95), nodeGoCommitRoundTripP95Ms: percentile(commitRTTMs, .95), memoryMeasurement: { forcedGC: false, includesRetainedSnapshotsAndTombstones: true, rssIsPerDocumentCapacity: false, baselineAndFinalSameServiceProcess: true }, nodeServiceBaselineRSSBytes: baselineService.rss, nodeServiceRSSBytes: serviceMetrics.rss, nodeServiceHeapBytes: serviceMetrics.heapUsed, paragraphs: 200, samples: samples.length, browserAckP95Ms: Math.round(p95), browserAckMaxMs: Math.round(samples.at(-1)), snapshotBytes: bytes, browserJSHeapBytes: metrics.metrics.find(x => x.name === 'JSHeapUsedSize')?.value, nodeHarnessRSSBytes: process.memoryUsage().rss };
     await kill(); await start(); const recovered = await state(); assert.deepEqual(recovered.outline, s.outline);
     await a.reload(); await saved(a);
-    if (process.env.CREWSHIP_DOCS_D0_OUTPUT) { const screenshot = process.env.CREWSHIP_DOCS_D0_OUTPUT + '.png'; await a.screenshot({ path: screenshot, fullPage: false }); report.screenshot = screenshot; }
+    if (process.env.CREWSHIP_DOCS_D0_OUTPUT) { const screenshot = output + '.png'; await a.screenshot({ path: screenshot, fullPage: false }); report.screenshot = screenshot; }
   });
   report.status = 'passed';
 } catch (error) {
   report.status = 'failed';
   // Assertion metadata and response bodies are intentionally excluded.
-  report.failure = { name: error.name, message: String(error.message).replaceAll(f.owner, '[redacted]').replaceAll(f.editor, '[redacted]').replaceAll(f.agent, '[redacted]').replaceAll(f.service, '[redacted]') };
+  report.failure = { name: error.name, message: redactFixture(String(error.message), secrets) };
   process.exitCode = 1;
 } finally {
   await browser?.close(); await kill();
-  const output = process.env.CREWSHIP_DOCS_D0_OUTPUT || join(await mkdtemp(join(tmpdir(), 'crewship-docs-d0-')), 'acceptance.json');
-  await writeFile(output, JSON.stringify(report, null, 2) + '\n');
-  console.log(JSON.stringify({ status: report.status, scenarios: report.scenarios.length, evidence: output, ...(report.failure ? { failure: report.failure } : {}) }));
+  report.browserDiagnostics = browserDiagnostics;
+  report.diagnosticCapture = { retainedBytes: diagnosticBytes, droppedEvents: droppedDiagnosticEvents, droppedInputBytes: droppedDiagnosticBytes };
+  await writeEvidence(evidenceDirectory, basename(output), redactFixture(JSON.stringify(report, null, 2) + '\n', secrets));
+  fixtureLog(JSON.stringify({ status: report.status, scenarios: report.scenarios.length, evidence: output, ...(report.failure ? { failure: report.failure } : {}) }), secrets);
 }

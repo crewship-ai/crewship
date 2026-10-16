@@ -5,7 +5,7 @@
   "packageManager": "pnpm@10.11.0",
   "scripts": {
     "build": "esbuild browser.mjs --bundle --format=esm --outfile=dist/browser.js",
-    "test": "node --test schema-node-test.mjs hocuspocus-node-test.mjs"
+    "test": "node --test schema-node-test.mjs hocuspocus-node-test.mjs fixture-boundaries-node-test.mjs"
   },
   "dependencies": {
     "@hocuspocus/provider": "4.7.1",

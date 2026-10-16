@@ -2,19 +2,21 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
+import { fixtureFetch, validateFixture, parseFixture } from './fixture-boundaries.mjs';
 import * as Y from 'yjs';
 import { VERSION, create, load, snapshot, outline, project, validate, patch, hash, decode, anchor, resolve } from './schema.mjs';
 
 // Experimental transport: one serialized document authority, durable before
 // broadcast. Hocuspocus's normal sync protocol is evaluated separately.
 export async function startService(fixture, { port = 0 } = {}) {
+  fixture = validateFixture(fixture);
   const peers = new Set(); let tail = Promise.resolve(); let queued = 0;
   let holdPhase = null; let held = false; let releaseHold;
   let state;
   const commitTimings = [];
   const headers = token => ({ 'Content-Type': 'application/json', 'X-D0-Service': fixture.service, 'X-Workspace-ID': fixture.workspace, Authorization: `Bearer ${token}` });
   async function go(path, token, body) {
-    const response = await fetch(fixture.authority + path, { method: body === undefined ? 'GET' : 'POST', headers: headers(token), body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10000) });
+    const response = await fixtureFetch(fixture.authority, path, { method: body === undefined ? 'GET' : 'POST', headers: headers(token), body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10000) });
     const data = await response.json();
     if (!response.ok) throw Object.assign(new Error(data.error || 'authority error'), { status: response.status });
     return data;
@@ -191,7 +193,7 @@ async function bodyJSON(req) {
   return JSON.parse(Buffer.concat(chunks).toString());
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const fixture = JSON.parse(await readFile(process.argv[2], 'utf8'));
+  const fixture = parseFixture(await readFile(process.argv[2], 'utf8'));
   const service = await startService(fixture, { port: Number(process.argv[3]) || 0 });
   process.stdout.write(JSON.stringify({ url: service.url }) + '\n');
   process.on('SIGTERM', () => { service.close().then(() => process.exit(0)); });
