@@ -9,6 +9,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { useConfirm } from "@/components/ui/use-confirm"
 import { cn } from "@/lib/utils"
 import { isManagerTier } from "@/lib/permissions/tiers"
 import { useArtifactStore } from "@/stores/artifact-store"
@@ -100,6 +101,7 @@ function ScopedArtifactPane({ agentId, width = 540, expanded = false, onAskSelec
   const [error, setError] = useState("")
   const [view, setView] = useState<"preview" | "editor">("preview")
   const [dirty, setDirty] = useState(false)
+  const { ask, dialog } = useConfirm()
   const previousRef = useRef<ArtifactSnapshot | null>(null)
   const versionRef = useRef<{ version: string | null; downloadedAt: number }>({ version: null, downloadedAt: 0 })
 
@@ -162,13 +164,17 @@ function ScopedArtifactPane({ agentId, width = 540, expanded = false, onAskSelec
   const text = loaded && !binary ? new TextDecoder().decode(loaded.bytes) : null
   // Unsaved edits survive neither a tab switch nor a pane close (the editor
   // remounts from the snapshot), so both need the same discard confirmation.
-  const guardDirty = () => {
+  const guardDirty = async () => {
     if (!dirty) return true
-    if (window.confirm("Discard unsaved artifact changes?")) {
-      setDirty(false)
-      return true
-    }
-    return false
+    const ok = await ask({
+      title: "Discard unsaved artifact changes?",
+      description: "The edits made since the last save are lost.",
+      confirmLabel: "Discard changes",
+      cancelLabel: "Keep editing",
+      destructive: true,
+    })
+    if (ok) setDirty(false)
+    return ok
   }
   const url = active && workspaceId ? artifactDownloadUrl(agentId, workspaceId, path) : ""
   const ArtifactIcon = /\.(csv|tsv|xlsx?)$/i.test(path) ? FileSpreadsheet : /\.html?$/i.test(path) ? FileCode2 : FileText
@@ -193,7 +199,7 @@ function ScopedArtifactPane({ agentId, width = 540, expanded = false, onAskSelec
     style={expanded ? { width: 0 } : { width: `min(${width}px, 42vw)` }}
   >
     <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
-      <Button variant="ghost" size="icon-sm" aria-label="Back to artifacts" onClick={() => { if (guardDirty()) setOpen(false) }}><ArrowLeft className="size-4" /></Button>
+      <Button variant="ghost" size="icon-sm" aria-label="Back to artifacts" onClick={async () => { if (await guardDirty()) setOpen(false) }}><ArrowLeft className="size-4" /></Button>
       <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40"><ArtifactIcon className="size-4 text-primary" /></span>
       <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold" title={active?.title}>{active?.title ?? "Artifact"}</p><p className="truncate text-[11px] text-muted-foreground" title={path}>{path}</p></div>
       <Button variant="outline" size="sm" aria-label={expanded ? "Show chat alongside" : "Expand artifact"} onClick={() => setFocus(!expanded)}>{expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}<span className="hidden lg:inline">{expanded ? "Chat" : "Expand"}</span></Button>
@@ -201,8 +207,8 @@ function ScopedArtifactPane({ agentId, width = 540, expanded = false, onAskSelec
     </header>
     {tabs.length > 1 && <div className="flex shrink-0 gap-1 overflow-x-auto border-b px-2 py-1">
       {tabs.filter((t) => t.agentId === agentId).map((tab) => <div key={tab.id} className={cn("flex items-center rounded text-xs", activeId === tab.id ? "bg-muted text-foreground" : "text-muted-foreground")}>
-        <button type="button" className="max-w-32 truncate px-2 py-1" onClick={() => { if (tab.id === activeId || guardDirty()) setActive(tab.id) }}>{tab.title}</button>
-        <button type="button" className="px-1" aria-label={`Close ${tab.title}`} onClick={() => { if (tab.id !== activeId || guardDirty()) closeTab(tab.id) }}><X className="size-3" /></button>
+        <button type="button" className="max-w-32 truncate px-2 py-1" onClick={async () => { if (tab.id === activeId || await guardDirty()) setActive(tab.id) }}>{tab.title}</button>
+        <button type="button" className="px-1" aria-label={`Close ${tab.title}`} onClick={async () => { if (tab.id !== activeId || await guardDirty()) closeTab(tab.id) }}><X className="size-3" /></button>
       </div>)}
     </div>}
     <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/70 px-3 py-1.5 text-xs">
@@ -211,8 +217,8 @@ function ScopedArtifactPane({ agentId, width = 540, expanded = false, onAskSelec
       <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={() => setFollowing((v) => !v)} disabled={dirty} aria-label={following ? "Pause live updates" : "Follow live updates"}>{following ? <Pause className="size-3" /> : <Play className="size-3" />}{following ? "Pause" : "Follow"}</Button>
     </div>
     {text !== null && <div className="flex shrink-0 gap-1 border-b border-border bg-card/70 px-3 py-1">
-      <Button variant={view === "preview" ? "secondary" : "ghost"} size="sm" className="h-7 gap-1" onClick={() => {
-        if (dirty && !window.confirm("Discard unsaved artifact changes?")) return
+      <Button variant={view === "preview" ? "secondary" : "ghost"} size="sm" className="h-7 gap-1" onClick={async () => {
+        if (!(await guardDirty())) return
         setDirty(false); setView("preview")
       }}><Eye className="size-3" />Preview</Button>
       {canEdit && <Button variant={view === "editor" ? "secondary" : "ghost"} size="sm" className="h-7 gap-1" onClick={() => { setView("editor"); setFollowing(false) }}><FileCode2 className="size-3" />Editor</Button>}
@@ -222,8 +228,9 @@ function ScopedArtifactPane({ agentId, width = 540, expanded = false, onAskSelec
       {loading && !loaded && <div className="flex h-full items-center justify-center"><Spinner className="size-5" /></div>}
       {!loading && !loaded && !error && <p className="p-4 text-sm text-muted-foreground">No artifact open</p>}
       {loaded && UNSUPPORTED_WORKBOOK.test(path) && <div className="p-4 text-sm text-muted-foreground">Legacy and macro-enabled workbooks are download only. <AuthenticatedDownload href={url} download={active?.title || "artifact"} className="text-primary underline">Download this workbook</AuthenticatedDownload> to open it.</div>}
-      {loaded && !UNSUPPORTED_WORKBOOK.test(path) && (view === "preview" || binary) && <ArtifactPreview onAskSelection={onAskSelection} path={path} snapshot={loaded} url={url} revision={revision} onClose={() => { if (guardDirty()) setOpen(false) }} />}
+      {loaded && !UNSUPPORTED_WORKBOOK.test(path) && (view === "preview" || binary) && <ArtifactPreview onAskSelection={onAskSelection} path={path} snapshot={loaded} url={url} revision={revision} onClose={async () => { if (await guardDirty()) setOpen(false) }} />}
       {loaded && text !== null && view === "editor" && <FileEditor key={`${activeId}:${revision}`} code={text} language={active?.language ?? getEditorLanguage(active?.title ?? path)} onSave={handleSave} onDirtyChange={(v) => { setDirty(v); if (v) setFollowing(false) }} />}
     </div>
+    {dialog}
   </motion.aside>
 }

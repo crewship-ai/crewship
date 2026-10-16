@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { useConfirm } from "@/components/ui/use-confirm"
 import type { PipelineWebhook, WebhookUpdateBody } from "@/hooks/use-pipeline-webhooks"
 
 /**
@@ -43,6 +44,7 @@ export function RoutineWebhookEditorDialog({
   const [enabled, setEnabled] = useState(true)
   const [rotateSecret, setRotateSecret] = useState(false)
   const [jsonError, setJsonError] = useState<string | null>(null)
+  const { ask, dialog } = useConfirm()
 
   useEffect(() => {
     if (!webhook) return
@@ -56,7 +58,7 @@ export function RoutineWebhookEditorDialog({
 
   if (!webhook) return null
 
-  const submit = () => {
+  const submit = async () => {
     let inputsTemplate: Record<string, unknown>
     try {
       inputsTemplate = inputsTemplateJson.trim() ? JSON.parse(inputsTemplateJson) : {}
@@ -72,11 +74,17 @@ export function RoutineWebhookEditorDialog({
       enabled,
     }
     if (rotateSecret) {
-      if (!confirm(
-        "Rotate the signing secret? The URL stays the same, but every sender signing with the CURRENT secret will start failing HMAC verification until they update.",
-      )) {
-        return
-      }
+      const ok = await ask({
+        title: "Rotate the signing secret?",
+        description: "Saving also replaces this webhook's HMAC signing secret.",
+        consequences: [
+          { tone: "kept", text: "The URL stays the same" },
+          { tone: "lost", text: "Every sender signing with the current secret fails verification until it is updated" },
+        ],
+        confirmLabel: "Rotate and save",
+        destructive: true,
+      })
+      if (!ok) return
       body.rotate_secret = true
     }
     onSave(body)
@@ -140,8 +148,9 @@ export function RoutineWebhookEditorDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Button>
-          <Button onClick={submit} disabled={submitting}>{submitting ? "Saving…" : "Save"}</Button>
+          <Button onClick={() => void submit()} disabled={submitting}>{submitting ? "Saving…" : "Save"}</Button>
         </DialogFooter>
+        {dialog}
       </DialogContent>
     </Dialog>
   )

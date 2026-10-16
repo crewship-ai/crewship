@@ -8,6 +8,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { readApiError } from "@/lib/api-error"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useConfirm } from "@/components/ui/use-confirm"
 import type { AdminUser, AdminUserSessions } from "@/app/(dashboard)/admin/types"
 import { DrawerSection, ago } from "@/app/(dashboard)/admin/tabs/admin-kit"
 
@@ -19,6 +20,7 @@ export function UserSessions({ user, workspaceId, isMe, onChanged }: { user: Adm
   const [data, setData] = React.useState<AdminUserSessions | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState<string | null>(null)
+  const { ask, dialog } = useConfirm()
   const load = React.useCallback(async () => {
     try {
       const res = await apiFetch(adminUserURL(user.id, workspaceId, "sessions"))
@@ -132,10 +134,20 @@ export function UserSessions({ user, workspaceId, isMe, onChanged }: { user: Adm
       </DrawerSection>
       {data.sessions.some((s) => !s.current) && !isMe && (
         <Button variant="outline" size="sm" className="h-8 w-fit text-xs text-destructive" disabled={busy === "all"}
-          onClick={() => { if (window.confirm(`Sign ${user.full_name ?? user.email} out of every device? Their password stays the same.`)) void post("sessions/revoke-all", "all", "Signed out everywhere") }}>
+          onClick={async () => {
+            const ok = await ask({
+              title: `Sign ${user.full_name ?? user.email} out of every device?`,
+              description: "Every signed-in browser session ends; they sign in again to continue.",
+              consequences: [{ tone: "kept", text: "Their password stays the same" }],
+              confirmLabel: "Sign out everywhere",
+              destructive: true,
+            })
+            if (ok) void post("sessions/revoke-all", "all", "Signed out everywhere")
+          }}>
           <LogOut className="mr-1.5 h-3 w-3" />Sign out everywhere
         </Button>
       )}
+      {dialog}
     </>
   )
 }

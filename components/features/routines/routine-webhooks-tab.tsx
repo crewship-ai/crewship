@@ -8,6 +8,7 @@ import { usePipelineWebhooks, type PipelineWebhook, type WebhookUpdateBody } fro
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
+import { useConfirm } from "@/components/ui/use-confirm"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
@@ -35,6 +36,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
 
   const [editing, setEditing] = useState<PipelineWebhook | null>(null)
   const [editSaving, setEditSaving] = useState(false)
+  const { ask, dialog } = useConfirm()
   const saveEdit = async (body: WebhookUpdateBody) => {
     if (!editing) return
     setEditSaving(true)
@@ -97,7 +99,14 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
   }
 
   const del = async (w: PipelineWebhook) => {
-    if (!confirm(`Delete webhook "${w.name}"? Existing senders will start failing.`)) return
+    const ok = await ask({
+      title: `Delete webhook ${w.name || w.id}?`,
+      description: "Its address stops accepting deliveries.",
+      consequences: [{ tone: "lost", text: "Existing senders will start failing" }],
+      confirmLabel: "Delete webhook",
+      destructive: true,
+    })
+    if (!ok) return
     try {
       await remove(w.id)
       toast.success("Webhook deleted")
@@ -315,6 +324,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
         onCancel={() => setEditing(null)}
         onSave={saveEdit}
       />
+      {dialog}
     </div>
   )
 }

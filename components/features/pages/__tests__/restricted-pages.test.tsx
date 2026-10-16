@@ -1,6 +1,6 @@
 import React from "react"
 import { afterEach, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { RestrictedPages } from "../restricted-pages"
 import PagesPage from "@/app/(dashboard)/pages/page"
 
@@ -12,14 +12,19 @@ vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
   useWorkspace: () => ({ workspaceId: "workspace", workspace: { currentUserAccessMode: workspace.mode }, workspaces: [{ id: "workspace", currentUserAccessMode: workspace.mode }], loading: false }),
 }))
 vi.mock("../pages-layout", () => ({ PagesLayout: () => <div>Trusted Page editor</div> }))
-afterEach(() => { cleanup(); api.mockReset(); vi.restoreAllMocks(); Reflect.deleteProperty(window, "confirm"); workspace.mode = "restricted" })
+afterEach(() => { cleanup(); api.mockReset(); vi.restoreAllMocks(); workspace.mode = "restricted" })
 const catalog = [{ slug: "allowed", name: "Allowed Page", publication: 7, actions: [{ intent_hash: "frozen-intent", panel_id: "panel", id: "work", label: "Allowed action", inputs: [{ name: "task", type: "text", required: true }], confirm: { title: "Confirm work", body: "Run this declared action?" } }] }]
 const key = JSON.stringify(["allowed", "panel", "work"])
+/** Answer the Page's declared confirmation, shown in the page (#3342). */
+async function answer(label: "Run action" | "Cancel") {
+  const dialog = await screen.findByRole("alertdialog", { name: "Confirm work" })
+  fireEvent.click(within(dialog).getByRole("button", { name: label }))
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+  return dialog
+}
 function response(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }) }
 
 it("submits a publication-bound declared action after host confirmation and polls only its private result", async () => {
-  const confirm = vi.fn(() => true)
-  Object.defineProperty(window, "confirm", { value: confirm, configurable: true })
   api.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.endsWith("/restricted-pages")) return response(catalog)
     if (init?.method === "POST") return response({ run_id: "private-run", status: "SCHEDULED" }, 202)
@@ -31,8 +36,13 @@ it("submits a publication-bound declared action after host confirmation and poll
   fireEvent.change(screen.getByRole("combobox", { name: "Action" }), { target: { value: key } })
   fireEvent.change(screen.getByRole("textbox", { name: "task" }), { target: { value: "private input" } })
   fireEvent.click(screen.getByRole("button", { name: "Run action" }))
+  const dialog = await answer("Cancel")
+  expect(dialog).toHaveTextContent("Run this declared action?")
+  expect(api.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false)
+  expect(screen.getByRole("button", { name: "Run action" })).toBeEnabled()
+  fireEvent.click(screen.getByRole("button", { name: "Run action" }))
+  await answer("Run action")
   await screen.findByText("OWN_PAGE_RESULT")
-  expect(confirm).toHaveBeenCalledWith("Confirm work\n\nRun this declared action?")
   const submit = api.mock.calls.find(([, init]) => init?.method === "POST")!
   expect(submit[0]).toBe("/api/v1/pages/allowed/application/actions/panel/work?workspace_id=workspace")
   expect(JSON.parse(submit[1].body)).toEqual({ inputs: { task: "private input" }, publication: 7, expected_intent_hash:"frozen-intent" })
@@ -41,7 +51,6 @@ it("submits a publication-bound declared action after host confirmation and poll
 })
 
 it("retries the same frozen Page admission and clears a revoked private result", async () => {
-  Object.defineProperty(window, "confirm", { value: vi.fn(() => true), configurable: true })
   let submitted = 0
   let polls = 0
   api.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -55,6 +64,7 @@ it("retries the same frozen Page admission and clears a revoked private result",
   fireEvent.change(screen.getByRole("combobox", { name: "Action" }), { target: { value: key } })
   fireEvent.change(screen.getByRole("textbox", { name: "task" }), { target: { value: "private input" } })
   fireEvent.click(screen.getByRole("button", { name: "Run action" }))
+  await answer("Run action")
   await screen.findByText(/Could not confirm the outcome/)
   fireEvent.click(screen.getByRole("button", { name: "Retry request" }))
   await screen.findByText("REVOKED_PAGE_RESULT")

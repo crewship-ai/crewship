@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { useConfirm } from "@/components/ui/use-confirm"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { MentionAutocomplete, type CrewMember } from "@/components/features/chat/composer/mention-autocomplete"
 import { ConversationIdentity, ConversationIcon, conversationTitle } from "./conversation-identity"
@@ -256,9 +257,10 @@ export function ConversationThread({ conversation, workspaceId, userId, refresh,
   </div>
 }
 
-function ConversationMembers({ workspaceId, userId, conversation, participants, refresh }: { workspaceId: string; userId: string; conversation: WorkspaceConversation; participants: ConversationParticipant[]; refresh: () => void }) {
+export function ConversationMembers({ workspaceId, userId, conversation, participants, refresh }: { workspaceId: string; userId: string; conversation: WorkspaceConversation; participants: ConversationParticipant[]; refresh: () => void }) {
   const canManage = !conversation.is_direct && conversation.created_by === userId
   const [adding, setAdding] = useState("")
+  const { ask, dialog } = useConfirm()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error | null>(null)
   const people = useQuery({ queryKey: ["workspace-conversation-people", workspaceId, userId], enabled: canManage, queryFn: ({ signal }) => conversationRequest<{ user: ConversationPerson }[]>(workspaceId, `workspaces/${encodeURIComponent(workspaceId)}/members`, undefined, signal) })
@@ -280,7 +282,7 @@ function ConversationMembers({ workspaceId, userId, conversation, participants, 
         <ConversationIdentity id={person.user_id} name={person.name || "Workspace member"} avatarUrl={person.avatar_url} className="size-7 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{person.name || "Workspace member"}</span>
         <span className="text-[10px] text-muted-foreground">{person.role}</span>
-        {canManage && person.user_id !== conversation.created_by && <Button type="button" size="icon" variant="ghost" className="size-7 coarse:size-12 text-muted-foreground" aria-label={`Remove ${person.name || "member"}`} title="Remove member" disabled={busy} onClick={() => { if (window.confirm(`Remove ${person.name} from this conversation?`)) void change(person.user_id) }}><UserMinus className="size-3.5" /></Button>}
+        {canManage && person.user_id !== conversation.created_by && <Button type="button" size="icon" variant="ghost" className="size-7 coarse:size-12 text-muted-foreground" aria-label={`Remove ${person.name || "member"}`} title="Remove member" disabled={busy} onClick={async () => { if (await ask({ title: `Remove ${person.name || "this member"} from this conversation?`, description: conversation.kind === "channel" ? "Membership does not restrict access: everyone in the workspace can still read and write here." : "They lose access to this group and its history. You can add them again later.", confirmLabel: "Remove member", destructive: true })) void change(person.user_id) }}><UserMinus className="size-3.5" /></Button>}
       </li>)}
     </ul>
     {canManage && <>
@@ -295,6 +297,7 @@ function ConversationMembers({ workspaceId, userId, conversation, participants, 
       {people.error && <ErrorNotice error={people.error} retry={() => { void people.refetch() }} />}
     </>}
     {error && <p role="alert" className="text-xs text-destructive">{error.message}</p>}
+    {dialog}
   </div>
 }
 

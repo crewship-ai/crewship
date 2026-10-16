@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render as renderUI, screen, fireEvent, waitFor, act, cleanup } from "@testing-library/react"
+import { render as renderUI, screen, fireEvent, waitFor, act, cleanup, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
@@ -713,4 +713,52 @@ it("keeps workspace and slug data in governance POST paths", async () => {
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/approve`,
     expect.objectContaining({ method: "POST" }),
   ))
+})
+
+// #3342 — disable and reject ask in the page; Cancel posts nothing.
+describe("<RoutinesDetailPanel> — governance confirmations", () => {
+  const posts = (suffix: string) =>
+    vi.mocked(apiFetch).mock.calls.filter(([url, init]) => init?.method === "POST" && String(url).endsWith(suffix))
+
+  async function answer(title: string, label: string) {
+    const dialog = await screen.findByRole("alertdialog", { name: title })
+    fireEvent.click(within(dialog).getByRole("button", { name: label }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    return dialog
+  }
+
+  it("asks before rejecting a proposed routine", async () => {
+    cleanup()
+    vi.mocked(apiFetch).mockReset()
+    vi.mocked(apiFetch).mockResolvedValue(okJSON({ ...ROUTINE, status: "proposed" }))
+    render(<RoutinesDetailPanel {...defaultProps} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Reject" }))
+    const dialog = await answer("Reject Daily report?", "Cancel")
+    expect(dialog).toHaveTextContent("The proposed routine is discarded.")
+    expect(posts("/reject")).toHaveLength(0)
+
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }))
+    await answer("Reject Daily report?", "Reject routine")
+    await waitFor(() => expect(posts("/reject")).toHaveLength(1))
+  })
+
+  it("asks before disabling an active routine", async () => {
+    cleanup()
+    vi.mocked(apiFetch).mockReset()
+    vi.mocked(apiFetch).mockResolvedValue(okJSON(ROUTINE))
+    render(<RoutinesDetailPanel {...defaultProps} />)
+    await screen.findByText("Daily report")
+    const openMenu = async () => {
+      fireEvent.keyDown(screen.getByRole("button", { name: "More actions" }), { key: "Enter" })
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Disable routine" }))
+    }
+    await openMenu()
+    const dialog = await answer("Disable Daily report?", "Cancel")
+    expect(dialog).toHaveTextContent("It cannot be run until it is enabled again.")
+    expect(posts("/disable")).toHaveLength(0)
+
+    await openMenu()
+    await answer("Disable Daily report?", "Disable routine")
+    await waitFor(() => expect(posts("/disable")).toHaveLength(1))
+  })
 })

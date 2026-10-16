@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useConfirm } from "@/components/ui/use-confirm"
 import { useRouter } from "next/navigation"
 import { AnimatePresence, motion } from "motion/react"
 import { Play, Check, Ban, Inbox } from "lucide-react"
@@ -147,6 +148,7 @@ export function RoutinesDetailPanel({
   // Tracks the in-flight governance action (approve/reject/disable/enable)
   // so its button shows a spinner and the others stay disabled meanwhile.
   const [busyGov, setBusyGov] = useState<string | null>(null)
+  const { ask, dialog: governanceDialog } = useConfirm()
   // lastRunId holds the run_id of the most recent Run so we can show its
   // live activity rail inline (instant status after clicking).
   const [lastRunId, setLastRunId] = useState<string | null>(null)
@@ -389,27 +391,31 @@ export function RoutinesDetailPanel({
   // Lifecycle governance: approve/reject a proposed routine (MANAGER+),
   // or disable/enable an existing one (OWNER/ADMIN). Each hits its own
   // endpoint, toasts the outcome, then refetches so the hero badge +
-  // run-guard reflect the new status. enable/disable confirm first
-  // (matches the rollback confirm() pattern in the Versions tab).
+  // run-guard reflect the new status. disable and reject ask first, in
+  // the page (#3342); approve and enable act at once.
   const governanceAction = async (
     action: "approve" | "reject" | "disable" | "enable",
   ) => {
     if (!routine) return
-    if (
-      action === "disable" &&
-      !confirm(
-        `Disable "${routine.name || routine.slug}"? It cannot be run until re-enabled.`,
-      )
-    ) {
-      return
+    const name = routine.name || routine.slug
+    if (action === "disable") {
+      const ok = await ask({
+        title: `Disable ${name}?`,
+        description: "It cannot be run until it is enabled again.",
+        consequences: [{ tone: "kept", text: "Its recipe, versions and run history stay" }],
+        confirmLabel: "Disable routine",
+        destructive: true,
+      })
+      if (!ok) return
     }
-    if (
-      action === "reject" &&
-      !confirm(
-        `Reject "${routine.name || routine.slug}"? The proposed routine is discarded.`,
-      )
-    ) {
-      return
+    if (action === "reject") {
+      const ok = await ask({
+        title: `Reject ${name}?`,
+        description: "The proposed routine is discarded.",
+        confirmLabel: "Reject routine",
+        destructive: true,
+      })
+      if (!ok) return
     }
     setBusyGov(action)
     try {
@@ -822,6 +828,7 @@ export function RoutinesDetailPanel({
           void triggerAction("run", inputs)
         }}
       />
+      {governanceDialog}
     </div>
   )
 }

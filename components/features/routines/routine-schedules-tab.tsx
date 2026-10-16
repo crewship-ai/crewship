@@ -16,6 +16,7 @@ import {
 } from "@/hooks/use-pipeline-schedules"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useConfirm } from "@/components/ui/use-confirm"
 import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -129,6 +130,7 @@ export function RoutineSchedulesTab({
   // Reliability editor (B9, #2362) — every §13.2 row, opened per schedule.
   const [editing, setEditing] = useState<PipelineSchedule | null>(null)
   const [editSaving, setEditSaving] = useState(false)
+  const { ask, dialog } = useConfirm()
   const saveEdit = async (body: SchedulePatchBody) => {
     if (!editing) return
     setEditSaving(true)
@@ -188,7 +190,14 @@ export function RoutineSchedulesTab({
   }
 
   const del = async (s: PipelineSchedule) => {
-    if (!confirm(`Delete schedule "${s.name}"?`)) return
+    const ok = await ask({
+      title: `Delete schedule ${s.name}?`,
+      description: "The routine stops starting on this schedule.",
+      consequences: [{ tone: "kept", text: "Runs it already started stay in the history" }],
+      confirmLabel: "Delete schedule",
+      destructive: true,
+    })
+    if (!ok) return
     try {
       await remove(s.id)
       toast.success("Schedule deleted")
@@ -545,6 +554,7 @@ export function RoutineSchedulesTab({
         onSave={saveEdit}
         onPreview={preview}
       />
+      {dialog}
     </div>
   )
 }

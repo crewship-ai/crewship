@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { TemplateGallery } from "../template-gallery"
 import type { WorkflowTemplate } from "@/lib/types/template"
@@ -13,6 +13,12 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done }); return { promise, resolve } }
 beforeEach(() => { state.api.mockReset(); state.success.mockReset(); state.error.mockReset() })
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+/** Answer the delete confirmation with `label`. */
+async function answer(label: "Delete template" | "Cancel") {
+  const dialog = await screen.findByRole("alertdialog", { name: /^Delete template / })
+  fireEvent.click(within(dialog).getByRole("button", { name: label }))
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+}
 async function openEditor() {
   render(<TemplateGallery workspaceId="a" />)
   fireEvent.click(await screen.findByRole("button", { name: "New Template" }))
@@ -150,16 +156,18 @@ it("requires confirmation before deletion and reports refusal before a successfu
     if (init?.method === "DELETE") { if (refuse) return Promise.resolve(json({}, 403)); deleted = true; return Promise.resolve(json({})) }
     return Promise.resolve(json(deleted ? [] : [template("custom")]))
   })
-  const confirm = vi.fn().mockReturnValue(false)
-  vi.stubGlobal("confirm", confirm)
   render(<TemplateGallery workspaceId="a" />)
   fireEvent.click(await screen.findByRole("button", { name: "Delete template Template custom" }))
+  expect(await screen.findByRole("alertdialog", { name: "Delete template Template custom?" })).toBeInTheDocument()
+  await answer("Cancel")
   expect(state.api).toHaveBeenCalledTimes(1)
-  confirm.mockReturnValue(true)
+  expect(screen.getByText("Template custom")).toBeVisible()
   fireEvent.click(screen.getByRole("button", { name: "Delete template Template custom" }))
+  await answer("Delete template")
   await waitFor(() => expect(state.error).toHaveBeenCalledWith("Failed to delete template"))
   refuse = false
   fireEvent.click(screen.getByRole("button", { name: "Delete template Template custom" }))
+  await answer("Delete template")
   await screen.findByText("No templates yet")
   expect(state.success).toHaveBeenCalledWith("Template deleted")
 })
@@ -188,20 +196,20 @@ it("ignores a completed creation after the editor is abandoned", async () => {
 })
 
 it("reports a network failure during deletion without losing the template", async () => {
-  vi.stubGlobal("confirm", vi.fn().mockReturnValue(true))
   state.api.mockImplementation((_url: string, init?: RequestInit) => init?.method === "DELETE" ? Promise.reject(new Error("offline")) : Promise.resolve(json([template("custom")])))
   render(<TemplateGallery workspaceId="a" />)
   fireEvent.click(await screen.findByRole("button", { name: "Delete template Template custom" }))
+  await answer("Delete template")
   await waitFor(() => expect(state.error).toHaveBeenCalledWith("Failed to delete template"))
   expect(screen.getByText("Template custom")).toBeVisible()
 })
 
 it("does not refresh a former workspace when its deletion finishes", async () => {
-  vi.stubGlobal("confirm", vi.fn().mockReturnValue(true))
   const deleted = deferred<Response>()
   state.api.mockImplementation((url: string, init?: RequestInit) => init?.method === "DELETE" ? deleted.promise : Promise.resolve(json([template(url.endsWith("=a") ? "old" : "current")])))
   const view = render(<TemplateGallery workspaceId="a" />)
   fireEvent.click(await screen.findByRole("button", { name: "Delete template Template old" }))
+  await answer("Delete template")
   view.rerender(<TemplateGallery workspaceId="b" />)
   await screen.findByText("Template current")
   await act(async () => deleted.resolve(json({})))

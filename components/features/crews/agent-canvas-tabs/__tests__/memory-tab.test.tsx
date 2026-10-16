@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { MemoryTab } from "@/components/features/crews/agent-canvas-tabs/memory-tab"
 
 // PR-E F6 — Memory tab subtab navigation contract test.
@@ -403,5 +403,75 @@ describe("MemoryTab — PERSONA across an agent switch", () => {
     await waitFor(() => expect(crewCalls).toBe(2))
     expect(screen.queryByText("ALICE CREW PERSONA")).not.toBeInTheDocument()
     expect(screen.getByText("BOB CREW PERSONA")).toBeInTheDocument()
+  })
+})
+
+// #3342 — the persona reset and the peer-card delete ask in the page, not
+// through the browser's confirm().
+describe("MemoryTab — confirmations", () => {
+  const body = (payload: unknown, status = 200) => ({
+    ok: status < 400,
+    status,
+    text: async () => JSON.stringify(payload),
+    json: async () => payload,
+  })
+  const deletes = () =>
+    vi.mocked(global.fetch).mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "DELETE")
+
+  async function answer(title: string, label: string) {
+    const dialog = await screen.findByRole("alertdialog", { name: title })
+    fireEvent.click(within(dialog).getByRole("button", { name: label }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    return dialog
+  }
+
+  it("asks before resetting the agent persona; Cancel keeps it, confirm deletes the layer", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === "DELETE") return body({}, 204)
+      if (url.includes("/persona/history")) return body({ entries: [] })
+      if (url.includes("/persona")) return body({ content: "Be terse.", bytes: 9, from_default: false })
+      return body({ entries: [], peers: [] })
+    }) as unknown as typeof fetch
+    render(<MemoryTab agentId="agent_a" agentSlug="alice" workspaceId="ws_test" />)
+    fireEvent.click(screen.getByTestId("memory-subtab-persona"))
+    const reset = await screen.findByRole("button", { name: "Reset (drop agent layer)" })
+    await waitFor(() => expect(reset).toBeEnabled())
+
+    fireEvent.click(reset)
+    const dialog = await answer("Reset this agent's PERSONA.md?", "Cancel")
+    expect(dialog).toHaveTextContent("The crew default and the synthesized fallback are used instead")
+    expect(deletes()).toHaveLength(0)
+
+    fireEvent.click(reset)
+    await answer("Reset this agent's PERSONA.md?", "Reset persona")
+    await waitFor(() => expect(deletes()).toHaveLength(1))
+    expect(String(deletes()[0][0])).toContain("/api/v1/agents/agent_a/persona")
+  })
+
+  it("asks before deleting a peer card; Cancel keeps it, confirm deletes it", async () => {
+    const peer = { id: "p1", user_id: "usr_1", user_slug: "ana", bytes: 12, created_at: "", updated_at: "today" }
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === "DELETE") return body({}, 204)
+      if (url.endsWith("/peers/usr_1")) return body({ ...peer, content: "Prefers short answers." })
+      if (url.endsWith("/peers")) return body({ peers: [peer] })
+      return body({ entries: [] })
+    }) as unknown as typeof fetch
+    render(<MemoryTab agentId="agent_a" agentSlug="alice" workspaceId="ws_test" />)
+    fireEvent.click(screen.getByTestId("memory-subtab-peers"))
+    fireEvent.click(await screen.findByRole("button", { name: "Open peer card for usr_1" }))
+    expect(await screen.findByText("Prefers short answers.")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+    const dialog = await answer("Delete this peer card?", "Cancel")
+    expect(dialog).toHaveTextContent("The next routine sweep may rebuild it")
+    expect(deletes()).toHaveLength(0)
+    expect(screen.getByText("Prefers short answers.")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+    await answer("Delete this peer card?", "Delete card")
+    await waitFor(() => expect(deletes()).toHaveLength(1))
+    expect(String(deletes()[0][0])).toContain("/api/v1/agents/agent_a/peers/usr_1")
   })
 })

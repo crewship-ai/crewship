@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { useConfirm } from "@/components/ui/use-confirm"
 import {
   InboxActError,
   type InboxAction,
@@ -125,6 +126,7 @@ export function RunNeedsHumanActions({
   // first place the receipt exists, and the card must flip on it without
   // waiting for a refetch to write it back into payload.
   const [receipt, setReceipt] = useState<InboxActReceipt | null>(null)
+  const { ask, dialog } = useConfirm()
 
   const shown = receipt ?? (item.state === "resolved" ? receiptOf(item) : null)
   if (shown) return <ActReceipt receipt={shown} />
@@ -144,8 +146,14 @@ export function RunNeedsHumanActions({
   const perform = async (spec: InboxActionSpec & { id: InboxAction }, text?: string) => {
     if (!onAct) return
     if (spec.irreversible) {
-      const effect = spec.effect ? ` ${spec.effect}.` : ""
-      if (!window.confirm(`${spec.label}?${effect} This cannot be undone.`)) return
+      const ok = await ask({
+        title: `${spec.label}?`,
+        description: spec.effect ? `${spec.effect}.` : undefined,
+        consequences: [{ tone: "lost", text: "This cannot be undone." }],
+        confirmLabel: spec.label,
+        destructive: true,
+      })
+      if (!ok) return
     }
     setBusy(spec.id)
     try {
@@ -254,6 +262,7 @@ export function RunNeedsHumanActions({
           </div>
         </form>
       )}
+      {dialog}
     </div>
   )
 }
