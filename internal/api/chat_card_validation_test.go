@@ -47,12 +47,14 @@ func TestChatDecisionClosedFormsAndApprovalScope(t *testing.T) {
 		t.Fatalf("valid false/zero answers: %v", err)
 	}
 	for name, mutate := range map[string]func(*ChatCardResponse){
+		"unknown action":                 func(c *ChatCardResponse) { c.Decision.Resolution.ActionID = "invented" },
+		"mismatched action":              func(c *ChatCardResponse) { c.Decision.Resolution.ActionID = "stop" },
 		"unknown field":                  func(c *ChatCardResponse) { c.Decision.Resolution.Values["code"] = json.RawMessage(`"eval()"`) },
 		"nested value":                   func(c *ChatCardResponse) { c.Decision.Resolution.Values["ready"] = json.RawMessage(`{"value":true}`) },
 		"missing required":               func(c *ChatCardResponse) { delete(c.Decision.Resolution.Values, "ready") },
 		"unknown widget":                 func(c *ChatCardResponse) { c.Decision.Fields[0].Type = "ReactComponent" },
 		"information cannot approve run": func(c *ChatCardResponse) { c.Decision.DecisionType = "whole_run_approval" },
-		"workflow cannot be approved":    func(c *ChatCardResponse) { c.Decision.Status = "approved" },
+		"information cannot be approved": func(c *ChatCardResponse) { c.Decision.DecisionType = "information"; c.Decision.Status = "approved" },
 		"source mismatch":                func(c *ChatCardResponse) { c.Decision.Source.ID = "foreign" },
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -9,7 +9,7 @@ const load = (name: string) => JSON.parse(readFileSync(join(directory, name), "u
 describe("E2 shared projection contract", () => {
   it("accepts every actual Go handler fixture, including terminal receipts", () => {
     const names = readdirSync(directory).filter((name) => /^(proposal|decision)-.*\.json$/.test(name))
-    expect(names).toHaveLength(17)
+    expect(names).toHaveLength(19)
     for (const name of names) expect(E2CardSchema.safeParse(load(name)), name).toMatchObject({ success: true })
     expect(E2CardSchema.safeParse(load("unavailable.json")).success).toBe(false)
   })
@@ -26,6 +26,7 @@ describe("E2 shared projection contract", () => {
     approval.decision.source.type = "escalation"
     expect(E2CardSchema.safeParse(approval).success).toBe(false)
     const answered = load("decision-waitpoint-answered.json")
+    answered.decision.decision_type = "information"
     answered.decision.status = "approved"
     expect(E2CardSchema.safeParse(answered).success).toBe(false)
     const accepted = load("proposal-accepted.json")

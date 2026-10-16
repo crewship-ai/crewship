@@ -59,6 +59,7 @@ type ProposalDiscard struct {
 type DecisionAnswer struct {
 	SourceID        string                     `json:"source_id"`
 	ExpectedVersion string                     `json:"expected_version"`
+	ActionID        string                     `json:"action_id,omitempty"`
 	Action          string                     `json:"action"`
 	Values          map[string]json.RawMessage `json:"values"`
 }
@@ -81,19 +82,27 @@ type DecisionField struct {
 	Required bool             `json:"required"`
 	Options  []DecisionOption `json:"options,omitempty"`
 }
+type DecisionWorkflowAction struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Approved bool   `json:"approved"`
+}
+
 type DecisionResolution struct {
+	ActionID   string                     `json:"action_id,omitempty"`
 	AnsweredBy string                     `json:"answered_by"`
 	AnsweredAt string                     `json:"answered_at"`
 	Values     map[string]json.RawMessage `json:"values"`
 }
 type DecisionCard struct {
-	SchemaVersion  int                 `json:"schema_version"`
-	Source         DecisionSource      `json:"source"`
-	DecisionType   string              `json:"decision_type"`
-	Status         string              `json:"status"`
-	Title          string              `json:"title"`
-	Fields         []DecisionField     `json:"fields"`
-	ExpiresAt      *string             `json:"expires_at"`
-	AllowedActions []string            `json:"allowed_actions"`
-	Resolution     *DecisionResolution `json:"resolution"`
+	SchemaVersion   int                      `json:"schema_version"`
+	Source          DecisionSource           `json:"source"`
+	DecisionType    string                   `json:"decision_type"`
+	Status          string                   `json:"status"`
+	Title           string                   `json:"title"`
+	WorkflowActions []DecisionWorkflowAction `json:"workflow_actions,omitempty"`
+	Fields          []DecisionField          `json:"fields"`
+	ExpiresAt       *string                  `json:"expires_at"`
+	AllowedActions  []string                 `json:"allowed_actions"`
+	Resolution      *DecisionResolution      `json:"resolution"`
 }

@@ -55,6 +55,7 @@ func e2DecisionFixture(f chatIssueFixture, source, status string) ChatCardRespon
 	}
 	if source == "waitpoint" {
 		d.DecisionType = "workflow"
+		d.WorkflowActions = []chatentities.DecisionWorkflowAction{{ID: "ship", Label: "Ship", Approved: true}, {ID: "stop", Label: "Stop", Approved: false}}
 	}
 	if source == "run_approval" {
 		d.DecisionType = "whole_run_approval"
@@ -71,6 +72,12 @@ func e2DecisionFixture(f chatIssueFixture, source, status string) ChatCardRespon
 		d.Source.Version = "2"
 		if status == "answered" || status == "approved" || status == "rejected" {
 			d.Resolution = &chatentities.DecisionResolution{AnsweredBy: f.user, AnsweredAt: "2026-10-16T08:10:00Z", Values: map[string]json.RawMessage{}}
+			if source == "waitpoint" {
+				d.Resolution.ActionID = "ship"
+				if status == "rejected" {
+					d.Resolution.ActionID = "stop"
+				}
+			}
 			if source != "run_approval" {
 				d.Resolution.Values = map[string]json.RawMessage{"timing": json.RawMessage(`"later"`), "note": json.RawMessage(`"After review"`)}
 			}
@@ -106,6 +113,7 @@ func TestChatCardProjectionFixtures(t *testing.T) {
 	}
 	for _, status := range []string{"approved", "rejected"} {
 		cards["decision-run_approval-"+status] = e2DecisionFixture(f, "run_approval", status)
+		cards["decision-waitpoint-"+status] = e2DecisionFixture(f, "waitpoint", status)
 	}
 	for name, card := range cards {
 		t.Run(name, func(t *testing.T) {

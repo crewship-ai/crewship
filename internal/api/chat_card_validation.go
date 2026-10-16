@@ -113,15 +113,26 @@ func validateDecisionCard(d chatentities.DecisionCard) error {
 		return errInvalidCard
 	}
 	approval := d.DecisionType == "whole_run_approval"
-	if approval && d.Status == "answered" || !approval && (d.Status == "approved" || d.Status == "rejected") {
+	if approval && d.Status == "answered" || d.DecisionType == "information" && d.Status == "approved" {
 		return errInvalidCard
+	}
+	actions := map[string]bool{}
+	if len(d.WorkflowActions) != 0 && (d.DecisionType != "workflow" || len(d.WorkflowActions) < 2 || len(d.WorkflowActions) > 20) {
+		return errInvalidCard
+	}
+	for _, a := range d.WorkflowActions {
+		if _, duplicate := actions[a.ID]; duplicate || !decisionFieldID.MatchString(a.ID) || !cardText(a.Label, 1, 240) {
+			return errInvalidCard
+		}
+		actions[a.ID] = a.Approved
 	}
 	allowed := []string{"view"}
 	if d.Status == "pending" {
-		if d.DecisionType == "whole_run_approval" {
-			allowed = append(allowed, "approve", "reject")
-		} else {
+		if d.DecisionType != "whole_run_approval" {
 			allowed = append(allowed, "answer")
+		}
+		if d.DecisionType != "information" {
+			allowed = append(allowed, "approve", "reject")
 		}
 	}
 	if !cardActions(d.AllowedActions, allowed) {
@@ -159,6 +170,14 @@ func validateDecisionCard(d chatentities.DecisionCard) error {
 	if r == nil || !cardText(r.AnsweredBy, 1, 200) || !cardTime(r.AnsweredAt) || r.Values == nil {
 		return errInvalidCard
 	}
+	if len(actions) > 0 {
+		approved, exists := actions[r.ActionID]
+		if !exists || (d.Status == "approved" || d.Status == "answered") && !approved || d.Status == "rejected" && approved {
+			return errInvalidCard
+		}
+	} else if r.ActionID != "" {
+		return errInvalidCard
+	}
 	for id, raw := range r.Values {
 		f, exists := fields[id]
 		var value any
@@ -184,7 +203,7 @@ func validateDecisionCard(d chatentities.DecisionCard) error {
 			}
 		}
 	}
-	if d.Status == "answered" {
+	if d.Status == "answered" || d.Status == "approved" {
 		for id, f := range fields {
 			if _, exists := r.Values[id]; f.Required && !exists {
 				return errInvalidCard

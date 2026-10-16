@@ -30,17 +30,25 @@ export const DecisionFieldSchema = z.discriminatedUnion("type", [
 export const DecisionCardSchema = z.strictObject({
   schema_version: z.literal(1), source: z.strictObject({ type: z.enum(["escalation", "waitpoint", "run_approval"]), id, version: text(1, 128) }),
   decision_type: z.enum(["information", "workflow", "whole_run_approval"]), status: z.enum(["pending", "answered", "approved", "rejected", "expired", "cancelled"]),
+  workflow_actions: z.array(z.strictObject({ id: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/), label: text(1, 240), approved: z.boolean() })).min(2).max(20).optional(),
   title: text(1, 240), fields: z.array(DecisionFieldSchema).max(20), expires_at: timestamp.nullable(),
   allowed_actions: z.array(z.enum(["view", "answer", "approve", "reject"])),
-  resolution: z.strictObject({ answered_by: id, answered_at: timestamp,
+  resolution: z.strictObject({ action_id: id.optional(), answered_by: id, answered_at: timestamp,
     values: z.record(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/), z.union([text(0, 10000), z.boolean(), z.number()])) }).nullable(),
 }).superRefine((d, ctx) => {
   const approval = d.decision_type === "whole_run_approval"
   const pending = d.status === "pending"
   const closedWithoutAnswer = ["pending", "expired", "cancelled"].includes(d.status)
-  const allowed = pending ? approval ? ["view", "approve", "reject"] : ["view", "answer"] : ["view"]
-  let valid = !(approval ? d.status === "answered" : ["approved", "rejected"].includes(d.status)) && (d.source.type === "run_approval") === approval && unique(d.fields.map((f) => f.id)) && unique(d.allowed_actions) && d.allowed_actions.includes("view") && d.allowed_actions.every((a) => allowed.includes(a)) &&
+  const allowed = pending ? approval ? ["view", "approve", "reject"] : d.decision_type === "workflow" ? ["view", "answer", "approve", "reject"] : ["view", "answer"] : ["view"]
+  let valid = !(approval && d.status === "answered" || d.decision_type === "information" && d.status === "approved") && (d.source.type === "run_approval") === approval && unique(d.fields.map((f) => f.id)) && unique(d.allowed_actions) && d.allowed_actions.includes("view") && d.allowed_actions.every((a) => allowed.includes(a)) &&
     (closedWithoutAnswer ? d.resolution === null : d.resolution !== null)
+  if (d.workflow_actions) {
+    valid &&= d.decision_type === "workflow" && unique(d.workflow_actions.map((a) => a.id))
+    if (d.resolution) {
+      const action = d.workflow_actions.find((a) => a.id === d.resolution?.action_id)
+      valid &&= !!action && (d.status === "rejected" ? !action.approved : action.approved)
+    }
+  } else valid &&= !d.resolution?.action_id
   for (const f of d.fields) if (f.type === "choice" && !unique(f.options.map((o) => o.value))) valid = false
   for (const [key, value] of Object.entries(d.resolution?.values ?? {})) {
     const f = d.fields.find((f) => f.id === key)
@@ -52,7 +60,7 @@ export const DecisionCardSchema = z.strictObject({
       if (f.type === "datetime") valid &&= timestamp.safeParse(value).success
     }
   }
-  if (d.status === "answered") for (const f of d.fields) if (f.required && !Object.hasOwn(d.resolution?.values ?? {}, f.id)) valid = false
+  if (d.status === "answered" || d.status === "approved") for (const f of d.fields) if (f.required && !Object.hasOwn(d.resolution?.values ?? {}, f.id)) valid = false
   if (!valid) ctx.addIssue({ code: "custom", message: "Invalid decision state, form or source scope" })
 })
 const base = {
@@ -83,5 +91,5 @@ export const E2CommandSchemas = {
   proposal_edit: z.strictObject({ expected_version: z.number().int().min(1), title: text(1, 240), items: z.array(item).min(1).max(20) }),
   proposal_confirm: z.strictObject({ proposal_id: id, reviewed_version: z.number().int().min(1) }),
   proposal_discard: z.strictObject({ expected_version: z.number().int().min(1) }),
-  decision_answer: z.strictObject({ source_id: id, expected_version: text(1, 128), action: z.enum(["answer", "approve", "reject"]), values }),
+  decision_answer: z.strictObject({ source_id: id, expected_version: text(1, 128), action: z.enum(["answer", "approve", "reject"]), action_id: id.optional(), values }),
 }

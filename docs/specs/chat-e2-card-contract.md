@@ -25,7 +25,12 @@ mutators and their conflict/retry fixtures belong to A2, not this read slice.
 Decisions project existing escalation, waitpoint or whole-run approval sources.
 Their version is an opaque adapter token, not another answer-state ledger.
 Closed form types are text, textarea, choice, boolean, number and datetime.
-An informational/workflow answer cannot become a whole-run approval. Pending
+Information answers cannot approve an operation. Workflow approvals resolve only
+their identified waitpoint; they cannot become whole-run approvals. The source
+adapter chooses actions from the existing source policy, not from model text.
+Typed waitpoint actions retain their source `action_id`, label and approved/denied
+effect through `workflow_actions`; answers and terminal receipts identify the
+selected action. The source still validates its frozen form and governs effects. Pending
 and terminal states come from the authoritative source; source adapters must
 settle expiry and enforce answer/approval rights. Resolution values are bounded
 scalars keyed to known fields, with no arbitrary components or JavaScript.
