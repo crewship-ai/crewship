@@ -32,6 +32,7 @@ export function SecondaryPanel({
   label,
   toolbar,
   footer,
+  phoneInline = false,
   className,
   children,
 }: {
@@ -45,6 +46,10 @@ export function SecondaryPanel({
   toolbar?: React.ReactNode
   /** Sticky bottom area (bulk actions while several rows are selected). */
   footer?: React.ReactNode
+  /** Phone only: show the content as the page itself instead of a sheet —
+   *  for sections whose panel IS the list (Inbox), while nothing is open.
+   *  List → detail → back (PNL-05). */
+  phoneInline?: boolean
   className?: string
   children?: React.ReactNode
 }) {
@@ -61,13 +66,33 @@ export function SecondaryPanel({
   const sheetOpen = useAppStore((s) => s.secondaryPanelOpen)
   const setSheetOpen = useAppStore((s) => s.setSecondaryPanelOpen)
 
+  const inlineOnPhone = isMobile && phoneInline
   React.useEffect(() => {
+    if (inlineOnPhone) return
     register({ id, label })
     return () => {
       register(null)
       setSheetOpen(false)
     }
-  }, [id, label, register, setSheetOpen])
+  }, [id, label, register, setSheetOpen, inlineOnPhone])
+
+  if (inlineOnPhone) {
+    return (
+      <section data-slot="secondary-panel" data-panel-id={id} data-phone="inline" aria-label={label} className={cn("secondary-panel-phone", className)}>
+        <SecondaryPanelContext.Provider value={{ toggle: null, claim }}>
+          {toolbar ? (
+            <>
+              <div className="secondary-panel-toolbar">{toolbar}</div>
+              <div className="secondary-panel-body">{children}</div>
+            </>
+          ) : (
+            <div className="secondary-panel-content">{children}</div>
+          )}
+        </SecondaryPanelContext.Provider>
+        {footer && <div className="secondary-panel-footer">{footer}</div>}
+      </section>
+    )
+  }
 
   if (isMobile) {
     return (

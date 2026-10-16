@@ -88,4 +88,12 @@ describe("SecondaryPanel", () => {
     expect(screen.getAllByRole("button", { name: "Hide Issues views" })).toHaveLength(1)
     expect(toolbar).toContainElement(screen.getByRole("button", { name: "Hide Issues views" }))
   })
+
+  it("on a phone can be the page itself (list first), without a sheet button", () => {
+    mobile = true
+    render(<SecondaryPanel id="inbox" label="Inbox list" phoneInline><p>Rows</p></SecondaryPanel>)
+    expect(screen.getByText("Rows")).toBeVisible()
+    expect(screen.getByRole("region", { name: "Inbox list" })).toHaveAttribute("data-phone", "inline")
+    expect(useAppStore.getState().secondaryPanel).toBeNull()
+  })
 })

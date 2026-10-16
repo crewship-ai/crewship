@@ -1,7 +1,7 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useAuth, useIsInstanceAdmin } from "@/hooks/use-auth"
 import { ChevronRight, LogOut, PanelLeft, Search, X } from "lucide-react"
@@ -106,8 +106,14 @@ export function AppToolbar() {
   const setPageBarSlot = useAppStore((st) => st.setPageBarSlot)
   const secondaryPanel = useAppStore((st) => st.secondaryPanel)
   const setSecondaryPanelOpen = useAppStore((st) => st.setSecondaryPanelOpen)
-  const cmdkOpen = useAppStore((st) => st.commandPaletteOpen)
-  const setCmdkOpen = useAppStore((st) => st.setCommandPaletteOpen)
+  // The palette's open state lives in the app store so the sidebar's search
+  // field can open it; a local fallback keeps the toolbar working where a
+  // test or an embed provides a store without it.
+  const [localCmdk, setLocalCmdk] = useState(false)
+  const storeCmdk = useAppStore((st) => st.commandPaletteOpen)
+  const storeSetCmdk = useAppStore((st) => st.setCommandPaletteOpen)
+  const cmdkOpen = storeSetCmdk ? Boolean(storeCmdk) : localCmdk
+  const setCmdkOpen = storeSetCmdk ?? setLocalCmdk
   const { role } = useAbilities()
   const instanceAdmin = useIsInstanceAdmin()
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
@@ -227,7 +233,7 @@ export function AppToolbar() {
           this slot (Harbor 2: one 48 px bar, not a bar plus a sub-bar). */}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {renderBreadcrumbs()}
-        {!isMobile && <div ref={setPageBarSlot} data-slot="page-bar" className="flex min-w-0 flex-1 items-center gap-2" />}
+        {!isMobile && <div ref={setPageBarSlot} data-slot="page-bar" data-area-title={area?.title ?? ""} className="flex min-w-0 flex-1 items-center gap-2" />}
       </div>
 
       {/* Right: Status indicators + search + notifications */}

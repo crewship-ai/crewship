@@ -13,8 +13,9 @@ vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile }))
 import { useAppStore } from "@/lib/store"
 import { SubBar, SubBarPrimary } from "../sub-bar"
 
-function withSlot() {
+function withSlot(area = "Issues") {
   const slot = document.createElement("div")
+  slot.dataset.areaTitle = area
   slot.setAttribute("data-testid", "slot")
   document.body.appendChild(slot)
   act(() => useAppStore.getState().setPageBarSlot(slot))
@@ -45,8 +46,7 @@ describe("SubBar in the top bar", () => {
   })
 
   it("shows a title that differs from the area after a chevron", () => {
-    withSlot()
-    pathname = "/settings"
+    withSlot("Settings")
     render(<SubBar title="Members" />)
     expect(screen.getByRole("heading", { level: 1, name: "Members" }).className).not.toMatch(/sr-only/)
   })
