@@ -163,9 +163,12 @@ func TestNativeSearchManagedProjection(t *testing.T) {
 	if _, matched, err := query.Match(projection); err != nil || !matched {
 		t.Fatalf("actual managed leaf text missing: %v", err)
 	}
-	oldEncoded := bytes.Replace(encoded, []byte(`"adapter_version":2`), []byte(`"adapter_version":1`), 1)
+	oldEncoded := bytes.Replace(encoded, []byte(`"adapter_version":3`), []byte(`"adapter_version":2`), 1)
+	if bytes.Equal(oldEncoded, encoded) {
+		t.Fatal("old-cache fixture did not replace the current adapter version")
+	}
 	oldDigest := sha256.Sum256(oldEncoded)
-	execOrFatal(t, h.db, `UPDATE page_search_projections SET adapter_version=1,encoded=?,encoded_sha256=? WHERE page_id=?`, oldEncoded, hex.EncodeToString(oldDigest[:]), pageID)
+	execOrFatal(t, h.db, `UPDATE page_search_projections SET adapter_version=2,encoded=?,encoded_sha256=? WHERE page_id=?`, oldEncoded, hex.EncodeToString(oldDigest[:]), pageID)
 	call("GET", "/api/v1/pages/search/content?q=needle", nil, 200)
 	var cacheVersion int
 	if err = h.db.QueryRow(`SELECT adapter_version FROM page_search_projections WHERE page_id=?`, pageID).Scan(&cacheVersion); err != nil || cacheVersion != pagesearch.AdapterVersion {
@@ -287,10 +290,10 @@ func TestNativeSearchManagedProjection(t *testing.T) {
 	if len(noHref["matches"].([]any)) != 0 {
 		t.Fatalf("link href entered index: %+v", noHref)
 	}
-	execOrFatal(t, h.db, `UPDATE documents SET schema_version=4 WHERE page_id=?`, richPage)
+	execOrFatal(t, h.db, `UPDATE documents SET schema_version=5 WHERE page_id=?`, richPage)
 	unknownRaw, unknownStatus, unknownErr := request("GET", "/api/v1/pages/search/content?q=needle", nil)
 	if unknownErr != nil || unknownStatus != 422 || bytes.Contains(unknownRaw, []byte(`"matches"`)) {
-		t.Fatalf("unknown4 returned partial matches: %d %v %s", unknownStatus, unknownErr, unknownRaw)
+		t.Fatalf("unknown5 returned partial matches: %d %v %s", unknownStatus, unknownErr, unknownRaw)
 	}
 	execOrFatal(t, h.db, `UPDATE documents SET schema_version=3 WHERE page_id=?`, richPage)
 	// A real human schema2→3 upgrade after managed read invalidates the old
@@ -340,7 +343,7 @@ func TestNativeSearchManagedProjection(t *testing.T) {
 	if err = h.db.QueryRow(`SELECT count(*) FROM workspace_members WHERE workspace_id=? AND user_id=?`, workspace, owner).Scan(&rows); err != nil || rows != 1 {
 		t.Fatal("session race also changed membership")
 	}
-	t.Log("actual Router + managed Node24: initial rev0, nested leaf dedup, human raw CRDT save after read rejected by final CAS, fresh rebuild, checkpoint restore, mixed actual schemas1/2/3 and code leaf, href exclusion, old-cache rebuild, real schema upgrade CAS, unknown4 no partial response, exact session revocation zero publication")
+	t.Log("actual Router + managed Node24: initial rev0, nested leaf dedup, human raw CRDT save after read rejected by final CAS, fresh rebuild, checkpoint restore, mixed actual schemas1/2/3 and code leaf, href exclusion, old-cache rebuild, real schema upgrade CAS, unknown5 no partial response, exact session revocation zero publication")
 }
 
 func nativeSearchHumanUpdate(ctx context.Context, root string, raw []byte) (string, error) {

@@ -34,17 +34,26 @@ func FromDocument(source SourceTag, outline []DocumentBlock, persisted []BlockHa
 		known[block.ID] = block.Hash
 	}
 	seen := make(map[string]bool, len(outline))
+	images := make(map[string]bool)
 	for _, block := range outline {
-		if seen[block.ID] || known[block.ID] != block.Hash || !identifier.MatchString(block.ID) || block.Parent != "" && (!identifier.MatchString(block.Parent) || known[block.Parent] == "" || !seen[block.Parent]) {
+		if seen[block.ID] || known[block.ID] != block.Hash || !identifier.MatchString(block.ID) || block.Parent != "" && (!identifier.MatchString(block.Parent) || known[block.Parent] == "" || !seen[block.Parent] || images[block.Parent]) {
 			return projection, ErrInvalid
 		}
 		seen[block.ID] = true
 		switch block.Type {
 		case "paragraph", "heading", "codeBlock":
-			if block.Type == "codeBlock" && source.Schema != 3 {
+			if block.Type == "codeBlock" && source.Schema < 3 {
 				return projection, ErrUnsupported
 			}
 			projection.Segments = append(projection.Segments, Segment{Kind: block.Type, TargetID: block.ID, ParentID: block.Parent, Text: block.Text})
+		case "image":
+			if source.Schema != 4 {
+				return projection, ErrUnsupported
+			}
+			if block.Parent != "" {
+				return projection, ErrInvalid
+			}
+			images[block.ID] = true // Atomic root image: no alt, URL, refs or metadata text.
 		case "table", "tableRow", "tableCell", "tableHeader", "bulletList", "orderedList", "listItem":
 			// Their computed text repeats descendants. Do not index it.
 		default:

@@ -1,0 +1,84 @@
+{
+  "schema_version": 4,
+  "model_source": "fb1c0aafe89d499f749dbfae59f54bf09541cee5",
+  "content": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "attrs": {
+          "id": "paragraph"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Linked plaintext",
+            "marks": [
+              {
+                "type": "link",
+                "attrs": {
+                  "href": "https://href-canary.invalid/"
+                }
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": " inline code",
+            "marks": [
+              {
+                "type": "code"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "codeBlock",
+        "attrs": {
+          "id": "code"
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "Code leaf searchable"
+          }
+        ]
+      },
+      {
+        "type": "image",
+        "attrs": {
+          "id": "image",
+          "asset_ref": "asset-ref-canary",
+          "expected_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "alt": "alt-canary",
+          "width": 640,
+          "height": 480
+        }
+      }
+    ]
+  },
+  "outline": [
+    {
+      "id": "paragraph",
+      "type": "paragraph",
+      "parent": null,
+      "hash": "eb673fa444e8908dc6962027ba5d1817be12364fcf046c743b4f92b6f8834f86",
+      "text": "Linked plaintext inline code"
+    },
+    {
+      "id": "code",
+      "type": "codeBlock",
+      "parent": null,
+      "hash": "4dce0b2d6406b8b4e3def6ef06ac4f4d778583c2628be0fbb0834879d074c117",
+      "text": "Code leaf searchable"
+    },
+    {
+      "id": "image",
+      "type": "image",
+      "parent": null,
+      "hash": "f21873d81d746768758ef2df3f7c516a6b905ab49830b4a7bd2fdebe8e920688",
+      "text": ""
+    }
+  ]
+}

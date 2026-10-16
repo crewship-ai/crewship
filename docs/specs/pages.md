@@ -78,6 +78,14 @@ local expiry, not guaranteed instantaneous. Clearing asks for explicit search;
 it never automatically retries incomplete coverage. Search is currently a human
 session/CLI capability, not delegated agent-runtime authorization.
 
+The prepared search adapter version 3 additionally recognizes the frozen Docs4
+model: root image atoms contribute no searchable text, alt text, URLs or asset
+references, while their hashes remain part of the complete source fence. This
+pure-model preparation does not activate Docs4 in the document service. Matched
+runtime4 managed read, upgrade, restore and source-CAS qualification remain
+required before claiming Docs4 search support. Unknown Docs5 remains unsupported;
+older derived adapter caches rebuild from canonical content.
+
 ## Delivery boundary
 
 **Artifacts and Boards 1.0 use static artifact previews.** The Board drawing editor

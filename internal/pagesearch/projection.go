@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	AdapterVersion     = 2
+	AdapterVersion     = 3
 	MaxQueryBytes      = 256
 	MaxQueryTerms      = 32
 	MaxTextBytes       = 2 << 20
@@ -52,7 +52,7 @@ func (s SourceTag) Validate() error {
 	}
 	switch s.Type {
 	case "document":
-		if s.Schema < 1 || s.Schema > 3 {
+		if s.Schema < 1 || s.Schema > 4 {
 			return ErrUnsupported
 		}
 	case "slides":
@@ -114,7 +114,7 @@ func (p Projection) Validate() error {
 		if !identifier.MatchString(segment.TargetID) || segment.ParentID != "" && !identifier.MatchString(segment.ParentID) || !validText(segment.Text) {
 			return ErrInvalid
 		}
-		validKind := p.Source.Type == "document" && (segment.Kind == "paragraph" || segment.Kind == "heading" || p.Source.Schema == 3 && segment.Kind == "codeBlock") || p.Source.Type == "slides" && (segment.Kind == "text" || segment.Kind == "table-cell" || segment.Kind == "notes")
+		validKind := p.Source.Type == "document" && (segment.Kind == "paragraph" || segment.Kind == "heading" || p.Source.Schema >= 3 && segment.Kind == "codeBlock") || p.Source.Type == "slides" && (segment.Kind == "text" || segment.Kind == "table-cell" || segment.Kind == "notes")
 		if !validKind {
 			return ErrUnsupported
 		}
