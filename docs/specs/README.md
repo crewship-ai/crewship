@@ -48,6 +48,9 @@ public contract here. Superseded a spec? Move it to
 
 ## Pages and project files
 
+- [Slides persistence foundation](slides.md): typed schema, atomic semantic mutation,
+  immutable revisions and namespaced backup; native UI and agent admission remain separate cuts.
+
 - [Docs persistence foundation](documents.md): opt-in private Go/Node persistence,
   writer fencing, bounded history and backup contract; no public Docs editor.
 

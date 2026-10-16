@@ -162,7 +162,7 @@ func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID 
 	}
 	var pages []pageRow
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, slug, name, EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id) OR EXISTS(SELECT 1 FROM page_boards WHERE page_id=pages.id) OR EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id) FROM pages WHERE workspace_id = ? AND owner_user_id = ?`,
+		`SELECT id, slug, name, EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id) OR EXISTS(SELECT 1 FROM page_boards WHERE page_id=pages.id) OR EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id) OR EXISTS(SELECT 1 FROM slides_heads WHERE page_id=pages.id) FROM pages WHERE workspace_id = ? AND owner_user_id = ?`,
 		wsID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("select user-owned pages: %w", err)

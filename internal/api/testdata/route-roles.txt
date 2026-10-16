@@ -373,6 +373,10 @@ POST /api/v1/pages/{slug}/project/restore roleSelf
 POST /api/v1/pages/{slug}/project/unpublish roleSelf
 POST /api/v1/pages/{slug}/public roleSelf
 POST /api/v1/pages/{slug}/rollback roleSelf
+POST /api/v1/pages/{slug}/slides/initialize roleSelf
+POST /api/v1/pages/{slug}/slides/patch roleSelf
+POST /api/v1/pages/{slug}/slides/reorder roleSelf
+POST /api/v1/pages/{slug}/slides/restore roleSelf
 POST /api/v1/pages/{slug}/webhooks roleSelf
 POST /api/v1/projects roleCreate
 POST /api/v1/projects/{projectId}/milestones roleCreate

@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Native Slides Pages now support explicit durable human save/retry, history/restore and presentation with immutable Page/revision preconditions, retained conflicts and live type-specific edit capability; image/comments/export and agent work remain pending.
+
+- **Native Slides UI primitives support typed text, shapes, tables and keyboard Present (#3201).** This component delivery emits unsaved drafts; Pages persistence, images, comments and export remain pending.
 - **Docs service secrets are validated and read through one bounded descriptor (#3203).** Go, Node and the packaged healthcheck reject symlinks and nonregular files without blocking, and reject file growth beyond the secret budget.
 - **Page folders can nest and move without changing sharing (#3202).** The rail follows caller-visible folder structure, hides inaccessible ancestors, and asks for a fresh confirmation when organization or target permissions change. Folder moves preserve Page identities and leaf membership; folders with children must be emptied before deletion. API and CLI tree writes use explicit version fences.
 

@@ -19,6 +19,8 @@ export interface ContentReference {
   reason?: string
 }
 export interface ContentFacts {
+  has_slides?: boolean
+  slides_schema?: number
   has_document?: boolean
   document_schema?: number
   has_board?: boolean
@@ -50,12 +52,13 @@ function reference(type_id: string, schema_version: number): ContentReference {
 }
 export function deriveContentTypes(facts: ContentFacts): ContentDerivation {
   const result: ContentDerivation = { content_descriptor: reference("panels", 1), can_initialize_content: false }
-  const specialized = [facts.has_document, facts.has_board, facts.has_artifact].filter(Boolean).length
+  const specialized = [facts.has_slides, facts.has_document, facts.has_board, facts.has_artifact].filter(Boolean).length
   if (specialized > 1 || (specialized > 0 && (facts.has_panels || facts.has_project || facts.has_application))) {
     result.content_descriptor = { type_id: "conflicting", schema_version: 0, supported: false, reason: "conflicting-storage" }
     return result
   }
-  if (facts.has_document) result.content_descriptor = reference("doc", facts.document_schema ?? 0)
+  if (facts.has_slides) result.content_descriptor = reference("slides", facts.slides_schema ?? 0)
+  else if (facts.has_document) result.content_descriptor = reference("doc", facts.document_schema ?? 0)
   else if (facts.has_board) {
     result.content_descriptor = reference("board", 1)
     if (facts.board_format !== "crewship-board-excalidraw-0.18.1-v1") Object.assign(result.content_descriptor, { supported: false, reason: "unsupported-profile" })
@@ -82,7 +85,7 @@ export interface PageContentSource extends ContentFacts {
 // Missing metadata is old-server compatibility. Explicit unknown metadata
 // always fails closed; old presence flags must never override it.
 export function resolvePageContent(source: PageContentSource) {
-  const legacy = deriveContentTypes({ ...source, document_schema: 2, board_format: "crewship-board-excalidraw-0.18.1-v1", artifact_profile: "static-html-v1", artifact_version: 1 })
+  const legacy = deriveContentTypes({ ...source, document_schema: 2, slides_schema: 1, board_format: "crewship-board-excalidraw-0.18.1-v1", artifact_profile: "static-html-v1", artifact_version: 1 })
   const primary = resolveContentReference(Object.prototype.hasOwnProperty.call(source, "content_descriptor") ? source.content_descriptor : legacy.content_descriptor)
   const applicationReference = Object.prototype.hasOwnProperty.call(source, "content_descriptor") || Object.prototype.hasOwnProperty.call(source, "application_descriptor") ? source.application_descriptor : legacy.application_descriptor
   const application = applicationReference === undefined || applicationReference === null ? undefined : resolveContentReference(applicationReference)

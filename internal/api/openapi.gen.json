@@ -15312,6 +15312,777 @@
         ],
         "type": "object"
       },
+      "Slide": {
+        "additionalProperties": false,
+        "properties": {
+          "elements": {
+            "items": {
+              "$ref": "#/components/schemas/SlideElement"
+            },
+            "maxItems": 1000,
+            "minItems": 0,
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "notes": {
+            "description": "UTF-8 byte bound also enforced; LF/tab allowed, CR and other controls rejected.",
+            "maxLength": 16384,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "notes",
+          "elements"
+        ],
+        "type": "object"
+      },
+      "SlideDeck": {
+        "additionalProperties": false,
+        "description": "At most2MiB canonical UTF-8 JSON and1000 total elements. slides array sorted by ID in canonical encoding; slide_order owns presentation order and must contain every slide exactly once. deck_id equals immutable Page ID.",
+        "properties": {
+          "deck_id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "height": {
+            "maximum": 4096,
+            "minimum": 64,
+            "type": "integer"
+          },
+          "schema_version": {
+            "maximum": 1,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "slide_order": {
+            "items": {
+              "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          },
+          "slides": {
+            "items": {
+              "$ref": "#/components/schemas/Slide"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          },
+          "theme": {
+            "additionalProperties": false,
+            "properties": {
+              "background": {
+                "pattern": "^#[a-fA-F0-9]{6}$",
+                "type": "string"
+              },
+              "color": {
+                "pattern": "^#[a-fA-F0-9]{6}$",
+                "type": "string"
+              },
+              "font_family": {
+                "description": "At most128 UTF-8 bytes; no controls or LF/tab.",
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "font_size": {
+                "maximum": 160,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "background",
+              "color",
+              "font_family",
+              "font_size"
+            ],
+            "type": "object"
+          },
+          "width": {
+            "maximum": 4096,
+            "minimum": 64,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "deck_id",
+          "width",
+          "height",
+          "theme",
+          "slide_order",
+          "slides"
+        ],
+        "type": "object"
+      },
+      "SlideElement": {
+        "description": "Integer geometry must fit the deck frame; each element admits exactly one matching payload. IDs unique across slides/elements.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "height": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              },
+              "text": {
+                "additionalProperties": false,
+                "properties": {
+                  "align": {
+                    "enum": [
+                      "left",
+                      "center",
+                      "right"
+                    ],
+                    "type": "string"
+                  },
+                  "color": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "font_family": {
+                    "description": "At most128 UTF-8 bytes; no controls or LF/tab.",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "font_size": {
+                    "maximum": 160,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "value": {
+                    "description": "UTF-8 byte bound also enforced; LF/tab allowed, CR and other controls rejected.",
+                    "maxLength": 32768,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value",
+                  "font_family",
+                  "font_size",
+                  "color",
+                  "align"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "text"
+                ],
+                "type": "string"
+              },
+              "width": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "x": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "y": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "x",
+              "y",
+              "width",
+              "height",
+              "text"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "height": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              },
+              "shape": {
+                "additionalProperties": false,
+                "properties": {
+                  "fill": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "rectangle",
+                      "ellipse"
+                    ],
+                    "type": "string"
+                  },
+                  "stroke": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "stroke_width": {
+                    "maximum": 16,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "fill",
+                  "stroke",
+                  "stroke_width"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "shape"
+                ],
+                "type": "string"
+              },
+              "width": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "x": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "y": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "x",
+              "y",
+              "width",
+              "height",
+              "shape"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "height": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              },
+              "table": {
+                "additionalProperties": false,
+                "description": "Rectangular cells; aggregate across ALL tables (including empty cells) at most2000/slide and10000/deck.",
+                "properties": {
+                  "border": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "cells": {
+                    "items": {
+                      "items": {
+                        "description": "UTF-8 byte bound also enforced; LF/tab allowed, CR and other controls rejected.",
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "maxItems": 20,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "maxItems": 30,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "color": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "fill": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "font_family": {
+                    "description": "At most128 UTF-8 bytes; no controls or LF/tab.",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "font_size": {
+                    "maximum": 160,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "cells",
+                  "font_family",
+                  "font_size",
+                  "color",
+                  "fill",
+                  "border"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "table"
+                ],
+                "type": "string"
+              },
+              "width": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "x": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "y": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "x",
+              "y",
+              "width",
+              "height",
+              "table"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "SlideOperation": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "element": {
+                "$ref": "#/components/schemas/SlideElement"
+              },
+              "element_id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              },
+              "if_hash": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "op": {
+                "enum": [
+                  "set_element"
+                ],
+                "type": "string"
+              },
+              "slide_id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "slide_id",
+              "element_id",
+              "if_hash",
+              "element"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "element_id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              },
+              "if_hash": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "op": {
+                "enum": [
+                  "delete_element"
+                ],
+                "type": "string"
+              },
+              "slide_id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "slide_id",
+              "element_id",
+              "if_hash"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "element": {
+                "$ref": "#/components/schemas/SlideElement"
+              },
+              "if_hash": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "op": {
+                "enum": [
+                  "insert_element"
+                ],
+                "type": "string"
+              },
+              "slide_id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "slide_id",
+              "if_hash",
+              "element"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "if_hash": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "notes": {
+                "description": "UTF-8 byte bound also enforced; LF/tab allowed, CR and other controls rejected.",
+                "maxLength": 16384,
+                "type": "string"
+              },
+              "op": {
+                "enum": [
+                  "set_notes"
+                ],
+                "type": "string"
+              },
+              "slide_id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "slide_id",
+              "if_hash",
+              "notes"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "op": {
+                "enum": [
+                  "insert_slide"
+                ],
+                "type": "string"
+              },
+              "position": {
+                "maximum": 100,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "slide": {
+                "$ref": "#/components/schemas/Slide"
+              }
+            },
+            "required": [
+              "op",
+              "slide",
+              "position"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "if_hash": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "op": {
+                "enum": [
+                  "delete_slide"
+                ],
+                "type": "string"
+              },
+              "slide_id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "slide_id",
+              "if_hash"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "SlideOutline": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "order_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "page_id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "slides": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "elements": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "hash": {
+                        "pattern": "^[a-f0-9]{64}$",
+                        "type": "string"
+                      },
+                      "id": {
+                        "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "text",
+                          "shape",
+                          "table"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "type",
+                      "hash"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 1000,
+                  "minItems": 0,
+                  "type": "array"
+                },
+                "hash": {
+                  "pattern": "^[a-f0-9]{64}$",
+                  "type": "string"
+                },
+                "id": {
+                  "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "hash",
+                "elements"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "page_id",
+          "revision",
+          "order_version",
+          "content_hash",
+          "slides"
+        ],
+        "type": "object"
+      },
+      "SlideReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "duplicate": {
+            "type": "boolean"
+          },
+          "mutation_id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "order_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mutation_id",
+          "revision",
+          "order_version",
+          "content_hash",
+          "duplicate"
+        ],
+        "type": "object"
+      },
+      "SlideRevision": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "initialize",
+              "patch",
+              "reorder",
+              "restore"
+            ],
+            "type": "string"
+          },
+          "mutation_id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "order_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "parent_revision": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "schema_version": {
+            "maximum": 1,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "parent_revision",
+          "order_version",
+          "schema_version",
+          "content_hash",
+          "actor",
+          "kind",
+          "mutation_id",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "SlideState": {
+        "additionalProperties": false,
+        "properties": {
+          "content_hash": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "deck": {
+            "$ref": "#/components/schemas/SlideDeck"
+          },
+          "order_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "schema_version": {
+            "maximum": 1,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "revision",
+          "order_version",
+          "content_hash",
+          "deck"
+        ],
+        "type": "object"
+      },
       "StateBucket": {
         "properties": {
           "entries": {
@@ -112095,6 +112866,9 @@
                             "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                             "type": "boolean"
                           },
+                          "has_slides": {
+                            "type": "boolean"
+                          },
                           "icon": {
                             "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                             "type": "string"
@@ -113519,6 +114293,9 @@
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
                         },
+                        "has_slides": {
+                          "type": "boolean"
+                        },
                         "icon": {
                           "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                           "type": "string"
@@ -113933,6 +114710,9 @@
                         },
                         "has_project": {
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                          "type": "boolean"
+                        },
+                        "has_slides": {
                           "type": "boolean"
                         },
                         "icon": {
@@ -114361,6 +115141,9 @@
                           },
                           "has_project": {
                             "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                            "type": "boolean"
+                          },
+                          "has_slides": {
                             "type": "boolean"
                           },
                           "icon": {
@@ -115250,6 +116033,9 @@
                         "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                         "type": "boolean"
                       },
+                      "has_slides": {
+                        "type": "boolean"
+                      },
                       "icon": {
                         "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
                         "type": "string"
@@ -115599,6 +116385,10 @@
                       ],
                       "type": "object"
                     },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -115672,6 +116462,9 @@
                     },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
+                    "has_slides": {
                       "type": "boolean"
                     },
                     "icon": {
@@ -115869,6 +116662,10 @@
                       ],
                       "type": "object"
                     },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -115942,6 +116739,9 @@
                     },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
+                    "has_slides": {
                       "type": "boolean"
                     },
                     "icon": {
@@ -116768,6 +117568,10 @@
                       ],
                       "type": "object"
                     },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -116841,6 +117645,9 @@
                     },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
+                    "has_slides": {
                       "type": "boolean"
                     },
                     "icon": {
@@ -117038,6 +117845,10 @@
                       ],
                       "type": "object"
                     },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -117111,6 +117922,9 @@
                     },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
+                    "has_slides": {
                       "type": "boolean"
                     },
                     "icon": {
@@ -117833,6 +118647,10 @@
                       ],
                       "type": "object"
                     },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -117906,6 +118724,9 @@
                     },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
+                    "has_slides": {
                       "type": "boolean"
                     },
                     "icon": {
@@ -118365,6 +119186,10 @@
                       ],
                       "type": "object"
                     },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -118438,6 +119263,9 @@
                     },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
+                    "has_slides": {
                       "type": "boolean"
                     },
                     "icon": {
@@ -147615,6 +148443,10 @@
                           ],
                           "type": "object"
                         },
+                        "can_edit_slides": {
+                          "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                          "type": "boolean"
+                        },
                         "color": {
                           "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                           "type": "string"
@@ -147688,6 +148520,9 @@
                         },
                         "has_project": {
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                          "type": "boolean"
+                        },
+                        "has_slides": {
                           "type": "boolean"
                         },
                         "icon": {
@@ -147990,6 +148825,1473 @@
           "pages"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/slides": {
+      "get": {
+        "description": "List page slides (GET /api/v1/pages/{slug}/slides).",
+        "operationId": "get_api_v1_pages_slug_slides",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List page slides",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/slides/history": {
+      "get": {
+        "description": "Get page slides history (GET /api/v1/pages/{slug}/slides/history).",
+        "operationId": "get_api_v1_pages_slug_slides_history",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SlideRevision"
+                  },
+                  "maxItems": 1000,
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page slides history",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/slides/initialize": {
+      "post": {
+        "description": "Submit page slides initialize (POST /api/v1/pages/{slug}/slides/initialize).",
+        "operationId": "post_api_v1_pages_slug_slides_initialize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Exact case-sensitive keys, no duplicates, one JSON object at most2MiB; immutable Page binding and whole-revision CAS. No automatic rebase.",
+                "properties": {
+                  "base_rev": {
+                    "enum": [
+                      0
+                    ],
+                    "type": "integer"
+                  },
+                  "deck": {
+                    "$ref": "#/components/schemas/SlideDeck"
+                  },
+                  "mutation_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "page_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "schema_version": {
+                    "enum": [
+                      1
+                    ],
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "page_id",
+                  "schema_version",
+                  "base_rev",
+                  "mutation_id",
+                  "deck"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page slides initialize",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/slides/outline": {
+      "get": {
+        "description": "Get page slides outline (GET /api/v1/pages/{slug}/slides/outline).",
+        "operationId": "get_api_v1_pages_slug_slides_outline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideOutline"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page slides outline",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/slides/patch": {
+      "post": {
+        "description": "Submit page slides patch (POST /api/v1/pages/{slug}/slides/patch).",
+        "operationId": "post_api_v1_pages_slug_slides_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Progressive candidate semantics: each if_hash sees earlier operations in this atomic batch. if_hash is element hash for set/delete_element, full slide hash for insert_element/set_notes/delete_slide. insert/delete_slide also require if_order_version. Aggregate final deck limits enforced.",
+                "properties": {
+                  "base_rev": {
+                    "format": "int64",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "if_order_version": {
+                    "format": "int64",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "mutation_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "operations": {
+                    "items": {
+                      "$ref": "#/components/schemas/SlideOperation"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "page_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "schema_version": {
+                    "enum": [
+                      1
+                    ],
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "page_id",
+                  "schema_version",
+                  "base_rev",
+                  "mutation_id",
+                  "operations"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page slides patch",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/slides/reorder": {
+      "post": {
+        "description": "Submit page slides reorder (POST /api/v1/pages/{slug}/slides/reorder).",
+        "operationId": "post_api_v1_pages_slug_slides_reorder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Exact case-sensitive keys, no duplicates, one JSON object at most2MiB; immutable Page binding and whole-revision CAS. No automatic rebase.",
+                "properties": {
+                  "base_rev": {
+                    "format": "int64",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "if_order_version": {
+                    "format": "int64",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "mutation_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "page_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "schema_version": {
+                    "enum": [
+                      1
+                    ],
+                    "type": "integer"
+                  },
+                  "slide_order": {
+                    "items": {
+                      "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "page_id",
+                  "schema_version",
+                  "base_rev",
+                  "mutation_id",
+                  "if_order_version",
+                  "slide_order"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page slides reorder",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/slides/restore": {
+      "post": {
+        "description": "Restore page slides (POST /api/v1/pages/{slug}/slides/restore).",
+        "operationId": "post_api_v1_pages_slug_slides_restore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Exact case-sensitive keys, no duplicates, one JSON object at most2MiB; immutable Page binding and whole-revision CAS. No automatic rebase.",
+                "properties": {
+                  "base_rev": {
+                    "format": "int64",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "if_order_version": {
+                    "format": "int64",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "mutation_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "page_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "revision": {
+                    "format": "int64",
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "schema_version": {
+                    "enum": [
+                      1
+                    ],
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "page_id",
+                  "schema_version",
+                  "base_rev",
+                  "mutation_id",
+                  "if_order_version",
+                  "revision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Restore page slides",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/slides/revisions/{revision}": {
+      "get": {
+        "description": "Get page slides revision (GET /api/v1/pages/{slug}/slides/revisions/{revision}).",
+        "operationId": "get_api_v1_pages_slug_slides_revisions_revision",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SlideState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page slides revision",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/pages/{slug}/versions": {

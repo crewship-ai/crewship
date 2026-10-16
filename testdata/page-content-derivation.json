@@ -294,5 +294,39 @@
       },
       "can_initialize_content": false
     }
+  },
+  {
+    "name": "slides-native-viewer",
+    "facts": {
+      "has_slides": true,
+      "slides_schema": 1,
+      "human_owned": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "slides",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "slides-conflicting-document",
+    "facts": {
+      "has_slides": true,
+      "slides_schema": 1,
+      "has_document": true,
+      "document_schema": 2
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "conflicting",
+        "schema_version": 0,
+        "supported": false,
+        "reason": "conflicting-storage"
+      },
+      "can_initialize_content": false
+    }
   }
 ]
