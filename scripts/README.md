@@ -288,6 +288,7 @@ After frozen service/frontend installation and production export, run:
 crewship-heavy env CREWSHIP_PAGE_SEARCH_BROWSER=1 go test -tags page_search_browser ./internal/api -run '^TestNativeSearchBrowser$' -count=1 -timeout 6m -v
 ```
 
-Missing prerequisites fail. The script prints private report, filtered result
-JSON and full screenshot paths; no credentials are captured in evidence. The
+Missing prerequisites fail. `CREWSHIP_PAGE_SEARCH_OUTPUT` selects an owned
+private output parent; each execution creates a fresh subdirectory. The script
+prints private report, filtered result JSON and full screenshot paths; no credentials are captured in evidence. The
 Go fixture owns and removes its 0600 credential input and private Node process.

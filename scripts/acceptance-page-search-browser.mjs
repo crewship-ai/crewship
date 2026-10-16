@@ -1,6 +1,6 @@
 // Owned synthetic sessions, actual Router/Node/canonical DB/static export. No HTTP mocks.
 import assert from 'node:assert/strict'
-import { readFile, mkdtemp, writeFile } from 'node:fs/promises'
+import { readFile, mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -8,7 +8,9 @@ import { chromium, expect } from '@playwright/test'
 import { loopbackOrigin } from '../tools/docs-d0/fixture-boundaries.mjs'
 const fixture = JSON.parse(await readFile(process.env.CREWSHIP_PAGE_SEARCH_FIXTURE, 'utf8'))
 const origin = loopbackOrigin(fixture.server)
-const output = await mkdtemp(join(tmpdir(), 'crewship-native-search-'))
+const outputBase = process.env.CREWSHIP_PAGE_SEARCH_OUTPUT || tmpdir()
+await mkdir(outputBase, { recursive: true, mode: 0o700 })
+const output = await mkdtemp(join(outputBase, 'crewship-native-search-'))
 const browser = await chromium.launch({ headless: true })
 const contexts = []
 const captures = []
@@ -17,6 +19,9 @@ async function context(actor) {
   contexts.push(context)
   await context.addCookies([{ name: 'authjs.session-token', value: fixture.tokens[fixture[actor]], url: origin, httpOnly: true, sameSite: 'Lax' }])
   await context.addInitScript(id => localStorage.setItem('crewship.workspaceId', id), fixture.workspace)
+  const probe = await context.request.get(`${origin}/api/auth/session`)
+  assert.equal(probe.status(), 200)
+  assert.equal((await probe.json()).user.id, fixture[actor], 'real cookie session must identify intended synthetic actor')
   return context
 }
 async function capture(page, name) {
