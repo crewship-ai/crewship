@@ -296,7 +296,7 @@
     }
   },
   {
-    "name": "slides-foundation-no-viewer",
+    "name": "slides-native-viewer",
     "facts": {
       "has_slides": true,
       "slides_schema": 1,
@@ -306,8 +306,7 @@
       "content_descriptor": {
         "type_id": "slides",
         "schema_version": 1,
-        "supported": false,
-        "reason": "viewer-unavailable"
+        "supported": true
       },
       "can_initialize_content": false
     }

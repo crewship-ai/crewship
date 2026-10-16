@@ -177,10 +177,11 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 
 	page := obj(map[string]any{
 		"content_descriptor": contentReference, "application_descriptor": contentReference,
-		"has_slides":   boolean(),
-		"has_artifact": boolean(),
-		"has_board":    boolean(),
-		"has_project":  map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
+		"can_edit_slides": map[string]any{"type": "boolean", "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions."},
+		"has_slides":      boolean(),
+		"has_artifact":    boolean(),
+		"has_board":       boolean(),
+		"has_project":     map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": map[string]any{"type": "string",
 			"description": "`user/<id>` or `crew/<slug>` — exactly one of the two (§7.1 rule 1)."},

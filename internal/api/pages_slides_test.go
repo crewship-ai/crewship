@@ -56,8 +56,8 @@ func TestSlidesHTTPDurableCASLiveACLAndSlugIdentity(t *testing.T) {
 		t.Fatalf("Slides metadata missing %s", metadata.Body)
 	}
 	descriptor := wire["content_descriptor"].(map[string]any)
-	if descriptor["supported"] != false || descriptor["type_id"] != "slides" || descriptor["reason"] != "viewer-unavailable" {
-		t.Fatalf("premature usable viewer %v", descriptor)
+	if descriptor["supported"] != true || descriptor["type_id"] != "slides" || wire["can_edit_slides"] != true {
+		t.Fatalf("native viewer or live edit capability missing %v", wire)
 	}
 	for _, query := range []string{`INSERT INTO page_artifacts(page_id,head_rev) VALUES('slide-page-original',0)`, `INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES('ws-old','slide-page-original',1,X'00','{}')`, `INSERT INTO page_boards(page_id,seq,format) VALUES('slide-page-original',0,'crewship-board-excalidraw-0.18.1-v1')`, `INSERT INTO page_project_drafts(page_id) VALUES('slide-page-original')`, `INSERT INTO page_project_live(page_id) VALUES('slide-page-original')`, `INSERT INTO page_panels(id,page_id) VALUES('forbidden-panel','slide-page-original')`} {
 		if _, err := f.db.Exec(query); err == nil || !strings.Contains(err.Error(), "Page already contains Slides") {

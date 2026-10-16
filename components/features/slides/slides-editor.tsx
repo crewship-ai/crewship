@@ -16,14 +16,16 @@ export interface SlidesEditorProps {
   /** Emits an unsaved candidate only. Persistence must be separately acknowledged. */
   onChange?: (candidate: SlideDeck) => void
   readOnly?: boolean
+  reorderDisabled?: boolean
+  persistenceStatus?: string
 }
 
-export function SlidesEditor({ deck, onChange, readOnly }: SlidesEditorProps) {
+export function SlidesEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus }: SlidesEditorProps) {
   if (!isNativeSlideDeck(deck)) return <p role="alert">This Slides format is unavailable. Its content cannot be edited.</p>
-  return <NativeEditor deck={deck} onChange={onChange} readOnly={readOnly || !onChange} />
+  return <NativeEditor deck={deck} onChange={onChange} readOnly={readOnly || !onChange} reorderDisabled={reorderDisabled} persistenceStatus={persistenceStatus} />
 }
 
-function NativeEditor({ deck, onChange, readOnly }: { deck: SlideDeck; onChange?: (candidate: SlideDeck) => void; readOnly: boolean }) {
+function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus }: SlidesEditorProps & { deck: SlideDeck; readOnly: boolean }) {
   const [slideId, setSlideId] = React.useState(deck.slide_order[0])
   const [elementId, setElementId] = React.useState<string>()
   const [present, setPresent] = React.useState(false)
@@ -47,7 +49,7 @@ function NativeEditor({ deck, onChange, readOnly }: { deck: SlideDeck; onChange?
   })
   const position = deck.slide_order.indexOf(slideId)
   return <section aria-label="Slides editor" className="space-y-3">
-    <p role="status" className="text-sm text-muted-foreground">Changes in this preview are not saved. Images and comments are not available.</p>
+    <p role="status" className="text-sm text-muted-foreground">{persistenceStatus ?? "Changes in this preview are not saved."} Images and comments are not available.</p>
     {error && <p role="alert">{error}</p>}
     <div className="flex flex-wrap gap-2" aria-label="Slide actions">
       <button className={control} disabled={readOnly || !slide || deck.slides.length >= 100} onClick={() => { const next = insertSlide(deck, slideId); if (changed(next.deck)) { setSlideId(next.slideId); setElementId(undefined) } }}>New slide</button>
@@ -57,8 +59,8 @@ function NativeEditor({ deck, onChange, readOnly }: { deck: SlideDeck; onChange?
         candidate.slides = candidate.slides.filter(value => value.id !== slideId); candidate.slide_order = candidate.slide_order.filter(value => value !== slideId)
         if (changed(candidate)) { setSlideId(candidate.slide_order[Math.min(position, candidate.slide_order.length - 1)]); setElementId(undefined) }
       }}>Delete slide</button>
-      <button className={control} disabled={readOnly || position <= 0} onClick={() => changed(moveSlide(deck, slideId, -1))}>Move slide earlier</button>
-      <button className={control} disabled={readOnly || position < 0 || position >= deck.slides.length - 1} onClick={() => changed(moveSlide(deck, slideId, 1))}>Move slide later</button>
+      <button className={control} disabled={readOnly || reorderDisabled || position <= 0} onClick={() => changed(moveSlide(deck, slideId, -1))}>Move slide earlier</button>
+      <button className={control} disabled={readOnly || reorderDisabled || position < 0 || position >= deck.slides.length - 1} onClick={() => changed(moveSlide(deck, slideId, 1))}>Move slide later</button>
       <button className={control} disabled={!slide} onClick={() => setPresent(true)}>Present</button>
     </div>
     <nav aria-label="Slides" className="flex flex-wrap gap-2">{orderedSlides(deck).map((value, index) => <button key={value.id} className={control} aria-current={value.id === slideId ? "true" : undefined} onClick={() => { setSlideId(value.id); setElementId(undefined) }}>Slide {index + 1}</button>)}</nav>

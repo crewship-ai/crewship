@@ -70,3 +70,5 @@ if_order_version,slide_order}` with every existing slide ID exactly once.
 `--file -` reads stdin. Supply `{page_id,schema_version:1,base_rev,mutation_id,
 if_order_version,revision}`. Restore appends a new confirmed revision and can
 revive the original stable identities; it does not replace live permissions.
+
+Page detail may include `can_edit_slides` for native UI controls; it is advisory, missing=false, and does not replace the CLI mutation authority checks or indicate Docs/Board permissions.

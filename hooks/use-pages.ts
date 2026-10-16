@@ -144,6 +144,7 @@ export interface WirePage {
   application_descriptor?: unknown
   artifact_summary?: ArtifactSummary
   has_slides?: boolean
+  can_edit_slides?: boolean
   has_document?: boolean
   has_board?: boolean
   has_artifact?: boolean
@@ -492,6 +493,8 @@ export interface PageView {
   contentType?: string
   artifactSummary?: ArtifactSummary
   hasDocument?: boolean
+  hasSlides?: boolean
+  canEditSlides?: boolean
   hasBoard?: boolean
   hasArtifact?: boolean
   artifactEligible?: boolean
@@ -647,6 +650,8 @@ export function toPageView(raw: WirePage): PageView {
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),
     hasDocument: raw.has_document === true,
+    hasSlides: raw.has_slides === true,
+    canEditSlides: raw.can_edit_slides === true,
     hasBoard: raw.has_board === true,
     hasArtifact: raw.has_artifact === true,
     artifactSummary: raw.artifact_summary,

@@ -68,6 +68,7 @@ import { usePageReview } from "@/hooks/use-page-review"
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
 import { PageAvatar, PageGlyph } from "@/components/features/pages/page-glyph"
 import { IconPickerDialog } from "@/components/ui/icon-picker-dialog"
+import { PageSlides } from "@/components/features/pages/page-slides"
 import { PageEditor } from "@/components/features/pages/page-editor"
 import type { EditorSectionProps } from "@/components/features/pages/editor/section-props"
 import { usePageSave } from "@/components/ui/page-save-bar"
@@ -89,6 +90,7 @@ export function EditorContentSection(props: EditorSectionProps) {
       </p>
     )
   }
+  if (props.page.has_slides === true) return <SlidesPageContent {...props} />
   // `hasApplicationDraft`, not `hasApplication`: the wire's `has_application`
   // is `EXISTS(page_project_live WHERE published=1)`, so a Page whose
   // application has only ever been a draft reports false — and that is the
@@ -103,6 +105,14 @@ export function EditorContentSection(props: EditorSectionProps) {
   // anywhere in the product to rename itself or open its document.
   if (!props.capabilities.hasApplicationDraft) return <PanelPageContent {...props} />
   return <ApplicationPageContent {...props} />
+}
+
+function SlidesPageContent(props: EditorSectionProps) {
+  const dirty = React.useRef({ identity: false, slides: false })
+  const reportIdentity = React.useCallback((value: boolean) => { dirty.current.identity = value; props.onDirtyChange(dirty.current.identity || dirty.current.slides) }, [props.onDirtyChange])
+  const reportSlides = React.useCallback((value: boolean) => { dirty.current.slides = value; props.onDirtyChange(dirty.current.identity || dirty.current.slides) }, [props.onDirtyChange])
+  if (!props.page?.id) return <p role="alert">The saved Page identity is unavailable.</p>
+  return <div className="space-y-4"><PageIdentityCard workspaceId={props.workspaceId} slug={props.slug} page={props.page} mayEdit={props.capabilities.mayEditMetadata} onDirtyChange={reportIdentity} /><PageSlides key={props.page.id} workspaceId={props.workspaceId} slug={props.slug} pageId={props.page.id} onDirtyChange={reportSlides} /></div>
 }
 
 // ── The ordinary panel Page ────────────────────────────────────────────────

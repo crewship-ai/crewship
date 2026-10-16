@@ -127,7 +127,7 @@ func DeriveContentTypes(facts ContentFacts) ContentDerivation {
 	}
 	switch {
 	case facts.HasSlides:
-		result.ContentDescriptor = ContentReference{TypeID: "slides", SchemaVersion: facts.SlidesSchema, Supported: false, Reason: "viewer-unavailable"}
+		result.ContentDescriptor = contentReference("slides", facts.SlidesSchema)
 	case facts.HasDocument:
 		result.ContentDescriptor = contentReference("doc", facts.DocumentSchema)
 	case facts.HasBoard:

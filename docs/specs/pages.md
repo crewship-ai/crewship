@@ -1829,3 +1829,10 @@ this derived eligibility never replaces the existing live authorization checks.
 
 `node scripts/check-page-content-types.mjs` compares actual Go and TypeScript
 values and derivation against `testdata/page-content-derivation.json`.
+
+
+### Native Slides human editor
+
+Schema1 Slides content resolves to the compiled `page-slides` viewer/editor. `can_edit_slides` on Page detail is an additive advisory capability for this type only (missing=false); other format controls must not interpret false as their own authorization. It combines live human Page write standing, supported schema and exclusive human-owned content. The Slides authority remains the final writer-fence authorization boundary.
+
+The native editor retains an immutable saved Page/revision/order base and an unsaved candidate. Conflict, deleted/recreated slug or denied access never refresh those preconditions silently. Exact mutation retries preserve their original body and identity; UI status identifies the acknowledged revision, independently of a possibly newer head. Explicit confirmed discard is required before reopening over unsaved work. Content and reorder requests are separate atomic operations and cannot be mixed into a pretend atomic save. Revision previews use native saved snapshots, not HTML. This human UI delivery makes no Slides agent, image, comments or export claim.

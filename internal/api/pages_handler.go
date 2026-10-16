@@ -308,6 +308,8 @@ type pageWire struct {
 	// edit a page with no actions on it still gets true here, and an empty
 	// actions list then means exactly what it says.
 	Authored bool `json:"authored,omitempty"`
+	// Advisory current native Slides editing capability; mutations authorize again.
+	CanEditSlides bool `json:"can_edit_slides"`
 }
 
 // pageListWire is one row of the index. It carries counts rather than panels:
@@ -1762,15 +1764,16 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 	out := pageWire{
 		ContentDescriptor: content.ContentDescriptor, ApplicationDescriptor: content.ApplicationDescriptor,
 		HasSlides: rec.HasSlides, HasDocument: rec.HasDocument, HasBoard: rec.HasBoard, HasArtifact: rec.HasArtifact, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
-		ID:          rec.ID,
-		Slug:        rec.Slug,
-		Name:        rec.Name,
-		Description: rec.Description,
-		Owner:       h.ownerRef(ctx, rec),
-		Panels:      make([]any, 0, len(panels)),
-		CreatedAt:   rec.CreatedAt,
-		UpdatedAt:   rec.UpdatedAt,
-		Authored:    authored,
+		ID:            rec.ID,
+		Slug:          rec.Slug,
+		Name:          rec.Name,
+		Description:   rec.Description,
+		Owner:         h.ownerRef(ctx, rec),
+		Panels:        make([]any, 0, len(panels)),
+		CreatedAt:     rec.CreatedAt,
+		UpdatedAt:     rec.UpdatedAt,
+		Authored:      authored,
+		CanEditSlides: h.mayEditNativeSlides(ctx, rec, content.ContentDescriptor.Supported),
 		// One statement, only for a filed page; the index never comes
 		// through here (it renders from loadPageIndex's bulk load).
 		Folder:       h.folderRefFor(ctx, rec),
@@ -2269,4 +2272,18 @@ func derivePageContent(rec *pageRecord, panelCount int) pages.ContentDerivation 
 		HasProject: rec.HasProject, HasApplication: rec.HasApplication,
 		HasPanels: panelCount > 0, HumanOwned: rec.OwnerUserID != "",
 	})
+}
+
+// UI capability only. Native Slides writes independently recheck live credentials,
+// role, ownership/content exclusivity and grants under their durable writer fence.
+func (h *PageHandler) mayEditNativeSlides(ctx context.Context, rec *pageRecord, supported bool) bool {
+	user := UserFromContext(ctx)
+	if user == nil || !supported || !rec.HasSlides || rec.OwnerUserID == "" || rec.OwnerCrewID != "" || rec.HasDocument || rec.HasArtifact || rec.HasBoard || rec.HasProject || rec.HasApplication {
+		return false
+	}
+	if _, agent := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); agent {
+		return false
+	}
+	role, err := h.liveContentHumanRole(ctx, WorkspaceIDFromContext(ctx), user.ID)
+	return err == nil && h.mayEditSpec(ctx, WorkspaceIDFromContext(ctx), user.ID, role, rec)
 }

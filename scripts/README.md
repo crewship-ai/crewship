@@ -226,3 +226,6 @@ crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHI
 Build the real static export first. Missing Chromium, export or opt-in fails;
 `CREWSHIP_BOARD_MERMAID_OUTPUT` selects the evidence directory. Synthetic session
 credentials remain in a private temporary file removed by the Go fixture.
+
+- `check-slide-mutations.ts` + `slide-mutation-contract/`: execute TS-planned native Slides mutations through actual Go strict decode/semantic apply/canonical output; run through `crewship-heavy pnpm exec tsx scripts/check-slide-mutations.ts`.
+- `acceptance-slides-workflow-browser.mjs`: opt-in `slides_workflow_browser` real Router/DB/production static native Slides human flow using owned synthetic sessions; not login/model acceptance. Captures private evidence under operator-selected output.

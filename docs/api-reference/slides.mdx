@@ -138,3 +138,8 @@ snapshot. Original identities may revive; current authorization remains unchange
 **Errors:** 400 invalid candidate, 401 invalid credential, 403 denied,
 404 missing Slides/revision, 409 revision/order/identity/replay conflict,
 429 retained quota, 500 storage failure.
+
+
+The native Pages viewer/editor uses the canonical schema1 model, not HTML. `GET /api/v1/pages/{slug}` adds advisory `can_edit_slides`: true only for supported, exclusive, human-owned Slides with current human Page write standing. Missing or false disables Slides editing; it says nothing about Docs/Board capability. Metadata and Slides state are separate reads, so this flag is advisory; every mutation reauthorizes live credentials/ACL under the durable writer fence.
+
+Manual editing holds the original Page ID, base revision and order version until save or explicit discard. Conflict or access loss retains the candidate; no automatic rebase. An uncertain request retries the exact mutation ID/body. A receipt confirms its specific revision even if a newer head exists; the UI never presents that receipt as proof of the latest head. Saved revision previews render the actual native Slides snapshot. Reordering is a separate atomic endpoint: save/discard content changes before reordering, and save/discard a pending reorder before editing content. Images/comments/PPTX/export remain unavailable in this delivery.

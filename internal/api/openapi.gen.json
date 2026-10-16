@@ -116051,6 +116051,10 @@
                       ],
                       "type": "object"
                     },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -116323,6 +116327,10 @@
                         "supported"
                       ],
                       "type": "object"
+                    },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
                     },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
@@ -117226,6 +117234,10 @@
                       ],
                       "type": "object"
                     },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -117498,6 +117510,10 @@
                         "supported"
                       ],
                       "type": "object"
+                    },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
                     },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
@@ -118297,6 +118313,10 @@
                       ],
                       "type": "object"
                     },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -118831,6 +118851,10 @@
                         "supported"
                       ],
                       "type": "object"
+                    },
+                    "can_edit_slides": {
+                      "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                      "type": "boolean"
                     },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
@@ -148084,6 +148108,10 @@
                             "supported"
                           ],
                           "type": "object"
+                        },
+                        "can_edit_slides": {
+                          "description": "Advisory live human native Slides editing capability only. Missing means false; mutations independently reauthorize. False does not describe Docs/Board permissions.",
+                          "type": "boolean"
                         },
                         "color": {
                           "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
