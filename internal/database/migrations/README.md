@@ -24,3 +24,14 @@ as plain SQL belongs here.
 
 Nothing at or below **v169** may move here or change: those numbers are applied
 in databases nobody controls. See `../migrate_version_scheme.go`.
+
+The `static_pages_foundation` Go migration discovers the prerelease
+Artifact/Board schema before applying its unchanged SQL payloads. Fresh main
+installs receive the complete schema. An existing database with all three
+recognized prerelease identities (`20261014114745`–`20261014114747`) must match
+the retained feature schema, including grant constraints and required indexes;
+its original ledger rows and data remain intact and the new migration records
+one additional identity without repeating DDL. Partial identities or schema
+mismatches refuse the migration transaction and require explicit recovery.
+Unrelated main schema objects are outside this comparison. This storage and
+backup layer does not activate an Artifact or Board editor or interactive HTML.

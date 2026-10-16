@@ -8,10 +8,13 @@ package backup_test
 // the restore report said so.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -229,5 +232,73 @@ func TestRestore_AttachmentBlobNeverOverwritesADifferentFile(t *testing.T) {
 	}
 	if res.AttachmentsConflicts != 1 {
 		t.Fatalf("attachments_conflicts = %d, want 1", res.AttachmentsConflicts)
+	}
+}
+
+func TestBackupRestore_StaticPageBlobsWithoutAttachmentRows(t *testing.T) {
+	for _, fork := range []string{"", "static-page-fork"} {
+		t.Run("fork="+fork, func(t *testing.T) {
+			ctx := t.Context()
+			source := openMigratedDB(t)
+			ws := seedWorkspace(t, source)
+			root := t.TempDir()
+			for _, q := range []string{
+				`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('blob-artifact','ws_e2e_1','blob-artifact','Artifact','u_admin','{}'),('blob-board','ws_e2e_1','blob-board','Board','u_admin','{}')`,
+				`INSERT INTO page_artifacts(page_id,head_rev) VALUES('blob-artifact',1)`,
+				`INSERT INTO page_boards(page_id,seq,format) VALUES('blob-board',0,'crewship-board-excalidraw-0.18.1-v1')`,
+			} {
+				if _, err := source.Exec(q); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var encoded bytes.Buffer
+			if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+				t.Fatal(err)
+			}
+			contents := [][]byte{[]byte("<p>Private static Artifact</p>"), encoded.Bytes()}
+			shas := []string{}
+			for _, content := range contents {
+				sum := sha256.Sum256(content)
+				sha := hex.EncodeToString(sum[:])
+				shas = append(shas, sha)
+				path := filepath.Join(root, "attachments", ws, sha[:2], sha)
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, content, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := source.Exec(`INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,mutation_id,request_digest,created_at) VALUES('blob-revision','blob-artifact',1,?,'blob-mutation','digest','2026-10-14T13:45:28Z')`, shas[0]); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := source.Exec(`INSERT INTO page_board_files(id,board_page_id,sha256,content_type,width,height,byte_size,author_user_id,created_at) VALUES('blob-image','blob-board',?,'image/png',1,1,?,'u_admin','2026-10-14T13:45:28Z')`, shas[1], len(contents[1])); err != nil {
+				t.Fatal(err)
+			}
+			var attachmentRows int
+			if err := source.QueryRow(`SELECT COUNT(*) FROM attachments`).Scan(&attachmentRows); err != nil || attachmentRows != 0 {
+				t.Fatalf("fixture must have no attachments rows: %d %v", attachmentRows, err)
+			}
+			actor := backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}
+			created, err := backup.CreateBackup(ctx, source, backup.CreateOptions{Scope: backup.ScopeWorkspace, WorkspaceID: ws, OutputDir: t.TempDir(), Actor: actor, Passphrase: "static-pages-roundtrip", AttachmentRoot: root})
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := openMigratedDB(t)
+			targetRoot := t.TempDir()
+			restored, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{Path: created.Path, Passphrase: "static-pages-roundtrip", AsWorkspace: fork, Actor: actor, AttachmentRoot: targetRoot})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, sha := range shas {
+				got, err := os.ReadFile(filepath.Join(targetRoot, "attachments", restored.RestoredWorkspaceID, sha[:2], sha))
+				if err != nil || !bytes.Equal(got, contents[i]) {
+					t.Fatalf("static Page blob lost/changed: %v", err)
+				}
+			}
+			if created.Manifest.Contents.AttachmentsIncluded != 2 || restored.AttachmentsRestored != 2 {
+				t.Fatalf("blob accounting: %d %d", created.Manifest.Contents.AttachmentsIncluded, restored.AttachmentsRestored)
+			}
+		})
 	}
 }
