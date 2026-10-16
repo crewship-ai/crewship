@@ -24,8 +24,8 @@ export interface EntityRefPage {
 }
 
 /** Never guess a card's turn from proximity: persisted run identity is authority. */
-export function anchorEntityRefs(turns: readonly ChatTurn[], refs: readonly EntityRef[]) {
-  const anchored = new Map<string, { refs: EntityRef[]; withoutReply: boolean }>()
+export function anchorEntityRefs<T extends Pick<EntityRef, "anchor">>(turns: readonly ChatTurn[], refs: readonly T[]) {
+  const anchored = new Map<string, { refs: T[]; withoutReply: boolean }>()
   for (const ref of refs) {
     const run = ref.anchor.run_id
     const matching = run ? turns.filter((t) => t.role !== "user" && (t.runId === run || t.metadata?.run_id === run || t.parts.some((p) => p.metadata?.run_id === run))) : []

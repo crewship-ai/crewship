@@ -11,6 +11,7 @@ type Props = {
   reference: ProposalRef; viewerId: string; surface: ProposalScope["surface"]
   transport: ProposalTransport; onSnapshot: (reference: ProposalRef) => void; onAccessLost: () => void
   onComment: (comment: string) => Promise<boolean>; onOpen?: () => void
+  onReadCurrent?: () => Promise<ProposalRef | null>
   renderIssue: (issue: { id: string; identifier: string }) => React.ReactNode
   assignees: { id: string; name: string }[]; projects?: { id: string; name: string }[]
   rechecking?: boolean
@@ -18,7 +19,7 @@ type Props = {
 const control = "block w-full rounded-md border bg-background px-2 py-2 coarse:min-h-12"
 
 /** The caller supplies authorized snapshots and transport, never generated text. */
-export function ProposalEntityCard({ reference, viewerId, surface, transport, onSnapshot, onAccessLost, onComment, onOpen, renderIssue, assignees, projects = [], rechecking = false }: Props) {
+export function ProposalEntityCard({ reference, viewerId, surface, transport, onSnapshot, onAccessLost, onComment, onOpen, renderIssue, assignees, projects = [], rechecking = false, onReadCurrent }: Props) {
   const scope = { workspaceId: reference.entity.workspace_id, viewerId, proposalId: reference.entity.id, surface }
   const fields = useProposalDraft(reference, scope)
   const operation = useProposalOperation(scope, transport, (snapshot, action) => {
@@ -28,6 +29,7 @@ export function ProposalEntityCard({ reference, viewerId, surface, transport, on
   const [review, setReview] = useState(false)
   const [commentBusy, setCommentBusy] = useState(false)
   const [commentError, setCommentError] = useState(false)
+  const [readingConflict, setReadingConflict] = useState(false)
   const proposal = reference.proposal
   const selected = fields.draft.items.filter(item => item.selected)
   const dirty = JSON.stringify({ title: fields.draft.title, items: fields.draft.items }) !== JSON.stringify({ title: proposal.title, items: proposal.items })
@@ -73,8 +75,11 @@ export function ProposalEntityCard({ reference, viewerId, surface, transport, on
         {proposal.allowed_actions.includes("discard") && <Button className="coarse:min-h-12" variant="ghost" disabled={locked} onClick={() => command("discard")}>Discard proposal</Button>}
       </div>
       {dirty && <p className="text-xs text-muted-foreground">Save edits before confirming.</p>}
-      {review && !dirty && !fields.conflict && <div className="space-y-2 rounded-md border p-3" aria-label="Confirmation summary"><p>Create {selected.length} issues as {viewerId}.</p><ul>{selected.map(item => <li key={item.id}>{item.title} · project {projects.find(project => project.id === item.project_id)?.name ?? item.project_id ?? "none"} · {item.assignee_id ? `assigned to ${assignees.find(person => person.id === item.assignee_id)?.name ?? item.assignee_id}` : "unassigned"}</li>)}</ul><p>All selected issues are created together. No work will be started.</p><Button className="coarse:min-h-12" disabled={locked} onClick={() => command("confirm")}>Confirm creation of {selected.length} issues</Button></div>}
-      {operation.state !== "idle" && <div role={operation.state === "saving" ? "status" : "alert"} className="space-y-2"><p>{operation.state === "saving" ? "Saving…" : operation.message}</p>{operation.state === "unknown" && <Button className="coarse:min-h-12" variant="outline" onClick={() => void operation.retry()}>Retry identical operation</Button>}{operation.state === "conflict" && operation.current && <><p>Current version {operation.current.proposal.version}: {operation.current.proposal.title}</p><Button className="coarse:min-h-12" variant="outline" onClick={operation.reviewCurrent}>Review current version; keep draft</Button></>}</div>}
+      {review && !dirty && !fields.conflict && <div className="space-y-2 rounded-md border p-3" aria-label="Confirmation summary"><p>Create {selected.length} issues as {viewerId}.</p><ul>{selected.map(item => <li key={item.id}>{item.title} · project {projects.find(project => project.id === item.project_id)?.name ?? item.project_id ?? "none"} · {item.assignee_id ? `assigned to ${assignees.find(person => person.id === item.assignee_id)?.name ?? item.assignee_id}` : "unassigned"}</li>)}</ul><p>All selected issues are created together. Direct start is a separate action; existing workspace automations still apply.</p><Button className="coarse:min-h-12" disabled={locked} onClick={() => command("confirm")}>Confirm creation of {selected.length} issues</Button></div>}
+      {operation.state !== "idle" && <div role={operation.state === "saving" ? "status" : "alert"} className="space-y-2"><p>{operation.state === "saving" ? "Saving…" : operation.message}</p>{operation.state === "unknown" && <Button className="coarse:min-h-12" variant="outline" disabled={rechecking} onClick={() => { if (!rechecking) void operation.retry() }}>Retry identical operation</Button>}{operation.state === "conflict" && operation.current && <><p>Current version {operation.current.proposal.version}: {operation.current.proposal.title}</p><Button className="coarse:min-h-12" variant="outline" onClick={() => operation.reviewCurrent()}>Review current version; keep draft</Button></>}{operation.state === "conflict" && !operation.current && onReadCurrent && <Button variant="outline" className="coarse:min-h-12" disabled={rechecking || readingConflict} onClick={async () => {
+        setReadingConflict(true)
+        try { const snapshot = await onReadCurrent(); if (snapshot) operation.reviewCurrent(snapshot) } finally { setReadingConflict(false) }
+      }}>Read current proposal and review conflict</Button>}</div>}
       <div className="space-y-2 border-t pt-3"><label className="block text-xs">Comment to agent<textarea className={control} maxLength={10000} value={fields.comment} disabled={commentBusy} onChange={event => fields.setComment(event.target.value)} /></label><Button className="coarse:min-h-12" variant="outline" disabled={commentBusy || rechecking || !fields.comment.trim()} onClick={async () => {
         setCommentBusy(true); setCommentError(false)
         try { if (await onComment(fields.comment)) fields.setComment(""); else setCommentError(true) } catch { setCommentError(true) } finally { setCommentBusy(false) }

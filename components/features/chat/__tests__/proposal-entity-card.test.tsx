@@ -15,14 +15,17 @@ const onAccessLost = vi.fn()
 const snapshot = (value: ProposalRef) => new Response(JSON.stringify(value))
 function setup(initial = base, surface: "card" | "panel" = "card") {
   let change: (reference: ProposalRef) => void = () => {}
+  let setChecking: (checking: boolean) => void = () => {}
   function Harness() {
     const [reference, setReference] = useState(initial)
+    const [rechecking, changeChecking] = useState(false)
+    setChecking = changeChecking
     change = setReference
-    return <ProposalEntityCard reference={reference} viewerId="viewer" surface={surface} transport={transport} onSnapshot={setReference} onAccessLost={onAccessLost} onComment={onComment} assignees={[{ id: "agent-1", name: "Jamie" }]} renderIssue={issue => <p>Issue card {issue.identifier}</p>} />
+    return <ProposalEntityCard rechecking={rechecking} reference={reference} viewerId="viewer" surface={surface} transport={transport} onSnapshot={setReference} onAccessLost={onAccessLost} onComment={onComment} assignees={[{ id: "agent-1", name: "Jamie" }]} renderIssue={issue => <p>Issue card {issue.identifier}</p>} />
   }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const view = render(<QueryClientProvider client={client}><Harness /></QueryClientProvider>)
-  return { ...view, change: (reference: ProposalRef) => { change(reference) } }
+  return { ...view, setChecking: (checking: boolean) => setChecking(checking), change: (reference: ProposalRef) => { change(reference) } }
 }
 afterEach(() => { cleanup(); sessionStorage.clear(); transport.mockReset(); onComment.mockReset().mockResolvedValue(true); onAccessLost.mockReset() })
 it("edits/selects bounded issues, saves before explicit count/effect/actor confirmation, then renders immutable receipt and E1 slots", async () => {
@@ -42,7 +45,7 @@ it("edits/selects bounded issues, saves before explicit count/effect/actor confi
   expect(JSON.parse(transport.mock.calls[0][0].body).items[0]).toMatchObject({ title: "Measure latency", priority: "urgent", assignee_id: "agent-1" })
   fireEvent.click(screen.getByRole("button", { name: "Review confirmation" }))
   expect(screen.getByText("Create 1 issues as viewer.")).toBeVisible()
-  expect(screen.getByText("All selected issues are created together. No work will be started.")).toBeVisible()
+  expect(screen.getByText("All selected issues are created together. Direct start is a separate action; existing workspace automations still apply.")).toBeVisible()
   fireEvent.click(screen.getByRole("button", { name: "Confirm creation of 1 issues" }))
   await screen.findByText("Issue card ENG-1")
   expect(screen.queryByRole("textbox")).toBeNull()
@@ -130,4 +133,31 @@ it("does not send an operation if durable recovery is unavailable", async () => 
   await screen.findByText("Recovery storage is unavailable. No request was sent.")
   expect(transport).not.toHaveBeenCalled()
   storage.mockRestore()
+})
+
+it("does not retry an uncertain write until current access is verified", async () => {
+  transport.mockResolvedValueOnce(new Response("{}", { status: 500 }))
+  const view = setup()
+  fireEvent.click(screen.getByRole("button", { name: "Discard proposal" }))
+  const retry = await screen.findByRole("button", { name: "Retry identical operation" })
+  act(() => view.setChecking(true))
+  expect(retry).toBeDisabled()
+  fireEvent.click(retry)
+  expect(transport).toHaveBeenCalledTimes(1)
+  act(() => view.setChecking(false))
+  expect(retry).toBeEnabled()
+})
+
+it("purges only the old source after a late denial without calling a new surface callback", async () => {
+  let finish: (response: Response) => void = () => {}
+  transport.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const view = setup()
+  fireEvent.change(screen.getByLabelText("Issue 1 title"), { target: { value: "Pending edit" } })
+  fireEvent.click(screen.getByRole("button", { name: "Save proposal edits" }))
+  await waitFor(() => expect(transport).toHaveBeenCalledTimes(1))
+  expect(sessionStorage.getItem(proposalRecoveryKey(scope, "edit"))).not.toBeNull()
+  view.unmount()
+  await act(async () => finish(new Response("{}", { status: 403 })))
+  expect(sessionStorage.getItem(proposalRecoveryKey(scope, "edit"))).toBeNull()
+  expect(onAccessLost).not.toHaveBeenCalled()
 })
