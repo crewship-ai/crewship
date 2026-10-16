@@ -7,7 +7,7 @@ import { formatRoutineTime } from "@/lib/routine-time"
 
 import { routinePresetSummary } from "@/lib/routine-preset-summary"
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { Plus, Trash2, Pencil } from "lucide-react"
 import {
   usePipelineSchedules,
@@ -28,12 +28,12 @@ import { scheduleHealth } from "@/lib/schedule-health"
 import { RoutineOnceSchedule } from "./routine-once-schedule"
 import { RoutineRecurrenceFields } from "./routine-recurrence-fields"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
+import { inputsSubmitContent, submitInputsForm } from "./routine-run-inputs-dialog"
 import { RoutinePresetForm } from "./routine-preset-form"
 import { RoutineScheduleEditorDialog } from "./routine-schedule-editor-dialog"
 
@@ -152,6 +152,8 @@ export function RoutineSchedulesTab({
     Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   )
   const [editingInputs, setEditingInputs] = useState<PipelineSchedule | null>(null)
+  const answersFormId = useId()
+  const [answersReady, setAnswersReady] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const submit = async (inputs: Record<string, unknown>) => {
@@ -459,21 +461,27 @@ export function RoutineSchedulesTab({
         )}
 
         {editingInputs && (
-          <Dialog
+          <CreateSurface
             open
             onOpenChange={(open) => {
               if (!open && !busy) setEditingInputs(null)
             }}
+            size="sm"
+            onSubmit={() => answersReady && submitInputsForm(answersFormId)}
           >
-            <DialogContent className="max-h-[90dvh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Answers for {editingInputs.name}</DialogTitle>
-                <DialogDescription>
-                  These values are supplied to every start of this schedule.
-                </DialogDescription>
-              </DialogHeader>
+            <CreateSurfaceHeader
+              concept="routines"
+              title={`Answers for ${editingInputs.name}`}
+              description="These values are supplied to every start of this schedule."
+              onClose={() => {
+                if (!busy) setEditingInputs(null)
+              }}
+            />
+            <CreateSurfaceBody>
               <RoutinePresetForm
                 key={editingInputs.id}
+                formId={answersFormId}
+                onReadyChange={setAnswersReady}
                 workspaceId={workspaceId}
                 slug={slug}
                 version={editingInputs.target_pipeline_version}
@@ -496,8 +504,16 @@ export function RoutineSchedulesTab({
                   }
                 }}
               />
-            </DialogContent>
-          </Dialog>
+            </CreateSurfaceBody>
+            <CreateSurfaceFooter
+              hint={null}
+              onCancel={() => setEditingInputs(null)}
+              guardCancel={false}
+              primaryLabel={answersReady ? inputsSubmitContent("Save inputs", busy) : undefined}
+              onPrimary={answersReady ? () => submitInputsForm(answersFormId) : undefined}
+              busy={busy}
+            />
+          </CreateSurface>
         )}
 
         <RoutineOnceSchedule

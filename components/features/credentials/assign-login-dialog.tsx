@@ -18,12 +18,12 @@
  */
 
 import * as React from "react"
-import { Check, ChevronsUpDown } from "lucide-react"
+import { Check, ChevronsUpDown, UserPlus } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -131,18 +131,29 @@ export function AssignLoginDialog({ workspaceId, credential, open, onOpenChange,
     }
   }
 
+  const submitDisabled = !chosen || !slotOk || submitting
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Assign to agent</DialogTitle>
-          <DialogDescription>
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      onSubmit={() => {
+        if (!submitDisabled) void submit()
+      }}
+    >
+      <CreateSurfaceHeader
+        icon={UserPlus}
+        title="Assign to agent"
+        description={
+          <>
             <span className="font-medium text-foreground">{credential.name}</span> becomes the seat this agent pays
             with. The agent&apos;s own binding wins over its crew&apos;s and the workspace&apos;s.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-3">
+          </>
+        }
+        onClose={() => onOpenChange(false)}
+      />
+      <CreateSurfaceBody className="space-y-3">
           <div className="space-y-1.5">
             <Label className="type-section text-muted-foreground">Agent</Label>
             <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
@@ -213,15 +224,14 @@ export function AssignLoginDialog({ workspaceId, credential, open, onOpenChange,
           </div>
 
           {error && <p className="type-meta text-destructive">{error}</p>}
-        </div>
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
-          <Button onClick={submit} disabled={!chosen || !slotOk || submitting}>
-            {submitting ? "Assigning…" : "Assign"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        onCancel={() => onOpenChange(false)}
+        primaryLabel={submitting ? "Assigning…" : "Assign"}
+        onPrimary={submit}
+        primaryDisabled={!chosen || !slotOk}
+        busy={submitting}
+      />
+    </CreateSurface>
   )
 }

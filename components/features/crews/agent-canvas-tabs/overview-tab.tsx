@@ -7,8 +7,8 @@ import {
 
 import { useAgentReach } from "@/hooks/use-agent-reach"
 import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { AgentConnectorsCard } from "@/components/features/integrations/composio/access-editor"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { entityHref } from "@/lib/entity-links"
@@ -418,6 +418,7 @@ export function OverviewTab({
       <ManagerDialog
         open={manager !== null}
         onClose={() => setManager(null)}
+        concept={manager ?? undefined}
         title={
           manager === "skills" ? "Skills"
             : manager === "tools" ? "Tools and connectors"
@@ -480,23 +481,22 @@ function RowGroup({ title, note, children }: { title: string; note: string; chil
  * detour, and the same width suits every one of them.
  */
 function ManagerDialog({
-  open, onClose, title, description, children,
+  open, onClose, title, description, concept, children,
 }: {
   open: boolean
   onClose: () => void
   title: string
   description: string
+  concept?: string
   children: React.ReactNode
 }) {
+  // Every manager applies its own changes as they are made, so there is no
+  // draft to commit: Done is the only way out and nothing needs a guard.
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-[720px]">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-        {children}
-      </DialogContent>
-    </Dialog>
+    <CreateSurface open={open} onOpenChange={(next) => { if (!next) onClose() }} size="lg" restoreOpenerFocus>
+      <CreateSurfaceHeader concept={concept} title={title} description={description} onClose={onClose} />
+      <CreateSurfaceBody>{children}</CreateSurfaceBody>
+      <CreateSurfaceFooter hint={null} onCancel={onClose} cancelLabel="Done" />
+    </CreateSurface>
   )
 }

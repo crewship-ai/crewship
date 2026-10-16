@@ -21,16 +21,15 @@ import * as React from "react"
 import { Copy, Download, MoreHorizontal, Power, PowerOff, X } from "lucide-react"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CREATE_SURFACE_INPUT,
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceField,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
+import { Input } from "@/components/ui/input"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -215,36 +214,47 @@ export function RoutineActionsMenu({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={dialog === "duplicate"} onOpenChange={(o) => !o && setDialog(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Copy this routine</DialogTitle>
-            <DialogDescription>
-              Copies the definition under a new name. Schedules, webhooks and run history stay with
-              the original.
-            </DialogDescription>
-          </DialogHeader>
-          <label className="block space-y-1.5">
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              New name
-            </span>
-            <input
-              value={copyName}
-              onChange={(e) => setCopyName(e.target.value)}
-              className="w-full rounded-md border border-foreground/[0.1] bg-background px-2.5 py-2 text-[13px]"
-            />
-          </label>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialog(null)} disabled={busy}>
-              Cancel
-            </Button>
-            <Button onClick={submitDuplicate} disabled={busy || !copyName.trim()} className="gap-1.5">
-              {busy && <Spinner className="h-3.5 w-3.5" />}
-              Copy
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CreateSurface
+        open={dialog === "duplicate"}
+        onOpenChange={(o) => !o && setDialog(null)}
+        size="sm"
+        onSubmit={() => {
+          if (!busy && copyName.trim()) submitDuplicate()
+        }}
+      >
+        <CreateSurfaceHeader
+          concept="routines"
+          title="Copy this routine"
+          description="Copies the definition under a new name. Schedules, webhooks and run history stay with the original."
+          onClose={() => setDialog(null)}
+        />
+        <CreateSurfaceBody>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (!busy && copyName.trim()) submitDuplicate()
+            }}
+          >
+            <CreateSurfaceField label="New name" htmlFor="routine-copy-name">
+              <Input
+                id="routine-copy-name"
+                value={copyName}
+                onChange={(e) => setCopyName(e.target.value)}
+                className={CREATE_SURFACE_INPUT}
+              />
+            </CreateSurfaceField>
+          </form>
+        </CreateSurfaceBody>
+        <CreateSurfaceFooter
+          onCancel={() => setDialog(null)}
+          guardCancel={false}
+          primaryLabel="Copy"
+          onPrimary={submitDuplicate}
+          primaryDisabled={!copyName.trim()}
+          busy={busy}
+          primaryIcon={Copy}
+        />
+      </CreateSurface>
     </>
   )
 }

@@ -13,14 +13,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -266,16 +263,21 @@ export function JournalSavedViews({ workspaceId, filters, onApply }: JournalSave
         </button>
       )}
 
-      <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Save this view</DialogTitle>
-            <DialogDescription>
+      <CreateSurface
+        open={saveOpen}
+        onOpenChange={setSaveOpen}
+        size="sm"
+        onSubmit={() => { if (name.trim() && !saving) void create() }}
+      >
+          <CreateSurfaceHeader
+            title="Save this view"
+            description={<>
               Stores the current tab, time range, scope, severity and search so you can come
               back to it — or hand it to the crew.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
+            </>}
+            onClose={() => setSaveOpen(false)}
+          />
+          <CreateSurfaceBody className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="journal-view-name" className="text-xs">
                 Name
@@ -304,18 +306,17 @@ export function JournalSavedViews({ workspaceId, filters, onApply }: JournalSave
                 .map(([k, v]) => `${k}=${v}`)
                 .join("\n") || "(no filters)"}
             </pre>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setSaveOpen(false)}>
-              Cancel
-            </Button>
-            <Button size="sm" disabled={!name.trim() || saving} onClick={() => void create()}>
-              {saving && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+          </CreateSurfaceBody>
+          <CreateSurfaceFooter
+            onCancel={() => setSaveOpen(false)}
+            primaryLabel={<>
+              {saving && <Loader2 className="h-3 w-3 animate-spin" />}
               Save view
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </>}
+            onPrimary={() => void create()}
+            primaryDisabled={!name.trim() || saving}
+          />
+      </CreateSurface>
     </div>
   )
 }

@@ -11,7 +11,7 @@ import { INSTANCE_SCOPE } from "@/lib/admin-api"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
 import { SidebarSearch } from "@/components/layout/sidebar-kit"
 import {
@@ -307,18 +307,22 @@ export function SecurityPage() {
             </Button>
           </div>
         )}
-        <Dialog open={bulk !== null} onOpenChange={(o) => { if (!o) setBulk(null) }}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{BULK.find((b) => b.key === bulk)?.title} for {pickedRows.length} {pickedRows.length === 1 ? "workspace" : "workspaces"}</DialogTitle>
-              <DialogDescription>{pickedRows.map((r) => r.workspace_name).join(", ")}</DialogDescription>
-            </DialogHeader>
+        <CreateSurface open={bulk !== null} onOpenChange={(o) => { if (!o) setBulk(null) }} size="sm">
+            <CreateSurfaceHeader
+              title={<>{BULK.find((b) => b.key === bulk)?.title} for {pickedRows.length} {pickedRows.length === 1 ? "workspace" : "workspaces"}</>}
+              description={pickedRows.map((r) => r.workspace_name).join(", ")}
+              onClose={() => setBulk(null)}
+            />
+            {/* BulkGovernanceForm brings its own Review/Cancel row (`inDialog`):
+                saving goes through its change-review confirmation, not a
+                one-click primary, so the surface adds no second footer. */}
+            <CreateSurfaceBody>
             {bulk && (
               <BulkGovernanceForm section={bulk} rows={pickedRows} all={false} inDialog={{ onCancel: () => setBulk(null) }}
                 onSaved={() => { setBulk(null); setPicked(new Set()); void inst.reloadGov() }} />
             )}
-          </DialogContent>
-        </Dialog>
+            </CreateSurfaceBody>
+        </CreateSurface>
       </>
     )
   } else if (view === "activity") {

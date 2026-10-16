@@ -10,7 +10,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { isResourceRight, resourcePolicySchema, resourceShareReplacement, shareOperations, type ResourcePolicy, type SharedResource } from "@/lib/resource-sharing"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { ProjectGuestIntake } from "./project-guest-intake"
 
 const rosterSchema = z.array(z.object({
@@ -56,12 +56,14 @@ function ShareDialog({ workspaceId, resource }: { workspaceId: string; resource:
       return { members, policies }
     },
   })
-  return <Dialog open={open} onOpenChange={next => { if (!busyMember) setOpen(next) }}>
-    <DialogTrigger asChild><Button variant="outline" size="sm" className="coarse:h-12"><Share2 className="mr-1.5 h-3.5 w-3.5" />Share</Button></DialogTrigger>
-    <DialogContent className="max-h-[85dvh] overflow-y-auto">
-      <DialogHeader><DialogTitle>Share {resource.name}</DialogTitle><DialogDescription>
+  const requestOpen = (next: boolean) => { if (!busyMember) setOpen(next) }
+  return <>
+    <Button variant="outline" size="sm" className="coarse:h-12" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><Share2 className="mr-1.5 h-3.5 w-3.5" />Share</Button>
+    <CreateSurface open={open} onOpenChange={requestOpen} size="md" restoreOpenerFocus>
+      <CreateSurfaceHeader title={`Share ${resource.name}`} onClose={() => requestOpen(false)} description={<>
         {resource.kind === "routine" ? "View shares the stored definition, including its prompts and defaults, without permission to execute. View runs and outputs additionally shares past and future routine run history and outputs; inherited private conversation audiences still apply. Inputs are not shown directly; outputs may contain them. It does not share transcripts or execution authority. Edit draft additionally shares the collaborative unpublished draft and permits changes with View. It does not publish or grant execution. Existing Run shares do not automatically expose the definition. Run uses the routine’s configured credentials and also requires access to every agent it uses." : "List shows the project in Issues. Read opens its issues and explicitly shared comments. Contribute also permits requests, shared comments and arranging intake work; it requires Read. Manage with Read explicitly shares the project description and permits editing its name, description and milestones. Only empty milestones can be removed. Delete issues also requires Read and Manage, and explicitly permits permanent removal of Backlog or Cancelled issues without active work or sub-issues."}
-      </DialogDescription></DialogHeader>
+      </>} />
+      <CreateSurfaceBody className="space-y-4">
       <p className="text-sm text-muted-foreground">Trusted members use their workspace role. Individual shares apply to Guest accounts; changing account mode is managed in Settings.</p>
       {open && resource.kind === "project" && <ProjectGuestIntake workspaceId={workspaceId} projectId={resource.id} disabled={busyMember !== null} onBusy={busy => setBusyMember(busy ? "__intake__" : null)} />}
       {query.isPending && <p role="status">Loading shares…</p>}
@@ -78,8 +80,10 @@ function ShareDialog({ workspaceId, resource }: { workspaceId: string; resource:
       </>}
       <Button variant="outline" disabled={busyMember !== null} onClick={() => void query.refetch()}>Reload shares</Button>
       <p className="text-xs text-muted-foreground">Reloading discards edits for members whose saved access changed.</p>
-    </DialogContent>
-  </Dialog>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter hint={null} onCancel={() => requestOpen(false)} cancelLabel="Close" busy={busyMember !== null} />
+    </CreateSurface>
+  </>
 }
 
 function ShareMember({ workspaceId, resource, policy, label, onSaved, disabled, onBusy }: {

@@ -1,19 +1,17 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { Webhook } from "lucide-react"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { useConfirm } from "@/components/ui/use-confirm"
 import type { PipelineWebhook, WebhookUpdateBody } from "@/hooks/use-pipeline-webhooks"
 
 /**
@@ -44,7 +42,8 @@ export function RoutineWebhookEditorDialog({
   const [enabled, setEnabled] = useState(true)
   const [rotateSecret, setRotateSecret] = useState(false)
   const [jsonError, setJsonError] = useState<string | null>(null)
-  const { ask, dialog } = useConfirm()
+  // The body waiting on the rotation confirmation; null while not asking.
+  const [pendingRotation, setPendingRotation] = useState<WebhookUpdateBody | null>(null)
 
   useEffect(() => {
     if (!webhook) return
@@ -54,11 +53,12 @@ export function RoutineWebhookEditorDialog({
     setEnabled(webhook.enabled)
     setRotateSecret(false)
     setJsonError(null)
+    setPendingRotation(null)
   }, [webhook])
 
   if (!webhook) return null
 
-  const submit = async () => {
+  const submit = () => {
     let inputsTemplate: Record<string, unknown>
     try {
       inputsTemplate = inputsTemplateJson.trim() ? JSON.parse(inputsTemplateJson) : {}
@@ -74,33 +74,33 @@ export function RoutineWebhookEditorDialog({
       enabled,
     }
     if (rotateSecret) {
-      const ok = await ask({
-        title: "Rotate the signing secret?",
-        description: "Saving also replaces this webhook's HMAC signing secret.",
-        consequences: [
-          { tone: "kept", text: "The URL stays the same" },
-          { tone: "lost", text: "Every sender signing with the current secret fails verification until it is updated" },
-        ],
-        confirmLabel: "Rotate and save",
-        destructive: true,
-      })
-      if (!ok) return
-      body.rotate_secret = true
+      // Ask first: rotating breaks every sender still signing with the
+      // current secret. Declining saves nothing, as the old confirm() did.
+      setPendingRotation({ ...body, rotate_secret: true })
+      return
     }
     onSave(body)
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Edit webhook</DialogTitle>
-          <DialogDescription>
-            The public URL never changes here — only delete + recreate rotates it.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+    <CreateSurface
+      open
+      onOpenChange={(open) => !open && onCancel()}
+      size="sm"
+      onSubmit={() => {
+        if (!submitting) submit()
+      }}
+    >
+        <CreateSurfaceHeader
+          concept="routines"
+          icon={Webhook}
+          title="Edit webhook"
+          description="The public URL never changes here — only delete + recreate rotates it."
+          onClose={onCancel}
+        />
 
-        <div className="space-y-4">
+        <CreateSurfaceBody className="space-y-4">
           <div>
             <Label htmlFor="wh-name">Name</Label>
             <Input id="wh-name" value={name} onChange={(e) => setName(e.target.value)} className="mt-1.5" />
@@ -144,14 +144,31 @@ export function RoutineWebhookEditorDialog({
               dialog — only the HMAC secret, and only when you check this.
             </p>
           </div>
-        </div>
+        </CreateSurfaceBody>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Button>
-          <Button onClick={() => void submit()} disabled={submitting}>{submitting ? "Saving…" : "Save"}</Button>
-        </DialogFooter>
-        {dialog}
-      </DialogContent>
-    </Dialog>
+        <CreateSurfaceFooter
+          onCancel={onCancel}
+          guardCancel={false}
+          primaryLabel={submitting ? "Saving…" : "Save"}
+          onPrimary={submit}
+          busy={submitting}
+        />
+    </CreateSurface>
+    <ConfirmDialog
+      open={pendingRotation !== null}
+      onOpenChange={(open) => !open && setPendingRotation(null)}
+      title="Rotate the signing secret?"
+      description="Saving also replaces this webhook's HMAC signing secret."
+      consequences={[
+        { tone: "kept", text: "The URL stays the same" },
+        { tone: "lost", text: "Every sender signing with the current secret fails verification until it is updated" },
+      ]}
+      confirmLabel="Rotate and save"
+      destructive
+      onConfirm={() => {
+        if (pendingRotation) onSave(pendingRotation)
+      }}
+    />
+    </>
   )
 }

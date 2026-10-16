@@ -1,16 +1,14 @@
 "use client"
 
 import { RoutineRunEffects, routineRunFacts } from "./routine-run-effects"
-import { useRef, useState, type ReactNode } from "react"
+import { useId, useRef, useState, type ReactNode } from "react"
 import { Clock, DollarSign, Hand, Layers, Play, Users } from "lucide-react"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
 import { FormField } from "@/components/features/chat/asks/form-field"
 import {
@@ -86,6 +84,7 @@ export function RoutineRunInputsDialog({
   onCancel,
   onRun,
 }: RoutineRunInputsDialogProps) {
+  const formId = useId()
   if (inputs === null) return null
   // The version the run uses: a chosen historical version, else the head.
   const usedVersion =
@@ -99,14 +98,22 @@ export function RoutineRunInputsDialog({
   if (facts.decides) chips.push({ icon: Hand, text: facts.decides })
   if (facts.cost) chips.push({ icon: DollarSign, text: facts.cost })
   if (facts.duration) chips.push({ icon: Clock, text: facts.duration })
+  const dismiss = () => {
+    if (!submitting) onCancel()
+  }
   return (
-    <Dialog open onOpenChange={(open) => !open && !submitting && onCancel()}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto border-border bg-card sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {submitLabel} {routineName}
-          </DialogTitle>
-          <DialogDescription>
+    <CreateSurface
+      open
+      onOpenChange={(open) => !open && dismiss()}
+      size="sm"
+      onSubmit={() => submitInputsForm(formId)}
+    >
+      <CreateSurfaceHeader
+        concept="routines"
+        icon={submitLabel === "Run" ? Play : Clock}
+        title={`${submitLabel} ${routineName}`}
+        description={
+          <>
             {usedVersion ? (
               <>
                 Uses <span className="font-medium text-foreground">v{usedVersion}</span>
@@ -119,8 +126,11 @@ export function RoutineRunInputsDialog({
             {submitLabel === "Schedule"
               ? "the routine will start at the selected date and time."
               : "a new run is added to History."}
-          </DialogDescription>
-        </DialogHeader>
+          </>
+        }
+        onClose={dismiss}
+      />
+      <CreateSurfaceBody className="space-y-4">
         {error && <p role="alert" className="text-sm text-destructive">{error}{onReload && <Button type="button" variant="outline" size="sm" className="ml-2" onClick={onReload}>Reload recipe</Button>}</p>}
         {chips.length > 0 && (
           <ul aria-label="Run facts" className="flex flex-wrap gap-1.5">
@@ -170,22 +180,48 @@ export function RoutineRunInputsDialog({
             carrying the previous one's answers across. */}
         <InputsForm
           key={`${routineName}:${selectedVersion ?? "current"}`}
+          formId={formId}
           inputs={inputs}
           initialInputs={initialInputs}
           submitLabel={submitLabel}
           submitting={submitting}
-          onCancel={onCancel}
           onRun={onRun}
           footer={<RoutineRunEffects definition={definition} />}
-          hint={
-            submitLabel === "Schedule"
-              ? "Esc closes · nothing is scheduled yet"
-              : "Esc closes · nothing has started"
-          }
         />
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        hint={
+          submitLabel === "Schedule"
+            ? "Esc closes · nothing is scheduled yet"
+            : "Esc closes · nothing has started"
+        }
+        onCancel={onCancel}
+        guardCancel={false}
+        primaryLabel={inputsSubmitContent(submitLabel, submitting)}
+        primaryIcon={submitLabel === "Run" && !submitting ? Play : undefined}
+        onPrimary={() => submitInputsForm(formId)}
+        busy={submitting}
+      />
+    </CreateSurface>
   )
+}
+
+/** Submit an `InputsForm` rendered with `formId` from a control outside it —
+ *  a CreateSurface footer, or the shell's ⌘↵. Goes through the form's own
+ *  submit handler, so validation runs exactly as it does on Enter. */
+export function submitInputsForm(formId: string) {
+  const form = document.getElementById(formId)
+  if (form instanceof HTMLFormElement) form.requestSubmit()
+}
+
+/** The submit button's text, shared by the inline actions and a surface footer. */
+export function inputsSubmitContent(submitLabel: string, submitting?: boolean): string {
+  const isRun = submitLabel === "Run"
+  if (submitting) {
+    if (isRun) return "Running…"
+    return submitLabel.toLowerCase().includes("schedule") ? "Scheduling…" : "Working…"
+  }
+  return isRun ? "Run now" : submitLabel
 }
 
 export function InputsForm({
@@ -197,6 +233,7 @@ export function InputsForm({
   submitLabel = "Run",
   footer,
   hint,
+  formId,
 }: {
   inputs: RoutineInputSpec[]
   initialInputs?: Record<string, unknown>
@@ -208,6 +245,12 @@ export function InputsForm({
   footer?: ReactNode
   /** Muted text at the left of the buttons. */
   hint?: string
+  /**
+   * Render inside a CreateSurface: the form takes this id and leaves its
+   * actions to the surface footer (which submits it with `submitInputsForm`).
+   * Enter in a field still submits through a visually hidden default button.
+   */
+  formId?: string
 }) {
   const fields = slashFieldsFromRoutineInputs(inputs)
   const [values, setValues] = useState<Record<string, string>>(() =>
@@ -289,7 +332,7 @@ export function InputsForm({
   const isRun = submitLabel === "Run"
 
   return (
-    <form ref={formRef} noValidate onSubmit={handleSubmit} className="space-y-4">
+    <form id={formId} ref={formRef} noValidate onSubmit={handleSubmit} className="space-y-4">
       {summary > 0 && (
         <p
           role="alert"
@@ -370,37 +413,29 @@ export function InputsForm({
         </div>
       ))}
       {footer}
-      <DialogFooter className="sm:items-center">
-        {hint && <span className="text-xs text-muted-foreground sm:mr-auto">{hint}</span>}
-        {onCancel && (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onCancel}
-            disabled={submitting}
-          >
-            Cancel
-          </Button>
-        )}
-        <Button type="submit" disabled={submitting}>
-          {submitting ? (
-            isRun ? (
-              "Running…"
-            ) : submitLabel.toLowerCase().includes("schedule") ? (
-              "Scheduling…"
-            ) : (
-              "Working…"
-            )
-          ) : isRun ? (
-            <>
-              <Play className="mr-1 h-3.5 w-3.5" aria-hidden />
-              Run now
-            </>
-          ) : (
-            submitLabel
+      {formId ? (
+        // The implicit-submission target: without a submit button a form
+        // with several fields does not submit on Enter.
+        <button type="submit" tabIndex={-1} aria-hidden className="sr-only" disabled={submitting} />
+      ) : (
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+          {hint && <span className="text-xs text-muted-foreground sm:mr-auto">{hint}</span>}
+          {onCancel && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onCancel}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
           )}
-        </Button>
-      </DialogFooter>
+          <Button type="submit" disabled={submitting}>
+            {isRun && !submitting && <Play className="mr-1 h-3.5 w-3.5" aria-hidden />}
+            {inputsSubmitContent(submitLabel, submitting)}
+          </Button>
+        </div>
+      )}
     </form>
   )
 }

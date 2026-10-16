@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { Files, Pencil, Settings2 } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { CreateCrewDialog } from "./create-crew-dialog"
 import { CrewRestartButton } from "./crew-restart-button"
 import { MemoryWorkspace } from "./memory-workspace"
@@ -373,10 +373,22 @@ export function CrewCanvas({
       {tab === "memory" && <MemoryWorkspace key={crew.id} workspaceId={workspaceId} crewId={crew.id} />}
       </CanvasTabPanel>
       <CreateCrewDialog workspaceId={workspaceId} crew={crew} open={editOpen} onOpenChange={setEditOpen} onCreated={() => { onCrewChanged(); void fetchCrew() }} />
-      <Dialog open={adminOpen} onOpenChange={setAdminOpen}><DialogContent className="sm:max-w-4xl max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Crew administration</DialogTitle><DialogDescription>Access policies, integrations and container operations. Each control applies its own change.</DialogDescription></DialogHeader>
-        <CrewRestartButton workspaceId={workspaceId} crewId={crew.id} name={crew.name} onRestart={onCrewChanged} />
-        <SettingsTab workspaceId={workspaceId} crew={crew} agentsForCrew={agentsForCrew} integrations={integrations} patch={patch} applyAvatarStyle={applyAvatarStyle} onDelete={() => setConfirmDelete(true)} />
-      </DialogContent></Dialog>
+      {/* Each control applies its own change, so there is no draft for a
+          primary to commit and no discard to guard — Done is the only exit. */}
+      <CreateSurface open={adminOpen} onOpenChange={setAdminOpen} size="xl" restoreOpenerFocus>
+        <CreateSurfaceHeader
+          concept="crews"
+          context={crew.name}
+          title="Crew administration"
+          description="Access policies, integrations and container operations. Each control applies its own change."
+          onClose={() => setAdminOpen(false)}
+        />
+        <CreateSurfaceBody className="space-y-4">
+          <CrewRestartButton workspaceId={workspaceId} crewId={crew.id} name={crew.name} onRestart={onCrewChanged} />
+          <SettingsTab workspaceId={workspaceId} crew={crew} agentsForCrew={agentsForCrew} integrations={integrations} patch={patch} applyAvatarStyle={applyAvatarStyle} onDelete={() => setConfirmDelete(true)} />
+        </CreateSurfaceBody>
+        <CreateSurfaceFooter hint={null} onCancel={() => setAdminOpen(false)} cancelLabel="Done" />
+      </CreateSurface>
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}

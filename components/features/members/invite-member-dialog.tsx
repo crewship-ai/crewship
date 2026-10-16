@@ -11,17 +11,15 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { cn } from "@/lib/utils"
 import { CAPABILITY_BUNDLES, Capability, type CapabilityBundle } from "@/lib/capabilities"
 import { ACCESS_PROFILES, ASSIGNABLE_ROLES, ROLE_LABEL, ROLE_SUMMARY_BY_ROLE } from "@/components/features/settings/members/members-model"
-import { AreaChips, MemberDialogIcon, ROLE_ICON } from "@/components/features/settings/members/member-bits"
+import { AreaChips, ROLE_ICON } from "@/components/features/settings/members/member-bits"
 
 /**
  * Add someone to the workspace.
@@ -76,6 +74,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
   // Survives reset(), so several additions in one sitting still cost the
   // parent exactly one refresh — on the way out.
   const provisionedAny = useRef(false)
+  const formRef = useRef<HTMLFormElement>(null)
 
   /** Close or restart, refreshing the roster on the way out. Every path
    *  that discards the link goes through here, so the parent is refreshed
@@ -184,52 +183,53 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        // Covers Escape and the X, not just the buttons — those discard the
-        // link too, so the roster still needs refreshing.
-        if (!next) dismiss("close")
-        else setOpen(true)
-      }}
-    >
-      <DialogTrigger asChild>
-        {/* The card-action button, the same one Refresh / Export CSV / Check
-            again use across Settings and Admin. This was a filled primary,
-            which put it at a different visual weight from every other action
-            sitting in the same slot — and a filled button is for a page's
-            single main CTA, not for one of several equal actions on a card. */}
-        <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs">
-          <UserPlus className="mr-1.5 h-3 w-3" />
-          Add member
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader className="flex-row items-start gap-3 space-y-0 text-left">
-          <MemberDialogIcon icon={result ? Check : UserPlus} tint={result ? "var(--success)" : "var(--primary)"} />
-          <div className="min-w-0 space-y-1">
-          {/* Keyed off setup_url like everything else in this dialog. The
-              heading is part of the claim: "Send them this link" above a
-              dialog that deliberately issues no link says the opposite of
-              the paragraph underneath it. */}
-          <DialogTitle>
-            {!result ? "Add member" : result.setup_url ? "Send them this link" : "Member added"}
-          </DialogTitle>
-          <DialogDescription>
-            {result
+    <>
+      {/* The card-action button, the same one Refresh / Export CSV / Check
+          again use across Settings and Admin. This was a filled primary,
+          which put it at a different visual weight from every other action
+          sitting in the same slot — and a filled button is for a page's
+          single main CTA, not for one of several equal actions on a card. */}
+      <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+        <UserPlus className="mr-1.5 h-3 w-3" />
+        Add member
+      </Button>
+      <CreateSurface
+        open={open}
+        size="sm"
+        restoreOpenerFocus
+        onOpenChange={(next) => {
+          // Covers Escape and the X, not just the buttons — those discard the
+          // link too, so the roster still needs refreshing.
+          if (!next) dismiss("close")
+          else setOpen(true)
+        }}
+        onSubmit={() => {
+          if (!result && status !== "saving") formRef.current?.requestSubmit()
+        }}
+      >
+        {/* Keyed off setup_url like everything else in this dialog. The
+            heading is part of the claim: "Send them this link" above a
+            dialog that deliberately issues no link says the opposite of
+            the paragraph underneath it. */}
+        <CreateSurfaceHeader
+          icon={result ? Check : UserPlus}
+          accent={result ? "green" : "blue"}
+          title={!result ? "Add member" : result.setup_url ? "Send them this link" : "Member added"}
+          description={
+            result
               ? result.setup_url
                 ? "This is the only time the link is shown — the token is stored hashed and cannot be displayed again."
                 : "They already have an account, so nothing needs setting up."
-              : guest ? "Creates a Guest invitation with your initial shares. Existing accounts change only after acceptance." : "Creates the account if the email is new, then gives you a setup link to send them."}
-          </DialogDescription>
-          </div>
-        </DialogHeader>
+              : guest ? "Creates a Guest invitation with your initial shares. Existing accounts change only after acceptance." : "Creates the account if the email is new, then gives you a setup link to send them."
+          }
+          onClose={() => dismiss("close")}
+        />
 
         {result ? (
           /* Deliberately NOT auto-closing. The old dialog dismissed itself
              after 1.5s; doing that with a link on screen would destroy the
              only copy of something that cannot be shown again. */
-          <div className="space-y-4">
+          <CreateSurfaceBody className="space-y-4">
             <p className="text-body text-muted-foreground">
               {/* Keyed off setup_url, not created_user. They answer different
                   questions: an account that exists but was never set up gets
@@ -269,9 +269,14 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
                 Done
               </Button>
             </div>
-          </div>
+          </CreateSurfaceBody>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <>
+          <CreateSurfaceBody>
+          <form ref={formRef} onSubmit={handleSubmit} className="space-y-4">
+            {/* Enter in a field submits through this; the visible primary
+                lives in the footer, outside the form. */}
+            <button type="submit" className="sr-only" aria-hidden tabIndex={-1} />
             <div className="space-y-2">
               <Label htmlFor="invite-email">Email address</Label>
               <Input
@@ -349,20 +354,20 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
               <p className="text-body text-destructive">{error}</p>
             )}
 
-            <div className="flex justify-end gap-2">
-              {/* dismiss(), not setOpen(false): a controlled setOpen does
-                  NOT fire onOpenChange, so closing this way would skip the
-                  one refresh the parent is owed. */}
-              <Button type="button" variant="outline" onClick={() => dismiss("close")}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={status === "saving"}>
-                {status === "saving" ? "Adding…" : "Add member"}
-              </Button>
-            </div>
           </form>
+          </CreateSurfaceBody>
+          {/* dismiss(), not setOpen(false): a controlled setOpen does
+              NOT fire onOpenChange, so closing this way would skip the
+              one refresh the parent is owed. */}
+          <CreateSurfaceFooter
+            onCancel={() => dismiss("close")}
+            primaryLabel={status === "saving" ? "Adding…" : "Add member"}
+            onPrimary={() => formRef.current?.requestSubmit()}
+            busy={status === "saving"}
+          />
+          </>
         )}
-      </DialogContent>
-    </Dialog>
+      </CreateSurface>
+    </>
   )
 }
