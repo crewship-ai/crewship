@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/slides"
 )
 
 // BackupTables is the ordered list of tables exported in workspace /
@@ -312,6 +314,7 @@ var BackupTables = []string{
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
 	"slides_heads", "slides_revisions", "slides_receipts", "slides_object_ids",
+	"slides_comment_threads", "slides_comment_events", "slides_comment_receipts",
 	"documents",
 	"document_updates",
 	"document_receipts",
@@ -1479,6 +1482,24 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	// rows describing it. PRAGMA foreign_key_check returns one row per
 	// violation regardless of defer_foreign_keys, so it's the right
 	// probe to run inside the open tx.
+	// Validate original anchors/history and rebuild derived projections against
+	// the actual retained head, including same-identity INSERT OR IGNORE restores.
+	commentPages := map[slides.Key]bool{}
+	for _, table := range []string{"slides_comment_threads", "slides_comment_events", "slides_comment_receipts"} {
+		for _, row := range dump.Tables[table] {
+			workspace, wok := row["workspace_id"].(string)
+			page, pok := row["page_id"].(string)
+			if !wok || !pok || workspace == "" || page == "" {
+				return stats, fmt.Errorf("backup: invalid Slides comment Page identity")
+			}
+			commentPages[slides.Key{WorkspaceID: workspace, PageID: page}] = true
+		}
+	}
+	for key := range commentPages {
+		if err := slides.RebuildCommentPageTx(ctx, tx, key); err != nil {
+			return stats, fmt.Errorf("backup: invalid Slides comments: %w", err)
+		}
+	}
 	if hooks.PostInsert != nil {
 		if err := hooks.PostInsert(ctx, tx); err != nil {
 			return stats, fmt.Errorf("backup: post-insert hook: %w", err)
