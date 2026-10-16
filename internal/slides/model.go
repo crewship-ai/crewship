@@ -23,6 +23,7 @@ const (
 	MaxImageAltBytes      = 2048
 	MaxImageAssets        = 32
 	MaxImageAssetBytes    = 32 << 20
+	MaxImageAssetPixels   = 32 * 1024 * 1024
 	ImageHashDomain       = "crewship-slides-canonical-json/v2\n"
 	MaxDeckBytes          = 2 << 20
 	MaxSlides             = 100

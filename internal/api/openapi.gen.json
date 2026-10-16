@@ -150980,7 +150980,7 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
-                "description": "Progressive candidate semantics: each if_hash sees earlier operations in this atomic batch. if_hash is element hash for set/delete_element, full slide hash for insert_element/set_notes/delete_slide. insert/delete_slide also require if_order_version. Aggregate final deck limits enforced. Explicit first-image upgrade requires original schema1, target_schema_version2 and original whole-head if_content_hash together. Schema1 remains closed without images. Image asset ID/SHA must match live owning Page assets; promotion and exact immutable revision pins commit atomically. At most32 unique assets and32MiB unique asset bytes/revision. Restore appends the selected immutable source schema, including explicit mixed1/2 history.",
+                "description": "Progressive candidate semantics: each if_hash sees earlier operations in this atomic batch. if_hash is element hash for set/delete_element, full slide hash for insert_element/set_notes/delete_slide. insert/delete_slide also require if_order_version. Aggregate final deck limits enforced. Explicit first-image upgrade requires original schema1, target_schema_version2 and original whole-head if_content_hash together. Schema1 remains closed without images. Image asset ID/SHA must match live owning Page assets; promotion and exact immutable revision pins commit atomically. At most32 unique assets,32MiB unique asset bytes and33554432 unique asset decoded pixels/revision. Restore appends the selected immutable source schema, including explicit mixed1/2 history.",
                 "oneOf": [
                   {
                     "not": {
