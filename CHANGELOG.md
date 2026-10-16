@@ -18,6 +18,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Guests can search shared issue titles and identifiers in UI and CLI.** Filtering and total counts retain live project grants; hidden descriptions, comments and unrelated projects are excluded. A new search starts from the first page in the UI. Creation confirmation remains visible when the filter hides the new issue.
 - **Reloading a shared routine draft now discards local edits even when its saved revision has not changed.** A failed reload retains the local edits, and background refreshes of the same revision keep them.
+- **Decision reply drafts remain scoped to their viewer and source.** Reload restores an uncertain reply with its original retry key; definitive access loss removes protected recovery, and paginated source lists reconcile as complete snapshots.
+
 - **Escalation requests retain their verified execution source.** New run-authenticated requests keep the original agent run ID for accurate chat decision anchoring. Older service requests remain unanchored and retain their existing Inbox resolution.
 
 - **Decision cards gain a typed response view.** Source-defined workflow actions retain their identity, terminal decisions show read-only receipts, and uncertain replies keep the same operation key for retry. Integration with live decision sources follows separately.

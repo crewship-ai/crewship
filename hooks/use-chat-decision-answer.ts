@@ -31,10 +31,12 @@ export function useChatDecisionAnswer({ workspaceId, userId, chatId, reference, 
     })
     if (response.ok) {
       const receipt = DecisionRefSchema.parse(await response.json())
-      if (receipt.decision.source.id !== source.id || receipt.decision.source.type !== source.type || receipt.decision.status === "pending") throw new Error("Invalid source receipt")
+      if (receipt.decision.source.id !== source.id || receipt.decision.source.type !== source.type || receipt.entity.workspace_id !== workspaceId || receipt.anchor.run_id !== reference.anchor.run_id || receipt.anchor.trigger_message_id !== reference.anchor.trigger_message_id || receipt.decision.status === "pending" || !receipt.decision.resolution || receipt.decision.resolution.answered_by !== userId) throw new Error("Invalid source receipt")
       return "saved"
     }
-    if ([401, 403, 404].includes(response.status)) { if (mounted.current) onUnauthorized(); return intent.uncertain ? "unknown" : "refused" }
+    if ([401, 403, 404].includes(response.status)) { try { sessionStorage.removeItem(storageKey) } catch { /* The source remains unavailable. */ }
+      pending.current = null
+      if (mounted.current) onUnauthorized(); return "refused" }
     if (response.status === 409) return "conflict"
     if ([400, 422].includes(response.status)) {
       const body = await response.json().catch(() => null)
