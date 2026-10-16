@@ -129,6 +129,7 @@ func (a *approvalGateAdapter) Check(ctx context.Context, in orchestrator.Approva
 		Tool:        in.Tool,
 		Args:        in.Args,
 		Review:      in.Review,
+		Correlation: in.Correlation,
 		Mode:        mode,
 	})
 	if err != nil {
@@ -137,12 +138,13 @@ func (a *approvalGateAdapter) Check(ctx context.Context, in orchestrator.Approva
 	return orchestrator.ApprovalDecision{
 		// Required=true means the gate matched at least one rule and an
 		// enqueue happened; NotGated=true on Decision means no rule hit.
-		Required:  !dec.NotGated,
-		Approved:  dec.Approved,
-		Denied:    dec.Denied,
-		Pending:   dec.Pending,
-		RequestID: dec.RequestID,
-		Reason:    dec.Reason,
+		EffectiveMode: dec.EffectiveMode.String(),
+		Required:      !dec.NotGated,
+		Approved:      dec.Approved,
+		Denied:        dec.Denied,
+		Pending:       dec.Pending,
+		RequestID:     dec.RequestID,
+		Reason:        dec.Reason,
 	}, nil
 }
 
