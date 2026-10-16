@@ -124,7 +124,7 @@ func RebuildCommentPageTx(ctx context.Context, tx *sql.Tx, key Key) error {
 				events.Close()
 				return errors.New("invalid retained comment event sequence")
 			}
-			if _, e = time.Parse(time.RFC3339Nano, event.CreatedAt); e != nil {
+			if _, e = time.Parse(time.RFC3339Nano, event.CreatedAt); e != nil { // tsformat:allow: validate retained timestamp syntax only; event ordering uses integer version, no timestamp is written or compared in SQL
 				events.Close()
 				return e
 			}
