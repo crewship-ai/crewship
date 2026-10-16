@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/slides"
 )
 
@@ -110,8 +111,15 @@ func newSlideAgentCommandWithTransport(transport http.RoundTripper) *cobra.Comma
 				}
 				return fmt.Errorf("selected Slides HTTP%d: %s", response.StatusCode, data)
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), string(data))
-			return err
+			var payload any
+			if err := json.Unmarshal(data, &payload); err != nil {
+				return errors.New("invalid selected Slides JSON response")
+			}
+			// Output flags are local presentation only. Never consult cliCfg,
+			// resolve a human profile, or load an alternate transport.
+			formatter := cli.NewFormatter(cli.ResolveFormat(flagFormat, nil))
+			formatter.Writer = cmd.OutOrStdout()
+			return formatter.Machine(payload)
 		}}
 		if operation == "replace" {
 			command.Flags().String("file", "", "Exact replacement-only JSON; - reads stdin. Never refresh original admission")
