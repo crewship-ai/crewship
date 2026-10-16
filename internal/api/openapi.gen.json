@@ -119792,6 +119792,16 @@
                             "type": "integer"
                           }
                         },
+                        "required": [
+                          "page_id",
+                          "slug",
+                          "name",
+                          "content_type",
+                          "schema_version",
+                          "source_revision",
+                          "source_generation",
+                          "snippet"
+                        ],
                         "type": "object"
                       },
                       "type": "array"
@@ -119803,6 +119813,11 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "scope",
+                    "matches",
+                    "has_more"
+                  ],
                   "type": "object"
                 }
               }

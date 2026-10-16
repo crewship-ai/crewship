@@ -813,11 +813,17 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			}),
 		},
 		"GET /api/v1/pages/search/content": {
-			Response: obj(map[string]any{
-				"scope":    map[string]any{"type": "string", "enum": []string{"native-docs-slides"}},
-				"matches":  arr(obj(map[string]any{"page_id": str(), "slug": str(), "name": str(), "content_type": str(), "schema_version": integer(), "source_revision": integer(), "source_generation": integer(), "snippet": str()})),
-				"has_more": boolean(), "cursor": str(),
-			}),
+			Response: map[string]any{
+				"type": "object", "required": []string{"scope", "matches", "has_more"},
+				"properties": map[string]any{
+					"scope": map[string]any{"type": "string", "enum": []string{"native-docs-slides"}},
+					"matches": arr(map[string]any{
+						"type": "object", "required": []string{"page_id", "slug", "name", "content_type", "schema_version", "source_revision", "source_generation", "snippet"},
+						"properties": map[string]any{"page_id": str(), "slug": str(), "name": str(), "content_type": str(), "schema_version": integer(), "source_revision": integer(), "source_generation": integer(), "snippet": str()},
+					}),
+					"has_more": boolean(), "cursor": str(),
+				},
+			},
 		},
 		"GET /api/v1/pages/resolve/id/{pageId}": {
 			Response: map[string]any{"type": "object", "additionalProperties": false, "required": []string{"page_id", "slug"}, "properties": map[string]any{"page_id": str(), "slug": str()}},
