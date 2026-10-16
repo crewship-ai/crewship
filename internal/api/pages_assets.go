@@ -43,6 +43,13 @@ func (h *PageHandler) assetPage(w http.ResponseWriter, r *http.Request, write bo
 		replyError(w, 401, "human authentication required")
 		return nil, false
 	}
+	// The existing human asset routes are scopeSelf: retain their Page ACL
+	// authority while refreshing the exact admitted credential, including
+	// again through the upload's writer transaction after decoding.
+	if err := validateContentHumanCredential(r, h.pageAuthReader(r.Context()), scopeSelf); err != nil {
+		replyError(w, 401, "current human credential required")
+		return nil, false
+	}
 	ws := WorkspaceIDFromContext(r.Context())
 	rec, err := h.loadPage(r.Context(), ws, r.PathValue("slug"))
 	if errors.Is(err, sql.ErrNoRows) {
