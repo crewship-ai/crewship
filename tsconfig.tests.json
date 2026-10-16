@@ -4,6 +4,6 @@
     "incremental": false,
     "types": ["node", "vitest/globals", "@testing-library/jest-dom/vitest"]
   },
-  "include": ["next-env.d.ts", "components/features/chat/artifact/saxen.d.ts", "**/__tests__/**/*.ts", "**/__tests__/**/*.tsx", "**/*.test.ts", "**/*.test.tsx", "vitest.setup.ts"],
+  "include": ["next-env.d.ts", "components/features/chat/artifact/saxen.d.ts", "**/__tests__/**/*.ts", "**/__tests__/**/*.tsx", "**/*.test.ts", "**/*.test.tsx", "e2e/**/*.fixture.tsx", "vitest.setup.ts"],
   "exclude": ["node_modules", "cmd", "internal", ".next", "web/out", ".claude"]
 }
