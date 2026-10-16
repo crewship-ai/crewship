@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -118,5 +120,48 @@ func TestDecisionDispatcherWorkflowSourceMutationAndReceipt(t *testing.T) {
 	var status, payload string
 	if err := d.f.h.db.QueryRow(`SELECT status,decision_payload FROM pipeline_waitpoints WHERE token=?`, d.token).Scan(&status, &payload); err != nil || status != "approved" || !strings.Contains(payload, `"action_id":"ship"`) {
 		t.Fatalf("canonical workflow source %s %s %v", status, payload, err)
+	}
+}
+
+func TestDecisionDispatcherMixedSourcesPaginateWithoutDuplication(t *testing.T) {
+	d := newWaitpointCardRig(t, waitpointCardForm())
+	h := NewQueryHandler(d.f.h.db, nil, nil, "decision-test", newTestLogger())
+	d.r.queryHandler = h
+	req := httptest.NewRequest("POST", "/", jsonBody(map[string]string{"workspace_id": d.f.workspace, "crew_id": d.f.crew, "chat_id": d.f.chat, "actor_agent_id": d.f.agent, "source_run_id": d.f.run, "reason": "Mixed source question"}))
+	req.Header.Set("X-Crewship-Run-Token", internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.internalToken, d.f.workspace, d.f.crew), d.f.workspace, d.f.agent, d.f.run))
+	rr := httptest.NewRecorder()
+	h.CreateEscalation(rr, req)
+	if rr.Code != 201 {
+		t.Fatalf("TEXT source%d %s", rr.Code, rr.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	approval, err := harbormaster.Enqueue(t.Context(), d.f.h.db, nil, harbormaster.Request{WorkspaceID: d.f.workspace, CrewID: d.f.crew, AgentID: d.f.agent, RequestedBy: d.f.agent, Kind: harbormaster.KindCustom, Reason: "Mixed run gate", Payload: map[string]any{"tool": "agent_run", "args": map[string]any{}, "gate_mode": "sync", "correlation": map[string]any{"run_id": d.f.run, "chat_id": d.f.chat, "trigger_message_id": "trigger-" + d.f.run, "trigger_type": "human_chat"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := []string{created["escalation_id"].(string), d.id, approval}
+	cursor, snapshot := "", ""
+	for i, id := range expected {
+		req = withWorkspaceUser(httptest.NewRequest("GET", "/?limit=1&cursor="+url.QueryEscape(cursor), nil), d.f.user, d.f.workspace, "OWNER")
+		req.SetPathValue("chatId", d.f.chat)
+		rr = httptest.NewRecorder()
+		d.r.chatDecisionList(rr, req)
+		var page ChatCardPage
+		if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &page) != nil || len(page.Refs) != 1 || page.Refs[0].Entity.ID != id || page.HasMore != (i < 2) || page.SnapshotComplete != (i == 2) || page.Reset != (i == 0) || strings.Contains(rr.Body.String(), d.token) {
+			t.Fatalf("mixed page%d: %d %s", i, rr.Code, rr.Body.String())
+		}
+		if i == 0 {
+			snapshot = page.SnapshotID
+		}
+		if page.SnapshotID != snapshot {
+			t.Fatal("mixed page changed snapshot")
+		}
+		cursor = page.NextCursor
+	}
+	if cursor != "" {
+		t.Fatal("terminal mixed page retained cursor")
 	}
 }

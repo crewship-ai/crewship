@@ -41,7 +41,7 @@ type textDecisionSource struct{ ID, Workspace, Chat, Agent, Run, Reason, Created
 
 func readTextDecision(ctx context.Context, q issueOperationQueryer, id, workspace string) (textDecisionSource, error) {
 	var s textDecisionSource
-	err := q.QueryRowContext(ctx, `SELECT id,workspace_id,chat_id,from_agent_id,COALESCE(source_run_id,''),reason,created_at,COALESCE(answer_deadline_at,''),status,COALESCE(action,''),COALESCE(resolution,''),COALESCE(resolved_by_user_id,''),COALESCE(resolved_at,'') FROM escalations WHERE id=? AND workspace_id=? AND type='TEXT'`, id, workspace).Scan(&s.ID, &s.Workspace, &s.Chat, &s.Agent, &s.Run, &s.Reason, &s.Created, &s.Deadline, &s.Status, &s.Action, &s.Resolution, &s.Actor, &s.Resolved)
+	err := q.QueryRowContext(ctx, `SELECT id,workspace_id,chat_id,from_agent_id,COALESCE(source_run_id,''),reason,created_at,COALESCE(answer_deadline_at,''),status,COALESCE(action,''),COALESCE(resolution,''),COALESCE(resolved_by_user_id,''),COALESCE(resolved_at,'') FROM escalations WHERE id=? AND workspace_id=? AND type='TEXT' AND deleted_at IS NULL`, id, workspace).Scan(&s.ID, &s.Workspace, &s.Chat, &s.Agent, &s.Run, &s.Reason, &s.Created, &s.Deadline, &s.Status, &s.Action, &s.Resolution, &s.Actor, &s.Resolved)
 	return s, err
 }
 func (s textDecisionSource) version() string {
@@ -66,10 +66,11 @@ func (r *Router) escalationDecision(ctx context.Context, a chataudience.Receipt,
 		return ChatCardProjection{}, err
 	}
 	var origin struct {
-		Chat    string `json:"chat_id"`
-		Trigger string `json:"trigger_message_id"`
+		Chat    string                `json:"chat_id"`
+		Trigger string                `json:"trigger_message_id"`
+		Human   *chataudience.Receipt `json:"human_authority"`
 	}
-	if count != 1 || json.Unmarshal([]byte(raw), &origin) != nil || origin.Chat != s.Chat || origin.Trigger == "" {
+	if count != 1 || json.Unmarshal([]byte(raw), &origin) != nil || origin.Chat != s.Chat || origin.Trigger == "" || origin.Human == nil || origin.Human.ChatGeneration == "" || origin.Human.ChatGeneration != a.ChatGeneration || origin.Human.ChatID != a.ChatID || origin.Human.WorkspaceID != a.WorkspaceID || origin.Human.AgentID != a.AgentID {
 		return ChatCardProjection{}, sql.ErrNoRows
 	}
 	var role string
@@ -148,6 +149,13 @@ func (h *QueryHandler) resolveTextDecision(req *http.Request, id, workspace, use
 	if err != nil {
 		return false, err
 	}
+	readable, readErr := chataudience.CanReadVerifiedEscalation(req.Context(), tx, workspace, id, user)
+	if readErr != nil {
+		return false, readErr
+	}
+	if !readable {
+		return false, errDecisionDenied
+	}
 	op, _ := req.Context().Value(decisionOperationKey{}).(*decisionOperation)
 	if op != nil {
 		a, e := chataudience.CaptureTrustedQuery(req.Context(), tx, op.Audience.ChatID, user, &op.Audience)
@@ -162,6 +170,17 @@ func (h *QueryHandler) resolveTextDecision(req *http.Request, id, workspace, use
 			return false, sourceErr
 		}
 		if source.Chat != a.ChatID || source.Agent != a.AgentID || source.Run == "" {
+			return false, errDecisionDenied
+		}
+		var proofRaw string
+		var proofCount int
+		if err = tx.QueryRowContext(req.Context(), `SELECT COUNT(*),COALESCE(MAX(payload),'') FROM journal_entries WHERE workspace_id=? AND trace_id=? AND agent_id=? AND entry_type='run.started'`, workspace, source.Run, source.Agent).Scan(&proofCount, &proofRaw); err != nil {
+			return false, err
+		}
+		var proof struct {
+			Human *chataudience.Receipt `json:"human_authority"`
+		}
+		if proofCount != 1 || json.Unmarshal([]byte(proofRaw), &proof) != nil || proof.Human == nil || proof.Human.ChatGeneration == "" || proof.Human.ChatGeneration != a.ChatGeneration || proof.Human.ChatID != a.ChatID || proof.Human.WorkspaceID != a.WorkspaceID || proof.Human.AgentID != a.AgentID {
 			return false, errDecisionDenied
 		}
 		var key, hash string
@@ -190,7 +209,7 @@ func (h *QueryHandler) resolveTextDecision(req *http.Request, id, workspace, use
 		hash = op.Hash
 	}
 	now := tsformat.Format(time.Now())
-	res, err := tx.ExecContext(req.Context(), `UPDATE escalations SET status='RESOLVED',resolution=?,action=?,redirect_to=NULLIF(?,''),resolved_at=?,resolved_by='user',resolved_by_user_id=?,answer_operation_key=?,answer_operation_hash=? WHERE id=? AND workspace_id=? AND type IN ('TEXT','LINK') AND status='PENDING' AND (answer_deadline_at IS NULL OR julianday(answer_deadline_at)>julianday(?))`, resolution, action, redirect, now, user, key, hash, id, workspace, now)
+	res, err := tx.ExecContext(req.Context(), `UPDATE escalations SET status='RESOLVED',resolution=?,action=?,redirect_to=NULLIF(?,''),resolved_at=?,resolved_by='user',resolved_by_user_id=?,answer_operation_key=?,answer_operation_hash=? WHERE id=? AND workspace_id=? AND type IN ('TEXT','LINK') AND deleted_at IS NULL AND status='PENDING' AND (answer_deadline_at IS NULL OR julianday(answer_deadline_at)>julianday(?))`, resolution, action, redirect, now, user, key, hash, id, workspace, now)
 	if err != nil {
 		return false, err
 	}
@@ -316,7 +335,7 @@ func decisionString(value string) json.RawMessage { raw, _ := json.Marshal(value
 
 // Filter source visibility before pagination, so unsupported credentials,
 // unanchored legacy rows and foreign origins never affect page boundaries.
-const textDecisionVisibilitySQL = `e.workspace_id=? AND e.chat_id=? AND e.from_agent_id=? AND e.type='TEXT' AND COALESCE(e.source_run_id,'')<>''
+const textDecisionVisibilitySQL = `e.workspace_id=? AND e.chat_id=? AND e.from_agent_id=? AND e.type='TEXT' AND e.deleted_at IS NULL AND COALESCE(e.source_run_id,'')<>''
  AND (e.status IN ('PENDING','EXPIRED','CANCELLED') OR (e.status='RESOLVED' AND e.action IN ('approve','reject') AND length(COALESCE(e.resolution,''))<=10000 AND EXISTS(SELECT 1 FROM users u WHERE u.id=e.resolved_by_user_id)))
  AND (SELECT COUNT(*) FROM journal_entries j WHERE j.workspace_id=e.workspace_id AND j.trace_id=e.source_run_id AND j.agent_id=e.from_agent_id AND j.entry_type='run.started')=1
  AND EXISTS(SELECT 1 FROM journal_entries j WHERE j.workspace_id=e.workspace_id AND j.trace_id=e.source_run_id AND j.agent_id=e.from_agent_id AND j.entry_type='run.started' AND json_valid(j.payload) AND json_extract(j.payload,'$.chat_id')=e.chat_id AND json_type(j.payload,'$.trigger_message_id')='text' AND length(json_extract(j.payload,'$.trigger_message_id')) BETWEEN 1 AND 200)`

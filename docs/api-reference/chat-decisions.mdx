@@ -47,8 +47,7 @@ read authorization. Revoked access returns a generic 404/403 without a snapshot.
 
 Terminal cards are read-only and use the authoritative outcome, human actor and
 time. Old terminal records without an attributable actor are not fabricated into
-new chat receipts. No workflow answer or whole-run approval is accepted by this
-information-only adapter.
+new chat receipts. Each source keeps its own declared decision scope.
 
 
 For a workflow waitpoint, send `action: "answer"`, the exact stored `action_id`,
@@ -71,3 +70,17 @@ old invocation-backed sources fail closed with 404 in E2 even for current
 readers, while source aliases, outcomes and receipts remain persisted. Canonical
 Inbox behavior is preserved. Forks without verified original invocation are
 also omitted; history is not rebound to new authority.
+
+Purging a verified TEXT question removes it from all card, source, Inbox and
+journal read surfaces. The source retains a minimal tombstone (workspace, crew,
+chat, agent and run linkage plus deletion time) so durable projections cannot
+lose their private classification. Question, context, metadata, answer, actor
+and retry payload are cleared. Existing journal hash-chain entries remain
+immutable and withheld; this is source lifecycle deletion, not physical GDPR
+erasure. Source-less service and credential escalation purges retain their
+existing hard-delete behavior.
+
+Form-less boolean workflow waitpoints accept `--action approve` or `--action
+reject`, with no `--action-id`, `--values-json` or `--text`. The API equivalent
+uses that action, an empty `values` object and no `action_id`. Typed workflow
+forms continue to require their declared action ID and typed field values.

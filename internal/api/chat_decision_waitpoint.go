@@ -22,7 +22,7 @@ type waitpointDecisionSource struct {
 
 func readWaitpointDecision(ctx context.Context, q issueOperationQueryer, workspace, id string) (waitpointDecisionSource, error) {
 	var s waitpointDecisionSource
-	err := q.QueryRowContext(ctx, `SELECT w.chat_source_id,w.token,w.workspace_id,w.pipeline_run_id,COALESCE(p.invocation_source_run_id,''),COALESCE(p.invoking_agent_id,''),w.prompt,w.created_at,w.timeout_at,w.status,w.decision_form_json,COALESCE(w.decision_payload,''),COALESCE(w.decided_by_user_id,''),COALESCE(w.decided_at,''),COALESCE(w.answer_operation_key,''),COALESCE(w.answer_operation_hash,'') FROM pipeline_waitpoints w JOIN pipeline_runs p ON p.id=w.pipeline_run_id AND p.workspace_id=w.workspace_id WHERE w.workspace_id=? AND w.chat_source_id=? AND w.kind='approval'`, workspace, id).Scan(&s.ID, &s.Token, &s.Workspace, &s.PipelineRun, &s.Run, &s.Agent, &s.Prompt, &s.Created, &s.Deadline, &s.Status, &s.Form, &s.Payload, &s.Actor, &s.Resolved, &s.OperationKey, &s.OperationHash)
+	err := q.QueryRowContext(ctx, `SELECT w.chat_source_id,w.token,w.workspace_id,w.pipeline_run_id,COALESCE(p.invocation_source_run_id,''),COALESCE(p.invoking_agent_id,''),COALESCE(w.prompt,''),w.created_at,w.timeout_at,w.status,w.decision_form_json,COALESCE(w.decision_payload,''),COALESCE(w.decided_by_user_id,''),COALESCE(w.decided_at,''),COALESCE(w.answer_operation_key,''),COALESCE(w.answer_operation_hash,'') FROM pipeline_waitpoints w JOIN pipeline_runs p ON p.id=w.pipeline_run_id AND p.workspace_id=w.workspace_id WHERE w.workspace_id=? AND w.chat_source_id=? AND w.kind='approval'`, workspace, id).Scan(&s.ID, &s.Token, &s.Workspace, &s.PipelineRun, &s.Run, &s.Agent, &s.Prompt, &s.Created, &s.Deadline, &s.Status, &s.Form, &s.Payload, &s.Actor, &s.Resolved, &s.OperationKey, &s.OperationHash)
 	return s, err
 }
 
@@ -115,7 +115,7 @@ func waitpointDecisionProjection(ctx context.Context, q issueOperationQueryer, a
 	if !canRole(role, "read") {
 		return ChatCardProjection{}, sql.ErrNoRows
 	}
-	d := chatentities.DecisionCard{SchemaVersion: 1, Source: chatentities.DecisionSource{Type: "waitpoint", ID: s.ID, Version: s.version()}, DecisionType: "workflow", Status: "pending", Title: truncate(inbox.RedactSecrets(s.Prompt), 240), Fields: fields, WorkflowActions: actions, ExpiresAt: &s.Deadline, AllowedActions: []string{"view"}}
+	d := chatentities.DecisionCard{SchemaVersion: 1, Source: chatentities.DecisionSource{Type: "waitpoint", ID: s.ID, Version: s.version()}, DecisionType: "workflow", Status: "pending", Title: inbox.CleanTitle(inbox.RedactSecrets(s.Prompt), 240, "Waitpoint pending approval"), Fields: fields, WorkflowActions: actions, ExpiresAt: &s.Deadline, AllowedActions: []string{"view"}}
 	switch s.Status {
 	case "pending":
 		deadline, err := time.Parse(time.RFC3339Nano, s.Deadline)

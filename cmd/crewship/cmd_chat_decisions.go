@@ -63,7 +63,14 @@ func newChatDecisionCommand() *cobra.Command {
 					body.Action = "answer"
 					body.Values["answer"] = raw
 				case "waitpoint":
-					if actionID == "" || text != "" || action != "" {
+					if action != "" {
+						if (action != "approve" && action != "reject") || text != "" || actionID != "" || cmd.Flags().Changed("values-json") {
+							return fmt.Errorf("boolean waitpoint requires only --action approve or reject")
+						}
+						body.Action = action
+						break
+					}
+					if actionID == "" || text != "" {
 						return fmt.Errorf("waitpoint requires --action-id and optional --values-json")
 					}
 					if err = json.Unmarshal([]byte(valuesJSON), &body.Values); err != nil || body.Values == nil {
@@ -96,7 +103,7 @@ func newChatDecisionCommand() *cobra.Command {
 			cmd.Flags().String("expected-version", "", "Opaque reviewed source version")
 			cmd.Flags().String("idempotency-key", "", "Stable operation key; reuse on uncertain retry")
 			cmd.Flags().String("text", "", "Information answer (TEXT escalations only)")
-			cmd.Flags().String("action", "", "Whole-run decision: approve or reject (run_approval only)")
+			cmd.Flags().String("action", "", "Approve or reject a whole-run or form-less waitpoint")
 			cmd.Flags().String("action-id", "", "Declared frozen workflow action (waitpoint only)")
 			cmd.Flags().String("values-json", "{}", "JSON object of typed workflow field values (waitpoint only)")
 		}

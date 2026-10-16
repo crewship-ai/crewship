@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // AgentInboxHandler serves GET /api/v1/agents/{agentId}/inbox — a
@@ -110,12 +112,13 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	//     Crews preview panel showed an empty badge for a full queue.
 	//
 	// The constants rather than literals, so a rename moves this with them.
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM escalations
-		 WHERE workspace_id = ? AND from_agent_id = ? AND status NOT IN (?, ?, ?)`,
-		workspaceID, agentID,
-		escalationStatusResolved, escalationStatusExpired, escalationStatusCancelled,
-	).Scan(&resp.EscalationsOpen); err != nil {
+	viewerID := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		viewerID = user.ID
+	}
+	escalationArgs := []any{workspaceID, agentID, escalationStatusResolved, escalationStatusExpired, escalationStatusCancelled}
+	escalationArgs = append(escalationArgs, chataudience.VerifiedTextReadArgs(viewerID)...)
+	if err := h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM escalations e WHERE e.workspace_id=? AND e.from_agent_id=? AND e.status NOT IN (?,?,?) AND (NOT (`+chataudience.VerifiedTextSourceSQL+`) OR (`+chataudience.VerifiedTextReadSQL+`))`, escalationArgs...).Scan(&resp.EscalationsOpen); err != nil {
 		h.logger.Warn("inbox: escalations count", "err", err, "agent_id", agentID)
 		resp.Unavailable = append(resp.Unavailable, "escalations")
 	}

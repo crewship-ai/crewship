@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log/slog"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/chain"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // ChainHandler serves the one route that answers "what caused what" —
@@ -62,6 +64,9 @@ func (h *ChainHandler) Get(w http.ResponseWriter, r *http.Request) {
 		MaxNodes: atoiOrZero(r.URL.Query().Get("limit")),
 		// The inbox's own audience, per node (#2986, docs/specs/activity-links.md).
 		CanSeeInbox: inboxAudience(userID, RoleFromContext(r.Context())),
+		CanSeeInboxSource: func(ctx context.Context, id string) (bool, error) {
+			return chataudience.CanReadVerifiedEscalationInbox(ctx, h.db, workspaceID, id, userID)
+		},
 	}
 
 	g, err := chain.Walk(r.Context(), h.db, workspaceID, anchor, opt)

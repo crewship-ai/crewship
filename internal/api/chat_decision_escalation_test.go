@@ -127,6 +127,8 @@ func TestChatDecisionEscalationInboxAndChatSingleWinner(t *testing.T) {
 	version := d.get(t).Decision.Source.Version
 	execOrFatal(t, d.f.h.db, `INSERT INTO users(id,email) VALUES('inbox-other','inbox-other@example.test')`)
 	execOrFatal(t, d.f.h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('inbox-other-member',?,'inbox-other','MANAGER')`, d.f.workspace)
+	execOrFatal(t, d.f.h.db, `UPDATE chats SET visibility='group' WHERE id=?`, d.f.chat)
+	execOrFatal(t, d.f.h.db, `INSERT INTO chat_participants(chat_id,user_id) VALUES(?,'inbox-other')`, d.f.chat)
 	d.f.h.db.SetMaxOpenConns(2)
 	d.f.h.db.SetMaxIdleConns(2)
 	// Pin two actual SQLite connections, then hold the writer reservation until
