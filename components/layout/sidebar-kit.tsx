@@ -132,11 +132,15 @@ export function SidebarFilterButton({
   ...props
 }: React.ComponentProps<"button"> & { activeCount?: number; active?: boolean; icon?: LucideIcon }) {
   const on = active ?? activeCount > 0
+  // In a 272 px SecondaryPanel the label would squeeze the search field: the
+  // button shows its icon (and count) and keeps the label for screen readers.
+  const inPanel = React.useContext(SecondaryPanelContext) != null
   return (
     <button
       type="button"
       className={cn(
-        "kit-tap inline-flex items-center gap-1.5 h-8 px-2.5 shrink-0 rounded-md border text-[11px] whitespace-nowrap transition-colors",
+        "kit-tap inline-flex items-center gap-1.5 h-8 shrink-0 rounded-md border text-[11px] whitespace-nowrap transition-colors",
+        inPanel ? "px-2" : "px-2.5",
         on
           ? "bg-primary/10 border-primary/30 text-primary-hover"
           : "bg-foreground/[0.04] border-foreground/[0.08] text-muted-foreground hover:text-foreground",
@@ -145,7 +149,7 @@ export function SidebarFilterButton({
       {...props}
     >
       <Icon className="h-3 w-3" />
-      {children}
+      {inPanel ? <span className="sr-only">{children}</span> : children}
       {activeCount > 0 && (
         <span className="ml-0.5 rounded-full bg-primary-hover px-1.5 min-w-[15px] text-center text-[9px] font-bold text-background tabular-nums">
           {activeCount}

@@ -106,10 +106,10 @@ export function SubBar<T extends string = string>({
   // Harbor 2: on desktop and tablet the identity and the actions join the top
   // bar after the area's breadcrumb; a title that only repeats the area's name
   // stays as the page's accessible heading but is not shown twice.
+  // AppToolbar writes the area it names onto the slot.
+  const areaTitle = slot?.dataset.areaTitle ?? ""
+  const repeatsArea = areaTitle !== "" && areaTitle.toLowerCase() === title.toLowerCase()
   if (slot && !isMobile) {
-    // AppToolbar writes the area it names onto the slot.
-    const areaTitle = slot.dataset.areaTitle ?? ""
-    const repeatsArea = areaTitle !== "" && areaTitle.toLowerCase() === title.toLowerCase()
     return (
       <>
         {createPortal(
@@ -136,7 +136,8 @@ export function SubBar<T extends string = string>({
             )}
             {meta}
             <div className="flex-1" />
-            {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
+            {/* Keeps the primary action off the status icons that follow. */}
+            {actions && <div className="flex shrink-0 items-center gap-1.5 pr-2">{actions}</div>}
           </div>,
           slot,
         )}
@@ -148,15 +149,18 @@ export function SubBar<T extends string = string>({
   return (
     <div className={cn("shrink-0", className)}>
       {/* ---- Row 1: identity + actions ---- */}
-      <div className={cn(ROW, "gap-2", SCROLL_X)} aria-label={ariaLabel}>
+      {/* min-h, not h: with a coarse pointer the actions are 44 px tall. */}
+      <div className={cn(ROW, "h-auto min-h-9 gap-2", SCROLL_X)} aria-label={ariaLabel}>
         {leading && <div className="flex items-center shrink-0">{leading}</div>}
 
+        {/* On a phone the top bar already names the area; a title that only
+            repeats it stays the page's heading for assistive technology. */}
         <div className="flex items-center gap-2 min-w-0 max-sm:shrink-0">
-          {Icon && <Icon className="h-3.5 w-3.5 text-foreground/70 shrink-0" />}
+          {Icon && !(repeatsArea && section == null) && <Icon className="h-3.5 w-3.5 text-foreground/70 shrink-0" />}
           {/* One <h1> spanning the whole path, so the accessible name of the
               page is "Admin Console / Users" rather than a bare section label
               floating next to an unrelated heading. */}
-          <h1 className="text-body whitespace-nowrap shrink-0">
+          <h1 className={cn("text-body whitespace-nowrap shrink-0", repeatsArea && section == null && "sr-only")}>
             <span className={section != null ? "font-normal text-muted-foreground" : "font-semibold tracking-[-0.01em] text-foreground"}>
               {title}
             </span>
