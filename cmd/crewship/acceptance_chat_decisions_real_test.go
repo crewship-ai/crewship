@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -107,6 +108,25 @@ func TestAcceptance_ChatDecisions_RealSourceAndCLI(t *testing.T) {
 	}
 	args := []string{"chat", "decision", "answer", "decision-chat", "escalation", source, "--expected-version", card.Decision.Source.Version, "--idempotency-key", "cli-answer-key", "--text", "Tomorrow"}
 	exec(`UPDATE cli_tokens SET scopes='["agents:write"]' WHERE id='decision-token'`)
+	for _, readArgs := range [][]string{{"chat", "decision", "show", "decision-chat", "escalation", source}, {"chat", "decision", "list", "decision-chat"}} {
+		out, err = runFeedbackCLI(t, cfg, readArgs...)
+		if err != nil {
+			t.Fatalf("scoped source read: %v %s", err, out)
+		}
+		var references []api.ChatCardResponse
+		if readArgs[2] == "show" {
+			var current api.ChatCardResponse
+			_ = json.Unmarshal([]byte(out), &current)
+			references = []api.ChatCardResponse{current}
+		} else {
+			var page api.ChatCardPage
+			_ = json.Unmarshal([]byte(out), &page)
+			references = page.Refs
+		}
+		if len(references) != 1 || references[0].Decision == nil || slices.Contains(references[0].Decision.AllowedActions, "answer") {
+			t.Fatalf("narrow token advertised forbidden write: %s", out)
+		}
+	}
 	out, err = runFeedbackCLI(t, cfg, args...)
 	if err == nil {
 		t.Fatalf("narrow token answered source: %s", out)
@@ -116,6 +136,12 @@ func TestAcceptance_ChatDecisions_RealSourceAndCLI(t *testing.T) {
 		t.Fatalf("denied scope left source effects: status=%s err=%v", pendingStatus, err)
 	}
 	exec(`UPDATE cli_tokens SET scopes='["workspace:admin"]' WHERE id='decision-token'`)
+	out, err = runFeedbackCLI(t, cfg, "chat", "decision", "show", "decision-chat", "escalation", source)
+	var scopedWritable api.ChatCardResponse
+	if err != nil || json.Unmarshal([]byte(out), &scopedWritable) != nil || scopedWritable.Decision == nil || !slices.Contains(scopedWritable.Decision.AllowedActions, "answer") {
+		t.Fatalf("canonical scoped token lost legitimate action: %v %s", err, out)
+	}
+
 	for i := 0; i < 2; i++ {
 		out, err = runFeedbackCLI(t, cfg, args...)
 		if err != nil || !strings.Contains(out, `"answered_by": "decision-user"`) {

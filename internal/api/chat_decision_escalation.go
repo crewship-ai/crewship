@@ -83,7 +83,7 @@ func (r *Router) escalationDecision(ctx context.Context, a chataudience.Receipt,
 	}
 	switch s.Status {
 	case "PENDING":
-		if canRole(role, "create") {
+		if canRole(role, "create") && canScope(ctx, "workspace:admin") {
 			d.AllowedActions = append(d.AllowedActions, "answer")
 		}
 	case "EXPIRED":
