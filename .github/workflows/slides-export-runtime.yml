@@ -39,7 +39,8 @@ jobs:
         timeout-minutes: 8
         run: |
           set -euo pipefail
-          image="$(docker build -q -t crewship-slides-export:ci -f tools/slides-export/runtime/Dockerfile .)"
+          docker build --progress=plain --iidfile "$RUNNER_TEMP/slides-export-image-id" -t crewship-slides-export:ci -f tools/slides-export/runtime/Dockerfile .
+          image="$(cat "$RUNNER_TEMP/slides-export-image-id")"
           [[ "$image" =~ ^sha256:[a-f0-9]{64}$ ]]
           echo "image=$image" >> "$GITHUB_OUTPUT"
       - name: Scan the exact built image

@@ -32,6 +32,13 @@ const pnpmDir = "node_modules/.pnpm";
 // Adding an entry requires citing where the declaration is observable and a
 // review note; versions not listed here fail hard.
 const EXCEPTIONS = {
+  // Slides export image audit (2026-10-16): exact installed tarballs and
+  // matching npm gitHead READMEs declare MIT but omit a license text.
+  "brotli@1.3.3": "package.json and upstream README declare MIT; https://github.com/devongovett/brotli.js/blob/e36051345f6d27a56e5f39ea70d2f789b8574046/readme.md#license",
+  "dfa@1.2.0": "package.json and upstream README declare MIT; https://github.com/devongovett/dfa/blob/3f5e603e5082caedabefefdf53e8a6ca3111e966/README.md#license",
+  "fontkit@2.0.4": "package.json and upstream README declare MIT; https://github.com/foliojs/fontkit/blob/fbf3b9ef21eebd219eb73e666faed573af0fba09/README.md#license",
+  // The exact https tarball has only package.json, no source or license text.
+  "https@1.0.0": "exact https://registry.npmjs.org/https/-/https-1.0.0.tgz package.json declares ISC; package contains only package.json",
   // XLSX dependency audit (2026-10-15): exact npm 0.1.20 tarball and upstream
   // v0.1.20 tree contain no license text. package.json declares MIT; preserve
   // that declaration honestly as an EXCEPTION-NOTICE, not invented copyright.
@@ -151,6 +158,12 @@ const EXCEPTIONS = {
   "natural-compare@1.4.0": "package.json declares MIT (dev-tree fallback)",
 };
 
+// Reviewed full license embedded in the exact package README, retained verbatim.
+// This is a real upstream text, not an exception notice. A changed file fails.
+const README_LICENSES = {
+  "isarray@1.0.0": { file: "README.md", sha256: "ff138e683771b187f3629c383db72ee7d632009010a36d08e18e8d2a34222ec7" },
+};
+
 const licenseStems = new Set(["license", "licence", "copying", "notice", "patents"]);
 const licenseExts = ["", ".md", ".txt", ".mit", ".apache", "-mit", "-apache"];
 
@@ -247,6 +260,15 @@ for (const entry of entries) {
       if (!isLicenseFile(f)) continue;
       const st = await stat(path.join(pkgDir, f));
       if (st.isFile() && st.size > 0) found.push(f);
+    }
+    if (found.length === 0 && README_LICENSES[key]) {
+      const reviewed = README_LICENSES[key];
+      const source = path.join(pkgDir, reviewed.file);
+      if (!existsSync(source) || sha256(source) !== reviewed.sha256) {
+        meta.push(`${key}: reviewed README license digest mismatch`);
+        continue;
+      }
+      found.push(reviewed.file);
     }
     if (found.length === 0) {
       const why = EXCEPTIONS[key];
