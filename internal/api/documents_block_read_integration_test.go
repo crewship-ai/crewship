@@ -146,42 +146,85 @@ func TestDocumentBlockReadManagedRouterAndSidecar(t *testing.T) {
 	}
 	call(host.URL, human, "POST", endpoint+"/patch?block_id=leaf", map[string]any{}, 400)
 	// The real sidecar forwards the authenticated run token to this actual Router.
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := listener.Addr().String()
-	_ = listener.Close()
-	side := sidecar.NewServer(sidecar.ServerConfig{Addr: addr, Logger: newTestLogger(), IPC: &sidecar.IPCConfig{BaseURL: host.URL, Token: internaltoken.DeriveCrewToken(h.artifactMasterToken, workspace, "artifact-crew"), WorkspaceID: workspace, CrewID: "artifact-crew", AgentID: "artifact-agent", AgentSlug: "artifact-agent", AgentToken: internaltoken.DeriveAgentToken(h.artifactMasterToken, workspace, "artifact-agent"), AgentRunKey: internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, "artifact-crew"), RunID: "artifact-run", RunChatID: "artifact-chat"}})
-	sideCtx, stopSide := context.WithCancel(context.Background())
-	sideDone := make(chan error, 1)
-	go func() { sideDone <- side.Start(sideCtx) }()
-	t.Cleanup(func() {
-		stopSide()
-		select {
-		case e := <-sideDone:
-			if e != nil {
-				t.Errorf("sidecar stop: %v", e)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("sidecar stop timed out")
+	startSide := func(transportToken string) string {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
-	select {
-	case <-side.Ready():
-	case e := <-sideDone:
-		t.Fatalf("sidecar start: %v", e)
-	case <-time.After(5 * time.Second):
-		t.Fatal("sidecar ready timed out")
+		addr := listener.Addr().String()
+		_ = listener.Close()
+		side := sidecar.NewServer(sidecar.ServerConfig{Addr: addr, Logger: newTestLogger(), IPC: &sidecar.IPCConfig{BaseURL: host.URL, Token: transportToken, WorkspaceID: workspace, CrewID: "artifact-crew", AgentID: "artifact-agent", AgentSlug: "artifact-agent", AgentToken: internaltoken.DeriveAgentToken(h.artifactMasterToken, workspace, "artifact-agent"), AgentRunKey: internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, "artifact-crew"), RunID: "artifact-run", RunChatID: "artifact-chat"}})
+		sideCtx, stopSide := context.WithCancel(context.Background())
+		sideDone := make(chan error, 1)
+		go func() { sideDone <- side.Start(sideCtx) }()
+		t.Cleanup(func() {
+			stopSide()
+			select {
+			case e := <-sideDone:
+				if e != nil {
+					t.Errorf("sidecar stop: %v", e)
+				}
+			case <-time.After(5 * time.Second):
+				t.Error("sidecar stop timed out")
+			}
+		})
+		select {
+		case <-side.Ready():
+		case e := <-sideDone:
+			t.Fatalf("sidecar start: %v", e)
+		case <-time.After(5 * time.Second):
+			t.Fatal("sidecar ready timed out")
+		}
+		return "http://" + addr
 	}
-	sideURL := "http://" + addr
+	sideURL := startSide(internaltoken.DeriveCrewToken(h.artifactMasterToken, workspace, "artifact-crew"))
 	call(sideURL, agent, "GET", endpoint+"?block_id=leaf&workspace_id="+workspace, nil, 200)
 	call(sideURL, agent, "GET", endpoint+"?block_id=leaf&workspace_id=wrong", nil, 400)
 	// A valid run capability never substitutes for its authenticated crew realm.
 	execOrFatal(t, h.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('block-other-crew',?,'Other crew','block-other-crew')`, workspace)
 	execOrFatal(t, h.db, `INSERT INTO workspaces(id,name,slug) VALUES('block-other-workspace','Other workspace','block-other-workspace')`)
 	execOrFatal(t, h.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('block-foreign-crew','block-other-workspace','Foreign crew','block-foreign-crew')`)
+	// Rejected transport must leave every durable mutation surface unchanged.
+	type durableState struct {
+		rev, receipts, checkpoints int64
+		projection                 string
+	}
+	durable := func() durableState {
+		t.Helper()
+		var v durableState
+		if err := h.db.QueryRow(`SELECT head_rev,CAST(projection AS TEXT),
+		 (SELECT COUNT(*) FROM document_receipts WHERE workspace_id=? AND page_id=?),
+		 (SELECT COUNT(*) FROM document_checkpoints WHERE workspace_id=? AND page_id=?)
+		 FROM documents WHERE workspace_id=? AND page_id=?`, workspace, page, workspace, page, workspace, page).Scan(&v.rev, &v.projection, &v.receipts, &v.checkpoints); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	beforeForeign := durable()
 	for _, realm := range []struct{ workspace, crew string }{{workspace, "block-other-crew"}, {"block-other-workspace", "block-foreign-crew"}} {
+		// Independently authenticated host transport is deliberately mismatched
+		// with the locally valid synthetic run. Exercise the real sidecar, not
+		// only a hand-built host request; this does not claim a stolen bearer.
+		foreignSide := startSide(internaltoken.DeriveCrewToken(h.artifactMasterToken, realm.workspace, realm.crew))
+		for _, operation := range []string{"read", "patch", "checkpoint"} {
+			method, path := "GET", endpoint
+			var payload any
+			if operation != "read" {
+				method, path = "POST", endpoint+"/"+operation
+				payload = map[string]any{"id": "foreign-" + realm.crew + "-" + operation, "schema": 3, "page_id": page, "epoch": state.Epoch, "ifRev": state.Rev}
+				if operation == "patch" {
+					payload.(map[string]any)["target"] = "leaf"
+					payload.(map[string]any)["text"] = "Forbidden foreign edit"
+					payload.(map[string]any)["ifHash"] = originalHash
+				}
+			}
+			t.Run("transport-"+realm.crew+"-"+operation, func(t *testing.T) {
+				raw, status, err := request(foreignSide, agent, method, path+"?workspace_id="+workspace, payload)
+				if err != nil || status != 403 || bytes.Contains(raw, []byte("Original selected plaintext")) {
+					t.Errorf("foreign transport %s: status%d want403 err%v body%s", operation, status, err, raw)
+				}
+			})
+		}
 		req, e := http.NewRequestWithContext(t.Context(), "GET", host.URL+"/api/v1/internal/documents/report?block_id=leaf", nil)
 		if e != nil {
 			t.Fatal(e)
@@ -198,6 +241,9 @@ func TestDocumentBlockReadManagedRouterAndSidecar(t *testing.T) {
 		if e != nil || response.StatusCode != 403 || bytes.Contains(denied, []byte("Original selected")) {
 			t.Fatalf("cross-realm run read=%d %v %s", response.StatusCode, e, denied)
 		}
+	}
+	if afterForeign := durable(); afterForeign != beforeForeign {
+		t.Fatalf("foreign transport mutated durable document: before%+v after%+v", beforeForeign, afterForeign)
 	}
 	// Exercise configured CLI HTTP forwarding with this synthetic run bearer.
 	// This is not the separate protected agent-runtime credential loader.

@@ -181,9 +181,15 @@ func (h *PageHandler) DocumentAgent(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 403, "invalid run")
 		return
 	}
-	var workspace string
-	if h.db.QueryRowContext(r.Context(), `SELECT workspace_id FROM artifact_run_principals WHERE run_id=?`, string(run)).Scan(&workspace) != nil {
+	var workspace, crew string
+	if h.db.QueryRowContext(r.Context(), `SELECT workspace_id,crew_id FROM artifact_run_principals WHERE run_id=?`, string(run)).Scan(&workspace, &crew) != nil {
 		replyError(w, 403, "unknown run")
+		return
+	}
+	// Keep the independently authenticated sidecar realm authoritative. The
+	// private engine later revalidates the original run bearer and live grants.
+	if workspace != InternalTokenWorkspaceFromContext(r.Context()) || crew == "" || crew != InternalTokenCrewFromContext(r.Context()) {
+		replyError(w, 403, "document run transport does not match")
 		return
 	}
 	r = r.WithContext(context.WithValue(r.Context(), ctxWorkspaceID, workspace))
