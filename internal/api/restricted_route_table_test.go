@@ -40,6 +40,7 @@ var restrictedAllowedPatterns = []string{
 	"GET /api/v1/agents/{agentId}/run-profile",
 	"GET /api/v1/auth/cli-token/validate",
 	"GET /api/v1/auth/cli-tokens",
+	"GET /api/v1/auth/pair/poll",
 	"GET /api/v1/auth/sessions",
 	"GET /api/v1/chats/{chatId}/execution-profile",
 	"GET /api/v1/chats/{chatId}/messages",
@@ -75,6 +76,7 @@ var restrictedAllowedPatterns = []string{
 	"POST /api/v1/agents/{agentId}/restricted-cli-chats",
 	"POST /api/v1/auth/cli-token",
 	"POST /api/v1/auth/invitation/accept",
+	"POST /api/v1/auth/pair/start",
 	"POST /api/v1/auth/sessions/{id}/revoke",
 	"POST /api/v1/chats/{chatId}/restricted-cli-run",
 	"POST /api/v1/chats/{chatId}/restricted-memory",
@@ -173,7 +175,7 @@ func (f restrictedRouteFixture) restrictedDecision(t *testing.T, user, pattern, 
 	}
 	req := httptest.NewRequest(method, "/restricted-route-table-probe", nil)
 	req.Pattern = pattern
-	if pattern == "POST /api/v1/auth/cli-token" {
+	if pattern == "POST /api/v1/auth/cli-token" || pattern == "POST /api/v1/auth/pair/start" || pattern == "GET /api/v1/auth/pair/poll" {
 		// The snapshot models an interactive Guest session. The real
 		// signature/session and bearer-denial paths have separate tests.
 		ctx := withUser(req.Context(), &AuthUser{ID: user, SessionID: "synthetic-verified-session"})
@@ -258,6 +260,8 @@ func TestRestrictedAllowlistPatternsAreRegistered(t *testing.T) {
 		checked[p] = true
 	}
 	checked["POST /api/v1/auth/cli-token"] = true
+	checked["POST /api/v1/auth/pair/start"] = true
+	checked["GET /api/v1/auth/pair/poll"] = true
 	for p, rule := range restrictedRoutes {
 		if !golden[p] {
 			t.Errorf("restrictedRoutes entry %q is missing from the golden list", p)

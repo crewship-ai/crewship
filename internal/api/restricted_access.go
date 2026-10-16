@@ -13,9 +13,11 @@ import (
 // A rule with a nil check is a blanket pass: the handler behind the pattern
 // enforces the exact resource authority itself. A rule with a check passes
 // only when check returns nil; access.ErrDenied and sql.ErrNoRows deny with
-// 404, any other error is a 500.
+// 404 (403 for session-only pairing), any other error is a 500.
 type restrictedRule struct {
 	check func(m *AuthMiddleware, store access.Store, r *http.Request, userID string) error
+	// Session-only pairing preserves its handler's 403 for bearer callers.
+	denyStatus int
 }
 
 // restrictedPass is the rule for patterns whose handlers enforce their own authority.
@@ -30,6 +32,13 @@ var restrictedSessionTokenCreation = restrictedRule{check: func(m *AuthMiddlewar
 	}
 	return nil
 }}
+
+// Pairing uses the same verified-session ceiling as CLI token bootstrap,
+// while keeping the pairing API's explicit browser-session-required response.
+var restrictedSessionPairing = restrictedRule{
+	check:      restrictedSessionTokenCreation.check,
+	denyStatus: http.StatusForbidden,
+}
 
 // restrictedAgentChatGrant requires a current agent/chat grant on {agentId}, checked
 // in the (live) agent's own workspace.
@@ -68,6 +77,8 @@ var restrictedRoutes = map[string]restrictedRule{
 
 	"POST /api/v1/auth/invitation/accept": restrictedPass,
 	"POST /api/v1/auth/cli-token":         restrictedSessionTokenCreation,
+	"POST /api/v1/auth/pair/start":        restrictedSessionPairing,
+	"GET /api/v1/auth/pair/poll":          restrictedSessionPairing,
 	// Native private-chat source projection enforces its own exact resource rights.
 	"GET /api/v1/chats/{chatId}/project-input-options": restrictedPass,
 
@@ -160,7 +171,11 @@ func (m *AuthMiddleware) restrictedRequest(w http.ResponseWriter, r *http.Reques
 		return true
 	}
 	if errors.Is(err, access.ErrDenied) || errors.Is(err, sql.ErrNoRows) {
-		replyError(w, http.StatusNotFound, "Resource not found")
+		if rule.denyStatus == http.StatusForbidden {
+			replyError(w, http.StatusForbidden, "A browser session is required")
+		} else {
+			replyError(w, http.StatusNotFound, "Resource not found")
+		}
 	} else {
 		replyInternalError(w, m.logger, "check resource authority", err)
 	}
