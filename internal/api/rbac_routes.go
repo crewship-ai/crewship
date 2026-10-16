@@ -116,6 +116,14 @@ func scopeForRoute(pattern string) string {
 		return false
 	}
 	switch segs[0] {
+	case "chats":
+		if has("proposals") {
+			return "crews:write"
+		}
+		if has("decisions") {
+			return "workspace:admin"
+		}
+		return ""
 	case "agents":
 		// Agent sub-resources borrow the target resource's scope so a token
 		// scoped to credentials/skills can manage them on an agent.

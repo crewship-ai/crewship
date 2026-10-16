@@ -866,7 +866,9 @@ omitted from lists without exposing their existence/count.
 
 PATCH accepts `expected_version`, `title` and a complete bounded `items` array.
 Discard accepts `expected_version`; confirm accepts `proposal_id` matching the
-path and `reviewed_version`. Every mutation requires `Idempotency-Key` (1–200
+path and `reviewed_version`. Scoped CLI tokens also require `crews:write`, matching canonical issue creation
+at `/api/v1/crews/{crewId}/issues`, for these mutations; ordinary
+chat ownership routes retain their existing scope policy. Every mutation requires `Idempotency-Key` (1–200
 bytes). Keys are scoped to the authenticated actor and workspace. Same-key
 retries recheck current read access and never execute effects again. Confirmation
 retries preserve the original created Issue IDs and accepted outcome. A late edit
