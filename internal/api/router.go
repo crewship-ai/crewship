@@ -62,6 +62,8 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	documentsServiceSocket string
+	documentsClient *http.Client
 	documentsSocket        string
 	documentsSecretFile    string
 	documentsServiceSecret string
@@ -1007,6 +1009,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // reference to the DB handle or the Docker client.
 
 func (r *Router) Shutdown() {
+	if r.documentsClient != nil { r.documentsClient.CloseIdleConnections() }
 	r.documentsStopOnce.Do(func() {
 		if r.documentsStop != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
