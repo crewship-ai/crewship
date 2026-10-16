@@ -812,6 +812,9 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 				"page": str(), "panel": str(), "action": str(), "routine": str(),
 			}),
 		},
+		"GET /api/v1/pages/resolve/id/{pageId}": {
+			Response: map[string]any{"type": "object", "additionalProperties": false, "required": []string{"page_id", "slug"}, "properties": map[string]any{"page_id": str(), "slug": str()}},
+		},
 		"GET /api/v1/pages/{slug}": {
 			Response: page,
 		},

@@ -103,6 +103,9 @@ func (r *Router) registerPageRoutes() {
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-pages", authed(wsCtx(http.HandlerFunc(p.RestrictedCatalog))))
 
+	// Two literal segments avoid ambiguity with /pages/{slug}/grants and other resources.
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/resolve/id/{pageId}", authed(wsCtx(http.HandlerFunc(p.ResolvePageIdentity))))
 	r.mux.Handle("GET /api/v1/pages", authed(wsCtx(http.HandlerFunc(p.List))))
 	r.mux.Handle("GET /api/v1/pages/{slug}", authed(wsCtx(http.HandlerFunc(p.Get))))
 	r.mux.Handle("GET /api/v1/pages/{slug}/grants", authed(wsCtx(http.HandlerFunc(p.ListGrants))))

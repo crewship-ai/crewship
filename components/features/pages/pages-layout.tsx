@@ -48,6 +48,10 @@ import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useSessionSafe } from "@/hooks/use-auth"
+import { useWorkspace } from "@/hooks/use-workspace"
+import { useResolvedPageIdentity } from "@/hooks/use-page-identity"
+import { usePageReferenceWorkspace } from "@/hooks/use-page-reference-workspace"
+import { stablePageHref } from "@/lib/pages/stable-links"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { cn } from "@/lib/utils"
 import {
@@ -105,7 +109,25 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // reads it back on popstate, and is the single place that asks the
   // unsaved-work question before the address is allowed to move.
   const nav = useEditorRoute(slug ?? null)
-  const selectedSlug = nav.slug
+  const session = useSessionSafe()
+  const currentUserId = session.data?.user.id ?? null
+  const directory = useWorkspace()
+  const reference = nav.reference
+  const eligible = Boolean(reference?.kind === "page" && currentUserId && directory.userId === currentUserId &&
+    directory.workspaces.some(workspace => workspace.id === reference.workspaceId))
+  const identity = useResolvedPageIdentity(workspaceId, reference, currentUserId, eligible)
+  const resolution = identity.resolution
+  const { openPage: navigatePage, resolveReference } = nav
+  const clearReference = React.useCallback(() => navigatePage(null), [navigatePage])
+  usePageReferenceWorkspace(reference, workspaceId, eligible, directory.setWorkspaceId, clearReference)
+  React.useEffect(() => {
+    if (reference?.kind === "page" && resolution) resolveReference(reference, resolution.identity.slug)
+  }, [reference, resolution, resolveReference])
+  // A slug hint never admits content. Canonical navigation must have accepted
+  // the resolved slug, with the stable ID still present, before detail reads.
+  const selectedSlug = reference
+    ? resolution && nav.slug === resolution.identity.slug ? nav.slug : null
+    : nav.slug
   const [chatHandoffOpen, setChatHandoffOpen] = React.useState(false)
 
   const [collapsed, setCollapsed] = React.useState(false)
@@ -125,7 +147,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const [filters, setFilters] = React.useState<PageFilters>(EMPTY_PAGE_FILTERS)
 
   const { pages, loading, error } = usePages(workspaceId)
-  const detail = usePage(workspaceId, selectedSlug)
+  const detail = usePage(workspaceId, selectedSlug, reference ? resolution?.binding : undefined)
 
   // ── Folders (#2527) ──────────────────────────────────────────────────────
   // The rail groups by folder when the server has them. The dialogs live
@@ -186,9 +208,6 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // under. The tolerant variant on purpose: this shell is also mounted in
   // tests and embeds with no provider, and a rail with no "Mine" group is a
   // rail, while a throw is a blank column.
-  const session = useSessionSafe()
-  const currentUserId = session.data?.user.id ?? null
-
   const summary = React.useMemo(() => summarisePages(pages, now), [pages, now])
   const filtered = React.useMemo(
     () => pages.filter((p) => matchesPageFilters(p, filters, search)),
@@ -299,6 +318,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         ariaLabel="Pages"
         actions={
           <>
+            {detail.raw && typeof detail.raw.id === "string" && detail.raw.id && detail.page && !detail.error && (
+              <CopyPageLink key={`${workspaceId}:${detail.raw.id}`} workspaceId={workspaceId} pageId={detail.raw.id} />
+            )}
             {selectedSlug && !editing && applicationAvailable && (
               <div
                 role="group"
@@ -445,8 +467,19 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               and `mode="wait"` keeps them from overlapping. Only THIS column is
               inside it — the rail beside it is not, so it never participates in
               the transition and never blinks. */}
-          <AnimatePresence mode="wait">
-            {editing && selectedSlug && contentSupported ? (
+          <AnimatePresence mode="wait" key={reference ? detail.error ? "reference-denied" : resolution?.binding.scope ?? "reference-pending" : "slug-navigation"}>
+            {reference && (!selectedSlug || detail.error) ? (
+              <div className="p-6" role="status">
+                <p>{reference.kind === "invalid" || !eligible && !directory.loading || identity.error || detail.error
+                  ? "Page link is unavailable. Check your workspace and Page access."
+                  : "Opening Page link…"}</p>
+                {reference.kind === "page" && eligible && (identity.error || detail.error) && (
+                  <button type="button" className="mt-3 inline-flex items-center underline coarse:min-h-12" onClick={() => nav.reloadReference(identity.reload)}>
+                    Resolve Page link again
+                  </button>
+                )}
+              </div>
+            ) : editing && selectedSlug && contentSupported ? (
               <motion.div
                 key={`editor-${selectedSlug}`}
                 // The editor arrives from the right edge and leaves the same
@@ -619,4 +652,25 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
       )}
     </div>
   )
+}
+
+
+function CopyPageLink({ workspaceId, pageId }: { workspaceId: string; pageId: string }) {
+  const [message, setMessage] = React.useState<string | null>(null)
+  const generation = React.useRef(0)
+  const [lifetime] = React.useState(() => ({ active: true }))
+  React.useEffect(() => { lifetime.active = true; return () => { lifetime.active = false } }, [lifetime])
+  const copy = async () => {
+    const request = ++generation.current
+    try {
+      await navigator.clipboard.writeText(new URL(stablePageHref(workspaceId, pageId), window.location.origin).href)
+      if (lifetime.active && generation.current === request) setMessage("Page link copied")
+    } catch {
+      if (lifetime.active && generation.current === request) setMessage("Could not copy Page link. Check clipboard access and try again.")
+    }
+  }
+  return <span className="flex items-center gap-2">
+    <SubBarSecondary icon={Share2} onClick={() => void copy()}>Copy Page link</SubBarSecondary>
+    {message && <span role="status" className="text-xs">{message}</span>}
+  </span>
 }

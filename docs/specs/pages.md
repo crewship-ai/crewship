@@ -9,6 +9,37 @@ that every feature shipped. The current custom-application contract is
 Internal research, work allocation and session evidence are maintained in
 [private context](../development/private-context.md).
 
+## Stable Page identity resolution
+
+`GET /api/v1/pages/resolve/id/{pageId}?workspace_id=WORKSPACE` resolves the
+original Page ID to `{page_id, slug}` under current human read authority.
+Lookup, exact session/CLI validity, current workspace role, Page grants, real
+panel crew reach and direct leaf-folder ACL share one read transaction. CLI
+scopes need `pages:read` or `pages:*`; write alone does not imply read, and
+legacy unrestricted tokens retain their existing object authority. Credentials
+fail with 401, scope/membership fail with 403, and authorized callers receive the same 404
+for hidden, missing, deleted or other-workspace identities. Responses are
+no-store and contain no title, folder path, ancestor ID or content.
+
+The endpoint uses two literal segments before the Page ID to avoid an ambiguous
+ServeMux pattern against existing `/pages/{slug}/grants` and related resources.
+Existing Pages named `resolve` or `by-id` keep their slug routes. Rename resolves
+the original identity to its new slug; reusing the old slug never retargets it.
+This resolver is not a stored typed internal link, backlink or content-search
+index. Fixed-revision/element anchors remain separate.
+
+The Page header's **Copy Page link** uses the confirmed loaded Page ID and
+workspace, producing `/pages?ref=PAGE_ID&workspace_id=WORKSPACE`. Clipboard
+success is reported only after the browser accepts the write; failures remain
+visible. Opening this link adopts only an authorized workspace, resolves the
+ID, and retains it while canonicalizing the current slug. The raw detail ID is
+checked before caching, subscribing or mounting content. Address reuse refuses
+the mismatched body and offers an explicit fresh resolution. Changing a link,
+workspace or resolution while editing uses the existing unsaved-work guard;
+canceling retains the current route, workspace and draft. Viewer/membership
+changes clear authorization-bound resolution immediately. An intentional
+workspace picker change leaves the stable reference rather than bouncing back.
+
 ## Delivery boundary
 
 **Artifacts and Boards 1.0 use static artifact previews.** The Board drawing editor

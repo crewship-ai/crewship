@@ -329,3 +329,41 @@ describe("useEditorRoute", () => {
     })
   })
 })
+
+
+describe("stable reference navigation guards", () => {
+  it("keeps original reference and workspace when same-slug navigation is canceled", () => {
+    go("/pages/same?ref=original&workspace_id=first")
+    const { result } = renderHook(() => useEditorRoute("same"))
+    act(() => result.current.setDirty(true))
+    act(() => {
+      go("/pages/same?ref=other&workspace_id=second")
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    })
+    expect(result.current.reference).toMatchObject({ pageId: "original", workspaceId: "first" })
+    expect(result.current.pending).not.toBeNull()
+    act(() => result.current.pending!.keep())
+    expect(window.location.search).toContain("ref=original")
+    expect(window.location.search).toContain("workspace_id=first")
+    expect(result.current.dirty).toBe(true)
+  })
+
+  it("guards explicit retry and keeps the expected ID after canonicalization", () => {
+    go("/pages/old?ref=original&workspace_id=first")
+    const { result } = renderHook(() => useEditorRoute("old"))
+    const reference = { kind: "page" as const, pageId: "original", workspaceId: "first" }
+    act(() => result.current.resolveReference(reference, "renamed"))
+    expect(window.location.href).toContain("/pages/renamed?ref=original&workspace_id=first")
+    act(() => result.current.setDirty(true))
+    const reload = vi.fn()
+    act(() => result.current.reloadReference(reload))
+    expect(reload).not.toHaveBeenCalled()
+    act(() => result.current.pending!.keep())
+    expect(reload).not.toHaveBeenCalled()
+    expect(result.current.dirty).toBe(true)
+    act(() => result.current.reloadReference(reload))
+    act(() => result.current.pending!.discard())
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(result.current.reference).toEqual(reference)
+  })
+})

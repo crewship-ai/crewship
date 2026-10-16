@@ -31,6 +31,22 @@ responses exist to keep them true:
 Implementation: `internal/api/pages_*.go`, `internal/pages` for the schemas and
 validation.
 
+## Resolve stable Page identity
+
+`GET /api/v1/pages/resolve/id/{pageId}?workspace_id=WORKSPACE` returns only
+`{"page_id":"original-id","slug":"current-address"}`. The original ID is
+authoritative; a renamed Page resolves to its current slug, even when another
+Page reuses the old address. No slug hint or similar-name fallback is used.
+
+Current human credentials and Page read access are required. Scoped tokens need
+`pages:read` or `pages:*`; `pages:write` alone does not imply read. Sessions and
+legacy unrestricted tokens retain existing Page ACL authority. Invalid/expired/
+revoked credentials return401, missing scope or workspace membership returns403.
+Hidden, missing, deleted and other-workspace IDs share the same404 body. The
+no-store response exposes no title, folder, ancestor, payload or counts.
+Page IDs contain1–128 ASCII letters, digits, underscores or hyphens; malformed
+identifiers return400. This endpoint adds no sharing grant or public-token access.
+
 ## Derived content format metadata
 
 Detail and index responses include `content_descriptor` with `type_id`,

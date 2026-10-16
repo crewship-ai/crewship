@@ -2,6 +2,8 @@
 
 import * as React from "react"
 
+import { samePageReference, type StablePageReference } from "@/lib/pages/stable-links"
+
 import { useNavigationGuard, type NavigationGuard } from "@/hooks/use-navigation-guard"
 
 import {
@@ -37,6 +39,10 @@ import {
 export interface EditorNavigation extends EditorRoute {
   /** Open a page in view mode (or the overview with `null`). */
   openPage: (slug: string | null) => void
+  /** Canonicalize an authorized stable reference without losing its ID fence. */
+  resolveReference: (reference: StablePageReference, slug: string) => void
+  /** Re-resolve only after the person accepts discarding unsaved changes. */
+  reloadReference: (reload: () => void) => void
   /** Enter or leave the editor on the current page. */
   setMode: (mode: EditorMode) => void
   /**
@@ -64,7 +70,7 @@ export interface EditorNavigation extends EditorRoute {
 }
 
 function sameRoute(a: EditorRoute, b: EditorRoute): boolean {
-  return a.slug === b.slug && a.mode === b.mode && a.section === b.section && a.pane === b.pane
+  return a.slug === b.slug && a.mode === b.mode && a.section === b.section && a.pane === b.pane && samePageReference(a.reference, b.reference)
 }
 
 export function useEditorRoute(initialSlug: string | null): EditorNavigation {
@@ -200,6 +206,18 @@ export function useEditorRoute(initialSlug: string | null): EditorNavigation {
     (slug: string | null) => navigate({ slug, mode: "view", section: DEFAULT_EDITOR_SECTION, pane: "section" }),
     [navigate],
   )
+  const resolveReference = React.useCallback(
+    (reference: StablePageReference, slug: string) => {
+      const current = routeRef.current
+      if (!samePageReference(current.reference, reference)) return
+      navigate({ ...current, slug }, { replace: true })
+    },
+    [navigate],
+  )
+  const reloadReference = React.useCallback(
+    (reload: () => void) => navigate({ ...routeRef.current }, { replace: true, onDiscard: reload }),
+    [navigate],
+  )
   const setMode = React.useCallback(
     (mode: EditorMode) => navigate({ ...routeRef.current, mode, pane: "section" }),
     [navigate],
@@ -221,5 +239,5 @@ export function useEditorRoute(initialSlug: string | null): EditorNavigation {
     [navigate],
   )
 
-  return { ...route, dirty, pending, openPage, setMode, openEditor, setSection, setPane, setDirty }
+  return { ...route, dirty, pending, openPage, resolveReference, reloadReference, setMode, openEditor, setSection, setPane, setDirty }
 }

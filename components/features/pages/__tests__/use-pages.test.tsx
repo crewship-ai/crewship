@@ -474,6 +474,16 @@ describe("usePages / usePage", () => {
     expect(panel.snapshot.provenance?.run_id).toBe("crun0000000000000000001")
   })
 
+  it("rejects a reused-slug body before cache or renderer admission", async () => {
+    mockFetch.mockResolvedValue(okJSON(wirePage({ id: "wrong-page", name: "Forbidden canary" })))
+    const identity = { expectedPageId: "original-page", viewerId: "viewer", scope: "fresh-authorized-resolution" }
+    const { result } = renderHook(() => usePage("ws-1", "fleet-201", identity), { wrapper: makeWrapper(qc) })
+    await waitFor(() => expect(result.current.error).toContain("Resolve this link again"))
+    expect(result.current.raw).toBeNull()
+    expect(result.current.page).toBeNull()
+    expect(qc.getQueryCache().getAll().every(query => query.state.data === undefined)).toBe(true)
+  })
+
   it("tells a 404 apart from any other failure, so the slug gets its own empty state", async () => {
     mockFetch.mockResolvedValue(errStatus(404))
     const { result } = renderHook(() => usePage("ws-1", "gone"), { wrapper: makeWrapper(qc) })

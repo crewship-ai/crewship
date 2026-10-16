@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Page identities resolve to their current authorized address (#3224).** The new read-only API and `crewship page resolve` retain original Page identity across rename and address reuse while checking current credentials, workspace and Page reach. Hidden identities reveal no address or metadata. The Page header copies explicit workspace/ID links; opening them retains identity through canonical address changes and refuses reused-slug bodies before rendering.
+
 - **Typed Slides API supports private PNG/JPEG revision attachments (#3213).** Explicit schema2 upgrades preserve schema1 history and hashes; exact image pins, credential checks and recovery validation commit with the revision. Removing an image preserves historic bytes and comments detach/restore by stable identity. Native image UI and export qualification remain separate.
 
 - Native Slides Pages now support explicit durable human save/retry, history/restore and presentation with immutable Page/revision preconditions, retained conflicts and live type-specific edit capability; image/comments/export and agent work remain pending.

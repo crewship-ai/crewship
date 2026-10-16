@@ -35,6 +35,20 @@ empty, and a line saying so would be read as a key. `page export` is the
 exception in the other direction: it prints YAML unless you ask for
 `--format json`.
 
+## crewship page resolve
+
+```bash
+crewship page resolve ORIGINAL_PAGE_ID --workspace WORKSPACE_ID --format json
+```
+
+Resolves the original Page ID to its current authorized `page_id` and `slug`
+within the explicit workspace. Rename and old-address reuse do not change the
+identity. Requires current human Page read authority and `pages:read` token scope
+(`pages:*` and legacy unrestricted tokens retain their documented authority).
+The command performs one identity lookup with no slug/name fallback. Hidden,
+missing, deleted and other-workspace identities share a404 response. It does not
+copy a UI link, select an element/revision, create a backlink or search content.
+
 ## Board collaboration commands
 
 These commands use your existing human profile. Read or comment rights do not
