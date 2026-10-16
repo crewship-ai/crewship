@@ -55,6 +55,8 @@ COPY config/*.json ./config/
 COPY schemas/*.json ./schemas/
 COPY internal/pages/content_types.json ./internal/pages/
 COPY e2e/ ./e2e/
+# Native Slides browser fixture is included in the root TypeScript check.
+COPY testdata/slides-schema-v1.json ./testdata/
 COPY scripts/prepare-pdf-assets.mjs scripts/prepare-chat-workers.mjs scripts/prepare-board-assets.mjs scripts/prepare-board-converter.mjs scripts/check-control-accessibility.tsx ./scripts/
 COPY tools/pages-build/sdk.ts ./tools/pages-build/
 ARG VERSION=dev
