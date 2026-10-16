@@ -111,9 +111,9 @@ func requireSeedRBACOwner(client *cli.Client) error {
 		return err
 	}
 	var rows []struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
-		Role string `json:"currentUserRole"`
+		ID   string `json:"id" yaml:"id"`
+		Slug string `json:"slug" yaml:"slug"`
+		Role string `json:"currentUserRole" yaml:"currentUserRole"`
 	}
 	if err := cli.ReadJSON(response, &rows); err != nil {
 		return err
