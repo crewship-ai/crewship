@@ -42,6 +42,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"slides_comment_threads": IntentInclude, "slides_comment_events": IntentInclude, "slides_comment_receipts": IntentInclude,
 	"slides_revision_assets": IntentInclude, "slides_heads": IntentInclude, "slides_revisions": IntentInclude, "slides_receipts": IntentInclude, "slides_object_ids": IntentInclude,
 	"slides_writer_fence":   IntentExcludeRuntime,
+	"document_creations":    IntentInclude, // durable human-owned creation provenance; no live consent
 	"documents":             IntentInclude,
 	"document_comments":     IntentInclude,
 	"document_requests":     IntentInclude, // durable history; restore clears live dispatch authority
@@ -51,6 +52,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"document_writer_fence": IntentExcludeRuntime, // installation-local SQL serialization singleton
 
 	"artifact_workspace_writes":             IntentExcludeRuntime, // per-installation rolling write-rate receipts are initialized anew on restore
+	"document_creation_consents":            IntentExcludeRuntime, // trusted message/run consent must not survive workspace restore
 	"artifact_creation_authorizations":      IntentExcludeRuntime, // explicit live-run creation opt-in must not survive restore
 	"page_artifact_request_updates":         IntentInclude,        // immutable typed progress/reply history, never live authority
 	"page_artifact_requests":                IntentInclude,        // history restored with live dispatch authority cleared

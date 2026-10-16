@@ -112,6 +112,12 @@ jobs:
           CREWSHIP_PAGE_SEARCH_BROWSER: '1'
           CREWSHIP_PAGE_SEARCH_OUTPUT: ${{ runner.temp }}/native-search-workflow
         run: go test -tags page_search_browser ./internal/api -run '^TestNativeSearchBrowser$' -count=1 -timeout 5m -v
+      - name: First chat message creates a populated document
+        timeout-minutes: 6
+        env:
+          CREWSHIP_DOCUMENT_CREATE_BROWSER: '1'
+          CREWSHIP_DOCUMENT_CREATE_OUTPUT: ${{ runner.temp }}/document-create-workflow
+        run: go test -tags "docs_foundation document_creation_browser" ./internal/api -run '^TestDocumentCreationChatBrowser$' -count=1 -timeout 5m -v
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         timeout-minutes: 3
         if: always()
@@ -121,4 +127,5 @@ jobs:
             ${{ runner.temp }}/artifact-production-workflow/
             ${{ runner.temp }}/board-mermaid-workflow/
             ${{ runner.temp }}/native-search-workflow/
+            ${{ runner.temp }}/document-create-workflow/
           if-no-files-found: error

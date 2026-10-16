@@ -18,6 +18,7 @@ type artifactMCPDefinition struct {
 }
 
 var artifactMCPDefinitions = []artifactMCPDefinition{
+	{"doc_create", "Create one complete private human-owned Docs from explicit pre-send chat permission for this live run. Supply title/name, slug, mutation_id and readable paragraph/heading/list/codeBlock blocks; the server supplies IDs and hashes. This creation-only permission cannot edit existing Pages or continue editing the created document. Exact payload/mutation_id retry only. No HTML, images or raw Yjs.", "POST", "/api/v1/documents/create", []string{"slug", "name", "mutation_id", "blocks"}, []string{"slug", "name", "mutation_id", "blocks"}, (*Server).handleDocumentCreate},
 	{"artifact_request_update", "Report an untrusted descriptive phase (never heartbeat/deadline extension), or complete an explicitly reply-only artifact request with plain text. Requires exact live admitted run/current grants/deadline. operation progress uses phase preparing|waiting_for_input|uploading|finalizing plus optional message; operation reply uses body only. Text <=4096 UTF8 bytes; exact mutation_id retry only. Cannot mark a revision request successful without publication.", "POST", "/artifact-requests/{request_id}/updates", []string{"request_id", "mutation_id", "operation", "phase", "message", "body"}, []string{"request_id", "mutation_id", "operation"}, (*Server).handleArtifactRequestContext},
 	{"artifact_list", "List only this current run's explicit delegated artifact Pages, after live principal/issuer/grant/read checks. No workspace-wide catalog. Follow next_cursor while has_more; each bounded scan can yield an empty page after revoked rows are filtered.", "GET", "/artifacts", []string{"cursor"}, []string{}, (*Server).handleArtifactToolRead},
 	{"artifact_diff", "Compare two exact retained authorized HTML revisions as one linear line-replacement hunk. Each source <=256 KiB; oversized returns413 with scoped-read/local-compare guidance and no partial result. HTTP body <=1 MiB before MCP wrapping, otherwise use scopedHTTP.", "GET", "/artifacts/{slug}/diff", []string{"slug", "from_revision", "to_revision"}, []string{"slug", "from_revision", "to_revision"}, (*Server).handleArtifactToolRead},
@@ -49,12 +50,17 @@ func artifactMCPCatalog() []memoryMCPToolDescriptor {
 			if key == "from_revision" || key == "to_revision" || key == "revision" || key == "base_rev" || key == "base_seq" || key == "base_version" || key == "limit" || key == "format_version" {
 				typ = "integer"
 			}
-			if key == "upserts" || key == "deletes" {
+			if key == "blocks" || key == "upserts" || key == "deletes" {
 				typ = "array"
 			}
 			p := map[string]any{"type": typ}
 			if typ == "array" {
 				p["items"] = map[string]any{"type": "object"}
+			}
+			if key == "blocks" && d.name == "doc_create" {
+				p["maxItems"] = 128
+				p["minItems"] = 1
+				p["items"] = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type"}, "properties": map[string]any{"type": map[string]any{"type": "string", "enum": []string{"paragraph", "heading", "bulletList", "orderedList", "codeBlock"}}, "text": map[string]any{"type": "string"}, "level": map[string]any{"type": "integer", "minimum": 1, "maximum": 3}, "items": map[string]any{"type": "array", "minItems": 1, "maxItems": 128, "items": map[string]any{"type": "string"}}}}
 			}
 			props[key] = p
 		}
@@ -106,7 +112,7 @@ func decodeArtifactMCPArgs(raw []byte, d artifactMCPDefinition) (map[string]json
 			if !ok || number < 0 || number > 9007199254740991 || number != float64(int64(number)) {
 				return nil, fmt.Errorf("%s must be a nonnegative safe integer", key)
 			}
-		case "upserts", "deletes":
+		case "blocks", "upserts", "deletes":
 			if _, ok := typed.([]any); !ok {
 				return nil, fmt.Errorf("%s must be an array", key)
 			}

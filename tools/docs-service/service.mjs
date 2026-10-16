@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { creationDocument } from './create-document.mjs';
 import { readFile, chmod, lstat } from 'node:fs/promises';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { isAbsolute, normalize } from 'node:path';
@@ -89,6 +90,12 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   // Reads have no path into fingerprint/receipt, writer lease or commit logic.
   async function execute(page, operation, context, request) {
     switch (operation) {
+      case 'prepare-create': {
+        if (!request || typeof request !== 'object' || Object.keys(request).length !== 1 || !Object.hasOwn(request,'blocks')) throw fault(400,'closed authoring blocks required');
+        const doc=create(creationDocument(request.blocks),RICH_VERSION);
+        try { return {schema:RICH_VERSION,snapshot:snapshot(doc),blocks:(await outline(doc,RICH_VERSION)).map(({id,hash})=>({id,hash}))}; }
+        finally { doc.destroy(); }
+      }
       case 'read': return executeRead(page, 'read', context, request);
       case 'verify-targets': return executeRead(page, 'verify-targets', context, request);
       case 'comments': return executeRead(page, 'comments', context, request);
@@ -254,7 +261,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if (req.method === 'POST' && req.url === '/drain') { await drain(); return reply(200, { drained: true }); }
       if(draining){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'service draining');}
       if(!ready){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'engine recovering');}
-      const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(initialize|upgrade|read|verify-targets|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
+      const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(prepare-create|initialize|upgrade|read|verify-targets|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
       if (req.method !== 'POST' || !match) throw fault(404, 'unknown operation');
       const context = { workspace: req.headers['x-workspace-id'], authorization: req.headers.authorization };
       if (!id(context.workspace) || typeof context.authorization !== 'string' || !/^Bearer \S+$/.test(context.authorization)) throw fault(401, 'workspace and bearer required');

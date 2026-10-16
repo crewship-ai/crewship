@@ -43,6 +43,7 @@ import (
 // either add it to BackupTables (FK-safe order, plus BackupTableIntent) or
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
+	"document_creation_consents":        "typed human message/run authority is installation-bound; restore must not recreate permission",
 	"page_search_projections":           "Runtime-only authorized native text projection; exclude from workspace/fork bundles and rebuild canonical text after scoped restore or offline instance cache clearing.",
 	"artifact_workspace_writes":         "rolling write-rate state is initialized anew on a restored installation",
 	"artifact_run_principals":           "active chat/run admission is installation-bound; restore must not resurrect publication authority",

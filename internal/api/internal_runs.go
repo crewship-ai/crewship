@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/runauthority"
@@ -28,21 +29,22 @@ const runVerdictFlagKey = "run_verdict_summaries"
 // POST /api/v1/internal/runs
 func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ID                     string                `json:"id"`
-		AgentID                string                `json:"agent_id"`
-		ChatID                 string                `json:"chat_id"`
-		WorkspaceID            string                `json:"workspace_id"`
-		TriggerType            string                `json:"trigger_type"`
-		Metadata               json.RawMessage       `json:"metadata"`
-		ArtifactHumanReceipt   *chataudience.Receipt `json:"artifact_human_receipt"`
-		BoardRequestID         string                `json:"board_request_id"`
-		DocumentRequestID      string                `json:"document_request_id"`
-		SlidesRequestID        string                `json:"slides_request_id"`
-		ArtifactRequestID      string                `json:"artifact_request_id"`
-		ArtifactHumanMessageID string                `json:"artifact_human_message_id"`
-		HumanAuthority         *chataudience.Receipt `json:"human_authority"`
-		TriggerMessageID       string                `json:"trigger_message_id"`
-		ChatOriginID           string                `json:"chat_origin_id"`
+		ID                     string                    `json:"id"`
+		AgentID                string                    `json:"agent_id"`
+		ChatID                 string                    `json:"chat_id"`
+		WorkspaceID            string                    `json:"workspace_id"`
+		TriggerType            string                    `json:"trigger_type"`
+		Metadata               json.RawMessage           `json:"metadata"`
+		ArtifactHumanReceipt   *chataudience.Receipt     `json:"artifact_human_receipt"`
+		BoardRequestID         string                    `json:"board_request_id"`
+		DocumentCreationIntent *documents.CreationIntent `json:"document_creation_intent"`
+		DocumentRequestID      string                    `json:"document_request_id"`
+		SlidesRequestID        string                    `json:"slides_request_id"`
+		ArtifactRequestID      string                    `json:"artifact_request_id"`
+		ArtifactHumanMessageID string                    `json:"artifact_human_message_id"`
+		HumanAuthority         *chataudience.Receipt     `json:"human_authority"`
+		TriggerMessageID       string                    `json:"trigger_message_id"`
+		ChatOriginID           string                    `json:"chat_origin_id"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
@@ -51,6 +53,12 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	if body.ID == "" || body.AgentID == "" || body.WorkspaceID == "" {
 		replyError(w, http.StatusBadRequest, "id, agent_id, workspace_id required")
 		return
+	}
+	if body.DocumentCreationIntent != nil {
+		if body.DocumentCreationIntent.Validate() != nil || InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" || body.HumanAuthority == nil || body.ArtifactHumanReceipt == nil || *body.HumanAuthority != *body.ArtifactHumanReceipt || body.TriggerMessageID == "" || body.TriggerMessageID != body.ArtifactHumanMessageID || body.DocumentRequestID != "" || body.ArtifactRequestID != "" || body.BoardRequestID != "" || body.SlidesRequestID != "" || body.ChatOriginID != "" {
+			replyError(w, 403, "explicit host human document creation intent required")
+			return
+		}
 	}
 	if body.TriggerType == "" {
 		body.TriggerType = "USER"
@@ -141,6 +149,9 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		payload := map[string]any{"trigger_type": body.TriggerType, "host_admitted": InternalTokenWorkspaceFromContext(r.Context()) == "" && InternalTokenCrewFromContext(r.Context()) == ""}
+		if body.DocumentCreationIntent != nil {
+			payload["document_creation_intent"] = body.DocumentCreationIntent
+		}
 		if body.ChatOriginID != "" {
 			payload["chat_origin_id"] = body.ChatOriginID
 		}
@@ -160,6 +171,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 				delete(md, "artifact_human_message_id")
 				delete(md, "artifact_request_id")
 				delete(md, "board_request_id")
+				delete(md, "document_creation_intent")
 				payload["metadata"] = md
 			}
 		}
@@ -207,11 +219,17 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 
 	if body.ArtifactHumanReceipt != nil {
 		if err := captureArtifactChatPrincipal(r, h.db, body.ID, body.WorkspaceID, body.AgentID, agentCrewID, body.ChatID, body.ArtifactHumanMessageID, body.ArtifactHumanReceipt, body.SlidesRequestID); err != nil {
-			if body.DocumentRequestID != "" || body.ArtifactRequestID != "" || body.BoardRequestID != "" || body.SlidesRequestID != "" {
+			if body.DocumentCreationIntent != nil || body.DocumentRequestID != "" || body.ArtifactRequestID != "" || body.BoardRequestID != "" || body.SlidesRequestID != "" {
 				replyError(w, 403, "artifact human admission refused")
 				return
 			}
 			h.logger.Warn("run has no artifact publication authority", "run_id", body.ID, "error", err)
+		}
+	}
+	if body.DocumentCreationIntent != nil {
+		if err := bindDocumentCreationRun(r, h.db, body.ID, body.ArtifactHumanMessageID, body.ArtifactHumanReceipt, *body.DocumentCreationIntent); err != nil {
+			replyError(w, 403, "document creation admission refused")
+			return
 		}
 	}
 	origins := 0

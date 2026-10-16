@@ -7,7 +7,7 @@ import "encoding/json"
 // from backups. Rewrite matching provenance together; never create principals.
 func remapArtifactCreationRuns(dump *DBDump) {
 	runs := map[string]string{}
-	for _, row := range dump.Tables["page_artifact_creations"] {
+	for _, row := range append(append([]map[string]any{}, dump.Tables["page_artifact_creations"]...), dump.Tables["document_creations"]...) {
 		old, _ := row["run_id"].(string)
 		if old != "" {
 			if _, ok := runs[old]; !ok {
@@ -17,6 +17,7 @@ func remapArtifactCreationRuns(dump *DBDump) {
 	}
 	for _, ref := range []struct{ table, column string }{
 		{"page_artifact_creations", "run_id"},
+		{"document_creations", "run_id"},
 		{"page_board_write_audit", "actor_run_id"},
 		{"page_board_elements", "author_run_id"},
 		{"page_board_mutations", "author_run_id"},

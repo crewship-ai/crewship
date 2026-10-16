@@ -59,6 +59,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"GET /api/v1/pages/ /slides":           guardHandlerIdentity,
 	"POST /api/v1/pages/ /slides":          guardHandlerIdentity,
 	"POST /api/v1/pages/ /document":        guardHandlerIdentity,
+	"POST /api/v1/documents/create":        guardHandlerIdentity,
 	"POST /artifact-requests/":             guardHandlerIdentity,
 	"GET /artifact-requests/":              guardHandlerIdentity,
 	"GET /board-requests/":                 guardHandlerIdentity,

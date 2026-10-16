@@ -757,6 +757,11 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			}
 			rep.RuntimeReset = append(rep.RuntimeReset, "document agent request dispatch authority")
 		}
+		if reset, err := resetPhysicalDocumentCreationAuthority(ctx, db.DB); err != nil {
+			return err
+		} else if reset {
+			rep.RuntimeReset = append(rep.RuntimeReset, "document creation consent and run authority")
+		}
 		if fenced, err := fencePhysicalSelectedRequests(ctx, db.DB); err != nil {
 			return err
 		} else if fenced {

@@ -1,6 +1,7 @@
 "use client"
 
 import { ArtifactResultCards } from "./artifact-result-cards"
+import { DocumentCreationChoice } from "./document-creation-choice"
 import { ArtifactCreationControl } from "./artifact-creation-control"
 import { ChatSessionSource } from "./chat-session-source"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -439,8 +440,21 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     setProjectInputSelection({ scope: projectInputScope, ids })
   }, [projectInputScope])
   useEffect(() => { setProjectInputSelection({ scope: projectInputScope, ids: [] }) }, [projectInputScope])
+  const documentCreationScope = JSON.stringify([currentUserId, workspaceId, sessionId])
+  const [documentCreation, setDocumentCreation] = useState<{ scope: string; submissionId: string } | null>(null)
+  const [documentCreationSending, setDocumentCreationSending] = useState(false)
+  useEffect(() => { setDocumentCreation(null) }, [documentCreationScope])
+  useEffect(() => { if (executionProfile === "restricted") setDocumentCreation(null) }, [executionProfile])
+  const selectedDocumentCreation = documentCreation?.scope === documentCreationScope ? documentCreation : null
+  const changeDocumentCreation = useCallback((selected: boolean) => {
+    setDocumentCreation(selected ? { scope: documentCreationScope, submissionId: crypto.randomUUID() } : null)
+  }, [documentCreationScope])
   const sendMessageWithPage = useCallback((text: string, metadata?: Record<string, unknown>) => {
     if (!canChat) return false
+    if (selectedDocumentCreation) {
+      if (executionProfileRef.current !== "trusted") { toast.error("Document creation requires an available agent chat."); return false }
+      metadata = { ...metadata, document_creation: { submission_id: selectedDocumentCreation.submissionId } }
+    }
     if (executionProfileRef.current === "restricted" && selectedProjectInputs.length) { metadata = { ...metadata, project_file_versions: [...selectedProjectInputs] } }
     if (pageContextSlug && !pageContextRemoved && !pageContextError) {
       const withPage = { ...metadata, page_context: { slug: pageContextSlug } }
@@ -454,13 +468,15 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         return false
       }
       pendingPageSendRef.current = text.trim()
+      setDocumentCreation(null)
       return true
     } else {
       const sent = metadata ? sendMessage(text, metadata) : sendMessage(text)
       if (sent === false) toast.error("Not connected — your message is still here. Try again when chat reconnects.")
+      else setDocumentCreation(null)
       return sent
     }
-  }, [canChat, sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs])
+  }, [canChat, sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs, selectedDocumentCreation])
 
   // Reply-settled hook: when a stream the user watched in THIS session
   // finishes (isStreaming true→false), tell the parent so it can re-fire
@@ -726,32 +742,35 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
    *  the user can see it. */
   const ensureSessionForSend = useCallback(async (): Promise<boolean> => {
     if (!canChat) return false
-    const sid = sessionId
-    let ok = await ensureSession()
-    if (ok) {
-      try {
-        const response = await apiFetch(`/api/v1/chats/${requireApiPathSegment(sid)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId ?? "")}`)
-        if (!response.ok) ok = false
-        else {
-          const profile = await response.json() as {mode:string;audience?:string}
-          if (currentSessionRef.current !== sid) return false
-          if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
-          else ok = false
-        }
-      } catch {ok = false}
-    }
-    // The user moved to another conversation while this one was being
-    // created: its message belongs to the conversation they left, whose
-    // composer keeps the draft. Nothing to say, nothing to send.
-    if (currentSessionRef.current !== sid) return false
-    // A trusted send goes over the socket, which the resolved profile has only
-    // just switched on. Restricted sends are HTTP and report connected.
-    if (ok && executionProfileRef.current === "trusted") ok = await waitForConnection(sid)
-    if (currentSessionRef.current !== sid) return false
-    if (!ok) {
-      toast.error("Couldn't start this conversation. Check your connection and try again.")
-    }
-    return ok
+    setDocumentCreationSending(true)
+    try {
+      const sid = sessionId
+      let ok = await ensureSession()
+      if (ok) {
+        try {
+          const response = await apiFetch(`/api/v1/chats/${requireApiPathSegment(sid)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId ?? "")}`)
+          if (!response.ok) ok = false
+          else {
+            const profile = await response.json() as {mode:string;audience?:string}
+            if (currentSessionRef.current !== sid) return false
+            if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
+            else ok = false
+          }
+        } catch {ok = false}
+      }
+      // The user moved to another conversation while this one was being
+      // created: its message belongs to the conversation they left, whose
+      // composer keeps the draft. Nothing to say, nothing to send.
+      if (currentSessionRef.current !== sid) return false
+      // A trusted send goes over the socket, which the resolved profile has only
+      // just switched on. Restricted sends are HTTP and report connected.
+      if (ok && executionProfileRef.current === "trusted") ok = await waitForConnection(sid)
+      if (currentSessionRef.current !== sid) return false
+      if (!ok) {
+        toast.error("Couldn't start this conversation. Check your connection and try again.")
+      }
+      return ok
+    } finally { setDocumentCreationSending(false) }
   }, [canChat,ensureSession,sessionId,workspaceId,waitForConnection])
 
   // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
@@ -1196,6 +1215,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
+        {canChat && (executionProfile === "trusted" || (executionProfile === "pending" && profileProbeSettled)) && sessionKind === "direct" && workspaceId && <DocumentCreationChoice workspaceId={workspaceId} selected={Boolean(selectedDocumentCreation)} onChange={changeDocumentCreation} disabled={isStreaming || creatingSession || documentCreationSending} />}
         {canChat ? <ChatComposer
           agentId={agentId}
           sessionId={sessionId}
@@ -1326,6 +1346,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
+        {canChat && (executionProfile === "trusted" || (executionProfile === "pending" && profileProbeSettled)) && sessionKind === "direct" && workspaceId && <DocumentCreationChoice workspaceId={workspaceId} selected={Boolean(selectedDocumentCreation)} onChange={changeDocumentCreation} disabled={isStreaming || creatingSession || documentCreationSending} />}
         {canChat ? <ChatComposer
           agentId={agentId}
           sessionId={sessionId}

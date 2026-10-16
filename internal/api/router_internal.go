@@ -67,6 +67,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// (Router.DrainVerdicts). Otherwise `internal` is local to this func.
 	r.internalHandler = internal
 	internalAuth := func(next http.Handler) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
+	r.mux.Handle("POST /api/v1/internal/documents/create", internalAuth(http.HandlerFunc(r.pages.CreateDocumentAgent)))
 	r.mux.Handle("GET /api/v1/internal/documents/{slug}", internalAuth(http.HandlerFunc(r.pages.DocumentAgent)))
 	r.mux.Handle("GET /api/v1/internal/slides/{slug}/requests/{requestId}", internalAuth(http.HandlerFunc(r.pages.SelectedSlidesAgent)))
 	r.mux.Handle("POST /api/v1/internal/slides/{slug}/requests/{requestId}/replace", internalAuth(http.HandlerFunc(r.pages.SelectedSlidesAgent)))
