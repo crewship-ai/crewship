@@ -46,7 +46,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   for (const path of [socket, authoritySocket, tokenFile]) if (!isAbsolute(path) || normalize(path) !== path || Buffer.byteLength(path) > 100) throw new Error('clean absolute Unix socket path required (maximum 100 bytes)');
   const secret = await readServiceSecret(tokenFile);
   const build = createHash('sha256');
-  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'service.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
+  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'service.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
   const identity = { protocol: PROTOCOL, schema: VERSION, build: build.digest('hex') };
   const leases = new Map();
   const owner = randomUUID();const syncEpoch=state=>`${state.incarnation??"legacy"}:${owner}:${state.generation??state.epoch}`; const documents = new Map(); let queued = 0; let draining = false;let ready=false;let admitted=0;const decoding=new Set();
@@ -104,7 +104,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         if (!Number.isSafeInteger(request.base_rev) || request.base_rev !== state.rev) throw fault(409, 'document request revision changed');
         return { page_id: page, rev: state.rev, targets: await verifyTargets(doc, request.targets) };
       }
-      if(operation==='export') return {markdown:markdown(validate(doc))};
+      if(operation==='export') { try { return {markdown:markdown(validate(doc))}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; } }
       if(operation==='checkpoints') return {checkpoints:await go(page,'checkpoints',context)};
       if(operation==='checkpoint-read') { const c=await go(page,'checkpoint-read',context,{id:request.checkpoint});const pinned=load(c.snapshot);try{return {...c,content:validate(pinned),outline:await outline(pinned)}}finally{pinned.destroy()} };
       if (operation === 'comments') {
