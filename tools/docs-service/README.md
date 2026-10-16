@@ -20,8 +20,13 @@ carry `X-Workspace-ID` and the original `Authorization: Bearer …`; Go decides
 whether the live human or agent run has permission, including whether raw
 human updates are allowed. Never expose the service directly to users.
 
+Go, Node and the packaged healthcheck open secret files once on Unix with
+no-follow/nonblocking flags, validate the opened descriptor, and read at most
+513 bytes from that descriptor. Path replacement cannot substitute a different
+file between validation and reading; growth after validation is rejected.
+
 `GET /health/live` and `/health/ready` return protocol 3, schema 2 and a SHA-256
-build identity over the lockfile, schema and service. `POST /drain` stops new
+build identity over the lockfile, schema, service and secret-file helper. `POST /drain` stops new
 admission and waits for pending work and lease releases. SIGTERM drains and
 closes. Drain waits at most 30 seconds, then reports failure. Document requests are `POST /v1/documents/{page}/{operation}` with JSON:
 

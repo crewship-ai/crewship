@@ -170,6 +170,10 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/board/delegations/{runId}", roleSelf, p.RevokeBoardRun)
 	// openapi: query revision:integer; responses 200,400,401,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/artifact", authed(wsCtx(http.HandlerFunc(p.GetArtifact))))
+	// openapi: query mutation_id:string; responses 200,201,400,401,403,404,408,409,413,422,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/assets", roleSelf, p.UploadPageAsset)
+	r.mux.Handle("GET /api/v1/pages/{slug}/assets/{assetId}", authed(wsCtx(http.HandlerFunc(p.GetPageAsset))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/assets/{assetId}/bytes", authed(wsCtx(http.HandlerFunc(p.GetPageAssetBytes))))
 	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/revisions", roleSelf, p.PublishArtifact)
 	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503

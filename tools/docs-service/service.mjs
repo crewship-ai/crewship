@@ -5,6 +5,7 @@ import { isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
 import { VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
+import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
 const fault = (status, message,code) => Object.assign(new Error(message), { status,...(code?{code}:{}) });
@@ -44,12 +45,9 @@ async function body(req) {
 export async function startService({ socket, authoritySocket, tokenFile, idleMs = 30000, timeoutMs = 10000, drainTimeoutMs = 30000 }) {
   if (!socket || !authoritySocket || !tokenFile || socket === authoritySocket || tokenFile === socket || tokenFile === authoritySocket) throw new Error('distinct service and authority Unix sockets and token file required');
   for (const path of [socket, authoritySocket, tokenFile]) if (!isAbsolute(path) || normalize(path) !== path || Buffer.byteLength(path) > 100) throw new Error('clean absolute Unix socket path required (maximum 100 bytes)');
-  const tokenStat = await lstat(tokenFile);
-  if (!tokenStat.isFile() || (tokenStat.mode & 0o777) !== 0o600 || tokenStat.size > 512) throw new Error('service token must be a regular mode-0600 file <=512 bytes');
-  const secret = (await readFile(tokenFile, 'utf8')).trim();
-  if (Buffer.byteLength(secret) < 32 || Buffer.byteLength(secret) > 256) throw new Error('service secret must contain 32..256 bytes');
+  const secret = await readServiceSecret(tokenFile);
   const build = createHash('sha256');
-  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'service.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
+  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'service.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
   const identity = { protocol: PROTOCOL, schema: VERSION, build: build.digest('hex') };
   const leases = new Map();
   const owner = randomUUID();const syncEpoch=state=>`${state.incarnation??"legacy"}:${owner}:${state.generation??state.epoch}`; const documents = new Map(); let queued = 0; let draining = false;let ready=false;let admitted=0;const decoding=new Set();

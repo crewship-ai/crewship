@@ -262,6 +262,7 @@ var TableCategory = map[string]string{
 	"page_board_elements":             CategoryPages,
 	"page_board_mutations":            CategoryPages,
 	"page_board_artifact_placements":  CategoryPages,
+	"page_assets":                     CategoryPages,
 	"page_artifacts":                  CategoryPages, "page_artifact_revisions": CategoryPages,
 	"page_panels": CategoryPages, "page_panel_data": CategoryPages, "page_versions": CategoryPages,
 	"page_project_builds": CategoryPages, "page_project_publications": CategoryPages,
