@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var errContentCredentialScope = errors.New("current CLI scope required")
+
 // Call through the operation's authority reader after its writer fence. Exact
 // credential validity is separate from live membership and object ACL checks.
 // requiredScope is the existing route scope; scopeSelf means validity only.
@@ -73,7 +75,7 @@ func validateContentCLIToken(ctx context.Context, reader pageAuthQueryer, token,
 	if requiredScope != scopeSelf && scopes.Valid {
 		set := parseScopes(scopes.String)
 		if set != nil && !canScope(context.WithValue(ctx, ctxTokenScopes, set), requiredScope) {
-			return errors.New("current CLI scope required: " + requiredScope)
+			return errContentCredentialScope
 		}
 	}
 	return nil

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Private Page image uploads recheck the exact live session or CLI credential after decoding (#3197).** Revoked/expired credentials cannot commit rows or blobs. Scoped CLI tokens now need `pages:write` for upload and `pages:read` for metadata/bytes, independently of live Page ACL; neither scope implies the other. This corrects the unshipped foundation's scope exemption. Sessions and legacy unrestricted tokens retain their existing Page authority.
+
 - Add private Page-scoped staged PNG/JPEG upload, metadata and canonical bytes API/CLI with bounded quotas, Page authorization and shared backup/GC. Typed editor image attachment remains separate.
 
 - Pages report compiled content format metadata and show an unavailable state for unsupported or conflicting formats. Empty human Pages retain HTML attachment, and application drafts remain available independently of publication.

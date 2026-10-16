@@ -32,6 +32,7 @@ func TestPageAssetRouterRechecksExactCredentialAfterBody(t *testing.T) {
 		{"valid-session", "session", ""}, {"valid-cli", "cli", ""},
 		{"revoked-session", "session", "revoked"}, {"revoked-cli", "cli", "revoked"},
 		{"expired-session", "session", "expired"}, {"expired-cli", "cli", "expired"},
+		{"scope-changed-cli", "cli", "scope"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			kind := test.kind
@@ -58,8 +59,8 @@ func TestPageAssetRouterRechecksExactCredentialAfterBody(t *testing.T) {
 			} else {
 				credential = "crewship_cli_asset_delayed_test"
 				credentialID = "asset-delayed-cli"
-				// Existing upload is roleSelf/scopeSelf. The fix must not invent pages:write.
-				execOrFatal(t, db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier,scopes,created_at) VALUES(?,?,'synthetic delayed',?,'STANDARD','["pages:read"]','2026-10-15T00:00:00Z')`, credentialID, user, hashStandard(credential))
+				// Page ACL remains roleSelf; the explicit token upload ceiling is pages:write.
+				execOrFatal(t, db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier,scopes,created_at) VALUES(?,?,'synthetic delayed',?,'STANDARD','["pages:write"]','2026-10-15T00:00:00Z')`, credentialID, user, hashStandard(credential))
 			}
 			storage := storageDir(t)
 			router, err := NewRouter(db, secret, newTestLogger(), WithStoragePath(storage))
@@ -93,6 +94,8 @@ func TestPageAssetRouterRechecksExactCredentialAfterBody(t *testing.T) {
 			switch test.change {
 			case "revoked":
 				execOrFatal(t, db, `UPDATE `+table+` SET revoked_at='2026-10-16T00:00:00Z' WHERE id=?`, credentialID)
+			case "scope":
+				execOrFatal(t, db, `UPDATE cli_tokens SET scopes='["pages:read"]' WHERE id=?`, credentialID)
 			case "expired":
 				execOrFatal(t, db, `UPDATE `+table+` SET expires_at='2020-01-01T00:00:00Z' WHERE id=?`, credentialID)
 			}

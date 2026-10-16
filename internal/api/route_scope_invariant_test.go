@@ -88,8 +88,8 @@ func TestEveryMintableScopeMapsToARoute(t *testing.T) {
 		return false
 	}
 	for scope := range knownScopes {
-		// Document reads run their scope gate inside the private authority's
-		// live SQL transaction, rather than the public mutation registry.
+		// Document and asset reads gate scopes through live authority,
+		// rather than the public mutation registry.
 		// TestDocumentCLITokenLiveRevocationAndScopeUnderWriter exercises it.
 		if scope == "pages:read" {
 			continue
@@ -109,6 +109,7 @@ func TestScopeForRoute(t *testing.T) {
 		pattern string
 		want    string
 	}{
+		{"/api/v1/pages/{slug}/assets", "pages:write"},
 		{"/api/v1/pages/{slug}/document/patch", "pages:write"},
 		{"/api/v1/pages/{slug}/document/requests", "pages:write"},
 		{"/api/v1/agents", "agents:write"},

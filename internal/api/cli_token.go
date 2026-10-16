@@ -165,8 +165,8 @@ type createTokenRequest struct {
 // The vocabulary is deliberately limited to scopes that actually gate a
 // route today (enforced by TestEveryMintableScopeMapsToARoute — every entry
 // here must be satisfiable against at least one recorded mutation route).
-// Document pages:read is the explicit exception: its private authority
-// checks the token inside the read transaction. Other families have no read
+// Document and Page asset pages:read are explicit exceptions: their live
+// authority checks the token before metadata or bytes are returned. Other families have no read
 // scopes and there is no agents:run:
 // reads are not scope-gated in this pass (GET routes register outside the
 // mutation chokepoint), and the agent-invocation surface is currently
