@@ -77,7 +77,7 @@ func (h *PageHandler) artifactPage(w http.ResponseWriter, r *http.Request, write
 		replyError(w, 403, "page write permission required")
 		return nil, false
 	}
-	if rec.HasBoard {
+	if rec.HasBoard || rec.HasSlides {
 		replyError(w, 409, "board pages cannot contain artifacts")
 		return nil, false
 	}

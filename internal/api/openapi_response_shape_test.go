@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
+	"github.com/crewship-ai/crewship/internal/slides"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -45,6 +46,10 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "SlideState", pointer: "/components/schemas/SlideState", value: slides.State{}},
+	{name: "SlideReceipt", pointer: "/components/schemas/SlideReceipt", value: slides.Receipt{}},
+	{name: "SlideRevision", pointer: "/components/schemas/SlideRevision", value: slides.Revision{}},
+	{name: "SlideOutline", pointer: "/components/schemas/SlideOutline", value: SlideOutline{}},
 	// Public human Docs responses; the real Go/Node subprocess test grades the wire.
 	{name: "DocumentState", pointer: "/components/schemas/DocumentState", value: DocumentStateResponse{}},
 	{name: "DocumentReceipt", pointer: "/components/schemas/DocumentReceipt", value: DocumentMutationResponse{}},

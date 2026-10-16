@@ -211,7 +211,7 @@ func resolveFKValue(t *testing.T, db *sql.DB, fk genFK, workspaceID string) (any
 			q    string
 			args []any
 		}{
-			{fmt.Sprintf(`SELECT %s FROM pages WHERE workspace_id=? AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.page_id=pages.id) LIMIT 1`, fk.refColumn), []any{workspaceID}},
+			{fmt.Sprintf(`SELECT %s FROM pages WHERE workspace_id=? AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.page_id=pages.id) AND NOT EXISTS(SELECT 1 FROM slides_heads s WHERE s.page_id=pages.id) LIMIT 1`, fk.refColumn), []any{workspaceID}},
 		}, queries...)
 	}
 	for _, cand := range queries {
@@ -302,6 +302,24 @@ var genColumnOverrides = map[string]any{
 // BackupTables order) and ultimately report the shortfall.
 func seedOneBackupTable(t *testing.T, db *sql.DB, table, workspaceID string) error {
 	t.Helper()
+	if table == "slides_heads" {
+		var owner string
+		if err := db.QueryRow(`SELECT owner_user_id FROM pages WHERE workspace_id=? AND owner_user_id IS NOT NULL AND owner_crew_id IS NULL LIMIT 1`, workspaceID).Scan(&owner); err != nil {
+			return err
+		}
+		_, err := seedBackupSlides(t, db, workspaceID, "gen_slides_page", owner)
+		return err
+	}
+	if table == "slides_revisions" || table == "slides_receipts" || table == "slides_object_ids" {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE workspace_id=?`, workspaceID).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			return fmt.Errorf("Slides parent not seeded")
+		}
+		return nil
+	}
 	if table == "documents" {
 		// A single synthetic Page cannot host Docs and legacy panels together.
 		// Keep a separate, explicitly human-owned Page so both families and
@@ -542,6 +560,14 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 			if got := after[table] - before[table]; got != 0 {
 				t.Errorf("%s is listed in knownForkDrops (%s) but the fork added %d row(s) — "+
 					"if that gap is fixed, delete the knownForkDrops entry", table, reason, got)
+			}
+			continue
+		}
+		if table == "slides_receipts" {
+			// Explicit fork security policy: source replay capability is not
+			// copied. Immutable revision mutation IDs remain409 tombstones.
+			if got := after[table] - before[table]; got != 0 {
+				t.Errorf("fork revived %d Slides receipts", got)
 			}
 			continue
 		}
