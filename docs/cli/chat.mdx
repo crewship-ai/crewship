@@ -766,3 +766,20 @@ preserves the source expiry and original run/trigger provenance.
 Late edit retries after a later revision or terminal transition return the current
 authorized card, preserving the original operation receipt; confirmation retries preserve
 the original accepted outcome and Issue IDs.
+
+### crewship chat proposal propose
+
+| Flag | Meaning |
+| --- | --- |
+| `--file` | JSON file containing the proposal title and complete items array. Required. |
+| `--idempotency-key` | Stable operation key retained for retries. Required. |
+| `--sidecar` | HTTP loopback origin; defaults to `http://127.0.0.1:9119`. |
+
+### crewship chat proposal revise
+
+| Flag | Meaning |
+| --- | --- |
+| `--file` | JSON file containing the replacement title and complete items array. Required. |
+| `--version` | Existing proposal version reviewed by this agent turn. Required. |
+| `--idempotency-key` | Stable revision key retained for retries. Required. |
+| `--sidecar` | HTTP loopback origin; defaults to `http://127.0.0.1:9119`. |
