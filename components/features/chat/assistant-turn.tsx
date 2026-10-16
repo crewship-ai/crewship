@@ -7,6 +7,7 @@ import { feedbackTurnKey, useFeedbackStore } from "@/stores/feedback-store"
 import { useSession } from "@/hooks/use-auth"
 import { useCurrentWorkspaceId } from "@/hooks/use-workspace"
 import { TurnPreferenceFeedback } from "./turn-preference-feedback"
+import { InlineRunImages } from "./artifact/inline-run-images"
 import { TurnReactions } from "./reactions/turn-reactions"
 import {
   Message,
@@ -646,6 +647,8 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, work
             return null
         }
       })}
+
+      {agentId && workspaceId && chatId && turn.runId && !turn.isStreaming && <InlineRunImages agentId={agentId} workspaceId={workspaceId} chatId={chatId} runId={turn.runId} />}
 
       {/* File creation notification */}
       {fileMatch && !turn.isStreaming && (

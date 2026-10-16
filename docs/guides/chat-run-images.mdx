@@ -1,0 +1,29 @@
+---
+title: Images and charts in chat
+description: View authorized agent image outputs within a conversation.
+---
+
+Chat displays PNG, JPEG and WebP files from the assistant reply's run output
+folder (`runs/<run-id>/`) directly below the reply. A chart exported by the agent
+as PNG uses the same viewer. Each image has its filename as alt text and caption,
+plus a SHA-256 byte-version identifier. The layout fits the conversation on phones.
+
+These are current files, not an immutable historical archive. Overwriting an
+output changes its displayed version on refresh. A write detected between listing
+and download is refused until a subsequent refresh. The viewer checks file
+signatures and never renders SVG or HTML as an image, including files renamed
+with a PNG extension. SVG outputs remain outside inline image discovery.
+
+The viewer first verifies the chat execution profile. Pending and restricted
+chats never request generic agent files.
+
+Only files returned by the existing authorized agent-files API are considered;
+image URLs or filenames in model prose cannot create an inline file reference.
+Chat uses the same output filters as Artifacts, excludes internal/configuration
+folders and attachments, and displays up to eight images per reply run.
+
+File events, completed runs, reconnects and window focus refresh the viewer.
+A one-minute foreground recheck covers missed events and access changes. When
+a read fails, the displayed images and filenames disappear and **Refresh images**
+retries the authorized read. A revoked viewer receives no image bytes from the
+file endpoint. Existing bytes may remain visible until the next recheck.
