@@ -58,6 +58,8 @@ import (
 // freshness verdict is arithmetic against it, and "a panel goes stale exactly
 // at its SLA" is only testable if the test owns the clock.
 type PageHandler struct {
+	nativeSearchInit                 sync.Once
+	nativeSearchSlots                chan struct{}
 	documentCall                     func(context.Context, string, string, string, string, any) ([]byte, int, error)
 	restrictedWorkflow               func() *restrictedworkflow.Service
 	artifactStoragePath              string
