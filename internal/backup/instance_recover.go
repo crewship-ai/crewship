@@ -675,6 +675,9 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			}
 		}
 		rep.MigrationsApplied = len(AppliedMigrationVersions(ctx, db.DB)) - before
+		if err := validateRecoveredSlideImages(ctx, db.DB, RecoveredStoreDir(dataDir, StoreOutput)); err != nil {
+			return fmt.Errorf("backup: recovered native image integrity: %w", err)
+		}
 
 		if len(serviceArgs) != 0 && serviceArgs[0].count > 0 {
 			services := serviceArgs[0].payload

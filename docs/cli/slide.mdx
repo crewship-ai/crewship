@@ -73,6 +73,7 @@ if_order_version,revision}`. Restore appends a new confirmed revision and can
 revive the original stable identities; it does not replace live permissions.
 
 Page detail may include `can_edit_slides` for native UI controls; it is advisory, missing=false, and does not replace the CLI mutation authority checks or indicate Docs/Board permissions.
+
 ## crewship slide comments
 
 Human-only stable comments. Comment/reply requires COMMENT access; resolve/reopen
@@ -120,3 +121,19 @@ The original thread version must match; resolved threads reject replies.
 stdin. Supply `{page_id,schema_version:1,mutation_id,if_version,resolved}` with
 an explicit boolean. `resolved:false` reopens; both transitions require WRITE.
 Conflicts stop after one exact request and never refresh/rebase its preconditions.
+
+## Private image revisions
+
+`crewship page assets upload PAGE --file image.png --mutation-id ID` stages a
+bounded private PNG/JPEG on the owning Page. Use the returned asset ID and SHA in
+an explicit schema2 image element, then the existing `crewship slide initialize`
+or `crewship slide patch PAGE --file request.json` command. Upload requires
+pages:write and metadata/bytes require pages:read independently; neither implies
+the other. CLI mutation never invents a replacement Page ID or refreshes fences.
+
+First image patch on schema1 requires original schema_version/base_rev/operation
+hashes plus target_schema_version2 and original if_content_hash. Other mutation
+requests use the current head schema. `crewship slide restore` creates a new
+revision in the selected immutable source version. Image comments use the
+existing comment protocol1, independently of deck1/2. Image export embedding,
+remote imports and automatic pruning are unavailable in this storage cut.

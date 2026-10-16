@@ -39,26 +39,13 @@ func Canonical(raw []byte) (Raster, error) {
 	if len(raw) == 0 || len(raw) > MaxInput {
 		return out, errors.New("image exceeds 5 MiB input limit")
 	}
-	config, format, err := image.DecodeConfig(bytes.NewReader(raw))
-	if err != nil || (format != "png" && format != "jpeg") || config.Width < 1 || config.Height < 1 || config.Width > MaxDimension || config.Height > MaxDimension || config.Width*config.Height > MaxPixels {
-		return out, errors.New("only bounded PNG/JPEG images are supported")
+	decoded, metadata, err := decodeStatic(raw)
+	if err != nil {
+		return out, err
 	}
-	if format == "jpeg" {
-		if err = checkJPEGOrientation(raw); err != nil {
-			return out, err
-		}
-	} else {
-		if err = staticPNG(raw); err != nil {
-			return out, err
-		}
-	}
-	decoded, actual, err := image.Decode(bytes.NewReader(raw))
-	if err != nil || actual != format || decoded.Bounds().Dx() != config.Width || decoded.Bounds().Dy() != config.Height {
-		return out, errors.New("invalid image pixels")
-	}
+	out = metadata
 	w := new(limitedWriter)
-	out.MIME = "image/png"
-	if format == "png" {
+	if out.MIME == "image/png" {
 		err = png.Encode(w, decoded)
 	} else {
 		out.MIME = "image/jpeg"
@@ -68,10 +55,47 @@ func Canonical(raw []byte) (Raster, error) {
 		return Raster{}, err
 	}
 	out.Bytes = w.Bytes()
-	out.Width = config.Width
-	out.Height = config.Height
 	return out, nil
 }
+
+// ValidateCanonical validates stored canonical bytes without reencoding or applying
+// the smaller upload input ceiling. Backup must compare this metadata with rows.
+func ValidateCanonical(raw []byte) (Raster, error) {
+	if len(raw) == 0 || len(raw) > MaxOutput {
+		return Raster{}, errors.New("canonical image exceeds 8 MiB")
+	}
+	_, metadata, err := decodeStatic(raw)
+	if err != nil {
+		return Raster{}, err
+	}
+	metadata.Bytes = raw
+	return metadata, nil
+}
+
+func decodeStatic(raw []byte) (image.Image, Raster, error) {
+	var out Raster
+	config, format, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil || (format != "png" && format != "jpeg") || config.Width < 1 || config.Height < 1 || config.Width > MaxDimension || config.Height > MaxDimension || config.Width*config.Height > MaxPixels {
+		return nil, out, errors.New("only bounded PNG/JPEG images are supported")
+	}
+	if format == "jpeg" {
+		if err = checkJPEGOrientation(raw); err != nil {
+			return nil, out, err
+		}
+	} else {
+		if err = staticPNG(raw); err != nil {
+			return nil, out, err
+		}
+	}
+	decoded, actual, err := image.Decode(bytes.NewReader(raw))
+	if err != nil || actual != format || decoded.Bounds().Dx() != config.Width || decoded.Bounds().Dy() != config.Height {
+		return nil, out, errors.New("invalid image pixels")
+	}
+	out.MIME = "image/" + format
+	out.Width, out.Height = config.Width, config.Height
+	return decoded, out, nil
+}
+
 func staticPNG(raw []byte) error {
 	for offset := 8; offset+12 <= len(raw); {
 		n := int(binary.BigEndian.Uint32(raw[offset:]))

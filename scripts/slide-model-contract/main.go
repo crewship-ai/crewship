@@ -1,4 +1,4 @@
-// Emits actual Go schema-1 canonical/hash output for the TS contract check.
+// Emits actual Go versioned canonical/hash output for the TS contract check.
 package main
 
 import (
@@ -9,7 +9,11 @@ import (
 )
 
 func main() {
-	raw, err := os.ReadFile("testdata/slides-schema-v1.json")
+	path := "testdata/slides-schema-v1.json"
+	if len(os.Args) == 2 {
+		path = os.Args[1]
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		panic(err)
 	}
