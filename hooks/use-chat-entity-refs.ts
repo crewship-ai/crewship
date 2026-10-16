@@ -21,9 +21,10 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
   const client = useQueryClient()
   const key = chatEntityKeys.refs(workspaceId, chatId, userId)
   const cursor = useRef<string | undefined>(undefined)
+  const denied = useRef(false)
   const scope = JSON.stringify(key)
   const priorScope = useRef(scope)
-  if (priorScope.current !== scope) { cursor.current = undefined; priorScope.current = scope }
+  if (priorScope.current !== scope) { cursor.current = undefined; denied.current = false; priorScope.current = scope }
   const active = enabled && !!workspaceId && !!chatId && !!userId
   const status = useRealtimeStatusSafe()
   useRealtimeChannelSafe(active ? `chat-hints:${chatId}` : null)
@@ -32,8 +33,8 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
     refetchInterval: RECHECK_MS, refetchIntervalInBackground: false,
     refetchOnWindowFocus: "always", refetchOnReconnect: "always",
     queryFn: async ({ signal }) => {
-      // Keep the last verified snapshot mounted while checking. A failed check
-      // hides it below; a successful check atomically replaces it.
+      // Transport/server failures keep the last snapshot mounted but unverified.
+      // Explicit access denial clears it and cannot be undone by a later outage.
       let next = cursor.current
       let snapshot: string | undefined
       const refs = new Map<string, EntityRef>()
@@ -46,7 +47,16 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
           const error = await response.json().catch(() => null)
           if (error?.error === "cursor_invalid") { next = undefined; cursor.current = undefined; snapshot = undefined; refs.clear(); restarted = true; continue }
         }
-        if (!response.ok) { cursor.current = undefined; throw new RefError([401, 403, 404].includes(response.status)) }
+        if (!response.ok) {
+          cursor.current = undefined
+          const unavailable = [401, 403, 404].includes(response.status)
+          if (unavailable) {
+            denied.current = true
+            client.setQueryData(key, { refs: [], checkedAt: undefined })
+            client.removeQueries({ queryKey: chatEntityKeys.detail(workspaceId, chatId, userId) })
+          }
+          throw new RefError(unavailable)
+        }
         const page = await response.json() as EntityRefPage
         if (page.contract_version != null && page.contract_version !== 1) throw new RefError(false)
         if (page.reset) { refs.clear(); snapshot = page.snapshot_id }
@@ -54,6 +64,7 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
         for (const ref of page.refs) refs.set(ref.event_id, ref)
         if (page.snapshot_complete && !page.has_more) {
           cursor.current = page.next_cursor
+          denied.current = false
           return { refs: [...refs.values()], checkedAt: Date.now() }
         }
         if (!page.has_more || !page.next_cursor || page.next_cursor === next) throw new RefError(false)
@@ -96,11 +107,11 @@ export function useChatEntityRefs({ workspaceId, chatId, userId, enabled }: {
     // The serialized key is the lifetime of viewer-scoped authorization.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, scope, client])
-  const unavailable = !active || query.error instanceof RefError && query.error.unavailable
+  const unavailable = !active || denied.current || query.error instanceof RefError && query.error.unavailable
   const rechecking = active && (query.isFetching || query.isPending || !!query.error)
   return {
-    refs: unavailable || query.error ? [] : query.data?.refs ?? [],
-    slots: unavailable || query.error ? [] : query.data?.refs ?? [],
+    refs: unavailable ? [] : query.data?.refs ?? [],
+    slots: unavailable ? [] : query.data?.refs ?? [],
     state: unavailable ? "unavailable" as const : rechecking ? "rechecking" as const : "ready" as const,
     checkedAt: query.data?.checkedAt,
     live: active && !rechecking && !query.error && status === "connected" && Date.now() - (query.data?.checkedAt ?? 0) < RECHECK_MS,
