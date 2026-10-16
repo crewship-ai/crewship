@@ -3,7 +3,9 @@ package harbormaster
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -129,8 +131,15 @@ func TestGate_AutoTuneSyncDowngradesToAsync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gate: %v", err)
 	}
-	if !dec.Pending {
+	if !dec.Pending || dec.EffectiveMode != ModeAsync {
 		t.Fatalf("expected auto-tuned async Pending decision, got %+v", dec)
+	}
+	var payload string
+	if err := db.QueryRowContext(ctx, `SELECT payload FROM approvals_queue WHERE id = ?`, dec.RequestID).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload, `"gate_mode":"async"`) {
+		t.Fatalf("stored requested rather than effective mode: %s", payload)
 	}
 	if !rec.hasType(journal.EntryType("keeper.rule_auto_tuned")) {
 		t.Errorf("expected keeper.rule_auto_tuned journal entry, got %v", rec.entries)
@@ -379,5 +388,44 @@ func TestGate_TimeoutUpdateFailureStillTimesOut(t *testing.T) {
 	}
 	if !dec.TimedOut {
 		t.Fatalf("expected TimedOut despite dead DB, got %+v", dec)
+	}
+}
+
+func TestGate_AutoTuneAsyncUpgradesToSyncMetadata(t *testing.T) {
+	db := openGateTestDB(t)
+	ctx := context.Background()
+	args := map[string]any{"agent_slug": "agent"}
+	for i := 0; i < RewardHistorySize/2; i++ {
+		if err := RecordOutcome(ctx, db, "ws_test", "agent_run", args, OutcomeDenied, "human", fmt.Sprint(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := &hookEmitter{hookOn: journal.EntryApprovalRequest}
+	rec.hook = func() {
+		if _, err := db.Exec(`UPDATE approvals_queue SET status='denied' WHERE status='pending'`); err != nil {
+			t.Error(err)
+		}
+	}
+	eval := NewEvaluator(RuleMatcher{ToolPattern: regexp.MustCompile("^agent_run$"), MapsToKind: KindToolCall})
+	dec, err := Gate(ctx, db, rec, eval, GateInput{Mode: ModeAsync, Tool: "agent_run", Args: args, WorkspaceID: "ws_test", AgentID: "agent_1", RequestedBy: "agent_1", Correlation: map[string]any{"run_id": "actual"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dec.Denied || dec.Pending || dec.EffectiveMode != ModeSync {
+		t.Fatalf("effective sync did not gate: %+v", dec)
+	}
+	var raw string
+	if err := db.QueryRow(`SELECT payload FROM approvals_queue WHERE id=?`, dec.RequestID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["gate_mode"] != "sync" || payload["tool"] != "agent_run" || payload["correlation"].(map[string]any)["run_id"] != "actual" {
+		t.Fatal(payload)
+	}
+	if HashArgs(payload["args"].(map[string]any)) != HashArgs(args) {
+		t.Fatal("correlation changed reward fingerprint")
 	}
 }

@@ -726,3 +726,67 @@ included. Recipients can alternatively enter the ID and token at `/shared-chat`.
 The management API is `GET`/`POST /api/v1/agents/{agentId}/chats/{chatId}/shares`
 and `DELETE /api/v1/agents/{agentId}/chats/{chatId}/shares/{shareId}`. The reader
 uses `GET /api/v1/shared-chats/{shareId}/messages` with a dedicated share bearer.
+
+## Issue proposals
+
+```bash
+crewship chat proposal list <chat-id> [--cursor opaque]
+crewship chat proposal show <chat-id> <proposal-id>
+crewship chat proposal edit <chat-id> <proposal-id> --file proposal.json --version 1 --idempotency-key edit-1
+crewship chat proposal confirm <chat-id> <proposal-id> --version 2 --idempotency-key confirm-1
+crewship chat proposal discard <chat-id> <proposal-id> --version 1 --idempotency-key discard-1
+```
+
+Edit files contain `title` and the complete `items` array. Retain stable item IDs;
+set `selected: false` to exclude an item. Every mutation requires the version
+explicitly reviewed and a stable key. After an unknown network outcome, repeat
+exactly the same command and key. A changed body with the same key returns 409.
+A stale version returns 409 with the currently authorized card; review it before
+using a new key/version. Accepted/discarded/expired cards are read-only.
+
+Confirmation creates the selected backlog issues atomically, attributed to the
+human reviewer with the immutable proposing agent/run/chat provenance. It does
+not directly start agent work. Existing workspace automations still apply.
+Existing issue creation rights apply to MEMBERs; proposing
+is not mandatory for their ordinary issue commands. Guests and restricted members
+cannot access this surface. See [proposal API](/api-reference/conversations#issue-proposals).
+
+Agents use the same executable with their verified sidecar token, without a
+human login/profile:
+
+```bash
+crewship chat proposal propose --file proposal.json --idempotency-key agent-plan-1
+crewship chat proposal revise <proposal-id> --file proposal.json --version 1 --idempotency-key agent-revision-1
+```
+
+`CREWSHIP_AGENT_TOKEN` must be supplied by the runtime. These commands call the
+loopback sidecar (`--sidecar` defaults to `http://127.0.0.1:9119`), which derives
+the host identity from that token. They cannot confirm work. A revision belongs
+to the original proposing agent and chat, uses a freshly admitted run, and
+preserves the source expiry and original run/trigger provenance.
+Late edit retries after a later revision or terminal transition return the current
+authorized card, preserving the original operation receipt; confirmation retries preserve
+the original accepted outcome and Issue IDs.
+
+### crewship chat proposal propose
+
+| Flag | Meaning |
+| --- | --- |
+| `--file` | JSON file containing the proposal title and complete items array. Required. |
+| `--idempotency-key` | Stable operation key retained for retries. Required. |
+| `--sidecar` | HTTP loopback origin; defaults to `http://127.0.0.1:9119`. |
+
+### crewship chat proposal revise
+
+| Flag | Meaning |
+| --- | --- |
+| `--file` | JSON file containing the replacement title and complete items array. Required. |
+| `--version` | Existing proposal version reviewed by this agent turn. Required. |
+| `--idempotency-key` | Stable revision key retained for retries. Required. |
+| `--sidecar` | HTTP loopback origin; defaults to `http://127.0.0.1:9119`. |
+## Source-backed decisions
+
+[`crewship chat decision`](/cli/chat-decision) lists, shows and answers existing
+TEXT information requests. Use the reviewed source version and preserve the
+operation key across uncertain retries. These commands share the authoritative
+source with Inbox and cannot approve workflows, credentials or entire runs.

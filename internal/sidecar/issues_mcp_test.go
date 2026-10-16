@@ -40,7 +40,7 @@ func TestIssuesMCPToolSchemaAndHandshake(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if len(response.Result.Tools) != 6 {
+	if len(response.Result.Tools) != 8 {
 		t.Fatalf("catalog %s", rec.Body.String())
 	}
 	for _, tool := range response.Result.Tools {

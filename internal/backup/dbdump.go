@@ -183,6 +183,8 @@ var BackupTables = []string{
 	// Depth 2: workspace via crews
 	"crew_members",
 	"agents",
+	"chat_issue_proposals",     // after chats, workspaces and agents
+	"chat_proposal_operations", // after proposal source
 	"crew_connections",
 	"crew_mcp_servers",
 	"credential_crews",

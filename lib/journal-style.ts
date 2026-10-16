@@ -223,6 +223,8 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "approval.denied": "approval",
   "approval.timeout": "approval",
   "approval.cancelled": "approval",
+  "approval.source_retired": "approval",
+  "escalation.source_classified": "peer",
   "mission.status_change": "mission",
   "mission.comment": "mission",
   "crew.action": "mission",

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/notify"
@@ -132,6 +133,12 @@ func (r *Router) route(ctx context.Context, category string, item inbox.Item) {
 		return
 	}
 	for _, uid := range recipients {
+		if item.Kind == inbox.KindEscalation {
+			allowed, checkErr := chataudience.CanReadVerifiedEscalation(ctx, r.db, item.WorkspaceID, item.SourceID, uid)
+			if checkErr != nil || !allowed {
+				continue
+			}
+		}
 		if r.presence != nil && item.Kind == inbox.KindMessage {
 			if chatID, ok := item.Payload["chat_id"].(string); ok && chatID != "" {
 				if r.presence.IsUserSubscribed("session:"+chatID, uid) {

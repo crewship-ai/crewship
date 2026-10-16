@@ -13,6 +13,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Chat shows advisory configured-model payer, budget and gate details above the composer after a current viewer/chat profile check.
 - **Decision drafts retain focus during access rechecks.** Typing and caret position survive temporary verification outages; sending waits for verified access and explicit source-version review, while uncertain submitted responses remain locked for exact retry.
+- **Withdrawn chat approval sources cannot be rejected through a stale Inbox ID.** Canonical decisions now retain the original chat generation and current operator audience; authorized refusal still works when only the original requester loses access.
+
+- **Chat decision answers preserve the Inbox token scope.** Narrowly scoped CLI tokens cannot answer through chat; the same existing workspace administration scope is required, including retries. Read-only role demotion still permits an authorized completed retry.
+- **Routine runs distinguish fresh chat invocation from inherited recipe authority.** Verified direct-human calls retain their exact source run privately; legacy and scheduled execution continue without a guessed question. Explicit invalid run credentials are refused before creating a run.
 
 - **Guest intake changes and deletion preserve active routine work.** Queued, running and waiting runs still block changes after their issue execution becomes superseded; completed runs do not. Rejected deletion keeps the issue and execution intact.
 
@@ -26,6 +30,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Agent images and charts appear in chat.** Authorized PNG, JPEG and WebP outputs from the reply’s run render inline with a filename caption, alt text and byte version. Access rechecks remove unavailable images; SVG and disguised active content stay outside the viewer.
 - **Decision reply drafts remain scoped to their viewer and source.** Reload restores an uncertain reply with its original retry key; definitive access loss removes protected recovery, and paginated source lists reconcile as complete snapshots.
 
+- **Chat can answer verified information requests from the same source as Inbox.** TEXT escalation cards use live access and deadline checks, reviewed source versions and stable retry keys; terminal receipts retain the actual human actor. Credential requests stay in the existing protected Inbox flow.
+
+- **Escalation requests retain their verified execution source.** New run-authenticated requests keep the original agent run ID for accurate chat decision anchoring. Older service requests remain unanchored and retain their existing Inbox resolution.
+
 - **Decision cards gain a typed response view.** Source-defined workflow actions retain their identity, terminal decisions show read-only receipts, and uncertain replies keep the same operation key for retry. Integration with live decision sources follows separately.
 
 - ⚠️ **Behaviour change: CLI pairing follows its source browser session.** Suspended accounts and missing, logged-out, revoked or expired source sessions cannot redeem codes. Request a fresh browser code for older pairings without session provenance; CLI-token authentication cannot start pairing.
@@ -34,8 +42,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 - **Agent questions stay connected across chat and Work.** Authorized decision forms appear beside their run and in “Waiting for you”; opening one uses the same source in the Work panel or a full-screen phone panel. Inbox answers refresh the card to a read-only receipt. Uncertain replies retain their original operation key across reload; temporary failures preserve drafts, while access denial clears the source and recovery data.
+- **Chat can project existing synchronous whole-run approvals.** Verified human run sources share the canonical Inbox decision and source retry metadata. Newly host-correlated blocking approvals enforce expiry and live operator/requester checks before commit; per-tool, async and legacy paths retain their existing behavior.
+- **Chat can project existing synchronous whole-run approvals.** Verified human run sources share the canonical Inbox decision and source retry metadata. Newly host-correlated blocking approvals enforce expiry and live operator checks before commit, with live requester admission required for approval; authorized refusal can still settle withdrawn requests; per-tool, async and legacy paths retain their existing behavior.
 - Chat pull-request cards label their data as stored metadata, including empty lists; live CI remains unavailable. The credential diagnostic runbook distinguishes a local missing credential (412) from a forge failure.
 - **Issue proposals are interactive in their originating chat.** Review and edit the proposed selection, confirm or discard the reviewed version, and open the same proposal in Work or a full-screen phone panel. Card and panel drafts stay separate; uncertain writes retain their retry key. Temporary access-check failures preserve drafts with writes disabled, while explicit access loss and sign-out clear protected recovery data.
+- **Chat can inspect the current payer and budget before work.** The read-only run preflight reports Paymaster remaining balances and predicted whole-run gate for the configured agent model, with an explicit unknown price and current provider admission constraints. It reserves no funds and grants no approval.
+- **Whole-run approvals follow the actual gate mode.** Nonblocking async reviews now allow the run to continue even when reward history changed a configured synchronous gate. Approval metadata records the effective mode and trusted run provenance; unknown adapter modes continue to block pending work. Direct human approvals recheck the recorded requester after the wait; delegated and legacy runs retain their existing paths. Legacy approval reads keep new internal chat/run references private.
 - **Personal memory withdrawal stays inside its workspace.** A guest invitation or restricted-membership change no longer erases saved preferences in another workspace. Local withdrawn preferences remain forgotten; previously erased values cannot be reconstructed. Clearing all preferences also works for agents without a crew.
 - **Chat drafts survive temporary access-check outages.** Network errors and server failures keep the last verified cards mounted as rechecking with writes disabled. Explicit access denial still clears protected data and cannot be undone by another failed check.
 - ⚠️ **Upgrade: restart agent containers after updating the backend and sidecar.** Coordinate an idle window and use `crewship crew restart-agents` so existing containers receive the matching sidecar; old sidecars can fail issue writes. Follow [the execution-authority rollout](RELEASING.md#execution-authority-rollout-3068), including the read-only `doctor execution-origins` audit against the actual stage/production database before upgrade.
@@ -366,6 +378,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - **Proposal card editing and recovery primitives** support explicit issue selection, reviewed confirmation summaries and isolated field/comment drafts; production Chat integration follows the proposal API.
+- **Agents can publish reviewable issue plans from their current chat.** Sidecar MCP and agent CLI commands create and revise inert proposals with verified run identity, stable retry keys, and fresh requester checks; later turns preserve the original source provenance.
+
+- **Review agent issue plans before creating work.** Durable chat proposals support bounded edits, version conflicts, explicit human confirmation, and safe retries through the API and CLI; selected backlog issues and audit receipts commit atomically.
 
 - **Experimental typed decision evaluation from the CLI** — recover the opt-in `crewship decisions evaluate`, `triage` and `rerank` pilot with bounded requests, advisory results and credential-free dry runs. This local command uses explicitly supplied provider keys outside server Paymaster accounting; hosted inference remains unverified.
 - ⚠️ **Behaviour change:** CLI AI connections preserve installation symlinks and support `ai status`, `ai doctor`, ownership-checked `ai disconnect`, and optional bundled skill installation. Registrations created outside the new ownership mechanism, or edited afterward, require explicit native-client removal before reconnecting. MCP refreshes stored login credentials per request, can use the server OpenAPI catalog with an explicit offline fallback, and supports exact operation write allowlists. Focused tools list agents/crews/routines, start and wait for routines with durable receipts, and diagnose runs and crew runtimes.

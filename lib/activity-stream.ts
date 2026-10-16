@@ -142,6 +142,9 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "approval.denied",
       "approval.timeout",
       "approval.cancelled",
+      // Backend-hidden privacy evidence, never a new human request.
+      "approval.source_retired",
+      "escalation.source_classified",
       // A trust grant is a standing decision — "approve this gate for me from
       // now on" — so it belongs with the one-off approvals rather than in a
       // group of its own. Reading them together is the point: a filter that

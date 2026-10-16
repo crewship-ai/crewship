@@ -68,9 +68,12 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	// ends only the run its OWN token binds, so there is no "end that other
 	// run" verb here to guard against in the first place.
 	"POST /agent/run/end": guardHandlerIdentity,
-	"POST /query":         guardHandlerIdentity,
-	"POST /escalate":      guardHandlerIdentity,
-	"POST /issue/create":  guardHandlerIdentity,
+	// Proposals require a verified token-bound live run in both handlers.
+	"POST /chat/proposal/create": guardHandlerIdentity,
+	"POST /chat/proposal/ /edit": guardHandlerIdentity,
+	"POST /query":                guardHandlerIdentity,
+	"POST /escalate":             guardHandlerIdentity,
+	"POST /issue/create":         guardHandlerIdentity,
 	// The rest of the issue surface (issue_verbs.go). READS are on this list
 	// deliberately: the board is crew data, and a sibling that omits its
 	// header must not fall back to the boot agent's identity to read it.
