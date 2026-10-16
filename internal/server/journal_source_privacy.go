@@ -18,11 +18,13 @@ func newJournalWSBridgeForSources(db *sql.DB, hub *ws.Hub, logger *slog.Logger) 
 	return newJournalWSBridgeWithFilter(hub, logger, func(entry journal.Entry) bool { return allowBroadSourceJournal(context.Background(), db, entry) })
 }
 func allowBroadSourceJournal(ctx context.Context, db *sql.DB, entry journal.Entry) bool {
+	if entry.Type == journal.EntryEscalationSourceClassified && entry.ActorType == journal.ActorSystem {
+		return false
+	}
 	sourceID, _ := entry.Refs["escalation_id"].(string)
 	if sourceID == "" {
 		return true
 	}
-	var allowed bool
-	err := db.QueryRowContext(ctx, `SELECT NOT EXISTS(SELECT 1 FROM escalations e WHERE e.workspace_id=? AND e.id=? AND `+chataudience.VerifiedTextSourceSQL+`)`, entry.WorkspaceID, sourceID).Scan(&allowed)
-	return err == nil && allowed
+	supported, err := chataudience.VerifiedTextJournalSource(ctx, db, entry.WorkspaceID, sourceID)
+	return err == nil && !supported
 }

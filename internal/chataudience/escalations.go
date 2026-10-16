@@ -32,14 +32,15 @@ type escalationQueryer interface {
 func CanReadVerifiedEscalation(ctx context.Context, db escalationQueryer, workspaceID, sourceID, userID string) (bool, error) {
 	args := []any{workspaceID, sourceID}
 	args = append(args, VerifiedTextReadArgs(userID)...)
+	args = append(args, workspaceID, sourceID)
 	var allowed bool
-	err := db.QueryRowContext(ctx, `SELECT NOT EXISTS (SELECT 1 FROM escalations e WHERE e.workspace_id=? AND e.id=? AND `+VerifiedTextSourceSQL+` AND NOT (`+VerifiedTextReadSQL+`))`, args...).Scan(&allowed)
+	err := db.QueryRowContext(ctx, `SELECT NOT EXISTS (SELECT 1 FROM escalations e WHERE e.workspace_id=? AND e.id=? AND `+VerifiedTextSourceSQL+` AND NOT (`+VerifiedTextReadSQL+`)) AND NOT EXISTS(SELECT 1 FROM journal_entries marker WHERE marker.workspace_id=? AND json_valid(marker.refs) AND json_extract(marker.refs,'$.escalation_id')=? AND `+verifiedTextMarkerSQL+` AND NOT EXISTS(SELECT 1 FROM escalations e WHERE e.workspace_id=marker.workspace_id AND e.id=json_extract(marker.refs,'$.escalation_id')))`, args...).Scan(&allowed)
 	return allowed, err
 }
 
 // VerifiedTextJournalReadSQL applies the same source fence to its existing
 // journal projection, before FTS/count/pagination can expose a hidden question.
-const VerifiedTextJournalReadSQL = `NOT EXISTS (SELECT 1 FROM escalations e WHERE e.workspace_id=journal_entries.workspace_id AND e.id=CASE WHEN json_valid(journal_entries.refs) THEN json_extract(journal_entries.refs,'$.escalation_id') END AND ` + VerifiedTextSourceSQL + ` AND NOT (` + VerifiedTextReadSQL + `))`
+const VerifiedTextJournalReadSQL = `NOT (journal_entries.entry_type='escalation.source_classified' AND journal_entries.actor_type='system') AND NOT (` + MissingVerifiedTextJournalSourceSQL + `) AND NOT EXISTS (SELECT 1 FROM escalations e WHERE e.workspace_id=journal_entries.workspace_id AND e.id=CASE WHEN json_valid(journal_entries.refs) THEN json_extract(journal_entries.refs,'$.escalation_id') END AND ` + VerifiedTextSourceSQL + ` AND NOT (` + VerifiedTextReadSQL + `))`
 
 func CanReadVerifiedEscalationJournal(ctx context.Context, db escalationQueryer, workspaceID, entryID, userID string) (bool, error) {
 	var allowed bool
@@ -50,7 +51,7 @@ func CanReadVerifiedEscalationJournal(ctx context.Context, db escalationQueryer,
 	return allowed, err
 }
 
-const VerifiedTextInboxReadSQL = `NOT EXISTS (SELECT 1 FROM escalations e WHERE inbox_items.kind='escalation' AND e.id=inbox_items.source_id AND e.workspace_id=inbox_items.workspace_id AND ` + VerifiedTextSourceSQL + ` AND NOT (` + VerifiedTextReadSQL + `))`
+const VerifiedTextInboxReadSQL = `NOT EXISTS(SELECT 1 FROM journal_entries marker WHERE inbox_items.kind='escalation' AND marker.workspace_id=inbox_items.workspace_id AND json_valid(marker.refs) AND json_extract(marker.refs,'$.escalation_id')=inbox_items.source_id AND ` + verifiedTextMarkerSQL + ` AND NOT EXISTS(SELECT 1 FROM escalations source WHERE source.workspace_id=marker.workspace_id AND source.id=inbox_items.source_id)) AND NOT EXISTS (SELECT 1 FROM escalations e WHERE inbox_items.kind='escalation' AND e.id=inbox_items.source_id AND e.workspace_id=inbox_items.workspace_id AND ` + VerifiedTextSourceSQL + ` AND NOT (` + VerifiedTextReadSQL + `))`
 
 func CanReadVerifiedEscalationInbox(ctx context.Context, db escalationQueryer, workspaceID, inboxID, userID string) (bool, error) {
 	var allowed bool
@@ -60,4 +61,15 @@ func CanReadVerifiedEscalationInbox(ctx context.Context, db escalationQueryer, w
 		return false, nil
 	}
 	return allowed, err
+}
+
+// Host-only classification survives the intentionally ephemeral source table
+// being omitted by backup. It conveys no audience grant and never expires.
+const verifiedTextMarkerSQL = `marker.entry_type='escalation.source_classified' AND marker.actor_type='system'`
+const MissingVerifiedTextJournalSourceSQL = `EXISTS(SELECT 1 FROM journal_entries marker WHERE marker.workspace_id=journal_entries.workspace_id AND json_valid(marker.refs) AND json_extract(marker.refs,'$.escalation_id')=CASE WHEN json_valid(journal_entries.refs) THEN json_extract(journal_entries.refs,'$.escalation_id') END AND ` + verifiedTextMarkerSQL + ` AND NOT EXISTS(SELECT 1 FROM escalations source WHERE source.workspace_id=marker.workspace_id AND source.id=json_extract(marker.refs,'$.escalation_id')))`
+
+func VerifiedTextJournalSource(ctx context.Context, db escalationQueryer, workspace, id string) (bool, error) {
+	var supported bool
+	err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM escalations e WHERE e.workspace_id=? AND e.id=? AND `+VerifiedTextSourceSQL+`) OR EXISTS(SELECT 1 FROM journal_entries marker WHERE marker.workspace_id=? AND json_valid(marker.refs) AND json_extract(marker.refs,'$.escalation_id')=? AND `+verifiedTextMarkerSQL+`)`, workspace, id, workspace, id).Scan(&supported)
+	return supported, err
 }

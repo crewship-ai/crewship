@@ -64,3 +64,17 @@ source projections if its original host proof is removed by retention or GDPR
 processing. Missing proof never converts it into a legacy public source. This
 can omit old verified history; source-less legacy and valid autonomous questions
 retain their existing Inbox behavior and receive no E2 correlation.
+
+Verified direct-human TEXT creation atomically appends a host-only, content-free
+`escalation.source_classified` journal marker containing only workspace and source
+identity. The ephemeral escalation table remains outside backups. When a restore
+or fork omits that source, the marker withholds retained Inbox/journal/chain
+projections; it creates no read grant or answer state and never expires through
+compaction. Source creation rolls back if the marker cannot commit.
+
+Rollout requires the complete source/privacy stack before deployment. Released
+databases gain nullable source correlation with existing rows unchanged; they
+have no previously classified sources. Databases that ran unmerged prototypes
+may have unmarked source rows and require explicit audit before rollout. There
+is no retrospective privacy guarantee or guessed provenance backfill for those
+unmarked prototypes.

@@ -40,10 +40,11 @@ const (
 	EntryInvitationRevoked  EntryType = "invitation.revoked"
 	EntryInvitationAccepted EntryType = "invitation.accepted"
 	// Communication
-	EntryPeerConversation EntryType = "peer.conversation"
-	EntryPeerEscalation   EntryType = "peer.escalation"
-	EntryMessageBroadcast EntryType = "message.broadcast"
-	EntryAgentMentioned   EntryType = "agent.mentioned"
+	EntryPeerConversation           EntryType = "peer.conversation"
+	EntryPeerEscalation             EntryType = "peer.escalation"
+	EntryEscalationSourceClassified EntryType = "escalation.source_classified"
+	EntryMessageBroadcast           EntryType = "message.broadcast"
+	EntryAgentMentioned             EntryType = "agent.mentioned"
 
 	// EntryConversationCompacted is emitted when an agent's prior session
 	// history overflows the context budget and the orchestrator either
