@@ -1517,6 +1517,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			return stats, fmt.Errorf("backup: invalid Slides image references: %w", err)
 		}
 	}
+	if err := clearRestoredSearchProjections(ctx, tx, dump); err != nil {
+		return stats, fmt.Errorf("backup: clear restored native search projections: %w", err)
+	}
 	if hooks.PostInsert != nil {
 		if err := hooks.PostInsert(ctx, tx); err != nil {
 			return stats, fmt.Errorf("backup: post-insert hook: %w", err)
