@@ -1,31 +1,74 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useTheme } from "next-themes"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { useAppearance } from "@/hooks/use-appearance"
-import { APPEARANCE_PREFERENCE_KEY, parseAppearance, type Appearance } from "@/lib/theme/appearance"
+import { APPEARANCE_PREFERENCE_KEY, emitAppearanceChange, parseAppearance, subscribeAppearance, type Appearance } from "@/lib/theme/appearance"
+import {
+  STYLE_PREFERENCE_KEY,
+  parseStyleState,
+  readStyleState,
+  renderedStyle,
+  serializeStyleState,
+  writeStyleState,
+} from "@/lib/theme/appearance-style"
+import { createAppearanceOutbox, type AppearanceOutbox, type OutboxStatus } from "@/lib/theme/appearance-outbox"
 
 /** Same tail as useUserPreference: a run of clicks through the accents is one write. */
 export const APPEARANCE_SYNC_DEBOUNCE_MS = 400
 
-const PUT_URL = `/api/v1/me/preferences/${encodeURIComponent(APPEARANCE_PREFERENCE_KEY)}`
+function prefUrl(key: string): string {
+  return `/api/v1/me/preferences/${encodeURIComponent(key)}`
+}
 
-function put(body: string, keepalive = false): void {
-  apiFetch(PUT_URL, {
-    method: "PUT",
-    keepalive,
-    headers: { "Content-Type": "application/json" },
-    body,
-  }).catch(() => {
-    /* best-effort: the choice is already applied and stored locally */
-  })
+// ── Sync status ("Not synced · Retry" in Settings › Appearance) ─────────
+let syncStatus: OutboxStatus = "synced"
+const statusListeners = new Set<() => void>()
+let activeOutbox: AppearanceOutbox | null = null
+function setSyncStatus(s: OutboxStatus): void {
+  syncStatus = s
+  for (const l of statusListeners) l()
+}
+function subscribeStatus(l: () => void): () => void {
+  statusListeners.add(l)
+  return () => void statusListeners.delete(l)
+}
+/** Whether this browser's appearance has reached the server. */
+export function useAppearanceSyncStatus(): OutboxStatus {
+  return useSyncExternalStore(subscribeStatus, () => syncStatus, () => "synced")
+}
+/** Sends writes the server refused again. */
+export function retryAppearanceSync(): void {
+  void activeOutbox?.retry()
+}
+
+function storageForOutbox() {
+  return {
+    getItem: (k: string) => localStorage.getItem(k),
+    setItem: (k: string, v: string) => localStorage.setItem(k, v),
+  }
+}
+
+function readStyleRaw(): string | null {
+  const s = readStyleState()
+  return s ? serializeStyleState(s) : null
 }
 
 /**
  * Keeps this browser's appearance (theme, accent, density, motion,
- * text size, sidebar mode) in step
- * with the signed-in user's `appearance` preference on the server.
+ * text size, sidebar mode) and its visual style in step with the signed-in
+ * user's `appearance` and `appearance.style` preferences on the server.
+ *
+ * - Writes go through a persisted outbox (lib/theme/appearance-outbox) in a
+ *   fixed order, `appearance` before `appearance.style`, with retries; a
+ *   write the server refuses for good shows "Not synced · Retry" and never
+ *   rolls the local look back.
+ * - The style key is separate so a client that predates it cannot drop it.
+ *   A style change still pending in the outbox beats the server's value; an
+ *   empty server style is never seeded from a default — only a style the
+ *   user picked is written.
  *
  * - On activation the server value wins: it is applied field by field, so a
  *   laptop that just signed in looks like the desktop the user set up. When
@@ -55,6 +98,7 @@ function put(body: string, keepalive = false): void {
  */
 export function useAppearanceSync(enabled: boolean): void {
   const { theme, accent, density, motion, textSize, sidebar, syncEnabled, setTheme, setAccent, setDensity, setMotion, setTextSize, setSidebar } = useAppearance()
+  const { resolvedTheme } = useTheme()
   const active = enabled && syncEnabled
 
   // The look as it would be stored; null until next-themes knows the theme.
@@ -62,12 +106,38 @@ export function useAppearanceSync(enabled: boolean): void {
   const serialized = current ? JSON.stringify(current) : null
   const currentRef = useRef(current)
   currentRef.current = current
+  const style = useSyncExternalStore(subscribeAppearance, readStyleRaw, () => null)
 
   // What the server is known to hold. A local value equal to it is not sent:
   // that is how applying the server's own value does not echo it back.
   const lastSentRef = useRef<string | null>(null)
-  const pendingRef = useRef<string | null>(null)
+  const lastStyleSentRef = useRef<string | null>(null)
+  const pendingRef = useRef<{ appearance: string | null; style: string | null }>({ appearance: null, style: null })
   const [ready, setReady] = useState(false)
+
+  const outboxRef = useRef<AppearanceOutbox | null>(null)
+  function outbox(): AppearanceOutbox {
+    if (!outboxRef.current) {
+      outboxRef.current = createAppearanceOutbox({
+        storage: storageForOutbox(),
+        send: (key, body, keepalive) =>
+          apiFetch(prefUrl(key), { method: "PUT", keepalive, headers: { "Content-Type": "application/json" }, body }).then((r) => ({
+            ok: Boolean(r?.ok),
+            status: typeof r?.status === "number" ? r.status : r?.ok ? 200 : 0,
+          })),
+        schedule: (fn, ms) => void setTimeout(() => void fn(), ms),
+        onStatus: setSyncStatus,
+      })
+    }
+    return outboxRef.current
+  }
+
+  // Paint the style that can actually be shown (Harbor for an unknown style
+  // or one without a palette for the current scheme), sync on or off.
+  useEffect(() => {
+    const scheme = resolvedTheme === "light" ? "light" : "dark"
+    document.documentElement.dataset.style = renderedStyle(style ? parseStyleState(JSON.parse(style)) : null, scheme)
+  }, [style, resolvedTheme])
 
   // Pull once per activation (mount, sign-in, or the switch turned on).
   useEffect(() => {
@@ -75,6 +145,7 @@ export function useAppearanceSync(enabled: boolean): void {
       setReady(false)
       return
     }
+    activeOutbox = outbox()
     let cancelled = false
     apiFetch("/api/v1/me/preferences")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
@@ -103,47 +174,92 @@ export function useAppearanceSync(enabled: boolean): void {
           // effect seed it with this device's look.
           lastSentRef.current = null
         }
+        // The style: a local change still waiting in the outbox wins; else the
+        // server's value is adopted; an empty server is left empty unless the
+        // user picked a style on this device (the push effect sends that).
+        const remoteStyle = parseStyleState(map[STYLE_PREFERENCE_KEY])
+        if (outbox().pending(STYLE_PREFERENCE_KEY)) {
+          lastStyleSentRef.current = null
+        } else if (remoteStyle) {
+          const r = serializeStyleState(remoteStyle)
+          if (r !== readStyleRaw()) {
+            writeStyleState(remoteStyle)
+            emitAppearanceChange()
+          }
+          lastStyleSentRef.current = r
+        } else {
+          lastStyleSentRef.current = null
+        }
         setReady(true)
+        void outbox().kick()
       })
       .catch(() => {
         if (cancelled) return
         // Offline, 5xx, or a response that is not JSON. Keep the local look and
         // treat it as already sent, so only a real change is written later.
         lastSentRef.current = currentRef.current ? JSON.stringify(currentRef.current) : null
+        lastStyleSentRef.current = readStyleRaw()
         setReady(true)
       })
+    const kick = () => void outbox().kick()
+    window.addEventListener("online", kick)
+    window.addEventListener("focus", kick)
     return () => {
       cancelled = true
+      window.removeEventListener("online", kick)
+      window.removeEventListener("focus", kick)
     }
     // The setters are stable (module functions, next-themes' memoised setter).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
 
-  // Push local changes, debounced. Each new value clears the previous timer,
-  // so a value that was only on screen for one render is never sent.
+  // Push local changes, debounced, both keys in one tick so the outbox can
+  // keep its order. Each new value clears the previous timer, so a value that
+  // was only on screen for one render is never sent.
   useEffect(() => {
-    if (!active || !ready || !serialized || serialized === lastSentRef.current) {
+    const appearanceOwed = Boolean(serialized) && serialized !== lastSentRef.current
+    const styleOwed = Boolean(style) && style !== lastStyleSentRef.current
+    if (!active || !ready || (!appearanceOwed && !styleOwed)) {
       // Nothing owed: a value that was replaced before its timer fired, or a
       // switch turned off, must not be flushed on unmount either.
-      pendingRef.current = null
+      pendingRef.current = { appearance: null, style: null }
       return
     }
-    pendingRef.current = serialized
+    pendingRef.current = { appearance: appearanceOwed ? serialized : null, style: styleOwed ? style : null }
     const t = setTimeout(() => {
-      pendingRef.current = null
-      lastSentRef.current = serialized
-      put(serialized)
+      const ob = outbox()
+      if (appearanceOwed && serialized) {
+        lastSentRef.current = serialized
+        ob.enqueue(APPEARANCE_PREFERENCE_KEY, serialized)
+      }
+      if (styleOwed && style) {
+        lastStyleSentRef.current = style
+        ob.enqueue(STYLE_PREFERENCE_KEY, style)
+      }
+      pendingRef.current = { appearance: null, style: null }
+      void ob.flush()
     }, APPEARANCE_SYNC_DEBOUNCE_MS)
     return () => clearTimeout(t)
-  }, [active, ready, serialized])
+    // outbox() is a lazy ref getter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, ready, serialized, style])
 
   // A change made just before the shell unmounts (sign-out, a hard
   // navigation) still reaches the server: keepalive lets the request outlive
-  // the page.
+  // the page; anything unsent stays in the outbox for the next load.
   useEffect(() => {
     return () => {
-      if (pendingRef.current) put(pendingRef.current, true)
-      pendingRef.current = null
+      const p = pendingRef.current
+      if (p.appearance || p.style) {
+        const ob = outbox()
+        if (p.appearance) ob.enqueue(APPEARANCE_PREFERENCE_KEY, p.appearance)
+        if (p.style) ob.enqueue(STYLE_PREFERENCE_KEY, p.style)
+        ob.flushKeepalive()
+      }
+      pendingRef.current = { appearance: null, style: null }
+      if (activeOutbox === outboxRef.current) activeOutbox = null
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 }
+

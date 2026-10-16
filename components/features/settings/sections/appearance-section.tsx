@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { THEME_OPTIONS } from "@/components/layout/theme-switcher"
 import { useAppearance } from "@/hooks/use-appearance"
+import { retryAppearanceSync, useAppearanceSyncStatus } from "@/hooks/use-appearance-sync"
 import type { Density, MotionChoice, SidebarChoice, TextSize, ThemeChoice } from "@/lib/theme/appearance"
 import { ACCENTS, WORKSPACE_ACCENT, type AccentChoice } from "@/lib/theme/accents"
 import { useWorkspaceAccentHex } from "@/components/layout/workspace-accent"
@@ -222,6 +223,7 @@ function TeamColourRow({ hex, value, onChange }: { hex: string | null | undefine
 
 export function AppearanceSection() {
   const { theme, setTheme, accent, setAccent, density, setDensity, motion, setMotion, textSize, setTextSize, sidebar, setSidebar, syncEnabled, setSyncEnabled } = useAppearance()
+  const syncStatus = useAppearanceSyncStatus()
   const workspaceHex = useWorkspaceAccentHex()
 
   return (
@@ -253,7 +255,17 @@ export function AppearanceSection() {
           label="Sync across devices"
           description="Use these choices wherever you sign in. Turning it on here adopts the ones already saved to your account."
         >
-          <Switch checked={syncEnabled} onCheckedChange={setSyncEnabled} aria-label="Sync across devices" />
+          <div className="flex items-center gap-3">
+            {syncEnabled && syncStatus === "failed" && (
+              <span className="flex items-center gap-2 text-label text-warn" role="status">
+                Not synced
+                <Button variant="outline" size="xs" onClick={retryAppearanceSync}>
+                  Retry
+                </Button>
+              </span>
+            )}
+            <Switch checked={syncEnabled} onCheckedChange={setSyncEnabled} aria-label="Sync across devices" />
+          </div>
         </SettingsRow>
       </SettingsCard>
     </div>

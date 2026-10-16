@@ -28,6 +28,7 @@
  */
 
 import { ACCENT_STORAGE_KEY, DEFAULT_ACCENT, applyAccent, isAccentChoice, type AccentChoice } from "@/lib/theme/accents"
+import { STYLE_BOOT_SNIPPET, STYLE_STORAGE_KEY } from "@/lib/theme/appearance-style"
 
 
 export const THEME_CHOICES = ["dark", "light", "system"] as const
@@ -62,6 +63,12 @@ export const DEFAULT_DENSITY: Density = "comfortable"
 export const DEFAULT_TEXT_SIZE: TextSize = "small"
 /** What a device that ran an earlier build keeps when it never stored one. */
 export const LEGACY_TEXT_SIZE: TextSize = "default"
+/** next-themes' storage key and default. A new device follows the system
+ *  (Harbor 2); one that ran an earlier build — whose default was Dark —
+ *  keeps Dark unless it stored something else. */
+export const THEME_STORAGE_KEY = "theme"
+export const DEFAULT_THEME: ThemeChoice = "system"
+export const LEGACY_THEME: ThemeChoice = "dark"
 export const DEFAULT_SIDEBAR: SidebarChoice = "hover"
 export const DEFAULT_MOTION: MotionChoice = "system"
 
@@ -161,8 +168,9 @@ export function motionConfigValue(m: MotionChoice): "user" | "always" | "never" 
 /**
  * Brings this browser's stored look to the current defaults ONCE, without
  * changing what anyone sees. A device that ran an earlier build (it holds
- * any Crewship key) but never stored a text size keeps that build's default,
- * Standard; a brand-new device keeps nothing and so gets Compact. A stored
+ * any Crewship key) but never stored a text size or a theme keeps that
+ * build's defaults, Standard and Dark; a brand-new device keeps nothing and
+ * so gets Small text and the system theme. A stored
  * choice is never touched. The boot script below does the same before first
  * paint (the only place it runs in the app); this is its testable twin.
  * Storage that throws or cannot be listed leaves everything as it is.
@@ -181,6 +189,7 @@ export function migrateDeviceAppearance(): void {
       }
     }
     if (used && s.getItem(TEXT_SIZE_STORAGE_KEY) === null) s.setItem(TEXT_SIZE_STORAGE_KEY, LEGACY_TEXT_SIZE)
+    if (used && s.getItem(THEME_STORAGE_KEY) === null) s.setItem(THEME_STORAGE_KEY, LEGACY_THEME)
     s.setItem(APPEARANCE_VERSION_STORAGE_KEY, APPEARANCE_VERSION)
   } catch {
     // Private mode or blocked storage: nothing stored, nothing to keep.
@@ -218,6 +227,12 @@ function emit(): void {
   for (const l of listeners) l()
 }
 
+/** Tells every appearance reader that something changed in this tab — for
+ *  stores that live beside this one (lib/theme/appearance-style). */
+export function emitAppearanceChange(): void {
+  emit()
+}
+
 function onStorage(e: StorageEvent): void {
   // Another tab changed a choice. Paint it here too, then let readers re-read.
   if (e.key === ACCENT_STORAGE_KEY && isAccentChoice(e.newValue)) document.documentElement.dataset.accent = e.newValue
@@ -227,6 +242,9 @@ function onStorage(e: StorageEvent): void {
   }
   else if (e.key === DENSITY_STORAGE_KEY) applyDensityAttr(readDensity())
   else if (e.key === MOTION_STORAGE_KEY) applyMotionAttr(readMotion())
+  else if (e.key === STYLE_STORAGE_KEY) {
+    // The style attribute is painted by AppearanceStyleSync from the new value.
+  }
   else if (e.key !== APPEARANCE_SYNC_STORAGE_KEY) return
   emit()
 }
@@ -308,10 +326,12 @@ export const APPEARANCE_BOOT_SCRIPT = `(function(){try{var d=document.documentEl
   APPEARANCE_VERSION,
 )}){var u=false,n=typeof s.length==="number"?s.length:0;for(var i=0;i<n&&typeof s.key==="function";i++){var k=s.key(i);if(k&&k!==vk&&(k==="theme"||k.indexOf("crewship")===0)){u=true;break}}if(u&&s.getItem(tk)===null)s.setItem(tk,${JSON.stringify(
   LEGACY_TEXT_SIZE,
-)});s.setItem(vk,${JSON.stringify(APPEARANCE_VERSION)})}if(s.getItem(${JSON.stringify(
+)});if(u&&s.getItem(${JSON.stringify(THEME_STORAGE_KEY)})===null)s.setItem(${JSON.stringify(
+  THEME_STORAGE_KEY,
+)},${JSON.stringify(LEGACY_THEME)});s.setItem(vk,${JSON.stringify(APPEARANCE_VERSION)})}if(s.getItem(${JSON.stringify(
   DENSITY_STORAGE_KEY,
 )})==="compact")d.setAttribute("data-density","compact");var m=s.getItem(${JSON.stringify(
   MOTION_STORAGE_KEY,
 )});if(m==="on")d.setAttribute("data-motion","reduce");else if(m==="off")d.setAttribute("data-motion","full");var t=s.getItem(tk);if(t===null)t=${JSON.stringify(
   DEFAULT_TEXT_SIZE,
-)};if(t==="small"||t==="large")d.setAttribute("data-text-size",t)}catch(e){}})()`
+)};if(t==="small"||t==="large")d.setAttribute("data-text-size",t);${STYLE_BOOT_SNIPPET}}catch(e){}})()`

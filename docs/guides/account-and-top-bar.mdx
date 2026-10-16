@@ -43,7 +43,7 @@ Restricted sessions are not offered Notification preferences or Connect CLI.
 
 `/settings?tab=appearance`
 
-- **Theme** — Dark, Light or System (follows the OS).
+- **Theme** — Dark, Light or System (follows the OS). A new device starts on System; a device that used Crewship before keeps Dark unless you chose otherwise.
   - In light, the left rail sits on a quiet grey ground; content, section panels and cards are white and separated by hairlines.
 - **Accent** — eight presets as large swatches in spectrum order: Blue (default), Sky, Teal, Indigo, Violet, Fuchsia, Pink, Graphite. They tint buttons, links, chips, switches and the focus ring, shown live in a preview strip. Green, red and amber are never accents — they mean done, failed and needs-attention.
   - **Team colour** (its own row under the swatches) uses the workspace's brand colour from **Settings → General → Pages appearance → Brand accent**. Its hue and saturation are kept and each shade's lightness is adjusted until it meets WCAG AA (4.5:1) on the background and cards, so a light brand colour like mint still gets readable buttons and links. Switching workspace switches the colour; a workspace without one shows Blue.
@@ -52,7 +52,7 @@ Restricted sessions are not offered Notification preferences or Connect CLI.
 - **Touch** — on any touch screen (phone, tablet or touch laptop, at any window width) every button, field, tab and menu item is at least 44 px tall, and checkboxes and radios get a 44 px tap area.
 - **Sidebar** — Rail · expand on hover (default), Rail, or Pinned open; the same modes as the switch at the bottom of the rail and ⌘B, which now also sync.
 - **Reduce motion** — System (the OS setting), On (no transitions or animations), Off (full motion even if the OS asks for less).
-- **Sync across devices** — on by default. Theme, accent, text size, density, sidebar and motion are stored with your account under the `appearance` key of the per-user preference store (`GET`/`PUT /api/v1/me/preferences/appearance`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser.
+- **Sync across devices** — on by default. Theme, accent, text size, density, sidebar and motion are stored with your account under the `appearance` key of the per-user preference store, the visual style under `appearance.style` (`GET`/`PUT /api/v1/me/preferences/{key}`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser. Changes are written in order and retried when the connection drops; if the server refuses one, **Not synced · Retry** appears next to the switch and your look on this device stays as you set it.
 
 ## Settings → General → Pages appearance
 
@@ -73,9 +73,10 @@ Everything on these pages is stored with **your user**, not with the browser, in
 | Key | What |
 |---|---|
 | `appearance` | theme, accent, text size, density, sidebar mode, reduce motion |
+| `appearance.style` | visual style and its options (`{"v":1,"style":"harbor","knobs":{}}`); kept apart so an older client that rewrites `appearance` cannot drop it |
 | `notification-sounds.<workspace-id>` | Notification sounds for that workspace |
 
-A new user starts on the defaults — **Dark**, **Blue**, Small text size, Comfortable, sidebar rail with hover, motion following the OS, sounds off — and gets their own rows on the first change. The browser keeps a copy so the first paint is already right; on sign-in the server copy wins. Two things stay per device on purpose: the **Sync across devices** switch itself, and the browser's permission to play audio.
+A new user starts on the defaults — **System** theme (follows the OS), **Blue**, Small text size, Comfortable, sidebar rail with hover, motion following the OS, sounds off — and gets their own rows on the first change. The browser keeps a copy so the first paint is already right; on sign-in the server copy wins. Two things stay per device on purpose: the **Sync across devices** switch itself, and the browser's permission to play audio.
 
 ## Settings → Sessions & tokens
 

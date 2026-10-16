@@ -112,6 +112,23 @@ describe("boot script (before first paint)", () => {
   })
 })
 
+describe("theme default (Harbor + System for new devices)", () => {
+  it("a new device stores no theme, so next-themes follows the system", () => {
+    migrateDeviceAppearance()
+    expect(store.get("theme")).toBeUndefined()
+  })
+  it("a device that ran an earlier build (default Dark) keeps Dark", () => {
+    stubStorage({ "crewship-accent": "teal" })
+    migrateDeviceAppearance()
+    expect(store.get("theme")).toBe("dark")
+  })
+  it("a stored theme is never touched", () => {
+    stubStorage({ theme: "light", "crewship-accent": "teal" })
+    migrateDeviceAppearance()
+    expect(store.get("theme")).toBe("light")
+  })
+})
+
 describe("mixed clients", () => {
   it("an older client's stored 'default' still means Standard (14 px)", () => {
     expect(parseAppearance({ textSize: "default" }).textSize).toBe("default")

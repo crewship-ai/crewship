@@ -12,6 +12,8 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a
 
 let workspaceHex: string | null | undefined = null
 vi.mock("@/components/layout/workspace-accent", () => ({ useWorkspaceAccentHex: () => workspaceHex }))
+const sync = vi.hoisted(() => ({ status: "synced" as "synced" | "pending" | "failed", retry: vi.fn() }))
+vi.mock("@/hooks/use-appearance-sync", () => ({ useAppearanceSyncStatus: () => sync.status, retryAppearanceSync: () => sync.retry() }))
 
 import { AppearanceSection } from "../appearance-section"
 import { ACCENTS } from "@/lib/theme/accents"
@@ -142,5 +144,18 @@ describe("AppearanceSection", () => {
     render(<AppearanceSection />)
     expect(screen.queryByRole("radiogroup", { name: "Base palette" })).toBeNull()
     expect(screen.queryByRole("radiogroup", { name: "Light mode sidebar" })).toBeNull()
+  })
+
+  it("shows Not synced with Retry only when a write was refused for good (#3334)", () => {
+    sync.status = "synced"
+    render(<AppearanceSection />)
+    expect(screen.queryByText("Not synced")).toBeNull()
+    cleanup()
+    sync.status = "failed"
+    render(<AppearanceSection />)
+    expect(screen.getByRole("status")).toHaveTextContent("Not synced")
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(sync.retry).toHaveBeenCalledOnce()
+    sync.status = "synced"
   })
 })

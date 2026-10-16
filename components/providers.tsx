@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { AuthProvider } from "@/hooks/use-auth"
 import { Toaster } from "@/components/ui/sonner"
 import { useMotionChoice } from "@/hooks/use-appearance"
-import { motionConfigValue } from "@/lib/theme/appearance"
+import { DEFAULT_THEME, motionConfigValue } from "@/lib/theme/appearance"
 
 /**
  * Root client-side providers. A single React Query client is held for
@@ -43,7 +43,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     // Harbor themes: "dark" is the default (unchanged for everyone who never
     // opens the switcher) and "light" the Harbor day palette. The class lands
     // on <html>, where globals.css keys the palettes.
-    <ThemeProvider attribute="class" defaultTheme="dark" themes={HARBOR_THEMES} enableSystem disableTransitionOnChange>
+    <ThemeProvider attribute="class" defaultTheme={DEFAULT_THEME} themes={HARBOR_THEMES} enableSystem disableTransitionOnChange>
     <QueryClientProvider client={queryClient}>
       {/* Settings › Appearance › Reduce motion: System → "user" (the OS
           setting), On → "always", Off → "never". The CSS side of the same
