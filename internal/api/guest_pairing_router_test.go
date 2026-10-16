@@ -96,7 +96,8 @@ func TestGuestPairingRouterSessionAndAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	hidden := f.call(t, other, "GET", "/api/v1/auth/pair/poll?code="+code, "", 200)
-	if err := json.Unmarshal(hidden.Body.Bytes(), &poll); err != nil || poll.Status != "expired" {
+	var hiddenPoll pairPollResponse
+	if err := json.Unmarshal(hidden.Body.Bytes(), &hiddenPoll); err != nil || hiddenPoll.Status != "expired" || hiddenPoll.ExpiresAt != "" || hiddenPoll.AdapterHint != "" {
 		t.Fatal("foreign pairing disclosed", err)
 	}
 	redeemed := f.call(t, "", "POST", "/api/v1/auth/pair/redeem", `{"code":"`+code+`"}`, 200)
