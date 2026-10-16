@@ -245,3 +245,14 @@ live WebSocket behavior. Keep this directory outside the public source tree.
 - `acceptance-slides-workflow-browser.mjs`: opt-in `slides_workflow_browser` real Router/DB/production static native Slides human flow using owned synthetic sessions; not login/model acceptance. Captures private evidence under operator-selected output.
 
 - `acceptance-slides-comments-browser.mjs`: opt-in `slides_comments_browser` actual Router/SQLite/static native comments flow with distinct synthetic COMMENT and WRITE humans. Run after production export through `crewship-heavy env CREWSHIP_SLIDES_COMMENTS_BROWSER=1 go test -tags slides_comments_browser ./internal/api -run '^TestSlidesCommentsBrowser$' -count=1 -timeout 6m`. `CREWSHIP_SLIDES_COMMENTS_OUTPUT` selects a private owned evidence directory. Missing prerequisites fail; no shared login, response mocks or model claims.
+
+`acceptance-slides-selected-browser.mjs` runs only through the opt-in Linux
+`TestSlidesSelectedBrowser` fixture after a production static export. Run
+`CREWSHIP_SLIDES_SELECTED_BROWSER=1 go test -tags slides_selected_browser ./internal/api -run '^TestSlidesSelectedBrowser$'` through `crewship-heavy`, preserving the installed
+`PLAYWRIGHT_BROWSERS_PATH` when HOME is isolated. Optional
+`CREWSHIP_SLIDES_SELECTED_OUTPUT` selects owned evidence output. It serves real
+Router/SQLite/static UI with separate synthetic WRITE/READ sessions, verifies
+actual textarea selection, exact lost-ack retry, cancellation, original-revision
+conflicts and confirmed result preview. The production worker uses a deterministic
+trusted Store replacement instead of model dispatch; this is not model or new
+sidecar execution evidence. No execution containers or shared server are used.
