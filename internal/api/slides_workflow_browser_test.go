@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/slides"
 )
 
@@ -32,7 +34,21 @@ func TestSlidesWorkflowBrowser(t *testing.T) {
 	f := newInstanceFixture(t)
 	t.Cleanup(f.r.Shutdown)
 	seedInstanceUser(t, f.db, "slides-reader", "slides-reader@example.invalid", "ws-old", "VIEWER")
-	reader := mintTokenFor(t, f.db, "slides-reader", "slides-browser-reader-session")
+	validator, err := auth.NewJWTValidator("this-is-a-32-char-test-secret-pad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens := map[string]string{}
+	for _, user := range []string{"boss", "slides-reader"} {
+		session, err := sessions.NewDBStore(f.db).Create(t.Context(), user, "synthetic-slides-browser", "127.0.0.1", auth.RefreshTokenTTL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tokens[user], err = validator.IssueAccessToken(user, session.ID, user, user+"@example.invalid")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	wmSeedPage(t, f.db, "ws-old", "readonly-slides-page", "readonly-slides", "Read only Slides", "boss", "")
 	deck := slideTestDeck(t, "readonly-slides-page")
 	wantCode(t, f.slideDo(f.boss, "POST", "/api/v1/pages/readonly-slides/slides/initialize", slideJSON(t, slides.InitializeRequest{PageID: deck.DeckID, SchemaVersion: 1, MutationID: "readonly-init", Deck: deck})), 200, "initialize readonly fixture")
@@ -42,7 +58,7 @@ func TestSlidesWorkflowBrowser(t *testing.T) {
 	mux.Handle("/", StaticFileHandler(os.DirFS(filepath.Join(repo, "out"))))
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
-	fixture, err := json.Marshal(map[string]any{"server": server.URL, "workspace": "ws-old", "owner_token": f.boss, "reader_token": reader})
+	fixture, err := json.Marshal(map[string]any{"server": server.URL, "workspace": "ws-old", "owner_token": tokens["boss"], "reader_token": tokens["slides-reader"]})
 	if err != nil {
 		t.Fatal(err)
 	}
