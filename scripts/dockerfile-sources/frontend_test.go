@@ -72,6 +72,10 @@ func excludedTypeScript(t *testing.T, file string, excludes []string) bool {
 			if strings.HasSuffix(file, ".test.tsx") {
 				return true
 			}
+		case "e2e/**/*.fixture.tsx":
+			if strings.HasPrefix(file, "e2e/") && strings.HasSuffix(file, ".fixture.tsx") {
+				return true
+			}
 		default:
 			if strings.ContainsAny(pattern, "*?[") {
 				t.Fatalf("new tsconfig exclusion %q needs source-contract support", pattern)
@@ -104,6 +108,28 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 	}
 	if !includes["**/*.ts"] || !includes["**/*.tsx"] {
 		t.Fatal("production tsconfig include changed; review frontend source contract")
+	}
+	// Browser fixture entrypoints can import backend-generated JSON. They are
+	// checked by the test project, outside the narrowed production image context.
+	for _, exclusion := range config.Exclude {
+		if exclusion != "e2e/**/*.fixture.tsx" {
+			continue
+		}
+		testRaw, err := os.ReadFile(filepath.Join(root, "tsconfig.tests.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var testConfig struct{ Include []string }
+		if err := json.Unmarshal(testRaw, &testConfig); err != nil {
+			t.Fatal(err)
+		}
+		covered := false
+		for _, inclusion := range testConfig.Include {
+			covered = covered || inclusion == exclusion
+		}
+		if !covered {
+			t.Fatal("browser fixtures excluded from production must remain in test typechecking")
+		}
 	}
 	output, err := exec.Command("git", "-C", root, "ls-files", "-z").Output()
 	if err != nil {
