@@ -2177,7 +2177,11 @@ is required for every returned issue. Other workspace memberships do not bypass
 the account restriction.
 
 **Request:** No body. Query parameters: optional `project_id`, `limit` (default
-100, maximum 500), `offset` (default zero). An explicit ungranted project is 404.
+100, maximum 500), `offset` (default zero), and `q` (up to 256 Unicode characters,
+trimmed). `q` performs literal substring matching on issue title or identifier
+with SQLite ASCII case folding. `%` and `_` do not act as wildcards. Descriptions,
+comments and other resource metadata are never searched. The count and pages
+remain filtered by live project.list grants. An explicit ungranted project is 404.
 
 **Response:** `200 OK`, an array of JSON objects with `id`, `identifier`, `title`,
 `status`, `project_id`, `project_name` and booleans `can_read` and `can_contribute`. Description is not
@@ -2190,7 +2194,7 @@ included. `X-Total-Count` counts the filtered total and `X-Next-Offset` pages re
 | Status | Condition |
 | --- | --- |
 | `200` | Filtered list, possibly empty |
-| `400` | Invalid pagination |
+| `400` | Invalid pagination, oversized search or invalid Unicode |
 | `401` | Authentication required |
 | `403` | Workspace authentication gate denied |
 | `404` | Unavailable Guest membership/project |
@@ -2218,7 +2222,7 @@ and run history are excluded. No mutation endpoint is enabled by this read.
 | Status | Condition |
 | --- | --- |
 | `200` | Current authorized detail |
-| `400` | Invalid pagination input |
+| `400` | Invalid pagination input or a collection-only `q` parameter on detail |
 | `401` | Authentication required |
 | `403` | Workspace authentication gate denied |
 | `404` | Foreign, missing or revoked issue/project |

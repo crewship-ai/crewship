@@ -54,13 +54,20 @@ export function RestrictedIssues({ identifier }: { identifier?: string | null })
   const { workspaceId } = useWorkspace()
   const { data: session } = useSession()
   const context = useAccessContext()
-  const [offset, setOffset] = useState(0)
+  const filterScope = JSON.stringify([session?.user.id, workspaceId])
+  const [filter, setFilter] = useState({ scope: "", draft: "", q: "", offset: 0 })
+  const currentFilter = filter.scope === filterScope ? filter : { scope: filterScope, draft: "", q: "", offset: 0 }
+  const { q, offset } = currentFilter
+  const searchId = useId()
+  const setOffset = (next: number) => setFilter({ ...currentFilter, offset: next })
   const base = workspaceId ? `/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/restricted-issues` : ""
   const query = useQuery({
-    queryKey: ["restricted-issues", session?.user.id, workspaceId, identifier, offset],
+    queryKey: ["restricted-issues", session?.user.id, workspaceId, identifier, offset, q],
     enabled: !!workspaceId && !!session?.user.id, retry: false, refetchInterval: 15_000,
     queryFn: async ({ signal }) => {
-      const path = identifier ? `${base}/${requireApiPathSegment(identifier)}` : `${base}?limit=100&offset=${offset}`
+      const params = new URLSearchParams({ limit: "100", offset: String(offset) })
+      if (q) params.set("q", q)
+      const path = identifier ? `${base}/${requireApiPathSegment(identifier)}` : `${base}?${params}`
       const response = await apiFetch(path, { signal })
       if (!response.ok) throw new IssueReadError(response.status, response.status === 404 ? "Access unavailable" : "Issues unavailable")
       const data = await response.json()
@@ -79,11 +86,16 @@ export function RestrictedIssues({ identifier }: { identifier?: string | null })
   return <main className="mx-auto w-full max-w-4xl space-y-4 p-4 md:p-6">
     <div className="flex items-center justify-between"><h1 className="text-lg font-semibold">{identifier ? "Issue" : "Issues shared with you"}</h1>{identifier ? <Link href="/issues" className="text-sm text-primary">Back to issues</Link> : <Button variant="outline" onClick={() => { void query.refetch(); void projects.refetch() }}>Refresh</Button>}</div>
     <p className="text-sm text-muted-foreground">Your project grants decide which issues you can list, read and contribute to. Only comments explicitly shared with this project appear here.</p>
+    {!identifier && <form className="touch-form space-y-2" onSubmit={event => { event.preventDefault(); setFilter({ ...currentFilter, q: currentFilter.draft.trim(), offset: 0 }) }}>
+      <label htmlFor={searchId} className="text-sm font-medium">Search shared issues</label>
+      <div className="flex gap-2"><Input id={searchId} type="search" maxLength={256} value={currentFilter.draft} onChange={event => setFilter({ ...currentFilter, draft: event.target.value })} /><Button type="submit">Search</Button>{q && <Button type="button" variant="outline" onClick={() => setFilter({ scope: filterScope, draft: "", q: "", offset: 0 })}>Clear search</Button>}</div>
+      <p className="text-xs text-muted-foreground">Search titles and identifiers in projects shared with you.</p>
+    </form>}
     {!identifier && !accessLost(projects.error) && workspaceId && projects.data?.some(project => project.can_manage) && <SharedProjectDetails key={`${session?.user.id}:${workspaceId}`} workspaceId={workspaceId} projects={projects.data.filter(project => project.can_manage)} />}
     {!identifier && !accessLost(projects.error) && projects.data?.some(project => project.can_contribute) && <NewIssue key={`${session?.user.id}:${workspaceId}`} base={base} projects={projects.data} disabled={projects.isError} />}
     {query.isPending && <p role="status">Loading shared issues…</p>}
     {query.isError && (!query.data || accessLost(query.error)) && <AccessNotice kind={accessLost(query.error) ? "no-access" : "unavailable"} title="Issues unavailable" description="Your access may have changed. Retry to check your current project grants." context={context} current="issues" onRetry={() => void query.refetch()} />}
-    {(!query.isError || !accessLost(query.error)) && query.data?.length === 0 && <AccessNotice kind="no-access" title="No issues shared here" description="There are no issues in the projects shared with you on this page." context={context} current="issues" />}
+    {(!query.isError || !accessLost(query.error)) && query.data?.length === 0 && (q ? <p role="status">No matching shared issues. Try another search or clear the filter.</p> : <AccessNotice kind="no-access" title="No issues shared here" description="There are no issues in the projects shared with you on this page." context={context} current="issues" />)}
     {query.isError && query.data && !accessLost(query.error) && <p role="status" className="text-sm text-muted-foreground">Issues could not be refreshed. Your current view and drafts are kept; refresh before posting.</p>}
     {(!query.isError || !accessLost(query.error)) && query.data?.map(issue => <IssueCard key={`${session?.user.id}:${workspaceId}:${issue.id}`} issue={issue} detail={!!identifier} mutationsDisabled={query.isError} base={base} userId={session?.user.id} />)}
     {!identifier && !query.isError && <div className="flex gap-2">
@@ -99,15 +111,21 @@ function NewIssue({ base, projects, disabled }: { base: string; projects: Projec
   const [projectId, setProjectId] = useState("")
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
+  const [created, setCreated] = useState<Pick<Issue, "identifier" | "can_read"> | null>(null)
   const request = useIssueRequest()
   const eligible = projects.filter(project => project.can_contribute)
   const selected = eligible.find(project => project.id === projectId)
   const save = useMutation({
-    mutationFn: () => request.send(base, "POST", { project_id: projectId, title, description }),
-    onSuccess: async () => { request.clear(); setTitle(""); setDescription(""); await client.invalidateQueries({ queryKey: ["restricted-issues"] }) },
+    mutationFn: async () => {
+      const result = issueSchema.safeParse(await request.send(base, "POST", { project_id: projectId, title, description }))
+      if (!result.success || !result.data.id || !result.data.identifier || result.data.project_id !== projectId) throw new Error("Could not confirm the created issue. Your draft is kept; retry to confirm the result.")
+      return result.data
+    },
+    onMutate: () => setCreated(null),
+    onSuccess: async saved => { request.clear(); setCreated({ identifier: saved.identifier, can_read: saved.can_read }); setTitle(""); setDescription(""); await client.invalidateQueries({ queryKey: ["restricted-issues"] }) },
   })
   return <details className="rounded-lg border bg-card p-4"><summary className="cursor-pointer font-medium">New issue</summary>
-    <form className="mt-3 space-y-3" onSubmit={event => { event.preventDefault(); if (!disabled && selected?.intake_ready && title.trim() && !save.isPending) save.mutate() }}>
+    <form className="touch-form mt-3 space-y-3" onSubmit={event => { event.preventDefault(); if (!disabled && selected?.intake_ready && title.trim() && !save.isPending) save.mutate() }}>
       <label htmlFor={`${id}-project`} className="block text-sm">Project</label>
       <select id={`${id}-project`} className="min-h-9 w-full rounded-md border bg-background px-3 coarse:min-h-12" value={projectId} disabled={disabled || save.isPending} onChange={event => setProjectId(event.target.value)}><option value="">Choose a project</option>{eligible.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
       {selected && !selected.intake_ready && <p role="status" className="text-sm text-muted-foreground">Ask your administrator to configure this project’s issue intake crew.</p>}
@@ -116,6 +134,7 @@ function NewIssue({ base, projects, disabled }: { base: string; projects: Projec
       <p className="text-xs text-muted-foreground">Creates an unassigned request in Backlog. An authorized workspace member can review it and start work.</p>
       <Button type="submit" disabled={disabled || !selected?.intake_ready || !title.trim() || save.isPending}>{save.isPending ? "Creating…" : "Create issue"}</Button>
       {save.isError && <p role="alert" className="text-sm">{save.error.message}</p>}
+      {created && <div><p role="status" className="text-sm">Created {created.identifier}.</p>{created.can_read && <Link className="inline-flex min-h-9 items-center text-sm text-primary underline coarse:min-h-12" href={`/issues/${encodeURIComponent(created.identifier)}`}>Open {created.identifier}</Link>}</div>}
     </form>
   </details>
 }
