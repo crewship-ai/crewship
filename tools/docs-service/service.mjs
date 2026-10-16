@@ -118,7 +118,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       }
       if (operation === 'read') {
         const { rev, generation, incarnation, snapshot, snapshotRev, updates, blocks } = state;
-        return { schema: state.schema, rev, generation, incarnation, snapshot, snapshotRev, updates, blocks, epoch: syncEpoch(state), content: validate(doc,version), outline: await outline(doc,version) };
+        return { schema: state.schema, rev, generation, incarnation, snapshot, snapshotRev, updates, blocks, epoch: syncEpoch(state), content: validate(doc,version), outline: await outline(doc,version), ...(context.authorization.startsWith('Bearer agtv2.') && state.requestScope?.target?.structure ? {agent_request:{kind:'structure',request_id:state.requestScope.requestID,page_id:page,schema:3,base_rev:state.requestScope.baseRev}} : {}) };
       }
       if (operation === 'verify-targets') {
         if (!Number.isSafeInteger(request.base_rev) || request.base_rev !== state.rev) throw fault(409, 'document request revision changed');
@@ -155,7 +155,12 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     if (!supportedSchema(request.schema)) throw fault(409,'unsupported client schema');
     if (operation === 'upgrade' && context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human schema upgrade required');
     if (!id(request.id)) throw fault(400, 'operation ID required');
-    const fingerprint = await hash({ operation, request });
+    // Epoch is renewable transport, never original request authority. Structural
+    // intent identity survives Node/Go restart and human edits for receipt reads;
+    // absent a receipt, the immutable original scope fence below still rejects.
+    const structural = (operation === 'patch' && request.operations !== undefined) || (operation === 'checkpoint' && state.requestScope?.target?.structure);
+    const fingerprintInput = structural ? Object.fromEntries(Object.entries(request).filter(([key]) => key !== 'epoch')) : request;
+    const fingerprint = await hash({ operation, request: fingerprintInput });
     const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint });
     if (receipt.found) {
       let schema = operation === 'upgrade' ? RICH_VERSION : request.schema;

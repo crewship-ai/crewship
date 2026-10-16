@@ -42,22 +42,31 @@ type DocumentBlockHash struct {
 	ID   string `json:"id"`
 	Hash string `json:"hash"`
 }
+type DocumentAgentRequestContext struct {
+	Kind      string `json:"kind"`
+	RequestID string `json:"request_id"`
+	PageID    string `json:"page_id"`
+	Schema    int    `json:"schema"`
+	BaseRev   int64  `json:"base_rev"`
+}
+
 type DocumentStateResponse struct {
-	PageID      string                 `json:"page_id"`
-	Schema      int                    `json:"schema"`
-	Rev         int64                  `json:"rev"`
-	Epoch       string                 `json:"epoch"`
-	Generation  int64                  `json:"generation"`
-	Incarnation string                 `json:"incarnation"`
-	Snapshot    string                 `json:"snapshot"`
-	SnapshotRev int64                  `json:"snapshotRev"`
-	Updates     []string               `json:"updates"`
-	Blocks      []DocumentBlockHash    `json:"blocks"`
-	Content     DocumentNode           `json:"content"`
-	Outline     []DocumentOutlineBlock `json:"outline"`
-	CanWrite    bool                   `json:"can_write"`
-	CanComment  bool                   `json:"can_comment"`
-	CanResolve  bool                   `json:"can_resolve"`
+	AgentRequest *DocumentAgentRequestContext `json:"agent_request,omitempty"`
+	PageID       string                       `json:"page_id"`
+	Schema       int                          `json:"schema"`
+	Rev          int64                        `json:"rev"`
+	Epoch        string                       `json:"epoch"`
+	Generation   int64                        `json:"generation"`
+	Incarnation  string                       `json:"incarnation"`
+	Snapshot     string                       `json:"snapshot"`
+	SnapshotRev  int64                        `json:"snapshotRev"`
+	Updates      []string                     `json:"updates"`
+	Blocks       []DocumentBlockHash          `json:"blocks"`
+	Content      DocumentNode                 `json:"content"`
+	Outline      []DocumentOutlineBlock       `json:"outline"`
+	CanWrite     bool                         `json:"can_write"`
+	CanComment   bool                         `json:"can_comment"`
+	CanResolve   bool                         `json:"can_resolve"`
 }
 type DocumentMutationRequest struct {
 	ID           string                       `json:"id"`

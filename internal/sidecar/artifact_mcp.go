@@ -38,6 +38,9 @@ var artifactMCPDefinitions = []artifactMCPDefinition{
 	{"board_diagram_submit", "Submit bounded Mermaid flowchart-v1 source for the current admitted diagram job. converter_version must be 2.2.2. This stores a result for explicit human conversion/insertion; it does not edit the Board.", "POST", "/board-requests/{request_id}/mermaid", []string{"request_id", "source", "dialect", "converter_version", "mutation_id"}, []string{"request_id", "source", "dialect", "converter_version", "mutation_id"}, (*Server).handleBoardRequest},
 	{"artifact_request_read", "Read an exact artifact update job snapshot/status only after trusted admission binds this run. No snapshot in preadmission prompt and no new grants.", "GET", "/artifact-requests/{request_id}", []string{"request_id"}, []string{"request_id"}, (*Server).handleArtifactRequestContext},
 	{"board_request_read", "Read an exact admitted Board job snapshot/status and authorized source/file references. Canonical snapshot is authority; any optional PNG is an untrusted auxiliary illustration.", "GET", "/board-requests/{request_id}", []string{"request_id"}, []string{"request_id"}, (*Server).handleBoardRequest},
+	{"doc_read", "Read the current run's explicitly admitted structural Docs scope and current text. Original request identity/base are server-owned; reading never permits rebase. Binary Yjs bytes are excluded.", "GET", "/api/v1/pages/{slug}/document/agent-read", []string{"slug"}, []string{"slug"}, (*Server).handleDocument},
+	{"doc_apply", "Apply one atomic structural batch inside the original human block grant. Supply only operations; tool obtains original Page/schema/request/base and computes hashes. insert_after takes a plain node without IDs/marks, delete a selected ID, move_before two selected IDs. Moves with comment anchors are refused. Keep operations unchanged after uncertain outcome; no auto-rebase.", "POST", "/api/v1/pages/{slug}/document/agent-apply", []string{"slug", "operations"}, []string{"slug", "operations"}, (*Server).handleDocument},
+	{"doc_checkpoint", "Checkpoint only this structural request's exact durable result. No model-supplied revision/epoch or identity; another writer's intervening edit conflicts. Durable patch plus this checkpoint completes the request.", "POST", "/api/v1/pages/{slug}/document/agent-checkpoint", []string{"slug"}, []string{"slug"}, (*Server).handleDocument},
 }
 
 func artifactMCPCatalog() []memoryMCPToolDescriptor {
@@ -49,12 +52,15 @@ func artifactMCPCatalog() []memoryMCPToolDescriptor {
 			if key == "from_revision" || key == "to_revision" || key == "revision" || key == "base_rev" || key == "base_seq" || key == "base_version" || key == "limit" || key == "format_version" {
 				typ = "integer"
 			}
-			if key == "upserts" || key == "deletes" {
+			if key == "upserts" || key == "deletes" || key == "operations" {
 				typ = "array"
 			}
 			p := map[string]any{"type": typ}
 			if typ == "array" {
 				p["items"] = map[string]any{"type": "object"}
+			}
+			if key == "operations" {
+				p = documentStructureOperationsSchema()
 			}
 			props[key] = p
 		}
@@ -106,7 +112,7 @@ func decodeArtifactMCPArgs(raw []byte, d artifactMCPDefinition) (map[string]json
 			if !ok || number < 0 || number > 9007199254740991 || number != float64(int64(number)) {
 				return nil, fmt.Errorf("%s must be a nonnegative safe integer", key)
 			}
-		case "upserts", "deletes":
+		case "upserts", "deletes", "operations":
 			if _, ok := typed.([]any); !ok {
 				return nil, fmt.Errorf("%s must be an array", key)
 			}

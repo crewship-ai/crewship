@@ -31,6 +31,7 @@ import (
 
 func newDocCommand() *cobra.Command {
 	root := &cobra.Command{Use: "doc", Short: "Read and edit saved Page documents with semantic preconditions"}
+	root.AddCommand(newDocAgentCommand())
 	for _, operation := range []string{"read", "outline", "patch", "checkpoint", "restore", "upgrade", "export", "request", "status", "initialize", "checkpoints", "checkpoint-read", "comments", "comment", "comment-resolve", "request-list"} {
 		operation := operation
 		cmd := &cobra.Command{Use: operation + " <page-slug>", Short: "Document " + operation, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {

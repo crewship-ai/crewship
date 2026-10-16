@@ -45,3 +45,38 @@ export function captureDocumentSelection(editor: Editor | null, confirmed: Docum
   if (!targets.length) throw new Error("Select nonempty text in a paragraph or heading before sending agent work.")
   return { page_id: identity, base_rev: confirmed.rev, epoch: confirmed.epoch, targets }
 }
+
+export interface DocumentStructureSelectionSnapshot {
+  page_id: string
+  base_rev: number
+  epoch: string
+  structure: { block_ids: string[]; allow_insert_after: true }
+  blocks: { id: string; type: string; text: string }[]
+}
+
+export function documentRootBlocks(content: unknown): { id: string; type: string; text: string }[] {
+  if (!content || typeof content !== "object" || !Array.isArray((content as { content?: unknown }).content)) return []
+  const text = (value: unknown): string => {
+    if (!value || typeof value !== "object") return ""
+    const node = value as { text?: unknown; content?: unknown[] }
+    return typeof node.text === "string" ? node.text : (node.content ?? []).map(text).join("")
+  }
+  return ((content as { content: unknown[] }).content).flatMap(value => {
+    if (!value || typeof value !== "object") return []
+    const node = value as { type?: unknown; attrs?: { id?: unknown } }
+    return typeof node.type === "string" && typeof node.attrs?.id === "string" ? [{ id: node.attrs.id, type: node.type, text: text(value) }] : []
+  })
+}
+
+export function captureDocumentStructureSelection(editor: Editor | null, confirmed: DocumentState | undefined, pageId: string | undefined, ready: boolean, ids: string[]): DocumentStructureSelectionSnapshot {
+  if (!editor || !confirmed || !ready) throw new Error("Wait until the document is saved before selecting blocks for the agent.")
+  if (confirmed.schema !== 3) throw new Error("Explicitly upgrade this document before requesting structural edits.")
+  if (ids.length === 0 || ids.length > 256 || new Set(ids).size !== ids.length) throw new Error("Select between 1 and 256 whole blocks. The selection is never truncated.")
+  const identity = confirmed.page_id || pageId
+  if (!identity || (confirmed.page_id && pageId && confirmed.page_id !== pageId)) throw new Error("The confirmed page identity is unavailable. Reopen this page.")
+  if (canonical(editor.getJSON()) !== canonical(confirmed.content)) throw new Error("The editor differs from the confirmed document. Wait for saving, then select blocks again.")
+  const roots = documentRootBlocks(confirmed.content), start = roots.findIndex(block => block.id === ids[0])
+  if (start < 0 || ids.some((id, index) => roots[start + index]?.id !== id)) throw new Error("Select a contiguous range of whole root blocks.")
+  if (ids.some(id => !confirmed.outline?.some(block => block.id === id && block.hash))) throw new Error("The confirmed block outline is unavailable. Reopen this page.")
+  return { page_id: identity, base_rev: confirmed.rev, epoch: confirmed.epoch, structure: { block_ids: [...ids], allow_insert_after: true }, blocks: roots.slice(start, start + ids.length) }
+}

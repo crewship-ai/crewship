@@ -73,6 +73,7 @@ var responseShapeContracts = []struct {
 	{name: "DocumentInitializeReceipt", pointer: "/components/schemas/DocumentInitializeReceipt", value: DocumentInitializeResponse{}},
 	{name: "DocumentNode", pointer: "/components/schemas/DocumentNode", value: DocumentNode{}},
 	{name: "DocumentComment.anchor", pointer: "/components/schemas/DocumentComment/properties/anchor", value: DocumentCommentAnchor{}},
+	{name: "DocumentState.agent_request", pointer: "/components/schemas/DocumentState/properties/agent_request", value: DocumentAgentRequestContext{}},
 	{name: "DocumentRequests.rows", pointer: "/components/schemas/DocumentRequests/properties/requests/items", value: DocumentRequestResult{}},
 	{name: "DocumentRequests.targets", pointer: "/components/schemas/DocumentRequests/properties/eligible_chats/items", value: DocumentRequestTarget{}},
 	// Custody responses are metadata-only DTOs, including optional cursor/code.

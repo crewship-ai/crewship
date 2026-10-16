@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import { Editor, Extension } from "@tiptap/core"
 import StarterKit from "@tiptap/starter-kit"
 import { DocumentAgentWork } from "../document-agent-work"
-import { captureDocumentSelection } from "../document-selection"
+import { captureDocumentSelection, captureDocumentStructureSelection } from "../document-selection"
 import type { DocumentState } from "@/hooks/use-page-document"
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request }))
@@ -103,5 +103,49 @@ it("accepts equivalent confirmed empty text blocks without treating projection d
   content.content![1].content = []
   const state = { ...confirmed, content }
   expect(captureDocumentSelection(editor, state, undefined, true).targets[0].quote).toBe("Alpha")
+  editor.destroy()
+})
+
+function structureFixture(count: number) {
+  const { editor, confirmed } = fixture()
+  editor.commands.setContent({ type: "doc", content: Array.from({ length: count }, (_, index) => ({ type: "paragraph", attrs: { id: `p${index}` }, content: [{ type: "text", text: `Block ${index}` }] })) })
+  return { editor, confirmed: { ...confirmed, schema: 3, content: editor.getJSON(), outline: Array.from({ length: count }, (_, index) => ({ id: `p${index}`, type: "paragraph", text: `Block ${index}`, hash: "a".repeat(64) })) } }
+}
+
+it("explicitly selects all 200 root blocks and retries the immutable structural request without hashes or text grant", async () => {
+  const { editor, confirmed } = structureFixture(200)
+  const submissions: unknown[] = []
+  request.mockImplementation(async (_url: string, init?: RequestInit) => {
+    if (init?.method === "POST") { submissions.push(JSON.parse(init.body as string)); return { ok: submissions.length > 1, status: 503, json: async () => ({ error: "Unknown send outcome" }) } }
+    return { ok: true, json: async () => ({ requests: [], can_dispatch: true, eligible_chats: [{ chat_id: "chat", agent_name: "Agent" }] }) }
+  })
+  const { rerender } = render(<DocumentAgentWork workspaceId="w" slug="doc" confirmed={confirmed} editor={editor} ready disabled={false} />)
+  fireEvent.change(await screen.findByLabelText("Editing scope"), { target: { value: "blocks" } })
+  fireEvent.click(screen.getByRole("button", { name: "Select all blocks" }))
+  expect(screen.getByLabelText("Selected whole blocks for agent")).toHaveTextContent("200 whole blocks")
+  fireEvent.change(screen.getByLabelText("Private agent chat"), { target: { value: "chat" } })
+  fireEvent.change(screen.getByLabelText("Agent instructions"), { target: { value: "Reorganize the document." } })
+  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
+  await screen.findByText("Unknown send outcome")
+  expect(submissions[0]).toMatchObject({ page_id: "real-page-id", base_rev: 7, structure: { block_ids: Array.from({ length: 200 }, (_, index) => `p${index}`), allow_insert_after: true } })
+  expect(submissions[0]).not.toHaveProperty("targets")
+  expect(JSON.stringify(submissions[0])).not.toContain('"hash"')
+  rerender(<DocumentAgentWork workspaceId="w" slug="renamed" confirmed={{ ...confirmed, rev: 8 }} editor={editor} ready disabled={false} />)
+  fireEvent.click(screen.getByRole("button", { name: "Retry send" }))
+  await waitFor(() => expect(submissions).toHaveLength(2))
+  expect(submissions[1]).toEqual(submissions[0])
+  editor.destroy()
+})
+
+it("never truncates a 257-block whole-document selection and refuses a noncontiguous structural range", async () => {
+  const { editor, confirmed } = structureFixture(257)
+  render(<DocumentAgentWork workspaceId="w" slug="doc" confirmed={confirmed} editor={editor} ready disabled={false} />)
+  fireEvent.change(await screen.findByLabelText("Editing scope"), { target: { value: "blocks" } })
+  expect(screen.getByRole("button", { name: "Select all blocks" })).toBeDisabled()
+  expect(screen.getByRole("status")).toHaveTextContent("257 root blocks")
+  expect(() => captureDocumentStructureSelection(editor, confirmed, undefined, true, confirmed.outline.map(block => block.id))).toThrow(/never truncated/)
+  expect(() => captureDocumentStructureSelection(editor, confirmed, undefined, true, ["p0", "p2"])).toThrow(/contiguous/)
+  expect(() => captureDocumentStructureSelection(editor, { ...confirmed, schema: 2 }, undefined, true, ["p0"])).toThrow(/upgrade/)
+  expect(request.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false)
   editor.destroy()
 })
