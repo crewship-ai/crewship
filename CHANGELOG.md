@@ -353,6 +353,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Proposal card editing and recovery primitives** support explicit issue selection, reviewed confirmation summaries and isolated field/comment drafts; production Chat integration follows the proposal API.
+
 - **Experimental typed decision evaluation from the CLI** — recover the opt-in `crewship decisions evaluate`, `triage` and `rerank` pilot with bounded requests, advisory results and credential-free dry runs. This local command uses explicitly supplied provider keys outside server Paymaster accounting; hosted inference remains unverified.
 - ⚠️ **Behaviour change:** CLI AI connections preserve installation symlinks and support `ai status`, `ai doctor`, ownership-checked `ai disconnect`, and optional bundled skill installation. Registrations created outside the new ownership mechanism, or edited afterward, require explicit native-client removal before reconnecting. MCP refreshes stored login credentials per request, can use the server OpenAPI catalog with an explicit offline fallback, and supports exact operation write allowlists. Focused tools list agents/crews/routines, start and wait for routines with durable receipts, and diagnose runs and crew runtimes.
 

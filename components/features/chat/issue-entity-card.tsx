@@ -12,8 +12,11 @@ import type { EntityRef } from "@/lib/chat-entity-cards"
 import type { Mission } from "@/lib/types/mission"
 import { chatEntityKeys } from "@/hooks/use-chat-entity-refs"
 import { useChatIssueMutation, type CardWriteState } from "@/hooks/use-chat-issue-mutation"
+import { EntityCardFrame } from "./entity-card-frame"
 import { useChatAgent } from "./chat-agent-context"
 import { ChatIssuePullRequests } from "./issue-pull-requests"
+
+export { EntityCardFrame } from "./entity-card-frame"
 
 type Props = {
   reference: EntityRef; chatId: string; userId?: string; rechecking: boolean
@@ -32,11 +35,6 @@ export function CardWriteFeedback({ state, message, retry, resolveConflict }: {
     {state === "unknown" && <><p>The outcome is unknown. Your draft is kept.</p><Button size="sm" variant="outline" className="coarse:min-h-12" onClick={() => void retry()}>Check and retry the same operation</Button></>}
     {state === "conflict" && <><p>This issue changed. Your draft is kept.</p><Button size="sm" variant="outline" className="coarse:min-h-12" onClick={resolveConflict}>Reload current values; keep my draft</Button></>}
   </div>
-}
-
-/** Shared frame keeps the source operation distinct from current issue data. */
-export function EntityCardFrame({ children }: { children: React.ReactNode }) {
-  return <section className="my-2 min-w-0 space-y-3 rounded-xl border bg-card p-3 text-sm shadow-sm">{children}</section>
 }
 
 export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, live, checkedAt, onOpen, reconcile }: Props) {
