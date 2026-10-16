@@ -16,6 +16,10 @@ export function fixtureURL(origin, path) {
   if (url.origin !== base) throw new Error('fixture origin changed');
   return url.href;
 }
+export function fixtureWebSocketURL(origin) {
+  const port = Number(new URL(loopbackOrigin(origin)).port);
+  return `ws://127.0.0.1:${port}/ws`;
+}
 export function fixtureFetch(origin, path, options = {}) {
   return fetch(fixtureURL(origin, path), { ...options, redirect: 'error' });
 }
