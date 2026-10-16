@@ -1,7 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"github.com/crewship-ai/crewship/internal/pageassets"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,7 +134,11 @@ func TestSlidesImagesActualRouterExplicitSchema2Initialize(t *testing.T) {
 	f.r.pages.artifactStoragePath = storageDir(t)
 	const page = "init-image-page"
 	wmSeedPage(t, f.db, "ws-old", page, page, "Image initialize", "boss", "")
-	uploaded := f.slideDo(f.boss, "POST", "/api/v1/pages/"+page+"/assets?mutation_id=first", string(pageAssetPNG(t)))
+	var maximum bytes.Buffer
+	if err := png.Encode(&maximum, image.NewRGBA(image.Rect(0, 0, pageassets.MaxDimension, pageassets.MaxDimension))); err != nil {
+		t.Fatal(err)
+	}
+	uploaded := f.slideDo(f.boss, "POST", "/api/v1/pages/"+page+"/assets?mutation_id=first", maximum.String())
 	wantCode(t, uploaded, 201, "upload")
 	asset := assetMeta(t, uploaded)
 	deck := slideTestDeck(t, page)
@@ -166,7 +174,7 @@ func TestSlidesImagesEncryptedBackupForkRetainsNonHeadRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, broken := range []string{"missing", "corrupt", "metadata"} {
+	for _, broken := range []string{"missing", "corrupt", "metadata", "mime"} {
 		t.Run(broken+"-bundle", func(t *testing.T) {
 			sourcePath, err := attachmentBlobPath(f.r.pages.artifactStoragePath, "ws-old", asset.SHA256)
 			if err != nil {
@@ -181,8 +189,12 @@ func TestSlidesImagesEncryptedBackupForkRetainsNonHeadRefs(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			if broken == "metadata" {
-				mustExec(t, f.db, `DROP TRIGGER page_asset_immutable`)
+			if broken == "mime" {
+				mustExec(t, f.db, `DROP TRIGGER IF EXISTS page_asset_immutable`)
+				mustExec(t, f.db, `UPDATE page_assets SET content_type='image/jpeg' WHERE id=?`, asset.ID)
+				t.Cleanup(func() { mustExec(t, f.db, `UPDATE page_assets SET content_type='image/png' WHERE id=?`, asset.ID) })
+			} else if broken == "metadata" {
+				mustExec(t, f.db, `DROP TRIGGER IF EXISTS page_asset_immutable`)
 				mustExec(t, f.db, `UPDATE page_assets SET width=width+1 WHERE id=?`, asset.ID)
 				t.Cleanup(func() { mustExec(t, f.db, `UPDATE page_assets SET width=width-1 WHERE id=?`, asset.ID) })
 			} else if broken == "missing" {

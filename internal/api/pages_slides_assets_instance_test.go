@@ -88,3 +88,38 @@ func TestSlidesImagesPhysicalInstanceRecoveryIntegrity(t *testing.T) {
 		})
 	}
 }
+
+func TestSlidesImagesLegacyNoKitRecoveryVersionBoundary(t *testing.T) {
+	for _, version := range []int{1, 2} {
+		t.Run(map[int]string{1: "legacy-v1-partial", 2: "v2-missing-pins-refused"}[version], func(t *testing.T) {
+			f := newInstanceFixture(t)
+			t.Cleanup(f.r.Shutdown)
+			f.r.pages.artifactStoragePath = storageDir(t)
+			const page = "legacy-slides-page"
+			wmSeedPage(t, f.db, "ws-old", page, page, "Legacy Slides", "boss", "")
+			deck := slideTestDeck(t, page)
+			deck.SchemaVersion = version
+			wantCode(t, f.slideDo(f.boss, "POST", "/api/v1/pages/"+page+"/slides/initialize", slideJSON(t, slides.InitializeRequest{PageID: page, SchemaVersion: version, MutationID: "init", Deck: deck})), 200, "initialize source")
+			mustExec(t, f.db, `DROP TABLE slides_revision_assets; DROP INDEX idx_page_assets_page_identity_digest; DELETE FROM _migrations WHERE version=20261016010758`)
+			t.Setenv("ENCRYPTION_KEY", "")
+			const pass = "legacy-slide-instance-no-kit-passphrase"
+			made, err := backup.CreateInstanceBackup(t.Context(), f.db, backup.InstanceOptions{OutputDir: t.TempDir(), Passphrase: pass, Paths: backup.InstancePaths{Output: f.r.pages.artifactStoragePath}, Actor: backup.Actor{UserID: "boss", Role: "instance_admin"}, RecoveryKit: false, Quiesce: quiesce.New(), Poll: time.Millisecond})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recovered, err := backup.RecoverInstance(t.Context(), backup.RecoverOptions{BundlePath: made.Path, Passphrase: pass, DataDir: filepath.Join(t.TempDir(), "recovered"), Drill: true, Actor: "boss"})
+			if version == 2 {
+				if err == nil {
+					t.Fatal("schema2 without pin schema recovered successfully")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("legacy-v1 no-kit recovery must preserve existing partial recovery: %v", err)
+			}
+			if len(recovered.Warnings) == 0 {
+				t.Fatal("pending no-kit migration warning absent")
+			}
+		})
+	}
+}

@@ -160,3 +160,55 @@ then reconstructs projection/provenance from actual retained deck history.
 Imported projection fields are not trusted. Fork remaps the Page namespace while preserving thread IDs,
 keeps stable slide/element anchors and historical event mutation IDs, and clears
 comment replay receipts. A historical mutation ID remains a409 tombstone.
+
+## Private raster images (schema 2)
+
+Schema 1 remains closed to text, shapes and tables; its canonical bytes and hashes
+are unchanged. Schema 2 adds `type:"image"` with existing integer geometry and an
+`image` payload `{asset_id,expected_sha256,alt}`. The asset ID belongs to the same
+immutable Page ID; the digest identifies canonical PNG/JPEG bytes, never a URL.
+Alt text is bounded to2048 UTF-8 bytes. A revision permits32 unique asset IDs and
+32MiB total canonical asset bytes; repeated placement of one ID counts once.
+Existing2MiB deck/100 slides/1000 elements and Page64 assets/64MiB staging+history
+limits still apply. Upload/read use the existing private Page asset API/CLI and
+its independent pages:write/pages:read token ceilings. EXIF2..8 are explicitly
+unsupported by the raster upload foundation; no silent orientation stripping.
+
+Initialization explicitly accepts schema1 or schema2, matching the full deck.
+An existing schema1 deck upgrades only with an explicit atomic patch:
+`schema_version:1`, original `base_rev`, `target_schema_version:2`, original
+whole-head `if_content_hash`, and the existing progressive operation hashes.
+The batch must actually attach an image. Ordinary mutations name the current
+head schema; reads never migrate or downgrade storage. Unknown schemas and
+images inside schema1 fail closed. Restore names an actual immutable revision
+and appends a new revision in that source version, so explicit1/2 mixed history
+is retained without rewriting old snapshots. Schema2 Deck hashes use a new
+version domain; unchanged text/shape/table element hashes retain their v1 domain.
+Image element hashes use v2; full-slide hashes retain the existing v1 domain.
+
+The sole production Store constructor runs asset validation after immutable
+revision insertion and comment projection, before receipt and final live Page
+credential/ACL checks. It verifies owning Page, SHA, expiry, MIME/dimensions and
+bounded bytes, promotes staged assets and inserts exact revision pins in that
+same transaction. Any failure rolls back every write. No standalone retain API
+exists. Image deletion preserves older revision pins/bytes; quota exhaustion
+refuses new uploads instead of discarding history. Full Page deletion cascades
+the owned graph. Unreferenced physical bytes use the existing shared blob GC.
+There is no automatic revision pruning in this delivery.
+
+Comments still use protocol/anchor version1, independent of deck version. An
+image supports the same stable element-ID/parent anchor and original revision
+as other elements; delete detaches and explicit restore of the original ID
+reattaches it. Image text-range edits are unsupported. Comment protocol2 remains
+rejected even on a schema2 deck.
+
+Encrypted workspace/fork restore validates every canonical revision and exact
+retained pin set, remaps asset IDs inside the sole Slides canonical rewrite before
+hashing, and verifies actual restored image format/dimensions/SHA/length before
+DB commit. Missing, corrupt or conflicting required images fail restore. Offline
+physical instance recovery separately verifies the same invariants before
+reporting success. Older closed-v1/no-kit recovery can retain the existing
+pending-migration warning without synthetic pins; schema2 without a pin table
+fails closed. Files-only restore has its existing separate contract. Native
+image UI qualification, Docs images, normal Page copy, crop/remote imports,
+image export embedding and pruning are separate from this API/storage cut.
