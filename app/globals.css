@@ -1195,7 +1195,6 @@ body {
     .rail-label { transition: none; }
   }
 }
-}
 
 /* Streamdown markdown inside chat messages */
 .is-assistant pre {
