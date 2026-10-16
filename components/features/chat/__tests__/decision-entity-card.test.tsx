@@ -2,6 +2,7 @@ import React from "react"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import pending from "@/internal/api/testdata/chat-e2/decision-waitpoint-pending.json"
+import information from "@/internal/api/testdata/chat-e2/decision-escalation-pending.json"
 import rejected from "@/internal/api/testdata/chat-e2/decision-waitpoint-rejected.json"
 import { DecisionRefSchema } from "@/lib/chat-e2-cards"
 import { DecisionEntityCard } from "../decision-entity-card"
@@ -64,4 +65,24 @@ it("restores an uncertain reply without auto-submitting and retries its captured
   expect(screen.getByLabelText(/Run now/)).toBeDisabled()
   fireEvent.click(screen.getByRole("button", { name: "Retry the same response" }))
   await waitFor(() => expect(onAnswer).toHaveBeenCalledWith(recovery.answer, recovery.key))
+})
+
+it("keeps focused draft and caret while access is rechecking or temporarily unavailable", () => {
+  const reference = DecisionRefSchema.parse(information)
+  const onAnswer = vi.fn()
+  const props = { reference, onAnswer, onRecheck: vi.fn() }
+  const view = render(<DecisionEntityCard {...props} />)
+  const input = screen.getByRole("textbox") as HTMLTextAreaElement
+  fireEvent.change(input, { target: { value: "Tomorrow morning" } })
+  input.focus()
+  input.setSelectionRange(3, 8)
+  for (const rechecking of [true, true, false]) {
+    view.rerender(<DecisionEntityCard {...props} rechecking={rechecking} />)
+    expect(input).toHaveFocus()
+    expect(input).toHaveValue("Tomorrow morning")
+    expect([input.selectionStart,input.selectionEnd]).toEqual([3,8])
+    expect(input).not.toBeDisabled()
+    expect((screen.getByRole("button", { name: "Send answer" }) as HTMLButtonElement).disabled).toBe(rechecking)
+  }
+  expect(onAnswer).not.toHaveBeenCalled()
 })
