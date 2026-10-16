@@ -252,9 +252,7 @@ At least one of --level / --max-ephemeral is required; --max-ephemeral
 				if err := cli.CheckError(resp); err != nil {
 					return err
 				}
-				var current struct {
-					WholeRunApproval *bool `json:"whole_run_approval"`
-				}
+				var current policyUpdateWire
 				if err := cli.ReadJSON(resp, &current); err != nil {
 					return err
 				}
@@ -281,18 +279,14 @@ At least one of --level / --max-ephemeral is required; --max-ephemeral
 				return err
 			}
 
-			var updated struct {
-				policyWire
-				WholeRunApprovalValue *bool `json:"whole_run_approval"`
-			}
+			var updated policyUpdateWire
 			if err := cli.ReadJSON(resp, &updated); err != nil {
 				return err
 			}
-			if wholeRunApprovalSet && (updated.WholeRunApprovalValue == nil || *updated.WholeRunApprovalValue != wholeRunApproval) {
+			if wholeRunApprovalSet && (updated.WholeRunApproval == nil || *updated.WholeRunApproval != wholeRunApproval) {
 				return errors.New("server did not confirm the requested whole-run approval setting; read the current policy before retrying")
 			}
-			p := updated.policyWire
-			cli.PrintSuccess(fmt.Sprintf("Policy updated for crew %s: %s / %s", p.CrewID, p.AutonomyLevel, p.BehaviorMode))
+			cli.PrintSuccess(fmt.Sprintf("Policy updated for crew %s: %s / %s", updated.CrewID, updated.AutonomyLevel, updated.BehaviorMode))
 		}
 
 		// The ephemeral quota lives on the crew record, not the policy route,
@@ -435,6 +429,15 @@ type policyWire struct {
 	SetByUserID      string `json:"set_by_user_id,omitempty" yaml:"set_by_user_id,omitempty"`
 	SetAt            string `json:"set_at,omitempty" yaml:"set_at,omitempty"`
 	Reason           string `json:"reason,omitempty" yaml:"reason,omitempty"`
+}
+
+// policyUpdateWire preserves field presence for capability/confirmation checks.
+// Keep it separate from policyWire so legacy read output retains its bool value.
+type policyUpdateWire struct {
+	CrewID           string `json:"crew_id" yaml:"crew_id"`
+	AutonomyLevel    string `json:"autonomy_level" yaml:"autonomy_level"`
+	BehaviorMode     string `json:"behavior_mode" yaml:"behavior_mode"`
+	WholeRunApproval *bool  `json:"whole_run_approval" yaml:"whole_run_approval"`
 }
 
 func init() {
