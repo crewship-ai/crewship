@@ -310,6 +310,10 @@ var BackupTables = []string{
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
 	"documents",
+	"slides_heads",
+	"slides_revisions",
+	"slides_receipts",
+	"slides_object_ids",
 	"document_updates",
 	"document_receipts",
 	"document_checkpoints",

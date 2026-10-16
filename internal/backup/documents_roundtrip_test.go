@@ -93,6 +93,9 @@ func TestDocumentBackupWorkspaceRoundtrip(t *testing.T) {
 	}
 	seedBackupDocument(t, source, ws, "document-page", "u_admin")
 	seedBackupDocument(t, source, "foreign-documents", "foreign-document-page", "u_admin")
+	if _, err := source.Exec(`UPDATE slides_writer_fence SET seq=71 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
 	actor := backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}
 	bundle, err := backup.CreateBackup(t.Context(), source, backup.CreateOptions{Scope: backup.ScopeWorkspace, WorkspaceID: ws, OutputDir: t.TempDir(), Passphrase: "document-backup-roundtrip-passphrase", Actor: actor})
 	if err != nil {
@@ -109,6 +112,7 @@ func TestDocumentBackupWorkspaceRoundtrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertBackupDocument(t, target, 1)
+			assertDormantSlides(t, target, 0)
 			var restoredWS, page string
 			if err := target.QueryRow(`SELECT workspace_id,page_id FROM documents`).Scan(&restoredWS, &page); err != nil {
 				t.Fatal(err)
@@ -129,6 +133,9 @@ func TestDocumentBackupWorkspaceRoundtrip(t *testing.T) {
 	}
 	if _, ok := dump.Tables["document_writer_fence"]; ok {
 		t.Fatal("runtime singleton in workspace dump")
+	}
+	if _, ok := dump.Tables["slides_writer_fence"]; ok {
+		t.Fatal("Slides runtime singleton in workspace dump")
 	}
 	if err := backup.RestoreDump(t.Context(), source, dump); err != nil {
 		t.Fatal(err)
@@ -157,6 +164,7 @@ func TestDocumentInstanceBackupRecovery(t *testing.T) {
 	}
 	defer target.Close()
 	assertBackupDocument(t, target.DB, 2)
+	assertDormantSlides(t, target.DB, 0)
 }
 
 func TestDocumentRestoreCorruptBinaryRollsBackFence(t *testing.T) {
@@ -178,5 +186,20 @@ func TestDocumentRestoreCorruptBinaryRollsBackFence(t *testing.T) {
 	}
 	if epoch != 41 || writer != "source-engine" || owner != "source-owner" || lease != 4102444800000 {
 		t.Fatal("failed restore changed live authority")
+	}
+}
+
+// These assertions qualify only the dormant foundation, not populated Slides recovery.
+func assertDormantSlides(t *testing.T, db *sql.DB, wantFence int) {
+	t.Helper()
+	for _, table := range []string{"slides_heads", "slides_revisions", "slides_receipts", "slides_object_ids"} {
+		var count int
+		if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("dormant %s count=%d: %v", table, count, err)
+		}
+	}
+	var seq int
+	if err := db.QueryRow(`SELECT seq FROM slides_writer_fence WHERE id=1`).Scan(&seq); err != nil || seq != wantFence {
+		t.Fatalf("Slides fence=%d want %d: %v", seq, wantFence, err)
 	}
 }
