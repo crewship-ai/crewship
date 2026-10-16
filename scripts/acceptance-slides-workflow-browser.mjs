@@ -35,9 +35,9 @@ try{
   await work.getByRole('button',{name:'Present',exact:true}).click();const populated=page.getByRole('dialog',{name:'Present slides',exact:true});await expect(populated).toBeVisible();await expect(populated.getByText(literal,{exact:true})).toBeVisible();await page.screenshot({path:join(output,`${mode}-present.png`)});await populated.getByRole('button',{name:'Close presentation',exact:true}).click()
   // Drop one real acknowledgement after the request already committed.
   await work.getByRole('textbox',{name:'Speaker notes',exact:true}).fill('Ack lost but durable')
-  let originalBody,committedReceipt
+  let originalBody,committedReceipt,dropped=false
   const pattern='**/slides/patch?*'
-  await page.route(pattern,async route=>{originalBody=route.request().postData();const response=await route.fetch();expect(response.status()).toBe(200);committedReceipt=await response.json();await page.unroute(pattern);await route.abort('failed')})
+  await page.route(pattern,async route=>{if(dropped)return route.continue();dropped=true;originalBody=route.request().postData();const response=await route.fetch();expect(response.status()).toBe(200);committedReceipt=await response.json();await route.abort('failed')})
   await work.getByRole('button',{name:'Save changes',exact:true}).click();await expect(work.getByRole('button',{name:'Retry original save',exact:true})).toBeVisible();const beforeRetry=await state();expect(beforeRetry.revision).toBe(committedReceipt.revision)
   const retry=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname.endsWith('/slides/patch'))
   await work.getByRole('button',{name:'Retry original save',exact:true}).click();const duplicate=await retry;expect(duplicate.request().postData()).toBe(originalBody);expect((await duplicate.json()).duplicate).toBe(true);await expect(work.getByRole('status').filter({hasText:'original request confirmed'})).toBeVisible();expect((await state()).revision).toBe(beforeRetry.revision)
