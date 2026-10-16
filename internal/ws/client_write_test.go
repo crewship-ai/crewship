@@ -174,3 +174,28 @@ func TestEntityInvalidationDeliveryRechecksTrustedAudience(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteFrameRechecksSuspendedAccountOnBroadChannels(t *testing.T) {
+	db := seededDB(t)
+	hub := newRunningHub(t)
+	hub.SetChannelAuthorizer(NewDBChannelAuthorizer(db))
+	client := &Client{hub: hub, conn: dialClientConn(t), userID: "u-good", ctx: context.Background()}
+	frames := [][]byte{
+		[]byte(`{"type":"update","channel":"workspace:ws-1","payload":{}}`),
+		[]byte(`{"type":"update","channel":"providers:global","payload":{}}`),
+		[]byte(`{"type":"pong"}`),
+	}
+	for _, frame := range frames {
+		if !client.writeFrame(frame) {
+			t.Fatal("active account denied")
+		}
+	}
+	if _, err := db.Exec(`UPDATE users SET suspended_at='' WHERE id='u-good'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, frame := range frames {
+		if client.writeFrame(frame) {
+			t.Fatal("queued update delivered after account suspension")
+		}
+	}
+}
