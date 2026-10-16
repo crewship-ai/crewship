@@ -726,3 +726,26 @@ included. Recipients can alternatively enter the ID and token at `/shared-chat`.
 The management API is `GET`/`POST /api/v1/agents/{agentId}/chats/{chatId}/shares`
 and `DELETE /api/v1/agents/{agentId}/chats/{chatId}/shares/{shareId}`. The reader
 uses `GET /api/v1/shared-chats/{shareId}/messages` with a dedicated share bearer.
+
+## Issue proposals
+
+```bash
+crewship chat proposal list <chat-id> [--cursor opaque]
+crewship chat proposal show <chat-id> <proposal-id>
+crewship chat proposal edit <chat-id> <proposal-id> --file proposal.json --version 1 --idempotency-key edit-1
+crewship chat proposal confirm <chat-id> <proposal-id> --version 2 --idempotency-key confirm-1
+crewship chat proposal discard <chat-id> <proposal-id> --version 1 --idempotency-key discard-1
+```
+
+Edit files contain `title` and the complete `items` array. Retain stable item IDs;
+set `selected: false` to exclude an item. Every mutation requires the version
+explicitly reviewed and a stable key. After an unknown network outcome, repeat
+exactly the same command and key. A changed body with the same key returns 409.
+A stale version returns 409 with the currently authorized card; review it before
+using a new key/version. Accepted/discarded/expired cards are read-only.
+
+Confirmation creates the selected backlog issues atomically, attributed to the
+human reviewer with the immutable proposing agent/run/chat provenance. It does
+not start agent work. Existing issue creation rights apply to MEMBERs; proposing
+is not mandatory for their ordinary issue commands. Guests and restricted members
+cannot access this surface. See [proposal API](/api-reference/conversations#issue-proposals).
