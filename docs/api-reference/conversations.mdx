@@ -846,3 +846,9 @@ mutation results, retry keys, request hashes and human authority receipts.
 Missing and inaccessible operations both return `404`. Backend failures return
 `503`. This endpoint only reads metadata and never executes or retries work.
 Responses set `Cache-Control: no-store`.
+
+## Source-backed decision cards
+
+The [Chat decisions API](/api-reference/chat-decisions) projects verified TEXT
+escalations into a chat and resolves the same source as Inbox, with current
+human authorization, source versions and stable operation keys.

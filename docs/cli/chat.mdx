@@ -726,3 +726,10 @@ included. Recipients can alternatively enter the ID and token at `/shared-chat`.
 The management API is `GET`/`POST /api/v1/agents/{agentId}/chats/{chatId}/shares`
 and `DELETE /api/v1/agents/{agentId}/chats/{chatId}/shares/{shareId}`. The reader
 uses `GET /api/v1/shared-chats/{shareId}/messages` with a dedicated share bearer.
+
+## Source-backed decisions
+
+[`crewship chat decision`](/cli/chat-decision) lists, shows and answers existing
+TEXT information requests. Use the reviewed source version and preserve the
+operation key across uncertain retries. These commands share the authoritative
+source with Inbox and cannot approve workflows, credentials or entire runs.

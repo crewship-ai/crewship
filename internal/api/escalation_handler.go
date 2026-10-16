@@ -513,7 +513,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		resolverUserID = u.ID
 	}
 	// Require at least MANAGER to resolve escalations (data-modifying operation)
-	if !canRole(role, "create") {
+	if !canRole(role, "create") && r.Context().Value(decisionOperationKey{}) == nil {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
@@ -593,7 +593,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// Terminal is terminal. The message names which terminal state, because
 	// "already resolved" told an operator whose escalation had EXPIRED that
 	// somebody had decided it — the opposite of what happened.
-	if status != escalationStatusPending {
+	if status != escalationStatusPending && r.Context().Value(decisionOperationKey{}) == nil {
 		replyError(w, http.StatusConflict, escalationTerminalError(status))
 		return
 	}
@@ -672,24 +672,44 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		redirectToVal = body.RedirectTo
 	}
 
-	result, err := h.db.ExecContext(r.Context(), `
+	if escalationType != "CREDENTIAL" {
+		replayed, resolveErr := h.resolveTextDecision(r, escalationID, workspaceID, resolverUserID, body.Resolution, body.Action, body.RedirectTo)
+		if resolveErr != nil {
+			switch {
+			case errors.Is(resolveErr, errTextDecisionDenied):
+				replyError(w, http.StatusForbidden, "Forbidden")
+			case errors.Is(resolveErr, errDecisionVersion), errors.Is(resolveErr, errDecisionKeyCollision):
+				replyError(w, http.StatusConflict, resolveErr.Error())
+			default:
+				replyInternalError(w, h.logger, "resolve escalation transaction", resolveErr)
+			}
+			return
+		}
+		if replayed {
+			writeJSON(w, http.StatusOK, map[string]any{"status": "RESOLVED", "replayed": true})
+			return
+		}
+	} else {
+		result, err := h.db.ExecContext(r.Context(), `
 		UPDATE escalations SET status = 'RESOLVED', resolution = ?, action = ?, redirect_to = ?, resolved_at = ?, resolved_by = 'user'
 		WHERE id = ? AND workspace_id = ? AND status = 'PENDING'
 	`, storedResolution, body.Action, redirectToVal, now, escalationID, workspaceID)
-	if err != nil {
-		replyInternalError(w, h.logger, "resolve escalation update", err)
-		return
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		replyInternalError(w, h.logger, "resolve escalation rows affected", err)
-		return
-	}
-	if n == 0 {
-		// Lost the compare-and-swap: a cancel, an expiry or another resolve
-		// landed between the read above and this UPDATE.
-		replyError(w, http.StatusConflict, "escalation is no longer pending")
-		return
+		if err != nil {
+			replyInternalError(w, h.logger, "resolve escalation update", err)
+			return
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			replyInternalError(w, h.logger, "resolve escalation rows affected", err)
+			return
+		}
+		if n == 0 {
+			// Lost the compare-and-swap: a cancel, an expiry or another resolve
+			// landed between the read above and this UPDATE.
+			replyError(w, http.StatusConflict, "escalation is no longer pending")
+			return
+		}
+
 	}
 
 	// Agent-proposed credential: a CREDENTIAL escalation may link a credential

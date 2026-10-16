@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Reloading a shared routine draft now discards local edits even when its saved revision has not changed.** A failed reload retains the local edits, and background refreshes of the same revision keep them.
 - **Decision reply drafts remain scoped to their viewer and source.** Reload restores an uncertain reply with its original retry key; definitive access loss removes protected recovery, and paginated source lists reconcile as complete snapshots.
 
+- **Chat can answer verified information requests from the same source as Inbox.** TEXT escalation cards use live access and deadline checks, reviewed source versions and stable retry keys; terminal receipts retain the actual human actor. Credential requests stay in the existing protected Inbox flow.
+
 - **Escalation requests retain their verified execution source.** New run-authenticated requests keep the original agent run ID for accurate chat decision anchoring. Older service requests remain unanchored and retain their existing Inbox resolution.
 
 - **Decision cards gain a typed response view.** Source-defined workflow actions retain their identity, terminal decisions show read-only receipts, and uncertain replies keep the same operation key for retry. Integration with live decision sources follows separately.

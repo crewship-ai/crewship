@@ -1,0 +1,40 @@
+---
+title: Chat decisions
+description: Source-backed information requests in chat
+---
+
+Chat decision cards are projections of existing escalation records. They do not
+create another approval queue or grant authority to agents. This integration
+supports run-authenticated TEXT escalations with persisted chat, agent-run and
+trigger correlation. Credential escalations and sources without verified origin
+remain available on their existing Inbox surfaces.
+
+- `GET /api/v1/chats/{chatId}/decisions` returns a replacement `ChatCardPage`.
+- `GET /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}` returns a `ChatCardResponse`.
+- `POST /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer` answers the existing source.
+
+`sourceType` is currently `escalation`. Reads require current trusted chat access;
+Guests and restricted memberships receive no source information. The response
+contains only current viewer-authorized source snapshots. Pages contain at most 100 visible cards. Follow `next_cursor` until
+`snapshot_complete` is true, replacing accumulated cards whenever `reset` is true.
+Cursors are purpose-separated opaque tokens bound to the current viewer, chat,
+workspace and access revision; hidden sources never affect page boundaries.
+
+An answer requires the `Idempotency-Key` header and this JSON body:
+
+```json
+{"source_id":"source-id","expected_version":"opaque-reviewed-version","action":"answer","values":{"answer":"The requested information"}}
+```
+
+The human's current workspace role, chat audience and source deadline are checked
+inside the existing source's write transaction. Inbox and chat compete on the
+same pending-source CAS; only the winner notifies the agent. A successful retry
+with the same key and body returns the terminal source without another delivery.
+Reusing the key with another body returns 409 without an unrelated receipt.
+A stale version returns 409 with `ChatCardVersionConflict.current`, after fresh
+read authorization. Revoked access returns a generic 404/403 without a snapshot.
+
+Terminal cards are read-only and use the authoritative outcome, human actor and
+time. Old terminal records without an attributable actor are not fabricated into
+new chat receipts. No workflow answer or whole-run approval is accepted by this
+information-only adapter.
