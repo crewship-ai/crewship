@@ -891,7 +891,8 @@ Guests/restricted viewers have no E2 surface. Selected issues, human attribution
 accepted outcome, Issue card receipts and existing durable audit outbox entries
 commit together. Any failure rolls all of them back. Concurrency has one winner;
 other reviewed versions get 409. The proposing run may already have finished.
-No work starts implicitly: proposals contain no dispatch intent.
+Confirmation does not directly dispatch work: proposals contain no dispatch
+intent. Existing workspace automations still apply to created issues.
 
 Workspace bundle restores preserve source and operation receipts, so a same-key
 confirmation retry returns its original accepted outcome without repeating effects.
