@@ -214,6 +214,15 @@ func (l *Lease) Run(parent context.Context, input []byte, b Binding) (result Fra
 	if err := parent.Err(); err != nil {
 		return result, err
 	}
+	// A provider acknowledgement is not ownership proof. Verify the immutable
+	// ID and both independently bound labels before any document bytes are sent.
+	owned, inspectErr := inspectOwned(parent, intent)
+	if inspectErr != nil || owned == nil {
+		return result, ErrCleanup
+	}
+	if err := parent.Err(); err != nil {
+		return result, err
+	}
 	ctx, cancel := context.WithTimeout(parent, 130*time.Second)
 	defer cancel()
 	out, logs := &capture{limit: MaxFrameBytes, cancel: cancel}, &capture{limit: 64 << 10, cancel: cancel}

@@ -141,3 +141,18 @@ func TestUncertainRecoveryRequiresAuditedTrustedAcknowledgement(t *testing.T) {
 	}
 	l.Close()
 }
+
+func TestCleanupJournalRefusesDifferentPinnedRoot(t *testing.T) {
+	j := fixtureJournal(t)
+	alternate, err := os.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := j.root
+	j.root = alternate
+	defer func() { j.root = original; _ = alternate.Close() }()
+	// Named directory and lock remain untouched. Only actual root custody differs.
+	if !errors.Is(j.verify(), ErrCleanup) {
+		t.Fatal("different pinned directory root accepted")
+	}
+}

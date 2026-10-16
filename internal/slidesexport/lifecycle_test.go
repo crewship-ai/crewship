@@ -86,6 +86,9 @@ func TestRunnerOwnedProcessLifecycle(t *testing.T) {
 					t.Fatal("trailing bytes accepted", err)
 				}
 			case "foreign":
+				if _, e := os.Stat(filepath.Join(dir, "start-entered")); !os.IsNotExist(e) {
+					t.Fatal("document input sent before acknowledged ownership verification")
+				}
 				if !errors.Is(err, ErrCleanup) {
 					t.Fatal("foreign owner accepted", err)
 				}

@@ -73,8 +73,12 @@ func (j *cleanupJournal) verify() error {
 	if j == nil || j.root == nil || j.lock.Verify() != nil {
 		return ErrCleanup
 	}
+	pinned, err := j.root.Stat(".")
+	if err != nil || !pinned.IsDir() || !os.SameFile(j.identity, pinned) {
+		return ErrCleanup
+	}
 	named, err := os.Lstat(j.directory)
-	if err != nil || !named.IsDir() || !os.SameFile(j.identity, named) {
+	if err != nil || !named.IsDir() || !os.SameFile(pinned, named) {
 		return ErrCleanup
 	}
 	return nil
