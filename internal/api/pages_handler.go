@@ -1237,7 +1237,7 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRecord, error) {
 	var p pageRecord
-	err := h.db.QueryRowContext(ctx, `
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `
 		SELECT id, slug, name, COALESCE(description, ''),
 		       COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''),
 		       COALESCE(folder_id, ''), pages_version,

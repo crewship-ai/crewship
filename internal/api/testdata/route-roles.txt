@@ -360,6 +360,7 @@ POST /api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight roleSel
 POST /api/v1/workspaces/{workspaceId}/logo roleManage
 POST /api/v1/workspaces/{workspaceId}/members roleManage
 POST /api/v1/workspaces/{workspaceId}/members/provision roleManage
+POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID} roleManage
 POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules roleInline
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate roleCreate
