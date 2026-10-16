@@ -227,7 +227,7 @@ export function AppToolbar() {
           this slot (Harbor 2: one 48 px bar, not a bar plus a sub-bar). */}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {renderBreadcrumbs()}
-        {!isMobile && <div ref={setPageBarSlot} data-slot="page-bar" className="flex min-w-0 flex-1 items-center gap-2" />}
+        {!isMobile && <div ref={setPageBarSlot} data-slot="page-bar" data-area-title={area?.title ?? ""} className="flex min-w-0 flex-1 items-center gap-2" />}
       </div>
 
       {/* Right: Status indicators + search + notifications */}
