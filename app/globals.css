@@ -84,17 +84,18 @@
 }
 
 :root {
-  /* ── Light surfaces (kept from prior shadcn palette — only Philosophy /
-   *    legal pages render light; main app is dark-first) ── */
-  /* A quiet grey ground: the white rail, panels and cards sit on it. */
-  --background: #F7F8FA;
-  --foreground: #0F1733;
+  /* ── Light surfaces (Harbor 2). The rail and the frame sit on a quiet
+   *    grey ground (--sidebar); content, panels and cards are white and
+   *    separated by hairlines, not shadows. Values pinned in
+   *    lib/__tests__/theme-contrast.test.ts. ── */
+  --background: #FFFFFF;
+  --foreground: #0C111B;
   --scrollbar-thumb: oklch(0.80 0 0);
   --scrollbar-thumb-hover: oklch(0.66 0 0);
   --card: #FFFFFF;
-  --card-foreground: #0F1733;
+  --card-foreground: #0C111B;
   --popover: #FFFFFF;
-  --popover-foreground: #0F1733;
+  --popover-foreground: #0C111B;
 
   /* Brand — #0E6BE8 is the light-mode variant of the marketing site's
    *  #1E7BFE (deeper so it stays legible on white). Same hue family. */
@@ -104,23 +105,25 @@
 
   --secondary: oklch(0.1994 0.0470 270.6494);
   --secondary-foreground: oklch(1.0000 0 0);
-  --muted: #EEF2F7;
-  --muted-foreground: #566079;
-  /* Dimmer-but-AA-compliant second muted level. Replaces the old
-   * text-muted-foreground/40–/70 alpha pattern, which composited to
-   * well under the WCAG AA 4.5:1 minimum for normal-size text.
-   * Light: 5.86:1 on --background, 5.76:1 on --card. */
-  --muted-foreground-soft: #646E87;
-  --accent: #EEF2F7;
-  --accent-foreground: #0F1733;
+  --muted: #F8F9FA;
+  --muted-foreground: #4B5363;
+  /* Dimmer-but-AA-compliant second muted level (Harbor 2 tertiary text).
+   * The design's #757D8C measured 3.4–4.1:1 on its own surfaces; this keeps
+   * its hue at a lower lightness: ≥ 4.66:1 on every surface, hover and
+   * selection (pinned in theme-contrast.test.ts). */
+  --muted-foreground-soft: #616875;
+  /* Fourth grey: icons and dividers only, never text (3:1, WCAG 1.4.11). */
+  --icon-faint: #7E8797;
+  --accent: #F3F4F6;
+  --accent-foreground: #0C111B;
 
   /* Destructive — matches marketing-site --color-error (oklch 0.70 0.19 25,
    *  a tighter red than the previous orange-leaning oklch(0.71 0.19 39)). */
   --destructive: #C0261B;
   --destructive-foreground: oklch(1.0000 0 0);
 
-  --border: #D8E0EB;
-  --input: #D8E0EB;
+  --border: #E4E6EA;
+  --input: #E4E6EA;
   --control-border: #8792AB;
   --ring: var(--brand);
 
@@ -156,13 +159,13 @@
    * Routines, Settings); the page ground under the content is the only grey.
    * It was #E6EEF7, a second blue-grey that read as a separate stripe. The
    * active row is an accent tint rather than white-on-blue. */
-  --sidebar: #FFFFFF;
-  --sidebar-foreground: #0F1733;
+  --sidebar: #F3F4F6;
+  --sidebar-foreground: #0C111B;
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--brand-foreground);
   --sidebar-accent: var(--brand-tint);
   --sidebar-accent-foreground: var(--brand-ink);
-  --sidebar-border: #E3E7EE;
+  --sidebar-border: #E4E6EA;
   --sidebar-ring: var(--brand);
 
   /* ── Semantic palette — Day values. The marketing-site lightness (≥ 0.72)
@@ -198,17 +201,17 @@
   --orange: oklch(0.54 0.15 45);
   --azure: oklch(0.50 0.10 225);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter, "Inter"), -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
   --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
   /* Shape scale. Controls (rows, inputs, selects, buttons) are rounded-md
-     = 8px, small marks rounded-sm = 6px, cards rounded-card = 16px, chips
-     rounded-full. --radius drives sm/md/lg/xl below; cards have their own
+     = 8px, small marks rounded-sm = 6px, cards rounded-card = 10px (Harbor 2),
+     dialogs rounded-xl = 14px, chips rounded-full. --radius drives sm/md/lg/xl below; cards have their own
      token so a control never inherits a card's roundness. */
   --radius: 0.625rem;
 
   /* ── Surface tokens (for nested sections & raised elements) ── */
-  --surface-subtle: #FBFCFE;
+  --surface-subtle: #F8F9FA;
   --surface-raised: #FFFFFF;
 
   /* ── Shadows (functional, minimal — orchestration uses borders over shadows) ── */
@@ -247,8 +250,12 @@
      Light theme uses primary-tinted overlays.
      Consumed via utility classes below (.row-selected, .row-hover, .chip-*).
      Components should NEVER hardcode bg-blue-500/X — use lib/interaction.ts. */
-  --selection-bg: color-mix(in srgb, var(--foreground) 7%, transparent);
-  --selection-bg-hover: color-mix(in srgb, var(--foreground) 9%, transparent);
+  /* Harbor 2: a selected row is the opaque accent tint, as in the design.
+     The old 7–9 % foreground overlay left tertiary and status text at
+     4.1–4.4:1 on the grey ground; every text token clears 4.5:1 on every
+     accent's tint (theme-contrast.test.ts). */
+  --selection-bg: var(--brand-tint);
+  --selection-bg-hover: var(--brand-tint);
   --selection-border: var(--brand);
   --row-hover-bg: color-mix(in srgb, var(--foreground) 4%, transparent);
   --chip-active-bg: color-mix(in srgb, var(--brand) 14%, transparent);
@@ -264,7 +271,7 @@
   --primary-strong: var(--brand-strong);
   --primary-strong-hover: var(--brand-strong-hover);
   --primary-glow: var(--brand-glow);
-  --line-strong: #B9C8DE;
+  --line-strong: #D2D6DC;
   --shadow-color: rgb(15 23 51 / 0.35);
   --page-glow: none;
   /* Deep "panel" ground for heroes, terminals and graph canvases. Text on it
@@ -274,12 +281,12 @@
   --panel-muted: #A5B3CB;
   --panel-node: #131E3A;
   /* Status chips — tinted fill + text pairs, every pair ≥ 4.5:1. */
-  --chip-ok-bg: #E2F3E9;     --chip-ok-fg: #136B3C;
-  --chip-warn-bg: #FCEFD9;   --chip-warn-fg: #8A5300;
-  --chip-danger-bg: #FDE7E7; --chip-danger-fg: #B42318;
+  --chip-ok-bg: #E5F4EC;     --chip-ok-fg: #157A45;
+  --chip-warn-bg: #FCF1DC;   --chip-warn-fg: #8A5A00;
+  --chip-danger-bg: #FCEAE8; --chip-danger-fg: #C0261B;
   --chip-neutral-bg: #E9EEF5; --chip-neutral-fg: #3F4A63;
   --chip-info-bg: var(--brand-tint); --chip-info-fg: var(--brand-ink);
-  --chip-violet-bg: #EFE8FC; --chip-violet-fg: #5B35B0;
+  --chip-violet-bg: #F0EBFD; --chip-violet-fg: #6544D6;
   /* Icon tile glyph colours: the tint is the chip's own accent (--ic). */
   --tile-inset: inset 0 1px 0 rgb(255 255 255 / 0.35);
   --tile-text-mix: 78%;
@@ -293,20 +300,20 @@
 
 .dark {
   color-scheme: dark;
-  /* ── Dark surfaces — Unify-style depth from the marketing site:
-   *    bg ≈ #0a0b0e (near-black, cool purple tint), card +6 lightness,
-   *    border at 0.24 lightness. All in hue 285 (cool purple-blue). ── */
-  --background: #0A0B0E;
-  --foreground: #EDEDF2;
+  /* ── Dark surfaces (Harbor 2): the rail ground is the darkest step,
+   *    content one step up, cards and popovers two, muted fills three.
+   *    Values pinned in lib/__tests__/theme-contrast.test.ts. ── */
+  --background: #0F1013;
+  --foreground: #ECEEF2;
   /* Scrollbar thumb. Well above --border (0.24) on purpose: a track hint has
      to be legible against BOTH the background (0.10) and the card (0.155),
      and a border-weight thumb disappeared on the card. */
   --scrollbar-thumb: oklch(0.38 0.010 285);
   --scrollbar-thumb-hover: oklch(0.52 0.012 285);
-  --card: #121318;
-  --card-foreground: #EDEDF2;
-  --popover: #121318;
-  --popover-foreground: #EDEDF2;
+  --card: #181A1F;
+  --card-foreground: #ECEEF2;
+  --popover: #181A1F;
+  --popover-foreground: #ECEEF2;
 
   /* Brand — #1E7BFE (vivid blue from Crewship logo's blue-bg variant).
    *  Hex used directly — OKLCH approximations of vivid blues can drift
@@ -320,22 +327,21 @@
 
   --secondary: oklch(1.0000 0 0);
   --secondary-foreground: oklch(0.10 0.008 285);
-  --muted: #16171D;
-  --muted-foreground: #9295A3;
-  /* Dimmer-but-AA-compliant second muted level (see :root note).
-   * Dark: 4.99:1 on --background, 4.74:1 on --card — both above the
-   * 4.5:1 AA floor, while plain muted-foreground (5.64/5.36) stays
-   * the brighter tier. */
-  --muted-foreground-soft: #7E818F;
-  --accent: #1C1E25;
-  --accent-foreground: #EDEDF2;
+  --muted: #1E2127;
+  --muted-foreground: #A4AAB6;
+  /* Tertiary text (see :root note). The design's #767D8B measured
+   * 3.3–4.2:1 on the lighter dark surfaces; this is ≥ 4.64:1 everywhere. */
+  --muted-foreground-soft: #9096A1;
+  --icon-faint: #6F7683;
+  --accent: #20232A;
+  --accent-foreground: #ECEEF2;
 
   /* Destructive — same red as light mode for brand consistency. */
-  --destructive: oklch(0.70 0.19 25);
+  --destructive: #F2695C;
   --destructive-foreground: oklch(1.0000 0 0);
 
-  --border: #24262E;
-  --input: #2A2C35;
+  --border: #282B33;
+  --input: #282B33;
   /* Operable form boundaries need more contrast than decorative separators.
    * Keep --input as the existing fill; brightening it also lifts backgrounds. */
   --control-border: oklch(0.54 0.010 285);
@@ -377,18 +383,18 @@
   --chart-4: oklch(0.63 0.145 55);
   --chart-5: oklch(0.82 0.13 105);
 
-  --sidebar: #0D0E12;
-  --sidebar-foreground: #EDEDF2;
+  --sidebar: #0A0B0D;
+  --sidebar-foreground: #ECEEF2;
   /* sidebar-primary pair must have contrast — previously both white. */
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--brand-foreground);
-  --sidebar-accent: #1C1E25;
+  --sidebar-accent: #20232A;
   --sidebar-accent-foreground: var(--brand-ink);
-  --sidebar-border: #24262E;
+  --sidebar-border: #282B33;
   --sidebar-ring: var(--brand);
 
   /* ── Semantic palette (identical to light — brand-consistent across modes) ── */
-  --success: oklch(0.72 0.18 152);
+  --success: #4CC38A;
   --save-bar-bg: #001F0F;
   --save-bar-border: #0B4A27;
   --save-bar-fg: #59F3A6;
@@ -396,7 +402,7 @@
   --save-bar-action-fg: #00170B;
   --info: #5DA1FF;
   --notice: oklch(0.72 0.14 200);
-  --warn: oklch(0.78 0.15 75);
+  --warn: #E5A83B;
   --purple: oklch(0.66 0.22 300);
   /* See the light-theme note. Measured on bg-purple/20 over the dark card:
      5.11:1, up from 4.48:1. Chroma unchanged at 0.22. */
@@ -408,19 +414,19 @@
   --orange: oklch(0.77 0.14 50);
   --azure: oklch(0.79 0.11 220);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter, "Inter"), -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
   --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
   /* Shape scale. Controls (rows, inputs, selects, buttons) are rounded-md
-     = 8px, small marks rounded-sm = 6px, cards rounded-card = 16px, chips
-     rounded-full. --radius drives sm/md/lg/xl below; cards have their own
+     = 8px, small marks rounded-sm = 6px, cards rounded-card = 10px (Harbor 2),
+     dialogs rounded-xl = 14px, chips rounded-full. --radius drives sm/md/lg/xl below; cards have their own
      token so a control never inherits a card's roundness. */
   --radius: 0.625rem;
 
   /* ── Surface tokens (dark theme: nested section + raised popover/drawer)
    *    Hue 285 now matches background family. ── */
-  --surface-subtle: #0F1014;
-  --surface-raised: #16171D;
+  --surface-subtle: #0F1013;
+  --surface-raised: #1E2127;
 
   /* ── Shadows (dark theme — same functional values, lower visibility) ── */
   --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.20);
@@ -433,8 +439,12 @@
   --shadow-2xs: 0 1px 1px 0 oklch(0 0 0 / 0.18);
 
   /* ── Interaction tokens (dark theme overrides) ── */
-  --selection-bg: color-mix(in srgb, var(--foreground) 7%, transparent);
-  --selection-bg-hover: color-mix(in srgb, var(--foreground) 9%, transparent);
+  /* Harbor 2: a selected row is the opaque accent tint, as in the design.
+     The old 7–9 % foreground overlay left tertiary and status text at
+     4.1–4.4:1 on the grey ground; every text token clears 4.5:1 on every
+     accent's tint (theme-contrast.test.ts). */
+  --selection-bg: var(--brand-tint);
+  --selection-bg-hover: var(--brand-tint);
   --selection-border: var(--brand);
   --row-hover-bg: color-mix(in srgb, var(--foreground) 4%, transparent);
   --chip-active-bg: color-mix(in srgb, var(--brand) 14%, transparent);
@@ -445,19 +455,19 @@
   --primary-strong: var(--brand-strong);
   --primary-strong-hover: var(--brand-strong-hover);
   --primary-glow: var(--brand-glow);
-  --line-strong: #3A3D49;
+  --line-strong: #373B45;
   --shadow-color: rgb(0 0 0 / 0.7);
   --page-glow: radial-gradient(60% 40% at 80% 0%, rgb(59 130 246 / 0.07), transparent 70%);
   --panel-bg: radial-gradient(120% 140% at 0% 0%, #1B1F2C 0%, #12141B 55%, #0C0D12 100%);
   --panel-foreground: #E8EEF8;
   --panel-muted: #A5B3CB;
   --panel-node: #121318;
-  --chip-ok-bg: #0F2E22;     --chip-ok-fg: #6FE3B0;
-  --chip-warn-bg: #2E240F;   --chip-warn-fg: #F7C77E;
-  --chip-danger-bg: #3A1417; --chip-danger-fg: #FF9B9B;
+  --chip-ok-bg: #10261C;     --chip-ok-fg: #4CC38A;
+  --chip-warn-bg: #2B2010;   --chip-warn-fg: #E5A83B;
+  --chip-danger-bg: #2E1513; --chip-danger-fg: #F2695C;
   --chip-neutral-bg: #1C1E25; --chip-neutral-fg: #B2B5C2;
   --chip-info-bg: var(--brand-tint); --chip-info-fg: var(--brand-ink);
-  --chip-violet-bg: #211A3D; --chip-violet-fg: #C4A8FF;
+  --chip-violet-bg: #1E1835; --chip-violet-fg: #A28BFA;
   --tile-inset: none;
   --tile-text-mix: 55%;
   --chart-grid: rgb(255 255 255 / 0.06);
@@ -482,6 +492,7 @@
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted-foreground-soft: var(--muted-foreground-soft);
+  --color-icon-faint: var(--icon-faint);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
@@ -556,7 +567,7 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   /* rounded-card: every card, panel and dialog surface. */
-  --radius-card: 1rem;
+  --radius-card: 0.625rem;
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);
