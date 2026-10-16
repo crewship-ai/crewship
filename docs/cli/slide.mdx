@@ -137,3 +137,7 @@ requests use the current head schema. `crewship slide restore` creates a new
 revision in the selected immutable source version. Image comments use the
 existing comment protocol1, independently of deck1/2. Image export embedding,
 remote imports and automatic pruning are unavailable in this storage cut.
+
+Image revisions also cap decoded pixels at33,554,432 across unique asset IDs;
+repeated placement of the same asset counts once. This is independent of the
+32MiB encoded byte and32asset limits, and is enforced on write and restore.
