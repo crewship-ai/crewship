@@ -24,3 +24,5 @@ reports are ignored build output, not an operational procedure.
   [RELEASING.md](../../RELEASING.md).
 
 - [Trusted CI control inventory](ci-inventory-guard.md): main-owned metadata guard, explicit administrator exceptions and shared-App enforcement limits.
+
+- [Pull-request credential diagnostics](pull-request-credentials.md): distinguish local credential preconditions from provider failures without exposing secrets.
