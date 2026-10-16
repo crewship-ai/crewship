@@ -110,7 +110,7 @@ func scanSelectedRequest(row commentScanner) (SelectedAuthorityState, error) {
 	}
 	r.Selection = record.Input.Selection
 	r.Instruction = record.Input.Instruction
-	if r.SchemaVersion != SelectedRequestProtocolVersion || record.Input.PageID != r.PageID || record.Input.BaseRev != r.BaseRevision || record.Verified.DeckSchemaVersion != r.BaseSchemaVersion || record.Verified.ContentHash != r.BaseContentHash || record.Input.Selection != record.Verified.Selection || !identifier.MatchString(r.ID) || !identifier.MatchString(record.OriginRequestID) || r.Version < 1 || record.Sequence < 1 || !validText(r.Error, MaxSelectedRequestErrorBytes) {
+	if r.SchemaVersion != SelectedRequestProtocolVersion || record.Input.PageID != r.PageID || record.Input.BaseRev != r.BaseRevision || record.Verified.DeckSchemaVersion != r.BaseSchemaVersion || record.Verified.ContentHash != r.BaseContentHash || record.Input.Selection != record.Verified.Selection || !identifier.MatchString(r.ID) || !identifier.MatchString(record.OriginRequestID) || (r.OriginalRunID != "" && !identifier.MatchString(r.OriginalRunID)) || r.Version < 1 || record.Sequence < 1 || !validText(r.Error, MaxSelectedRequestErrorBytes) {
 		return record, errors.New("invalid stored selected request envelope")
 	}
 	return record, nil
@@ -134,7 +134,7 @@ func validateSelectedRecord(ctx context.Context, tx *sql.Tx, key Key, record Sel
 	if selectedActive(r.Status) && (validateSelectedAdmission(record.Admission) != nil || r.HumanActor != "user:"+record.Admission.HumanUserID || r.AgentActor != "agent:"+record.Admission.AgentID || record.Input.ChatID != record.Admission.ChatID) {
 		return errors.New("active selected request lost original admission")
 	}
-	if r.Restored && (selectedActive(r.Status) || record.RunID != "" || record.Admission.AudienceJSON != "{}" || record.Admission.CredentialID != "" || record.Admission.CredentialHash != "") {
+	if r.Restored && (selectedActive(r.Status) || record.RunID != "" || record.Admission.HumanUserID != "" || record.Admission.AgentID != "" || record.Admission.ChatID != "" || record.Admission.AudienceJSON != "{}" || record.Admission.CredentialID != "" || record.Admission.CredentialHash != "") {
 		return errors.New("restored selected request is not inert")
 	}
 	if r.ResultRevision != nil {

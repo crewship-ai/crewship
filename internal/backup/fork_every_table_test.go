@@ -311,13 +311,23 @@ func seedOneBackupTable(t *testing.T, db *sql.DB, table, workspaceID string) err
 		_, err := seedBackupSlides(t, db, workspaceID, "gen_slides_page", owner)
 		return err
 	}
+	if table == "slides_requests" {
+		seedBackupSelected(t, db, workspaceID, "gen_selected_page", "u_admin", "a_alice", "ch_alice_1")
+		store := slides.New(db, slides.Options{})
+		key := slides.Key{WorkspaceID: workspaceID, PageID: "gen_selected_page"}
+		if err := store.SettleSelectedRequest(t.Context(), key, "gen_selected_page-result", "succeeded", "", backupSlideAuthority); err != nil {
+			return err
+		}
+		_, err := store.CancelSelectedRequest(t.Context(), key, "gen_selected_page-pending", slides.CancelSelectedRequestInput{PageID: key.PageID, SchemaVersion: 1, MutationID: "gen_pending_cancel", IfVersion: 1}, backupSlideAuthority)
+		return err
+	}
 	if table == "slides_comment_threads" {
 		store := slides.New(db, slides.Options{})
 		key := slides.Key{WorkspaceID: workspaceID, PageID: "gen_slides_page"}
 		_, err := store.CreateComment(t.Context(), key, slides.CreateCommentRequest{PageID: key.PageID, SchemaVersion: 1, BaseRev: 2, MutationID: "gen_comment", Anchor: slides.CommentAnchor{AnchorSchemaVersion: 1, Kind: "slide", SlideID: "slide_one", Revision: 2}, Body: "Retained fixture"}, backupSlideAuthority)
 		return err
 	}
-	if table == "slides_revisions" || table == "slides_receipts" || table == "slides_object_ids" || table == "slides_comment_events" || table == "slides_comment_receipts" {
+	if table == "slides_revisions" || table == "slides_receipts" || table == "slides_object_ids" || table == "slides_comment_events" || table == "slides_comment_receipts" || table == "slides_request_events" || table == "slides_request_receipts" {
 		var count int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE workspace_id=?`, workspaceID).Scan(&count); err != nil {
 			return err
@@ -570,7 +580,7 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 			}
 			continue
 		}
-		if table == "slides_receipts" || table == "slides_comment_receipts" {
+		if table == "slides_receipts" || table == "slides_comment_receipts" || table == "slides_request_receipts" {
 			// Explicit fork security policy: source replay capability is not
 			// copied. Immutable revision mutation IDs remain409 tombstones.
 			if got := after[table] - before[table]; got != 0 {

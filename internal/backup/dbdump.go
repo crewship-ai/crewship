@@ -315,6 +315,7 @@ var BackupTables = []string{
 	"pages",
 	"slides_heads", "slides_revisions", "slides_revision_assets", "slides_receipts", "slides_object_ids",
 	"slides_comment_threads", "slides_comment_events", "slides_comment_receipts",
+	"slides_requests", "slides_request_events", "slides_request_receipts",
 	"documents",
 	"document_updates",
 	"document_receipts",
@@ -1140,6 +1141,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		hooks = &RestoreDumpHooks{}
 	}
 	var stats RestoreStats
+	prepared, err := prepareSelectedRestoreDump(dump)
+	if err != nil {
+		return stats, err
+	}
+	dump = prepared
 	// PRAGMA foreign_keys is a no-op inside an open transaction per
 	// the SQLite docs, so we must set it on a held connection BEFORE
 	// BeginTx. db.Conn pins us to a single pooled connection; we
@@ -1226,6 +1232,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			return stats, fmt.Errorf("backup: probe %s: %w", table, err)
 		}
 		if !exists {
+			if table == "slides_requests" || table == "slides_request_events" || table == "slides_request_receipts" {
+				return stats, fmt.Errorf("backup: target cannot retain selected Slides request history")
+			}
 			// Target lacks this table — skip rather than failing so a
 			// bundle from a newer schema can restore (partially) here.
 			continue
@@ -1233,6 +1242,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		allowed, err := tableColumns(ctx, tx, table)
 		if err != nil {
 			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
+		}
+		if table == "slides_requests" && (!allowed["restored"] || !allowed["protocol_version"] || !allowed["verified_json"] || !allowed["original_run_id"] || !allowed["credential_id"]) {
+			return stats, fmt.Errorf("backup: target cannot preserve selected Slides authority fences")
 		}
 		// Dropping an admission fence is a security downgrade, not ordinary
 		// schema skew: an older target would classify this work as autonomous.
@@ -1514,6 +1526,22 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	for key := range imagePages {
 		if err := slides.ValidateImagePageTx(ctx, tx, key); err != nil {
 			return stats, fmt.Errorf("backup: invalid Slides image references: %w", err)
+		}
+	}
+	selectedPages := map[slides.Key][]string{}
+	for _, row := range dump.Tables["slides_requests"] {
+		workspace, wok := row["workspace_id"].(string)
+		page, pok := row["page_id"].(string)
+		id, iok := row["id"].(string)
+		if !wok || !pok || !iok || workspace == "" || page == "" || id == "" {
+			return stats, fmt.Errorf("backup: invalid selected Slides request identity")
+		}
+		key := slides.Key{WorkspaceID: workspace, PageID: page}
+		selectedPages[key] = append(selectedPages[key], id)
+	}
+	for key, ids := range selectedPages {
+		if err := slides.FenceSelectedRestorePageTx(ctx, tx, key, ids); err != nil {
+			return stats, fmt.Errorf("backup: invalid selected Slides request history: %w", err)
 		}
 	}
 	if hooks.PostInsert != nil {
