@@ -59,6 +59,8 @@ COPY e2e/ ./e2e/
 COPY testdata/slides-schema-v1.json testdata/slides-schema-v2.json ./testdata/
 COPY scripts/prepare-pdf-assets.mjs scripts/prepare-chat-workers.mjs scripts/prepare-board-assets.mjs scripts/prepare-board-converter.mjs scripts/check-control-accessibility.tsx scripts/check-slide-mutations.ts ./scripts/
 COPY tools/pages-build/sdk.ts ./tools/pages-build/
+# Shared closed Docs model is instantiated with frontend Yjs dependencies.
+COPY tools/docs-service/schema-core.mjs ./tools/docs-service/
 ARG VERSION=dev
 ARG NEXT_PUBLIC_SENTRY_DSN=""
 ENV NEXT_PUBLIC_CREWSHIP_VERSION=$VERSION

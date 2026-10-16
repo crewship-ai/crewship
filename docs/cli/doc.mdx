@@ -13,7 +13,7 @@ CLI profile supplies the workspace and exact human bearer. Page ACLs apply;
 scoped tokens need `pages:read` for reads and `pages:write` for mutations.
 `pages:*` grants both. These commands do not mint agent authority.
 
-Mutation JSON uses schema `2`, a stable unique `id`, and (except initialize) the
+Mutation JSON uses the confirmed source schema (`1`, `2` or `3`) and original `page_id` (required for3), a stable unique `id`, and (except initialize) the
 opaque `epoch` returned by a fresh read. A transport retry reuses the exact ID
 and payload. A conflict requires rereading and human review; the CLI does not
 silently rebase. JSON input is one object, at most 2 MiB. See the
@@ -39,7 +39,7 @@ outline: actual block IDs, parents, types, text and hashes.
 
 `crewship doc initialize report --file initialize.json` calls
 `POST /api/v1/pages/{slug}/document/initialize`. `--file` names a JSON file;
-`--file -` reads stdin. Body: `{id,schema:2,body:<schema-valid document tree>}`.
+`--file -` reads stdin. Body: `{id,schema,page_id,body:<schema-valid document tree>}`.
 Only an empty Page owned by the authenticated human may attach a Doc.
 
 ## crewship doc patch
@@ -47,15 +47,15 @@ Only an empty Page owned by the authenticated human may attach a Doc.
 `crewship doc patch report --file patch.json` calls
 `POST /api/v1/pages/{slug}/document/patch`. `--file` names a JSON file;
 `--file -` reads stdin. Semantic body:
-`{id,schema:2,epoch,target,text,ifRev,ifHash}`. Use the block ID/hash and revision
-from the outline. Raw editor updates use `{id,schema:2,epoch,kind:"human",update}`;
+`{id,schema,page_id,epoch,target,text,ifRev,ifHash}`. Use the block ID/hash and revision
+from the outline. Raw editor updates use `{id,schema,page_id,epoch,kind:"human",update}`;
 agents cannot submit raw CRDT updates.
 
 ## crewship doc checkpoint
 
 `crewship doc checkpoint report --file checkpoint.json` calls
 `POST /api/v1/pages/{slug}/document/checkpoint`. `--file` names a JSON file;
-`--file -` reads stdin. Body: `{id,schema:2,epoch,ifRev}`. Success pins a complete,
+`--file -` reads stdin. Body: `{id,schema,page_id,epoch,ifRev}`. Success pins a complete,
 confirmed state; it does not infer success from local editor content.
 
 ## crewship doc checkpoints
@@ -69,11 +69,20 @@ confirmed state; it does not infer success from local editor content.
 `GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}` to inspect the pinned
 content and outline without replacing the live document.
 
+## crewship doc upgrade
+
+`crewship doc upgrade report --file upgrade.json` calls
+`POST /api/v1/pages/{slug}/document/upgrade`. `--file` names one JSON file;
+`--file -` reads stdin. Body: `{id,schema:1|2,target_schema:3,page_id,epoch,ifRev}`.
+Only a human with live write access can explicitly enable links/code. Freeze
+all original fields; uncertain acknowledgment retries exactly. No read upgrades,
+no automatic rebase, and no agent raw writes or human-profile fallback.
+
 ## crewship doc restore
 
 `crewship doc restore report --file restore.json` calls
 `POST /api/v1/pages/{slug}/document/restore`. `--file` names a JSON file;
-`--file -` reads stdin. Body: `{id,schema:2,epoch,ifRev,checkpoint}`. Restore advances
+`--file -` reads stdin. Body: `{id,schema,page_id,epoch,ifRev,checkpoint}`. Restore advances
 history generation, fences stale tabs and keeps the same Page and grants.
 
 ## crewship doc export
@@ -93,7 +102,7 @@ content. This command emits text rather than the usual JSON response envelope.
 `crewship doc comment report --file comment.json` calls
 `POST /api/v1/pages/{slug}/document/comments`. `--file` names a JSON file;
 `--file -` reads stdin. Body:
-`{id,schema:2,epoch,ifRev,block,from,to,text}`. Offsets select text within one
+`{id,schema,page_id,epoch,ifRev,block,from,to,text}`. Offsets select text within one
 paragraph or heading. A comment does not dispatch an agent.
 
 ## crewship doc comment-resolve
@@ -101,7 +110,7 @@ paragraph or heading. A comment does not dispatch an agent.
 `crewship doc comment-resolve report --file resolve.json` calls
 `POST /api/v1/pages/{slug}/document/comments/resolve`. `--file` names a JSON file;
 `--file -` reads stdin. Body:
-`{id,schema:2,epoch,ifRev,comment,version,resolved}`. `resolved:false` reopens the
+`{id,schema,page_id,epoch,ifRev,comment,version,resolved}`. `resolved:false` reopens the
 same comment; resolution requires current Page write access.
 
 ## crewship doc request

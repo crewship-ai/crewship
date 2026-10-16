@@ -4425,7 +4425,7 @@
         "type": "object"
       },
       "DocumentNode": {
-        "description": "Schema-2 bounded tree: depth \u003c=40 and \u003c=10000 nodes; stable unique IDs on blocks, headings levels1..3, no marks. Structural grammar and retained Yjs validation are enforced by the document engine.",
+        "description": "Versioned bounded tree: depth\u003c=40, nodes\u003c=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks and plain codeBlock. Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine.",
         "properties": {
           "attrs": {
             "properties": {
@@ -4480,9 +4480,60 @@
           },
           "marks": {
             "items": {
-              "type": "string"
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "attrs": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "href": {
+                          "description": "Canonical HTTP(S) URL without credentials or control/space characters; engine enforces UTF8 byte bound2048.",
+                          "maxLength": 2048,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "href"
+                      ],
+                      "type": "object"
+                    },
+                    "type": {
+                      "enum": [
+                        "link"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "attrs"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "attrs": {
+                      "additionalProperties": false,
+                      "maxProperties": 0,
+                      "type": "object"
+                    },
+                    "type": {
+                      "enum": [
+                        "code"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "type": "object"
+                }
+              ]
             },
-            "maxItems": 0,
+            "maxItems": 1,
             "type": "array"
           },
           "text": {
@@ -4500,7 +4551,8 @@
               "table",
               "tableRow",
               "tableCell",
-              "tableHeader"
+              "tableHeader",
+              "codeBlock"
             ],
             "type": "string"
           }
@@ -140292,6 +140344,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -140402,6 +140472,34 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "epoch": {
                     "type": "string"
@@ -140414,9 +140512,14 @@
                     "minimum": 0,
                     "type": "integer"
                   },
+                  "page_id": {
+                    "type": "string"
+                  },
                   "schema": {
                     "enum": [
-                      2
+                      1,
+                      2,
+                      3
                     ],
                     "type": "integer"
                   }
@@ -140533,6 +140636,24 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {
@@ -140748,6 +140869,24 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {
@@ -140972,6 +141111,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -141187,6 +141344,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -141295,6 +141470,34 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "block": {
                     "type": "string"
@@ -141314,9 +141517,14 @@
                     "minimum": 0,
                     "type": "integer"
                   },
+                  "page_id": {
+                    "type": "string"
+                  },
                   "schema": {
                     "enum": [
-                      2
+                      1,
+                      2,
+                      3
                     ],
                     "type": "integer"
                   },
@@ -141448,6 +141656,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -141558,6 +141784,34 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "comment": {
                     "type": "string"
@@ -141573,12 +141827,17 @@
                     "minimum": 0,
                     "type": "integer"
                   },
+                  "page_id": {
+                    "type": "string"
+                  },
                   "resolved": {
                     "type": "boolean"
                   },
                   "schema": {
                     "enum": [
-                      2
+                      1,
+                      2,
+                      3
                     ],
                     "type": "integer"
                   },
@@ -141702,6 +141961,24 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {
@@ -141901,6 +142178,42 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -141975,6 +142288,34 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "body": {
                     "$ref": "#/components/schemas/DocumentNode"
@@ -141983,9 +142324,13 @@
                     "pattern": "^[a-zA-Z0-9_-]{1,128}$",
                     "type": "string"
                   },
+                  "page_id": {
+                    "type": "string"
+                  },
                   "schema": {
                     "enum": [
-                      2
+                      2,
+                      3
                     ],
                     "type": "integer"
                   }
@@ -142109,6 +142454,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -142221,6 +142584,34 @@
                 "oneOf": [
                   {
                     "additionalProperties": false,
+                    "allOf": [
+                      {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "schema": {
+                                "enum": [
+                                  1,
+                                  2
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "schema": {
+                                "enum": [
+                                  3
+                                ]
+                              }
+                            },
+                            "required": [
+                              "page_id"
+                            ]
+                          }
+                        ]
+                      }
+                    ],
                     "properties": {
                       "epoch": {
                         "type": "string"
@@ -142235,9 +142626,14 @@
                         ],
                         "type": "string"
                       },
+                      "page_id": {
+                        "type": "string"
+                      },
                       "schema": {
                         "enum": [
-                          2
+                          1,
+                          2,
+                          3
                         ],
                         "type": "integer"
                       },
@@ -142258,6 +142654,34 @@
                   },
                   {
                     "additionalProperties": false,
+                    "allOf": [
+                      {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "schema": {
+                                "enum": [
+                                  1,
+                                  2
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "schema": {
+                                "enum": [
+                                  3
+                                ]
+                              }
+                            },
+                            "required": [
+                              "page_id"
+                            ]
+                          }
+                        ]
+                      }
+                    ],
                     "properties": {
                       "epoch": {
                         "type": "string"
@@ -142280,9 +142704,14 @@
                         ],
                         "type": "string"
                       },
+                      "page_id": {
+                        "type": "string"
+                      },
                       "schema": {
                         "enum": [
-                          2
+                          1,
+                          2,
+                          3
                         ],
                         "type": "integer"
                       },
@@ -142410,6 +142839,24 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {
@@ -142625,6 +143072,24 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {
@@ -142925,6 +143390,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -143017,6 +143500,34 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
                 "properties": {
                   "checkpoint": {
                     "type": "string"
@@ -143032,9 +143543,14 @@
                     "minimum": 0,
                     "type": "integer"
                   },
+                  "page_id": {
+                    "type": "string"
+                  },
                   "schema": {
                     "enum": [
-                      2
+                      1,
+                      2,
+                      3
                     ],
                     "type": "integer"
                   }
@@ -143153,6 +143669,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -143238,6 +143772,306 @@
           }
         ],
         "summary": "Restore page document",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/document/upgrade": {
+      "post": {
+        "description": "Submit page document upgrade (POST /api/v1/pages/{slug}/document/upgrade).",
+        "operationId": "post_api_v1_pages_slug_document_upgrade",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              1,
+                              2
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "schema": {
+                            "enum": [
+                              3
+                            ]
+                          }
+                        },
+                        "required": [
+                          "page_id"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "properties": {
+                  "epoch": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "ifRev": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "page_id": {
+                    "type": "string"
+                  },
+                  "schema": {
+                    "enum": [
+                      1,
+                      2
+                    ],
+                    "type": "integer"
+                  },
+                  "target_schema": {
+                    "enum": [
+                      3
+                    ],
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id",
+                  "schema",
+                  "epoch",
+                  "ifRev",
+                  "page_id",
+                  "target_schema"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page document upgrade",
         "tags": [
           "pages"
         ],

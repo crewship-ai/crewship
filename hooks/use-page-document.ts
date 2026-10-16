@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import * as Y from "yjs"
+import { documentSchema } from "@/lib/documents/schema"
 import { apiFetch } from "@/lib/api-fetch"
 
 export interface DocumentState {
@@ -20,17 +21,21 @@ export async function documentRequest<T>(workspace: string, slug: string, path =
 
 /** Acknowledged updates are removed only after the API confirms them. Remote
  * updates merge into the same CRDT, never replace a locally edited JSON body. */
-export function usePageDocument(workspace: string, slug: string) {
-  const doc = useMemo(() => new Y.Doc({ gc: false, guid: `${workspace}:${slug}` }), [workspace, slug])
+export function usePageDocument(workspace: string, slug: string, pageId?: string) {
+  const identity = pageId ?? slug
+  const endpoint = useRef(slug); endpoint.current = slug
+  const doc = useMemo(() => new Y.Doc({ gc: false, guid: `${workspace}:${identity}` }), [workspace, identity])
   const [state, setState] = useState<DocumentState>()
   const [status, setStatus] = useState("Loading document…")
   const [error, setError] = useState<string>()
   const [pending, setPending] = useState(0)
   const [recovery, setRecovery] = useState(false)
   const [denied, setDenied] = useState(false)
+  const authorizationLost=useRef(false)
+  const deny=useCallback(()=>{authorizationLost.current=true;setDenied(true);setRecovery(pending>0);setStatus("Document access is unavailable.")},[pending])
   useEffect(() => {
     let active = true, epoch: string | undefined, polling = false, blocked = false
-    const queue: { id: string; update: string; attempted: boolean }[] = []
+    const queue: { id: string; update: string; attempted: boolean; request?: {id:string;update:string;schema:number;epoch:string;kind:string;page_id?:string} }[] = []
     const local = (update: Uint8Array, origin: unknown) => {
       if (origin === "remote") return
       const last = queue.at(-1)
@@ -40,9 +45,13 @@ export function usePageDocument(workspace: string, slug: string) {
     }
     doc.on("update", local)
     function accept(next: DocumentState): boolean {
-        if (!active) return false
+        if (!active || authorizationLost.current) return false
         setPending(queue.length)
-        if (next.schema > 2) { blocked = true; setRecovery(queue.length > 0); setDenied(true); setStatus("This document needs a newer editor."); return false }
+        if (!Number.isSafeInteger(next.rev) || next.rev<0 || typeof next.epoch!=="string" || !next.epoch || next.epoch.length>256 || typeof next.snapshot!=="string" || typeof next.can_write!=="boolean" || (next.updates!==undefined && (!Array.isArray(next.updates) || next.updates.some(update=>typeof update!=="string")))) throw new DocumentAPIError("Invalid confirmed document metadata; content preserved.",400)
+        if (![1,2,3].includes(next.schema)) { blocked = true; setRecovery(queue.length > 0); setDenied(true); setStatus("This document needs a newer editor."); return false }
+        if (pageId && next.page_id !== pageId) throw new DocumentAPIError("The original Page identity changed. Recover your draft before reopening.",409)
+        let remote: Y.Doc | undefined
+        try { const loaded = documentSchema.load(next.snapshot); if (!(loaded instanceof Y.Doc)) throw new Error("Invalid document binary type"); remote=loaded; for (const update of next.updates ?? []) Y.applyUpdate(loaded,decodeUpdate(update)); documentSchema.validate(loaded,next.schema) } catch(cause) { throw new DocumentAPIError(cause instanceof Error ? `Confirmed document content rejected: ${cause.message}` : "Confirmed document content rejected.",400) } finally { remote?.destroy() }
         if (epoch !== undefined && next.epoch !== epoch) {
           // A restore replaces history. Never replay a stale draft into its new epoch.
           blocked = true; setRecovery(true); setStatus("Document history changed. Recover your draft before reopening."); return false
@@ -55,18 +64,22 @@ export function usePageDocument(workspace: string, slug: string) {
         return true
     }
     async function poll() {
-      if (!active || polling || blocked) return
+      if (!active || authorizationLost.current || polling || blocked) return
       polling = true
       try {
-        let next = await documentRequest<DocumentState>(workspace, slug)
+        let next = await documentRequest<DocumentState>(workspace, endpoint.current)
         if (!accept(next)) return
         if (queue.length && active && next.can_write) {
           const batch = queue[0]; batch.attempted = true
-          await documentRequest(workspace, slug, "/patch", { id: batch.id, update: batch.update, schema: 2, epoch, kind: "human" })
+          try { documentSchema.validate(doc,next.schema) } catch (cause) { throw new DocumentAPIError(cause instanceof Error ? `Local document content rejected: ${cause.message}` : "Local document content rejected.",400) }
+          if (!epoch) throw new DocumentAPIError("Confirmed document epoch required.",409)
+          batch.request ??= { id:batch.id,update:batch.update,schema:next.schema===1?2:next.schema,epoch,kind:"human",...((pageId ?? next.page_id)?{page_id:pageId ?? next.page_id}:{}) }
+          await documentRequest(workspace,endpoint.current,"/patch",batch.request)
+          if (!active) return
           queue.shift()
           // The receipt confirms durability, but the pre-write read is stale.
           // Refresh authorized head metadata before enabling checkpoints.
-          next = await documentRequest<DocumentState>(workspace, slug)
+          next = await documentRequest<DocumentState>(workspace, endpoint.current)
           if (!accept(next)) return
           setPending(queue.length)
         }
@@ -87,12 +100,12 @@ export function usePageDocument(workspace: string, slug: string) {
     void poll()
     const timer = setInterval(() => void poll(), 500)
     return () => { active = false; clearInterval(timer); doc.off("update", local); doc.destroy() }
-  }, [workspace, slug, doc])
+  }, [workspace, pageId, doc])
   useEffect(() => {
     if (!pending) return
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
     window.addEventListener("beforeunload", warn)
     return () => window.removeEventListener("beforeunload", warn)
   }, [pending])
-  return { doc, state, status, error, pending, recovery, denied, editable: Boolean(state?.can_write && !recovery && !denied) }
+  return { doc, state, status, error, pending, recovery, denied, deny, editable: Boolean(state?.can_write && !recovery && !denied) }
 }

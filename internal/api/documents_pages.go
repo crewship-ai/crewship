@@ -59,6 +59,7 @@ func (r *Router) registerDocumentRoutes() {
 	r.mux.Handle("GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}", authed(wsCtx(http.HandlerFunc(p.GetDocument))))
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/initialize", roleSelf, p.MutateDocument)
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/patch", roleSelf, p.MutateDocument)
+	r.authedMut("POST", "/api/v1/pages/{slug}/document/upgrade", roleSelf, p.MutateDocument)
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/checkpoint", roleSelf, p.MutateDocument)
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/restore", roleSelf, p.MutateDocument)
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/comments", roleSelf, p.MutateDocument)

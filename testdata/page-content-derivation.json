@@ -361,5 +361,20 @@
       },
       "can_initialize_content": false
     }
+  },
+  {
+    "name": "doc-rich-schema-3",
+    "facts": {
+      "has_document": true,
+      "document_schema": 3
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "doc",
+        "schema_version": 3,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
   }
 ]

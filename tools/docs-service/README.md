@@ -117,4 +117,37 @@ proves the 32-operation per-document queue rejects overflow, and verifies that
 drain waits for all admitted failed responses. This is controlled downstream
 backpressure and failure injection, not a slow-disk throughput measurement.
 
-Private protocol 3 requires an explicit protocol-3 recovery request and acknowledgement before admission. Protocol 3 adds private immutable request scope to authorized state and requires semantic edit interval metadata; mismatched engines fail before recovery. Older Go/Node pairs fail startup without fencing or acknowledging edits; the content schema remains 2.
+Private protocol 3 requires an explicit protocol-3 recovery request and acknowledgement before admission. Protocol 3 adds private immutable request scope to authorized state and requires semantic edit interval metadata; mismatched engines fail before recovery. The current matched pair also negotiates explicit latest content capability3 before recovery. A protocol3 pair with missing/older/newer content capability fails before fencing. Stored schema1/2 binary, canonical hashes and checkpoint source versions remain readable; no read upgrades them.
+
+Schema3 adds closed HTTP(S) link and inline code marks plus plain code blocks.
+Explicit human upgrade binds the original Page ID, revision and synchronization
+epoch; it advances revision/generation atomically without rewriting the old Yjs
+binary. Restore uses the actual checkpoint schema and rotates the writer fence.
+An authorized WRITE→READ principal may read their own existing durable receipt
+without creating another mutation; a fresh upgrade requires live write authority.
+Full access/session revocation denies both reads and receipt replay. Schema3
+initialization and upgrades are human-only at both the engine and Go authority.
+
+For schema3 semantic commits, the trusted engine supplies private `semantic.rich`
+`before`/`after` document JSON, never client-supplied scope. Each proof is bounded
+to500000UTF8 bytes and the existing private HTTP body limit remains3MiB. Go checks
+closed root/unique IDs/bounded tree and authenticates every nontext FULL subtree
+hash in exact preorder against the stored projection and candidate projection.
+This covers ancestor attributes and root ordering, not only leaf text hashes.
+Go reconstructs only the supplied UTF16 edit in the target paragraph/heading,
+inserts plain text, and compares the entire candidate tree. Adjacent equal-mark
+text fragments and absent/empty text-content lists are normalized only for this
+comparison; Yjs bytes, character IDs, marks outside the edit and stored hashes
+are never normalized or rewritten. The existing immutable request guard runs in
+the same writer transaction after this proof; fresh preconditions cannot expand
+an original selection. The engine remains the trusted binary validator: Go does
+not decode Yjs or infer hidden retained structs from visible JSON.
+
+The schema3 generic semantic path is covered by actual separate Go/Node process
+tests. Selected schema3 request admission freezes the canonical content version in
+the server-owned target snapshot. The worker uses that original version and Page
+ID; subsequent upgrade/restore/human edits cannot refresh the original revision.
+Actual engine admission, scoped patch/checkpoint/replay and human-edit denial are
+covered by the opt-in process suite; no model completion is simulated. Images are unsupported by3 and
+require a separate future schema4 contract. No export fidelity or model-run
+acceptance follows from these protocol tests.

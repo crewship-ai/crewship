@@ -24,8 +24,8 @@ extend the selected quotation or substitute the latest revision as the request
 base. A mismatch stops the request for explicit human reselection.
 For generic work without an explicit selection-bound request, select actual
 outline block IDs and hashes. POST `/patch` with JSON
-`{id,schema:2,epoch,target,text,ifRev,ifHash}` replaces the chosen block's text.
-Keep all preconditions from the read. Raw CRDT updates are for human editors.
+`{id,schema,page_id,epoch,target,text,ifRev,ifHash}` replaces the chosen block's text.
+For generic work use schema2 for a legacy1/2 document, or schema3 for an explicitly upgraded3 document. For selected work use ONLY the immutable schema and Page ID supplied by the trusted request snapshot, never the latest read version. Schema3 replacement inserts plain text without inherited links/code; it preserves marks and character identities outside the actual edit. Do not target code blocks or images, change marks/attributes, or request an upgrade. Keep all original preconditions. Raw CRDT updates are for human editors.
 Read fresh state before another operation because leases advance epochs.
 Current selection-bound work supports one selected paragraph or heading. Do
 not claim a partial edit completes a request spanning multiple textblocks.
@@ -45,7 +45,7 @@ rebase it or overwrite another editor. A transient transport error does not mean
 the operation failed or succeeded.
 
 After the semantic patch receives durable confirmation, GET fresh state and
-POST `/checkpoint` with `{id,schema:2,epoch,ifRev}`. For an explicit document
+POST `/checkpoint` with `{id,schema,page_id,epoch,ifRev}`. For an explicit document
 request, use the checkpoint ID supplied in the trusted request prompt. Report
 success only when the patch and checkpoint are confirmed. Return the existing
 Page link, saved revision and checkpoint; a local file or model's final text is

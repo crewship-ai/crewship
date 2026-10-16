@@ -11,7 +11,7 @@ tag: Experimental
 Docs attach to an empty human-owned Page and preserve its identity, ownership and
 ACLs. They cannot coexist with HTML artifacts, panels, Boards or project drafts.
 The Go authority stores binary Yjs state and validates live identity under the
-SQL writer fence. The separately managed Node service computes schema-2 content.
+SQL writer fence. The separately managed Node service computes closed versioned schema1/2/3 content.
 A successful response confirms durable storage; local editor content is not a
 save receipt. See [document architecture](../specs/documents.md),
 [CLI commands](/cli/doc) and [activation](/configuration/environment#collaborative-documents).
@@ -25,7 +25,7 @@ Agent access uses separate internal sidecar routes with the original admitted
 run bearer, live human delegation and explicit agent Page write grant. No body
 field can claim an actor, owner or run identity.
 
-Mutation JSON uses `schema:2` and a unique stable `id` matching
+Mutation JSON uses the original confirmed `schema` (1,2 or3) and `page_id` (required for3; checked whenever provided) and a unique stable `id` matching
 `[a-zA-Z0-9_-]{1,128}`. Except initialize, supply the opaque `epoch` from a fresh
 read. Epoch changes on restore or process incarnation changes; it is not a
 client-constructed number. An uncertain transport outcome retries the exact
@@ -65,17 +65,27 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
-**Request:** JSON `{id,schema:2,body:<valid document tree>}`; no epoch. Only an empty Page owned by the human may initialize.
+**Request:** JSON `{id,schema,page_id,body:<valid document tree>}`; no epoch. Only an empty Page owned by the human may initialize.
 
 **Response:** First success returns durable state `{schema,rev:0,epoch,generation,incarnation,snapshot,snapshotRev,updates,blocks}`, with a numeric fence and no `id`, `actor` or `kind`. An exact retry returns `{id,rev,epoch,actor,kind:"init",found:true,duplicate:true}` instead. The response is a union of these two shapes. Obtain the opaque editor epoch using GET before editing.
 
 **Statuses:** 200; 400 invalid input; 401/403 access; 404 missing Page; 409 occupied Page or conflicting identity; 429 quota; 500 storage/authority failure; 502/503 engine failure.
 
+## `POST /api/v1/pages/{slug}/document/upgrade`
+
+**Authentication:** human session or exact live human CLI bearer; `pages:write`, live Page write access, and existing human-owned document. Agents cannot initialize or upgrade schema3.
+
+**Request:** `{id,schema:1|2,target_schema:3,page_id,epoch,ifRev}`. Freeze the original Page ID, revision, epoch and operation ID. Upgrade validates the original binary with both source and target closed validators, then atomically advances revision/generation without rebuilding Yjs or its character IDs. A later edit conflicts; never silently rebase. No read upgrades content.
+
+**Response:** durable `{id,rev,schema:3,epoch,...}` receipt. A lost acknowledgment retries the exact original payload. A human downgraded WRITE→READ may read their own prior durable receipt without creating a write; full access/session revocation denies replay. Receipt revision can precede the current head. Reopen to inspect its actual version.
+
+**Statuses:** 200; 400 malformed original input; 401/403/404 access or Page mismatch; 409 original revision/epoch/schema conflict; 413 bound; 429 quota; 500 storage failure; 502/503 engine failure.
+
 ## `POST /api/v1/pages/{slug}/document/patch`
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
-**Request:** JSON semantic `{id,schema:2,epoch,target,text,ifRev,ifHash}` replaces one existing paragraph/heading text. `target` and SHA-256 `ifHash` come from the outline. Human editor updates instead use `{id,schema:2,epoch,kind:"human",update:<base64 incremental Yjs>}`; agents cannot send raw updates.
+**Request:** JSON semantic `{id,schema,page_id,epoch,target,text,ifRev,ifHash}` replaces one existing paragraph/heading text. `target` and SHA-256 `ifHash` come from the outline. Human editor updates instead use `{id,schema,page_id,epoch,kind:"human",update:<base64 incremental Yjs>}`; agents cannot send raw updates.
 
 **Response:** Durable receipt `{id,rev,epoch,actor,kind}`; exact retries may add `found`, `schema` and `duplicate`. The returned revision is committed, not speculative.
 
@@ -85,7 +95,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
-**Request:** JSON `{id,schema:2,epoch,ifRev}` pins the exact current confirmed revision.
+**Request:** JSON `{id,schema,page_id,epoch,ifRev}` pins the exact current confirmed revision.
 
 **Response:** `{id,rev,schema,checkpoint,epoch}` confirms a complete retained state. An exact retry can return the common receipt shape with `found`/`duplicate`.
 
@@ -115,7 +125,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
-**Request:** JSON `{id,schema:2,epoch,ifRev,checkpoint}` selects a retained checkpoint under current write permission.
+**Request:** JSON `{id,schema,page_id,epoch,ifRev,checkpoint}` selects a retained checkpoint under current write permission.
 
 **Response:** Durable `{id,rev,epoch,actor,kind}` receipt for restored content and a new history generation. Stale tabs retain unsaved drafts for explicit recovery; they cannot replay into the new generation. Page ID and grants are preserved.
 
@@ -145,7 +155,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
-**Request:** JSON `{id,schema:2,epoch,ifRev,block,from,to,text}` selects a nonempty range within one paragraph/heading. Text is bounded to 10000 UTF-8 bytes; the derived anchor (quote plus encoded relative positions) must fit 8192 bytes. Requires comment permission.
+**Request:** JSON `{id,schema,page_id,epoch,ifRev,block,from,to,text}` selects a nonempty range within one paragraph/heading. Text is bounded to 10000 UTF-8 bytes; the derived anchor (quote plus encoded relative positions) must fit 8192 bytes. Requires comment permission.
 
 **Response:** Durable common receipt `{id,rev,epoch,actor,kind}`. The stored anchor uses relative CRDT positions and captures the quote and source revision. A comment never dispatches an agent.
 
@@ -155,7 +165,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 
 **Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
 
-**Request:** JSON `{id,schema:2,epoch,ifRev,comment,version,resolved}`. Set `resolved:false` to reopen the same comment. Requires Page write permission, not merely comment permission.
+**Request:** JSON `{id,schema,page_id,epoch,ifRev,comment,version,resolved}`. Set `resolved:false` to reopen the same comment. Requires Page write permission, not merely comment permission.
 
 **Response:** Durable common receipt `{id,rev,epoch,actor,kind}`; resolution is guarded by exact comment version and document revision.
 
@@ -180,3 +190,7 @@ Depth is at most 40 and node count at most 10000. Binary state remains authorita
 **Response:** 202 `{id,request_id}` is a queue receipt. It is not completion. Trusted admission binds the exact real run; succeeded requires that run’s durable semantic patch and request-specific checkpoint. Model prose alone cannot create a result card. Results remain on the same Page. Exact submission retries reuse the same request and immutable selection snapshot. A changed base or target requires a new explicit human selection/submission. Bounds are 3 active, 30/hour and 2000 retained jobs per Page; interrupted running jobs fail for human review rather than replaying model execution.
 
 **Statuses:** 202; 400 invalid input; 401/403 access/admission; 404 Page missing; 409 base/submission conflict; 429 request bounds; 500 storage failure; 503 disabled engine.
+
+Schema3 supports canonical HTTP(S) links (only `href`, no credentials,2048UTF8 bytes), mutually exclusive inline code, and plain `codeBlock` with stable ID. Schema1/2 remain closed to marks/code blocks; private images require a later schema4. Both visible and retained/deleted Yjs formatting are validated. Semantic agent replacement inserts plain text and preserves marks/identities outside the authorized edit; only paragraphs/headings are agent targets. Code blocks may receive human comments, but are not selected agent targets. Go authenticates private full-tree before/after proofs against every stored subtree hash and original scope before commit; each proof is capped500000UTF8 bytes within the existing3MiB private body limit. Oversized proof denial creates no revision or receipt.
+
+Checkpoint reads and restores retain the actual source schema1/2/3. Restore rotates generation/epoch, and an earlier selection remains bound to its original revision/schema. Markdown preserves supported link/code syntax with contextual table escaping; inline code containing line breaks and code blocks inside tables return422 with an explicit unsupported-export report. There is no silent flattening or image/export-parity claim.
