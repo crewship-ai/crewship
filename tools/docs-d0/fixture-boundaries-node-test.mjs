@@ -15,6 +15,8 @@ test('fixture network recipients require canonical numeric loopback origins', ()
   assert.equal(loopbackOrigin('http://127.0.0.1:12345'), 'http://127.0.0.1:12345');
   for (const bad of ['https://127.0.0.1:80', 'http://localhost:80', 'http://127.1:80', 'http://[::1]:80', 'http://example.test:80', 'http://127.0.0.1:65536', 'http://127.0.0.1:0', 'http://x@127.0.0.1:80', 'http://127.0.0.1:80/', 'http://127.0.0.1:80?q=1']) assert.throws(() => loopbackOrigin(bad));
   for (const path of ['//example.test', '/\\example.test', 'http://example.test', '/a\r\nX: y']) assert.throws(() => fixtureURL('http://127.0.0.1:12345', path));
+  assert.equal(fixtureURL('http://127.0.0.1:80', '/state'), 'http://127.0.0.1/state');
+  assert.equal(fixtureURL('http://127.0.0.1:65535', '/state'), 'http://127.0.0.1:65535/state');
   assert.equal(fixtureURL('http://127.0.0.1:12345', '/state'), 'http://127.0.0.1:12345/state');
 });
 test('redirect refusal prevents fixture credentials reaching a redirected recipient', async t => {

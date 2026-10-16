@@ -6,6 +6,8 @@ import WebSocket from 'ws';
 import { fixtureWebSocketURL } from './fixture-boundaries.mjs';
 
 test('fixture WebSocket recipient is fixed numeric loopback and cannot follow redirects', async t => {
+  assert.equal(fixtureWebSocketURL('http://127.0.0.1:80'), 'ws://127.0.0.1:80/ws');
+  assert.equal(fixtureWebSocketURL('http://127.0.0.1:65535'), 'ws://127.0.0.1:65535/ws');
   assert.equal(fixtureWebSocketURL('http://127.0.0.1:1234'), 'ws://127.0.0.1:1234/ws');
   for (const origin of ['http://example.test:1234', 'http://localhost:1234', 'http://127.0.0.1:1234/foreign', 'ws://127.0.0.1:1234']) {
     assert.throws(() => fixtureWebSocketURL(origin));

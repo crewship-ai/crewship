@@ -13,11 +13,12 @@ export function fixtureURL(origin, path) {
   const base = loopbackOrigin(origin);
   if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || /[\\\r\n]/.test(path)) throw new Error('local fixture path required');
   const url = new URL(path, base);
-  if (url.origin !== base) throw new Error('fixture origin changed');
+  if (url.origin !== new URL(base).origin) throw new Error('fixture origin changed');
   return url.href;
 }
 export function fixtureWebSocketURL(origin) {
-  const port = Number(new URL(loopbackOrigin(origin)).port);
+  const base = loopbackOrigin(origin);
+  const port = Number(base.slice(base.lastIndexOf(':') + 1));
   return `ws://127.0.0.1:${port}/ws`;
 }
 export function fixtureFetch(origin, path, options = {}) {
