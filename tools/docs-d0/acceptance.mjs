@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
-import { loopbackOrigin, fixtureFetch, parseFixture, fixtureLog, evidenceRun, writeEvidence, boundedLog, redactFixture } from './fixture-boundaries.mjs';
+import { loopbackOrigin, fixtureFetch, fixtureWebSocketURL, parseFixture, fixtureLog, evidenceRun, writeEvidence, boundedLog, redactFixture } from './fixture-boundaries.mjs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { chromium } from '@playwright/test';
@@ -223,7 +223,7 @@ try {
   });
   await scenario('agent raw CRDT transport is rejected', async () => {
     const before = await state();
-    const ws = new WebSocket(loopbackOrigin(url).replace('http:', 'ws:') + '/ws');
+    const ws = new WebSocket(fixtureWebSocketURL(url), { followRedirects: false });
     await once(ws, 'open');
     const closed = once(ws, 'close'); ws.send(JSON.stringify({ kind: 'auth', token: f.agent, schema: 1 }));
     await Promise.race([closed, pause(3000).then(() => { throw new Error('agent socket accepted'); })]);
