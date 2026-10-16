@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Chat shows advisory configured-model payer, budget and gate details above the composer after a current viewer/chat profile check.
 - **Decision drafts retain focus during access rechecks.** Typing and caret position survive temporary verification outages; sending waits for verified access and explicit source-version review, while uncertain submitted responses remain locked for exact retry.
 
 - **Guest intake changes and deletion preserve active routine work.** Queued, running and waiting runs still block changes after their issue execution becomes superseded; completed runs do not. Rejected deletion keeps the issue and execution intact.
