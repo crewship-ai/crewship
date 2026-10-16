@@ -2,7 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
 const menuAccess = vi.hoisted(() => ({ mode: "trusted" as "trusted" | "restricted" | "loading", api: vi.fn() }))
-vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => menuAccess.mode }))
+vi.mock("@/hooks/use-access-mode", () => ({
+  useAccessMode: () => menuAccess.mode,
+  useRestrictedSurfaces: () => menuAccess.mode === "trusted" ? null : menuAccess.mode === "restricted" ? ["account_security"] : [],
+  useTrustedWorkspaceId: () => menuAccess.mode === "trusted" ? "ws-test" : null,
+}))
 
 // Radix DropdownMenu relies on pointer-capture + scrollIntoView, which
 // happy-dom doesn't implement. Polyfill them so the menu can open in the
