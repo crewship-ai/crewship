@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -101,7 +102,7 @@ func TestActualExportImageLifecycle(t *testing.T) {
 			go func() { _, e := r.Run(runCtx, raw, b); done <- e }()
 			if mode == "hold" {
 				intent := waitActualIntent(t, r, true)
-				profile := verifyActualIsolation(t, intent.ContainerID)
+				profile := verifyActualIsolation(t, intent.ContainerID, fixtureImage)
 				results["actual_isolation"] = profile
 				stop()
 			}
@@ -278,20 +279,31 @@ func waitActualIntent(t *testing.T, r *Runner, running bool) cleanupIntent {
 		}
 	}
 }
-func verifyActualIsolation(t *testing.T, id string) map[string]any {
+func verifyActualIsolation(t *testing.T, id, image string) map[string]any {
 	t.Helper()
+	type mount struct {
+		Type, Source, Destination string
+		RW                        bool
+	}
+	type ulimit struct {
+		Name       string
+		Hard, Soft int64
+	}
 	var rows []struct {
+		Image  string
+		Mounts []mount
 		Config struct {
-			User string
-			Cmd  []string
+			User            string
+			Cmd, Entrypoint []string
 		}
 		HostConfig struct {
 			NetworkMode                             string
-			ReadonlyRootfs                          bool
-			CapDrop                                 []string
-			SecurityOpt                             []string
+			ReadonlyRootfs, Init                    bool
+			CapDrop, SecurityOpt, Binds             []string
+			Mounts                                  []mount
 			Memory, MemorySwap, NanoCpus, PidsLimit int64
 			Tmpfs                                   map[string]string
+			Ulimits                                 []ulimit
 			LogConfig                               struct{ Type string }
 		}
 	}
@@ -299,8 +311,57 @@ func verifyActualIsolation(t *testing.T, id string) map[string]any {
 		t.Fatal("actual isolation inspection")
 	}
 	x := rows[0]
-	if x.Config.User != "1001:1001" || x.HostConfig.NetworkMode != "none" || !x.HostConfig.ReadonlyRootfs || x.HostConfig.Memory != 1<<30 || x.HostConfig.MemorySwap != 1<<30 || x.HostConfig.NanoCpus != 1e9 || x.HostConfig.PidsLimit != 64 || x.HostConfig.LogConfig.Type != "none" || !strings.Contains(strings.Join(x.HostConfig.CapDrop, ","), "ALL") || !strings.Contains(strings.Join(x.HostConfig.SecurityOpt, ","), "no-new-privileges") || !strings.Contains(x.HostConfig.Tmpfs["/tmp"], "noexec") || !strings.Contains(strings.Join(x.Config.Cmd, " "), "--max-old-space-size=512") {
+	expectedCmd := []string{"--signal=KILL", "120s", "node", "--max-old-space-size=512", "/opt/slides-export/entry.mjs", "report", ""}
+	if x.Image != image || !reflect.DeepEqual(x.Config.Entrypoint, []string{"timeout"}) || !reflect.DeepEqual(x.Config.Cmd, expectedCmd) {
+		t.Fatal("actual immutable image or fixed entrypoint differs")
+	}
+	if x.Config.User != "1001:1001" || x.HostConfig.NetworkMode != "none" || !x.HostConfig.ReadonlyRootfs || !x.HostConfig.Init || x.HostConfig.Memory != 1<<30 || x.HostConfig.MemorySwap != 1<<30 || x.HostConfig.NanoCpus != 1e9 || x.HostConfig.PidsLimit != 64 || x.HostConfig.LogConfig.Type != "none" || !reflect.DeepEqual(x.HostConfig.CapDrop, []string{"ALL"}) || !reflect.DeepEqual(x.HostConfig.SecurityOpt, []string{"no-new-privileges"}) {
 		t.Fatal("actual container profile differs from approved limits")
 	}
-	return map[string]any{"user": x.Config.User, "network": x.HostConfig.NetworkMode, "readonly": x.HostConfig.ReadonlyRootfs, "memory": x.HostConfig.Memory, "memory_swap": x.HostConfig.MemorySwap, "nano_cpus": x.HostConfig.NanoCpus, "pids": x.HostConfig.PidsLimit, "cap_drop": x.HostConfig.CapDrop, "security_opt": x.HostConfig.SecurityOpt, "tmpfs": x.HostConfig.Tmpfs, "logs": x.HostConfig.LogConfig.Type}
+	if len(x.HostConfig.Binds) != 0 {
+		t.Fatal("unexpected host bind")
+	}
+	for _, mounts := range [][]mount{x.Mounts, x.HostConfig.Mounts} {
+		if len(mounts) > 1 {
+			t.Fatal("unexpected mount count")
+		}
+		for _, m := range mounts {
+			if m.Type != "tmpfs" || m.Source != "" || m.Destination != "/tmp" || !m.RW {
+				t.Fatal("unexpected mount")
+			}
+		}
+	}
+	if len(x.HostConfig.Tmpfs) != 1 {
+		t.Fatal("unexpected tmpfs count")
+	}
+	opts := map[string]string{}
+	for _, part := range strings.Split(x.HostConfig.Tmpfs["/tmp"], ",") {
+		key, value, _ := strings.Cut(part, "=")
+		if _, ok := opts[key]; ok {
+			t.Fatal("duplicate tmpfs option")
+		}
+		opts[key] = value
+	}
+	if len(opts) != 8 || (opts["size"] != "32m" && opts["size"] != "33554432") || opts["uid"] != "1001" || opts["gid"] != "1001" || (opts["mode"] != "0700" && opts["mode"] != "700") {
+		t.Fatal("actual tmpfs ceiling/ownership differs")
+	}
+	for _, required := range []string{"rw", "nosuid", "nodev", "noexec"} {
+		if value, ok := opts[required]; !ok || value != "" {
+			t.Fatal("missing tmpfs isolation", required)
+		}
+	}
+	limits := map[string]int64{}
+	for _, u := range x.HostConfig.Ulimits {
+		if u.Hard != u.Soft {
+			t.Fatal("asymmetric ulimit")
+		}
+		if _, ok := limits[u.Name]; ok {
+			t.Fatal("duplicate ulimit")
+		}
+		limits[u.Name] = u.Hard
+	}
+	if len(limits) != 2 || limits["nofile"] != 256 || limits["fsize"] != 64<<20 {
+		t.Fatal("actual file ceilings differ")
+	}
+	return map[string]any{"image": x.Image, "entrypoint": x.Config.Entrypoint, "command": x.Config.Cmd, "user": x.Config.User, "network": x.HostConfig.NetworkMode, "readonly": x.HostConfig.ReadonlyRootfs, "init": x.HostConfig.Init, "memory": x.HostConfig.Memory, "memory_swap": x.HostConfig.MemorySwap, "nano_cpus": x.HostConfig.NanoCpus, "pids": x.HostConfig.PidsLimit, "cap_drop": x.HostConfig.CapDrop, "security_opt": x.HostConfig.SecurityOpt, "tmpfs": x.HostConfig.Tmpfs, "ulimits": limits, "bind_count": len(x.HostConfig.Binds), "mounts": x.Mounts, "logs": x.HostConfig.LogConfig.Type}
 }
