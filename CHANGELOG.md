@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Dependency updates now build and package together.** Refresh the frontend, Go and CI dependencies, explicitly declare lockfile version changes, and retain the version-scoped license inventory.
+- ⚠️ **Behaviour change: crash reporting uses Sentry v11.** Self-hosted Sentry must be 26.4.2 or newer. Browser, Node and Edge initialization disable collection of user identifiers, request metadata, AI content and other payload data. Browser release-health sessions stay off and telemetry consent remains required.
+
 ### Fixed
 - **Personal memory withdrawal stays inside its workspace.** A guest invitation or restricted-membership change no longer erases saved preferences in another workspace. Local withdrawn preferences remain forgotten; previously erased values cannot be reconstructed. Clearing all preferences also works for agents without a crew.
 - **Chat drafts survive temporary access-check outages.** Network errors and server failures keep the last verified cards mounted as rechecking with writes disabled. Explicit access denial still clears protected data and cannot be undone by another failed check.
