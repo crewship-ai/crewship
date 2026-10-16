@@ -46,7 +46,7 @@ func TestCaptureDoesNotExposeReaderFromAndPolicyIsFixed(t *testing.T) {
 		t.Fatal("capture limit bypassed")
 	}
 	args := strings.Join(createArgs("owned", "token", "unit", "sha256:"+strings.Repeat("a", 64), "report", ""), " ")
-	for _, required := range []string{"--pull=never", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--user=1001:1001", "--memory=1g", "--memory-swap=1g", "--pids-limit=64", "--cpus=1", "--log-driver=none", "--signal=KILL 120s", "--max-old-space-size=512"} {
+	for _, required := range []string{"crewship.instance-id=unit", "--pull=never", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--user=1001:1001", "--memory=1g", "--memory-swap=1g", "--pids-limit=64", "--cpus=1", "--log-driver=none", "--signal=KILL 120s", "--max-old-space-size=512"} {
 		if !strings.Contains(args, required) {
 			t.Fatal("missing isolation", required)
 		}

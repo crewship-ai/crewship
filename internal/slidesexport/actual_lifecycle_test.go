@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
 const maliciousEntry = `import {readFile} from 'node:fs/promises';
@@ -212,6 +214,8 @@ exec "$CREWSHIP_TEST_ACTUAL_DOCKER" "$@"
 		t.Fatal("unrelated owned foreign fixture did not survive", e)
 	}
 	results["foreign_container_survived"] = true
+	results["foreign_instance_survived"] = true
+	results["foreign_instance_owner"] = foreign.OwnerID
 	evidence := os.Getenv("CREWSHIP_TEST_SLIDES_EXPORT_EVIDENCE")
 	if evidence == "" {
 		t.Fatal("owned evidence directory required")
@@ -294,6 +298,7 @@ func verifyActualIsolation(t *testing.T, id, image string) map[string]any {
 		Mounts []mount
 		Config struct {
 			User, WorkingDir string
+			Labels           map[string]string
 			Cmd, Entrypoint  []string
 		}
 		HostConfig struct {
@@ -315,7 +320,7 @@ func verifyActualIsolation(t *testing.T, id, image string) map[string]any {
 	if x.Image != image || !reflect.DeepEqual(x.Config.Entrypoint, []string{"timeout"}) || !reflect.DeepEqual(x.Config.Cmd, expectedCmd) {
 		t.Fatal("actual immutable image or fixed entrypoint differs")
 	}
-	if x.Config.WorkingDir != "/tmp" || x.Config.User != "1001:1001" || x.HostConfig.NetworkMode != "none" || !x.HostConfig.ReadonlyRootfs || !x.HostConfig.Init || x.HostConfig.Memory != 1<<30 || x.HostConfig.MemorySwap != 1<<30 || x.HostConfig.NanoCpus != 1e9 || x.HostConfig.PidsLimit != 64 || x.HostConfig.LogConfig.Type != "none" || !reflect.DeepEqual(x.HostConfig.CapDrop, []string{"ALL"}) || !reflect.DeepEqual(x.HostConfig.SecurityOpt, []string{"no-new-privileges"}) {
+	if x.Config.Labels[resourcelifecycle.InstanceLabel] != "actual_ci" || x.Config.Labels["crewship.slides.export.owner"] != "actual_ci" || x.Config.WorkingDir != "/tmp" || x.Config.User != "1001:1001" || x.HostConfig.NetworkMode != "none" || !x.HostConfig.ReadonlyRootfs || !x.HostConfig.Init || x.HostConfig.Memory != 1<<30 || x.HostConfig.MemorySwap != 1<<30 || x.HostConfig.NanoCpus != 1e9 || x.HostConfig.PidsLimit != 64 || x.HostConfig.LogConfig.Type != "none" || !reflect.DeepEqual(x.HostConfig.CapDrop, []string{"ALL"}) || !reflect.DeepEqual(x.HostConfig.SecurityOpt, []string{"no-new-privileges"}) {
 		t.Fatal("actual container profile differs from approved limits")
 	}
 	if len(x.HostConfig.Binds) != 0 {
@@ -363,5 +368,5 @@ func verifyActualIsolation(t *testing.T, id, image string) map[string]any {
 	if len(limits) != 2 || limits["nofile"] != 256 || limits["fsize"] != 64<<20 {
 		t.Fatal("actual file ceilings differ")
 	}
-	return map[string]any{"image": x.Image, "entrypoint": x.Config.Entrypoint, "command": x.Config.Cmd, "user": x.Config.User, "working_dir": x.Config.WorkingDir, "network": x.HostConfig.NetworkMode, "readonly": x.HostConfig.ReadonlyRootfs, "init": x.HostConfig.Init, "memory": x.HostConfig.Memory, "memory_swap": x.HostConfig.MemorySwap, "nano_cpus": x.HostConfig.NanoCpus, "pids": x.HostConfig.PidsLimit, "cap_drop": x.HostConfig.CapDrop, "security_opt": x.HostConfig.SecurityOpt, "tmpfs": x.HostConfig.Tmpfs, "ulimits": limits, "bind_count": len(x.HostConfig.Binds), "mounts": x.Mounts, "logs": x.HostConfig.LogConfig.Type}
+	return map[string]any{"image": x.Image, "entrypoint": x.Config.Entrypoint, "command": x.Config.Cmd, "user": x.Config.User, "working_dir": x.Config.WorkingDir, "instance_owner": x.Config.Labels[resourcelifecycle.InstanceLabel], "network": x.HostConfig.NetworkMode, "readonly": x.HostConfig.ReadonlyRootfs, "init": x.HostConfig.Init, "memory": x.HostConfig.Memory, "memory_swap": x.HostConfig.MemorySwap, "nano_cpus": x.HostConfig.NanoCpus, "pids": x.HostConfig.PidsLimit, "cap_drop": x.HostConfig.CapDrop, "security_opt": x.HostConfig.SecurityOpt, "tmpfs": x.HostConfig.Tmpfs, "ulimits": limits, "bind_count": len(x.HostConfig.Binds), "mounts": x.Mounts, "logs": x.HostConfig.LogConfig.Type}
 }
