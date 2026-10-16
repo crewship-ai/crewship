@@ -43,7 +43,14 @@ jobs:
           image="$(cat "$RUNNER_TEMP/slides-export-image-id")"
           [[ "$image" =~ ^sha256:[a-f0-9]{64}$ ]]
           echo "image=$image" >> "$GITHUB_OUTPUT"
+      - name: Exercise actual pinned converter image
+        timeout-minutes: 6
+        env:
+          CREWSHIP_TEST_SLIDES_EXPORT_IMAGE: ${{ steps.build.outputs.image }}
+          CREWSHIP_TEST_SLIDES_EXPORT_EVIDENCE: ${{ runner.temp }}/slides-export-evidence
+        run: go test -tags=slides_export_runtime ./internal/slidesexport -run '^TestActualExportImageCorpus$' -count=1 -v -timeout 5m
       - name: Scan the exact built image
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         timeout-minutes: 5
         with:
@@ -51,12 +58,6 @@ jobs:
           fail-build: true
           severity-cutoff: critical
           output-format: table
-      - name: Exercise actual pinned converter image
-        timeout-minutes: 6
-        env:
-          CREWSHIP_TEST_SLIDES_EXPORT_IMAGE: ${{ steps.build.outputs.image }}
-          CREWSHIP_TEST_SLIDES_EXPORT_EVIDENCE: ${{ runner.temp }}/slides-export-evidence
-        run: go test -tags=slides_export_runtime ./internal/slidesexport -run '^TestActualExportImageCorpus$' -count=1 -v -timeout 5m
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         timeout-minutes: 3

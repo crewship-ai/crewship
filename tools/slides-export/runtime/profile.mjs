@@ -13,7 +13,7 @@ export async function checkedProfile() {
  return { manifest, fingerprint: sha('crewship-slides-export-profile/v1\n' + JSON.stringify(stable(manifest))) };
 }
 async function generate() {
- const manifest = { protocol_version: 1, base_image: 'node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e', admission_sha256: sha(await readFile(resolve(root, '../../../internal/slidesexport/input.go'))), license_generator_sha256: sha(await readFile(resolve(root, '../../../scripts/gen-frontend-licenses.mjs'))), files: [] };
+ const manifest = { protocol_version: 1, base_image: 'node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315', admission_sha256: sha(await readFile(resolve(root, '../../../internal/slidesexport/input.go'))), license_generator_sha256: sha(await readFile(resolve(root, '../../../scripts/gen-frontend-licenses.mjs'))), files: [] };
  for (const path of names.sort()) { const bytes = await readFile(join(root, path)); manifest.files.push({ path, bytes: bytes.length, sha256: sha(bytes) }); }
  await writeFile(join(root, 'profile.json'), JSON.stringify(stable(manifest), null, 2) + '\n');
 }

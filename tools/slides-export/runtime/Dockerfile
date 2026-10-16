@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS build
+FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS build
 WORKDIR /opt/slides-export
 RUN corepack enable && corepack prepare pnpm@10.11.0 --activate
 COPY tools/slides-export/runtime/package.json tools/slides-export/runtime/pnpm-lock.yaml tools/slides-export/runtime/pnpm-workspace.yaml ./
@@ -12,7 +12,7 @@ RUN node profile.mjs --verify-admission /tmp/export-admission.go \
     && node profile.mjs --verify-license-generator /tmp/export-license-generator.mjs \
     && node /tmp/export-license-generator.mjs /licenses
 
-FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
+FROM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315
 COPY --from=build /opt/slides-export /opt/slides-export
 COPY --from=build /licenses /usr/share/doc/crewship-slides-export/licenses
 USER 1001:1001

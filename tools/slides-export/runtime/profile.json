@@ -1,11 +1,11 @@
 {
   "admission_sha256": "ebfca3c965222aa2814e3076d47136ca377d188d81b5f0f499cd7c47d72be6d7",
-  "base_image": "node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e",
+  "base_image": "node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315",
   "files": [
     {
-      "bytes": 1596,
+      "bytes": 1592,
       "path": "Dockerfile",
-      "sha256": "5808c799dcfb64917390bf1ebc62dcdfa633f7dc8b18f790d3951e4f845110d6"
+      "sha256": "aa2cd5213e98956b4d651b9f188700ceadb185223ba3085ef18292b55f818032"
     },
     {
       "bytes": 2400,
@@ -48,9 +48,9 @@
       "sha256": "8c7e50577a9f9ae3a0e1ac322824f3c34903df252fd5c6ab712267f6a8791dba"
     },
     {
-      "bytes": 2729,
+      "bytes": 2727,
       "path": "profile.mjs",
-      "sha256": "c2ecab907d70e0df812eb2e91918715489a9507319d2c5a515e08df83ab29f62"
+      "sha256": "86449be848b1e3be74c5c0648ac6838b25266d936305ebff35ce70eb1eb2b03f"
     },
     {
       "bytes": 14957,
