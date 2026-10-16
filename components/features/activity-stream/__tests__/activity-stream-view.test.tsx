@@ -31,7 +31,7 @@ const mock = vi.hoisted(() => ({
   work: vi.fn<(p: ComponentProps<typeof ActivityWorkPage>) => React.ReactNode>(),
   row: vi.fn<(p: ComponentProps<typeof FeedRow>) => React.ReactNode>(),
 }))
-vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search) }))
+vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search), usePathname: () => window.location.pathname }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mock.mobile }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: mock.fetch }))
 vi.mock("@/hooks/use-journal-list", () => ({ useJournalList: mock.list }))
@@ -54,6 +54,7 @@ vi.mock("../activity-work-page", () => ({ ActivityWorkPage: mock.work }))
 vi.mock("../activity-rail-focus", () => ({ RailRoutineFocus: () => null }))
 vi.mock("../feed-row", () => ({ FeedRow: mock.row }))
 import { ActivityStreamView } from "../activity-stream-view"
+import { useAppStore } from "@/lib/store"
 import { EMPTY_FACETS } from "../activity-sidebar"
 const event = (id: string, extra: Partial<JournalEntry> = {}): JournalEntry => ({ id, workspace_id: "ws", ts: "2026-10-02T20:00:00Z", entry_type: "run.completed", severity: "info", actor_type: "system", summary: id, ...extra })
 const entries = [event("e1", { crew_id: "c1", agent_id: "a1", mission_id: "m1", payload: { run_id: "r1", pipeline_slug: "triage", step_id: "step1" } }), event("e2", { payload: { run_id: "r2", routine_slug: "other", step: "step2" } })]
@@ -70,13 +71,15 @@ const listState = (over: Record<string, unknown> = {}) => ({ entries, loading: f
 const show = () => render(<ActivityStreamView workspaceId="ws & a" />)
 beforeEach(() => {
   vi.clearAllMocks(); mock.mobile = false
+  try { window.localStorage.removeItem("crewship.pref.panel.activity.collapsed") } catch { /* no storage */ }
+  useAppStore.getState().setSecondaryPanelOpen(false)
   window.history.replaceState(null, "", "/activity")
   mock.list.mockReturnValue(listState())
   mock.stream.mockReturnValue({ status: "connected" })
   mock.chains.mockReturnValue({ chains: [chain, agentChain, workChain], hasUnrecordedRuns: false, hasMore: false, error: null, refresh: mock.refreshChains })
   mock.lookup.mockReturnValue(lookup)
   mock.fetch.mockImplementation(async () => new Response(JSON.stringify({ missions: [{ id: "m1", title: "Fix", status: "IN_PROGRESS", priority: "high" }] })))
-  mock.sidebar.mockImplementation((p) => <aside><input aria-label="Activity search" value={p.search} onChange={(e) => p.onSearchChange(e.target.value)} /><button onClick={p.onToggleCollapse}>Hide rail</button></aside>)
+  mock.sidebar.mockImplementation((p) => <div><input aria-label="Activity search" value={p.search} onChange={(e) => p.onSearchChange(e.target.value)} /></div>)
   mock.home.mockImplementation(() => <div>Activity home</div>)
   mock.detail.mockImplementation((p) => <div>Record {p.entry.id}<button onClick={p.onBack}>Close record</button></div>)
   mock.workflow.mockImplementation((p) => <div>Workflow {p.chain.origin}</div>)
@@ -218,12 +221,27 @@ it("renders loading and errors as such and retries a failed journal read", () =>
   fireEvent.click(screen.getByRole("button", { name: "Try again" }))
   expect(mock.refresh).toHaveBeenCalledOnce()
 })
-it("starts mobile filters closed and closes their overlay", () => {
-  mock.mobile = true; show()
-  fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }))
-  expect(screen.getByRole("textbox", { name: "Activity search" })).toBeVisible()
-  fireEvent.click(screen.getByRole("button", { name: "Close filters" }))
+// Harbor 2 M3 (#3350): the rail is the section's SecondaryPanel.
+it("puts the rail in the activity SecondaryPanel, which collapses it", () => {
+  show()
+  const panel = document.querySelector("[data-slot=secondary-panel]")!
+  expect(panel).toHaveAttribute("data-panel-id", "activity")
+  expect(within(panel as HTMLElement).getByRole("textbox", { name: "Activity search" })).toBeVisible()
+  fireEvent.click(screen.getByRole("button", { name: "Hide Activity views" }))
+  expect(panel).toHaveAttribute("data-collapsed", "true")
   expect(screen.queryByRole("textbox", { name: "Activity search" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Show Activity views" }))
+  expect(screen.getByRole("textbox", { name: "Activity search" })).toBeVisible()
+})
+it("on a phone keeps the rail in the panel sheet, closed until asked and closed again by a pick", () => {
+  mock.mobile = true; show()
+  expect(document.querySelector("[data-slot=secondary-panel]")).toBeNull()
+  expect(screen.queryByRole("textbox", { name: "Activity search" })).toBeNull()
+  act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+  const sheet = screen.getByRole("dialog", { name: "Activity views" })
+  expect(within(sheet).getByRole("textbox", { name: "Activity search" })).toBeInTheDocument()
+  act(() => sidebar().onOpenEntity("issue", "m1", "m1"))
+  expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
 })
 
 it("walks from workflow through named nodes, back, and breadcrumb jumps", () => {
@@ -326,7 +344,8 @@ it("uses the same narrowed chain index for sidebar and lens overview", () => {
 })
 it.each(["array", "http", "network"])("handles %s issue metadata responses", async (kind) => {
   if (kind === "network") mock.fetch.mockRejectedValue(new Error("offline"))
-  else mock.fetch.mockResolvedValue(new Response(JSON.stringify(kind === "array" ? [{ id: "new" }] : {}), { status: kind === "http" ? 503 : 200 }))
+  // A fresh body per call: the panel's preference read shares this fetch.
+  else mock.fetch.mockImplementation(async () => new Response(JSON.stringify(kind === "array" ? [{ id: "new" }] : {}), { status: kind === "http" ? 503 : 200 }))
   show()
   await act(async () => {})
   expect(sidebar().issues).toEqual(kind === "array" ? [{ id: "new" }] : [])

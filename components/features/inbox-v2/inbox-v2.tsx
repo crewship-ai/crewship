@@ -9,7 +9,7 @@ import { toast } from "sonner"
 import type { WorkspaceRole } from "@/components/features/inbox/inbox-derive"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { SubBar } from "@/components/layout/sub-bar"
 import { useApprovals, decideApproval } from "@/hooks/use-approvals"
 import { useInbox, useInboxItem } from "@/hooks/use-inbox"
@@ -19,7 +19,6 @@ import { apiFetch } from "@/lib/api-fetch"
 import { inboxBulk } from "@/lib/api/inbox"
 import { isAdminTier } from "@/lib/permissions/tiers"
 import type { Mission } from "@/lib/types/mission"
-import { cn } from "@/lib/utils"
 
 import {
   approvalEntry, EMPTY_INBOX_V2_FILTERS, INBOX_V2_TYPES,
@@ -53,7 +52,7 @@ export function InboxV2() {
   const [selectedKey, setSelectedKey] = useState<string | null>(requestedID ? `request:${requestedID}` : null)
   const [confirmation, setConfirmation] = useState<InboxV2Confirmation | null>(null)
   const [filters, setFilters] = useState<InboxV2Filters>({ ...EMPTY_INBOX_V2_FILTERS, search: requestedSearch })
-  const [collapsed, setCollapsed] = useState(false)
+  const closePanelSheet = useCloseSecondaryPanelSheet()
   const roster = useInboxLookup(workspaceId)
   const wsStatus = useRealtimeStatusSafe()
   const live = wsStatus === "connected"
@@ -383,45 +382,32 @@ export function InboxV2() {
           </div>
         )}
     <div className="relative flex min-h-0 flex-1 overflow-hidden">
-      {/* Same shell as routines-layout: a collapsible aside, w-9 when shut.
-          The 190px view rail is gone — the views are a facet section inside
-          this one column, the way Routines carries its status buckets. */}
-      <aside
-        className={cn(
-          "shrink-0 overflow-hidden border-r border-border/60 bg-card",
-          // Full width on a phone — a fixed 340px column left a dead strip
-          // beside it, because the reading pane is hidden until a row is
-          // opened. Desktop gives long request titles more room.
-          collapsed ? "w-full lg:w-9" : "w-full lg:w-[350px] xl:w-[374px]",
-          selectedKey && "hidden lg:block",
-        )}
-      >
-        {collapsed && (
-          <div className="hidden h-full flex-col items-center pt-1.5 lg:flex">
-            <SidebarCollapseButton collapsed onToggle={() => setCollapsed(false)} />
-          </div>
-        )}
-        <div className={cn("h-full", collapsed && "lg:hidden")}>
-          <InboxV2Explorer
-            view={view}
-            onView={showView}
-            viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: feeds.history.length }}
-            entries={currentEntries}
-            visible={visible}
-            attention={attention}
-            onClearAttention={() => router.push("/inbox")}
-            filters={filters}
-            onFilters={(next) => { setFilters(next); if (selectedKey) closeEntry() }}
-            selectedKey={displayed?.key ?? null}
-            onOpen={openEntry}
-            onMarkAllRead={!attention && view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
-            onToggleCollapse={() => setCollapsed(true)}
-            lookup={lookup}
-          />
-        </div>
-      </aside>
+      {/* The one SecondaryPanel (Harbor 2, #3350): 272 px, collapse remembered
+          per user, and on a phone a bottom sheet opened from the top bar, so
+          the reading pane is the page at every width. The explorer's kit
+          toolbar becomes the panel toolbar and carries the collapse button;
+          the views are a section inside it, as before. */}
+      <SecondaryPanel id="inbox" label="Inbox views">
+        <InboxV2Explorer
+          view={view}
+          onView={showView}
+          viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: feeds.history.length }}
+          entries={currentEntries}
+          visible={visible}
+          attention={attention}
+          onClearAttention={() => router.push("/inbox")}
+          filters={filters}
+          onFilters={(next) => { setFilters(next); if (selectedKey) closeEntry() }}
+          selectedKey={displayed?.key ?? null}
+          // On a phone the list is a sheet over the detail: close it so the
+          // opened entry shows.
+          onOpen={(entry) => { closePanelSheet(); openEntry(entry) }}
+          onMarkAllRead={!attention && view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
+          lookup={lookup}
+        />
+      </SecondaryPanel>
 
-      <main ref={detailRef} tabIndex={-1} aria-label="Inbox detail" className={cn("min-w-0 flex-1 overflow-y-auto", !selectedKey && "hidden lg:block")}>
+      <main ref={detailRef} tabIndex={-1} aria-label="Inbox detail" className="min-w-0 flex-1 overflow-y-auto">
         {selectedKey && !confirmation && (
           <div className="sticky top-0 z-10 border-b border-border/60 bg-background px-3 py-2">
             <Button variant="ghost" size="sm" onClick={closeEntry}>← Back to inbox</Button>

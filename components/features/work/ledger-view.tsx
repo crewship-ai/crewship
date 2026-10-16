@@ -12,7 +12,7 @@ import * as React from "react"
 import { X } from "lucide-react"
 
 import { TIME_WINDOW_MS, type TimeWindow } from "@/components/features/activity-stream/time-window"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -20,7 +20,6 @@ import { useLedgerDeliveries } from "@/hooks/use-webhook-deliveries"
 import { isTerminalWorkState, useLedgerWork } from "@/hooks/use-work-items"
 import { roleAtLeast } from "@/lib/routine-governance"
 import { relTime } from "@/lib/time"
-import { cn } from "@/lib/utils"
 import {
   LEDGER_TONE_LABEL,
   agentName,
@@ -86,12 +85,9 @@ export function LedgerView({
   const [openWorkId, setOpenWorkId] = React.useState<string | null>(null)
   const [openDeliveryId, setOpenDeliveryId] = React.useState<string | null>(null)
   const isMobile = useIsMobile()
-  const [railCollapsed, setRailCollapsed] = React.useState(false)
-  // On a phone the rail is a drawer over the page; start it closed, as
-  // Activity and the Routines explorer do.
-  React.useEffect(() => {
-    if (isMobile) setRailCollapsed(true)
-  }, [isMobile])
+  // The rail is Activity's SecondaryPanel: collapse is the panel's, and on a
+  // phone it is a sheet from the top bar that starts closed.
+  const closePanelSheet = useCloseSecondaryPanelSheet()
   const { role } = useAbilities()
 
   const from = now - TIME_WINDOW_MS[win]
@@ -102,11 +98,11 @@ export function LedgerView({
   const deliveries = useLedgerDeliveries(workspaceId, since)
   const windowLabel = win === "24h" ? "last 24 h" : "last 7 days"
 
-  // A pick on a phone closes the drawer, so the page it narrowed shows.
+  // A pick on a phone closes the panel sheet, so the page it narrowed shows.
   function picked<T>(set: (v: T) => void) {
     return (v: T) => {
       set(v)
-      if (isMobile) setRailCollapsed(true)
+      closePanelSheet()
     }
   }
 
@@ -239,73 +235,54 @@ export function LedgerView({
 
   return (
     <div className="relative flex min-h-0 flex-1 overflow-hidden">
-      {isMobile && !railCollapsed && (
-        <button
-          type="button"
-          aria-label="Close filters"
-          onClick={() => setRailCollapsed(true)}
-          className="absolute inset-0 z-20 bg-black/50"
-        />
-      )}
-      <aside
-        className={cn(
-          "shrink-0 overflow-hidden border-r border-foreground/[0.06] bg-card transition-all",
-          railCollapsed ? "w-9" : "w-[280px]",
-          isMobile && !railCollapsed && "absolute inset-y-0 left-0 z-30 shadow-2xl",
-        )}
-      >
-        {railCollapsed ? (
-          <div className="flex h-full flex-col items-center pt-1.5">
-            <SidebarCollapseButton collapsed onToggle={() => setRailCollapsed(false)} />
-          </div>
-        ) : (
-          // The rail changes its rows the way it enters a routine focus:
-          // from the right, 12px, 200ms — and again when the ledger switches.
-          <div key={section} className="h-full overflow-y-auto pb-4 animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
-            {section === "work" ? (
-              <WorkRail
-                counts={ledgerCounts(workForCounts)}
-                tone={tone}
-                onTone={picked(setTone)}
-                agents={workAgents}
-                agentId={agentId}
-                onAgent={picked(setAgentId)}
-                families={workFamilies}
-                family={family}
-                onFamily={picked(setFamily)}
-                chips={chips}
-                loading={work.loading}
-                windowLabel={windowLabel}
-                onSection={switchSection}
-                onLeave={onLeave}
-                onCollapse={() => setRailCollapsed(true)}
-              />
-            ) : (
-              <DeliveriesRail
-                counts={{
-                  all: dlvForCounts.length,
-                  accepted: dlvForCounts.filter((d) => deliveryTone(d) === "accepted").length,
-                  ignored: dlvForCounts.filter((d) => deliveryTone(d) === "ignored").length,
-                }}
-                decision={decision}
-                onDecision={picked(setDecision)}
-                endpoints={endpoints}
-                endpointId={agentId}
-                onEndpoint={picked(setAgentId)}
-                families={dlvFamilies}
-                family={family}
-                onFamily={picked(setFamily)}
-                chips={chips}
-                loading={deliveries.loading}
-                windowLabel={windowLabel}
-                onSection={switchSection}
-                onLeave={onLeave}
-                onCollapse={() => setRailCollapsed(true)}
-              />
-            )}
-          </div>
-        )}
-      </aside>
+      {/* Activity's one SecondaryPanel (Harbor 2, #3350): the ledger rail's
+          Back row is the panel toolbar and carries the collapse button; on a
+          phone the rail is a bottom sheet from the top bar. */}
+      <SecondaryPanel id="activity" label="Activity views">
+        {/* The rail changes its rows the way it enters a routine focus:
+            from the right, 12px, 200ms — and again when the ledger switches. */}
+        <div key={section} className="flex min-h-0 flex-1 flex-col animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
+          {section === "work" ? (
+            <WorkRail
+              counts={ledgerCounts(workForCounts)}
+              tone={tone}
+              onTone={picked(setTone)}
+              agents={workAgents}
+              agentId={agentId}
+              onAgent={picked(setAgentId)}
+              families={workFamilies}
+              family={family}
+              onFamily={picked(setFamily)}
+              chips={chips}
+              loading={work.loading}
+              windowLabel={windowLabel}
+              onSection={switchSection}
+              onLeave={onLeave}
+            />
+          ) : (
+            <DeliveriesRail
+              counts={{
+                all: dlvForCounts.length,
+                accepted: dlvForCounts.filter((d) => deliveryTone(d) === "accepted").length,
+                ignored: dlvForCounts.filter((d) => deliveryTone(d) === "ignored").length,
+              }}
+              decision={decision}
+              onDecision={picked(setDecision)}
+              endpoints={endpoints}
+              endpointId={agentId}
+              onEndpoint={picked(setAgentId)}
+              families={dlvFamilies}
+              family={family}
+              onFamily={picked(setFamily)}
+              chips={chips}
+              loading={deliveries.loading}
+              windowLabel={windowLabel}
+              onSection={switchSection}
+              onLeave={onLeave}
+            />
+          )}
+        </div>
+      </SecondaryPanel>
 
       <div key={section} className="flex min-w-0 flex-1 animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
         <div className="min-w-0 flex-1 overflow-y-auto">
