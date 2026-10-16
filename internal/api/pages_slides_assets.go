@@ -12,6 +12,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
+// newSlidesStore is the single human/selected-agent production constructor.
+// Every durable revision, including selected edits that preserve image refs,
+// must execute the same Page asset validation and pinning transaction hook.
+func (h *PageHandler) newSlidesStore() *slides.Store {
+	return slides.New(h.db, slides.Options{OnRevision: h.pinSlideAssets})
+}
+
 // pinSlideAssets runs after the immutable revision INSERT and before receipt and
 // final live credential/Page authorization. Never acquire a blob mutex here:
 // uploads and collection acquire blob lock before DB writer admission. Every live
