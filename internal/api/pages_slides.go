@@ -22,8 +22,27 @@ type slideHTTP struct {
 
 // authorize executes twice under the Store writer fence. Content never supplies
 // the actor, ACL or run scope, including when replaying an acknowledged receipt.
+type slidePermission int
+
+const (
+	slideRead slidePermission = iota
+	slideWrite
+	slideComment
+)
+
 func (h *slideHTTP) authorize(r *http.Request, key slides.Key, write, initialize bool) slides.Authorize {
+	permission := slideRead
+	if write {
+		permission = slideWrite
+	}
+	return h.authorizePermission(r, key, permission, initialize)
+}
+func (h *slideHTTP) authorizePermission(r *http.Request, key slides.Key, permission slidePermission, initialize bool) slides.Authorize {
+	write := permission != slideRead
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
+		if permission < slideRead || permission > slideComment {
+			return "", errSlideAccess
+		}
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		user := UserFromContext(ctx)
 		if user == nil {
@@ -48,7 +67,7 @@ func (h *slideHTTP) authorize(r *http.Request, key slides.Key, write, initialize
 			return "", errSlideAccess
 		}
 		if a, ok := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); ok {
-			if initialize || a.WorkspaceID != key.WorkspaceID || a.HumanUserID != user.ID || h.pages.checkDocumentRunPageScope(ctx, key.PageID, a) != nil || h.pages.checkArtifactRun(ctx, key.PageID, a) != nil {
+			if permission == slideComment || initialize || a.WorkspaceID != key.WorkspaceID || a.HumanUserID != user.ID || h.pages.checkDocumentRunPageScope(ctx, key.PageID, a) != nil || h.pages.checkArtifactRun(ctx, key.PageID, a) != nil {
 				return "", errSlideAccess
 			}
 			// A Doc request is limited to its admitted Doc operations, even if corrupt
@@ -77,7 +96,11 @@ func (h *slideHTTP) authorize(r *http.Request, key slides.Key, write, initialize
 		if initialize && rec.OwnerUserID != user.ID {
 			return "", errSlideAccess
 		}
-		if write {
+		if permission == slideComment {
+			if !h.pages.mayComment(ctx, key.WorkspaceID, user.ID, role, rec) {
+				return "", errSlideAccess
+			}
+		} else if write {
 			if !h.pages.mayEditSpec(ctx, key.WorkspaceID, user.ID, role, rec) {
 				return "", errSlideAccess
 			}

@@ -12,7 +12,7 @@ import (
 // integration must remap image references HERE before this one hash pass.
 // Object IDs and tombstones are stable within the newly namespaced Page.
 func remapSlides(dump *DBDump, idMap map[string]map[string]string) error {
-	for _, table := range []string{"slides_heads", "slides_revisions", "slides_receipts", "slides_object_ids"} {
+	for _, table := range []string{"slides_heads", "slides_revisions", "slides_receipts", "slides_object_ids", "slides_comment_threads", "slides_comment_events", "slides_comment_receipts"} {
 		for _, row := range dump.Tables[table] {
 			for column, anchor := range map[string]string{"workspace_id": "workspaces", "page_id": "pages"} {
 				if old, ok := row[column].(string); ok {
@@ -59,6 +59,9 @@ func remapSlides(dump *DBDump, idMap map[string]map[string]string) error {
 	// immutable revision's mutation ID as a tombstone: replay in a fork gets409,
 	// while an ordinary same-identity restore keeps live-authenticated replay.
 	dump.Tables["slides_receipts"] = nil
+	// Comment replay capabilities are likewise cleared; immutable event mutation
+	// IDs remain historical tombstones in the newly namespaced Page.
+	dump.Tables["slides_comment_receipts"] = nil
 	return nil
 }
 func validateSlidesRestoreRow(table string, row map[string]any) error {
