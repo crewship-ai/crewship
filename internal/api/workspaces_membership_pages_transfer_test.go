@@ -54,6 +54,12 @@ func wmSeedPage(t *testing.T, db *sql.DB, wsID, id, slug, name, ownerUserID, own
 		id, wsID, slug, name, nilIfEmpty(ownerUserID), nilIfEmpty(ownerCrewID)); err != nil {
 		t.Fatalf("seed page %s: %v", id, err)
 	}
+	// Legacy crew-transfer fixtures represent regular application/panel Pages;
+	// private empty staging Pages have separate fail-closed custody coverage.
+	if _, err := db.Exec(`INSERT INTO page_project_drafts(page_id,source_digest,revision,spec_json,updated_at) VALUES(?,?,1,'{}','2026-10-16T00:00:00Z')`, id, strings.Repeat("a", 64)); err != nil {
+		t.Fatal(err)
+	}
+
 }
 
 func wmSeedPanel(t *testing.T, db *sql.DB, id, pageID, ownerCrewID string) {

@@ -293,6 +293,10 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 	if err := departWorkspace(r.Context(), h.db, h.journal, actorID, workspaceID, memberUserID); err != nil {
 		var needsManual *ErrPagesNeedManualTransfer
 		if errors.As(err, &needsManual) {
+			if needsManual.HumanOwnedPages {
+				writeJSON(w, http.StatusConflict, map[string]string{"code": "page_ownership_transfer_required", "error": needsManual.Error()})
+				return
+			}
 			replyError(w, http.StatusConflict, "cannot remove this member: "+err.Error())
 			return
 		}

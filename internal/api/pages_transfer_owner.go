@@ -80,10 +80,14 @@ type pageOwnerTransferResult struct {
 // the caller must refuse the erasure and let a human reassign the page
 // first (e.g. `crewship page grant` / a manual owner change).
 type ErrPagesNeedManualTransfer struct {
-	Pages []string // "slug (name)" for every page that could not be resolved
+	Pages           []string // Regular pages that could not be resolved.
+	HumanOwnedPages bool     // Private output or staging pages require a human successor.
 }
 
 func (e *ErrPagesNeedManualTransfer) Error() string {
+	if e.HumanOwnedPages {
+		return "cannot remove or erase this user: private pages require an explicit human successor; keep the current owner until ownership can be transferred"
+	}
 	return fmt.Sprintf(
 		"cannot erase this user: page(s) %s have no crew that owns their panels and the user belongs to no crew in this workspace — reassign these pages to a crew manually, then retry",
 		strings.Join(e.Pages, ", "))
@@ -149,17 +153,26 @@ func emitPageOwnerTransferJournals(ctx context.Context, j journal.Emitter, wsID,
 // rows, and on the instance route the audit entry). It neither commits nor
 // writes the journal; the caller does both.
 func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID string) ([]pageOwnerTransferResult, error) {
-	type pageRow struct{ id, slug, name string }
+	type pageRow struct {
+		id, slug, name string
+		humanOnly      bool
+	}
 	var pages []pageRow
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, slug, name FROM pages WHERE workspace_id = ? AND owner_user_id = ?`,
+		`SELECT id, slug, name,
+ EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id)
+ OR EXISTS(SELECT 1 FROM page_boards WHERE page_id=pages.id)
+ OR (NOT EXISTS(SELECT 1 FROM page_panels WHERE page_id=pages.id)
+ AND NOT EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=pages.id)
+ AND NOT EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id))
+ FROM pages WHERE workspace_id = ? AND owner_user_id = ?`,
 		wsID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("select user-owned pages: %w", err)
 	}
 	for rows.Next() {
 		var p pageRow
-		if err := rows.Scan(&p.id, &p.slug, &p.name); err != nil {
+		if err := rows.Scan(&p.id, &p.slug, &p.name, &p.humanOnly); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan user-owned page: %w", err)
 		}
@@ -185,8 +198,13 @@ func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID 
 	}
 	var toTransfer []resolvedTransfer
 	var unresolved []string
+	var humanOwnedPages bool
 
 	for _, p := range pages {
+		if p.humanOnly {
+			humanOwnedPages = true
+			continue
+		}
 		crewID, reason, err := resolveTransferTargetCrew(ctx, tx, wsID, p.id, userID)
 		if err != nil {
 			return nil, fmt.Errorf("resolve target crew for page %s: %w", p.slug, err)
@@ -202,12 +220,12 @@ func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID 
 		toTransfer = append(toTransfer, resolvedTransfer{page: p, crewID: crewID, crewName: crewName, reason: reason})
 	}
 
-	if len(unresolved) > 0 {
+	if len(unresolved) > 0 || humanOwnedPages {
 		// Refuse the WHOLE batch — see file header. Rolling back here (via
 		// the deferred tx.Rollback) means pages that DID resolve are not
 		// transferred either; the erasure has to be retried after a human
 		// fixes the unresolved ones.
-		return nil, &ErrPagesNeedManualTransfer{Pages: unresolved}
+		return nil, &ErrPagesNeedManualTransfer{Pages: unresolved, HumanOwnedPages: humanOwnedPages}
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)

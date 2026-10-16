@@ -52,6 +52,7 @@ import (
 
 func (r *Router) registerPageRoutes() {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
+	p.artifactStoragePath = r.storagePath
 	p.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	// Held on the Router so cmd_start can reach THIS instance: it owns the
 	// create/update/delete paths that write wake-gate rules, and the freshness
@@ -110,6 +111,14 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("PUT", "/api/v1/pages/{slug}/panels/{panelId}/data", roleSelf, p.PushData)
 	r.authedMut("PUT", "/api/v1/pages/{slug}/grants", roleSelf, p.PutGrant)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/grants", roleSelf, p.DeleteGrant)
+
+	// Human static HTML initial wire: immutable page_id is required.
+	// openapi: responses 200,400,401,403,404,409,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact", authed(wsCtx(http.HandlerFunc(p.GetArtifact))))
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/revisions", roleSelf, p.PublishArtifact)
+	// openapi: responses 200,201,400,401,403,404,409,413,422,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/restore", roleSelf, p.RestoreArtifact)
 
 	// Folders (#2527, pages_folders.go). Under /page-folders rather than
 	// /pages/folders: `GET /pages/folders/{slug}` and `GET /pages/{slug}/grants`

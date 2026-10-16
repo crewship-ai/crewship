@@ -128,6 +128,8 @@ export interface WirePanel {
 }
 
 export interface WirePage {
+  has_artifact?: boolean
+  has_board?: boolean
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
   /**
@@ -1031,6 +1033,7 @@ function usePagesRealtime(
 
   const channel = pageId ? `page:${pageId}` : null
 
+  useRealtimeEventSafe("page.updated", invalidate)
   useRealtimeEventSafe("page.panel.updated", invalidate)
   useRealtimeEventSafe("realtime.reconnected", invalidate)
   useRealtimeChannelSafe(channel)

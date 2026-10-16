@@ -2,6 +2,8 @@
 
 import { usePageCreationAccess, usePageFolderCreationAccess } from "@/hooks/use-page-creation-access"
 
+import { PageArtifactView } from "./page-artifact"
+import { NewArtifactDialog } from "./new-artifact-dialog"
 import { PageApplicationView } from "./page-application"
 
 /**
@@ -114,6 +116,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const canCreateFolder = usePageFolderCreationAccess(workspaceId)
   const [importing, setImporting] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
+  const [creatingArtifact, setCreatingArtifact] = React.useState(false)
   const [search, setSearch] = React.useState("")
   const [filters, setFilters] = React.useState<PageFilters>(EMPTY_PAGE_FILTERS)
 
@@ -229,7 +232,11 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // rendered its grant and mint forms and fired reads against a Page that is
   // not there. The address is not allowed to reach a state the data does not
   // support.
-  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null
+  const staticPage = !!detail.raw && !detail.error && (detail.raw.has_artifact === true || (
+    !detail.raw.has_board && !detail.raw.has_project && !detail.raw.has_application && detail.raw.owner?.startsWith("user/") && Array.isArray(detail.raw.panels) && detail.raw.panels.length === 0
+  ))
+  const boardPage = detail.raw?.has_board === true
+  const editing = !staticPage && !boardPage && nav.mode === "edit" && selectedSlug != null && detail.page != null
 
   // Application | Panels. The switch lives in the page header beside Edit,
   // because that is where the page is named and where a person looks for
@@ -324,7 +331,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               </div>
             )}
             {selectedSlug && !editing && (
-              <SubBarSecondary icon={MessageSquare} onClick={() => setChatHandoffOpen(true)} disabled={detail.page == null}>
+              <SubBarSecondary icon={MessageSquare} onClick={() => setChatHandoffOpen(true)} disabled={detail.page == null || staticPage || boardPage}>
                 Ask about this Page
               </SubBarSecondary>
             )}
@@ -332,7 +339,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               <SubBarSecondary
                 icon={Share2}
                 onClick={() => nav.openEditor("access")}
-                disabled={detail.page == null}
+                disabled={detail.page == null || staticPage || boardPage}
                 title="Who reaches this Page, who may send it data, and its public links"
               >
                 Share
@@ -342,7 +349,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               <SubBarSecondary
                 icon={Pencil}
                 onClick={() => nav.openEditor()}
-                disabled={detail.page == null}
+                disabled={detail.page == null || staticPage || boardPage}
                 title="Edit this Page's content, data, access and history"
               >
                 Edit
@@ -354,6 +361,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
             </SubBarSecondary>}
+            {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => setCreatingArtifact(true)}>New HTML</SubBarSecondary>}
             {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
             </SubBarPrimary>}
@@ -465,7 +473,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 flex flex-col overflow-hidden"
               >
-                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={
+                {staticPage && detail.raw?.id ? <PageArtifactView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} pageId={detail.raw.id} onDirtyChange={nav.setDirty} /> : boardPage ? <p role="status" className="p-6">This Page contains a Board. Its editor is not available in this release.</p> : <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={
                 <PageView
                   headingRef={viewHeading}
                   page={detail.page}
@@ -482,7 +490,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   // on a live socket, never on a timer of its own (epic #1935).
                   live={detail.live}
                 />
-                } />
+                } />}
               </motion.div>
             ) : (
               <motion.div
@@ -575,6 +583,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
       {/* Only creation opens the document editor from here now. Editing an
           existing Page's document belongs to the editor's Content section,
           beside the panels it changes. */}
+      {creatingArtifact && <NewArtifactDialog workspaceId={workspaceId} onClose={() => setCreatingArtifact(false)} onCreated={saved => { openPage(saved) }} />}
       {creating && (
         <PageEditor
           workspaceId={workspaceId}

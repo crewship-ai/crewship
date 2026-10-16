@@ -51,6 +51,7 @@ public contract here. Superseded a spec? Move it to
 - [Pages](pages.md): panel schemas, freshness, permissions, data model and
   API/CLI surface. Code references its section anchors; preserve them.
   Explicit historical design sections are not claims of current implementation.
+- [Human static HTML](static-artifacts.md): identity-bound human publication, static preview, history, restore and CLI.
 - [Pages Apps](pages-apps.md): custom applications, browser/isolation boundaries
   and remaining acceptance limits.
 - [Project files](project-files.md): immutable, explicitly selected files and

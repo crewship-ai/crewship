@@ -45,6 +45,9 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "PageArtifact", pointer: "/paths/~1api~1v1~1pages~1{slug}~1artifact/get/responses/200/content/application~1json/schema", value: pageArtifactResponse{}},
+	{name: "PageArtifactMutation", pointer: "/paths/~1api~1v1~1pages~1{slug}~1artifact~1revisions/post/responses/201/content/application~1json/schema", value: pageArtifactMutationResponse{}},
+	{name: "PageArtifactRestore", pointer: "/paths/~1api~1v1~1pages~1{slug}~1artifact~1restore/post/responses/200/content/application~1json/schema", value: pageArtifactMutationResponse{}},
 	{name: "RoutineOriginBinding", pointer: "/components/schemas/RoutineOriginBinding", value: routineOriginBindingResponse{}},
 	{name: "FailedIssueMutationJob", pointer: "/components/schemas/FailedIssueMutationJob", value: failedIssueMutationJob{}},
 	{name: "FailedIssueMutationPage", pointer: "/components/schemas/FailedIssueMutationPage", value: failedIssueMutationPage{}},

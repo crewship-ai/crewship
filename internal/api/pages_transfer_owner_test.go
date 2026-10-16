@@ -82,6 +82,12 @@ func (r *pagesTransferRig) seedPage(t *testing.T, id, slug, name, ownerUserID, o
 		id, r.wsID, slug, name, nilIfEmpty(ownerUserID), nilIfEmpty(ownerCrewID)); err != nil {
 		t.Fatalf("seed page %s: %v", id, err)
 	}
+	// These legacy transfer cases exercise regular application/panel pages,
+	// not the newly supported private empty staging Page.
+	if _, err := r.db.Exec(`INSERT INTO page_project_drafts(page_id,source_digest,revision,spec_json,updated_at) VALUES(?, ?,1,'{}','2026-10-16T00:00:00Z')`, id, strings.Repeat("a", 64)); err != nil {
+		t.Fatal(err)
+	}
+
 }
 
 func (r *pagesTransferRig) seedPanel(t *testing.T, id, pageID, ownerCrewID string) {
