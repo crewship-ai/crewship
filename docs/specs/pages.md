@@ -9,6 +9,25 @@ that every feature shipped. The current custom-application contract is
 Internal research, work allocation and session evidence are maintained in
 [private context](../development/private-context.md).
 
+## Stable Page identity resolution
+
+`GET /api/v1/pages/resolve/id/{pageId}?workspace_id=WORKSPACE` resolves the
+original Page ID to `{page_id, slug}` under current human read authority.
+Lookup, exact session/CLI validity, current workspace role, Page grants, real
+panel crew reach and direct leaf-folder ACL share one read transaction. CLI
+scopes need `pages:read` or `pages:*`; write alone does not imply read, and
+legacy unrestricted tokens retain their existing object authority. Credentials
+fail401, scope/membership fail403, and authorized callers receive the same404
+for hidden, missing, deleted or other-workspace identities. Responses are
+no-store and contain no title, folder path, ancestor ID or content.
+
+The endpoint uses two literal segments before the Page ID to avoid an ambiguous
+ServeMux pattern against existing `/pages/{slug}/grants` and related resources.
+Existing Pages named `resolve` or `by-id` keep their slug routes. Rename resolves
+the original identity to its new slug; reusing the old slug never retargets it.
+This resolver is not a stored typed internal link, backlink or content-search
+index. UI link mounting and fixed-revision/element anchors are separate gates.
+
 ## Delivery boundary
 
 **Artifacts and Boards 1.0 use static artifact previews.** The Board drawing editor
