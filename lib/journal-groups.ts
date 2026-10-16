@@ -80,6 +80,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
   peer: [
     "peer.conversation",
     "peer.escalation",
+    "escalation.source_classified",
     "message.broadcast",
     "agent.mentioned",
     "notification.delivered",
@@ -101,6 +102,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "approval.denied",
     "approval.timeout",
     "approval.cancelled",
+    "approval.source_retired",
     "approval.trust_granted",
     "approval.trust_revoked",
     "approval.auto_tuning_reset",

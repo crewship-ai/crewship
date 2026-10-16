@@ -28,6 +28,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// draft with a workspace-scoped save proof; the internal test_run route
 	// serves agent authoring. Neither dispatches a real run; /run does.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
+	pipes.runTokenSecret = r.internalToken
 	pipes.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	pipes.storagePath = r.storagePath
 	// The routine detail's `files` member reads the author crew's shared

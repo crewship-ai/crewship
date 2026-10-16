@@ -80,7 +80,7 @@ Only flags you actually set are sent — passing nothing returns `no fields to u
 | `--name <string>` | Rename the workspace. |
 | `--slug <string>` | Change the slug (URLs flip immediately). |
 | `--language <code>` | Preferred reply language for agents (e.g. `cs`, `en`). Reinforced at the top and bottom of every agent prompt — including chat sessions, assignments, and pipelines — so the agent answers in this language. |
-| `--allow-privileged-credentials` | Allow credentials in a `--privileged` crew despite the UID isolation boundary. Defaults to `false` (fails closed). |
+| `--allow-privileged-credentials` | Allow privileged runtime configuration and credential delivery. Enabling requires an instance administrator with workspace OWNER/ADMIN rights; scoped tokens need `workspace:admin` and `instance:admin`. Defaults to `false` (fails closed). Workspace administrators may disable it. |
 | `--credential-audit-retention-days` | Days of `credential_audit` history to keep. `0` means keep forever. Leave unset to use the 90-day default. |
 | `--audit-log-retention-days` | Days of `audit_logs` history to keep. `0` means keep forever, which is the default — `audit_logs` is the compliance trail and its retention obligation is yours to declare. |
 | `--approvals-retention-days` | Days of decided `approvals_queue` history (approved/denied/timeout/cancelled) to keep. `0` means keep forever. Leave unset to use the 90-day default. A pending approval is never swept regardless of age. Rejected above `106751` days (~292 years) — past that the day count overflows the retention sweep's `int64`-nanosecond cutoff arithmetic. |

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 )
@@ -674,17 +675,20 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 	// counted once in RowsAffected, not twice. See the file header "Why
 	// erase approvals_queue rather than add it to the excluded list" for
 	// why this table is erased at all.
-	res, err = h.db.ExecContext(r.Context(),
-		`DELETE FROM approvals_queue WHERE workspace_id = ? AND (requested_by = ? OR decided_by = ?)`,
-		wsID, targetID, targetID)
+	approvalWriter := h.journal
+	if _, noop := approvalWriter.(noopEmitter); noop {
+		approvalWriter = nil
+	}
+	approvalDeleted, approvalErr := harbormaster.DeleteSources(r.Context(), h.db, approvalWriter, wsID, `(requested_by=? OR decided_by=?)`, targetID, targetID)
+	err = approvalErr
 	if err != nil {
 		h.logger.Warn("gdpr delete: approvals_queue delete failed",
 			"action_id", actionID, "err", err)
 		if firstErr == nil {
 			firstErr = err
 		}
-	} else if n, _ := res.RowsAffected(); n > 0 {
-		scope.ApprovalsQueue = int(n)
+	} else if approvalDeleted > 0 {
+		scope.ApprovalsQueue = int(approvalDeleted)
 	}
 
 	// 5) user_models: the operator model — the one surface holding the

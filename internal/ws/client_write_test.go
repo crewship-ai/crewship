@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -173,4 +174,50 @@ func TestEntityInvalidationDeliveryRechecksTrustedAudience(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriteFrameRechecksSuspendedAccountOnBroadChannels(t *testing.T) {
+	db := seededDB(t)
+	hub := newRunningHub(t)
+	hub.SetChannelAuthorizer(NewDBChannelAuthorizer(db))
+	client := &Client{hub: hub, conn: dialDeliverySink(t), userID: "u-good", ctx: context.Background()}
+	frames := [][]byte{
+		[]byte(`{"type":"update","channel":"workspace:ws-1","payload":{}}`),
+		[]byte(`{"type":"update","channel":"providers:global","payload":{}}`),
+		[]byte(`{"type":"pong"}`),
+	}
+	for _, frame := range frames {
+		if !client.writeFrame(frame) {
+			t.Fatal("active account denied")
+		}
+	}
+	if _, err := db.Exec(`UPDATE users SET suspended_at='' WHERE id='u-good'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, frame := range frames {
+		if client.writeFrame(frame) {
+			t.Fatal("queued update delivered after account suspension")
+		}
+	}
+}
+
+// Multiple valid frames need a peer that keeps reading instead of treating the
+// first frame as an upgrade-authentication message.
+func dialDeliverySink(t *testing.T) *websocket.Conn {
+	t.Helper()
+	server := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
+		defer connection.Close()
+		_, _ = io.Copy(io.Discard, connection)
+	}))
+	t.Cleanup(server.Close)
+	endpoint, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := websocket.Dial("ws://"+endpoint.Host+"/", "", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	return connection
 }
