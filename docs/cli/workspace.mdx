@@ -544,3 +544,24 @@ machine-readable responses, including `next_cursor` when more results exist.
 Scoped CLI credentials need `workspace:admin` for both listing and transfer.
 `workspace:*` and unrestricted tokens also carry this authority. Session callers
 need a current trusted workspace OWNER or ADMIN session.
+
+## `crewship workspace artifact-policy show`
+
+Read the selected workspace's artifact creation switch, complete crew allowlist
+and current policy version. Requires a trusted workspace OWNER/ADMIN and
+`workspace:admin` for scoped CLI credentials.
+
+## `crewship workspace artifact-policy set`
+
+Replace the entire administrative policy using the version just reviewed with
+`show`. This ceiling does not grant consent for individual agent runs.
+
+| Flag | Meaning |
+| --- | --- |
+| `--base-version` | Required current policy version; use 0 before the first save. |
+| `--enabled` | Required explicit `true` or `false` switch value. |
+| `--crew-id` | Complete allowed crew IDs, repeated or comma-separated. |
+| `--clear-crews` | Explicitly empty the allowlist; mutually exclusive with `--crew-id`. |
+
+A stale version refuses the change. Read the policy again before deciding on a
+replacement. Use `--format json` for machine-readable responses.
