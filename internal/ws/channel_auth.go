@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/chataudience"
@@ -12,7 +13,9 @@ import (
 
 // DBChannelAuthorizer checks channel access against workspace membership in the DB.
 type DBChannelAuthorizer struct {
-	db *sql.DB
+	db          *sql.DB
+	contentMu   sync.RWMutex
+	contentRead func(context.Context, string, string, string) (bool, error)
 }
 
 // NewDBChannelAuthorizer creates a channel authorizer backed by workspace
@@ -84,6 +87,14 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 	}
 
 	switch chType {
+	case "artifact", "board":
+		a.contentMu.RLock()
+		read := a.contentRead
+		a.contentMu.RUnlock()
+		if read == nil {
+			return false, nil
+		}
+		return read(ctx, userID, chType, chID)
 	case "workspace":
 		return a.isMemberOfWorkspace(ctx, userID, chID)
 	case "crew":
@@ -215,4 +226,23 @@ func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userI
 func (a *DBChannelAuthorizer) isSessionOwner(ctx context.Context, userID, chatID string) (bool, error) {
 	receipt, err := chataudience.CaptureTrusted(ctx, a.db, chatID, userID, nil)
 	return receipt != nil && err == nil, err
+}
+
+// SetPageContentAuthorizer injects the central Pages ACL without a package cycle.
+func (a *DBChannelAuthorizer) SetPageContentAuthorizer(read func(context.Context, string, string, string) (bool, error)) {
+	a.contentMu.Lock()
+	defer a.contentMu.Unlock()
+	a.contentRead = read
+}
+
+// Configure before accepting connections; the callback survives either startup
+// construction order (router before DB authorizer, or authorizer before router).
+func (h *Hub) SetPageContentAuthorizer(read func(context.Context, string, string, string) (bool, error)) bool {
+	h.presenceMu.Lock()
+	defer h.presenceMu.Unlock()
+	h.contentRead = read
+	if a, ok := h.channelAuth.(*DBChannelAuthorizer); ok {
+		a.SetPageContentAuthorizer(read)
+	}
+	return read != nil
 }

@@ -258,6 +258,8 @@ type mcpCredFieldEntry struct {
 
 // InternalHandler provides endpoints called by the sidecar over the Unix socket using X-Internal-Token auth.
 type InternalHandler struct {
+	// Canonical request handler retains the process-start Slides admission fence.
+	slidesPages    *PageHandler
 	loginRefresher runStartRefresher
 	db             *sql.DB
 	logger         *slog.Logger

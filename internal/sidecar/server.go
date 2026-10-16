@@ -592,6 +592,60 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			}
 			switch {
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/pages/") && strings.Contains(r.URL.Path, "/slides"):
+				s.handleSelectedSlides(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/pages/") && strings.Contains(r.URL.Path, "/slides"):
+				s.handleSelectedSlides(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/pages/") && strings.Contains(r.URL.Path, "/document"):
+				s.handleDocument(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/pages/") && strings.Contains(r.URL.Path, "/document"):
+				s.handleDocument(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/artifact-requests/"):
+				s.handleArtifactRequestContext(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/artifact-requests/"):
+				s.handleArtifactRequestContext(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/board-requests/"):
+				s.handleBoardRequest(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/board-requests/"):
+				s.handleBoardRequest(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/boards/") && strings.HasSuffix(r.URL.Path, "/batches"):
+				s.handleBoardPublish(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/boards/"):
+				s.handleBoardPublish(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/artifacts":
+				s.handleArtifactCreate(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/artifacts/") && strings.HasSuffix(r.URL.Path, "/restore"):
+				s.handleArtifactPublish(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/artifacts/") && strings.HasSuffix(r.URL.Path, "/revisions"):
+				s.handleArtifactPublish(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/artifacts/") && strings.HasSuffix(r.URL.Path, "/threads"):
+				s.handleArtifactComments(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/artifacts/") && strings.Contains(r.URL.Path, "/threads/") && strings.HasSuffix(r.URL.Path, "/comments"):
+				s.handleArtifactComments(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/artifacts":
+				s.handleArtifactToolRead(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/artifacts/") && strings.HasSuffix(r.URL.Path, "/diff"):
+				s.handleArtifactToolRead(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/artifacts/"):
+				s.handleArtifactPublish(w, r)
+				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/page-webhooks/"):
 				s.handlePageWebhook(w, r)
 				return

@@ -1,0 +1,269 @@
+# Slides typed persistence foundation
+
+This is the S1a foundation on existing human-owned Pages. It supplies bounded
+schema 1 storage, revisions and a human API/CLI. It does not supply a native
+viewer/editor, Present, image assets, selected-edit agent admission,
+or an Office export gate. The derived Page descriptor is `slides` with
+`supported:false` and `reason:viewer-unavailable`; clients must not initialize
+another content type over it. A working Slides product requires those later cuts.
+
+Human comments are a separate retained history described below. Native comment UI
+is supplied by a later integration; these API/CLI routes do not advertise a viewer.
+
+## Canonical contract
+
+`internal/slides/model.go`, `lib/slides/model.ts` and
+`testdata/slides-schema-v1.json` define the shared integer-geometry schema and
+versioned hash encoding. The deck ID equals the immutable Page ID. Slides and
+elements have globally unique ASCII IDs within a deck. `slide_order` owns
+presentation order; canonical serialization sorts the separate slides collection
+by ID. Element array order owns paint order. Unicode is preserved without
+normalization, including LF and valid surrogate pairs; invalid UTF-8, lone
+surrogates, CR/other controls, duplicate/unknown/case-aliased keys and trailing
+JSON are rejected. Hashes use SHA256 of the documented domain prefix and
+canonical UTF-8 JSON. The cross-language checker executes both Go and TS.
+
+Schema 1 admits text, rectangle/ellipse shapes and rectangular tables. It admits
+no image, author HTML/JavaScript, iframe or external resource reference. A deck
+has 1–100 slides, at most 1000 total elements, at most 2MiB of canonical JSON and
+integer frames 64–4096 pixels. Text is bounded to 32KiB, notes 16KiB and table cells
+4KiB in UTF-8. Tables have at most 30 rows and 20 columns, with an aggregate limit
+of 2000 actual cells per slide and 10000 per deck, including empty cells across
+all tables. Final candidate validation applies after every batch and restore.
+
+## API and CLI
+
+All routes use the normal workspace context and live Page ACL. CLI reads:
+
+```sh
+crewship slide read PAGE
+crewship slide outline PAGE
+crewship slide history PAGE
+crewship slide at-rev PAGE REVISION
+```
+
+Mutations take an exact JSON request with `--file FILE` or `--file -` for stdin:
+
+```sh
+crewship slide initialize PAGE --file request.json
+crewship slide patch PAGE --file request.json
+crewship slide reorder PAGE --file request.json
+crewship slide restore PAGE --file request.json
+```
+
+Corresponding reads are `GET /api/v1/pages/{slug}/slides`, `/outline`, `/history`
+and `/revisions/{revision}`. Mutations are `POST` under the same Slides path
+with `/initialize`, `/patch`, `/reorder` and `/restore`. The generated OpenAPI
+catalog also supplies the existing generic CLI/MCP discovery mechanism.
+There is no registered internal Slides agent endpoint or supported Slides run
+delegation in this cut. Human CLI mutation is not selected-edit agent admission.
+
+Every mutation requires `page_id`, `schema_version`, `base_rev` and
+`mutation_id`. Initialization requires revision 0 and a matching full deck.
+Existing mutation requests require a whole-head revision CAS. Reorder and
+restore additionally require `if_order_version`; patches inserting/deleting
+slides require it too. The semantic operation union is `set_element`,
+`insert_element`, `delete_element`, `set_notes`, `insert_slide`, `delete_slide`.
+Set-element replaces the full element while preserving ID. Element set/delete
+preconditions hash the element; insert-element, set-notes and delete-slide hash
+the whole slide. Preconditions are **progressive within an atomic batch**:
+each hash sees earlier operations. A caller must compute intermediate hashes
+when editing the same slide repeatedly. No operation guesses or rebases them.
+
+A stale revision/order/object hash, mismatched immutable Page ID or conflicting
+mutation ID returns 409. Deleting/recreating the same slug never retargets an
+already prepared mutation. The CLI sends one exact request and never fetches
+new state or rewrites the saved Page ID on conflict. Invalid candidates return 400;
+retention quota returns 429. A successful receipt acknowledges its own immutable
+revision, not necessarily the current head after another writer commits.
+
+## Authority, retention and lifecycle
+
+The Go Store serializes mutations, reads and receipt replays under a SQLite
+writer fence. Trusted API authorization checks active unrestricted workspace
+membership, the exact session/CLI credential and Page ACL inside that transaction,
+and again before commit. Initialization requires the human Page owner. Content
+cannot nominate an actor. Future internal run integration must retain the existing
+live human-chat principal/delegation and immutable Docs Page scope checks.
+
+Default retention bounds are 128 decks per instance, 1000 revisions, 10000 lifetime
+object identities and 64MiB retained canonical revision bytes per Page. Quota
+rejection preserves confirmed history. Deleted slide/element IDs remain tombstones
+and cannot be reused by insertion; explicit restoration can revive the original
+identity. Revision insertion, head, identity reservation and request receipt commit
+atomically. The trusted `OnRevision` hook runs after the immutable revision insert
+and before receipt/commit in the same transaction; future asset pinning must reject
+or commit atomically there.
+
+Database guards exclude legacy artifacts, boards, Docs, project source/live rows
+and panels on the same Page in both directions. Normal handlers also fail closed
+on Slides. Slides retain a human owner: departure or account erasure requires an
+explicit eligible human successor, never an implicit crew fallback. Page deletion
+cascades its private Slides state; it does not affect another Page's namespace.
+
+Pages-category backups include heads, every immutable revision, receipts and
+identity tombstones. The installation-local writer singleton is regenerated.
+Same-identity restore retains receipts subject to live authorization. Fork rewrites
+embedded deck IDs and hashes in **every** head/revision while preserving object IDs
+inside the new Page namespace. It clears source replay receipts; retained revision
+mutation IDs reject historical mutation-ID reuse with 409. `remap_slides.go` is the
+single canonical rewrite authority; future image references must join this rewrite
+before hash recomputation. Restore rejects malformed canonical data, wrong hashes,
+Page binding and row/snapshot schema mismatches before committing any rows.
+
+## Stable human comments
+
+Comments use envelope `schema_version:1` and `anchor_schema_version:1`, both
+independent of deck schema; mixed-version retained deck history remains valid. An original
+anchor contains `{kind:slide|element,slide_id,element_id?,revision}`; element ID is
+required only for an element anchor. Create requires immutable `page_id`,
+`schema_version:1`, `base_rev`, `mutation_id`, `anchor` and nonblank `body`.
+`anchor.revision` must equal the current `base_rev`; the target must exist there.
+Reply requires `page_id`, `schema_version`, `mutation_id`, `if_version`, `body`;
+resolve/reopen replaces body with a required boolean `resolved`. All three reject
+unknown/case-aliased/duplicate keys, null fields and trailing JSON, within16KiB.
+
+COMMENT access permits create/reply. WRITE access permits resolve/reopen. Read
+requires Page read access. Every route explicitly rejects run authority; these
+human comments do not grant agent comment capability. Exact live session/CLI
+credentials and ACL apply to initial mutations, receipt retries and each list
+page. CLI token reads require `pages:read`; mutations require `pages:write`.
+Advisory `can_comment`/`can_resolve` flags are captured under the same read fence.
+Workspace invalidation emits only `slides.comments.changed` with an empty payload.
+
+Thread human version increments for each immutable comment/reply/resolve/reopen
+event, independently of the deck revision. Replying to a resolved thread returns
+409; reopening requires WRITE. Comment body is at most10000 UTF-8 bytes. Retention
+caps per Page are1000 threads,10000 events and16MiB of event bodies. Quotas reject
+new events without pruning history. Events retain opaque trusted actor attribution
+without a user/agent/chat foreign key that could erase comment history.
+
+Original anchors never change. Text or geometry changes and reorder preserve
+attachment. Target deletion marks a thread `detached`; explicit restore of the
+original identity marks it `restored` with `last_missing_revision` and
+`restored_at_revision` provenance. There is no fuzzy matching. `projection_revision`
+identifies the deck revision used for the current status. Internal projection
+updates and the existing trusted external `OnRevision` hook share one transaction;
+projection updates do not consume human thread versions.
+
+Thread and event lists use `limit` (default25, maximum100) and an opaque `cursor`.
+Responses include `items`, `next_cursor`, `watermark`, `has_more`, `can_comment`,
+`can_resolve`. Membership watermarks exclude later-created threads/events until a
+fresh list; current permissions are rechecked on every continuation. Clients must
+follow `has_more`/`next_cursor` rather than treating the first page as complete.
+
+Pages backups include threads, immutable events and receipts. Original anchor
+revisions are pinned with a deferred NO ACTION foreign key; Page/head deletion
+still cascades the entire owned graph. Restore validates the original anchor at
+its pinned snapshot and contiguous event versions/kinds/count/resolution state,
+then reconstructs projection/provenance from actual retained deck history.
+Imported projection fields are not trusted. Fork remaps the Page namespace while preserving thread IDs,
+keeps stable slide/element anchors and historical event mutation IDs, and clears
+comment replay receipts. A historical mutation ID remains a409 tombstone.
+
+## Private raster images (schema 2)
+
+Schema 1 remains closed to text, shapes and tables; its canonical bytes and hashes
+are unchanged. Schema 2 adds `type:"image"` with existing integer geometry and an
+`image` payload `{asset_id,expected_sha256,alt}`. The asset ID belongs to the same
+immutable Page ID; the digest identifies canonical PNG/JPEG bytes, never a URL.
+Alt text is bounded to2048 UTF-8 bytes. A revision permits32 unique asset IDs and
+32MiB total canonical asset bytes, and33,554,432 decoded pixels across unique
+asset IDs (about128MiB RGBA base, not a process memory SLA); repeated placement
+of one ID counts once for every budget.
+Existing2MiB deck/100 slides/1000 elements and Page64 assets/64MiB staging+history
+limits still apply. Upload/read use the existing private Page asset API/CLI and
+its independent pages:write/pages:read token ceilings. EXIF2..8 are explicitly
+unsupported by the raster upload foundation; no silent orientation stripping.
+
+Initialization explicitly accepts schema1 or schema2, matching the full deck.
+An existing schema1 deck upgrades only with an explicit atomic patch:
+`schema_version:1`, original `base_rev`, `target_schema_version:2`, original
+whole-head `if_content_hash`, and the existing progressive operation hashes.
+The batch must actually attach an image. Ordinary mutations name the current
+head schema; reads never migrate or downgrade storage. Unknown schemas and
+images inside schema1 fail closed. Restore names an actual immutable revision
+and appends a new revision in that source version, so explicit1/2 mixed history
+is retained without rewriting old snapshots. Schema2 Deck hashes use a new
+version domain; unchanged text/shape/table element hashes retain their v1 domain.
+Image element hashes use v2; full-slide hashes retain the existing v1 domain.
+
+The sole production Store constructor runs asset validation after immutable
+revision insertion and comment projection, before receipt and final live Page
+credential/ACL checks. It verifies owning Page, SHA, expiry, MIME/dimensions and
+bounded bytes, promotes staged assets and inserts exact revision pins in that
+same transaction. Any failure rolls back every write. No standalone retain API
+exists. Image deletion preserves older revision pins/bytes; quota exhaustion
+refuses new uploads instead of discarding history. Full Page deletion cascades
+the owned graph. Unreferenced physical bytes use the existing shared blob GC.
+There is no automatic revision pruning in this delivery.
+
+Comments still use protocol/anchor version1, independent of deck version. An
+image supports the same stable element-ID/parent anchor and original revision
+as other elements; delete detaches and explicit restore of the original ID
+reattaches it. Image text-range edits are unsupported. Comment protocol2 remains
+rejected even on a schema2 deck.
+
+Encrypted workspace/fork restore validates every canonical revision and exact
+retained pin set, remaps asset IDs inside the sole Slides canonical rewrite before
+hashing, and verifies actual restored image format/dimensions/SHA/length before
+DB commit. Missing, corrupt or conflicting required images fail restore. Offline
+physical instance recovery separately verifies the same invariants before
+reporting success. Older closed-v1/no-kit recovery can retain the existing
+pending-migration warning without synthetic pins; schema2 without a pin table
+fails closed. Files-only restore has its existing separate contract. Native
+image UI qualification, Docs images, normal Page copy, crop/remote imports,
+image export embedding and pruning are separate from this API/storage cut.
+
+## Selected text agent requests
+
+Request protocol1 is independent of deck schema1/2. Human-only
+`POST /api/v1/pages/{slug}/slides/requests` admits one immutable Page ID, original
+base revision, text element hash, UTF16 range and exact quoted text, instruction
+and private chat audience. The server pins the full original revision/hash and
+original credential identity; it stores no bearer. Images, geometry, styles,
+ordering and comments are outside this capability. Listing uses bounded
+Page-bound cursor pagination; detail returns at most8 immutable history events.
+Human cancellation requires immutable `page_id`, protocol1, `mutation_id` and
+`if_version`. Retrying the exact submission or cancellation never starts new work.
+
+The managed worker claims once, checks the original head before binding a run,
+and delegates only the original text range. The protected
+`crewship slide agent read|replace` CLI uses the original run bearer through the
+fixed local sidecar at127.0.0.1:9119, with no proxy, redirect, human profile or
+server override fallback. Its replacement JSON contains only `page_id`,
+`request_schema_version:1`, `request_id` and `replacement`. The server preserves
+original prefix/suffix and element geometry/style, applies original whole-head
+CAS, and commits its one request-owned result revision in the content transaction.
+That revision is the checkpoint. Conflicts stop; neither re-read nor retry
+refreshes selection or preconditions. An exact retry can return the original
+owned result after a later human edit, while fresh writes and revoked credentials
+remain denied. Workspace invalidations contain no private identifiers or content.
+
+Every protected read, write and replay rechecks exact original credential,
+private audience, human and agent grants, live run and delegation. A retained
+principal origin prevents downgrade to generic HTML, Board, Docs, Slides or
+eligible Page capabilities even after its original Page/request is deleted.
+The public human CLI commands are `slide request create|list|get|cancel`.
+
+Startup interrupts captured pre-start active requests under version fences;
+new intake remains separate. The current worker executes one request at a time
+per instance. Default limits are3 active and30 admissions/hour per Page,
+2000 retained requests and64MiB request metadata per Page, and8 events/request.
+Admission wire JSON is bounded16KiB, instruction4096 UTF8 bytes, selection4096
+UTF16 units, replacement wire256KiB and replacement text32768 UTF8 bytes; final
+text and deck limits still apply. Protected snapshots/responses are bounded512KiB.
+
+Workspace restore, fork, Replace and offline instance recovery preserve original
+and owned-result revision pins and append interrupted history for active work.
+Restored requests are terminal and inert: live identities, credentials, audiences,
+run bindings and cancellation receipts are cleared. Fork remaps embedded Page
+and asset IDs once, then derives request base/result hashes from the rewritten
+immutable revisions; original selection/object IDs and historical actors remain
+provenance. Source replay capability never restarts a restored request. Physical
+recovery also drops selected source principals and their delegation graph before
+promotion. Chat/agent deletion retains request-owned content and history.
+
+These are storage/API/transport contracts. Native selected UI, actual queued
+chat/model execution and Office/export qualification have separate gates;
+semantic Store or deterministic dispatch tests do not demonstrate model execution.

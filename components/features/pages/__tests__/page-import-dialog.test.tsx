@@ -94,6 +94,12 @@ async function choose(contents: string, name = "fleet-health.json") {
   const file = new File([contents], name, { type: "application/json" })
   fireEvent.change(input, { target: { files: [file] } })
   await waitFor(() => expect(screen.getByText(name)).toBeTruthy())
+  // The name appears before File.text() resolves. Wait for parsing to finish:
+  // a valid bundle enables Install; a rejected file presents its refusal.
+  await waitFor(() => {
+    const install = screen.getByRole("button", { name: "Install" }) as HTMLButtonElement
+    expect(!install.disabled || screen.queryByRole("alert") !== null).toBe(true)
+  })
 }
 
 function importCalls(calls: Call[]) {

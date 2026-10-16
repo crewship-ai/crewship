@@ -72,6 +72,7 @@ import (
 // refuses.
 const (
 	pageGrantRead    = "read"
+	pageGrantComment = "comment"
 	pageGrantProduce = "produce"
 	pageGrantWrite   = "write"
 
@@ -80,14 +81,14 @@ const (
 	pageSubjectAgent = "agent"
 	// pageSubjectWorkspace is "everyone in this workspace" — every current
 	// human member, never an agent (#2533 §3/1, §3/14). Its subject_id is
-	// always "". On a page grant it may carry read or write, never produce:
+	// always "". On a page grant it may carry read, comment or write, never produce:
 	// produce names a producer, and "everyone" is not one.
 	pageSubjectWorkspace = "workspace"
 )
 
 func validPageGrantLevel(level string) bool {
 	switch level {
-	case pageGrantRead, pageGrantProduce, pageGrantWrite:
+	case pageGrantRead, pageGrantComment, pageGrantProduce, pageGrantWrite:
 		return true
 	}
 	return false
@@ -103,9 +104,9 @@ func validPageSubjectType(kind string) bool {
 
 // workspaceSubjectLevelAllowed is the schema's CHECK on the workspace subject
 // in Go, so the handler answers 400 in a sentence rather than a constraint
-// violation: read or write, never produce.
+// violation: read, comment or write, never produce.
 func workspaceSubjectLevelAllowed(level string) bool {
-	return level == pageGrantRead || level == pageGrantWrite
+	return level == pageGrantRead || level == pageGrantComment || level == pageGrantWrite
 }
 
 // pageGrantRecord is one page_grants row PLUS the use-time verdict on its
@@ -151,7 +152,7 @@ func (g pageGrantRecord) inertReason() string {
 
 // reachesPage reports whether holding this level is enough to OPEN the page.
 //
-// All three verbs qualify, which is the answer to the question the file used to
+// All four verbs qualify, which is the answer to the question the file used to
 // leave open — "is `read` implied by `produce` and `write`". It is, and the
 // alternative is indefensible in both directions:
 //
@@ -169,7 +170,7 @@ func (g pageGrantRecord) inertReason() string {
 // here — "does any live grant name you" — has no ordering in it.
 func reachesPage(level string) bool {
 	switch level {
-	case pageGrantRead, pageGrantProduce, pageGrantWrite:
+	case pageGrantRead, pageGrantComment, pageGrantProduce, pageGrantWrite:
 		return true
 	}
 	return false
@@ -219,8 +220,8 @@ func reachesPage(level string) bool {
 //     for a few hours once, with two definitions and two sets of passing tests,
 //     and that is the mistake this constraint exists to prevent.
 //
-//  3. THE VERBS NEST. reachesPage (above) accepts all three levels: `read` is
-//     implied by `produce` and by `write`, because a principal who may rewrite
+//  3. THE VERBS NEST. reachesPage (above) accepts all four levels: `read` is
+//     implied by `comment`, `produce` and by `write`, because a principal who may rewrite
 //     a page and cannot open it is two paths disagreeing rather than a
 //     narrower permission.
 //
@@ -257,7 +258,7 @@ func (g pageGrantRecord) grant() pageGrant {
 // pageRecord parameter precisely so the batch form can exist at all — one
 // statement, one CASE, one definition of live, two entry points.
 func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID string) (map[string][]pageGrantRecord, error) {
-	rows, err := h.db.QueryContext(ctx, `
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
 		SELECT g.page_id, g.subject_type, g.subject_id, g.level, COALESCE(g.panel_ids, ''),
 		       g.granted_by_user_id, g.granted_at,
 		       COALESCE(wm.role, ''),
@@ -435,7 +436,7 @@ func (h *PageHandler) agentGrants(ctx context.Context, wsID string, rec *pageRec
 // arrangement, never over content.
 func (h *PageHandler) agentViewer(ctx context.Context, wsID, agentID string) (*pageViewer, error) {
 	v := &pageViewer{UserID: "", Role: "", Crews: map[string]bool{}}
-	rows, err := h.db.QueryContext(ctx, `
+	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
 		SELECT a.crew_id
 		FROM agents a
 		JOIN crews c ON c.id = a.crew_id

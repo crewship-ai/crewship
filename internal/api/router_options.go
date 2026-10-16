@@ -27,6 +27,12 @@ import (
 
 type RouterOption func(*Router)
 
+// WithDocumentAuthority enables only the private persistence socket, never a
+// public document editor or API. Empty paths leave the foundation disabled.
+func WithDocumentAuthority(socket, secretFile string) RouterOption {
+	return func(r *Router) { r.documentsSocket = socket; r.documentsSecretFile = secretFile }
+}
+
 // WithSocketPath sets the Unix socket path used for IPC with the sidecar.
 func WithSocketPath(path string) RouterOption {
 	return func(r *Router) {
@@ -481,4 +487,9 @@ func WithTranscriptLock(lock func(context.Context) (func(), error)) RouterOption
 // WithTranscriptLock remains the restore fence and create compatibility fallback.
 func WithTranscriptSnapshotLock(lock func(context.Context) (func(), error)) RouterOption {
 	return func(r *Router) { r.transcriptSnapshotLock = lock }
+}
+
+// WithDocumentService connects the public Pages bridge to a private engine.
+func WithDocumentService(socket string) RouterOption {
+	return func(r *Router) { r.documentsServiceSocket = socket }
 }

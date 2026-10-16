@@ -1278,6 +1278,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				if err := attachmentsRestore(ctx, false); err != nil {
 					return err
 				}
+				if err := validateRestoredSlideImageBlobs(ctx, commitTx, opts.AttachmentRoot, extracted.DBDump); err != nil {
+					return err
+				}
 				if err := dockerRestore(ctx); err != nil {
 					return err
 				}

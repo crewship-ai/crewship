@@ -183,10 +183,16 @@ const categoryWorkOnly = ""
 // TableCategory maps every table in BackupTables to its category. A table
 // missing here fails TestTableCategory_CoversEveryBackupTable.
 var TableCategory = map[string]string{
+	"slides_requests": CategoryPages, "slides_request_events": CategoryPages, "slides_request_receipts": CategoryPages,
+	"slides_comment_threads": CategoryPages, "slides_comment_events": CategoryPages, "slides_comment_receipts": CategoryPages,
+	"slides_revision_assets": CategoryPages, "slides_heads": CategoryPages, "slides_revisions": CategoryPages, "slides_receipts": CategoryPages, "slides_object_ids": CategoryPages,
+	"documents": CategoryPages, "document_comments": CategoryPages, "document_requests": CategoryPages,
+	"document_updates": CategoryPages, "document_receipts": CategoryPages, "document_checkpoints": CategoryPages,
 	"environment_revisions": CategoryAgents, // definition/build provenance; image bytes remain CategoryEnv
 	"users":                 categoryAnchor, "workspaces": categoryAnchor, "skills": categoryAnchor,
 
 	// Crews, agents and their settings.
+	"workspace_artifact_creation_policy": CategoryAgents, "workspace_artifact_creation_crews": CategoryAgents,
 	"crews": CategoryAgents, "service_runtime_intents": CategoryAgents, "crew_members": CategoryAgents,
 	"agents": CategoryAgents, "crew_connections": CategoryAgents, "crew_mcp_servers": CategoryAgents,
 	"agent_skills": CategoryAgents, "agent_mcp_bindings": CategoryAgents, "agent_config_history": CategoryAgents, "agent_slug_reservations": CategoryAgents,
@@ -240,7 +246,27 @@ var TableCategory = map[string]string{
 	"credential_audit": CategoryCreds, "credential_rotations": CategoryCreds, "composio_settings": CategoryCreds,
 
 	// Pages and their files.
-	"page_folders": CategoryPages, "page_folder_acl": CategoryPages, "pages": CategoryPages,
+	"page_folder_structure": CategoryPages, "page_folders": CategoryPages, "page_folder_acl": CategoryPages, "pages": CategoryPages,
+	"page_board_source_history":   CategoryPages,
+	"page_board_write_audit":      CategoryPages,
+	"page_board_request_previews": CategoryPages,
+	"page_board_requests":         CategoryPages, "page_board_request_files": CategoryPages, "page_board_request_sources": CategoryPages,
+	"page_board_comment_history": CategoryPages, "page_board_comment_reactions": CategoryPages,
+	"page_board_threads": CategoryPages, "page_board_comments": CategoryPages, "page_board_comment_mutations": CategoryPages,
+	"page_artifact_copies":          CategoryPages,
+	"page_artifact_comment_history": CategoryPages, "page_artifact_comment_reactions": CategoryPages,
+	"page_artifact_threads": CategoryPages, "page_artifact_comments": CategoryPages, "page_artifact_comment_mutations": CategoryPages,
+	"page_artifact_mutation_receipts": CategoryPages,
+	"page_artifact_creations":         CategoryPages,
+	"page_artifact_requests":          CategoryPages,
+	"page_artifact_request_updates":   CategoryPages,
+	"page_boards":                     CategoryPages,
+	"page_board_files":                CategoryPages,
+	"page_board_elements":             CategoryPages,
+	"page_board_mutations":            CategoryPages,
+	"page_board_artifact_placements":  CategoryPages,
+	"page_assets":                     CategoryPages,
+	"page_artifacts":                  CategoryPages, "page_artifact_revisions": CategoryPages,
 	"page_panels": CategoryPages, "page_panel_data": CategoryPages, "page_versions": CategoryPages,
 	"page_project_builds": CategoryPages, "page_project_publications": CategoryPages,
 	"page_project_live": CategoryPages, "page_project_withdrawals": CategoryPages,
