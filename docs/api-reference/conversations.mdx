@@ -906,3 +906,31 @@ issues again.
 The [Chat decisions API](/api-reference/chat-decisions) projects verified TEXT
 escalations into a chat and resolves the same source as Inbox, with current
 human authorization, source versions and stable operation keys.
+
+## Configured chat run preflight
+
+### `GET /api/v1/chats/{chatId}/run-preflight`
+
+**Auth:** An authenticated current trusted member who can read the chat and its
+agent. Guests and restricted profiles have no E2 projection. Existing workspace
+selection applies; the response contains no credential secrets.
+
+**Request:** Supply the chat ID in the path and select the current workspace
+with the usual workspace context or `workspace_id` query parameter. No request
+body is accepted. CLI: `crewship chat run-preflight <chat-id>`.
+
+**Response:** `200 OK` returns `ChatRunPreflight`, with scope
+`configured_chat_agent`, agent/model identity, a visibility-filtered payer label,
+applicable budget balances, configured/predicted gate mode, and constraints.
+`estimate_state` is `unknown` and `estimate_usd` is null without a complete-run
+Paymaster estimate. Reads use `Cache-Control: no-store`.
+
+**Statuses:** `404` hides a missing or inaccessible chat, including access
+withdrawn during the read; `503` means current payer, policy, budget or chat facts
+could not be verified. A temporary failure is not proof of access withdrawal.
+
+This is a snapshot, not a reservation or approval. Model/provider overrides need
+a fresh launch-specific check; paid-provider admission still checks the current
+budget after a human wait. The default evaluator does not match ordinary
+`agent_run` calls, so configured sync mode alone does not promise a blocking gate.
+See [the run gate](/guides/harbormaster#where-the-run-level-mode-comes-from).

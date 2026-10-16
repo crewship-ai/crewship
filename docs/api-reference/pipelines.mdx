@@ -1038,14 +1038,7 @@ Removing an absent tag is otherwise successful.
 
 ## Internal routine invocation provenance
 
-The sidecar invokes saved routines through `POST /api/v1/internal/pipelines/run`
-with its existing internal credential and host-injected invoking identity.
-An optional `X-Crewship-Run-Token` must cryptographically match the body's
-`workspace_id`, `invoking_agent_id` and `source_run_id`. An explicitly supplied
-invalid or mismatched credential returns 403 before creating a run. Calls
-without this header preserve the existing execution path.
-
-Fresh chat correlation is retained only for a verified direct-human invocation
-recorded by the host. Scheduled and peer invocations, source-less legacy calls,
-and a recipe's inherited authoring origin do not supply a new chat question.
-This metadata is private and does not grant execution or approval authority.
+Saved routines use the sidecar's internal IPC transport. Its authenticated run
+identity and fresh-chat correlation are documented in
+[Routine invocation provenance](/api-reference/internal#routine-invocation-provenance).
+This is not a public pipeline endpoint and grants no new execution authority.

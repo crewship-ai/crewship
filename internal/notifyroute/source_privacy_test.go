@@ -2,8 +2,10 @@ package notifyroute
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/notify"
 )
@@ -19,6 +21,19 @@ func TestVerifiedPrivateTextNotificationRechecksExpandedRecipients(t *testing.T)
 		if _, err := db.Exec(sql); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// Production admission records a unique direct-human run start bound to
+	// the original chat generation. A source_run_id alone is not that proof.
+	receipt, err := chataudience.CaptureTrusted(t.Context(), db, "private-chat", "u_member", nil)
+	if err != nil || receipt == nil {
+		t.Fatalf("capture source admission: %v %v", receipt, err)
+	}
+	proof, err := json.Marshal(map[string]any{"trigger_type": "USER", "chat_id": "private-chat", "trigger_message_id": "private-trigger", "human_authority": receipt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO journal_entries(id,workspace_id,agent_id,trace_id,entry_type,actor_type,summary,payload) VALUES('private-run-start','ws1','private-agent','verified-run','run.started','orchestrator','Host admitted run',?)`, string(proof)); err != nil {
+		t.Fatal(err)
 	}
 	srv := newRecordingWebhookServer(t)
 	channel := seedWebhookChannel(t, db, srv.URL)
