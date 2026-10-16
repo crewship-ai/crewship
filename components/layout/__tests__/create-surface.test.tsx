@@ -699,3 +699,20 @@ describe("the sheet grabber", () => {
     expect(onOpenChange, "a cancelled drag dismissed the sheet").not.toHaveBeenCalled()
   })
 })
+
+describe("CreateSurfaceFooter inside a form", () => {
+  beforeEach(() => cleanup())
+
+  it("Cancel closes without submitting the form", () => {
+    const onSubmit = vi.fn((e: { preventDefault: () => void }) => e.preventDefault())
+    const onCancel = vi.fn()
+    render(
+      <form onSubmit={onSubmit}>
+        <CreateSurfaceFooter onCancel={onCancel} guardCancel={false} primaryLabel="Save" onPrimary={vi.fn()} />
+      </form>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+})
