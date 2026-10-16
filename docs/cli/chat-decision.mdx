@@ -27,3 +27,8 @@ Waitpoint denial may use an empty `--values-json '{}'` when required inputs are
 omitted. Supplied inputs remain typed and are validated against the frozen form.
 Unsupported forms and async run reviews stay on their existing source surfaces.
 Never place credential values in any information or workflow argument.
+
+Form-less boolean workflow waitpoints accept `--action approve` or `--action
+reject`, with no `--action-id`, `--values-json` or `--text`. The API equivalent
+uses that action, an empty `values` object and no `action_id`. Typed workflow
+forms continue to require their declared action ID and typed field values.

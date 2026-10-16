@@ -208,6 +208,36 @@ func TestAcceptance_ChatDecisions_RealSourceAndCLI(t *testing.T) {
 	if err = db.QueryRow(`SELECT status,decision_payload FROM pipeline_waitpoints WHERE token=?`, bearer).Scan(&workflowStatus, &workflowPayload); err != nil || workflowStatus != "approved" || !strings.Contains(workflowPayload, `"action_id":"ship"`) {
 		t.Fatalf("workflow actual source%s %s %v", workflowStatus, workflowPayload, err)
 	}
+
+	booleanBearer, createErr := waitpoints.CreateApproval(t.Context(), pipeline.WaitpointApprovalRequest{WorkspaceID: workspace, PipelineRunID: "decision-pipeline-run", StepID: "boolean-review", Prompt: "Approve this workflow step?", TimeoutSec: 3600, InvokingCrewID: "decision-crew"})
+	if createErr != nil {
+		t.Fatal(createErr)
+	}
+	var booleanID string
+	if err = db.QueryRow(`SELECT chat_source_id FROM pipeline_waitpoints WHERE token=?`, booleanBearer).Scan(&booleanID); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runFeedbackCLI(t, cfg, "chat", "decision", "show", "decision-chat", "waitpoint", booleanID)
+	var booleanCard api.ChatCardResponse
+	if err != nil || json.Unmarshal([]byte(out), &booleanCard) != nil || booleanCard.Decision == nil {
+		t.Fatalf("boolean CLI show %v %s", err, out)
+	}
+	booleanArgs := []string{"chat", "decision", "answer", "decision-chat", "waitpoint", booleanID, "--expected-version", booleanCard.Decision.Source.Version, "--idempotency-key", "boolean-cli-key", "--action", "reject"}
+	for _, extra := range [][]string{{"--action-id", "ship"}, {"--values-json", "{}"}, {"--text", "unrelated"}} {
+		if bad, modeErr := runFeedbackCLI(t, cfg, append(append([]string{}, booleanArgs...), extra...)...); modeErr == nil {
+			t.Fatalf("incompatible boolean flags accepted%s", bad)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		out, err = runFeedbackCLI(t, cfg, booleanArgs...)
+		if err != nil || !strings.Contains(out, `"status": "rejected"`) || strings.Contains(out, booleanBearer) {
+			t.Fatalf("boolean CLI answer/replay %v %s", err, out)
+		}
+	}
+	var booleanStatus string
+	if err = db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE token=?`, booleanBearer).Scan(&booleanStatus); err != nil || booleanStatus != "denied" {
+		t.Fatalf("boolean actual source%s %v", booleanStatus, err)
+	}
 	exec(`UPDATE workspace_members SET role='VIEWER' WHERE id='decision-member'`)
 	out, err = runFeedbackCLI(t, cfg, args...)
 	if err != nil || !strings.Contains(out, `"answered_by": "decision-user"`) {
