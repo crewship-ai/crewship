@@ -159,19 +159,65 @@ func TestChatDecisionApprovalRecreatedChatCannotReanchorSource(t *testing.T) {
 func TestChatDecisionApprovalInboxAndChatOneWinner(t *testing.T) {
 	d := newApprovalDecisionRig(t)
 	version := d.read(t).Ref.Decision.Source.Version
+	var seq int
+	var name, file string
+	if err := d.f.h.db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &file); err != nil {
+		t.Fatal(err)
+	}
+	other, err := sql.Open("sqlite", file+"?_pragma=busy_timeout(10000)&_pragma=foreign_keys(1)&_txlock=immediate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Close() })
+	other.SetMaxOpenConns(1)
+	if err := other.PingContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// Separate pools guarantee distinct SQLite connections even when the
+	// scheduler runs the two requests sequentially.
+	if d.f.h.db == other || d.f.h.db.Stats().OpenConnections < 1 || other.Stats().OpenConnections != 1 {
+		t.Fatal("race must exercise separate connections")
+	}
+	inboxHandler := NewApprovalsHandler(other, newTestLogger(), d.r.Journal())
 	var wg sync.WaitGroup
 	wg.Add(2)
 	start := make(chan struct{})
-	results := make(chan bool, 2)
-	go func() { defer wg.Done(); <-start; results <- d.resolve(t, version, "chat", "approve") == nil }()
-	go func() { defer wg.Done(); <-start; results <- d.inbox("denied").Code == 200 }()
+	results := make(chan string, 2)
+	go func() {
+		defer wg.Done()
+		<-start
+		if err := d.resolve(t, version, "chat", "approve"); err == nil {
+			results <- "winner"
+		} else if errors.Is(err, errDecisionVersion) {
+			results <- "conflict"
+		} else {
+			results <- "error: " + err.Error()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		req := withWorkspaceUser(httptest.NewRequest("POST", "/", strings.NewReader(`{"status":"denied"}`)), d.a.UserID, d.a.WorkspaceID, "OWNER")
+		req.SetPathValue("id", d.id)
+		rr := httptest.NewRecorder()
+		inboxHandler.Decide(rr, req)
+		if rr.Code == 200 {
+			results <- "winner"
+		} else if rr.Code == 409 {
+			results <- "conflict"
+		} else {
+			results <- fmt.Sprintf("error: Inbox %d %s", rr.Code, rr.Body.String())
+		}
+	}()
 	close(start)
 	wg.Wait()
 	close(results)
 	wins := 0
-	for won := range results {
-		if won {
+	for result := range results {
+		if result == "winner" {
 			wins++
+		} else if result != "conflict" {
+			t.Fatal(result)
 		}
 	}
 	if wins != 1 {
@@ -186,9 +232,6 @@ func TestChatDecisionApprovalInboxAndChatOneWinner(t *testing.T) {
 	var emissions int
 	if err := d.f.h.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE entry_type IN ('approval.granted','approval.denied')`).Scan(&emissions); err != nil || emissions != 1 {
 		t.Fatalf("postcommit journal=%d %v", emissions, err)
-	}
-	if d.f.h.db.Stats().OpenConnections < 2 {
-		t.Fatal("race must exercise separate connections")
 	}
 }
 func TestChatDecisionApprovalNarrowSourceAndAnswer(t *testing.T) {
