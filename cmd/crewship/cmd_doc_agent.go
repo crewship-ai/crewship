@@ -28,11 +28,11 @@ func validateDocAgentOperations(raw []byte) error {
 	}
 	for _, rawOp := range operations {
 		var op struct {
-			Op       string          `json:"op"`
-			ID       string          `json:"id"`
-			AfterID  string          `json:"after_id"`
-			BeforeID string          `json:"before_id"`
-			Node     json.RawMessage `json:"node"`
+			Op       string          `json:"op" yaml:"op"`
+			ID       string          `json:"id" yaml:"id"`
+			AfterID  string          `json:"after_id" yaml:"after_id"`
+			BeforeID string          `json:"before_id" yaml:"before_id"`
+			Node     json.RawMessage `json:"node" yaml:"node"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(rawOp))
 		decoder.DisallowUnknownFields()
