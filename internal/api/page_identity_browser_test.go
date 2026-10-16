@@ -69,7 +69,7 @@ func TestPageIdentityBrowser(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO page_folders(id,workspace_id,slug,name,owner_crew_id,created_at,updated_at) VALUES('identity-browser-parent',?,'identity-hidden-parent','Hidden ancestor canary',?,'2026-10-16','2026-10-16')`, workspace, crew)
 	execOrFatal(t, db, `INSERT INTO page_folders(id,workspace_id,slug,name,owner_crew_id,parent_id,created_at,updated_at) VALUES('identity-browser-leaf',?,'identity-leaf','Shared leaf',?,'identity-browser-parent','2026-10-16','2026-10-16')`, workspace, crew)
 	execOrFatal(t, db, `INSERT INTO page_folder_acl(folder_id,subject_type,subject_id,can_read,can_write,set_at) VALUES('identity-browser-leaf','user',?,1,0,'2026-10-16')`, reader)
-	execOrFatal(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,owner_crew_id,folder_id,spec_json) VALUES('identity-browser-original',?,'identity-old','Original stable Page',?,?,'identity-browser-leaf','{}')`, workspace, owner, crew)
+	execOrFatal(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_crew_id,folder_id,spec_json) VALUES('identity-browser-original',?,'identity-old','Original stable Page',?,'identity-browser-leaf','{}')`, workspace, crew)
 	var raced atomic.Bool
 	mux := http.NewServeMux()
 	mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
