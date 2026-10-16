@@ -39,6 +39,9 @@ exception in the other direction: it prints YAML unless you ask for
 
 ### crewship page assets upload
 
+A scoped CLI token needs `pages:write`; `pages:*` also permits upload. Current
+Page write access remains required. A `pages:read` token cannot upload.
+
 ```bash
 crewship page assets upload report --file chart.png --mutation-id chart-1
 cat chart.jpg | crewship page assets upload report --file - --mutation-id photo-1
@@ -52,6 +55,8 @@ not stored as original file bytes. This command does not insert an editor image.
 
 ### crewship page assets show
 
+Requires `pages:read` (or `pages:*`) and current Page read access.
+
 ```bash
 crewship page assets show report ASSET_ID
 ```
@@ -60,6 +65,8 @@ Reads metadata through `GET /api/v1/pages/{slug}/assets/{assetId}` using current
 Page visibility. Digest knowledge never grants access.
 
 ### crewship page assets download
+
+Requires `pages:read` (or `pages:*`); `pages:write` alone grants no read access.
 
 ```bash
 crewship page assets download report ASSET_ID > canonical.png
