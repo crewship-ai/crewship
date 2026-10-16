@@ -34,6 +34,7 @@ export function ChatIssuePullRequests({ crewId, identifier, revision }: { crewId
   if (query.isError) return <div role="alert" className="space-y-2 text-xs"><p>{query.error.message}</p><Button variant="outline" size="sm" onClick={() => void query.refetch()}>Retry pull requests</Button></div>
   if (!query.data) return <p role="status" className="text-xs text-muted-foreground">Loading pull requests…</p>
   return <section aria-label="Linked pull requests" className="space-y-2">
+    <p className="text-xs text-muted-foreground">Stored data · live CI unavailable</p>
     <IssueCodeLinksCard links={query.data} />
     {!!query.data.length && <div className="space-y-1 px-2 text-[11px] text-muted-foreground">
       {query.data.map(link => <p key={link.id}>
