@@ -26,6 +26,8 @@ interface RightPanelProps {
   initialTab?: string
   hideTabs?: boolean
   style?: React.CSSProperties
+  /** Already authorized conversation decisions, rendered only in Work. */
+  workHeader?: React.ReactNode
   /** Legacy Files props remain accepted while transcript callers migrate. */
   files?: FileEntry[]
   filesLoading?: boolean
@@ -38,7 +40,7 @@ interface RightPanelProps {
 }
 
 /** Chat exposes deliverables and work; agent configuration lives on the agent card. */
-export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, initialTab, hideTabs, style }: RightPanelProps) {
+export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, initialTab, hideTabs, style, workHeader }: RightPanelProps) {
   const chatAgent = useChatAgent()
   const [activeTab, setActiveTab] = useState<PanelTab>(() => validTab(initialTab))
   useEffect(() => { setActiveTab(validTab(initialTab)) }, [initialTab])
@@ -59,7 +61,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     </div>}
     <div className="min-h-0 flex-1 overflow-y-auto">
       {activeTab === "memory" ? <PreferencesTab agentId={agentId} workspaceId={workspaceId} /> : activeTab === "artifacts" ? <AgentArtifactsTab agentId={agentId} workspaceId={workspaceId} crewId={chatAgent?.crewId} agentSlug={chatAgent?.slug} />
-        : <AgentWorkTab agentId={agentId} workspaceId={workspaceId} />}
+        : <>{workHeader && <div className="p-3">{workHeader}</div>}<AgentWorkTab agentId={agentId} workspaceId={workspaceId} /></>}
     </div>
   </div>
 })
