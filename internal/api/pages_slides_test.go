@@ -149,7 +149,11 @@ func TestSlidesCustodyBlocksDepartureUntilHumanSuccessor(t *testing.T) {
 }
 
 func (f *instanceFixture) slideDo(token, method, path, body string) *httptest.ResponseRecorder {
-	return f.do(token, method, path+"?workspace_id=ws-old", body)
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return f.do(token, method, path+separator+"workspace_id=ws-old", body)
 }
 
 func TestSlidesCustodyAccountErasureAfterExplicitSuccessor(t *testing.T) {
