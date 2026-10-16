@@ -52,7 +52,7 @@ func (h *documentAuthority) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method == "GET" && r.URL.Path == "/health/ready" {
-		writeJSON(w, 200, map[string]int{"protocol": documentEngineProtocol, "schema": 2})
+		writeJSON(w, 200, map[string]int{"protocol": documentEngineProtocol, "schema": documents.LatestSchema})
 		return
 	}
 	if r.Method == "POST" && r.URL.Path == "/internal/docs/v1/engine/recover" {
@@ -60,6 +60,7 @@ func (h *documentAuthority) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			Boot     string `json:"boot"`
 			Protocol int    `json:"protocol"`
+			Schema   int    `json:"schema"`
 		}
 		d := json.NewDecoder(r.Body)
 		d.DisallowUnknownFields()
@@ -67,15 +68,15 @@ func (h *documentAuthority) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 400, "bounded boot identity required")
 			return
 		}
-		if input.Protocol != documentEngineProtocol {
-			replyError(w, 409, "unsupported document engine protocol")
+		if input.Protocol != documentEngineProtocol || input.Schema != documents.LatestSchema {
+			replyError(w, 409, "unsupported document engine protocol or content capability")
 			return
 		}
 		if err := h.store.RecoverEngine(r.Context(), input.Boot); err != nil {
 			documentAuthorityError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"recovered": true, "protocol": documentEngineProtocol})
+		writeJSON(w, 200, map[string]any{"recovered": true, "protocol": documentEngineProtocol, "schema": documents.LatestSchema})
 		return
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
@@ -236,28 +237,29 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 	k := documents.Key{WorkspaceID: WorkspaceIDFromContext(r.Context()), PageID: r.PathValue("page")}
 	op := r.PathValue("operation")
 	var in struct {
-		Generation  *int64                 `json:"generation"`
-		ID          string                 `json:"id"`
-		Fingerprint string                 `json:"fingerprint"`
-		Schema      int                    `json:"schema"`
-		Snapshot    []byte                 `json:"snapshot"`
-		Update      []byte                 `json:"update"`
-		Blocks      json.RawMessage        `json:"blocks"`
-		Owner       string                 `json:"owner"`
-		Token       string                 `json:"token"`
-		LeaseOwner  string                 `json:"leaseOwner"`
-		LeaseToken  string                 `json:"leaseToken"`
-		Epoch       int64                  `json:"epoch"`
-		IfRev       int64                  `json:"ifRev"`
-		IfHashes    map[string]string      `json:"ifHashes"`
-		Semantic    *documentSemanticPatch `json:"semantic"`
-		Kind        string                 `json:"kind"`
-		Checkpoint  string                 `json:"checkpoint"`
-		Body        string                 `json:"body"`
-		Anchor      json.RawMessage        `json:"anchor"`
-		Comment     string                 `json:"comment"`
-		Version     int64                  `json:"version"`
-		Resolved    bool                   `json:"resolved"`
+		Generation   *int64                 `json:"generation"`
+		ID           string                 `json:"id"`
+		Fingerprint  string                 `json:"fingerprint"`
+		Schema       int                    `json:"schema"`
+		TargetSchema int                    `json:"targetSchema"`
+		Snapshot     []byte                 `json:"snapshot"`
+		Update       []byte                 `json:"update"`
+		Blocks       json.RawMessage        `json:"blocks"`
+		Owner        string                 `json:"owner"`
+		Token        string                 `json:"token"`
+		LeaseOwner   string                 `json:"leaseOwner"`
+		LeaseToken   string                 `json:"leaseToken"`
+		Epoch        int64                  `json:"epoch"`
+		IfRev        int64                  `json:"ifRev"`
+		IfHashes     map[string]string      `json:"ifHashes"`
+		Semantic     *documentSemanticPatch `json:"semantic"`
+		Kind         string                 `json:"kind"`
+		Checkpoint   string                 `json:"checkpoint"`
+		Body         string                 `json:"body"`
+		Anchor       json.RawMessage        `json:"anchor"`
+		Comment      string                 `json:"comment"`
+		Version      int64                  `json:"version"`
+		Resolved     bool                   `json:"resolved"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 3<<20)
 	decoder := json.NewDecoder(r.Body)
@@ -339,6 +341,20 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		v := documentReceiptWire(receipt)
 		v["found"] = found
 		result = v
+	case "upgrade":
+		if artifactAgentID(r) != "" {
+			replyError(w, 403, "human schema upgrade required")
+			return
+		}
+		if in.Generation == nil {
+			replyError(w, 400, "original document generation required")
+			return
+		}
+		var receipt documents.Receipt
+		receipt, err = h.store.UpgradeRequest(ctx, k, lease, in.ID, in.Fingerprint, in.Schema, in.TargetSchema, in.IfRev, in.Generation, auth)
+		wire := documentReceiptWire(receipt)
+		wire["schema"] = documents.LatestSchema
+		result = wire
 	case "commit":
 		if in.Generation == nil {
 			replyError(w, 400, "document generation required")

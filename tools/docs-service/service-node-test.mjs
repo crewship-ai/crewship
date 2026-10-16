@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import * as Y from 'yjs';
 import { mkdtemp, writeFile, stat, chmod, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startService, PROTOCOL } from './service.mjs';
-import { create, snapshot, initialJSON, outline, load, anchor } from './schema.mjs';
+import { RICH_VERSION, create, snapshot, initialJSON, outline, load, anchor, find, encode } from './schema.mjs';
 const secret = 'a'.repeat(48);
 function call(socket, path, data, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -37,26 +38,28 @@ function initialState() {
   const doc = create(initialJSON()); const state = { schema: 2, rev: 1, epoch: 3, generation: 0, incarnation: 'go-boot', snapshot: snapshot(doc), updates: [] }; doc.destroy(); return state;
 }
 function authorityModel() {
-  const model = { state: initialState(), receipts: new Map(), seen: [], boots: new Set(), recoveries: 0, acquisitions: 0, releases: 0, commits: 0, checkpoints: 0, restores: 0, compatible: true, rejectCommit: false, revoked: new Set() };
+  const model = { state: initialState(), receipts: new Map(), seen: [], boots: new Set(), recoveries: 0, acquisitions: 0, releases: 0, commits: 0, checkpoints: 0, checkpointStates: new Map(), restores: 0, compatible: true, rejectCommit: false, revoked: new Set(), readOnly: new Set() };
   model.handle = async (op, data, req, res) => {
     model.seen.push({ op, data, bearer: req.headers.authorization });
-    if (op === 'recover') { assert.equal(typeof data.boot, 'string'); if (!model.boots.has(data.boot)) { model.boots.add(data.boot); model.recoveries++; model.state.generation++; model.state.epoch++; } return { recovered: true, protocol: PROTOCOL }; }
-    if (op === 'ready') return { protocol: model.compatible ? PROTOCOL : 99, schema: 2 };
+    if (op === 'recover') { assert.equal(typeof data.boot, 'string'); if (!model.boots.has(data.boot)) { model.boots.add(data.boot); model.recoveries++; model.state.generation++; model.state.epoch++; } return { recovered: true, protocol: PROTOCOL, schema: RICH_VERSION }; }
+    if (op === 'ready') return { protocol: model.compatible ? PROTOCOL : 99, schema: RICH_VERSION };
     assert.ok(req.headers.authorization?.startsWith('Bearer '));
     if (model.revoked.has(req.headers.authorization)) { res.writeHead(403); return { error: 'revoked principal' }; }
     if (op === 'state') return model.state;
     if (op === 'receipt') { const receipt = model.receipts.get(data.id); return receipt && receipt.fingerprint === data.fingerprint ? { ...receipt, found: true } : { found: false }; }
+    if (model.readOnly.has(req.headers.authorization) && !['checkpoint-read','checkpoints','comments'].includes(op)) { res.writeHead(403); return { error: 'read-only principal' }; }
     if (op === 'lease') { model.acquisitions++; model.state.epoch++; return { token: `lease-${model.acquisitions}`, epoch: model.state.epoch, generation: model.state.generation, expiresAt: new Date(Date.now() + 30000).toISOString() }; }
     if (op === 'renew') { assert.equal(data.epoch, model.state.epoch); return { expiresAt: new Date(Date.now() + 30000).toISOString() }; }
     if (op === 'release') { model.releases++; return { released: true }; }
-    if (op === 'checkpoint-read') return { schema: model.state.schema, snapshot: model.state.snapshot };
+    if (op === 'checkpoint-read') return model.checkpointStates.get(data.id) ?? { schema: model.state.schema, snapshot: model.state.snapshot };
     if (op === 'commit') {
       if (model.rejectCommit) { res.writeHead(403); return { error: 'revoked' }; }
       assert.equal(data.epoch, model.state.epoch); assert.equal(data.generation, model.state.generation);
       assert.equal(data.leaseOwner.length, 36); assert.ok(data.update); model.commits++;
       model.state = { ...model.state, schema: data.schema, rev: model.state.rev + 1, snapshot: data.snapshot };
-    } else if (op === 'checkpoint') model.checkpoints++;
-    else if (op === 'restore') { model.restores++; model.state = { ...model.state, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1 }; }
+    } else if (op === 'checkpoint') { model.checkpoints++; model.checkpointStates.set(data.id,{schema:model.state.schema,snapshot:model.state.snapshot}); }
+    else if (op === 'upgrade') { assert.equal(data.schema,model.state.schema); assert.equal(data.targetSchema,RICH_VERSION); assert.equal(data.ifRev,model.state.rev); assert.equal(data.generation,model.state.generation); model.state = {...model.state,schema:RICH_VERSION,rev:model.state.rev+1,epoch:model.state.epoch+1,generation:model.state.generation+1}; }
+    else if (op === 'restore') { model.restores++; const source=model.checkpointStates.get(data.checkpoint)??model.state; model.state = { ...model.state,schema:source.schema,snapshot:source.snapshot, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1 }; }
     const receipt = { id: data.id, rev: model.state.rev, epoch: model.state.epoch, fingerprint: data.fingerprint };
     model.receipts.set(data.id, receipt); return receipt;
   };
@@ -130,7 +133,7 @@ test('Unix service validates transport and acknowledges only durable receipts', 
   const model = authorityModel(), f = await fixture(model.handle); await f.start();
   try {
     assert.equal((await stat(f.socket)).mode & 0o777, 0o600);
-    assert.equal((await call(f.socket, '/health/ready')).body.schema, 2);
+    assert.equal((await call(f.socket, '/health/ready')).body.schema, RICH_VERSION);
     assert.equal((await call(f.socket, '/health/live', undefined, { 'X-Crewship-Docs-Service': 'bad' })).status, 403);
     const state = (await read(f)).body; assert.equal(typeof state.epoch, 'string');
     const request = patchRequest(state, 'one');
@@ -145,7 +148,7 @@ test('Unix service validates transport and acknowledges only durable receipts', 
 });
 test('initialization bootstraps without document state or lease', async () => {
   const seen = []; const f = await fixture((op, data, req, res) => {
-    seen.push(op); if (op === 'recover') return { recovered: true, protocol: PROTOCOL };
+    seen.push(op); if (op === 'recover') return { recovered: true, protocol: PROTOCOL, schema: RICH_VERSION };
     if (op === 'receipt') { res.writeHead(404); return { error: 'not found' }; }
     assert.equal(op, 'initialize'); assert.equal(data.schema, 2); assert.ok(data.snapshot); return { rev: 1, epoch: 0 };
   }); await f.start();
@@ -217,7 +220,7 @@ test('every read route stays read-only with mutation-shaped fields and live auth
 test('every mutation route requires its own valid schema and operation ID', async () => {
   const model = authorityModel(), f = await fixture(model.handle); await f.start();
   try {
-    for (const operation of ['initialize', 'patch', 'checkpoint', 'restore', 'comment', 'resolve']) {
+    for (const operation of ['initialize', 'upgrade', 'patch', 'checkpoint', 'restore', 'comment', 'resolve']) {
       const invalid = { schema: 999, id: 'valid-id', body: initialJSON() };
       assert.equal((await call(f.socket, `/v1/documents/p/${operation}`, invalid)).status, operation === 'initialize' ? 400 : 409, operation);
       assert.equal((await call(f.socket, `/v1/documents/p/${operation}`, { ...invalid, schema: 2, id: '../invalid' })).status, 400, operation);
@@ -257,8 +260,8 @@ test('checkpoint and restore retry receipts survive generation changes; readines
 test('blocked persistence bounds document queue and drain waits for all failed acknowledgements', async () => {
   const blocked = deferred(), started = deferred(); let calls = 0;
   const f = await fixture(async (op, data, req, res) => {
-    if (op === 'recover') return { recovered: true, protocol: PROTOCOL };
-    if (op === 'ready') return { protocol: PROTOCOL, schema: 2 };
+    if (op === 'recover') return { recovered: true, protocol: PROTOCOL, schema: RICH_VERSION };
+    if (op === 'ready') return { protocol: PROTOCOL, schema: RICH_VERSION };
     calls++; started.resolve(); await blocked.promise; res.writeHead(503); return { error: 'controlled persistence failure' };
   }); await f.start(); const pending = [];
   try {
@@ -283,7 +286,7 @@ test('duplicate socket bind cannot recover or fence the existing engine', async 
 test('recovery gates all admission and failure closes its socket; a fresh boot can retry', async () => {
   const entered = deferred(), proceed = deferred(); let reject = true, boots = [];
   const f = await fixture(async (op, data, req, res) => {
-    if (op === 'recover') { boots.push(data.boot); entered.resolve(); await proceed.promise; if (reject) { res.writeHead(503); return { error: 'recovery failed' }; } return { recovered: true, protocol: PROTOCOL }; }
+    if (op === 'recover') { boots.push(data.boot); entered.resolve(); await proceed.promise; if (reject) { res.writeHead(503); return { error: 'recovery failed' }; } return { recovered: true, protocol: PROTOCOL, schema: RICH_VERSION }; }
     assert.fail('recovery must gate document authority calls');
   });
   const starting = f.start(); const rejected = assert.rejects(starting, /recovery failed/);
@@ -397,8 +400,8 @@ test('slow incomplete bodies consume bounded admission while health remains resp
 test('drain aborts existing body readers and promptly closes new incomplete requests while persistence waits', { timeout: 10000 }, async () => {
   const blocked = deferred(), entered = deferred();
   const f = await fixture(async (op, data, req, res) => {
-    if (op === 'recover') return { recovered: true, protocol: PROTOCOL };
-    if (op === 'ready') return { protocol: PROTOCOL, schema: 2 };
+    if (op === 'recover') return { recovered: true, protocol: PROTOCOL, schema: RICH_VERSION };
+    if (op === 'ready') return { protocol: PROTOCOL, schema: RICH_VERSION };
     entered.resolve(); await blocked.promise; res.writeHead(503); return { error: 'controlled persistence failure' };
   }); await f.start();
   const held = [];
@@ -472,4 +475,62 @@ test('public comment responses resolve spans without exposing the private anchor
     assert.equal(comment.status, 'attached'); assert.equal(comment.from, 0); assert.equal(comment.to, 8);
     assert.equal(comment.spans, undefined); assert.equal(comment.anchor.spans, undefined);
   } finally { await f.close(); }
+});
+
+test('startup rejects missing, old or future Go content capability before admitting documents', async () => {
+ for (const schema of [undefined, 2, 4]) {
+  const f = await fixture((op,data) => { assert.equal(op,'recover'); assert.equal(data.schema,RICH_VERSION); return {recovered:true,protocol:PROTOCOL,...(schema === undefined ? {} : {schema})}; });
+  try { await assert.rejects(f.start(),/compatible engine recovery/); await assert.rejects(call(f.socket,'/v1/documents/p/read',{})); } finally { await f.close(); }
+ }
+});
+
+test('explicit human upgrade binds original Page/revision, preserves bytes and retries without reapplying', async () => {
+ const model=authorityModel(),f=await fixture(model.handle);await f.start();
+ try {
+  const before=(await read(f)).body,request={id:'explicit-three',schema:2,target_schema:3,page_id:'p',epoch:before.epoch,ifRev:before.rev};
+  for(const changed of [{...request,page_id:'foreign'},{...request,ifRev:before.rev-1},{...request,target_schema:4},{...request,update:'forged'}])assert.equal((await call(f.socket,'/v1/documents/p/upgrade',changed)).status,409);
+  assert.equal((await call(f.socket,'/v1/documents/p/upgrade',request,{Authorization:'Bearer agtv2.synthetic'})).status,403);
+  const receipt=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(receipt.status,200);assert.equal(receipt.body.schema,3);assert.equal(model.state.snapshot,before.snapshot);assert.equal(model.state.rev,before.rev+1);
+  const after=(await read(f)).body;assert.equal(after.schema,3);assert.notEqual(after.epoch,before.epoch);assert.deepEqual(after.content,before.content);
+  const retry=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(retry.status,200);assert.equal(retry.body.rev,receipt.body.rev);assert.equal(retry.body.duplicate,true);assert.equal(model.seen.filter(x=>x.op==='upgrade').length,1);
+  model.revoked.add('Bearer human');assert.equal((await call(f.socket,'/v1/documents/p/upgrade',request)).status,403);assert.equal(model.state.rev,before.rev+1);
+ } finally {await f.close()}
+});
+test('schema3 raw human marks are versioned; old clients and unqualified semantic clients fail closed',async()=>{
+ const model=authorityModel(),f=await fixture(model.handle);await f.start();
+ try {
+  const before=(await read(f)).body;const upgrade={id:'upgrade-marks',schema:2,target_schema:3,page_id:'p',epoch:before.epoch,ifRev:before.rev};assert.equal((await call(f.socket,'/v1/documents/p/upgrade',upgrade)).status,200);
+  const current=(await read(f)).body,doc=load(current.snapshot),vector=Y.encodeStateVector(doc);find(doc,'intro').toArray()[0].format(0,8,{link:{href:'https://example.invalid/'}});const update=encode(Y.encodeStateAsUpdate(doc,vector));doc.destroy();
+  assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'old-client',schema:2,epoch:current.epoch,kind:'human',update})).status,409);assert.equal(model.commits,0);
+  assert.equal((await call(f.socket,'/v1/documents/p/verify-targets',{base_rev:current.rev,targets:[]})).status,403);
+  assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'raw-agent',schema:3,page_id:'p',epoch:current.epoch,kind:'human',update},{Authorization:'Bearer agtv2.synthetic'})).status,403);assert.equal(model.commits,0);
+  assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'foreign-page',schema:3,page_id:'foreign',epoch:current.epoch,kind:'human',update})).status,409);
+  const saved=await call(f.socket,'/v1/documents/p/patch',{id:'human-link',schema:3,page_id:'p',epoch:current.epoch,kind:'human',update});assert.equal(saved.status,200);const rich=(await read(f)).body;assert.equal(rich.schema,3);assert.equal(rich.content.content.find(node=>node.attrs?.id==='intro').content[0].marks[0].attrs.href,'https://example.invalid/');
+ }finally{await f.close()}
+});
+test('mixed schema checkpoint read and restore use the actual source version without a silent upgrade',async()=>{
+ const model=authorityModel(),f=await fixture(model.handle);await f.start();
+ try {
+  const old=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{id:'legacy-checkpoint',schema:2,epoch:old.epoch,ifRev:old.rev})).status,200);
+  assert.equal((await call(f.socket,'/v1/documents/p/upgrade',{id:'mixed-upgrade',schema:2,target_schema:3,page_id:'p',epoch:old.epoch,ifRev:old.rev})).status,200);
+  const current=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{id:'rich-checkpoint',schema:3,page_id:'p',epoch:current.epoch,ifRev:current.rev})).status,200);
+  const request={id:'restore-legacy',schema:3,page_id:'p',epoch:current.epoch,ifRev:current.rev,checkpoint:'legacy-checkpoint'};const restored=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(restored.status,200);const head=(await read(f)).body;assert.equal(head.schema,2);assert.notEqual(head.epoch,current.epoch);assert.equal(head.snapshot,old.snapshot);
+  const retry=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(retry.status,200);assert.equal(retry.body.schema,2);assert.equal(retry.body.rev,restored.body.rev);assert.equal(retry.body.duplicate,true);assert.equal(model.restores,1);
+  const pinned=await call(f.socket,'/v1/documents/p/checkpoint-read',{checkpoint:'rich-checkpoint'});assert.equal(pinned.status,200);assert.equal(pinned.body.schema,3);
+ }finally{await f.close()}
+});
+
+// Receipt lookup remains an authorized read of an existing durable result.
+test('WRITE to READ downgrade permits original receipt but never a fresh upgrade',async()=>{
+ const model=authorityModel(),f=await fixture(model.handle);await f.start();
+ try{
+ const old=(await read(f)).body;const request={id:'readable-upgrade',schema:2,target_schema:3,page_id:'p',epoch:old.epoch,ifRev:old.rev};
+ const original=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(original.status,200);
+ const rich=(await read(f)).body;await call(f.socket,'/v1/documents/p/checkpoint',{id:'readable-rich',schema:3,page_id:'p',epoch:rich.epoch,ifRev:rich.rev});
+ // A later confirmed restore changes the head, not the original receipt.
+ model.state={...model.state,schema:2,rev:model.state.rev+1,snapshot:old.snapshot};model.readOnly.add('Bearer human');
+ const rev=model.state.rev;const retry=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(retry.status,200);assert.equal(retry.body.duplicate,true);assert.equal(retry.body.rev,original.body.rev);assert.equal(retry.body.schema,3);assert.equal(model.state.rev,rev);
+ const current=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/upgrade',{...request,id:'fresh-read-only',epoch:current.epoch,ifRev:current.rev})).status,403);assert.equal(model.state.rev,rev);
+ model.revoked.add('Bearer human');assert.equal((await call(f.socket,'/v1/documents/p/upgrade',request)).status,403);
+ }finally{await f.close()}
 });

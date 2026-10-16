@@ -1,0 +1,143 @@
+//go:build linux && (docs_foundation || conformance)
+
+package api
+
+import (
+	"context"
+	"database/sql"
+	"encoding/base64"
+	"encoding/json"
+	"os/exec"
+	"path/filepath"
+	"testing"
+
+	"github.com/crewship-ai/crewship/internal/documents"
+)
+
+// Uses the foundation suite's actual separate Go authority and Node engine;
+// no computation or durable-response mocks participate in these assertions.
+func exerciseDocumentRichVersions(t *testing.T, h *PageHandler, workspace, user, human, agent, node, root string, call func(string, string, string, map[string]any, int) map[string]any) (string, map[string]any) {
+	t.Helper()
+	const page = "rich-legacy-page"
+	wmSeedPage(t, h.db, workspace, page, "rich-legacy", "Legacy document", user, "")
+	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'agent','artifact-agent','write',?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))`, page, user)
+	script := `import {create,snapshot,outline} from './tools/docs-service/schema.mjs';
+const doc=create({type:'doc',content:[{type:'paragraph',attrs:{id:'legacy-intro'},content:[{type:'text',text:'Legacy text'}]}]},1);
+console.log(JSON.stringify({snapshot:snapshot(doc),blocks:(await outline(doc,1)).map(({id,hash})=>({id,hash}))}));doc.destroy();`
+	command := exec.Command(node, "--input-type=module", "-e", script)
+	command.Dir = root
+	raw, err := command.Output()
+	if err != nil {
+		t.Fatalf("legacy binary fixture: %v", err)
+	}
+	var fixture struct {
+		Snapshot string          `json:"snapshot"`
+		Blocks   json.RawMessage `json:"blocks"`
+	}
+	if err = json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	binary, err := base64.StdEncoding.DecodeString(fixture.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorize := func(ctx context.Context, tx *sql.Tx) (string, error) {
+		var owner string
+		err := tx.QueryRowContext(ctx, `SELECT owner_user_id FROM pages WHERE id=? AND workspace_id=?`, page, workspace).Scan(&owner)
+		return owner, err
+	}
+	if _, err = documents.New(h.db, documents.Options{}).InitRequest(t.Context(), documents.Key{WorkspaceID: workspace, PageID: page}, "legacy-seed", "synthetic-schema1-binary", 1, binary, fixture.Blocks, authorize); err != nil {
+		t.Fatal(err)
+	}
+	read := func() map[string]any { return call(page, "read", human, map[string]any{}, 200) }
+	state := read()
+	if state["schema"] != float64(1) {
+		t.Fatalf("legacy schema lost: %v", state)
+	}
+	call(page, "comment", human, map[string]any{"id": "legacy-comment", "schema": 1, "epoch": state["epoch"], "ifRev": state["rev"], "block": "legacy-intro", "from": 0, "to": 6, "text": "Legacy comment"}, 200)
+	call(page, "checkpoint", human, map[string]any{"id": "legacy-one", "schema": 1, "epoch": state["epoch"], "ifRev": state["rev"]}, 200)
+	block := state["outline"].([]any)[0].(map[string]any)
+	// A legacy schema2 client can still edit stored schema1, as before this cut.
+	call(page, "patch", human, map[string]any{"id": "legacy-compatible-edit", "schema": 2, "epoch": state["epoch"], "ifRev": state["rev"], "target": "legacy-intro", "ifHash": block["hash"], "text": "Legacy text edited"}, 200)
+	state = read()
+	if state["schema"] != float64(2) {
+		t.Fatal("legacy edit compatibility changed")
+	}
+	restore := map[string]any{"id": "legacy-return", "schema": 2, "epoch": state["epoch"], "ifRev": state["rev"], "checkpoint": "legacy-one"}
+	call(page, "restore", human, restore, 200)
+	state = read()
+	if state["schema"] != float64(1) {
+		t.Fatal("legacy checkpoint silently upgraded")
+	}
+	upgrade := map[string]any{"id": "actual-rich-upgrade", "schema": 1, "target_schema": 3, "page_id": page, "epoch": state["epoch"], "ifRev": state["rev"]}
+	assertComment := func() {
+		t.Helper()
+		items := call(page, "comments", human, map[string]any{}, 200)["comments"].([]any)
+		if len(items) != 1 {
+			t.Fatalf("legacy comment missing: %v", items)
+		}
+		comment := items[0].(map[string]any)
+		if comment["status"] != "attached" || comment["quote"] != "Legacy" || comment["from"] != float64(0) || comment["to"] != float64(6) {
+			t.Fatalf("legacy character anchor changed: %v", comment)
+		}
+	}
+	original := state["snapshot"]
+	receipt := call(page, "upgrade", human, upgrade, 200)
+	state = read()
+	if state["schema"] != float64(3) || state["snapshot"] != original || state["rev"] != receipt["rev"] {
+		t.Fatal("upgrade changed original binary or schema/revision")
+	}
+	assertComment()
+	if call(page, "upgrade", human, upgrade, 200)["duplicate"] != true {
+		t.Fatal("upgrade retry not durable")
+	}
+	// Generate the actual browser-equivalent incremental Yjs mark/code update.
+	script = `import * as Y from './tools/docs-service/node_modules/yjs/dist/yjs.mjs';import {load,find,decode,encode} from './tools/docs-service/schema.mjs';
+const state=JSON.parse(process.argv[1]),doc=load(state.snapshot);for(const u of state.updates||[])Y.applyUpdate(doc,decode(typeof u==='string'?u:u.update));const vector=Y.encodeStateVector(doc);
+find(doc,'legacy-intro').toArray()[0].format(0,6,{link:{href:'https://example.invalid/'}});
+const code=new Y.XmlElement('codeBlock');code.setAttribute('id','rich-code');const text=new Y.XmlText();text.insert(0,'const literal = "<script>";');code.insert(0,[text]);doc.getXmlFragment('default').insert(1,[code]);
+console.log(JSON.stringify({update:encode(Y.encodeStateAsUpdate(doc,vector))}));doc.destroy();`
+	command = exec.Command(node, "--input-type=module", "-e", script, string(mustDocumentsJSON(t, state)))
+	command.Dir = filepath.Clean(root)
+	raw, err = command.Output()
+	if err != nil {
+		t.Fatalf("rich binary update fixture: %v", err)
+	}
+	var patch map[string]any
+	if err = json.Unmarshal(raw, &patch); err != nil {
+		t.Fatal(err)
+	}
+	patch["id"] = "actual-rich-human"
+	patch["schema"] = 3
+	patch["page_id"] = page
+	patch["epoch"] = state["epoch"]
+	patch["kind"] = "human"
+	call(page, "patch", human, patch, 200)
+	state = read()
+	content := state["content"].(map[string]any)["content"].([]any)
+	if len(content) != 2 || content[1].(map[string]any)["type"] != "codeBlock" {
+		t.Fatal("code block not durable")
+	}
+	text := content[0].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if text["marks"].([]any)[0].(map[string]any)["type"] != "link" {
+		t.Fatal("link not durable")
+	}
+	call(page, "checkpoint", human, map[string]any{"id": "rich-three", "schema": 3, "page_id": page, "epoch": state["epoch"], "ifRev": state["rev"]}, 200)
+	call(page, "initialize", agent, map[string]any{"id": "agent-rich-reinit", "schema": 3, "page_id": page, "body": state["content"]}, 403)
+	call(page, "restore", human, map[string]any{"id": "rich-to-legacy", "schema": 3, "page_id": page, "epoch": state["epoch"], "ifRev": state["rev"], "checkpoint": "legacy-one"}, 200)
+	state = read()
+	if state["schema"] != float64(1) {
+		t.Fatal("mixed restore ignored source version")
+	}
+	pinned := call(page, "checkpoint-read", human, map[string]any{"checkpoint": "rich-three"}, 200)
+	if pinned["schema"] != float64(3) || string(mustDocumentsJSON(t, pinned["content"])) != string(mustDocumentsJSON(t, map[string]any{"type": "doc", "content": content})) {
+		t.Fatal("rich checkpoint lost actual marked/code content")
+	}
+	call(page, "restore", human, map[string]any{"id": "legacy-to-rich", "schema": 1, "epoch": state["epoch"], "ifRev": state["rev"], "checkpoint": "rich-three"}, 200)
+	if read()["schema"] != float64(3) {
+		t.Fatal("mixed restore did not retain rich source version")
+	}
+	assertComment()
+	t.Log("actual schema1 read/edit/comment/checkpoint; schema1→3 immutable upgrade/retry; marked/code schema3 history and mixed restore PASS")
+	return page, upgrade
+}

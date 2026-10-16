@@ -4,7 +4,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
-import { VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
+import { VERSION, RICH_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
 import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
@@ -14,9 +14,11 @@ const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(v
 // which splits a surrogate pair, even when its submitted quote matches it.
 const textBoundary = (text, index) => index === 0 || index === text.length ||
   !(text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff && text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff);
-async function verifyTargets(doc, targets) {
+const contentSchema = version => version === 1 ? VERSION : version;
+const supportedSchema = version => [1, VERSION, RICH_VERSION].includes(version);
+async function verifyTargets(doc, targets, version = VERSION) {
   if (!Array.isArray(targets) || targets.length < 1 || targets.length > 16) throw fault(400, 'one to sixteen selected text targets required');
-  const blocks = new Map((await outline(doc)).map(block => [block.id, block]));
+  const blocks = new Map((await outline(doc,version)).map(block => [block.id, block]));
   const seen = new Set(), verified = []; let quoted = 0;
   for (const target of targets) {
     if (!target || typeof target !== 'object' || Array.isArray(target) || Object.keys(target).some(key => !['id','hash','from','to','quote'].includes(key)) ||
@@ -47,7 +49,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   const secret = await readServiceSecret(tokenFile);
   const build = createHash('sha256');
   for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'service.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
-  const identity = { protocol: PROTOCOL, schema: VERSION, build: build.digest('hex') };
+  const identity = { protocol: PROTOCOL, schema: RICH_VERSION, build: build.digest('hex') };
   const leases = new Map();
   const owner = randomUUID();const syncEpoch=state=>`${state.incarnation??"legacy"}:${owner}:${state.generation??state.epoch}`; const documents = new Map(); let queued = 0; let draining = false;let ready=false;let admitted=0;const decoding=new Set();
   async function go(page, operation, context, data = {}) {
@@ -83,7 +85,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       case 'checkpoints': return executeRead(page, 'checkpoints', context, request);
       case 'checkpoint-read': return executeRead(page, 'checkpoint-read', context, request);
       case 'export': return executeRead(page, 'export', context, request);
-      case 'initialize': case 'patch': case 'checkpoint': case 'restore':
+      case 'initialize': case 'upgrade': case 'patch': case 'checkpoint': case 'restore':
       case 'comment': case 'resolve':
         return executeMutation(page, operation, context, request);
       default: throw fault(404, 'unknown operation');
@@ -92,25 +94,27 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   async function executeRead(page, operation, context, request) {
     if (operation === 'verify-targets' && context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'human request admission required');
     const state = await go(page, 'state', context);
-    if (state.schema !== VERSION && state.schema !== 1) throw fault(409, 'unsupported schema; content preserved');
+    if (!supportedSchema(state.schema)) throw fault(409, 'unsupported schema; content preserved');
+    const version = contentSchema(state.schema);
     const doc = load(state.snapshot);
     try {
       for (const update of state.updates || []) Y.applyUpdate(doc, decode(typeof update === 'string' ? update : update.update));
       if (operation === 'read') {
         const { rev, generation, incarnation, snapshot, snapshotRev, updates, blocks } = state;
-        return { schema: VERSION, rev, generation, incarnation, snapshot, snapshotRev, updates, blocks, epoch: syncEpoch(state), content: validate(doc), outline: await outline(doc) };
+        return { schema: state.schema, rev, generation, incarnation, snapshot, snapshotRev, updates, blocks, epoch: syncEpoch(state), content: validate(doc,version), outline: await outline(doc,version) };
       }
       if (operation === 'verify-targets') {
+        if(version === RICH_VERSION) throw fault(403,'Schema3 selected agent requests require the qualified rich semantic guard.');
         if (!Number.isSafeInteger(request.base_rev) || request.base_rev !== state.rev) throw fault(409, 'document request revision changed');
-        return { page_id: page, rev: state.rev, targets: await verifyTargets(doc, request.targets) };
+        return { page_id: page, rev: state.rev, targets: await verifyTargets(doc, request.targets,version) };
       }
-      if(operation==='export') { try { return {markdown:markdown(validate(doc))}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; } }
+      if(operation==='export') { try { return {markdown:markdown(validate(doc,version))}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; } }
       if(operation==='checkpoints') return {checkpoints:await go(page,'checkpoints',context)};
-      if(operation==='checkpoint-read') { const c=await go(page,'checkpoint-read',context,{id:request.checkpoint});const pinned=load(c.snapshot);try{return {...c,content:validate(pinned),outline:await outline(pinned)}}finally{pinned.destroy()} };
+      if(operation==='checkpoint-read') { const c=await go(page,'checkpoint-read',context,{id:request.checkpoint});const pinned=load(c.snapshot);try{return {...c,content:validate(pinned,contentSchema(c.schema??VERSION)),outline:await outline(pinned,contentSchema(c.schema??VERSION))}}finally{pinned.destroy()} };
       if (operation === 'comments') {
         const comments = await go(page, 'comments', context);
         return { comments: comments.map(comment => {
-          const { id, block, quote, checkpoint, start, end, status, from, to } = resolve(doc, comment.anchor);
+          const { id, block, quote, checkpoint, start, end, status, from, to } = resolve(doc, comment.anchor,version);
           const publicAnchor = { id, block, quote, checkpoint, start, end };
           return { ...comment, anchor: publicAnchor, ...publicAnchor, status: comment.resolved ? 'resolved' : status, from, to };
         }) };
@@ -119,34 +123,55 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     } finally { doc.destroy(); }
   }
   async function executeMutation(page, operation, context, request) {
+    if ((request.schema === RICH_VERSION || request.page_id !== undefined) && request.page_id !== page) throw fault(409,'original Page identity changed');
+    if (operation === 'initialize' && request.schema === RICH_VERSION && context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human rich document initialization required');
     if (operation === 'initialize') {
-      if (request.schema !== VERSION || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
+      if (![VERSION,RICH_VERSION].includes(request.schema) || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
       const fingerprint = await hash({ operation, request });
       try { const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint }); if (receipt.found) return { ...receipt, duplicate: true }; } catch (error) { if (error.status !== 404) throw error; }
-      const doc = create(request.body);
-      try { return await go(page, 'initialize', context, { id: request.id, fingerprint, schema: VERSION, snapshot: snapshot(doc), blocks: (await outline(doc)).map(({ id, hash }) => ({ id, hash })) }); }
+      const doc = create(request.body,request.schema);
+      try { return await go(page, 'initialize', context, { id: request.id, fingerprint, schema: request.schema, snapshot: snapshot(doc), blocks: (await outline(doc,request.schema)).map(({ id, hash }) => ({ id, hash })) }); }
       finally { doc.destroy(); }
     }
     const state = await go(page, 'state', context);
-    if (state.schema !== VERSION && state.schema !== 1) throw fault(409, 'unsupported schema; content preserved');
-    if (request.schema !== VERSION) throw fault(409, 'unsupported client schema');
+    if (!supportedSchema(state.schema)) throw fault(409, 'unsupported schema; content preserved');
+    const version = contentSchema(state.schema);
+    if (!supportedSchema(request.schema)) throw fault(409,'unsupported client schema');
+    if (operation === 'upgrade' && context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human schema upgrade required');
     if (!id(request.id)) throw fault(400, 'operation ID required');
     const fingerprint = await hash({ operation, request });
     const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint });
-    if (receipt.found) return { ...receipt, schema:VERSION, epoch:syncEpoch(state), duplicate: true };
+    if (receipt.found) {
+      let schema = operation === 'upgrade' ? RICH_VERSION : request.schema;
+      if (operation === 'restore') { const pinned = await go(page,'checkpoint-read',context,{id:request.checkpoint}); schema = pinned.schema ?? VERSION; }
+      return { ...receipt, schema, epoch:syncEpoch(state), duplicate: true };
+    }
+    if (request.schema !== state.schema && !(state.schema === 1 && request.schema === VERSION)) throw fault(409,'unsupported client schema; reopen the confirmed document');
+    if (operation === 'upgrade') {
+      if (context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human schema upgrade required');
+      if (request.page_id !== page || request.target_schema !== RICH_VERSION || ![1,VERSION].includes(state.schema) || request.ifRev !== state.rev || Object.keys(request).some(key=>!['id','schema','target_schema','page_id','epoch','ifRev'].includes(key))) throw fault(409,'original Page identity, revision and supported upgrade required');
+    }
+    if (version === RICH_VERSION && operation === 'patch' && request.kind !== 'human') throw fault(403,'Schema3 semantic writes require the qualified rich semantic guard');
     let doc = load(state.snapshot); let lease;
     try {
       for (const update of state.updates || []) Y.applyUpdate(doc, decode(typeof update === 'string' ? update : update.update));
+      validate(doc,version);
       const baseVector = Y.encodeStateVector(doc);
       if (request.epoch !== syncEpoch(state)) throw fault(409, 'old epoch; reload document');
-      if(operation==='comment') { if(request.ifRev!==state.rev)throw fault(409,'comment revision changed');const selected=anchor(doc,request.block,request.from,request.to,request.id,state.rev);const result=await go(page,'comment',context,{id:request.id,fingerprint,body:request.text,anchor:selected,ifRev:state.rev,generation:state.generation??0});return {...result,epoch:syncEpoch(state)}; }
+      if(operation==='comment') { if(request.ifRev!==state.rev)throw fault(409,'comment revision changed');const selected=anchor(doc,request.block,request.from,request.to,request.id,state.rev,version);const result=await go(page,'comment',context,{id:request.id,fingerprint,body:request.text,anchor:selected,ifRev:state.rev,generation:state.generation??0});return {...result,epoch:syncEpoch(state)}; }
       if(operation==='resolve') return {...await go(page,'resolve',context,{id:request.id,fingerprint,comment:request.comment,version:request.version,resolved:request.resolved,ifRev:request.ifRev,generation:state.generation??0}),epoch:syncEpoch(state)};
       const key=`${context.workspace}/${page}`;const cached=leases.get(key);
       if(cached && cached.lease.epoch===state.epoch && (!cached.lease.expiresAt || Date.parse(cached.lease.expiresAt)>Date.now()+1000)) lease=cached.lease;
       if(!lease) { lease=await go(page,'lease',context,{owner,epoch:state.epoch});leases.set(key,{lease,context,page,touched:Date.now()}); } else {cached.touched=Date.now();cached.context=context;}
       if(lease.generation!==undefined && lease.generation!==state.generation) throw fault(409,'document generation changed; reload');
       if (!Number.isSafeInteger(lease.epoch) || lease.epoch < state.epoch || typeof lease.token !== 'string') throw fault(409, 'writer lease changed; reload document');
-      const hashes = {}; let semantic;
+      if (operation === 'upgrade') {
+        validate(doc,RICH_VERSION);
+        const result = await go(page,'upgrade',context,{id:request.id,fingerprint,schema:state.schema,targetSchema:RICH_VERSION,ifRev:state.rev,generation:state.generation??0,epoch:lease.epoch,leaseToken:lease.token,leaseOwner:owner});
+        leases.delete(key);
+        return {...result,schema:RICH_VERSION,epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
+      }
+      const hashes = {}; let semantic; let resultVersion = version;
       switch (operation) {
         case 'patch':
           if (request.kind === 'human') {
@@ -154,7 +179,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
             if (typeof request.update !== 'string' || request.update.length > 1400000) throw fault(400, 'bounded update required');
             Y.applyUpdate(doc, decode(request.update));
           } else {
-            const target = (await outline(doc)).find(block => block.id === request.target);
+            const target = (await outline(doc,version)).find(block => block.id === request.target);
             if (request.ifRev !== state.rev || !target || target.hash !== request.ifHash) throw fault(409, 'semantic precondition conflict');
             hashes[request.target] = request.ifHash;
             const scope = state.requestScope;
@@ -163,15 +188,15 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
               const prefix = scope.target.text.slice(0, scope.target.from), suffix = scope.target.text.slice(scope.target.to);
               if (request.text.length < prefix.length + suffix.length || !request.text.startsWith(prefix) || !request.text.endsWith(suffix)) throw fault(409, 'selected text range conflict');
             }
-            const edit = patch(doc, { op: 'replaceText', id: request.target, text: request.text, ...(scope ? { range: { from: scope.target.from, to: scope.target.to } } : {}) });
+            const edit = patch(doc, { op: 'replaceText', id: request.target, text: request.text, ...(scope ? { range: { from: scope.target.from, to: scope.target.to } } : {}) },version);
             semantic = { target: request.target, text: request.text, edit };
           }
           break;
         case 'restore': {
           if (request.ifRev !== state.rev) throw fault(409, 'restore precondition conflict');
           const checkpoint = await go(page, 'checkpoint-read', context, { id: request.checkpoint });
-          if (checkpoint.schema !== undefined && checkpoint.schema !== VERSION && checkpoint.schema !== 1) throw fault(409, 'unsupported checkpoint schema');
-          doc.destroy(); doc = load(checkpoint.snapshot); break;
+          if (checkpoint.schema !== undefined && !supportedSchema(checkpoint.schema)) throw fault(409, 'unsupported checkpoint schema');
+          resultVersion = contentSchema(checkpoint.schema??VERSION); doc.destroy(); doc = load(checkpoint.snapshot); break;
         }
         case 'checkpoint':
           if (request.ifRev !== state.rev) throw fault(409, 'checkpoint precondition conflict');
@@ -179,13 +204,13 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         default: throw fault(404, 'unknown operation');
       }
       if (doc.store.pendingStructs || doc.store.pendingDs) throw fault(400, 'unresolved Yjs dependencies');
-      validate(doc);
-      const blocks = (await outline(doc)).map(({ id, hash }) => ({ id, hash }));
+      validate(doc,resultVersion);
+      const blocks = (await outline(doc,resultVersion)).map(({ id, hash }) => ({ id, hash }));
       const renewal=await go(page, 'renew', context, { owner, epoch: lease.epoch, token: lease.token });
       if(renewal.expiresAt)lease.expiresAt=renewal.expiresAt;
       if (operation === 'restore') return {...await go(page, 'restore', context, { id: request.id, fingerprint, checkpoint: request.checkpoint, ifRev: state.rev,generation:state.generation??0, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner }),epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
       if (operation === 'checkpoint') return {...await go(page, 'checkpoint', context, { id: request.id, fingerprint, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, ifRev: state.rev,generation:state.generation??0, snapshot: snapshot(doc) }),epoch:syncEpoch(state)};
-      return {...await go(page, 'commit', context, { id: request.id, fingerprint, kind: operation === 'patch' ? (request.kind === 'human' ? 'human' : 'agent') : operation, ...(operation === 'patch' && request.kind !== 'human' ? { semantic } : {}), epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation:state.generation??0, schema: VERSION, snapshot: snapshot(doc), blocks, ifHashes: hashes, checkpoint: request.checkpoint }),epoch:syncEpoch(state)};
+      return {...await go(page, 'commit', context, { id: request.id, fingerprint, kind: operation === 'patch' ? (request.kind === 'human' ? 'human' : 'agent') : operation, ...(operation === 'patch' && request.kind !== 'human' ? { semantic } : {}), epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation:state.generation??0, schema: version, snapshot: snapshot(doc), blocks, ifHashes: hashes, checkpoint: request.checkpoint }),epoch:syncEpoch(state)};
     } finally {
       doc.destroy();
       // The engine retains its fenced lease across editor operations. Each write renews with the original live principal; no unconfirmed document is cached.
@@ -213,13 +238,13 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if (req.method === 'GET' && req.url === '/health/ready') {
         if (draining || !ready) return reply(503, { ready: false, ...identity });
         const authority = await go('', 'health', { workspace: '' });
-        if (authority.protocol !== PROTOCOL || authority.schema !== VERSION) throw fault(503, 'authority protocol or schema unsupported');
+        if (authority.protocol !== PROTOCOL || authority.schema !== RICH_VERSION) throw fault(503, 'authority protocol or schema unsupported');
         return reply(200, { ready: true, ...identity });
       }
       if (req.method === 'POST' && req.url === '/drain') { await drain(); return reply(200, { drained: true }); }
       if(draining){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'service draining');}
       if(!ready){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'engine recovering');}
-      const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(initialize|read|verify-targets|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
+      const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(initialize|upgrade|read|verify-targets|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
       if (req.method !== 'POST' || !match) throw fault(404, 'unknown operation');
       const context = { workspace: req.headers['x-workspace-id'], authorization: req.headers.authorization };
       if (!id(context.workspace) || typeof context.authorization !== 'string' || !/^Bearer \S+$/.test(context.authorization)) throw fault(401, 'workspace and bearer required');
@@ -236,8 +261,8 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     try{await lstat(socket);throw new Error('service socket already exists')}catch(error){if(error.code!=='ENOENT')throw error}
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socket,resolve)});bound=true;
     await chmod(socket,0o600);
-    const recovered=await go('engine','recover',{workspace:''},{boot:owner,protocol:PROTOCOL});
-    if(!recovered.recovered || recovered.protocol!==PROTOCOL)throw new Error('authority did not confirm compatible engine recovery');ready=true;
+    const recovered=await go('engine','recover',{workspace:''},{boot:owner,protocol:PROTOCOL,schema:RICH_VERSION});
+    if(!recovered.recovered || recovered.protocol!==PROTOCOL || recovered.schema!==RICH_VERSION)throw new Error('authority did not confirm compatible engine recovery');ready=true;
   }catch(error){clearInterval(timer);if(bound){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}throw error}
   return { identity, socket, drain, async close() { await drain(); clearInterval(timer); await new Promise(resolve => server.close(resolve)); } };
 }

@@ -622,6 +622,7 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 			}
 		}
 	}
+	richPage, richUpgrade := exerciseDocumentRichVersions(t, h, workspace, user, human, agent, node, root, call)
 	report := map[string]any{"protocol": documentEngineProtocol, "schema": 2, "documents": 9, "selectedRequestRealHTTP": map[string]any{"scenarios": []string{"selected success", "fresh rebase", "revoked grant"}, "rangeAndTargetRejection": 409, "crossPageGenericDelegationRejection": 403, "deletedRequestAfterRunResetRejection": 403, "freshRebaseRejection": 409, "revokedGrantRejection": 403, "onePatchExactCheckpoint": true, "exactPatchRetry": true, "noRejectedMutationReceiptsOrResults": true, "modelRun": false}, "representativeHistory": representativeReport, "commitMilliseconds": float64(commitDuration.Microseconds()) / 1000, "writerContentionMilliseconds": float64(contentionDuration.Microseconds()) / 1000, "simulatedWriterHoldMilliseconds": 50, "snapshotBytes": snapshotBytes, "replayUpdates": updates, "replayBytes": updateBytes, "nodeRSSKiB": nodeRSSKB, "nodeCrashRestart": true, "goCrashRestart": true, "durableReplay": true}
 	reportPath := os.Getenv("CREWSHIP_DOCS_FOUNDATION_OUTPUT")
 	if reportPath == "" {
@@ -642,6 +643,7 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 	// Exact human session revocation is independently live at the SQL boundary.
 	execOrFatal(t, h.db, `UPDATE user_sessions SET revoked_at=? WHERE id='docs-session'`, now.Format(time.RFC3339))
 	call(page, "read", human, map[string]any{}, 401)
+	call(richPage, "upgrade", human, richUpgrade, 401)
 }
 func documentsWaitSocket(t *testing.T, path string) {
 	t.Helper()
