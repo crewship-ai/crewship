@@ -24,7 +24,12 @@ image URLs or filenames in model prose cannot create an inline file reference.
 Chat uses the same output filters as Artifacts, excludes internal/configuration
 folders and attachments, and displays up to eight images per reply run.
 
-File events, completed runs, reconnects and window focus refresh the viewer.
+Only replies near the viewport load images. Scrolling away releases their file
+bytes and stops polling, while retaining the measured space to keep scrolling
+stable. Browsers without viewport observation offer explicit **Load run images**
+and **Hide run images** controls instead of automatically loading history.
+
+File events, completed runs, reconnects and window focus refresh the visible viewer.
 A one-minute foreground recheck covers missed events and access changes. When
 a read fails, the displayed images and filenames disappear and **Refresh images**
 retries the authorized read. A revoked viewer receives no image bytes from the

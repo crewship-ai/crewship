@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
 import { useSessionSafe } from "@/hooks/use-auth"
@@ -52,7 +53,7 @@ export async function loadRunImages(opts: { agentId: string; workspaceId: string
 }
 
 /** Current authorized output, not a historical immutable file archive. */
-export function InlineRunImages({ agentId, workspaceId, chatId, runId }: { agentId: string; workspaceId: string; chatId: string; runId: string }) {
+function VisibleRunImages({ agentId, workspaceId, chatId, runId }: { agentId: string; workspaceId: string; chatId: string; runId: string }) {
   const agent = useChatAgent()
   const { data: session } = useSessionSafe()
   const viewer = session?.user?.id
@@ -75,4 +76,41 @@ export function InlineRunImages({ agentId, workspaceId, chatId, runId }: { agent
     <div className="h-72 max-h-[50vh]"><FilePreview url={`${artifactDownloadUrl(agentId, workspaceId, image.path)}&revision=${image.fingerprint}`} name={image.name} bytes={image.bytes} showHeader={false} onClose={() => {}} /></div>
     <figcaption className="break-words border-t p-2 text-xs text-muted-foreground">{image.name} · Current run output · version {image.fingerprint.slice(0, 12)}</figcaption>
   </figure>)}</div>
+}
+
+
+type InlineRunImagesProps = { agentId: string; workspaceId: string; chatId: string; runId: string }
+
+/** Offscreen history must not retain file bytes or keep authority polls alive. */
+export function InlineRunImages(props: InlineRunImagesProps) {
+  const { data: session } = useSessionSafe()
+  if (!session?.user?.id) return null
+  return <RunImagesBoundary key={JSON.stringify([props, session.user.id])} {...props} />
+}
+
+function RunImagesBoundary(props: InlineRunImagesProps) {
+  const boundary = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
+  const [manual, setManual] = useState(false)
+  const [height, setHeight] = useState(1)
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") { setManual(true); return }
+    const observer = new IntersectionObserver(entries => {
+      const entry = entries[0]
+      if (!entry) return
+      if (!entry.isIntersecting && boundary.current) {
+        setHeight(Math.max(1, boundary.current.getBoundingClientRect().height))
+      }
+      setVisible(entry.isIntersecting)
+    }, { rootMargin: "200px 0px" })
+    if (boundary.current) observer.observe(boundary.current)
+    return () => observer.disconnect()
+  }, [])
+  return <div ref={boundary} style={{ minHeight: height }}>
+    {manual && <button type="button" className="text-xs underline coarse:min-h-12" onClick={() => {
+      if (visible && boundary.current) setHeight(Math.max(1, boundary.current.getBoundingClientRect().height))
+      setVisible(value => !value)
+    }}>{visible ? "Hide run images" : "Load run images"}</button>}
+    {visible && <VisibleRunImages {...props} />}
+  </div>
 }

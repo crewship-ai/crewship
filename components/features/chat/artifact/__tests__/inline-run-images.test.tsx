@@ -1,13 +1,15 @@
 import { webcrypto } from "node:crypto"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { InlineRunImages, loadRunImages, runImageFiles } from "../inline-run-images"
 import { apiFetch } from "@/lib/api-fetch"
 import { readArtifactSnapshot, readArtifactVersion } from "../artifact-file-io"
 
+const sessionState = vi.hoisted(() => ({ id: "human" as string | undefined }))
+
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
-vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "human" } } }) }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: sessionState.id } } }) }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: vi.fn() }))
 vi.mock("../../chat-agent-context", () => ({ useChatAgent: () => ({ crewId: "crew", slug: "agent" }) }))
 vi.mock("../artifact-file-io", async original => ({ ...await original<typeof import("../artifact-file-io")>(), readArtifactSnapshot: vi.fn(), readArtifactVersion: vi.fn() }))
@@ -21,6 +23,12 @@ function mount() {
 }
 beforeEach(() => {
   vi.resetAllMocks()
+  sessionState.id = "human"
+  vi.stubGlobal("IntersectionObserver", class {
+    constructor(private callback: IntersectionObserverCallback) {}
+    observe(target: Element) { this.callback([{ target, isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver) }
+    disconnect() {}
+  })
   vi.stubGlobal("crypto", webcrypto)
   vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:authorized-image"), revokeObjectURL: vi.fn() }))
   vi.mocked(apiFetch).mockImplementation(async (url) => new Response(JSON.stringify(String(url).includes("execution-profile") ? { mode: "trusted" } : [file])))
@@ -77,3 +85,56 @@ for (const mode of ["restricted", "pending"]) {
     expect(vi.mocked(apiFetch).mock.calls.every(([url]) => String(url).includes("execution-profile"))).toBe(true)
   })
 }
+
+
+it("does no offscreen HTTP, loads on entry and drops cached bytes/blobs on leaving while preserving height", async () => {
+  let notify: IntersectionObserverCallback | undefined
+  vi.stubGlobal("IntersectionObserver", class {
+    constructor(callback: IntersectionObserverCallback) { notify = callback }
+    observe() {}
+    disconnect() {}
+  })
+  const { container, client } = mount()
+  expect(apiFetch).not.toHaveBeenCalled()
+  const boundary = container.firstElementChild as HTMLElement
+  act(() => notify?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver))
+  await screen.findByRole("img")
+  vi.spyOn(boundary, "getBoundingClientRect").mockReturnValue({ height: 320 } as DOMRect)
+  act(() => notify?.([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver))
+  expect(screen.queryByRole("img")).toBeNull()
+  expect(boundary).toHaveStyle({ minHeight: "320px" })
+  await waitFor(() => expect(client.getQueryCache().getAll()).toHaveLength(0))
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:authorized-image")
+})
+
+it("requires an explicit load without IntersectionObserver and releases bytes on Hide", async () => {
+  vi.stubGlobal("IntersectionObserver", undefined)
+  const { client } = mount()
+  expect(apiFetch).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Load run images" }))
+  await screen.findByRole("img")
+  fireEvent.click(screen.getByRole("button", { name: "Hide run images" }))
+  expect(screen.queryByRole("img")).toBeNull()
+  await waitFor(() => expect(client.getQueryCache().getAll()).toHaveLength(0))
+})
+
+
+it("does not carry a previous viewer's measured output space into another viewer", async () => {
+  let notify: IntersectionObserverCallback | undefined
+  vi.stubGlobal("IntersectionObserver", class {
+    constructor(callback: IntersectionObserverCallback) { notify = callback }
+    observe() {}
+    disconnect() {}
+  })
+  const { container, client, rerender } = mount()
+  act(() => notify?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver))
+  await screen.findByRole("img")
+  vi.spyOn(container.firstElementChild as HTMLElement, "getBoundingClientRect").mockReturnValue({ height: 320 } as DOMRect)
+  act(() => notify?.([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver))
+  expect(container.firstElementChild).toHaveStyle({ minHeight: "320px" })
+  const requests = vi.mocked(apiFetch).mock.calls.length
+  sessionState.id = "another-viewer"
+  rerender(<QueryClientProvider client={client}><InlineRunImages agentId="a" workspaceId="w" chatId="chat" runId="run-1" /></QueryClientProvider>)
+  expect(container.firstElementChild).toHaveStyle({ minHeight: "1px" })
+  expect(apiFetch).toHaveBeenCalledTimes(requests)
+})
