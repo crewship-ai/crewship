@@ -53,6 +53,14 @@ func seedUserRoster(ctx context.Context, client *cli.Client, roster []demoUser) 
 	if wsID == "" {
 		return fmt.Errorf("seedRBACUsers: workspace_id not set on client")
 	}
+	for _, user := range roster {
+		if user.Role == "ADMIN" {
+			if err := requireSeedRBACOwner(client); err != nil {
+				return err
+			}
+			break
+		}
+	}
 	fmt.Fprintln(os.Stderr, "Seeding RBAC fixture through authenticated member provisioning...")
 	placed := 0
 	for _, u := range roster {

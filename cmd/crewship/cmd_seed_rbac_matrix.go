@@ -98,3 +98,31 @@ func newSeedRBACMatrixCmd() *cobra.Command {
 		return nil
 	}}
 }
+
+// requireSeedRBACOwner checks before provisioning any part of a roster that
+// includes ADMIN profiles. The API still enforces the live grant boundary.
+func requireSeedRBACOwner(client *cli.Client) error {
+	response, err := client.Get("/api/v1/workspaces")
+	if err != nil {
+		return fmt.Errorf("verify RBAC roster owner: %w", err)
+	}
+	defer response.Body.Close()
+	if err := cli.CheckError(response); err != nil {
+		return err
+	}
+	var rows []struct {
+		ID   string `json:"id"`
+		Slug string `json:"slug"`
+		Role string `json:"currentUserRole"`
+	}
+	if err := cli.ReadJSON(response, &rows); err != nil {
+		return err
+	}
+	target := client.GetWorkspaceID()
+	for _, row := range rows {
+		if (row.ID == target || row.Slug == target) && row.Role == "OWNER" {
+			return nil
+		}
+	}
+	return fmt.Errorf("RBAC demo roster requires workspace OWNER authority to provision ADMIN profiles; sign in as the workspace owner")
+}

@@ -29,6 +29,8 @@ func fixtureRoster() []map[string]any {
 	return rows
 }
 func stubSeedUserProvision(s *clitest.StubServer, path string) {
+	workspace := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/workspaces/"), "/members/provision")
+	s.OnGet("/api/v1/workspaces", clitest.JSONResponse(200, []map[string]string{{"id": workspace, "name": "Demo", "slug": "demo", "currentUserRole": "OWNER"}}))
 	s.OnPost(path, clitest.JSONResponse(201, map[string]any{"user_id": "new-user", "created_user": true, "setup_url": "https://untrusted.invalid/reset-password?token=setup%2Btoken"}))
 	s.OnPost("/api/v1/auth/reset", clitest.JSONResponse(200, map[string]bool{"ok": true}))
 	for i, u := range append(append([]demoUser{}, demoUsers...), demoCapabilityUsers()...) {
@@ -82,6 +84,7 @@ func TestSeedRBACUsers_ExistingMembersRequireProof(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()
 	s.OnPost(provisionMembersPath, clitest.ErrorResponse(409, "existing account"))
+	s.OnGet("/api/v1/workspaces", clitest.JSONResponse(200, []map[string]string{{"id": covWS, "currentUserRole": "OWNER"}}))
 	s.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
 	if err := seedRBACUsers(t.Context(), newSeedClient(s)); err == nil {
 		t.Fatal("existing member without working fixture login accepted")

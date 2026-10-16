@@ -193,6 +193,14 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// The requested roster includes ADMIN profiles. Refuse a non-owner
+	// before optional cleanup, as well as before the first account write.
+	if withUsers {
+		if err := requireSeedRBACOwner(client); err != nil {
+			return fmt.Errorf("--with-users: %w", err)
+		}
+	}
+
 	// ── Phase 0: Nuke (after auth, before seed) ──
 	if nuke {
 		if err := ctx.Err(); err != nil {
