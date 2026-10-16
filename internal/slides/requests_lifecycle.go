@@ -57,6 +57,13 @@ func (s *Store) BindSelectedRun(ctx context.Context, key Key, id, runID string, 
 			}
 			return bind(ctx, tx, record)
 		}
+		head, err := readState(ctx, tx, key, 0)
+		if err != nil {
+			return err
+		}
+		if head.Revision != record.Summary.BaseRevision || head.ContentHash != record.Summary.BaseContentHash {
+			return ErrConflict
+		}
 		if _, err = tx.ExecContext(ctx, `UPDATE slides_requests SET run_id=?,original_run_id=?,version=version+1,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE workspace_id=? AND page_id=? AND id=?`, runID, runID, key.WorkspaceID, key.PageID, id); err != nil {
 			return err
 		}

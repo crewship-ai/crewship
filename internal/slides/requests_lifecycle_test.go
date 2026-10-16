@@ -7,6 +7,39 @@ import (
 	"testing"
 )
 
+func TestSelectedRequestHumanEditBetweenClaimAndBindDeniesDelegation(t *testing.T) {
+	store, key, input, admission := selectedAdmissionFixture(t)
+	ctx := t.Context()
+	if _, err := store.AdmitSelectedRequest(ctx, key, "claim_then_edit", input, admission, storeAuthority); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ClaimSelectedRequest(ctx, key, "claim_then_edit", storeAuthority); err != nil {
+		t.Fatal(err)
+	}
+	state := currentState(t, store, key)
+	notes := "Human edit before run admission"
+	hash, _ := SlideHash(state.Deck.Slides[0])
+	patch := PatchRequest{PageID: key.PageID, SchemaVersion: state.Deck.SchemaVersion, BaseRev: state.Revision, MutationID: "human_before_bind", Operations: []Operation{{Op: "set_notes", SlideID: state.Deck.Slides[0].ID, IfHash: hash, Notes: &notes}}}
+	if _, err := store.Patch(ctx, key, patch, storeAuthority); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	err := store.BindSelectedRun(ctx, key, "claim_then_edit", "run_after_edit", storeAuthority, func(context.Context, *sql.Tx, SelectedAuthorityState) error { called = true; return nil })
+	if !errors.Is(err, ErrConflict) || called {
+		t.Fatal("stale run/delegation admitted", called, err)
+	}
+	detail, err := store.ReadSelectedRequest(ctx, key, "claim_then_edit", storeAuthority)
+	if err != nil || detail.Request.OriginalRunID != "" || detail.Request.Version != 2 {
+		t.Fatal("failed binding mutated history", detail, err)
+	}
+	if err = store.SettleSelectedRequest(ctx, key, "claim_then_edit", "failed", "Original selection changed before run admission", storeAuthority); err != nil {
+		t.Fatal(err)
+	}
+	if currentState(t, store, key).Revision != 2 {
+		t.Fatal("metadata cleanup changed content")
+	}
+}
+
 func TestSelectedRequestLifecycleOwnedResultReplayAndIdentityRetention(t *testing.T) {
 	store, key, input, admission := selectedAdmissionFixture(t)
 	ctx := t.Context()
