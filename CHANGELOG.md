@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Guest intake changes and deletion preserve active routine work.** Queued, running and waiting runs still block changes after their issue execution becomes superseded; completed runs do not. Rejected deletion keeps the issue and execution intact.
+
 - **Shared routine results retain private provenance.** Replays preserve their source and trusted caller origins; issue runs, ambiguous legacy origins and malformed authority evidence stay hidden. Final outputs receive the same credential scrubbing as step outputs, including historical shared reads. Oversized selected results return 413.
 
 - **Guests can inspect explicitly shared routine history and outputs.** A new Results share with View exposes run metadata and selected outputs in UI and CLI, without execution authority or transcripts. Inputs are not shown directly; outputs may contain them. Existing View/Run shares retain their previous scope; inherited private conversation audiences still constrain results.
