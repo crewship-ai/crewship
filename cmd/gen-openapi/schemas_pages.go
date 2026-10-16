@@ -109,7 +109,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	}
 	folder := obj(map[string]any{
 		"id": str(), "slug": str(), "name": str(),
-		"parent_id":       map[string]any{"type": []string{"string", "null"}, "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions."},
+		"parent_id":       map[string]any{"type": "string", "nullable": true, "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions."},
 		"tree_version":    map[string]any{"type": "integer", "minimum": 0, "description": "Workspace structure fence for nested create and reparent."},
 		"icon":            map[string]any{"type": "string", "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty."},
 		"color":           map[string]any{"type": "string", "description": "A crew palette key, or empty."},
@@ -672,7 +672,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			Request: map[string]any{"type": "object", "additionalProperties": false,
 				"required": []string{"parent", "tree_version"},
 				"properties": map[string]any{
-					"parent":       map[string]any{"type": []string{"string", "null"}, "minLength": 1, "description": "New parent slug, or null for workspace root. No ancestor permission inheritance."},
+					"parent":       map[string]any{"type": "string", "nullable": true, "minLength": 1, "description": "New parent slug, or null for workspace root. No ancestor permission inheritance."},
 					"tree_version": map[string]any{"type": "integer", "minimum": 0},
 					"acl_version":  map[string]any{"type": "integer", "minimum": 0, "description": "Required when parent is a slug."},
 				}},

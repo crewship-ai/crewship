@@ -416,8 +416,8 @@ export function usePageFolders(workspaceId: string | null | undefined, enabled =
     void qc.invalidateQueries({ queryKey: pagesKeys.all(workspaceId) })
   }, [qc, workspaceId])
 
-  // A folder event carries only a slug; the page list is what says where each
-  // page now is, so both are re-read. `page.updated` too: a rename shows in
+  // Folder events can be generic tree invalidations without identities; the
+  // authorized lists say where each page belongs, so both are re-read. `page.updated` too: a rename shows in
   // the rail, and a page's own `folder` rides on that row.
   useRealtimeEventSafe("page.folder.updated", invalidate)
   useRealtimeEventSafe("page.updated", invalidate)

@@ -235,3 +235,8 @@ shared instance or execution containers. Run through `crewship-heavy`:
 -run '^TestFolderTreeBrowser$' -count=1 -timeout 6m`.
 Missing prerequisites fail explicitly; `conformance` vet compiles but does not
 execute this browser fixture.
+
+`CREWSHIP_FOLDER_TREE_OUTPUT` optionally selects an owned retained directory for
+synthetic tree screenshots, reader-filtered JSON and report. The report records
+current source head/dirty state; capture evidence does not establish deployed or
+live WebSocket behavior. Keep this directory outside the public source tree.

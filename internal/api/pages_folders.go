@@ -474,7 +474,7 @@ func (h *PageHandler) GetFolder(w http.ResponseWriter, r *http.Request) {
 // ── 3. Create — POST /api/v1/page-folders ──────────────────────────────────
 
 func (h *PageHandler) CreateFolder(w http.ResponseWriter, r *http.Request) {
-	user, wsID, viewer, ok := h.folderViewer(w, r)
+	user, wsID, _, ok := h.folderViewer(w, r)
 	if !ok {
 		return
 	}

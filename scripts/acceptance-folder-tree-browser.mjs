@@ -3,6 +3,7 @@ import { readFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { chromium, expect } from '@playwright/test'
 const fixture = JSON.parse(await readFile(process.env.CREWSHIP_FOLDER_TREE_FIXTURE, 'utf8'))
 const output = process.env.CREWSHIP_FOLDER_TREE_OUTPUT || await mkdtemp(join(tmpdir(), 'crewship-folder-tree-'))
@@ -75,7 +76,9 @@ try {
   await reader.reload()
   await expect(reader.locator('[data-rail-header]').filter({ hasText: 'Browser child' })).toHaveCount(0)
   await capture(reader, 'reader-revoked')
-  const report = { status: 'PASS', execution: 'owned real Router/DB/static export; synthetic preauthenticated sessions; no HTTP mocks', scenarios: ['UI create', 'nested create', 'reparent', 'reload', 'hidden parent rawJSON/UI', 'revocation reload'], captures }
+  const sourceHead = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+  const sourceDirty = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim()
+  const report = { status: 'PASS', sourceHead, sourceDirty, execution: 'owned real Router/DB/static export; synthetic preauthenticated sessions; no HTTP mocks', scenarios: ['UI create', 'nested create', 'reparent', 'reload', 'hidden parent rawJSON/UI', 'revocation reload'], captures }
   await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2))
   console.log(JSON.stringify({ ...report, report: join(output, 'report.json') }))
 } finally {

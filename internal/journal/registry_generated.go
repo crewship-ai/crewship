@@ -110,7 +110,7 @@ var AllEntryTypes = []EntryType{
 	EntryType("page.folder_acl_changed"),        // entryPageFolderACLChanged, internal/api/pages_folder_acl.go:83:7
 	EntryType("page.folder_changed"),            // entryPageFolderChanged, internal/api/pages_folders.go:75:2
 	EntryType("page.folder_membership_changed"), // entryPageFolderMembershipChanged, internal/api/pages_folders.go:79:2
-	EntryType("page.folder_tree_changed"),       // entryPageFolderTreeChanged, internal/api/pages_folder_tree.go:285:7
+	EntryType("page.folder_tree_changed"),       // entryPageFolderTreeChanged, internal/api/pages_folder_tree.go:291:7
 	EntryPageGrantAdded,
 	EntryPageGrantRemoved,
 	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:793:2

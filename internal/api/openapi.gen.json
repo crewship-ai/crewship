@@ -111164,10 +111164,8 @@
                           },
                           "parent_id": {
                             "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions.",
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "nullable": true,
+                            "type": "string"
                           },
                           "shared": {
                             "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
@@ -111431,10 +111429,8 @@
                     },
                     "parent_id": {
                       "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "nullable": true,
+                      "type": "string"
                     },
                     "shared": {
                       "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
@@ -111552,10 +111548,8 @@
                     },
                     "parent_id": {
                       "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "nullable": true,
+                      "type": "string"
                     },
                     "shared": {
                       "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
@@ -112181,10 +112175,8 @@
                     },
                     "parent_id": {
                       "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "nullable": true,
+                      "type": "string"
                     },
                     "shared": {
                       "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
@@ -112448,10 +112440,8 @@
                     },
                     "parent_id": {
                       "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions.",
-                      "type": [
-                        "string",
-                        "null"
-                      ]
+                      "nullable": true,
+                      "type": "string"
                     },
                     "shared": {
                       "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
@@ -114635,10 +114625,8 @@
                   "parent": {
                     "description": "New parent slug, or null for workspace root. No ancestor permission inheritance.",
                     "minLength": 1,
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "nullable": true,
+                    "type": "string"
                   },
                   "tree_version": {
                     "minimum": 0,
