@@ -42,11 +42,15 @@ func (h *QueryHandler) PendingEscalationCount(w http.ResponseWriter, r *http.Req
 	// transition, so the row still flips exactly once.
 	h.sweepExpiredEscalationsBestEffort(r.Context(), workspaceID)
 	var count int
+	viewerID := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		viewerID = user.ID
+	}
+	countArgs := append([]any{workspaceID}, chataudience.VerifiedTextReadArgs(viewerID)...)
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM escalations e
-		 JOIN crews c ON c.id = e.crew_id
-		 WHERE c.workspace_id = ? AND e.status = 'PENDING' AND c.deleted_at IS NULL`,
-		workspaceID).Scan(&count)
+		`SELECT COUNT(*) FROM escalations e JOIN crews c ON c.id=e.crew_id
+ WHERE c.workspace_id=? AND e.status='PENDING' AND c.deleted_at IS NULL
+ AND (NOT (`+chataudience.VerifiedTextSourceSQL+`) OR (`+chataudience.VerifiedTextReadSQL+`))`, countArgs...).Scan(&count)
 	if err != nil {
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
@@ -1026,7 +1030,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		FROM escalations e
 		JOIN agents from_a ON from_a.id = e.from_agent_id
 		LEFT JOIN credentials c ON c.id = e.credential_id AND c.workspace_id = e.workspace_id
-		WHERE e.crew_id = ? AND e.workspace_id = ?`
+		WHERE e.crew_id = ? AND e.workspace_id = ? AND e.deleted_at IS NULL`
 	query += ` AND (NOT (` + chataudience.VerifiedTextSourceSQL + `) OR (` + chataudience.VerifiedTextReadSQL + `))`
 	args := []interface{}{crewID, workspaceID}
 	user := UserFromContext(r.Context())
@@ -1118,7 +1122,9 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 }
 
 // PurgeEscalations handles DELETE /api/v1/crews/{crewId}/escalations —
-// HARD-delete every escalation row for one crew in the context workspace. A
+// Purge every escalation for one crew in the context workspace. Verified TEXT
+// sources retain a content-free source tombstone so durable projections cannot
+// become public after source removal; other sources are hard-deleted. A
 // teardown/reset primitive for seed --nuke: the escalations table carries a
 // workspace_id but NO foreign key, so a crew delete never cascades to it and
 // the rows survive a nuke as orphans (and keep surfacing in the inbox as
@@ -1142,16 +1148,15 @@ func (h *QueryHandler) PurgeEscalations(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Scope by BOTH crew_id and workspace_id: crewId comes from the path and a
-	// caller must not reach another workspace's rows by guessing a crew id.
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM escalations WHERE crew_id = ? AND workspace_id = ?`, crewID, workspaceID)
+	deleted, err := h.purgeEscalationSources(r, workspaceID, crewID)
 	if err != nil {
+		if replyPurgeSourceError(w, err) {
+			return
+		}
 		h.logger.Error("purge escalations", "error", err)
-		replyError(w, http.StatusInternalServerError, "purge failed")
+		replyError(w, 500, "purge failed")
 		return
 	}
-	deleted, _ := res.RowsAffected()
 	writeJSON(w, http.StatusOK, map[string]int64{"deleted": deleted})
 }
 
