@@ -31,6 +31,11 @@ func waitpointCardForm() *pipeline.DecisionForm {
 
 func newWaitpointCardRig(t *testing.T, form *pipeline.DecisionForm) waitpointCardRig {
 	t.Helper()
+	return newWaitpointCardRigWithPrompt(t, form, "When should this run?")
+}
+
+func newWaitpointCardRigWithPrompt(t *testing.T, form *pipeline.DecisionForm, prompt string) waitpointCardRig {
+	t.Helper()
 	f := newChatIssueFixture(t)
 	seedVersionedPipeline(t, f.h.db, f.workspace, "card-recipe", "card-recipe")
 	execOrFatal(t, f.h.db, `INSERT INTO pipeline_runs(id,workspace_id,pipeline_id,pipeline_slug,status,started_at,invocation_source_run_id,invoking_agent_id) VALUES('card-pipeline-run',?,'card-recipe','card-recipe','running','2026-10-16T08:00:00Z',?,?)`, f.workspace, f.run, f.agent)
@@ -38,7 +43,7 @@ func newWaitpointCardRig(t *testing.T, form *pipeline.DecisionForm) waitpointCar
 	store := pipeline.NewSQLWaitpointStore(f.h.db)
 	t.Cleanup(store.Close)
 	h.SetWaitpointStore(store)
-	token, err := store.CreateApproval(t.Context(), pipeline.WaitpointApprovalRequest{WorkspaceID: f.workspace, PipelineRunID: "card-pipeline-run", StepID: "review", Prompt: "When should this run?", TimeoutSec: 3600, DecisionForm: form, InvokingCrewID: f.crew})
+	token, err := store.CreateApproval(t.Context(), pipeline.WaitpointApprovalRequest{WorkspaceID: f.workspace, PipelineRunID: "card-pipeline-run", StepID: "review", Prompt: prompt, TimeoutSec: 3600, DecisionForm: form, InvokingCrewID: f.crew})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,5 +431,25 @@ func TestChatDecisionWaitpointUnrepresentableAnswerHasNoEffect(t *testing.T) {
 		if card := d.read(t).Decision; card.Status != "pending" || card.Resolution != nil {
 			t.Fatalf("%s changed source %+v", mode, card)
 		}
+	}
+}
+
+func TestChatDecisionWaitpointCanonicalEmptyPrompt(t *testing.T) {
+	d := newWaitpointCardRigWithPrompt(t, nil, "")
+	var missing bool
+	if err := d.f.h.db.QueryRow(`SELECT prompt IS NULL FROM pipeline_waitpoints WHERE token=?`, d.token).Scan(&missing); err != nil || !missing {
+		t.Fatalf("canonical nullable prompt: %v %v", missing, err)
+	}
+	card := d.read(t).Decision
+	if card.Title != "Waitpoint pending approval" {
+		t.Fatalf("fallback title %q", card.Title)
+	}
+	answer := chatentities.DecisionAnswer{SourceID: d.id, ExpectedVersion: card.Source.Version, Action: "approve", Values: map[string]json.RawMessage{}}
+	op := &decisionOperation{Audience: d.a, Version: answer.ExpectedVersion, Key: "empty-prompt", Hash: "empty-prompt-intent"}
+	if err := d.resolve(t, answer, op); err != nil {
+		t.Fatal(err)
+	}
+	if card := d.read(t).Decision; card.Status != "approved" || card.Title != "Waitpoint pending approval" {
+		t.Fatalf("terminal card %+v", card)
 	}
 }
