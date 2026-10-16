@@ -21,5 +21,9 @@ func (r *Router) registerSlideRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/slides/comments", roleSelf, h.MutateComment)
 	r.authedMut("POST", "/api/v1/pages/{slug}/slides/comments/{threadId}/replies", roleSelf, h.MutateComment)
 	r.authedMut("POST", "/api/v1/pages/{slug}/slides/comments/{threadId}/resolve", roleSelf, h.MutateComment)
+	r.mux.Handle("GET /api/v1/pages/{slug}/slides/requests", authed(wsCtx(http.HandlerFunc(h.ReadSelectedRequests))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/slides/requests/{requestId}", authed(wsCtx(http.HandlerFunc(h.ReadSelectedRequests))))
+	r.authedMut("POST", "/api/v1/pages/{slug}/slides/requests", roleSelf, h.MutateSelectedRequest)
+	r.authedMut("POST", "/api/v1/pages/{slug}/slides/requests/{requestId}/cancel", roleSelf, h.MutateSelectedRequest)
 
 }

@@ -104,7 +104,7 @@ func TestArtifactRunRetryCannotCrossActorOrRun(t *testing.T) {
 	body := `{"html":"x","base_rev":0,"mutation_id":"same"}`
 	artifactExpect(t, artifactAgentSave(t, h, ws, token, body), 201)
 	artifactExpect(t, artifactSave(t, h, ws, user, "x", "same", 0), 409)
-	execOrFatal(t, h.db, `INSERT INTO artifact_run_principals SELECT 'second-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
+	execOrFatal(t, h.db, `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) SELECT 'second-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
 	execOrFatal(t, h.db, `INSERT INTO page_artifact_run_delegations(page_id,run_id,granted_by_user_id,expires_at,granted_at,revoked_at,revoked_by_user_id,request_id) SELECT page_id,'second-run',granted_by_user_id,expires_at,granted_at,NULL,NULL,NULL FROM page_artifact_run_delegations WHERE page_id=?`, page)
 	execOrFatal(t, h.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('second-start',?,'artifact-crew','artifact-agent','run.started','system','test','second-run')`, ws)
 	second := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, ws, "artifact-crew"), ws, "artifact-agent", "second-run")

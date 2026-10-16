@@ -60,7 +60,7 @@ func TestArtifactAgentCommentsExplicitGrantProvenanceAndRetryIdentity(t *testing
 	var human map[string]any
 	_ = json.Unmarshal([]byte(body), &human)
 	artifactExpect(t, artifactDiscussionCall(t, h, workspace, user, "OWNER", "reply", thread, human), 409)
-	execOrFatal(t, h.db, `INSERT INTO artifact_run_principals SELECT 'other-comment-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
+	execOrFatal(t, h.db, `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) SELECT 'other-comment-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
 	execOrFatal(t, h.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('other-comment-start',?,'artifact-crew','artifact-agent','run.started','system','test','other-comment-run')`, workspace)
 	other := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, "artifact-crew"), workspace, "artifact-agent", "other-comment-run")
 	artifactExpect(t, agentCommentCall(t, h, workspace, other, thread, body, false), 403)

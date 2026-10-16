@@ -39,7 +39,12 @@ func TestSelectedRequestStrictProtocolAndUTF16(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	patch, err := SelectedReplacementPatch(request.PageID, "request", request.BaseRev, verified, "Nový text 🐎")
+	corrupted := verified
+	corrupted.ContentHash = strings.Repeat("f", 64)
+	if _, err := SelectedReplacementPatch(state, request.PageID, "request", request.BaseRev, corrupted, "replacement"); err == nil {
+		t.Fatal("corrupted persisted original hash accepted")
+	}
+	patch, err := SelectedReplacementPatch(state, request.PageID, "request", request.BaseRev, verified, "Nový text 🐎")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +85,7 @@ func TestSelectedRequestStrictProtocolAndUTF16(t *testing.T) {
 			t.Fatal("strict selected protocol accepted", bad)
 		}
 	}
-	if _, err := SelectedReplacementPatch(request.PageID, "request", 7, verified, strings.Repeat("a", MaxTextBytes)); err == nil {
+	if _, err := SelectedReplacementPatch(state, request.PageID, "request", 7, verified, strings.Repeat("a", MaxTextBytes)); err == nil {
 		t.Fatal("aggregate final text overflow accepted")
 	}
 }
@@ -124,7 +129,7 @@ func TestSelectedProtocolOneOverDeckTwoPreservesImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	patch, err := SelectedReplacementPatch(request.PageID, "mixed_version_request", 7, verified, "replacement")
+	patch, err := SelectedReplacementPatch(state, request.PageID, "mixed_version_request", 7, verified, "replacement")
 	if err != nil || patch.SchemaVersion != 2 {
 		t.Fatal(patch, err)
 	}
