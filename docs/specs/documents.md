@@ -100,6 +100,11 @@ Schema 2 adds bounded lists and heading levels 1–3 to paragraphs and simple
 tables. Every block has a stable ID. Node validates visible and retained Yjs
 structures, including tombstones, and rejects unknown metadata or unresolved
 CRDT dependencies. Tiptap 3.32.0, Yjs 13.6.33 and `@tiptap/y-tiptap` 3.0.7 are pinned.
+Human CLI schema upgrade uses `crewship doc upgrade <slug> --file request.json`
+(or `--file -` for stdin). It submits the original Page/schema/target schema,
+revision, epoch and operation ID unchanged; conflicts do not trigger a fresh
+read or automatic retry.
+
 Existing schema1 content remains readable and keeps its legacy schema2-client commit compatibility. Explicit human CAS upgrade to3 binds Page ID/revision/epoch and preserves the original binary, while rotating generation. Schema3 adds closed HTTP(S) link/code marks and plain code blocks. Images are not part of3; future4 requires its own immutable logical-reference/pin contract. Unchanged text identities/marks survive semantic edits, inserted text is plain, and Go verifies full-tree subtree hashes/preorder against stored state and the original immutable selection. JSON comparison alone coalesces adjacent equal-mark text spans; binary/hashes are never normalized. Each private before/after proof is bounded500000UTF8 bytes within the existing3MiB HTTP envelope;
 
 unsupported future schemas fail closed. JSON/Markdown are projections, never

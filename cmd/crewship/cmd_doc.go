@@ -143,7 +143,7 @@ func newDocCommand() *cobra.Command {
 			cmd.Use = "checkpoint-read <page-slug> <checkpoint-id>"
 			cmd.Args = cobra.ExactArgs(2)
 		}
-		if operation == "patch" || operation == "checkpoint" || operation == "restore" || operation == "request" || operation == "initialize" || operation == "comment" || operation == "comment-resolve" {
+		if operation == "upgrade" || operation == "patch" || operation == "checkpoint" || operation == "restore" || operation == "request" || operation == "initialize" || operation == "comment" || operation == "comment-resolve" {
 			cmd.Flags().String("file", "", "JSON request file; - reads stdin. Preserve operation IDs when retrying an exact request")
 		}
 		root.AddCommand(cmd)

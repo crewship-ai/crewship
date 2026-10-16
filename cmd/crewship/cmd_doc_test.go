@@ -89,3 +89,40 @@ func TestDocumentCLIRequestPreservesSelectionAndStopsOnStaleBase(t *testing.T) {
 		t.Fatal("CLI fetched new state to rebase request")
 	}
 }
+
+func TestDocumentCLIUpgradeAcceptsFileAndPreservesOriginalFences(t *testing.T) {
+	for _, status := range []int{200, 409} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			stub := pageStub(t)
+			resetDocCommand(t)
+			payload := `{"id":"upgrade-original","schema":2,"target_schema":3,"page_id":"original-page","epoch":"opaque-original-epoch","ifRev":7}`
+			const path = "/api/v1/pages/report/document/upgrade"
+			stub.OnPost(path, func(_ *http.Request, body []byte) (int, []byte, string) {
+				var got, want any
+				if json.Unmarshal(body, &got) != nil || json.Unmarshal([]byte(payload), &want) != nil || !reflect.DeepEqual(got, want) {
+					t.Errorf("changed upgrade envelope: %s", body)
+				}
+				if status == 409 {
+					return status, []byte(`{"error":"original document revision changed"}`), "application/json"
+				}
+				return status, []byte(`{"schema":3,"rev":8}`), "application/json"
+			})
+			output, err := runPageCLI(t, payload, "doc", "upgrade", "report", "--file", "-")
+			if status == 200 {
+				var result map[string]any
+				if err != nil || json.Unmarshal([]byte(output), &result) != nil || result["schema"] != float64(3) || result["rev"] != float64(8) {
+					t.Fatalf("upgrade flag/request failed: %v %s", err, output)
+				}
+			}
+			if status == 409 && (err == nil || !strings.Contains(err.Error(), "original document revision changed")) {
+				t.Fatalf("upgrade conflict hidden: %v", err)
+			}
+			if len(stub.CallsFor("POST", path)) != 1 {
+				t.Fatal("upgrade was not submitted exactly once")
+			}
+			if len(stub.CallsFor("GET", "/api/v1/pages/report/document")) != 0 {
+				t.Fatal("upgrade silently fetched a new base")
+			}
+		})
+	}
+}
