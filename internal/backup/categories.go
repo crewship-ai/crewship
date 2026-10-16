@@ -183,8 +183,10 @@ const categoryWorkOnly = ""
 // TableCategory maps every table in BackupTables to its category. A table
 // missing here fails TestTableCategory_CoversEveryBackupTable.
 var TableCategory = map[string]string{
-	"environment_revisions": CategoryAgents, // definition/build provenance; image bytes remain CategoryEnv
-	"users":                 categoryAnchor, "workspaces": categoryAnchor, "skills": categoryAnchor,
+	"workspace_artifact_creation_policy": CategoryAgents,
+	"workspace_artifact_creation_crews":  CategoryAgents,
+	"environment_revisions":              CategoryAgents, // definition/build provenance; image bytes remain CategoryEnv
+	"users":                              categoryAnchor, "workspaces": categoryAnchor, "skills": categoryAnchor,
 
 	// Crews, agents and their settings.
 	"crews": CategoryAgents, "service_runtime_intents": CategoryAgents, "crew_members": CategoryAgents,
