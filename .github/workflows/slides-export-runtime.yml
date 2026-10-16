@@ -1,0 +1,65 @@
+name: Slides Export Runtime
+on:
+  pull_request:
+    paths:
+      - 'internal/slidesexport/**'
+      - 'tools/slides-export/**'
+      - 'scripts/gen-frontend-licenses.mjs'
+      - '.github/workflows/slides-export-runtime.yml'
+  merge_group:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/slidesexport/**'
+      - 'tools/slides-export/**'
+      - 'scripts/gen-frontend-licenses.mjs'
+      - '.github/workflows/slides-export-runtime.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: slides-export-runtime-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  image:
+    name: Pinned Slides converter image and protocol
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        timeout-minutes: 6
+        with:
+          go-version: '1.27.2'
+          cache: true
+      - name: Build isolated export image without publication
+        id: build
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          image="$(docker build -q -t crewship-slides-export:ci -f tools/slides-export/runtime/Dockerfile .)"
+          [[ "$image" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+      - name: Scan the exact built image
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        timeout-minutes: 5
+        with:
+          image: crewship-slides-export:ci
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+      - name: Exercise actual pinned converter image
+        timeout-minutes: 6
+        env:
+          CREWSHIP_TEST_SLIDES_EXPORT_IMAGE: ${{ steps.build.outputs.image }}
+          CREWSHIP_TEST_SLIDES_EXPORT_EVIDENCE: ${{ runner.temp }}/slides-export-evidence
+        run: go test -tags=slides_export_runtime ./internal/slidesexport -run '^TestActualExportImageCorpus$' -count=1 -v -timeout 5m
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        timeout-minutes: 3
+        with:
+          name: slides-export-image-${{ github.sha }}
+          path: ${{ runner.temp }}/slides-export-evidence/
+          if-no-files-found: warn
