@@ -41,7 +41,13 @@ export const MOTION_CHOICES = ["system", "on", "off"] as const
 export type MotionChoice = (typeof MOTION_CHOICES)[number]
 
 /** Interface text size. Every size in the app is rem-based, so this scales
- *  text, spacing and controls together — a zoom, not a font swap. */
+ *  text, spacing and controls together — a zoom, not a font swap.
+ *
+ *  Each stored value keeps an absolute meaning across releases, so a choice
+ *  saved (or synced) by an older build renders the same: "small" is Compact
+ *  (13 px body text, the Harbor 2 size), "default" is Standard (14 px),
+ *  "large" is 112.5 %. Only a brand-new device starts at Compact; see
+ *  migrateDeviceAppearance. */
 export const TEXT_SIZES = ["small", "default", "large"] as const
 export type TextSize = (typeof TEXT_SIZES)[number]
 
@@ -52,7 +58,10 @@ export const SIDEBAR_CHOICES = ["hover", "collapsed", "pinned"] as const
 export type SidebarChoice = (typeof SIDEBAR_CHOICES)[number]
 
 export const DEFAULT_DENSITY: Density = "comfortable"
-export const DEFAULT_TEXT_SIZE: TextSize = "default"
+/** What a device with no stored size shows: Compact (Harbor 2). */
+export const DEFAULT_TEXT_SIZE: TextSize = "small"
+/** What a device that ran an earlier build keeps when it never stored one. */
+export const LEGACY_TEXT_SIZE: TextSize = "default"
 export const DEFAULT_SIDEBAR: SidebarChoice = "hover"
 export const DEFAULT_MOTION: MotionChoice = "system"
 
@@ -65,6 +74,10 @@ export const SIDEBAR_STORAGE_KEY = "crewship_sidebar_mode"
 /** The sync switch is deliberately per DEVICE: "this laptop keeps its own
  *  look" is exactly the choice it exists for, so it can never itself sync. */
 export const APPEARANCE_SYNC_STORAGE_KEY = "crewship-appearance-sync"
+/** Marks a device whose stored look has been brought to the current
+ *  defaults (migrateDeviceAppearance); bumped when a default changes. */
+export const APPEARANCE_VERSION_STORAGE_KEY = "crewship-appearance-version"
+export const APPEARANCE_VERSION = "2"
 
 /** The one key in the per-user preference store (GET /api/v1/me/preferences). */
 export const APPEARANCE_PREFERENCE_KEY = "appearance"
@@ -132,7 +145,7 @@ export function applyMotionAttr(m: MotionChoice): void {
   else delete document.documentElement.dataset.motion
 }
 
-/** Default is the absence of the attribute. */
+/** Standard (14 px) is the absence of the attribute. */
 export function applyTextSizeAttr(t: TextSize): void {
   if (t === "default") delete document.documentElement.dataset.textSize
   else document.documentElement.dataset.textSize = t
@@ -141,6 +154,37 @@ export function applyTextSizeAttr(t: TextSize): void {
 /** The motion/react MotionConfig setting for a choice. */
 export function motionConfigValue(m: MotionChoice): "user" | "always" | "never" {
   return m === "on" ? "always" : m === "off" ? "never" : "user"
+}
+
+// ── Device migration ────────────────────────────────────────────────
+
+/**
+ * Brings this browser's stored look to the current defaults ONCE, without
+ * changing what anyone sees. A device that ran an earlier build (it holds
+ * any Crewship key) but never stored a text size keeps that build's default,
+ * Standard; a brand-new device keeps nothing and so gets Compact. A stored
+ * choice is never touched. The boot script below does the same before first
+ * paint (the only place it runs in the app); this is its testable twin.
+ * Storage that throws or cannot be listed leaves everything as it is.
+ */
+export function migrateDeviceAppearance(): void {
+  try {
+    const s = localStorage
+    if (s.getItem(APPEARANCE_VERSION_STORAGE_KEY) === APPEARANCE_VERSION) return
+    let used = false
+    const n = typeof s.length === "number" ? s.length : 0
+    for (let i = 0; i < n && typeof s.key === "function"; i++) {
+      const k = s.key(i)
+      if (k && k !== APPEARANCE_VERSION_STORAGE_KEY && (k === "theme" || k.indexOf("crewship") === 0)) {
+        used = true
+        break
+      }
+    }
+    if (used && s.getItem(TEXT_SIZE_STORAGE_KEY) === null) s.setItem(TEXT_SIZE_STORAGE_KEY, LEGACY_TEXT_SIZE)
+    s.setItem(APPEARANCE_VERSION_STORAGE_KEY, APPEARANCE_VERSION)
+  } catch {
+    // Private mode or blocked storage: nothing stored, nothing to keep.
+  }
 }
 
 // ── Store ───────────────────────────────────────────────────────────
@@ -254,12 +298,20 @@ export function setAccentChoice(id: AccentChoice): void {
 /**
  * Inline in <head> (app/layout.tsx), beside the accent script, so a compact,
  * reduced-motion or large-text user does not see one frame of the default
- * look on every load. Only known attribute values are ever written.
+ * look on every load. It first runs the one-time device migration (same
+ * rules as migrateDeviceAppearance). Only known attribute values are ever
+ * written.
  */
-export const APPEARANCE_BOOT_SCRIPT = `(function(){try{var d=document.documentElement,s=localStorage;if(s.getItem(${JSON.stringify(
+export const APPEARANCE_BOOT_SCRIPT = `(function(){try{var d=document.documentElement,s=localStorage;var vk=${JSON.stringify(
+  APPEARANCE_VERSION_STORAGE_KEY,
+)},tk=${JSON.stringify(TEXT_SIZE_STORAGE_KEY)};if(s.getItem(vk)!==${JSON.stringify(
+  APPEARANCE_VERSION,
+)}){var u=false,n=typeof s.length==="number"?s.length:0;for(var i=0;i<n&&typeof s.key==="function";i++){var k=s.key(i);if(k&&k!==vk&&(k==="theme"||k.indexOf("crewship")===0)){u=true;break}}if(u&&s.getItem(tk)===null)s.setItem(tk,${JSON.stringify(
+  LEGACY_TEXT_SIZE,
+)});s.setItem(vk,${JSON.stringify(APPEARANCE_VERSION)})}if(s.getItem(${JSON.stringify(
   DENSITY_STORAGE_KEY,
 )})==="compact")d.setAttribute("data-density","compact");var m=s.getItem(${JSON.stringify(
   MOTION_STORAGE_KEY,
-)});if(m==="on")d.setAttribute("data-motion","reduce");else if(m==="off")d.setAttribute("data-motion","full");var t=s.getItem(${JSON.stringify(
-  TEXT_SIZE_STORAGE_KEY,
-)});if(t==="small"||t==="large")d.setAttribute("data-text-size",t)}catch(e){}})()`
+)});if(m==="on")d.setAttribute("data-motion","reduce");else if(m==="off")d.setAttribute("data-motion","full");var t=s.getItem(tk);if(t===null)t=${JSON.stringify(
+  DEFAULT_TEXT_SIZE,
+)};if(t==="small"||t==="large")d.setAttribute("data-text-size",t)}catch(e){}})()`

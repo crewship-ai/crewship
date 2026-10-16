@@ -116,8 +116,12 @@ describe("AppearanceSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Large" }))
     expect(document.documentElement.dataset.textSize).toBe("large")
     expect(store.get("crewship-text-size")).toBe("large")
-    fireEvent.click(screen.getByRole("button", { name: "Default" }))
+    // Standard is the earlier 14 px default; Small (13 px) is the Harbor 2
+    // size a new device starts at. Not "Compact": that is the density name.
+    fireEvent.click(screen.getByRole("button", { name: "Standard" }))
     expect(document.documentElement.dataset.textSize).toBeUndefined()
+    fireEvent.click(screen.getByRole("button", { name: "Small" }))
+    expect(document.documentElement.dataset.textSize).toBe("small")
   })
 
   it("chooses the sidebar mode through the synced store", () => {

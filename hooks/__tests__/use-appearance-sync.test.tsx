@@ -121,7 +121,7 @@ describe("useAppearanceSync", () => {
     renderSync()
 
     await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "dark", accent: "graphite", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover" })
+    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "dark", accent: "graphite", density: "comfortable", motion: "system", textSize: "small", sidebar: "hover" })
   })
 
   it("completes a partial server value from local and writes the whole thing back", async () => {
@@ -130,7 +130,7 @@ describe("useAppearanceSync", () => {
 
     await waitFor(() => expect(result.current.theme).toBe("light"))
     await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "blue", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover" })
+    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "blue", density: "comfortable", motion: "system", textSize: "small", sidebar: "hover" })
   })
 
   it("completes a value saved by an older build, keeping its fields", async () => {
@@ -141,7 +141,7 @@ describe("useAppearanceSync", () => {
 
     await waitFor(() => expect(result.current.accent).toBe("workspace"))
     await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "workspace", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover" })
+    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "workspace", density: "comfortable", motion: "system", textSize: "small", sidebar: "hover" })
   })
 
   it("sends nothing at all with sync off on this device", async () => {

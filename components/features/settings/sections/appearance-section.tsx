@@ -28,7 +28,7 @@ const DENSITY_OPTIONS: { value: Density; label: string }[] = [
 
 const TEXT_SIZE_OPTIONS: { value: TextSize; label: string }[] = [
   { value: "small", label: "Small" },
-  { value: "default", label: "Default" },
+  { value: "default", label: "Standard" },
   { value: "large", label: "Large" },
 ]
 

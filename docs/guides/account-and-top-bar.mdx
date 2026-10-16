@@ -44,11 +44,12 @@ Restricted sessions are not offered Notification preferences or Connect CLI.
 `/settings?tab=appearance`
 
 - **Theme** — Dark, Light or System (follows the OS).
-  - In light, the left rail, section panels and cards are white on a quiet grey page ground.
+  - In light, the left rail sits on a quiet grey ground; content, section panels and cards are white and separated by hairlines.
 - **Accent** — eight presets as large swatches in spectrum order: Blue (default), Sky, Teal, Indigo, Violet, Fuchsia, Pink, Graphite. They tint buttons, links, chips, switches and the focus ring, shown live in a preview strip. Green, red and amber are never accents — they mean done, failed and needs-attention.
   - **Team colour** (its own row under the swatches) uses the workspace's brand colour from **Settings → General → Pages appearance → Brand accent**. Its hue and saturation are kept and each shade's lightness is adjusted until it meets WCAG AA (4.5:1) on the background and cards, so a light brand colour like mint still gets readable buttons and links. Switching workspace switches the colour; a workspace without one shows Blue.
-- **Text size** — Small, Default or Large. Scales text, spacing and controls together (the interface is rem-based), like browser zoom but kept with your account.
+- **Text size** — Small (13 px text, what a new device starts at), Standard (14 px, the earlier default) or Large. Scales text, spacing and controls together (the interface is rem-based), like browser zoom but kept with your account. A size you, or an earlier version of Crewship, saved keeps its size; a device that used Crewship before without saving one keeps Standard.
 - **Density** — Comfortable or Compact. Compact tightens the vertical padding of sidebar rows, settings rows and table cells on mouse/trackpad devices; text size and touch targets do not change.
+- **Touch** — on any touch screen (phone, tablet or touch laptop, at any window width) every button, field, tab and menu item is at least 44 px tall, and checkboxes and radios get a 44 px tap area.
 - **Sidebar** — Rail · expand on hover (default), Rail, or Pinned open; the same modes as the switch at the bottom of the rail and ⌘B, which now also sync.
 - **Reduce motion** — System (the OS setting), On (no transitions or animations), Off (full motion even if the OS asks for less).
 - **Sync across devices** — on by default. Theme, accent, text size, density, sidebar and motion are stored with your account under the `appearance` key of the per-user preference store (`GET`/`PUT /api/v1/me/preferences/appearance`; CLI: `crewship preferences`). Turning sync on adopts the value already saved on the account; with sync off nothing is sent and the choices stay in this browser.
@@ -74,7 +75,7 @@ Everything on these pages is stored with **your user**, not with the browser, in
 | `appearance` | theme, accent, text size, density, sidebar mode, reduce motion |
 | `notification-sounds.<workspace-id>` | Notification sounds for that workspace |
 
-A new user starts on the defaults — **Dark**, **Blue**, Default text size, Comfortable, sidebar rail with hover, motion following the OS, sounds off — and gets their own rows on the first change. The browser keeps a copy so the first paint is already right; on sign-in the server copy wins. Two things stay per device on purpose: the **Sync across devices** switch itself, and the browser's permission to play audio.
+A new user starts on the defaults — **Dark**, **Blue**, Small text size, Comfortable, sidebar rail with hover, motion following the OS, sounds off — and gets their own rows on the first change. The browser keeps a copy so the first paint is already right; on sign-in the server copy wins. Two things stay per device on purpose: the **Sync across devices** switch itself, and the browser's permission to play audio.
 
 ## Settings → Sessions & tokens
 

@@ -46,3 +46,13 @@ describe("Harbor 2 shape", () => {
     expect(css).toMatch(/--radius:\s*0\.625rem;/)
   })
 })
+
+describe("Harbor 2 type scale", () => {
+  const css = read("app/globals.css")
+  it("the page title is 21 px at Compact (1.4rem on a 13/14 root)", () => {
+    expect(css).toMatch(/--typo-title:\s*1\.4rem;/)
+  })
+  it("the smallest text never drops below the 11 px floor, even at Compact", () => {
+    expect(css).toMatch(/--typo-micro:\s*max\(11px,\s*0\.6875rem\);/)
+  })
+})
