@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -598,6 +599,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// Nothing here touches Content. A form submission is an ordinary user
 	// message; strip the metadata and the conversation reads identically,
 	// which is what lets every CLI adapter stay unaware of forms.
+	documentCreation, err := documents.CreationIntentFromMetadata(msgOpt.Metadata)
+	if err != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: "Document creation permission is invalid"})
+		return err
+	}
 	var userMsgMetadata any
 	if env, ok := askforms.EnvelopeFromMetadata(msgOpt.Metadata); ok {
 		userMsgMetadata = map[string]any{askforms.EnvelopeMetadataKey: env}
@@ -609,12 +615,19 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		userMsgMetadata.(map[string]any)["page_context"] = pageContext
 	}
 
+	if documentCreation != nil {
+		if userMsgMetadata == nil {
+			userMsgMetadata = map[string]any{}
+		}
+		userMsgMetadata.(map[string]any)[documents.CreationMetadataKey] = documentCreation
+	}
+
 	// The human turn is recorded and emitted regardless of whether the agent
 	// will respond. The sender also receives the event, which acknowledges
 	// persistence; its UI suppresses the duplicate optimistic turn.
 	triggerMessageID := generateMsgID()
 	persistUserMsg := func() error {
-		if err := b.convStore.Append(ctx, chatID, conversation.Message{
+		message := conversation.Message{
 			ID:           triggerMessageID,
 			AgentID:      info.AgentID,
 			Role:         conversation.RoleUser,
@@ -622,7 +635,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			Metadata:     userMsgMetadata,
 			AuthorUserID: userID,
 			Timestamp:    time.Now().UTC(),
-		}); err != nil {
+		}
+		if documentCreation != nil {
+			return b.convStore.AppendDocumentCreation(ctx, chatID, message, *documentCreation, info.HumanAuthority)
+		}
+		if err := b.convStore.Append(ctx, chatID, message); err != nil {
 			return err
 		}
 		return b.convStore.SyncSession(ctx, chatID)
@@ -893,6 +910,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// provisioning has cleared.
 	if err := persistUserMsg(); err != nil {
 		b.logger.Error("failed to persist user message", "error", err)
+		if errors.Is(err, conversation.ErrDocumentCreationConsentUnconfirmed) {
+			streamFn(ws.ChatEvent{Type: "error", Content: conversation.ErrDocumentCreationConsentUnconfirmed.Error()})
+			return err
+		}
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
 		return fmt.Errorf("persist user message: %w", err)
 	}
@@ -1178,6 +1199,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		"tags":                      []string{"chat", info.CLIAdapter},
 		"artifact_human_receipt":    info.HumanAuthority,
 		"artifact_human_message_id": triggerMessageID,
+		"document_creation_intent":  documentCreation,
 		"artifact_request_id":       msgOpt.ArtifactRequestID,
 		"document_request_id":       msgOpt.DocumentRequestID,
 		"slides_request_id":         msgOpt.SlidesRequestID,

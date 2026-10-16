@@ -319,7 +319,7 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 	if metadata != nil {
 		cleanMetadata := make(map[string]interface{}, len(metadata))
 		for k, v := range metadata {
-			if k != "artifact_human_receipt" && k != "artifact_human_message_id" && k != "document_request_id" && k != "artifact_request_id" && k != "board_request_id" && k != "slides_request_id" {
+			if k != "artifact_human_receipt" && k != "artifact_human_message_id" && k != "document_request_id" && k != "artifact_request_id" && k != "board_request_id" && k != "slides_request_id" && k != "document_creation_intent" {
 				cleanMetadata[k] = v
 			}
 		}
@@ -329,6 +329,7 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		payload["artifact_request_id"] = metadata["artifact_request_id"]
 		payload["document_request_id"] = metadata["document_request_id"]
 		payload["slides_request_id"] = metadata["slides_request_id"]
+		payload["document_creation_intent"] = metadata["document_creation_intent"]
 		payload["board_request_id"] = metadata["board_request_id"]
 	}
 	body, err := json.Marshal(payload)
