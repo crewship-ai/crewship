@@ -110,6 +110,34 @@ Existing schema1 content remains readable and keeps its legacy schema2-client co
 unsupported future schemas fail closed. JSON/Markdown are projections, never
 Docs persistence. Yjs garbage collection remains disabled.
 
+## Current text-block reads
+
+`GET /api/v1/pages/{slug}/document?block_id=ID` returns only the current paragraph,
+heading or code block as `{page_id,schema,rev,generation,epoch,block}`. The block
+contains its stable `id`, `type`, nullable `parent`, canonical `hash` and complete
+plaintext `text`. It excludes Yjs bytes and unrelated blocks. Human CLI:
+`crewship doc read report --block stable-id`. This is current state, not
+`sinceRev`, `atRev`, quote disambiguation, cell selection or structural editing.
+
+The original caller is forwarded to the existing managed reader. Before returning
+any selected outcome, the server rechecks exact credentials/live Page authority
+and the entire persisted source in one SQL snapshot. A concurrent source change
+returns 409; missing blocks return 404, nontext targets or text over 256 KiB UTF8
+return 422 without truncation. The managed outline uses complete plaintext.
+Materialization still uses the existing full read envelope (snapshot, replay,
+content and outline), capped at 4 MiB; even a small selected block in a large/deep
+source can therefore return an explicit bounded-read502. A projection-only
+private transport is not implemented by this cut.
+
+Only a singleton valid `block_id` is accepted on the current GET. Other operations,
+empty/duplicate IDs and unknown selector query combinations return 400. The
+optional singleton `workspace_id` must equal the authenticated context. Sidecar
+forwards only the validated block selector. Its existing allowed patch/checkpoint
+POSTs may carry the CLI's matching workspace context, which is checked and
+stripped. No arbitrary query passthrough or new agent delegation is introduced.
+Existing generic and selected run reads retain their current Page authority;
+this does not add a protected agent-runtime CLI credential loader.
+
 ## History, requests and recovery
 
 `documents` stores baseline and projection; `document_updates` stores ordered

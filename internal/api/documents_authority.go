@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -87,29 +86,7 @@ func (h *documentAuthority) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.SetPathValue("page", parts[3])
 	r.SetPathValue("operation", parts[4])
 	operation := http.HandlerFunc(h.operation)
-	if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer agtv2.") {
-		// Resolve the transport's crew from the stored principal, then let the
-		// existing run-capability verifier authenticate its HMAC and liveness.
-		fields := strings.Split(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), ".")
-		if len(fields) != 5 {
-			replyError(w, 403, "invalid run capability")
-			return
-		}
-		run, e := base64.RawURLEncoding.DecodeString(fields[3])
-		if e != nil {
-			replyError(w, 403, "invalid run capability")
-			return
-		}
-		var workspace, crew string
-		if h.pages.db.QueryRowContext(r.Context(), `SELECT workspace_id,crew_id FROM artifact_run_principals WHERE run_id=?`, string(run)).Scan(&workspace, &crew) != nil || workspace != r.Header.Get("X-Workspace-ID") {
-			replyError(w, 403, "invalid run capability")
-			return
-		}
-		ctx := context.WithValue(r.Context(), ctxInternalTokenWS, workspace)
-		ctx = context.WithValue(ctx, ctxInternalTokenCrew, crew)
-		if checked, ok := h.pages.artifactAgentRequest(w, r.WithContext(ctx)); ok {
-			operation.ServeHTTP(w, checked)
-		}
+	if h.authenticateAgent(w, r, operation) {
 		return
 	}
 	h.middleware.RequireAuth(h.middleware.RequireWorkspace(operation)).ServeHTTP(w, r)

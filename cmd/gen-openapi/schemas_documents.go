@@ -44,6 +44,11 @@ func documentSchemaCatalog() map[string]DomainSchema {
 		out["GET "+path] = DomainSchema{Response: ref(name), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "413", "429", "500", "502", "503"}}
 	}
 	get(base, "DocumentState")
+	currentRead := out["GET "+base]
+	currentRead.Response = map[string]any{"oneOf": []any{ref("DocumentState"), documentBlockReadSchema()}}
+	currentRead.Parameters = []map[string]any{{"in": "query", "name": "block_id", "required": false, "description": "Optional stable text block ID; only current document GET supports this selector. Duplicate/empty/unknown selector combinations return400.", "schema": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,80}$"}}}
+	currentRead.ErrorStatuses = append(currentRead.ErrorStatuses, "422")
+	out["GET "+base] = currentRead
 	get(base+"/checkpoints", "DocumentCheckpoints")
 	get(base+"/checkpoints/{checkpoint}", "DocumentCheckpoint")
 	get(base+"/comments", "DocumentComments")
