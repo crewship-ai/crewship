@@ -41,7 +41,7 @@ func (pages *PageHandler) bindSelectedSlidesRun(r *http.Request, id, run string,
 		}
 		return record.Summary.HumanActor, nil
 	}
-	return h.store.BindSelectedRun(r.Context(), key, id, run, authorize, func(ctx context.Context, tx *sql.Tx, record slides.SelectedAuthorityState) error {
+	err := h.store.BindSelectedRun(r.Context(), key, id, run, authorize, func(ctx context.Context, tx *sql.Tx, record slides.SelectedAuthorityState) error {
 		result, err := tx.ExecContext(ctx, `INSERT INTO page_artifact_run_delegations(page_id,run_id,granted_by_user_id,expires_at,granted_at,slides_request_id) SELECT ?,run_id,human_user_id,expires_at,strftime('%Y-%m-%dT%H:%M:%fZ','now'),? FROM artifact_run_principals WHERE run_id=? AND workspace_id=? AND slides_request_origin=? AND chat_id=? AND agent_id=? AND human_user_id=? ON CONFLICT(page_id,run_id) DO UPDATE SET slides_request_id=excluded.slides_request_id WHERE page_artifact_run_delegations.request_id IS NULL AND page_artifact_run_delegations.document_request_id IS NULL AND (page_artifact_run_delegations.slides_request_id IS NULL OR page_artifact_run_delegations.slides_request_id=excluded.slides_request_id)`, key.PageID, id, run, key.WorkspaceID, id, record.Admission.ChatID, record.Admission.AgentID, record.Admission.HumanUserID)
 		if err != nil {
 			return err
@@ -51,4 +51,8 @@ func (pages *PageHandler) bindSelectedSlidesRun(r *http.Request, id, run string,
 		}
 		return nil
 	})
+	if err == nil {
+		h.pages.selectedRequestChanged(key.WorkspaceID)
+	}
+	return err
 }

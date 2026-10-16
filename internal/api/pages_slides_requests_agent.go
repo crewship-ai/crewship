@@ -99,5 +99,8 @@ func (pages *PageHandler) SelectedSlidesAgent(w http.ResponseWriter, r *http.Req
 		slideHTTPError(w, err)
 		return
 	}
+	if !result.Duplicate {
+		h.pages.selectedRequestChanged(key.WorkspaceID)
+	}
 	writeJSON(w, 200, SlidesSelectedReplacementResponse{MutationID: result.MutationID, Revision: result.Revision, OrderVersion: result.OrderVersion, ContentHash: result.ContentHash, Duplicate: result.Duplicate})
 }

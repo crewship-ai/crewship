@@ -171,7 +171,9 @@ func (h *PageHandler) dispatchNextSelectedSlidesRequest(ctx context.Context) {
 				return selectedTerminalMetadataAuthority(ctx, tx)
 			}
 		}
-		if err := store.SettleSelectedRequest(cleanup, key, id, status, message, authorize); err != nil && !errors.Is(err, slides.ErrNotFound) && !errors.Is(err, slides.ErrConflict) {
+		if err := store.SettleSelectedRequest(cleanup, key, id, status, message, authorize); err == nil {
+			h.selectedRequestChanged(key.WorkspaceID)
+		} else if !errors.Is(err, slides.ErrNotFound) && !errors.Is(err, slides.ErrConflict) {
 			h.slidesRequestsUnavailable.Store(true)
 			h.logger.Error("Slides selected request settlement failed; dispatch stopped")
 		}
@@ -193,6 +195,7 @@ func (h *PageHandler) dispatchNextSelectedSlidesRequest(ctx context.Context) {
 		return
 	}
 	claimed = true
+	h.selectedRequestChanged(key.WorkspaceID)
 	var receipt chataudience.Receipt
 	if json.Unmarshal([]byte(record.Admission.AudienceJSON), &receipt) != nil {
 		finish("failed", "Original chat admission is invalid")
@@ -225,5 +228,7 @@ func (h *PageHandler) dispatchNextSelectedSlidesRequest(ctx context.Context) {
 	// credentials/grants for success; revoked work settles via metadata only.
 	if err = store.SettleSelectedRequest(ctx, key, id, "succeeded", "", authorize); err != nil {
 		finish("failed", "Agent finished without a live-authorized saved replacement")
+	} else {
+		h.selectedRequestChanged(key.WorkspaceID)
 	}
 }

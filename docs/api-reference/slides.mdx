@@ -251,3 +251,112 @@ selected immutable source version, retaining mixed1/2 history. Comments keep
 their independent `schema_version:1` and `anchor_schema_version:1`, including image
 element anchors; schema2 does not admit comment protocol2 or image text ranges.
 See the [raster storage/recovery contract](../specs/slides.md).
+
+## Selected text agent requests
+
+`POST /api/v1/pages/{slug}/slides/requests` accepts an immutable
+`{page_id,type_id:"slides",schema_version:1,base_rev,submission_id,chat_id,instruction,selection}`.
+The selection is `{selection_schema_version:1,kind:"text_range",slide_id,element_id,element_hash,from,to,quote}`:
+`from`/`to` are UTF16 offsets into one original text element and `quote` must
+match exactly. Admission pins the original full deck hash, private chat audience
+and exact credential identity. It returns202 with request ID, status, version
+and duplicate indication. Its protocol1 supports deck schema1/2; image targets
+and geometry/style/order changes are outside this capability.
+
+`GET /api/v1/pages/{slug}/slides/requests?limit=25&cursor=...` returns bounded
+watermarked pagination. `GET /api/v1/pages/{slug}/slides/requests/{requestId}`
+returns the original request, up to8 history events and any request-owned result
+revision/hash. `POST .../{requestId}/cancel` takes
+`{page_id,schema_version:1,mutation_id,if_version}`. Every human route requires
+live exact credentials and Page permissions, including duplicate replay.
+
+Human CLI: `crewship slide request create <slug> --file request.json`,
+`list <slug> --limit 25 --cursor ...`, `get <slug> <request-id>` and
+`cancel <slug> <request-id> --file cancel.json`. Preserve the original JSON on
+conflict; submitting new preconditions is a new human decision.
+
+Run-bound agents use `crewship slide agent read <slug> <request-id>` and
+`replace <slug> <request-id> --file replacement.json`, with
+`{page_id,request_schema_version:1,request_id,replacement}`. This protected CLI
+uses only the original run token through the local sidecar, never a human
+profile or alternate server. The server changes only the admitted range and
+preserves original prefix/suffix/style/geometry. The one saved result revision
+is its checkpoint. A409 or403 stops work; an uncertain retry must preserve the
+exact payload. No automatic read/rebase/selection refresh is performed.
+
+Restore/fork retains original and result history but clears source runtime
+capabilities and makes requests inert. See the [Slides contract](../specs/slides.md)
+for quotas, exact authorization, backup and recovery semantics. Native UI and
+actual model execution are qualified separately from deterministic API tests.
+
+## `POST /api/v1/pages/{slug}/slides/requests`
+
+**Request:** The immutable protocol1 admission object above, bounded16KiB.
+
+**Response:** 202 `{id,request_id,version,status,duplicate}`.
+
+**Auth:** Human Page WRITE, private chat admission and original live credential.
+
+**Errors:** 400 malformed, 401 invalid credential, 403 denied, 404 missing Page,
+409 original state/submission conflict, 429 quota, 500 storage, 503 unavailable runtime.
+
+## `GET /api/v1/pages/{slug}/slides/requests`
+
+**Request:** Optional `limit`1..100 (default25) and opaque `cursor`; no body.
+
+**Response:** 200 `{items,next_cursor,watermark,has_more}` with bounded original
+request summaries. Follow continuation cursors for complete history membership.
+
+**Auth:** Human Page READ and exact live credential, CLI pages:read scope.
+
+**Errors:** 400 cursor/limit, 401 invalid credential, 403 denied, 404 missing Page,
+500 invalid retained state.
+
+## `GET /api/v1/pages/{slug}/slides/requests/{requestId}`
+
+**Request:** Stable request ID in the Page namespace; no body.
+
+**Response:** 200 `{request,history}` with at most8 events and original/result
+revision hashes. Private audience and credential metadata are never returned.
+
+**Auth:** Human Page READ and exact live credential, CLI pages:read scope.
+
+**Errors:** 401 invalid credential, 403 denied, 404 missing Page/request,
+500 invalid retained state.
+
+## `POST /api/v1/pages/{slug}/slides/requests/{requestId}/cancel`
+
+**Request:** `{page_id,schema_version:1,mutation_id,if_version}`.
+
+**Response:** 200 `{mutation_id,request_id,version,status,duplicate}`.
+
+**Auth:** Human Page WRITE and exact live credential, CLI pages:write scope.
+
+**Errors:** 400 malformed, 401 invalid credential, 403 denied, 404 missing request,
+409 thread-version/mutation conflict, 500 storage. Exact cancellation replay
+returns its original receipt under current authority.
+
+## Protected selected-text read
+
+**Request:** Original run-bound request ID; no body.
+
+**Response:** 200 `{request,original_element}`; original frozen text only.
+
+**Auth:** Original live selected run, exact original human credential, grants,
+private audience and narrowly bound delegation; no human-profile fallback.
+
+**Errors:** 400 malformed, 401 invalid run bearer, 403 revoked/expired/wrong origin,
+404 missing Page/request, 500 invalid retained state.
+
+## Protected selected-text replacement
+
+**Request:** `{page_id,request_schema_version:1,request_id,replacement}`;
+256KiB wire and32768 UTF8 replacement bytes, original target/preconditions fixed.
+
+**Response:** 200 `{mutation_id,revision,order_version,content_hash,duplicate}`.
+The immutable owned result revision is the checkpoint, including exact replay.
+
+**Auth:** Original live selected run and exact live human credential/grants/audience.
+
+**Errors:** 400 malformed, 401 invalid run bearer, 403 denied, 404 missing target,
+409 original head/result conflict, 429 quota, 500 storage. No automatic rebase.

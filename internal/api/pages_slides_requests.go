@@ -93,6 +93,9 @@ func (h *slideHTTP) MutateSelectedRequest(w http.ResponseWriter, r *http.Request
 		if cancel, ok := h.pages.slidesRequestCancels.Load(result.RequestID); ok {
 			cancel.(context.CancelFunc)()
 		}
+		if !result.Duplicate {
+			h.pages.selectedRequestChanged(key.WorkspaceID)
+		}
 		writeJSON(w, 200, SlidesSelectedCancelResponse{MutationID: result.MutationID, RequestID: result.RequestID, Version: result.Version, Status: result.Status, Duplicate: result.Duplicate})
 		return
 	}
@@ -119,5 +122,13 @@ func (h *slideHTTP) MutateSelectedRequest(w http.ResponseWriter, r *http.Request
 		slideHTTPError(w, err)
 		return
 	}
+	if !result.Duplicate {
+		h.pages.selectedRequestChanged(key.WorkspaceID)
+	}
 	writeJSON(w, 202, SlidesSelectedAdmissionResponse{ID: result.ID, RequestID: result.RequestID, Version: result.Version, Status: result.Status, Duplicate: result.Duplicate})
+}
+
+// Workspace invalidation contains no Page, request, chat or private content.
+func (h *PageHandler) selectedRequestChanged(workspace string) {
+	broadcastWorkspaceEvent(h.hub, workspace, "slides.requests.changed", map[string]any{})
 }
