@@ -1,12 +1,12 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState } from "react"
 import { RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
+import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 
 interface AvatarPickerProps {
   seed: string
@@ -22,8 +22,6 @@ function randomSeed(): string {
 }
 
 export function AvatarPicker({ seed, style, onSeedChange, onStyleChange, lockedStyle, styleOnly }: AvatarPickerProps) {
-  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
-  useAvatarStylesVersion()
   const [previewSeeds] = useState(() =>
     Array.from({ length: 8 }, () => randomSeed())
   )
@@ -31,19 +29,15 @@ export function AvatarPicker({ seed, style, onSeedChange, onStyleChange, lockedS
   const effectiveStyle = lockedStyle || style || DEFAULT_AVATAR_STYLE
   const styleKeys = Object.keys(AVATAR_STYLES)
 
-  const currentUrl = useMemo(
-    () => getAgentAvatarUrl(seed, effectiveStyle),
-    [seed, effectiveStyle],
-  )
-
   return (
     <div className="space-y-4">
       {!styleOnly && (
         <div className="flex items-start gap-4">
-          <img
-            src={currentUrl}
+          <AgentAvatar
+            seed={seed}
+            style={effectiveStyle}
             alt="Current avatar"
-            className="h-20 w-20 rounded-2xl border shrink-0"
+            className="h-20 w-20 rounded-card border shrink-0"
           />
           <div className="space-y-2 flex-1">
             <Label htmlFor="avatar-seed">Avatar Seed</Label>
@@ -88,8 +82,9 @@ export function AvatarPicker({ seed, style, onSeedChange, onStyleChange, lockedS
                     isActive ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:bg-muted"
                   }`}
                 >
-                  <img
-                    src={getAgentAvatarUrl(seed || "preview", key)}
+                  <AgentAvatar
+                    seed={seed || "preview"}
+                    style={key}
                     alt={entry.label}
                     className="h-10 w-10 rounded-lg"
                   />
@@ -127,8 +122,9 @@ export function AvatarPicker({ seed, style, onSeedChange, onStyleChange, lockedS
                   seed === s ? "border-primary bg-primary/5" : "border-border"
                 }`}
               >
-                <img
-                  src={getAgentAvatarUrl(s, effectiveStyle)}
+                <AgentAvatar
+                  seed={s}
+                  style={effectiveStyle}
                   alt={s}
                   className="h-8 w-8 rounded"
                 />

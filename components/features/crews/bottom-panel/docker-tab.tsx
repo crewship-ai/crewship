@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, ContainerStatus } from "./types"
-import { EmptyState } from "./shared"
+import { PanelEmptyText } from "./shared"
 
 /**
  * Reads the `containers` envelope, and THROWS when it isn't there.
@@ -95,10 +95,10 @@ export function DockerTab({
     return () => { cancelled = true }
   }, [crewId, workspaceId])
 
-  if (!crewId) return <EmptyState>Select a crew to see its containers.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
-  if (containers === null) return <EmptyState>Loading container status…</EmptyState>
-  if (containers.length === 0) return <EmptyState>No containers running.</EmptyState>
+  if (!crewId) return <PanelEmptyText>Select a crew to see its containers.</PanelEmptyText>
+  if (error) return <PanelEmptyText><span className="text-destructive">Failed to load: {error}</span></PanelEmptyText>
+  if (containers === null) return <PanelEmptyText>Loading container status…</PanelEmptyText>
+  if (containers.length === 0) return <PanelEmptyText>No containers running.</PanelEmptyText>
 
   return (
     <div className="h-full overflow-y-auto">

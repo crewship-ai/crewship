@@ -25,7 +25,8 @@
 import * as React from "react"
 import { Bot, CircleDot, Clock, ListTree, MessageSquare, type LucideIcon } from "lucide-react"
 
-import { Appear, DetailCard, EmptyState, Pill, StatStrip, type StatItem } from "@/components/ui/detail"
+import { Appear, DetailCard, Pill, StatStrip, type StatItem } from "@/components/ui/detail"
+import { EmptyState } from "@/components/layout/empty-state"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { TypedRunDetail } from "@/components/features/activity/typed-run-detail"
 import { entityHref } from "@/lib/entity-links"
@@ -150,13 +151,13 @@ export function IssueDrillDown({ workspaceId, issueId, label, chains, onOpenWork
         <section role="region" aria-label="History">
           <DetailCard title="History" subtitle="Events, comments and runs, newest first">
             {history.error ? (
-              <EmptyState icon={CircleDot} title={history.error} description="The issue's own record could not be read." />
+              <EmptyState size="compact" icon={CircleDot} title={history.error} description="The issue's own record could not be read." />
             ) : history.loading ? (
               <p role="status" className="py-6 text-center text-xs text-muted-foreground">
                 Loading the issue's history…
               </p>
             ) : history.items.length === 0 && !history.canLoadOlder ? (
-              <EmptyState icon={CircleDot} title="Nothing recorded yet" description="No event, comment or run on this issue." />
+              <EmptyState size="compact" icon={CircleDot} title="Nothing recorded yet" description="No event, comment or run on this issue." />
             ) : (
               <div className="flex flex-col">
                 <ol className="flex flex-col">
@@ -382,6 +383,7 @@ export function AgentDrillDown({ workspaceId, agentID, agentSlug, name, chains, 
         <DetailCard title="What it worked on" subtitle={`${worked.length} ${worked.length === 1 ? "workflow" : "workflows"}`}>
           {worked.length === 0 ? (
             <EmptyState
+              size="compact"
               icon={Bot}
               title="No work in this window"
               description="Work this agent did outside a routine's dispatch is not indexed yet — it has no chain to belong to."

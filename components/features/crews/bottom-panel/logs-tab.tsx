@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, LogEntry } from "./types"
-import { EmptyState, formatTime } from "./shared"
+import { PanelEmptyText, formatTime } from "./shared"
 
 /**
  * Logs — the exec log of a single run.
@@ -68,12 +68,12 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
     return () => { cancelled = true }
   }, [runId, workspaceId])
 
-  if (!context) return <EmptyState>Select a run or routine to see its logs.</EmptyState>
-  if (!isRun && !isRoutine) return <EmptyState>Logs are shown per run or routine.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
-  if (runId === "") return <EmptyState>No runs yet to show logs for.</EmptyState>
-  if (logs === null) return <EmptyState>Loading…</EmptyState>
-  if (logs.length === 0) return <EmptyState>No log output for this run.</EmptyState>
+  if (!context) return <PanelEmptyText>Select a run or routine to see its logs.</PanelEmptyText>
+  if (!isRun && !isRoutine) return <PanelEmptyText>Logs are shown per run or routine.</PanelEmptyText>
+  if (error) return <PanelEmptyText><span className="text-destructive">Failed to load: {error}</span></PanelEmptyText>
+  if (runId === "") return <PanelEmptyText>No runs yet to show logs for.</PanelEmptyText>
+  if (logs === null) return <PanelEmptyText>Loading…</PanelEmptyText>
+  if (logs.length === 0) return <PanelEmptyText>No log output for this run.</PanelEmptyText>
 
   return (
     <div className="h-full overflow-y-auto p-3 text-[11px] leading-relaxed font-mono text-foreground/80">

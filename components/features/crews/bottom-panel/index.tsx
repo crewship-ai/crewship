@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils"
 import { useUserPreference } from "@/hooks/use-user-preference"
 
 import type { BottomPanelProps, BottomTab } from "./types"
-import { EmptyState } from "./shared"
+import { PanelEmptyText } from "./shared"
 import { MessagesTab } from "./messages-tab"
 import { ExecTab } from "./exec-tab"
 import { YamlTab } from "./yaml-tab"
@@ -318,11 +318,11 @@ export function BottomPanel({
                 crewSlug={context.crewSlug}
               />
             ) : (
-              <EmptyState>
+              <PanelEmptyText>
                 {context?.kind === "agent"
                   ? "Agent has no crew assigned — terminal needs a crew container."
                   : "Select an agent to open a shell."}
-              </EmptyState>
+              </PanelEmptyText>
             )
           )}
         </div>
