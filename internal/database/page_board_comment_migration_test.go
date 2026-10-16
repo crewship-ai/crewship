@@ -1,4 +1,4 @@
-package api
+package database
 
 import (
 	"database/sql"
@@ -6,23 +6,35 @@ import (
 	"log/slog"
 	"path/filepath"
 	"testing"
-
-	"github.com/crewship-ai/crewship/internal/database"
 )
 
-// Intermediate unreleased schemas no longer exist. Leave Board pending in the
-// real main+Artifacts registry, then apply its final schema through Migrate.
-// The foundation regression separately upgrades seeded main through all three
-// consolidated migrations and compares the complete original final schema.
+// Upgrade an actual registry prefix before Board, then apply all later schemas.
+// This also leaves downstream Docs/Slides triggers pending until Board exists.
+// The foundation regression separately proves populated-main to union upgrade.
 func TestBoardCommentFinalSchemaPreservesActorReceiptsAndImmutableHistory(t *testing.T) {
-	db, err := database.Open(filepath.Join(t.TempDir(), "board-upgrade.db"))
+	db, err := Open(filepath.Join(t.TempDir(), "board-upgrade.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err = database.MigrateSkipping(t.Context(), db.DB, logger, "page_boards"); err != nil {
-		t.Fatal("main+Artifacts baseline", err)
+	var baseline []migration
+	foundBoard := false
+	for _, m := range migrations {
+		if m.name == "page_boards" {
+			foundBoard = true
+			break
+		}
+		baseline = append(baseline, m)
+	}
+	if !foundBoard {
+		t.Fatal("Board migration missing from actual registry")
+	}
+	if err = ensureMigrationsTable(t.Context(), db.DB); err != nil {
+		t.Fatal(err)
+	}
+	if err = applyRegistry(t.Context(), db.DB, baseline, logger); err != nil {
+		t.Fatal("pre-Board registry prefix", err)
 	}
 	var tables int
 	if err = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='page_board_comments'`).Scan(&tables); err != nil || tables != 0 {
@@ -38,8 +50,12 @@ func TestBoardCommentFinalSchemaPreservesActorReceiptsAndImmutableHistory(t *tes
 INSERT INTO workspaces(id,name,slug) VALUES('ws','Workspace','workspace');
 INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('p','ws','board','Board','u','{}'),('p2','ws','other-board','Other','u','{}');
 INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES('p','user','other','read','u','2026-10-01T00:00:00Z');`)
-	if err = database.Migrate(t.Context(), db.DB, logger); err != nil {
+	if err = Migrate(t.Context(), db.DB, logger); err != nil {
 		t.Fatal("apply final Board schema", err)
+	}
+	var docs int
+	if err = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='documents'`).Scan(&docs); err != nil || docs != 1 {
+		t.Fatalf("dependent Docs migration was not applied: tables=%d err=%v", docs, err)
 	}
 	var grant string
 	if err = db.QueryRow(`SELECT level||':'||granted_by_user_id||':'||granted_at FROM page_grants WHERE page_id='p' AND subject_id='other'`).Scan(&grant); err != nil || grant != "read:u:2026-10-01T00:00:00Z" {
@@ -85,7 +101,7 @@ INSERT INTO page_board_comment_mutations(id,page_id,thread_id,comment_id,mutatio
 	if err = db.QueryRow(`SELECT (SELECT COUNT(*) FROM page_board_comment_history WHERE id='edit' AND body='Edited body' AND actor_user_id IS NULL),(SELECT COUNT(*) FROM page_board_comment_mutations WHERE id='other-receipt' AND actor_user_id IS NULL AND request_digest='digest' AND reaction_emoji='👍' AND reaction_active=1)`).Scan(&history, &receipts); err != nil || history != 1 || receipts != 1 {
 		t.Fatalf("actor deletion changed durable content: history=%d receipts=%d err=%v", history, receipts, err)
 	}
-	if err = database.Migrate(t.Context(), db.DB, logger); err != nil {
+	if err = Migrate(t.Context(), db.DB, logger); err != nil {
 		t.Fatal("migration replay", err)
 	}
 	if err = db.QueryRow(`SELECT (SELECT COUNT(*) FROM page_board_comment_history),(SELECT COUNT(*) FROM page_board_comment_mutations)`).Scan(&history, &receipts); err != nil || history != 2 || receipts != 2 {
