@@ -10,6 +10,7 @@ CREATE TABLE slides_revision_assets (
  FOREIGN KEY(page_id,asset_id,expected_sha256) REFERENCES page_assets(page_id,id,sha256) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX idx_slides_revision_assets_asset ON slides_revision_assets(page_id,asset_id,expected_sha256);
+CREATE INDEX idx_slides_revision_assets_digest ON slides_revision_assets(expected_sha256,page_id,asset_id);
 CREATE TRIGGER slides_revision_assets_immutable BEFORE UPDATE ON slides_revision_assets
 BEGIN SELECT RAISE(ABORT,'Slides revision asset references are immutable'); END;
 CREATE TRIGGER slides_revision_assets_no_delete BEFORE DELETE ON slides_revision_assets

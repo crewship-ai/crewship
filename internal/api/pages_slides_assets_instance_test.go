@@ -100,7 +100,7 @@ func TestSlidesImagesLegacyNoKitRecoveryVersionBoundary(t *testing.T) {
 			deck := slideTestDeck(t, page)
 			deck.SchemaVersion = version
 			wantCode(t, f.slideDo(f.boss, "POST", "/api/v1/pages/"+page+"/slides/initialize", slideJSON(t, slides.InitializeRequest{PageID: page, SchemaVersion: version, MutationID: "init", Deck: deck})), 200, "initialize source")
-			mustExec(t, f.db, `DROP TABLE slides_revision_assets; DELETE FROM _migrations WHERE version=20261016010758`)
+			mustExec(t, f.db, `DROP TABLE slides_revision_assets; DROP INDEX idx_page_assets_page_identity_digest; DELETE FROM _migrations WHERE version=20261016010758`)
 			t.Setenv("ENCRYPTION_KEY", "")
 			const pass = "legacy-slide-instance-no-kit-passphrase"
 			made, err := backup.CreateInstanceBackup(t.Context(), f.db, backup.InstanceOptions{OutputDir: t.TempDir(), Passphrase: pass, Paths: backup.InstancePaths{Output: f.r.pages.artifactStoragePath}, Actor: backup.Actor{UserID: "boss", Role: "instance_admin"}, RecoveryKit: false, Quiesce: quiesce.New(), Poll: time.Millisecond})
