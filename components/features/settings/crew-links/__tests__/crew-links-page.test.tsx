@@ -9,7 +9,7 @@ vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role }) }))
 let mobile = false
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }), usePathname: () => "/settings/crew-links" }))
 
 import { CrewLinksPage } from "../crew-links-page"
 

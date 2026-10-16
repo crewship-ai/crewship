@@ -296,6 +296,7 @@ export function PeoplePage() {
   return (
     <DrillPage
       parent={{ href: "/admin", label: "Admin", icon: Shield }}
+      panelId="drill-people"
       title="People & workspaces"
       icon={Users}
       description="Who can sign in, and where they work"
@@ -305,7 +306,7 @@ export function PeoplePage() {
       filterCount={Number(Boolean(q.trim())) + Number(facet !== "all")}
       actions={
         <>
-          {/* Icons only on a phone, so the sub-bar keeps room for Filters. */}
+          {/* Icons only on a phone, so the actions fit the sub-bar. */}
           <Button size="sm" variant="outline" className="h-7 text-xs max-md:w-8 max-md:px-0" aria-label="New workspace" onClick={() => setDialog("workspace")}>
             <Building2 /><span className="max-md:hidden">New workspace</span>
           </Button>
