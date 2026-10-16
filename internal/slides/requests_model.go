@@ -13,6 +13,8 @@ const (
 	MaxSelectedRequestBytes        = 16 << 10
 	MaxSelectedInstructionBytes    = 4096
 	MaxSelectedQuoteUnits          = 4096
+	MaxStoredSelectedInputBytes    = 64 << 10
+	MaxVerifiedSelectionBytes      = 100 << 10
 )
 
 type TextSelection struct {
@@ -46,9 +48,18 @@ type VerifiedTextSelection struct {
 }
 
 func DecodeSelectedRequest(raw []byte) (SelectedRequestInput, error) {
-	var request SelectedRequestInput
 	if len(raw) > MaxSelectedRequestBytes {
-		return request, errors.New("selected request exceeds16KiB")
+		return SelectedRequestInput{}, errors.New("selected request exceeds16KiB")
+	}
+	return decodeStoredSelectedInput(raw)
+}
+
+// Persisted canonical JSON can escape Unicode separators more compact wire JSON
+// represented literally. Its own bound is separate from original HTTP admission.
+func decodeStoredSelectedInput(raw []byte) (SelectedRequestInput, error) {
+	var request SelectedRequestInput
+	if len(raw) > MaxStoredSelectedInputBytes {
+		return request, errors.New("stored selected input exceeds budget")
 	}
 	err := strictRequest(raw, &request, func(object map[string]json.RawMessage) error {
 		_, err := requiredObject(object["selection"], "selection_schema_version", "kind", "slide_id", "element_id", "element_hash", "from", "to", "quote")
@@ -59,12 +70,52 @@ func DecodeSelectedRequest(raw []byte) (SelectedRequestInput, error) {
 	}
 	return request, validateSelectedRequest(request)
 }
+func decodeVerifiedTextSelection(raw []byte) (VerifiedTextSelection, error) {
+	var verified VerifiedTextSelection
+	if len(raw) > MaxVerifiedSelectionBytes {
+		return verified, errors.New("stored verified selection exceeds budget")
+	}
+	err := strictRequest(raw, &verified, func(object map[string]json.RawMessage) error {
+		if _, err := requiredObject(object["selection"], "selection_schema_version", "kind", "slide_id", "element_id", "element_hash", "from", "to", "quote"); err != nil {
+			return err
+		}
+		var version int
+		if err := json.Unmarshal(object["deck_schema_version"], &version); err != nil {
+			return err
+		}
+		var identity struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(object["original_element"], &identity); err != nil {
+			return err
+		}
+		placeholder := "__selected_original"
+		if identity.ID == placeholder {
+			placeholder = "__selected_original2"
+		}
+		slide, _ := json.Marshal(map[string]any{"id": placeholder, "notes": "", "elements": []json.RawMessage{object["original_element"]}})
+		return validateRequestSlide(slide, version)
+	}, []string{"selection", "original_element", "deck_schema_version", "content_hash"}, nil)
+	if err != nil {
+		return verified, err
+	}
+	if err = validateTextSelection(verified.Selection); err != nil {
+		return verified, err
+	}
+	if !SupportedSchema(verified.DeckSchemaVersion) || !hashPattern.MatchString(verified.ContentHash) || verified.OriginalElement.Type != "text" || verified.OriginalElement.Text == nil {
+		return verified, errors.New("invalid verified original text element")
+	}
+	return verified, nil
+}
 func validateSelectedRequest(request SelectedRequestInput) error {
 	if request.SchemaVersion != SelectedRequestProtocolVersion || request.TypeID != "slides" || request.BaseRev < 1 || !identifier.MatchString(request.PageID) || !identifier.MatchString(request.ChatID) || !identifier.MatchString(request.SubmissionID) || strings.TrimSpace(request.Instruction) == "" || !validText(request.Instruction, MaxSelectedInstructionBytes) {
 		return errors.New("invalid selected request protocol, identity or instruction")
 	}
-	selection := request.Selection
-	if selection.SelectionSchemaVersion != SelectionSchemaVersion || selection.Kind != "text_range" || !identifier.MatchString(selection.SlideID) || !identifier.MatchString(selection.ElementID) || !hashPattern.MatchString(selection.ElementHash) || selection.From < 0 || selection.To <= selection.From || !validText(selection.Quote, MaxTextBytes) || len(utf16.Encode([]rune(selection.Quote))) < 1 || len(utf16.Encode([]rune(selection.Quote))) > MaxSelectedQuoteUnits {
+	return validateTextSelection(request.Selection)
+}
+func validateTextSelection(selection TextSelection) error {
+	quoteUnits := len(utf16.Encode([]rune(selection.Quote)))
+	if selection.SelectionSchemaVersion != SelectionSchemaVersion || selection.Kind != "text_range" || !identifier.MatchString(selection.SlideID) || !identifier.MatchString(selection.ElementID) || !hashPattern.MatchString(selection.ElementHash) || selection.From < 0 || selection.To <= selection.From || !validText(selection.Quote, MaxTextBytes) || quoteUnits < 1 || quoteUnits > MaxSelectedQuoteUnits {
 		return errors.New("invalid immutable text selection")
 	}
 	return nil
@@ -111,10 +162,13 @@ func VerifyTextSelection(state State, request SelectedRequestInput) (VerifiedTex
 
 // SelectedReplacementPatch never accepts new preconditions or a whole element
 // from the run. A read cannot refresh its original target or base revision.
-func SelectedReplacementPatch(pageID, requestID string, baseRev int64, verified VerifiedTextSelection, replacement string) (PatchRequest, error) {
+func SelectedReplacementPatch(pinned State, pageID, requestID string, baseRev int64, verified VerifiedTextSelection, replacement string) (PatchRequest, error) {
 	var result PatchRequest
 	if !identifier.MatchString(pageID) || !identifier.MatchString(requestID+"-patch") || baseRev < 1 || !SupportedSchema(verified.DeckSchemaVersion) || verified.Selection.SelectionSchemaVersion != SelectionSchemaVersion || verified.Selection.Kind != "text_range" || !identifier.MatchString(verified.Selection.SlideID) || !validText(replacement, MaxTextBytes) || verified.OriginalElement.Type != "text" || verified.OriginalElement.Text == nil || verified.OriginalElement.ID != verified.Selection.ElementID {
 		return result, errors.New("invalid selected replacement")
+	}
+	if err := ValidateVerifiedTextSelection(pinned, pageID, baseRev, verified); err != nil {
+		return result, err
 	}
 	original := verified.OriginalElement
 	hash, err := ElementHash(original)
@@ -132,4 +186,48 @@ func SelectedReplacementPatch(pageID, requestID string, baseRev int64, verified 
 	}
 	original.Text = &text
 	return PatchRequest{PageID: pageID, SchemaVersion: verified.DeckSchemaVersion, BaseRev: baseRev, MutationID: requestID + "-patch", Operations: []Operation{{Op: "set_element", SlideID: verified.Selection.SlideID, ElementID: verified.Selection.ElementID, IfHash: verified.Selection.ElementHash, Element: &original}}}, nil
+}
+
+// ValidateVerifiedTextSelection checks persisted host metadata against the exact
+// pinned original revision, never the latest head. The actual request authority
+// repeats this under its writer fence before every write or receipt replay.
+func ValidateVerifiedTextSelection(pinned State, pageID string, baseRev int64, verified VerifiedTextSelection) error {
+	if err := validateTextSelection(verified.Selection); err != nil {
+		return err
+	}
+	if pinned.Deck.DeckID != pageID || pinned.Revision != baseRev || pinned.SchemaVersion != pinned.Deck.SchemaVersion || pinned.SchemaVersion != verified.DeckSchemaVersion || pinned.ContentHash != verified.ContentHash || !hashPattern.MatchString(verified.ContentHash) {
+		return ErrConflict
+	}
+	hash, err := DeckHash(pinned.Deck)
+	if err != nil || hash != verified.ContentHash {
+		return ErrConflict
+	}
+	for _, slide := range pinned.Deck.Slides {
+		if slide.ID == verified.Selection.SlideID {
+			for _, element := range slide.Elements {
+				if element.ID == verified.Selection.ElementID {
+					before, e := canonicalValue(element)
+					if e != nil {
+						return ErrConflict
+					}
+					stored, e := canonicalValue(verified.OriginalElement)
+					if e != nil || string(before) != string(stored) {
+						return ErrConflict
+					}
+					if element.Type != "text" || element.Text == nil {
+						return ErrConflict
+					}
+					if _, e = selectionOffsets(element.Text.Value, verified.Selection); e != nil {
+						return ErrConflict
+					}
+					elementHash, e := ElementHash(element)
+					if e != nil || elementHash != verified.Selection.ElementHash {
+						return ErrConflict
+					}
+					return nil
+				}
+			}
+		}
+	}
+	return ErrConflict
 }
