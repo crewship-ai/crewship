@@ -147,6 +147,15 @@ it("opens the decision from mobile Work and returns keyboard focus on close", as
   await waitFor(() => expect(opener).toHaveFocus())
 })
 
+it("keeps a view-only question readable without calling it Waiting for you", async () => {
+  current = { ...base, decision: { ...base.decision, allowed_actions: ["view"] } }
+  setup()
+  const card = await screen.findByRole("region", { name: "Decision in chat" })
+  expect(within(card).getByText(base.decision.title)).toBeVisible()
+  expect(within(card).queryByRole("button", { name: "Send answer" })).toBeNull()
+  expect(screen.queryByRole("region", { name: "Waiting for you" })).toBeNull()
+})
+
 it.each(["pending", "restricted"])("does not fetch decision sources for %s execution", async mode => {
   profile = mode
   setup()

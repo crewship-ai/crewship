@@ -1140,8 +1140,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const decisionPanel = selectedDecision && !decisions.unavailable ? <section aria-label="Decision detail" className="min-w-0 space-y-3 p-3">
     <Button ref={decisionPanelStart} variant="outline" className="coarse:min-h-12" onClick={closeDecision}>Back to Work</Button>{renderDecision(selectedDecision, "panel")}
   </section> : null
-  const waitingForYou = decisionRefs.some(ref => ref.decision.status === "pending")
-    ? <DecisionWaitingSection references={decisionRefs} rechecking={decisions.rechecking} onOpen={openDecision} /> : null
+  const actionableDecisions = decisionRefs.filter(ref => ref.decision.status === "pending" && ref.decision.allowed_actions.some(action => action !== "view"))
+  const waitingForYou = actionableDecisions.length
+    ? <DecisionWaitingSection references={actionableDecisions} rechecking={decisions.rechecking} onOpen={openDecision} /> : null
   const mobileDecisionPanel = isMobile ? <Sheet open={!!decisionTarget && !decisions.unavailable} onOpenChange={open => { if (!open) closeDecision() }}>
     <SheetContent side="right" onCloseAutoFocus={event => { event.preventDefault(); if (decisionOpener.current?.isConnected) decisionOpener.current.focus() }} className="w-full max-w-full gap-0 overflow-y-auto p-0 sm:max-w-full">
       <SheetTitle className="sr-only">Decision detail</SheetTitle>{decisionPanel}
