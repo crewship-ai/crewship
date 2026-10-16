@@ -273,3 +273,21 @@ test. It exercises real human CRDT updates, checkpoint restore, exact session
 revocation and final query snapshot coverage. A green process-recovery test
 alone does not execute this search gate. On the shared development host, run
 these commands through `crewship-heavy`.
+
+### Native search browser gate
+
+`acceptance-page-search-browser.mjs` runs through Linux-only
+`TestNativeSearchBrowser` with real Router, private Node, canonical Docs/Slides
+and a built static export. It uses distinct owned synthetic human sessions,
+indexes a private matching Page as owner, tests authorized body-text results,
+immutable-ID navigation after rename/slug reuse, actual grant revocation plus
+bounded batch expiry and stopped-engine refusal. No HTTP responses are mocked.
+After frozen service/frontend installation and production export, run:
+
+```bash
+crewship-heavy env CREWSHIP_PAGE_SEARCH_BROWSER=1 go test -tags page_search_browser ./internal/api -run '^TestNativeSearchBrowser$' -count=1 -timeout 6m -v
+```
+
+Missing prerequisites fail. The script prints private report, filtered result
+JSON and full screenshot paths; no credentials are captured in evidence. The
+Go fixture owns and removes its 0600 credential input and private Node process.
