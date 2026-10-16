@@ -363,7 +363,16 @@ func insertedIDs(request PatchRequest) map[string]string {
 	}
 	return ids
 }
-func (s *Store) Patch(ctx context.Context, key Key, request PatchRequest, authorize Authorize) (result Receipt, err error) {
+
+// PatchReceiptGuard is trusted compiled request-result integration. It runs for
+// a new revision and exact receipt replay inside the writer transaction, before
+// final live authorization/commit. It cannot replace revision asset/comment hooks.
+type PatchReceiptGuard func(context.Context, *sql.Tx, Key, string, Receipt) error
+
+func (s *Store) Patch(ctx context.Context, key Key, request PatchRequest, authorize Authorize) (Receipt, error) {
+	return s.PatchWithReceipt(ctx, key, request, authorize, nil)
+}
+func (s *Store) PatchWithReceipt(ctx context.Context, key Key, request PatchRequest, authorize Authorize, onReceipt PatchReceiptGuard) (result Receipt, err error) {
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return result, err
@@ -386,6 +395,9 @@ func (s *Store) Patch(ctx context.Context, key Key, request PatchRequest, author
 		}
 		if found {
 			result = previous
+			if onReceipt != nil {
+				return onReceipt(ctx, tx, key, actor, result)
+			}
 			return nil
 		}
 		current, err := readState(ctx, tx, key, 0)
@@ -403,7 +415,13 @@ func (s *Store) Patch(ctx context.Context, key Key, request PatchRequest, author
 			return fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
 		result, err = s.write(ctx, tx, key, current, candidate, request.MutationID, "patch", hash, actor, insertedIDs(request), false)
-		return err
+		if err != nil {
+			return err
+		}
+		if onReceipt != nil {
+			return onReceipt(ctx, tx, key, actor, result)
+		}
+		return nil
 	})
 	return
 }
