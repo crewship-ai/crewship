@@ -14,3 +14,8 @@ export function purgeChatDecisionRecovery(workspace: string, viewer: string, cha
     for (const key of remove) sessionStorage.removeItem(key)
   } catch { /* Access denial still evicts all visible cards even when storage is unavailable. */ }
 }
+
+/** An answer denial removes only its source; other uncertain replies survive. */
+export function purgeChatDecisionSourceRecovery(workspace: string, viewer: string, chat: string, type: string, id: string) {
+  try { sessionStorage.removeItem(`chat-decision:${JSON.stringify([workspace,viewer,chat,type,id])}`) } catch { /* Visible source eviction does not depend on browser storage. */ }
+}
