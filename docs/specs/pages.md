@@ -40,6 +40,44 @@ canceling retains the current route, workspace and draft. Viewer/membership
 changes clear authorization-bound resolution immediately. An intentional
 workspace picker change leaves the stable reference rather than bouncing back.
 
+## Native content search
+
+`GET /api/v1/pages/search/content?workspace_id=WORKSPACE&q=WORDS` searches
+current native Docs (schemas 1/2/3) and Slides (schema 1/2) plain text. It requires a
+current human session or CLI `pages:read`/`pages:*` credential and live Page read
+access. This is a supported native scope, not fulltext across all Page types.
+Docs paragraph/heading leaves (plus schema3 code blocks) and Slides text, table cells and notes contribute
+once; image metadata, external links, comments and historical revisions do not.
+
+Literal Unicode-folded terms are ANDed across a Page's leaves. Results contain
+one entry per Page with a bounded snippet and current source revision, ordered
+by stable Page ID. `limit` defaults to 50 and accepts 1–50; explicit empty values
+are invalid. The optional opaque cursor is bound to the exact credential,
+viewer, workspace and normalized query for five minutes; it uses live current
+content and authority, rather than a retained search snapshot. Revocation can
+remove results between pages. Hidden matches do not contribute to pagination.
+
+Every authorized native candidate must have a current validated projection:
+unsupported formats or supported content limits return 422, and an unavailable,
+changed or incomplete projection returns 503 with a retry message instead of
+partial results or false no-results. The request has a ten-second overall
+budget and at most 256 authorized native candidates. Two handler-wide rebuild
+slots bound canonical materialization. Cache projections allow 2 MiB text and
+4 MiB encoded data per Page and 64 MiB encoded data per workspace. These are
+derived caches: workspace/fork backups exclude them, scoped restore clears them,
+and physical instance recovery clears all of them before canonical rebuilding.
+No bearer is stored in the cache or cursor. This does not establish backlinks.
+
+The Pages **Search native text** dialog submits explicitly and opens results by
+stable Page ID plus workspace through the existing unsaved-work guard. **Next
+results** replaces the displayed batch rather than retaining earlier metadata.
+A batch has a maximum local lifetime of 15 seconds and clears on Page/folder
+updates, reconnect, focus, visibility return or identity/workspace change.
+Grant/issuer changes without a realtime event are therefore bounded by that
+local expiry, not guaranteed instantaneous. Clearing asks for explicit search;
+it never automatically retries incomplete coverage. Search is currently a human
+session/CLI capability, not delegated agent-runtime authorization.
+
 ## Delivery boundary
 
 **Artifacts and Boards 1.0 use static artifact previews.** The Board drawing editor

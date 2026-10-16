@@ -31,6 +31,46 @@ responses exist to keep them true:
 Implementation: `internal/api/pages_*.go`, `internal/pages` for the schemas and
 validation.
 
+## Search native content
+
+`GET /api/v1/pages/search/content?workspace_id=WORKSPACE&q=WORDS&limit=50`
+
+**Request:** `q` is a nonempty UTF-8 query (maximum 256 bytes/32 distinct
+Unicode-folded literal AND terms). `limit` is optional, 1–50 (default 50).
+Optional `cursor` is an opaque continuation from the same exact credential,
+viewer, workspace and normalized query, expiring after five minutes. Explicit
+empty or repeated query parameters are rejected. No automatic paging occurs.
+
+**Response: `200 OK`** (no-store):
+
+```json
+{"scope":"native-docs-slides","matches":[{"page_id":"original-id","slug":"current-address","name":"Report","content_type":"slides","schema_version":2,"source_revision":3,"source_generation":0,"snippet":"Matching plain text"}],"has_more":false}
+```
+
+A cursor is present only when `has_more` is true. One result per currently
+readable Page is ordered by Page ID. Current Docs schemas 1/2/3 and Slides schema
+1/2 are supported; HTML, Apps, image metadata, comments and history are outside
+this scope. Terms may span leaf segments; snippets are at most 512 UTF-8 bytes.
+All authorized native Pages must have current validated projections before any
+results are returned. Continuations use live current authority/content, not a
+retained snapshot; revocation can remove matches between requests. Hidden
+matches contribute no counts, ordering or pagination metadata.
+
+| Status | Meaning |
+| --- | --- |
+| 400 | Invalid query, limit or expired/mismatched cursor; search again explicitly. |
+| 401 | Missing, invalid or revoked exact human credential. |
+| 403 | Missing current `pages:read` scope or trusted workspace membership. |
+| 422 | Unsupported authorized native format or bounded content/candidate limit. |
+| 503 | Canonical engine unavailable, incomplete/stale projection or overall deadline; retry. |
+| 500 | Unexpected internal failure. |
+
+Page grants, direct leaf-folder ACL and live grant issuers use existing Page
+read policy. `pages:write` alone does not imply read. Derived projections are
+excluded from workspace/fork backup and cleared on restore/recovery. Limits are
+256 authorized native Pages per query, 2 MiB text/4 MiB encoded projection per
+Page, 64 MiB encoded projection per workspace and a ten-second overall deadline.
+
 ## Resolve stable Page identity
 
 `GET /api/v1/pages/resolve/id/{pageId}?workspace_id=WORKSPACE` returns only

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Pages can search supported native Docs and Slides body text (#3228).** Human read authority is checked before materialization and again with current source revisions before pagination. Hidden matches do not affect result counts or cursors; incomplete coverage returns a retry/unsupported error. The UI opens stable workspace/Page identities and expires local result batches after 15 seconds. API and `crewship page search` support explicit opaque continuation. Other Page types, backlinks and delegated agent search remain separate.
+
 - **Page identities resolve to their current authorized address (#3224).** The new read-only API and `crewship page resolve` retain original Page identity across rename and address reuse while checking current credentials, workspace and Page reach. Hidden identities reveal no address or metadata. The Page header copies explicit workspace/ID links; opening them retains identity through canonical address changes and refuses reused-slug bodies before rendering.
 
 - **Typed Slides API supports private PNG/JPEG revision attachments (#3213).** Explicit schema2 upgrades preserve schema1 history and hashes; exact image pins, credential checks and recovery validation commit with the revision. Removing an image preserves historic bytes and comments detach/restore by stable identity. Native image UI and export qualification remain separate.
