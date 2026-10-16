@@ -4,7 +4,6 @@ import { useState } from "react"
 import Link from "next/link"
 import { entityHref } from "@/lib/entity-links"
 
-import Image from "next/image"
 import { AnimatePresence, motion } from "motion/react"
 import { Search, Pause, Play, WrapText, ArrowDownUp, Filter, Download, RefreshCw, Users, User, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -18,8 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { SEVERITY_COLOR } from "@/lib/journal-style"
 import type { JournalSeverity } from "@/lib/types/journal"
 import { TimeRangePicker, type TimeRange, type CustomRange } from "./time-range-picker"
@@ -152,8 +150,6 @@ export function LogsToolbar({
   missionId,
   onClearMissionId,
 }: LogsToolbarProps) {
-  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
-  useAvatarStylesVersion()
   const isMobile = useIsMobile()
   const [filtersOpen, setFiltersOpen] = useState(false)
   return (
@@ -480,15 +476,15 @@ function ScopeBadge({ option, kind }: { option: ScopeOption; kind: "crew" | "age
   }
   if (kind === "agent") {
     const seed = option.avatarSeed || option.name
-    const url = getAgentAvatarUrl(seed, option.avatarStyle ?? null)
     return (
-      <Image
-        src={url}
-        alt=""
+      <AgentAvatar
+        seed={seed}
+        style={option.avatarStyle ?? null}
         width={16}
         height={16}
+        loading="lazy"
+        decoding="async"
         className="h-4 w-4 rounded shrink-0 bg-muted/40"
-        unoptimized
       />
     )
   }

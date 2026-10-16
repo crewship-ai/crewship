@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 
 import { apiFetch } from "@/lib/api-fetch"
 import type { BottomPanelContext } from "./types"
-import { EmptyState } from "./shared"
+import { PanelEmptyText } from "./shared"
 
 const NOISE_KEYS = new Set([
   "_count", "config_hash", "cached_image", "cached_requirements",
@@ -85,9 +85,9 @@ export function YamlTab({ workspaceId, context }: { workspaceId: string; context
     return () => { cancelled = true }
   }, [url])
 
-  if (!context || context.kind === "run") return <EmptyState>Select an entity to see its spec.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
-  if (data === null) return <EmptyState>Loading…</EmptyState>
+  if (!context || context.kind === "run") return <PanelEmptyText>Select an entity to see its spec.</PanelEmptyText>
+  if (error) return <PanelEmptyText><span className="text-destructive">Failed to load: {error}</span></PanelEmptyText>
+  if (data === null) return <PanelEmptyText>Loading…</PanelEmptyText>
 
   const yaml = toYaml(filterNoise(data))
 

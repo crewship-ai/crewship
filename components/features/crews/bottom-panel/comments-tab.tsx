@@ -7,7 +7,7 @@ import { seedColor } from "@/lib/agent-avatar"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
-import { EmptyState, formatRelative } from "./shared"
+import { PanelEmptyText, formatRelative } from "./shared"
 
 // Mirror of internal/api/issue_handler.go commentResponse.
 interface Comment {
@@ -78,10 +78,10 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
     }
   }
 
-  if (!context) return <EmptyState>Select an issue to see its comments.</EmptyState>
-  if (context.kind !== "mission") return <EmptyState>Comments are per-issue — select one.</EmptyState>
-  if (error && comments === null) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
-  if (comments === null) return <EmptyState>Loading…</EmptyState>
+  if (!context) return <PanelEmptyText>Select an issue to see its comments.</PanelEmptyText>
+  if (context.kind !== "mission") return <PanelEmptyText>Comments are per-issue — select one.</PanelEmptyText>
+  if (error && comments === null) return <PanelEmptyText><span className="text-destructive">Failed to load: {error}</span></PanelEmptyText>
+  if (comments === null) return <PanelEmptyText>Loading…</PanelEmptyText>
 
   return (
     <div className="h-full flex flex-col">

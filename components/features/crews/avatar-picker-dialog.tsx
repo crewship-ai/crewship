@@ -8,8 +8,8 @@ import {
   CreateSurfaceFooter,
   CreateSurfaceHeader,
 } from "@/components/layout/create-surface"
-import { AVATAR_STYLES, getAgentAvatarUrl, DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
-import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
+import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { cn } from "@/lib/utils"
 
 // Style options derived from the real DiceBear catalog in lib/agent-avatar.
@@ -81,8 +81,6 @@ export function AvatarPickerBody({
   crewStyle,
   onChange,
 }: AvatarPickerBodyProps) {
-  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
-  useAvatarStylesVersion()
   const draftSeed = seed || agentName
   const draftStyle = style
 
@@ -97,7 +95,6 @@ export function AvatarPickerBody({
   const setDraftStyle = (next: string | null) => onChange({ seed: draftSeed, style: next })
 
   const effectiveStyle = draftStyle ?? crewStyle ?? DEFAULT_AVATAR_STYLE
-  const previewUrl = getAgentAvatarUrl(draftSeed, effectiveStyle)
 
   return (
     <>
@@ -113,9 +110,9 @@ export function AvatarPickerBody({
             answer "which face", and splitting them across the panel with the
             style grid in between was what made the panel tall. */}
         <div className="flex items-center gap-3">
-          <img
-            src={previewUrl}
-            alt=""
+          <AgentAvatar
+            seed={draftSeed}
+            style={effectiveStyle}
             data-testid="avatar-preview"
             className="h-14 w-14 shrink-0 rounded-xl border border-foreground/10 bg-muted"
           />
@@ -153,7 +150,7 @@ export function AvatarPickerBody({
                     draftSeed === qs ? "border-primary" : "border-foreground/10 hover:border-foreground/25",
                   )}
                 >
-                  <img src={getAgentAvatarUrl(qs, effectiveStyle)} alt="" className="h-full w-full" />
+                  <AgentAvatar seed={qs} style={effectiveStyle} className="h-full w-full rounded-none" />
                 </button>
               ))}
             </div>
@@ -184,9 +181,9 @@ export function AvatarPickerBody({
               : "border-foreground/10 hover:bg-foreground/5",
           )}
         >
-          <img
-            src={getAgentAvatarUrl(draftSeed, crewStyle ?? DEFAULT_AVATAR_STYLE)}
-            alt=""
+          <AgentAvatar
+            seed={draftSeed}
+            style={crewStyle ?? DEFAULT_AVATAR_STYLE}
             className="h-6 w-6 shrink-0 rounded"
           />
           <span className={cn("type-row shrink-0 font-medium", draftStyle === null && "text-primary")}>
@@ -232,9 +229,9 @@ export function AvatarPickerBody({
                     : "border-foreground/10 hover:bg-foreground/5",
                 )}
               >
-                <img
-                  src={getAgentAvatarUrl(draftSeed, s.value)}
-                  alt=""
+                <AgentAvatar
+                  seed={draftSeed}
+                  style={s.value}
                   className="h-8 w-8 rounded"
                 />
                 <span

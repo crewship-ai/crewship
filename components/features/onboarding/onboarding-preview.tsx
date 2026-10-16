@@ -1,7 +1,6 @@
 "use client"
 
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
-import Image from "next/image"
 import {
   Building2,
   Star,
@@ -17,7 +16,7 @@ import {
 import { CLI_ADAPTERS, getAdapterConfig, getModelLabel } from "@/lib/cli-adapters"
 import { getAdapterBrand } from "@/lib/cli-adapter-brand"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 
 /**
  * OnboardingPreview — right pane of the split-screen Variant D
@@ -249,13 +248,15 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
                   className="flex items-center gap-2.5 text-sm"
                 >
                   <div className="relative shrink-0">
-                    <Image
-                      src={getAgentAvatarUrl(a.slug, "bottts-neutral")}
+                    <AgentAvatar
+                      seed={a.slug}
+                      style="bottts-neutral"
                       alt={a.name}
                       width={32}
                       height={32}
+                      loading="lazy"
+                      decoding="async"
                       className="rounded-lg bg-muted ring-1 ring-border"
-                      unoptimized
                     />
                     {a.lead && (
                       <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-warn text-black shadow-sm">

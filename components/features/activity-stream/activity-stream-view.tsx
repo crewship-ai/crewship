@@ -21,7 +21,8 @@ import { Activity, ChevronLeft, ChevronRight, FilterX } from "lucide-react"
 import { SubBar } from "@/components/layout/sub-bar"
 import { SidebarActiveChip, SidebarActiveChips, SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { Appear, EmptyState } from "@/components/ui/detail"
+import { Appear } from "@/components/ui/detail"
+import { EmptyState } from "@/components/layout/empty-state"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { useJournalList } from "@/hooks/use-journal-list"
@@ -1171,6 +1172,7 @@ export function ActivityStreamView({
               {surface.main !== "workflow" && error && !loading && (
                 <div className="px-6 py-14">
                   <EmptyState
+                    size="compact"
                     icon={Activity}
                     title="Could not load activity"
                     description={error}
@@ -1231,6 +1233,7 @@ export function ActivityStreamView({
                   // list. Saying so beats a graph-shaped hole.
                   <div className="px-6 py-14">
                     <EmptyState
+                      size="compact"
                       icon={Activity}
                       title="This workflow is no longer in the index"
                       description={`“${surface.chainLabel ?? "It"}” was picked from a list that has since moved on. The runs it holds are still in the activity feed.`}
@@ -1246,6 +1249,7 @@ export function ActivityStreamView({
               {surface.main !== "workflow" && !loading && !error && emptyByFilters && !overviewShown && (
                 <div className="px-6 py-14">
                   <EmptyState
+                    size="compact"
                     icon={FilterX}
                     title="No activity matches these filters"
                     description={`The loaded window holds ${entries.length.toLocaleString()} ${
@@ -1318,6 +1322,7 @@ export function ActivityStreamView({
                       {visible.length === 0 ? (
                         <div className="py-8">
                           <EmptyState
+                            size="compact"
                             icon={Activity}
                             title="Nothing here"
                             description={

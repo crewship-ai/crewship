@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { ChevronDown, Search, X } from "lucide-react"
 import type { Pipeline } from "@/hooks/use-pipelines"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { cn } from "@/lib/utils"
 
 // RoutinesFilterSidebar — left panel for /routines. Visually mirrors
@@ -303,16 +303,7 @@ function FacetRow({ label, count, active, onClick, dot, avatar }: FacetRowProps)
       )}
     >
       {avatar ? (
-        // Render via background-image to dodge the @next/next/no-img-
-        // element lint rule, which our CI ESLint config doesn't even
-        // ship (so the disable directive itself errors out). Same
-        // visual outcome — a 16×16 round avatar — without the rule
-        // collision.
-        <span
-          className="h-4 w-4 shrink-0 rounded-full bg-cover bg-center"
-          style={{ backgroundImage: `url(${getAgentAvatarUrl(avatar)})` }}
-          aria-hidden="true"
-        />
+        <AgentAvatar seed={avatar} aria-hidden="true" className="h-4 w-4 shrink-0 object-cover" />
       ) : dot ? (
         <span
           className={cn(

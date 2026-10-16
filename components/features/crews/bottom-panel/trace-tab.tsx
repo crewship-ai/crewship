@@ -6,7 +6,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { REPORTED_USAGE_HINT, formatReportedUsage } from "@/components/features/routines/routine-cost-format"
 
 import type { BottomPanelContext } from "./types"
-import { EmptyState, statusColor } from "./shared"
+import { PanelEmptyText, statusColor } from "./shared"
 
 // Subset of GetRun (pipeline_runs.go) we render.
 interface RunDetail {
@@ -51,10 +51,10 @@ export function TraceTab({ workspaceId, context }: { workspaceId: string; contex
     return () => { cancelled = true }
   }, [runId, workspaceId])
 
-  if (!context) return <EmptyState>Select a run to see its trace.</EmptyState>
-  if (context.kind !== "run") return <EmptyState>Trace is shown per run.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
-  if (run === null) return <EmptyState>Loading…</EmptyState>
+  if (!context) return <PanelEmptyText>Select a run to see its trace.</PanelEmptyText>
+  if (context.kind !== "run") return <PanelEmptyText>Trace is shown per run.</PanelEmptyText>
+  if (error) return <PanelEmptyText><span className="text-destructive">Failed to load: {error}</span></PanelEmptyText>
+  if (run === null) return <PanelEmptyText>Loading…</PanelEmptyText>
 
   const steps = Object.entries(run.step_outputs ?? {})
 
@@ -79,7 +79,7 @@ export function TraceTab({ workspaceId, context }: { workspaceId: string; contex
       )}
 
       {steps.length === 0 ? (
-        <EmptyState>No step output recorded yet.</EmptyState>
+        <PanelEmptyText>No step output recorded yet.</PanelEmptyText>
       ) : (
         <div className="relative pl-5 before:absolute before:left-[5px] before:top-1 before:bottom-1 before:w-px before:bg-foreground/10">
           {steps.map(([stepId, out]) => {

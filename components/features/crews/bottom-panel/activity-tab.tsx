@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
-import { EmptyState, formatRelative } from "./shared"
+import { PanelEmptyText, formatRelative } from "./shared"
 
 // Mirror of internal/api/issue_handler.go activityResponse.
 interface ActivityEntry {
@@ -60,11 +60,11 @@ export function ActivityTab({ workspaceId, context }: { workspaceId: string; con
     return () => { cancelled = true }
   }, [isMission, crewId, identifier, workspaceId])
 
-  if (!context) return <EmptyState>Select an issue to see its activity.</EmptyState>
-  if (context.kind !== "mission") return <EmptyState>Activity is per-issue — select one.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
-  if (entries === null) return <EmptyState>Loading…</EmptyState>
-  if (entries.length === 0) return <EmptyState>No activity recorded yet for {context.identifier}.</EmptyState>
+  if (!context) return <PanelEmptyText>Select an issue to see its activity.</PanelEmptyText>
+  if (context.kind !== "mission") return <PanelEmptyText>Activity is per-issue — select one.</PanelEmptyText>
+  if (error) return <PanelEmptyText><span className="text-destructive">Failed to load: {error}</span></PanelEmptyText>
+  if (entries === null) return <PanelEmptyText>Loading…</PanelEmptyText>
+  if (entries.length === 0) return <PanelEmptyText>No activity recorded yet for {context.identifier}.</PanelEmptyText>
 
   return (
     <div className="h-full overflow-y-auto p-4 text-xs">
