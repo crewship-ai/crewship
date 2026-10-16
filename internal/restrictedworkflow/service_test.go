@@ -212,20 +212,27 @@ func TestWorkflowRequiresRoutinePermissionAndBoundedTypedDeclaration(t *testing.
 	if _, err := s.db.ExecContext(t.Context(), `INSERT INTO access_grants(id,member_id,resource_kind,routine_id,operation,created_by,created_at) VALUES('restored-routine','m1','routine','routine','run','owner',strftime('%Y-%m-%dT%H:%M:%fZ','now'))`); err != nil {
 		t.Fatal(err)
 	}
-	for _, raw := range []string{
-		`{"dsl_version":"1.0","name":"private-work","steps":[{"id":"script","type":"script","script":{"path":"/crew/shared/steal.sh"}}]}`,
-		`{"dsl_version":"1.0","name":"private-work","steps":[{"id":"nested","type":"call_pipeline","pipeline_slug":"trusted"}]}`,
-		strings.Replace(routine, `"agent_slug":"worker","prompt":"Continue`, `"agent_slug":"foreign","prompt":"Continue`, 1),
-		strings.Replace(routine, `"prompt":"{{ inputs.task }}"`, `"prompt":"{{ secrets.openai }}"`, 1),
-		strings.Replace(routine, `"prompt":"{{ inputs.task }}"`, `"prompt":"{{ inputs.task }}","model_override":"expensive"`, 1),
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want error
+	}{
+		{"unsupported script", `{"dsl_version":"1.0","name":"private-work","steps":[{"id":"script","type":"script","script":{"path":"/crew/shared/steal.sh"}}]}`, ErrUnsupported},
+		{"missing nested routine", `{"dsl_version":"1.0","name":"private-work","steps":[{"id":"nested","type":"call_pipeline","pipeline_slug":"trusted"}]}`, ErrDenied},
+		{"foreign agent", strings.Replace(routine, `"agent_slug":"worker","prompt":"Continue`, `"agent_slug":"foreign","prompt":"Continue`, 1), ErrDenied},
+		{"secret reference", strings.Replace(routine, `"prompt":"{{ inputs.task }}"`, `"prompt":"{{ secrets.openai }}"`, 1), ErrUnsupported},
+		{"model override", strings.Replace(routine, `"prompt":"{{ inputs.task }}"`, `"prompt":"{{ inputs.task }}","model_override":"expensive"`, 1), ErrUnsupported},
 	} {
-		if _, err := s.db.ExecContext(t.Context(), `UPDATE pipelines SET definition_json=? WHERE id='routine'`, raw); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "private"}, "", 0); !errors.Is(err, ErrUnsupported) {
-			t.Fatalf("unsupported declaration admitted %v", err)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := s.db.ExecContext(t.Context(), `UPDATE pipelines SET definition_json=? WHERE id='routine'`, tc.raw); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "private"}, "", 0); !errors.Is(err, tc.want) {
+				t.Fatalf("declaration should be rejected with %v, got %v", tc.want, err)
+			}
+		})
 	}
+
 	var count int
 	if err := s.db.QueryRowContext(t.Context(), `SELECT count(*) FROM restricted_workflow_jobs`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("unsupported queue count=%d err=%v", count, err)
