@@ -100,7 +100,7 @@ func TestDocumentsStructuralBrowser(t *testing.T) {
 	mux.Handle("/", StaticFileHandler(os.DirFS(filepath.Join(root, "out"))))
 	host := httptest.NewServer(mux)
 	t.Cleanup(host.Close)
-	raw, _ := json.Marshal(map[string]any{"id": "structural-browser-init", "schema": 3, "body": map[string]any{"type": "doc", "content": content}})
+	raw, _ := json.Marshal(map[string]any{"id": "structural-browser-init", "schema": 3, "page_id": page, "body": map[string]any{"type": "doc", "content": content}})
 	request, _ := http.NewRequestWithContext(t.Context(), "POST", host.URL+"/api/v1/pages/"+slug+"/document/initialize?workspace_id="+workspace, strings.NewReader(string(raw)))
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")

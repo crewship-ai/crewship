@@ -33,7 +33,7 @@ func exerciseDocumentStructureCLI(t *testing.T, h *PageHandler, workspace, user,
 	for _, id := range []string{"outside", "first", "second", "third", "tail"} {
 		blocks = append(blocks, map[string]any{"type": "paragraph", "attrs": map[string]any{"id": id}, "content": []any{map[string]any{"type": "text", "text": id + " text"}}})
 	}
-	call(page, "initialize", human, map[string]any{"id": "structure-seed", "schema": 3, "body": map[string]any{"type": "doc", "content": blocks}}, 200)
+	call(page, "initialize", human, map[string]any{"id": "structure-seed", "schema": 3, "page_id": page, "body": map[string]any{"type": "doc", "content": blocks}}, 200)
 	router, err := NewRouter(h.db, jwtSecret, newTestLogger(), WithInternalToken(h.artifactMasterToken), WithDocumentAuthority(filepath.Join(dir, "cli-authority.sock"), tokenFile), WithDocumentService(nodeSocket))
 	if err != nil {
 		t.Fatal(err)
