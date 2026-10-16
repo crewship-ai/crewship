@@ -313,7 +313,7 @@ var BackupTables = []string{
 	"page_folders",    // pages.folder_id → page_folders, so folders land first; FK owner_crew_id → crews
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
-	"slides_heads", "slides_revisions", "slides_receipts", "slides_object_ids",
+	"slides_heads", "slides_revisions", "slides_revision_assets", "slides_receipts", "slides_object_ids",
 	"slides_comment_threads", "slides_comment_events", "slides_comment_receipts",
 	"documents",
 	"document_updates",
@@ -1498,6 +1498,22 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	for key := range commentPages {
 		if err := slides.RebuildCommentPageTx(ctx, tx, key); err != nil {
 			return stats, fmt.Errorf("backup: invalid Slides comments: %w", err)
+		}
+	}
+	imagePages := map[slides.Key]bool{}
+	for _, table := range []string{"slides_heads", "slides_revisions", "slides_revision_assets"} {
+		for _, row := range dump.Tables[table] {
+			workspace, wok := row["workspace_id"].(string)
+			page, pok := row["page_id"].(string)
+			if !wok || !pok || workspace == "" || page == "" {
+				return stats, fmt.Errorf("backup: invalid Slides image Page identity")
+			}
+			imagePages[slides.Key{WorkspaceID: workspace, PageID: page}] = true
+		}
+	}
+	for key := range imagePages {
+		if err := slides.ValidateImagePageTx(ctx, tx, key); err != nil {
+			return stats, fmt.Errorf("backup: invalid Slides image references: %w", err)
 		}
 	}
 	if hooks.PostInsert != nil {
