@@ -35,8 +35,10 @@ func newSlideCommand() *cobra.Command {
 			switch operation {
 			case "read":
 				response, err = client.Get(path)
-			case "outline", "history":
-				response, err = client.Get(path + "/" + operation)
+			case "outline":
+				response, err = client.Get(path + "/outline")
+			case "history":
+				response, err = client.Get(path + "/history")
 			case "at-rev":
 				revision, parseErr := strconv.ParseInt(args[1], 10, 64)
 				if parseErr != nil || revision < 1 {
@@ -76,7 +78,18 @@ func newSlideCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				response, err = client.Post(path+"/"+operation, json.RawMessage(raw))
+				switch operation {
+				case "initialize":
+					response, err = client.Post(path+"/initialize", json.RawMessage(raw))
+				case "patch":
+					response, err = client.Post(path+"/patch", json.RawMessage(raw))
+				case "reorder":
+					response, err = client.Post(path+"/reorder", json.RawMessage(raw))
+				case "restore":
+					response, err = client.Post(path+"/restore", json.RawMessage(raw))
+				default:
+					return fmt.Errorf("unsupported Slides operation")
+				}
 			}
 			if err != nil {
 				return err
