@@ -58719,7 +58719,6 @@
             "name": "cursor",
             "schema": {
               "maxLength": 4096,
-              "minLength": 0,
               "type": "string"
             }
           }
@@ -59071,7 +59070,7 @@
             }
           },
           {
-            "description": "Stable actor-scoped operation key; exact retry returns original authorized result. Different intent returns 409.",
+            "description": "Stable actor-scoped operation key; retries do not repeat effects. Confirmation outcome and issue IDs remain original; source representation reflects later transitions. Different intent returns 409.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
@@ -59262,7 +59261,7 @@
             }
           },
           {
-            "description": "Stable actor-scoped operation key; exact retry returns original authorized result. Different intent returns 409.",
+            "description": "Stable actor-scoped operation key; retries do not repeat effects. Confirmation outcome and issue IDs remain original; source representation reflects later transitions. Different intent returns 409.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
@@ -59453,7 +59452,7 @@
             }
           },
           {
-            "description": "Stable actor-scoped operation key; exact retry returns original authorized result. Different intent returns 409.",
+            "description": "Stable actor-scoped operation key; retries do not repeat effects. Confirmation outcome and issue IDs remain original; source representation reflects later transitions. Different intent returns 409.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,

@@ -112,6 +112,7 @@ PATCH /api/v1/agents/{agentId}/integrations/{integrationId} roleCreate
 PATCH /api/v1/agents/{agentId}/learning roleManage
 PATCH /api/v1/agents/{agentId}/peers/{userId} roleSelf
 PATCH /api/v1/automations/{id} roleManage
+PATCH /api/v1/chats/{chatId}/proposals/{sourceId} roleSelf
 PATCH /api/v1/credentials/{credentialId} roleCreate
 PATCH /api/v1/crews/{crewId} roleManage
 PATCH /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
@@ -217,6 +218,8 @@ POST /api/v1/automations roleManage
 POST /api/v1/automations/preview roleCreate
 POST /api/v1/chats/{chatId}/messages/{messageId}/reactions roleSelf
 POST /api/v1/chats/{chatId}/participants roleSelf
+POST /api/v1/chats/{chatId}/proposals/{sourceId}/confirm roleSelf
+POST /api/v1/chats/{chatId}/proposals/{sourceId}/discard roleSelf
 POST /api/v1/chats/{chatId}/restricted-cli-run roleSelf
 POST /api/v1/chats/{chatId}/restricted-memory roleSelf
 POST /api/v1/chats/{chatId}/restricted-run roleSelf

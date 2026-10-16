@@ -40,7 +40,7 @@ func (r *Router) readProposal(ctx context.Context, a chataudience.Receipt, id st
 }
 
 func (r *Router) chatProposalShow(w http.ResponseWriter, req *http.Request) {
-	r.ChatCardProjectionHandler(r.readProposal)(w, req)
+	r.proposalProjectionHandler(r.readProposal)(w, req)
 }
 
 func (r *Router) chatProposals(w http.ResponseWriter, req *http.Request) {
@@ -145,7 +145,7 @@ func (r *Router) chatProposals(w http.ResponseWriter, req *http.Request) {
 		proposalError(w, errEntityAudienceDenied)
 		return
 	}
-	writeJSON(w, 200, page)
+	writeProposalJSON(w, 200, page)
 }
 
 func (r *Router) chatProposalMutate(w http.ResponseWriter, req *http.Request) {
@@ -223,7 +223,7 @@ func (r *Router) chatProposalMutate(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	broadcastProposalInvalidation(req.Context(), r.db, r.hub, a.WorkspaceID, id)
-	writeJSON(w, 200, result)
+	writeProposalJSON(w, 200, result)
 }
 
 func proposalError(w http.ResponseWriter, err error) {
@@ -264,7 +264,7 @@ func (r *Router) internalProposalCreate(w http.ResponseWriter, req *http.Request
 		return
 	}
 	broadcastProposalInvalidation(req.Context(), r.db, r.hub, body.WorkspaceID, result.Entity.ID)
-	writeJSON(w, 201, result)
+	writeProposalJSON(w, 201, result)
 }
 
 func (r *Router) chatProposalConfirm(w http.ResponseWriter, req *http.Request) {
@@ -338,5 +338,5 @@ func (r *Router) internalProposalEdit(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	broadcastProposalInvalidation(req.Context(), r.db, r.hub, body.WorkspaceID, result.Entity.ID)
-	writeJSON(w, 200, result)
+	writeProposalJSON(w, 200, result)
 }

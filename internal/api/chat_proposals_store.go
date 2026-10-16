@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/chatentities"
 	"github.com/crewship-ai/crewship/internal/runauthority"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 var errProposalVersion = errors.New("proposal_version_conflict")
@@ -149,11 +150,11 @@ func (r *Router) createProposal(ctx context.Context, run, agent, workspace, key 
 	if a.ChatID == "" || a.TriggerMessageID == "" || a.HumanAuthority == nil {
 		return zero, errProposalForbidden
 	}
-	card := chatentities.ProposalCard{SchemaVersion: 1, Version: 1, Status: "draft", Title: body.Title, Items: body.Items, ExpiresAt: time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339Nano), AllowedActions: []string{"view"}}
+	card := chatentities.ProposalCard{SchemaVersion: 1, Version: 1, Status: "draft", Title: body.Title, Items: body.Items, ExpiresAt: tsformat.Format(time.Now().Add(24 * time.Hour)), AllowedActions: []string{"view"}}
 	if err = validateProposalCard(card); err != nil {
 		return zero, err
 	}
-	p := storedProposal{ID: generateCUID(), Workspace: workspace, Chat: a.ChatID, Agent: agent, Run: run, Trigger: a.TriggerMessageID, TriggerType: a.TriggerType, Event: generateCUID(), Created: time.Now().UTC().Format(time.RFC3339Nano), Card: card}
+	p := storedProposal{ID: generateCUID(), Workspace: workspace, Chat: a.ChatID, Agent: agent, Run: run, Trigger: a.TriggerMessageID, TriggerType: a.TriggerType, Event: generateCUID(), Created: tsformat.Format(time.Now()), Card: card}
 	if err = proposalItemsVisible(ctx, tx, p); err != nil {
 		return zero, err
 	}
@@ -257,7 +258,7 @@ func (r *Router) mutateProposal(req *http.Request, a chataudience.Receipt, id, k
 		p.Card.Status = "discarded"
 		p.Card.Version++
 	case "confirm":
-		outcome := &chatentities.ProposalOutcome{ReviewedVersion: version, ConfirmedBy: a.UserID, ConfirmedAt: time.Now().UTC().Format(time.RFC3339Nano), Issues: []chatentities.CreatedIssueRef{}}
+		outcome := &chatentities.ProposalOutcome{ReviewedVersion: version, ConfirmedBy: a.UserID, ConfirmedAt: tsformat.Format(time.Now()), Issues: []chatentities.CreatedIssueRef{}}
 		for _, item := range p.Card.Items {
 			if !item.Selected {
 				continue

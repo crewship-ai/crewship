@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 
@@ -32,10 +33,6 @@ func newChatProposalCommand() *cobra.Command {
 				return err
 			}
 			path := "/api/v1/chats/" + url.PathEscape(args[0]) + "/proposals"
-			if len(args) > 1 {
-				path += "/" + url.PathEscape(args[1])
-			}
-			method := "GET"
 			var body any
 			if action == "list" {
 				cursor, _ := cmd.Flags().GetString("cursor")
@@ -53,8 +50,6 @@ func newChatProposalCommand() *cobra.Command {
 					return fmt.Errorf("--version must be the reviewed proposal version")
 				}
 				client = client.WithHeader("Idempotency-Key", key)
-				method = "POST"
-				path += "/" + action
 				switch action {
 				case "confirm":
 					body = chatentities.ProposalConfirm{ProposalID: args[1], ReviewedVersion: version}
@@ -74,11 +69,21 @@ func newChatProposalCommand() *cobra.Command {
 						return e
 					}
 					body = chatentities.ProposalEdit{ExpectedVersion: version, Title: edit.Title, Items: edit.Items}
-					method = "PATCH"
-					path = path[:len(path)-len("/edit")]
 				}
 			}
-			resp, err := client.Do(method, path, body)
+			var resp *http.Response
+			switch action {
+			case "list":
+				resp, err = client.Do("GET", path, nil)
+			case "show":
+				resp, err = client.Do("GET", "/api/v1/chats/"+url.PathEscape(args[0])+"/proposals/"+url.PathEscape(args[1]), nil)
+			case "edit":
+				resp, err = client.Do("PATCH", "/api/v1/chats/"+url.PathEscape(args[0])+"/proposals/"+url.PathEscape(args[1]), body)
+			case "confirm":
+				resp, err = client.Do("POST", "/api/v1/chats/"+url.PathEscape(args[0])+"/proposals/"+url.PathEscape(args[1])+"/confirm", body)
+			case "discard":
+				resp, err = client.Do("POST", "/api/v1/chats/"+url.PathEscape(args[0])+"/proposals/"+url.PathEscape(args[1])+"/discard", body)
+			}
 			if err != nil {
 				return err
 			}
