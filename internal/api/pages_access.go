@@ -396,14 +396,14 @@ func pageAccessAgentPaths(agentID string, grants []pageGrantRecord) []string {
 
 // pageAccessGrantPaths renders the live grants matching `match` as
 // `grant:page:<level>` entries, one per distinct level, in the order the
-// verbs are defined (read, produce, write).
+// verbs are defined (read, comment, produce, write).
 func pageAccessGrantPaths(grants []pageGrantRecord, match func(pageGrantRecord) bool) []string {
 	levels := map[string]bool{}
 	for _, g := range liveGrantsIn(grants, match) {
 		levels[g.Level] = true
 	}
 	var out []string
-	for _, level := range []string{pageGrantRead, pageGrantProduce, pageGrantWrite} {
+	for _, level := range []string{pageGrantRead, pageGrantComment, pageGrantProduce, pageGrantWrite} {
 		if levels[level] {
 			out = append(out, pageReachGrantPage+level)
 		}

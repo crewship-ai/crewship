@@ -1,6 +1,6 @@
 # Browser acceptance tests
 
-Choose a suite by its server and data prerequisites. The seven configurations
+Choose a suite by its server and data prerequisites. The configurations
 below serve different purposes; combining them would mix fresh-instance,
 authenticated-server and isolated-fixture tests.
 
@@ -8,6 +8,8 @@ authenticated-server and isolated-fixture tests.
 
 | Configuration | Tests and prerequisites | Caller |
 | --- | --- | --- |
+| [playwright.artifact-runtime.config.ts](../playwright.artifact-runtime.config.ts) | Public HTTPS CSP/sandbox characterization; suite-owned fixture, no app or credentials; all three engines | [artifact-runtime.yml](../.github/workflows/artifact-runtime.yml) |
+| [playwright.board-editor.config.ts](../playwright.board-editor.config.ts) | Real pinned Excalidraw editor and production Board components: draft saving/retries/conflicts/revocation, static frames, isolated undo/export/Mermaid experiments; explicit mocked API, no product server or credentials | [artifact-runtime.yml](../.github/workflows/artifact-runtime.yml) |
 | [playwright.config.ts](../playwright.config.ts) | Main local suite with an explicit `testIgnore` list; requires an authenticated test instance | `pnpm test:e2e`, `pnpm test:e2e:ui` |
 | [playwright.pr.config.ts](../playwright.pr.config.ts) | `pr-contract.spec.ts`: authenticated desktop workflow and phone contract | [ci.yml](../.github/workflows/ci.yml), `playwright-pr` job |
 | [playwright.fresh.config.ts](../playwright.fresh.config.ts) | `onboarding-wizard.spec.ts`; disposable, never-bootstrapped database, no shared login state | `onboarding-journey` in [ci.yml](../.github/workflows/ci.yml), plus the [devcontainer workflow](../.github/workflows/e2e-devcontainer.yml) |
@@ -20,6 +22,36 @@ The three isolated UI suites serve the built static export; follow their CI
 build prerequisites when reproducing them. Their fixed ports are separate
 from the live development slots. The shared server/URL settings for the main,
 fresh, PR and nightly suites live in [playwright.shared.ts](../playwright.shared.ts).
+
+The Board editor suite instead starts its own loopback Vite fixture. Prepare
+local fonts with `node scripts/prepare-board-assets.mjs`, then run
+`pnpm exec playwright test --config=playwright.board-editor.config.ts`.
+Its deterministic in-memory store is test scaffolding: passing these tests is
+not evidence of production authorization, durable storage, or live collaboration.
+The Mermaid case exercises a trusted literal and explicit insertion; untrusted
+generation input, converter isolation and durable job idempotency require their
+own product tests before enabling that feature.
+
+The Chromium touch case uses real touch input against the production Board
+components with a simulated API. It covers drawing, moving a pin over its inert
+static preview, and inserting the local library. It does not exercise interactive
+iframe activation. The runtime component cases use the production React frame,
+channel and bootstrap over local HTTPS with a simulated host lease. They verify
+Stop/Restart, revision replacement and lease teardown in full Chromium, including
+a running infinite loop. They do not establish production domain admission or
+authorize enabling the interactive profile.
+
+The artifact runtime preparation cases require the canonical Go bootstrap
+harness. Precompile it with `go test -c -o /tmp/pagebuild.test ./internal/pagebuild`,
+then set `CREWSHIP_TEST_RUNTIME_BINARY=/tmp/pagebuild.test` when running
+`pnpm exec playwright test --config=playwright.artifact-runtime.config.ts`.
+On the shared development host, wrap builds/tests with `crewship-heavy`.
+The fixture starts the existing Go test server in preparation mode and relays
+its actual response headers and HTML into the distinct local HTTPS runtime site;
+there is no TypeScript copy of bootstrap JavaScript or CSP. The normal Pages
+Apps browser harness mode remains unchanged. These tests do not register a
+production artifact runtime route, accept an interactive publication profile,
+or establish a zero-egress or renderer termination guarantee.
 
 ## What fails CI
 
@@ -180,3 +212,87 @@ crewship-heavy env PYTHONDONTWRITEBYTECODE=1 python3 e2e/routines_live_contracts
 Cleanup attempts all fixture resources even when cancellation, logout or a
 workspace deletion fails. Temporary credential removal runs in `finally`;
 the scenario reports cleanup failures after all attempts.
+
+## Artifact runtime characterization (A0)
+
+`crewship-heavy pnpm exec playwright test --config=playwright.artifact-runtime.config.ts`
+executes the public [runtime suite](artifact-runtime/runtime.spec.ts) against
+suite-owned HTTPS fixtures, without a Crewship server, login, private files or
+external service. It requires OpenSSL and the installed Playwright browsers.
+The [workflow](../.github/workflows/artifact-runtime.yml) runs Chromium, Firefox
+and WebKit separately on PRs, merge groups and main. Chromium explicitly uses
+`channel: chromium` (the full browser), because its process isolation differs
+from the default headless shell. No test silently skips an unavailable engine.
+
+Studio, runtime and observer use separate registrable `.test` domains. A bounded
+suite-owned CONNECT proxy maps these HTTPS sites to loopback; certificates live
+in a temporary directory and are removed at teardown. No host configuration or
+certificate trust store is changed. Proxy connections, including deliberately
+stalled responses, are destroyed at teardown. Test and action timeouts fail the
+run; caught launch/evaluation failures cannot turn into successful results.
+
+These tests characterize the proposed CSP and sandbox fixture, rather than a
+shipped artifact server. They assert specific observed blocked attempts within
+a bounded observation window and the known self-navigation escape: immediate
+navigation, redirects, 204 and stalled responses can reach the observer before
+a second iframe `load`. A green result confirms this limitation remains
+reproducible; it does not certify zero egress or make second-load removal a
+security boundary. The preconnect case records CONNECT tunnels and HTTP hits
+but is explicitly inconclusive: absent HTTP traffic cannot establish absence
+of DNS/TCP speculation. Both separate-tab closure and cross-site iframe responsiveness/removal are
+asserted independently. A browser that freezes Studio fails the iframe test;
+passing the tab case does not establish iframe isolation. A console marker emitted
+immediately before the hostile loop proves it started before responsiveness is
+measured. Closing/removing the browsing context and continued Studio ticks do
+not measure underlying renderer process termination or reclaimed CPU.
+
+`acceptance-board-mermaid-browser.mjs` is called only by Linux-only
+`TestBoardMermaidWorkflowBrowser` (`board_mermaid_workflow_browser` or
+compile-only `conformance`). It uses migrated temporary storage, real Router
+handlers and production UI with two synthetic authenticated sessions. The
+canonical converter bootstrap and built pinned runner use separate owned HTTPS
+loopback sites. It seeds admitted Mermaid source without executing an agent.
+An aborted insertion before network leaves the job ready across client loss;
+two independently converted proposals are held before the real POSTs race.
+The test checks one commit, the existing-result receipt and reload persistence.
+It also sends HTML, directives, links, oversized source and an unsupported
+diagram directly through the canonical converter's one-shot MessageChannel,
+bypassing Studio prevalidation. It requires opaque-origin, readable rejection
+without geometry or Studio DOM execution. A third owned HTTPS canary has a
+successful browser reachability control; hostile resource successes fail in
+both browser evidence and server counters. Attempted and failed requests are
+recorded without claiming zero DNS/TCP speculation or general network silence.
+It mocks no API responses and creates no Docker or persistent dev resources.
+
+```bash
+crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_BOARD_MERMAID_BROWSER=1 go test -tags board_mermaid_workflow_browser ./internal/api -run '^TestBoardMermaidWorkflowBrowser$' -count=1 -timeout 6m
+```
+
+Build the real static export first. Missing Chromium, export or opt-in fails;
+`CREWSHIP_BOARD_MERMAID_OUTPUT` selects the evidence directory. Synthetic session
+credentials remain in a private temporary file removed by the Go fixture.
+## Docs D1b production traversal
+
+`docs-d1b-acceptance.mjs` runs the embedded application and the managed Node
+Docs service through the approved throwaway helper. Build a complete release
+bundle first: the selected `crewship` binary needs adjacent `crewship-sidecar`
+and `entrypoint.sh`, plus a real embedded static export. In an isolated worktree:
+
+```bash
+crewship-heavy make build
+crewship-heavy env D1B_ACCEPTANCE_BINARY="$PWD/crewship" \
+  D1B_ACCEPTANCE_OUTPUT=/tmp/crewship-docs-d1b-evidence \
+  node e2e/docs-d1b-acceptance.mjs
+```
+
+Use your own output directory. The installed Playwright Chromium must be
+available. The harness creates its own users, sessions, private sockets and
+service secret; it never uses a development environment's sessions. It covers
+Page creation, concurrent human edits, a lost response with exact retry,
+comments, simple formatting, checkpoint comparison/restore, Markdown export
+and unchanged Page identity. HTTP barriers delay real requests without
+fabricating responses. Reports identify the binary hash and actual Node build.
+
+This traversal explicitly does not perform a model-backed agent request.
+A genuine user-to-agent-to-result-card run requires a separately authorized
+model/runtime configuration; human semantic API edits are not its substitute.

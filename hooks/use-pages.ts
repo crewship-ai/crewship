@@ -27,6 +27,7 @@
  *     basis to compute, and there is no third glyph).
  */
 
+import { resolvePageContent } from "@/lib/pages/content-types"
 import { useCallback, useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -127,7 +128,26 @@ export interface WirePanel {
   refresh?: string | null
 }
 
+export interface ArtifactSummary {
+  head_rev: number
+  author_user_id: string
+  author_name: string
+  author_agent_id?: string
+  author_agent_name?: string
+  author_run_id?: string
+  published_at: string
+  last_activity_at: string
+}
+
 export interface WirePage {
+  content_descriptor?: unknown
+  application_descriptor?: unknown
+  artifact_summary?: ArtifactSummary
+  has_slides?: boolean
+  can_edit_slides?: boolean
+  has_document?: boolean
+  has_board?: boolean
+  has_artifact?: boolean
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
   /**
@@ -469,6 +489,15 @@ function emptyTally(): PanelTally {
 
 /** A page as every Pages surface consumes it. */
 export interface PageView {
+  contentSupported?: boolean
+  contentType?: string
+  artifactSummary?: ArtifactSummary
+  hasDocument?: boolean
+  hasSlides?: boolean
+  canEditSlides?: boolean
+  hasBoard?: boolean
+  hasArtifact?: boolean
+  artifactEligible?: boolean
   id: string
   slug: string
   name: string
@@ -612,11 +641,21 @@ export function toPageView(raw: WirePage): PageView {
     : toDate(raw.last_produced_at)
 
   const slug = trimmed(raw.slug) ?? ""
+  const content = resolvePageContent({ ...raw, has_panels: tally.total > 0, human_owned: Boolean(raw.owner?.startsWith("user/")) })
   return {
+    contentSupported: content.supported,
+    contentType: content.primary?.type_id,
     id: trimmed(raw.id) ?? slug,
     slug,
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),
+    hasDocument: raw.has_document === true,
+    hasSlides: raw.has_slides === true,
+    canEditSlides: raw.can_edit_slides === true,
+    hasBoard: raw.has_board === true,
+    hasArtifact: raw.has_artifact === true,
+    artifactSummary: raw.artifact_summary,
+    artifactEligible: content.supported && (raw.has_artifact === true || content.canInitializeContent),
     ownerRef: ownerRefOf(raw),
     ownerLabel: ownerLabelOf(raw),
     reach: reachOf(raw),
@@ -718,6 +757,7 @@ export function summarisePages(pages: readonly PageView[], now: Date = new Date(
 
 /** Facet state. Both facets are MULTI-select (#1776 — that is the whole point). */
 export interface PageFilters {
+  content?: ("artifact" | "board")[]
   states: PanelState[]
   owners: string[]
   /** Only pages reached through a grant and nothing else — "shared with me". */
@@ -727,7 +767,7 @@ export interface PageFilters {
 export const EMPTY_PAGE_FILTERS: PageFilters = { states: [], owners: [], shared: false }
 
 export function pageFilterCount(f: PageFilters): number {
-  return f.states.length + f.owners.length + (f.shared ? 1 : 0)
+  return f.states.length + f.owners.length + (f.content?.length ?? 0) + (f.shared ? 1 : 0)
 }
 
 /**
@@ -762,6 +802,7 @@ export function matchesPageFilters(
   filters: PageFilters,
   search: string,
 ): boolean {
+  if (filters.content?.length && !filters.content.some(kind => kind === "artifact" ? page.hasArtifact : page.hasBoard)) return false
   const q = search.trim().toLowerCase()
   if (q) {
     // The folder's name is in the haystack too: "ops" finds every page filed
@@ -1031,6 +1072,8 @@ function usePagesRealtime(
 
   const channel = pageId ? `page:${pageId}` : null
 
+  useRealtimeEventSafe("page.updated", invalidate)
+  useRealtimeEventSafe("page.deleted", invalidate)
   useRealtimeEventSafe("page.panel.updated", invalidate)
   useRealtimeEventSafe("realtime.reconnected", invalidate)
   useRealtimeChannelSafe(channel)

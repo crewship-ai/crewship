@@ -193,14 +193,14 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validPageGrantLevel(req.Level) {
 		replyError(w, http.StatusBadRequest,
-			`level must be "read", "produce" or "write" (§7.1b: three verbs — see the page, push into named panels, edit the spec)`)
+			`level must be "read", "comment", "produce" or "write" (see the page, comment, push into named panels, edit the spec)`)
 		return
 	}
 	// The workspace subject reads or writes, never produces (#2533 §3/14):
 	// produce names a producer, and "everyone in the workspace" is not one.
 	if req.SubjectType == pageSubjectWorkspace && !workspaceSubjectLevelAllowed(req.Level) {
 		replyError(w, http.StatusBadRequest,
-			`a grant to everyone in the workspace carries "read" or "write", never "produce": a producer is one named subject, and everyone is not one`)
+			`a grant to everyone in the workspace carries "read", "comment" or "write", never "produce": a producer is one named subject, and everyone is not one`)
 		return
 	}
 	panels := trimPageGrantPanels(req.Panels)
@@ -316,7 +316,7 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	if level != "" && !validPageGrantLevel(level) {
 		replyError(w, http.StatusBadRequest,
-			`level must be "read", "produce" or "write", or be omitted to revoke every level this subject holds`)
+			`level must be "read", "comment", "produce" or "write", or be omitted to revoke every level this subject holds`)
 		return
 	}
 
@@ -616,15 +616,24 @@ func (h *PageHandler) journalGrantChange(ctx context.Context, entryType journal.
 	if len(panels) > 0 {
 		payload["panels"] = panels
 	}
+	summary := fmt.Sprintf("%s %s %s on page %s %s %s/%s",
+		actor.Email, verb, level, rec.Slug, preposition, subjectType, subjectRef)
+	if h.hasPrivateOutputMetadata(ctx, rec) {
+		// Workspace journal readers need the authority change and its opaque
+		// principals, not names from a Page they cannot read.
+		delete(payload, "page")
+		delete(payload, "subject")
+		delete(payload, "panels")
+		summary = fmt.Sprintf("Page %s grant %s", level, verb)
+	}
 	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: wsID,
 		Type:        entryType,
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorUser,
 		ActorID:     actor.ID,
-		Summary: fmt.Sprintf("%s %s %s on page %s %s %s/%s",
-			actor.Email, verb, level, rec.Slug, preposition, subjectType, subjectRef),
-		Payload: payload,
+		Summary:     summary,
+		Payload:     payload,
 	}); err != nil && h.logger != nil {
 		h.logger.Warn("pages: grant change was not journalled",
 			"page", rec.Slug, "type", string(entryType), "subject", subjectType+"/"+subjectRef, "error", err)

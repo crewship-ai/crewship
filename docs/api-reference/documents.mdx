@@ -1,0 +1,182 @@
+---
+title: "Collaborative Documents API"
+description: "Confirmed document state, semantic edits, anchored comments, checkpoints and explicit agent requests."
+icon: "file-text"
+stability: experimental
+tag: Experimental
+---
+
+# Collaborative documents
+
+Docs attach to an empty human-owned Page and preserve its identity, ownership and
+ACLs. They cannot coexist with HTML artifacts, panels, Boards or project drafts.
+The Go authority stores binary Yjs state and validates live identity under the
+SQL writer fence. The separately managed Node service computes schema-2 content.
+A successful response confirms durable storage; local editor content is not a
+save receipt. See [document architecture](../specs/documents.md),
+[CLI commands](/cli/doc) and [activation](/configuration/environment#collaborative-documents).
+
+All public requests require a real human session or exact live human CLI bearer
+and workspace membership. Supply `X-Workspace-ID` or `workspace_id`. Page ACLs
+apply in addition to CLI scopes: `pages:read` for reads, `pages:write` for mutations,
+`pages:*` for both. Comments require Page comment access; resolution requires
+write access. Creation requires the authenticated human to own the empty Page.
+Agent access uses separate internal sidecar routes with the original admitted
+run bearer, live human delegation and explicit agent Page write grant. No body
+field can claim an actor, owner or run identity.
+
+Mutation JSON uses `schema:2` and a unique stable `id` matching
+`[a-zA-Z0-9_-]{1,128}`. Except initialize, supply the opaque `epoch` from a fresh
+read. Epoch changes on restore or process incarnation changes; it is not a
+client-constructed number. An uncertain transport outcome retries the exact
+same ID and payload. A different payload with the same ID conflicts. Semantic
+CAS additionally requires `ifRev` and the target's `ifHash`; conflicts require
+rereading and human review rather than silent overwrite. Request bodies are
+bounded to 2 MiB, and quota errors preserve confirmed data.
+
+The JSON document tree has `type`, optional `attrs`, `content`, `text` and empty
+`marks`. Supported types are `doc`, `text`, `paragraph`, `heading`, `bulletList`,
+`orderedList`, `listItem`, `table`, `tableRow`, `tableCell` and `tableHeader`.
+Blocks have stable unique IDs; headings have level 1, 2 or 3. Unknown nodes,
+attributes, nonempty marks and unsupported retained CRDT structures are refused.
+Depth is at most 40 and node count at most 10000. Binary state remains authoritative.
+
+## `GET /api/v1/documents/status`
+
+**Auth:** Current authenticated human identity and workspace membership. This configuration probe does not access a Page and does not require a document scope.
+
+**Request:** No JSON request body. Workspace header/query is required.
+
+**Response:** `{enabled:boolean}` reports configured opt-in. It does not certify service health, image qualification or model credentials.
+
+**Statuses:** 200; 401/403 for authentication or membership refusal.
+
+## `GET /api/v1/pages/{slug}/document`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** Path parameter `slug` identifies the existing Page. No request body.
+
+**Response:** Confirmed `{schema,rev,epoch,generation,incarnation,snapshot,snapshotRev,updates,blocks,content,outline,can_write,can_comment,can_resolve}`. Snapshot/updates are base64; blocks are `{id,hash}`. Outline entries contain `{id,type,parent,hash,text}`. `epoch` is opaque text. Read schema-1 history is projected using schema 2.
+
+**Statuses:** 200; 401/403/404 for access or missing document; 409 for unsupported schema; 429 for bounds; 500 storage/authority failure; 502/503 for engine/protocol failure.
+
+## `POST /api/v1/pages/{slug}/document/initialize`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** JSON `{id,schema:2,body:<valid document tree>}`; no epoch. Only an empty Page owned by the human may initialize.
+
+**Response:** First success returns durable state `{schema,rev:0,epoch,generation,incarnation,snapshot,snapshotRev,updates,blocks}`, with a numeric fence and no `id`, `actor` or `kind`. An exact retry returns `{id,rev,epoch,actor,kind:"init",found:true,duplicate:true}` instead. The response is a union of these two shapes. Obtain the opaque editor epoch using GET before editing.
+
+**Statuses:** 200; 400 invalid input; 401/403 access; 404 missing Page; 409 occupied Page or conflicting identity; 429 quota; 500 storage/authority failure; 502/503 engine failure.
+
+## `POST /api/v1/pages/{slug}/document/patch`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** JSON semantic `{id,schema:2,epoch,target,text,ifRev,ifHash}` replaces one existing paragraph/heading text. `target` and SHA-256 `ifHash` come from the outline. Human editor updates instead use `{id,schema:2,epoch,kind:"human",update:<base64 incremental Yjs>}`; agents cannot send raw updates.
+
+**Response:** Durable receipt `{id,rev,epoch,actor,kind}`; exact retries may add `found`, `schema` and `duplicate`. The returned revision is committed, not speculative.
+
+**Statuses:** 200; 400 invalid body/schema; 401/403 access; 404 missing document; 409 epoch/revision/hash or identity conflict; 429 quota; 500 storage/authority failure; 502/503 engine failure.
+
+## `POST /api/v1/pages/{slug}/document/checkpoint`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** JSON `{id,schema:2,epoch,ifRev}` pins the exact current confirmed revision.
+
+**Response:** `{id,rev,schema,checkpoint,epoch}` confirms a complete retained state. An exact retry can return the common receipt shape with `found`/`duplicate`.
+
+**Statuses:** 200; 400 invalid body; 401/403/404 access; 409 stale epoch/revision or identity; 429 quota; 500 storage/authority failure; 502/503 engine failure.
+
+## `GET /api/v1/pages/{slug}/document/checkpoints`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** Path parameter `slug`; no request body.
+
+**Response:** `{checkpoints:[{id,rev,schema,actor,created_at}]}` ordered by descending revision and ID, at most 1000 retained checkpoints.
+
+**Statuses:** 200; 401/403/404 access; 429 bounds; 500 storage/authority failure; 502/503 engine failure.
+
+## `GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** Path parameters `slug` and retained `checkpoint` ID; no request body.
+
+**Response:** `{id,rev,schema,snapshot,blocks,content,outline}` for the pinned state. Reading does not mutate the current document or restore authority.
+
+**Statuses:** 200; 401/403 access; 404 missing checkpoint/document; 409 unsupported schema; 500 storage/authority failure; 502/503 engine failure.
+
+## `POST /api/v1/pages/{slug}/document/restore`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** JSON `{id,schema:2,epoch,ifRev,checkpoint}` selects a retained checkpoint under current write permission.
+
+**Response:** Durable `{id,rev,epoch,actor,kind}` receipt for restored content and a new history generation. Stale tabs retain unsaved drafts for explicit recovery; they cannot replay into the new generation. Page ID and grants are preserved.
+
+**Statuses:** 200; 400 invalid body; 401/403 access; 404 missing checkpoint; 409 stale epoch/revision or identity; 429 quota; 500 storage/authority failure; 502/503 engine failure.
+
+## `GET /api/v1/pages/{slug}/document/export`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** Path parameter `slug`; no request body.
+
+**Response:** `text/markdown; charset=utf-8` attachment containing Markdown of confirmed current content. This response is text, not a JSON envelope.
+
+**Statuses:** 200; 401/403/404 access; 500 storage/authority failure; 502/503 engine failure.
+
+## `GET /api/v1/pages/{slug}/document/comments`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** Path parameter `slug`; no request body.
+
+**Response:** `{comments,can_write,can_comment,can_resolve}`. Each comment includes `{id,body,anchor,actor,rev,version,resolved,created_at,block,quote,checkpoint,start,end,status}` and attached `from/to` offsets where resolvable. Status is `attached`, `collapsed`, `detached` or `resolved`; anchors are never guessed or silently reattached.
+
+**Statuses:** 200; 401/403/404 access; 500 storage/authority failure; 502/503 engine failure.
+
+## `POST /api/v1/pages/{slug}/document/comments`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** JSON `{id,schema:2,epoch,ifRev,block,from,to,text}` selects a nonempty range within one paragraph/heading. Text is bounded to 10000 UTF-8 bytes; the derived anchor (quote plus encoded relative positions) must fit 8192 bytes. Requires comment permission.
+
+**Response:** Durable common receipt `{id,rev,epoch,actor,kind}`. The stored anchor uses relative CRDT positions and captures the quote and source revision. A comment never dispatches an agent.
+
+**Statuses:** 200; 400 invalid selection/body; 401/403 access; 404 missing document; 409 stale generation/revision or ID; 429 quota; 500 storage/authority failure; 502/503 engine failure.
+
+## `POST /api/v1/pages/{slug}/document/comments/resolve`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** JSON `{id,schema:2,epoch,ifRev,comment,version,resolved}`. Set `resolved:false` to reopen the same comment. Requires Page write permission, not merely comment permission.
+
+**Response:** Durable common receipt `{id,rev,epoch,actor,kind}`; resolution is guarded by exact comment version and document revision.
+
+**Statuses:** 200; 400 invalid body; 401/403 access; 404 missing comment/document; 409 version/epoch/revision conflict; 429 quota; 500 storage/authority failure; 502/503 engine failure.
+
+## `GET /api/v1/pages/{slug}/document/requests`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** Path parameter `slug`; no request body. Requires current read permission.
+
+**Response:** `{requests,can_dispatch,eligible_chats}`. Up to 100 newest request/result rows carry `{id,status,run_id,result_revision,checkpoint_id,error,created_at,updated_at,instruction,base_rev}`. Status is queued/running/succeeded/failed; absent result/run/checkpoint values are empty strings or revision 0. Eligible private chats carry `{chat_id,title,agent_id,agent_name,agent_slug}` and require the human owner plus an explicit agent write grant.
+
+**Statuses:** 200; 401/403/404 access; 500 storage failure.
+
+## `POST /api/v1/pages/{slug}/document/requests`
+
+**Auth:** Current authenticated identity, workspace membership and Page permission described above; exact live CLI scopes are rechecked by the authority.
+
+**Request:** JSON `{page_id,chat_id,instruction,base_rev,submission_id,targets:[{id,hash,from,to,quote}]}`. `page_id` must equal the existing Page ID. Targets are an immutable saved selection snapshot: exactly one paragraph/heading textblock target, confirmed full block hashes, UTF-16 `from`/`to` offsets, and nonempty exact substring quotes totalling at most 4096 UTF-16 code units. Instruction is nonempty and at most 4096 UTF-8 bytes; submission ID is 1–128 bytes. Base revision must equal current confirmed revision. The server verifies selection hashes/ranges/quotes and atomically binds the original base; intervening document changes conflict. Request execution never silently rebases onto a newer revision. The current UI captures one textblock selection; execution permits one semantic patch followed by its exact checkpoint. Requests spanning multiple textblocks are rejected; a partial multi-block edit is not a successful result. Requires human write permission, a human-owned private chat and the selected agent’s explicit Page write grant.
+
+**Response:** 202 `{id,request_id}` is a queue receipt. It is not completion. Trusted admission binds the exact real run; succeeded requires that run’s durable semantic patch and request-specific checkpoint. Model prose alone cannot create a result card. Results remain on the same Page. Exact submission retries reuse the same request and immutable selection snapshot. A changed base or target requires a new explicit human selection/submission. Bounds are 3 active, 30/hour and 2000 retained jobs per Page; interrupted running jobs fail for human review rather than replaying model execution.
+
+**Statuses:** 202; 400 invalid input; 401/403 access/admission; 404 Page missing; 409 base/submission conflict; 429 request bounds; 500 storage failure; 503 disabled engine.

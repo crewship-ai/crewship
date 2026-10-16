@@ -53,7 +53,8 @@ import (
 // listener, WebSocket hub, orchestrator, scheduler, and all supporting services.
 
 type Server struct {
-	containerCleanup *resourcelifecycle.Controller
+	documentsStartupErr error
+	containerCleanup    *resourcelifecycle.Controller
 
 	recoveredStopsMu        sync.Mutex
 	recoveredStopsCursor    string
@@ -1037,9 +1038,15 @@ func (s *Server) mountAPIRouter(
 	ratelimitcfg.SetGlobal(rateLimitStore)
 	opts = append(opts, goapi.WithRateLimitStore(rateLimitStore))
 
+	if cfg.Documents.Enabled {
+		opts = append(opts, goapi.WithDocumentAuthority(cfg.Documents.AuthoritySocket, cfg.Documents.ServiceTokenFile), goapi.WithDocumentService(cfg.Documents.ServiceSocket))
+	}
 	apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 	if err != nil {
 		logger.Error("failed to create API router", "error", err)
+		if cfg.Documents.Enabled {
+			s.documentsStartupErr = err
+		}
 	} else {
 		s.apiRouter = apiRouter
 		// Provider-login refresh (docs/prd/provider-logins.md §5.3) rides the
@@ -1335,12 +1342,15 @@ func newLLMProxy(cfg *config.Config, logger *slog.Logger, wsHub *ws.Hub) (*llmpr
 	}
 	if cfg.LLMProxy.Enabled && cfg.Auth.InternalToken != "" {
 		internalToken := cfg.Auth.InternalToken
+		// Credential IPC belongs to this daemon. The browser/auth origin can
+		// point at an optional development frontend that is not running.
+		internalURL := cfg.InternalAPIURL()
 		tokenSyncer = llmproxy.NewTokenSyncer(
-			tokenPool, cfg.Auth.NextjsURL, internalToken,
+			tokenPool, internalURL, internalToken,
 			cfg.LLMProxy.TokenSyncInterval, logger,
 		)
 		credMonitor = llmproxy.NewCredentialMonitor(
-			tokenPool, cfg.Auth.NextjsURL, internalToken,
+			tokenPool, internalURL, internalToken,
 			cfg.LLMProxy.HealthCheckInterval, logger,
 		)
 		credMonitor.SetOnChange(func(connID string, oldStatus, newStatus llmproxy.ConnectionStatus) {

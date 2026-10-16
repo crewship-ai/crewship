@@ -31,6 +31,313 @@ responses exist to keep them true:
 Implementation: `internal/api/pages_*.go`, `internal/pages` for the schemas and
 validation.
 
+## Derived content format metadata
+
+Detail and index responses include `content_descriptor` with `type_id`,
+`schema_version`, `supported`, and optional `reason`. Optional
+`application_descriptor` identifies existing application source/publication
+alongside panels; an unpublished or withdrawn source still has this reference.
+These are derived read metadata, never writable discriminators or ACL grants.
+`page get/list --format json` preserve both references, including future types.
+Clients reject explicit unknown versions, unsupported profiles or contradictory
+metadata before selecting a viewer. Missing metadata alone permits compatibility
+with an older server. Empty human Pages still offer Attach HTML through the
+existing authorized creation path.
+
+## Private staged PNG/JPEG assets
+
+CLI tokens need `pages:write` for uploads and `pages:read` for metadata/bytes;
+`pages:*` grants both. Neither read nor write implies the other. Sessions and
+legacy unrestricted tokens keep current Page ACL authority; a scope never grants
+access to another Page. Exact credential expiry/revocation and current token
+scopes are rechecked after upload decoding under the same writer transaction.
+The initial unshipped foundation exempted these routes from token ceilings;
+this correction prevents a read-only token from uploading through its human's
+write permission. Scope refusal returns 403; expired or revoked credentials return 401.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/v1/pages/{slug}/assets?mutation_id=ID` | Upload raw PNG/JPEG under current human Page write authority |
+| GET | `/api/v1/pages/{slug}/assets/{assetId}` | Read immutable metadata under current Page read authority |
+| GET | `/api/v1/pages/{slug}/assets/{assetId}/bytes` | Read canonical private PNG/JPEG bytes |
+
+Metadata contains `id`, `page_id`, `sha256`, `content_type`, `width`, `height`,
+`byte_size`, `state`, `created_at`, `expires_at`. New uploads are staged for24h;
+expired staged rows read404. Same author/input/mutation retries return200 with
+the original ID; changed input is409 and expired uncollected receipts410.
+`mutation_id` contains1–128 letters/digits/underscore/hyphen. No digest endpoint,
+public-link access or agent authority is provided. Canonical bytes use no-store,
+nosniff and same-origin resource policy. Missing or corrupt blobs return503.
+
+Hard limits:5MiB input,8MiB canonical output,2048/dimension,4,194,304pixels,
+2 concurrent decodes and4reads;64assets/64MiB per Page. Only actual decoded
+PNG/JPEG is reencoded. EXIF orientations2–8 explicitly return422; unsupported
+SVG/animation/malformed images return422, excessive input413. Quota refusal409
+does not publish bytes. Asset rows pin shared attachment blobs and participate
+in workspace backup/fork with Page ownership. Staging expiry stays absolute.
+This foundation provides no Docs/Slides image insertion or revision restore;
+future immutable revision attachment must be atomic and separately qualified.
+
+## Static HTML artifacts
+
+A human-owned empty Page can hold versioned HTML instead of panels or an App.
+Create that shell through `POST /api/v1/pages` with `slug`, `name`, `panels: []`
+and `allow_empty: true`; omit `owner` to use the authenticated human. Ordinary
+panel Pages still require panels. A shell can be renamed before its first upload.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/artifact` | Source, selected revision and history |
+| POST | `/api/v1/pages/{slug}/artifact/revisions` | Append a source revision |
+| POST | `/api/v1/pages/{slug}/artifact/restore` | Append a copy of an older revision |
+
+The existing workspace context and Page permissions apply. These routes require
+a human session or human CLI credential; agent and public-link credentials do
+not authorize this surface.
+
+`GET` accepts an optional positive integer `revision` query parameter. It returns
+`head_rev`, selected `revision`, original `html`, `can_write`, and `revisions`
+ordered newest first. Each history item has `revision`, `created_at`,
+`author_user_id`, and optional `restored_from`. An empty shell returns revision 0
+and an empty source/history. Source is escaped JSON with `no-store` and
+`nosniff`; it is not a directly navigable HTML endpoint.
+
+Publish body: `{"html":"<h1>Report</h1>","base_rev":0,"mutation_id":"first-save"}`.
+Restore body: `{"revision":1,"base_rev":2,"mutation_id":"restore-first"}`.
+Both return `revision` and `head_rev`, with 201 for a new revision or 200 for an
+identical retry. The server rechecks live membership and Page write permission
+within the writer transaction. A stale base or conflicting mutation ID is 409;
+it never forces an overwrite. The same mutation ID may be replayed only by the
+same author with the same operation and content.
+
+Limits: 10 MiB decoded nonempty UTF-8 source (413 if too large, 422 if invalid),
+200 retained source revisions, 30 committed revisions per artifact per rolling
+hour (`rate_limited`) and 200 per workspace (`workspace_rate_limited`). Rate
+limits return 429 with `Retry-After`. Workspace rate receipts survive Page deletion.
+Old unpinned sources are pruned; current head, discussion/request references,
+creation provenance and restore targets are preserved. If no source can be
+pruned, publication returns 409 `retention_pinned`. Durable retry receipts survive
+source pruning, with a separate 10,000-receipt cap (`mutation_limit`). A retry can
+confirm its original revision even after that revision's source expires; reading
+expired source returns 404. Missing/corrupt retained blobs return 503.
+
+
+Studio renders only a sanitized static preview: scripts, navigation, forms and
+external resources are disabled. Original source can be downloaded as plain
+text. Images and downloaded fonts are not rendered in this first slice. Public
+artifact sharing and interactive execution are not enabled. Agent updates use
+the separate run-delegation path below, not these human revision endpoints.
+
+### Explicit artifact requests
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/artifact/requests` | Requests and eligible private chat targets |
+| POST | `/api/v1/pages/{slug}/artifact/requests` | Explicitly request an agent update |
+| POST | `/api/v1/pages/{slug}/artifact/requests/{requestId}/cancel` | Cancel publication authority and request a run stop |
+
+Creation body: `{"chat_id":"CHAT_ID","base_rev":2,"instruction":"Clarify totals","thread_id":"THREAD_ID","submission_id":"review-2"}`.
+`thread_id` is optional. A current Page editor may initiate the request.
+The server requires a private chat owned
+by that human with no active read shares and an explicit target-agent Page write
+grant. It rechecks authority before admission and publication. No mention or
+agent-supplied identity creates this authority.
+
+The request grants only its admitted run authority for this Page and task;
+editors do not gain general grant-management rights. The immutable discussion
+snapshot is pulled through a run-authenticated endpoint after admission, never
+embedded in the chat before the live authorization check. Source reads and
+publication recheck the initiating editor's current rights.
+
+The current head and optional same-revision thread are immutable task inputs.
+Instruction is nonempty UTF-8, at most 4096 bytes; submission ID is 1–128 bytes.
+A new request and an exact retry return 202 `{id}`. Reusing an ID with different
+input or selecting a stale revision returns 409. Durable states are `queued`,
+`running`, `succeeded`, `failed`, `cancelled`. Only an atomic successful
+publication supplies `result_revision`. A run ending without publication fails.
+Queued work survives restart; interrupted execution is failed instead of
+blindly replayed. Cancel returns 200 `{id,status:"cancelled"}`, including a
+retry after cancellation. Already completed work is not undone.
+
+GET returns `{requests,can_dispatch,eligible_chats}`. Each request includes ID,
+chat/agent IDs, instruction, base revision, state, timestamps and optional thread,
+run, result revision and error. Eligible targets include `chat_id`, `title`,
+`agent_id`, `agent_name`, `agent_slug`. These targets are filtered by the server;
+knowing a chat ID cannot bypass private audience or live permissions.
+
+### Live chat creation status
+
+`GET /api/v1/chats/{chatId}/artifact-creation-authorization` resolves the caller's
+own chat to its trusted live run. Response:
+`{run_id,can_authorize,authorized,remaining,expires_at,revoked}`. Without an eligible
+live run, IDs/expiry are empty and capabilities are false. Studio polls this only
+while the chat is active and offers explicit authorization/revocation; it never
+infers an authority token from a streaming indicator. Shared chats do not expose
+this creation control.
+
+### Agent creation permission
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/v1/artifact-creation-authorizations/{runId}` | Permit one private artifact from your live chat run |
+| DELETE | `/api/v1/artifact-creation-authorizations/{runId}` | Revoke that permission |
+
+POST accepts only `{}` and returns 201, or 200 on retry, with
+`{run_id,max_artifacts:1,remaining:0|1,expires_at,revoked}`. The initiating human
+must retain Page creation rights. Revocation returns 204 and cannot be reversed
+for that run. This is a narrow explicit per-run opt-in, not a workspace-wide
+agent creation allowlist. Ordinary chat runs gain no creation permission.
+
+The authenticated agent sidecar `POST /artifacts` accepts
+`{slug,name,html,mutation_id}` and atomically creates a human-owned private Page,
+first revision, artifact-specific agent write grant and run delegation. Its
+response is `{page_id,slug,revision:1,head_rev,url}` (201 or 200 exact retry).
+No owner, audience or identity fields may be supplied. The server's agent prompt
+describes this protocol; the ordinary human CLI publication commands do not
+borrow the agent's token. Live admission is excluded from backups, so restoring
+history cannot revive an old run's publishing permission.
+
+### Delegated agent updates
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/v1/pages/{slug}/artifact/delegations` | Authorize a concrete live chat run |
+| DELETE | `/api/v1/pages/{slug}/artifact/delegations/{runId}` | Revoke that run's artifact access |
+
+The grant body is `{"run_id":"RUN_ID"}`. The human Page owner must also be the
+server-recorded initiator of the run, and the agent needs an existing explicit
+Page write grant. A crew grant is insufficient. These endpoints neither start a
+run nor let an agent choose its human principal. Grant returns `run_id` and
+`expires_at`; revoke returns 204. Revocation is permanent for that run/Page pair.
+
+The host captures immutable human authority only at trusted chat admission,
+including the exact human message and membership/chat authority epochs. Each
+agent read or publication validates its per-run bearer, crew transport, current
+run state, delegation deadline/revocation and current human and agent rights.
+The original admission has a one-hour deadline; a delegation cannot extend it.
+Work attempts, when present, must still belong to the current generation.
+Publication repeats these checks inside the writer transaction and retains the
+same expected-head and mutation retry rules. Revisions retain both human
+on-behalf-of attribution and the actual agent/run provenance.
+
+Inside the agent container, the sidecar exposes `GET /artifacts/{slug}` (optional
+`revision`) and `POST /artifacts/{slug}/revisions`, authenticated with the actual
+`CREWSHIP_AGENT_TOKEN` bearer. The publish JSON remains `html`, `base_rev` and
+`mutation_id`; identity is never chosen from JSON. Human REST credentials do not
+substitute for a run bearer on these routes. The same run-bound authorization also underlies explicit artifact creation
+and durable artifact requests described above.
+
+### Chat artifact results
+
+**Auth:** current human workspace membership, chat access and per-result Page read.
+**Request:** path `chatId`, no body. **Response:** bounded JSON results below.
+**Statuses:** 200 success, 401 unsupported identity, 404 missing membership or inaccessible chat, 500 database failure.
+
+`GET /api/v1/chats/{chatId}/artifact-results` returns `{results: [...]}` for an
+authenticated human who can currently read the chat. Each card contains
+`page_slug`, `title`, exact `revision`, `created_at`, `agent_id`, `agent_name`,
+`run_id` and `on_behalf_of_user_id`. Results come from server-linked retained
+publications, not agent message text. Current Page read access is independently
+required; inaccessible results are omitted without revealing hidden counts.
+The response has at most 20 Pages, selected from 100 recent candidate revisions.
+A card's URL can use `/pages/{slug}?revision=N`.
+
+### Copy an artifact revision
+
+`POST /api/v1/pages/{slug}/artifact/copies` accepts
+`{source_revision,slug,name,mutation_id}`. It copies one explicitly selected
+retained revision into a new private human-owned Page in the same workspace.
+Source read access and destination Page creation permission are checked again
+inside the transaction. It returns `201 {page_slug,revision:1}`, or `200` for an
+exact authorized retry. A reused identity with different input returns `409`.
+
+The new revision is authored by the human making the copy. Source provenance
+is retained separately and is not a grant: permissions, agent delegations,
+comments and requests are not inherited. The new artifact references the source
+blob independently, so removing an old source revision does not delete the copy.
+
+## Artifact discussion threads
+
+Threads refer to an immutable artifact revision. Publishing or restoring the
+source does not delete them or retarget their anchors. Whole-document anchors
+use `{"schema_version":1,"type":"document"}`. Static preview point anchors use
+`{"schema_version":1,"type":"point","coordinate_space":"viewport","x":120,"y":90,"viewport_width":800,"viewport_height":500}`.
+Coordinates must be finite and inside the captured viewport (dimensions 1–16384).
+The UI restarts the static preview at the top before capture and only overlays
+a saved point at the same revision and viewport dimensions. It does not infer
+DOM identity or scroll offset inside an opaque frame, or move points to new revisions.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/artifact/threads` | List threads; optional positive `revision` filter |
+| POST | `/api/v1/pages/{slug}/artifact/threads` | Start a revision-bound thread |
+| POST | `/api/v1/pages/{slug}/artifact/threads/{threadId}/replies` | Reply with an expected thread version |
+| PATCH | `/api/v1/pages/{slug}/artifact/threads/{threadId}` | Resolve or reopen with an expected thread version |
+| PATCH | `/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}` | Edit your own human-authored comment |
+| DELETE | `/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}` | Tombstone your own human-authored comment |
+| PUT | `/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji}` | Set or remove your reaction |
+| GET | `/api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/history` | Read your own comment's private edit history |
+
+Readers can list threads. Creating threads and replies requires a human
+identity with Page comment or write access;
+resolution/reopening requires write access. List returns `{threads, can_comment, can_resolve}`. Each thread
+contains `id`, original `revision`, `anchor`, `status` (`open` or `resolved`),
+`version`, server-author metadata/timestamps and `comments`. Comments contain
+`id`, `body`, `author_user_id`, `author_name` and `created_at`. Bodies are rendered
+as escaped text. A mention never executes or authorizes an agent.
+
+Create body:
+
+```json
+{"revision":2,"anchor":{"schema_version":1,"type":"document"},"body":"Please clarify","mutation_id":"review-1"}
+```
+
+Reply body:
+
+```json
+{"body":"Updated in revision 3","base_version":1,"mutation_id":"reply-1"}
+```
+
+Resolve/reopen body:
+
+```json
+{"resolved":true,"base_version":2,"mutation_id":"resolve-1"}
+```
+
+Edit uses `{body,base_version,mutation_id}`; delete uses `{base_version,mutation_id}`.
+Here `base_version` is the **thread** version, not the comment body version.
+Only the original human author with current Page comment access may edit or
+delete; an agent reply's on-behalf human is not its human author. Deletion leaves
+a tombstone and returns an empty `body`, preserving the thread and its anchor.
+
+Reaction paths accept URL-encoded `👍`, `❤️`, `👀` or `✅`, with
+`{active,base_version,mutation_id}`. Each human may hold one of each reaction on
+a live comment. `active:false` removes it. Responses include bounded aggregate
+`reactions:[{emoji,count,reacted_by_me}]` and server-computed `can_edit`,
+`can_delete`, `can_react` and `can_view_history` flags.
+
+Comments also carry body `version`, `edited_at` and `deleted_at` when applicable.
+History returns `{history:[{version,body,action,actor_user_id,created_at}]}`;
+`action` is `create`, `edit` or `delete`. It is readable only by the original
+human author with current comment access, including after tombstoning. Previous
+text remains in the immutable audit and backup, not in the reader's tombstone.
+At most 50 body versions are retained per comment; the final slot is reserved
+for deletion. Reactions increment the thread version, not the body version.
+
+Use `resolved:false` to reopen. A stale `base_version` returns 409 with code
+`stale_thread`. Reusing a mutation ID with a different actor, operation or payload
+returns 409 `mutation_conflict`. An exact retry checks current access first and
+returns the original `applied_version` alongside the current thread. Mutation
+responses are confirmed by the server before the UI treats a draft as saved.
+
+Limits are 4 KiB UTF-8 per body, 100 open threads per artifact, 50 comments per thread
+(including its first comment), 60 committed discussion mutations per hour and
+10,000 non-creation mutation receipts per artifact. Resolving a thread releases
+open-thread capacity; reopening checks the same cap. Creation receipts retain
+exact-retry identity and do not consume the transient receipt cap. Bounds return explicit limit errors;
+existing comments are not silently removed. Discussion records are included in
+workspace backup and restore. These endpoints use `Cache-Control:no-store`.
+
 ## Endpoints
 
 | Method | Endpoint | Purpose |
@@ -42,7 +349,7 @@ validation.
 | DELETE | [`/api/v1/pages/{slug}`](#delete-a-page) | Delete a page |
 | PUT | [`/api/v1/pages/{slug}/panels/{panelId}/data`](#push-panel-data) | Push one panel's payload — the write path |
 | GET | [`/api/v1/pages/{slug}/grants`](#list-grants) | List a page's grants |
-| PUT | [`/api/v1/pages/{slug}/grants`](#issue-a-grant) | Grant read, produce, or write |
+| PUT | [`/api/v1/pages/{slug}/grants`](#issue-a-grant) | Grant read, comment, produce, or write |
 | DELETE | [`/api/v1/pages/{slug}/grants`](#revoke-a-grant) | Revoke a grant |
 | GET | [`/api/v1/pages/{slug}/access`](#who-reaches-a-page) | Who reaches a page, and by which paths |
 | GET | [`/api/v1/pages/access`](#what-a-subject-reaches) | Which pages one user, crew or agent reaches |
@@ -563,7 +870,7 @@ still cannot widen who reaches it, not even to another agent in its own crew.
 |---|---|---|
 | `subject_type` | string | `user`, `crew`, `agent`, or `workspace` (every current human member of the workspace, never an agent). |
 | `subject` | string | The subject's slug or id. Omitted for `workspace`. |
-| `level` | string | `read`, `produce`, or `write`. The `workspace` subject carries `read` or `write` only; `produce` names a producer, and everyone is not one. |
+| `level` | string | `read`, `comment`, `produce`, or `write`. Agents may hold `comment`; their replies additionally require a live verified human run and that human’s current comment permission. The `workspace` subject carries `read`, `comment` or `write` only; `produce` names a producer, and everyone is not one. |
 | `panels` | string[] | Optional. Restricts a `produce` grant to named panels; omitted means every panel on the page. |
 
 ### What each level decides
@@ -677,7 +984,7 @@ spelled out per level:
 | `crew:<slug>` | A member of the crew that owns the page. |
 | `panel_crew:<slug>` | A member of a crew that owns a panel — one entry per crew, in panel order. On a crew's row, that the crew owns a panel. |
 | `folder:<slug>` | The folder the page is in is shared with the subject (a user directly or through a crew, a crew by name, or everyone in the workspace). |
-| `grant:page:<level>` | A live `read`, `produce` or `write` grant names the subject, or (for a user) one of their crews. |
+| `grant:page:<level>` | A live `read`, `comment`, `produce` or `write` grant names the subject, or (for a user) one of their crews. |
 | `panel_crew:withheld` | A crew the caller cannot see owns a panel. See below. |
 
 Rows are ordered users by email, then crews by slug, then agents by slug,
@@ -2342,3 +2649,410 @@ archived source digest, without the archived panel definition.
 authority, `404` Page or revision missing, `409` unsupported legacy revision,
 `500` archive/integrity error, `503` project storage unavailable.
 The response is `no-store`.
+
+## Boards
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/board` | Read the canonical drawing snapshot |
+| POST | `/api/v1/pages/{slug}/board` | Initialize an empty Page as a Board |
+| POST | `/api/v1/pages/{slug}/board/batches` | Commit one atomic drawing and placement update |
+| POST | `/api/v1/pages/{slug}/board/placements` | Pin an exact artifact revision |
+| DELETE | `/api/v1/pages/{slug}/board/placements/{placementId}` | Remove a placement |
+
+**Auth:** authenticated human workspace member; Page read for GET and Page write
+for every mutation. Initialization requires a human-owned empty Page. Agents do
+not inherit a crew grant. Pinning additionally requires current source artifact
+read access. A reader without source access receives placement geometry without
+source title, slug or revision. Public sharing is not available for Boards.
+
+**Request:** initialization takes `{"mutation_id":"init-1"}`. Every other mutation
+requires a stable `mutation_id` and the currently observed nonnegative `base_seq`.
+Batch bodies additionally contain `upserts:[{element,expected_rev}]` and
+`deletes:[{id,expected_rev}]`, optionally `placement_updates:[{id,expected_rev,x,y,width,height}]`,
+`placement_deletes:[{id,expected_rev}]`, `placement_restores:[{id,expected_rev}]`,
+and `placement_modes:[{id,expected_rev,mode,source_revision}]`. Pin modes are
+`fixed` (default) or explicitly selected `follow_latest`. Mode changes preserve
+the source Page identity and name a retained baseline revision. New elements use `expected_rev:0`; updates,
+deletions and restorations use the server element revision. Excalidraw's own
+version metadata is not concurrency authority. A pin body supplies
+`source_page_slug`, positive `source_revision`, `x`, `y`, `width` and `height`.
+Removal sends only the mutation identity and Board sequence. Requests are limited
+to 2 MiB, 500 operations and the supported drawing profile; remote embeds, links
+and inline image data are rejected. A committed mutation is never silently retried
+against a different sequence.
+
+**Response:** GET and initialization return `{format,seq,records,placements,can_write}`.
+The format is `crewship-board-excalidraw-0.18.1-v1`. Records contain `element_id`,
+server `element_rev`, `deleted`, and `element` (null for tombstones). Placements
+contain `id,x,y,width,height,placement_rev,mode` and optional authorized
+`source:{page_slug,revision,pinned_revision,title}`. In follow mode `revision`
+is the effective source head, while `pinned_revision` is the retained baseline.
+Source head advances do not change Board sequence or placement revision. Other mutations return `{seq,result_seq}`,
+with `placement_id` for a pin. Drawing batches additionally return canonical
+`element_revs`, `placement_revs` and the original `undo_expires_at`; clients must
+not infer revisions for saved undo. Exact retries return the original result
+sequence and current canonical sequence. Re-read the snapshot after mutation.
+
+Successful writes compact replay receipts and deletion tombstones older than
+24 hours. Expired mutation IDs remain reserved by a minimal audit ledger;
+reusing them returns `409 history_expired`. The ledger retains actor/run, sequence,
+digest and timestamp for the Board's lifetime, without scene contents. A full
+recent deletion window returns `409 history_capacity` with
+`earliest_history_expiry`; live drawings are never silently removed. Saved undo
+expires after 24 hours and always checks current target revisions.
+
+**Statuses:** 200 snapshot or exact retry; 201 new batch or pin; 400 malformed or
+unsupported drawing; 401 missing human authentication; 403 insufficient write
+permission; 404 inaccessible/missing Page or Board; 409 stale Board/element
+revision, conflicting mutation identity or incompatible Page kind;
+413 oversized request; 422 invalid scene; 429 quota; 408 cancelled while waiting for a decoding slot;
+500 storage failure.
+All writes recheck current authority inside the transaction. Whole-board CAS
+prevents partial commits; the client retains an unsaved draft after a conflict.
+
+### Board run authorization
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/v1/pages/{slug}/board/delegations` | Authorize an existing live human-initiated chat run |
+| DELETE | `/api/v1/pages/{slug}/board/delegations/{runId}` | Permanently revoke that run's Board authority |
+
+**Auth:** current human Board owner, who must also be the server-recorded human
+initiator of the chat run. An explicit Page write grant for the agent is required
+in addition to this run-bound delegation. The run must remain live, within its
+original admission deadline, and the issuing human must retain current rights.
+An agent cannot grant itself access. Backup restores never revive delegations.
+
+**Request:** POST takes `{"run_id":"RUN_ID"}`; DELETE has no body. **Response:**
+201 returns `{run_id,agent_id,expires_at,scope:"own-elements"}`; DELETE returns
+204 with no body. The scope permits the agent to add or change its own drawings,
+never human/other-agent elements or indirect relationships to protected elements.
+Human edits take ownership back. Pinned sources remain independently protected.
+**Statuses:** 400 invalid run ID, 401 unsupported identity, 403 insufficient
+current authority or revoked/expired run, 404 inaccessible Board, 413 oversized
+input, 500 database failure.
+
+### Board image files
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/api/v1/pages/{slug}/board/files` | Store a canonical immutable image |
+| GET | `/api/v1/pages/{slug}/board/files/{fileId}` | Read a file belonging to this Board |
+
+**Auth:** human Page write for upload, human Page read for download. A file ID
+from another Board does not authorize reading or using that file.
+**Request:** POST sends raw PNG/JPEG bytes (at most 5 MiB), with required query
+parameters `base_seq` and `mutation_id`. Dimensions are at most 2048 per axis and
+4,194,304 pixels total. The server decodes and re-encodes pixels, removing source
+metadata/trailing payload. Canonical output is at most 8 MiB. GET has no body.
+
+**Response:** upload returns `{file_id,content_type,width,height,bytes,seq,result_seq}`
+with 201 for creation or 200 for an exact retry. Download returns canonical
+`image/png` or `image/jpeg` bytes, `nosniff`, private no-store caching and same-origin
+CORP. Persisted drawing elements contain only the opaque `fileId`; transient
+Excalidraw data URLs never become the persisted scene.
+
+**Statuses:** 400 invalid query, 401 unsupported identity, 403 insufficient access,
+404 absent Board/file, 409 stale sequence, conflicting mutation identity or image storage quota,
+413 oversized upload, 422 invalid image, 429 quota, 500 storage failure,
+503 unavailable blob storage. Current limits are 100 files/50 MiB per Board and
+1,000 files/500 MiB per workspace. Unused uploads remain quota-counted for the
+Board's lifetime; deleting the Board releases references for ordinary blob GC.
+
+### Board discussions
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/board/threads` | Read up to 100 threads |
+| POST | `/api/v1/pages/{slug}/board/threads` | Create an anchored thread |
+| POST | `/api/v1/pages/{slug}/board/threads/{threadId}/comments` | Reply at an observed thread version |
+| POST | `/api/v1/pages/{slug}/board/threads/{threadId}/resolve` | Resolve or reopen a thread |
+| PATCH | `/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}` | Edit your own human comment |
+| DELETE | `/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}` | Tombstone your own human comment |
+| PUT | `/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/reactions/{emoji}` | Add or remove your reaction |
+| GET | `/api/v1/pages/{slug}/board/threads/{threadId}/comments/{commentId}/history` | Read your private comment history |
+
+**Auth:** human Page read for listing, Page comment for creation/replies, Page
+write for resolve/reopen. Authorization is rechecked inside each transaction.
+Agents cannot use these human discussion routes.
+
+**Request:** creation takes `mutation_id`, `body` and an `anchor` with
+`schema_version:1`, `type:"board"` and `board_seq`. An element anchor uses
+`type:"board-element"` and additionally `element_id` and `element_rev`.
+The server captures immutable original geometry; it never trusts client geometry.
+Replies take `mutation_id`, `body` and `base_version`; resolve/reopen replaces
+`body` with `resolved:true/false`. Keep the exact mutation ID and body after a
+lost response. Anchors cannot be changed after creation.
+
+**Response:** listing returns `{threads,can_comment,can_resolve}`; mutations return the current thread
+with `applied_version` identifying the committed retry result. Each thread has
+`id`, `anchor`, `status`, `version`, author/timestamps and `comments`.
+Comments are plain text, limited to 4 KiB, with 50 replies per thread.
+**Statuses:** 200 read/retry/update; 201 creation; 400 malformed request;
+401 unsupported identity; 403 insufficient rights; 404 inaccessible Board/thread;
+409 stale anchor/version or mutation identity conflict; 413 oversized request;
+422 invalid anchor; 429 discussion quota; 500 storage failure.
+
+Edits, deletion and reactions require current Page comment access and the
+captured **thread** `base_version`, plus `mutation_id`. Edit adds `body`; deletion
+accepts neither body nor reaction fields. Reaction adds `active:true/false` and
+uses one of `👍`, `❤️`, `👀`, `✅` in the path. Only the actual human author may
+edit/delete or read history, including after tombstone deletion. Other readers
+never receive prior bodies. Agent-authored discussion is not supported here.
+
+Each comment supplies `version`, optional `edited_at`/`deleted_at`,
+`can_edit`, `can_delete`, `can_react`, `can_view_history`, and
+`reactions:[{emoji,count,reacted_by_me}]`. Deleted comments return an empty body
+and no reactions. History returns `{history:[{version,body,action,actor_user_id,created_at}]}`
+newest first. A comment retains at most 50 immutable body-history records;
+editing reserves the final record for deletion. Discussion writes share the
+existing 10,000 receipts/Board and 200 writes/hour limits. Exact retries recheck
+current authorization before receipt lookup and do not consume another slot.
+
+### One-use element permissions
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/board/element-permissions` | List permissions and eligible live runs |
+| POST | `/api/v1/pages/{slug}/board/element-permissions` | Permit a specific run to modify selected human elements once |
+| DELETE | `/api/v1/pages/{slug}/board/element-permissions/{permissionId}` | Revoke a permission |
+
+**Auth:** current human Board editor. This permission supplements an existing
+run delegation and explicit agent Page write grant; it creates neither implicitly.
+Creating a missing base delegation still requires the Board owner who initiated
+the run. Expiry, run identity, live membership and all grants remain mandatory.
+
+**Request:** POST takes `mutation_id`, `run_id`,
+`elements:[{element_id,expected_rev}]`, `methods:["update","delete"]`,
+`purpose` and `expires_in_seconds` (at most 3,600). The UI defaults to update-only
+and 15 minutes. The agent includes `element_permission_id` in one exact Board
+batch. The server atomically consumes the permission with the changes; indirect
+modification of unselected protected elements is denied. Human ownership remains.
+
+**Response:** GET returns `{permissions,eligible_runs}`; creation returns the
+permission with its current used/revoked state on exact retry. Revocation has no
+response body. Agents see only their own live permission manifest through their
+authorized Board snapshot. Backup restore does not reactivate permissions.
+**Statuses:** 200 read/retry; 201 creation; 204 revoked; 400 malformed request;
+401 unsupported identity; 403 insufficient authority; 404 inaccessible target;
+409 changed element or conflicting mutation; 413 oversized body; 500 storage error.
+
+### Board agent requests
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/board/requests` | List jobs and eligible private chats |
+| POST | `/api/v1/pages/{slug}/board/requests` | Explicitly send selected content to an agent |
+| GET | `/api/v1/pages/{slug}/board/requests/{requestId}` | Read job state and prepared result |
+| POST | `/api/v1/pages/{slug}/board/requests/{requestId}/cancel` | Cancel future job authority |
+| POST | `/api/v1/pages/{slug}/board/requests/{requestId}/insert` | Confirm diagram insertion |
+
+**Auth:** human Page read for listing/detail, current Page write and eligible
+human-owned chat for dispatch. Insertion requires current Page write. The server
+binds the job to the dispatched run; knowing a job ID does not confer access.
+The agent pulls the authorized snapshot after run binding, not from an unverified
+dispatch prompt. Source artifact access is checked separately for each pin.
+
+**Request:** dispatch takes `submission_id`, `kind` (`diagram` or `artifact`),
+`chat_id`, `instruction`, `base_seq`, `selected_element_ids`,
+`selected_placement_ids` and `target:{x,y,width,height}`. Diagram requests also
+require `dialect:"flowchart-v1"` and `converter_version:"2.2.2"`. The server
+captures the selection; the client cannot substitute arbitrary scene content.
+Insertion takes `mutation_id`, `base_seq`, `source_hash`, `converter_version`
+and `upserts:[{element,expected_rev:0}]`. It is a separate human-authorized write.
+Cancellation has no required body. Retain submission/mutation IDs for retries.
+
+Dispatch may include optional `preview_png` (base64 PNG, at most 1 MiB decoded,
+1024×1024 pixels). The server re-encodes it, strips metadata and stores an immutable
+illustration with the job; canonical output is bounded to 2 MiB and retained
+previews to 128 MiB per workspace. It is untrusted auxiliary input, never proof
+of the selected scene. The UI exports only the captured drawings and selected
+raster assets; pins are generic empty rectangles, not iframe screenshots.
+`has_preview` indicates whether a job retained this helper. After admission,
+the assigned run can retrieve it through the job-scoped sidecar preview path,
+subject to current job, human and all captured source permissions. Retrying a
+submission preserves the exact original image and IDs.
+
+
+**Response:** dispatch returns 202 `{id}`. Listing returns
+`{can_dispatch,eligible_chats,converter_url,requests}`. Detail includes status,
+authorized result metadata and, for diagrams, prepared source/version/hash and
+inserted element IDs. States are `queued`, `running`, `ready_to_insert`,
+`inserted`, `succeeded`, `failed`, `cancelled`. Insert returns
+`{id,status,result_seq,already_inserted,inserted_element_ids}`.
+Artifact jobs may create one private output. If the Board changes or pin authority
+is lost, the output can succeed as `created_not_pinned`; it survives Board deletion.
+**Statuses:** 200 read/retry/cancel; 201 insertion; 202 dispatch; 400 malformed
+request; 401 unsupported identity; 403 insufficient current authority;
+404 inaccessible job; 409 stale sequence/conflicting submission/job state;
+413 oversized body; 422 unsupported diagram/profile; 429 quota; 500 storage error.
+
+### Isolated diagram converter
+
+`GET /api/v1/pages/runtime/board-converter` serves constant public bootstrap HTML
+only on the configured separate runtime site; the Studio host returns 404. It
+contains no Page data or credentials. A nonce CSP sandbox and a bounded
+MessagePort handshake isolate the pinned local converter program. Response is
+`text/html`, no-store, with no referrer; invalid runtime configuration fails closed.
+The public `/board-converter/runner.js` program alone permits opaque-origin
+loading. Private APIs do not gain CORS access.
+
+Conversion is currently enabled only on verified desktop Chromium with a valid
+separate runtime site. Other browsers retain the prepared source without executing
+it in Studio. Insertion always requires explicit human confirmation and server
+validation; a source hash does not prove the client-generated geometry came from
+the converter.
+
+### Agent artifact policy
+
+`GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy` and
+`PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy` require a current
+human workspace OWNER/ADMIN. The path must identify the authenticated workspace.
+GET returns `{enabled,crew_ids,version}`. An unsaved policy is disabled, with an
+empty allowlist and version 0. PUT requires the complete
+`{enabled,crew_ids,base_version}` replacement; at most 500 distinct current crew
+IDs from this workspace are accepted. A stale version returns 409.
+
+The workspace switch and crew allowlist are checked when an agent creates or
+publishes an artifact, including artifact output requested from a Board.
+Disabling the policy stops subsequent agent publication even for previously
+authorized runs. It does not grant any Page rights: the live run, verified human,
+explicit per-run authorization and Page grants are still required. Human
+publication and copying, agent reads/comments and Board geometry retain their
+own authorization rules.
+
+### Revision format manifest
+
+Artifact reads include `manifest` and `manifest_status`. New revisions record an
+immutable manifest with `format_version:1`, `runtime_profile:"static-html-v1"`,
+`entrypoint:"index.html"` and exactly one file containing its path, UTF-8 MIME,
+byte count and SHA-256 digest. `source:null` means no original React/TypeScript
+project bundle is attached; HTML is the published build.
+
+An unpublished Page returns `manifest:null` and status `unpublished`. A retained
+legacy revision has status `legacy_derived`: its manifest is derived from the
+verified stored bytes without rewriting history. A new stored manifest has
+status `recorded`. Reads, restore and copy reject a manifest that disagrees with
+the content or names an unsupported profile. Restore/copy create new recorded
+revisions while preserving the selected content.
+
+Publication may explicitly send `runtime_profile:"static-html-v1"` and
+`format_version:1`, or omit both for compatibility. Unsupported values are
+rejected before blob storage changes. This profile does not enable scripts.
+
+
+### Request outcome and runtime evidence
+
+Artifact and Board request records distinguish their durable result `status` from
+`execution_state`. A lost observer or a server restart does not prove that a
+bound agent run failed. Such requests remain pending until an authoritative
+terminal result or their admitted deadline is observed; they are never
+redispatched automatically.
+
+- `observed`: current work lease evidence or a confirmed terminal run outcome.
+- `awaiting_confirmation`: recent recorded activity without a confirmed lease or outcome.
+- `unknown`: no current trustworthy runtime evidence.
+- `deadline_exceeded`: the admitted request deadline elapsed without a confirmed outcome.
+
+`heartbeat_at` is an actual work-attempt heartbeat, or null. Journal activity is
+reported separately as `last_activity_at`; neither polling nor the request's
+`updated_at` creates a heartbeat. `run_status` appears only for a confirmed
+terminal run outcome. `deadline_source` distinguishes a persisted `recorded`
+deadline from a conservative `legacy_derived` deadline for an older running job.
+
+Expiring or cancelling a request revokes acceptance of its future result. It does
+not prove the agent process has stopped, release its runtime capacity or start a
+replacement. A committed revision or inserted diagram remains the authoritative
+successful result even if a later observer fails. New work requires an explicit
+human submission and may duplicate an unconfirmed run's work.
+
+### Request retries and private results
+
+Artifact and Board request creation accept optional `retry_of_request_id` (at
+most 128 characters). It must identify the same human's failed or cancelled
+request on the same workspace, source Page and job kind. The new submission
+uses the current source and a fresh snapshot. It neither resumes nor releases
+the old runtime. If the old runtime outcome is unconfirmed, records and the
+creation receipt include `retry_warning`; repeating work remains an explicit
+human choice. The usual policy, budget and authorization checks still apply.
+Omitting the field preserves existing submission fingerprints.
+
+### GET /api/v1/page-request-results/\{kind\}/\{requestId\}
+
+```http
+GET /api/v1/page-request-results/{kind}/{requestId}?workspace_id=WORKSPACE_ID
+```
+
+**Authentication:** human session or human API token with current workspace
+membership and Page access. Only the request's initiating human can resolve it;
+notification pointers and agent credentials grant no access.
+
+**Request:** `kind` is `artifact` or `board`; `requestId` identifies the request.
+There is no body. The workspace is resolved by the usual workspace middleware.
+
+**Response:** `{ "page_slug": "report", "revision": 3 }`. The positive
+`revision` is optional and appears only for a retained artifact result. A Board
+artifact result resolves to its independently accessible result Page; other
+Board requests resolve to the current source Board.
+
+**Statuses:** 200 resolved; 401 missing human identity; 403 workspace denial;
+404 missing, deleted or inaccessible result, wrong initiator or unsupported kind;
+500 database failure. The response is private and must not be cached as authority.
+
+Completion inserts a generic private Inbox message transactionally. It contains
+opaque pointers, not source content, titles or instructions. No external channel
+is called. Recovery retries pending notices with deduplication; restore suppresses
+pending delivery. The Inbox uses this resolver before rendering a result link.
+
+### GET /api/v1/pages/\{slug\}/artifact/lease
+
+```http
+GET /api/v1/pages/{slug}/artifact/lease?revision=3&workspace_id=WORKSPACE_ID
+```
+
+**Authentication:** current human Page reader. Agent, delegated-run and restricted
+identities are refused. The handler rechecks active account/workspace membership,
+current database role and Page access in one read-only transaction.
+
+**Request:** exactly one positive `revision` query parameter; no body.
+
+**Response:** `{page_id,revision,content_sha256,runtime_profile,expires_at}`.
+`expires_at` is an RFC 3339 timestamp, at most 15 seconds after the check began.
+Only metadata for the exact retained revision is read; this does not fetch HTML,
+verify blob bytes or enable scripts. The response is not a transferable capability
+and does not prevent permissions changing before expiry. Subsequent checks repeat
+authorization. The supported profile remains `static-html-v1`.
+
+**Statuses:** 200 current metadata; 400 missing, duplicate or invalid revision;
+401 missing human identity; 403 inactive/restricted membership; 404 missing or
+inaccessible Page/revision; 409 unsupported or inconsistent manifest metadata;
+500 database failure. Responses must not be cached as continuing authority.
+
+### Artifact request outcome selection and phase reporting
+
+Artifact request creation accepts `result_kind:"revision"` (default) or `"reply"`.
+The admitted kind is immutable. Reply-only requests cannot publish or restore a
+revision; revision requests cannot complete with a text answer alone.
+
+Authorized run-bound `artifact_request_update` operations append idempotent
+progress reports or a typed reply. Phases are `preparing`, `waiting_for_input`,
+`uploading` and `finalizing`; messages are plain text. They are explicitly
+agent-reported and do not extend deadlines, create heartbeats or prove completion.
+A reply-only result is atomically persisted with the agent/run/human provenance,
+terminal request state and private completion notice. List responses include
+`result_kind`, optional `agent_reported_phase:{phase,message,reported_at}` and
+optional `reply:{body,agent_id,run_id,on_behalf_of_user_id,created_at}`. Deleted
+identity references may be omitted. Existing Page read authorization still applies.
+
+## Collaborative documents
+
+The opt-in Docs API, CLI and service lifecycle are described in the
+[Docs contract](../specs/documents.md). It preserves Page identity and grants.
+Use `crewship doc read <slug>` or `crewship doc outline <slug>` to obtain the
+current durable revision, opaque epoch and target hash. Submit an exact JSON
+operation with `crewship doc patch <slug> --file patch.json`. Conflicts require
+rereading the target and an explicit new operation; transport retries reuse the
+original operation ID and body. `crewship doc checkpoint`, `crewship doc restore`
+and `crewship doc request` likewise accept `--file`; `crewship doc export <slug>`
+writes Markdown. See each command's `--help` for the bounded operation contract.

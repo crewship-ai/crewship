@@ -24,3 +24,8 @@ as plain SQL belongs here.
 
 Nothing at or below **v169** may move here or change: those numbers are applied
 in databases nobody controls. See `../migrate_version_scheme.go`.
+
+The three consolidated Artifact/Board migrations replace only the unreleased
+feature chain. The prerelease development database was reset before release;
+its temporary compatibility adapter is not shipped. Shipped main SQL and the
+general newer-schema guard are unchanged.

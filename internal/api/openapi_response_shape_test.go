@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
+	"github.com/crewship-ai/crewship/internal/slides"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -45,6 +46,40 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "SlideCommentAnchor", pointer: "/components/schemas/SlideCommentAnchor", value: slides.CommentAnchor{}},
+	{name: "SlideCommentEvent", pointer: "/components/schemas/SlideCommentEvent", value: slides.CommentEvent{}},
+	{name: "SlideCommentThread", pointer: "/components/schemas/SlideCommentThread", value: slides.CommentThread{}},
+	{name: "SlideCommentReceipt", pointer: "/components/schemas/SlideCommentReceipt", value: slides.CommentReceipt{}},
+	{name: "SlideSelectedRequests", pointer: "/components/schemas/SlideSelectedRequests", value: SlidesSelectedRequestsResponse{}},
+	{name: "SlideSelectedRequest", pointer: "/components/schemas/SlideSelectedRequest", value: SlidesSelectedRequestResponse{}},
+	{name: "SlideSelectedAdmission", pointer: "/components/schemas/SlideSelectedAdmission", value: SlidesSelectedAdmissionResponse{}},
+	{name: "SlideSelectedCancel", pointer: "/components/schemas/SlideSelectedCancel", value: SlidesSelectedCancelResponse{}},
+	{name: "SlideCommentThreads", pointer: "/components/schemas/SlideCommentThreads", value: SlidesCommentThreadsResponse{}},
+	{name: "SlideCommentHistory", pointer: "/components/schemas/SlideCommentHistory", value: SlidesCommentHistoryResponse{}},
+	{name: "SlideCommentThreadResponse", pointer: "/components/schemas/SlideCommentThreadResponse", value: SlidesCommentThreadResponse{}},
+	{name: "SlideState", pointer: "/components/schemas/SlideState", value: slides.State{}},
+	{name: "SlideReceipt", pointer: "/components/schemas/SlideReceipt", value: slides.Receipt{}},
+	{name: "SlideRevision", pointer: "/components/schemas/SlideRevision", value: slides.Revision{}},
+	{name: "SlideOutline", pointer: "/components/schemas/SlideOutline", value: SlideOutline{}},
+	// Public human Docs responses; the real Go/Node subprocess test grades the wire.
+	{name: "DocumentState", pointer: "/components/schemas/DocumentState", value: DocumentStateResponse{}},
+	{name: "DocumentReceipt", pointer: "/components/schemas/DocumentReceipt", value: DocumentMutationResponse{}},
+	{name: "DocumentCheckpoint", pointer: "/components/schemas/DocumentCheckpoint", value: DocumentCheckpointResponse{}},
+	{name: "DocumentCheckpoints", pointer: "/components/schemas/DocumentCheckpoints", value: DocumentCheckpointsResponse{}},
+	{name: "DocumentComment", pointer: "/components/schemas/DocumentComment", value: DocumentCommentResponse{}},
+	{name: "DocumentComments", pointer: "/components/schemas/DocumentComments", value: DocumentCommentsResponse{}},
+	{name: "DocumentRequests", pointer: "/components/schemas/DocumentRequests", value: DocumentRequestListResponse{}},
+	{name: "DocumentInitializationState", pointer: "/components/schemas/DocumentInitializationState", value: DocumentInitializationState{}},
+	{name: "DocumentInitializeReceipt", pointer: "/components/schemas/DocumentInitializeReceipt", value: DocumentInitializeResponse{}},
+	{name: "DocumentNode", pointer: "/components/schemas/DocumentNode", value: DocumentNode{}},
+	{name: "DocumentComment.anchor", pointer: "/components/schemas/DocumentComment/properties/anchor", value: DocumentCommentAnchor{}},
+	{name: "DocumentRequests.rows", pointer: "/components/schemas/DocumentRequests/properties/requests/items", value: DocumentRequestResult{}},
+	{name: "DocumentRequests.targets", pointer: "/components/schemas/DocumentRequests/properties/eligible_chats/items", value: DocumentRequestTarget{}},
+	// Custody responses are metadata-only DTOs, including optional cursor/code.
+	{name: "WorkspacePageOwnershipListResponse", pointer: "/components/schemas/WorkspacePageOwnershipListResponse", value: WorkspacePageOwnershipListResponse{}},
+	{name: "WorkspacePageOwnershipSummary", pointer: "/components/schemas/WorkspacePageOwnershipSummary", value: WorkspacePageOwnershipSummary{}},
+	{name: "WorkspacePageOwnershipSuccessor", pointer: "/components/schemas/WorkspacePageOwnershipSuccessor", value: WorkspacePageOwnershipSuccessor{}},
+	{name: "WorkspacePageOwnershipError", pointer: "/components/schemas/WorkspacePageOwnershipError", value: WorkspacePageOwnershipError{}},
 	{name: "RoutineOriginBinding", pointer: "/components/schemas/RoutineOriginBinding", value: routineOriginBindingResponse{}},
 	{name: "FailedIssueMutationJob", pointer: "/components/schemas/FailedIssueMutationJob", value: failedIssueMutationJob{}},
 	{name: "FailedIssueMutationPage", pointer: "/components/schemas/FailedIssueMutationPage", value: failedIssueMutationPage{}},
@@ -52,6 +87,7 @@ var responseShapeContracts = []struct {
 	{name: "RoutineOriginScheduleBinding", pointer: "/components/schemas/RoutineOriginScheduleBinding", value: routineOriginScheduleBinding{}},
 	{name: "ChatEntityReferencePage", pointer: "/components/schemas/ChatEntityReferencePage", value: EntityRefPage{}},
 	{name: "ChatEntityOperation", pointer: "/components/schemas/ChatEntityOperation", value: EntityOperationResponse{}},
+	{name: "IssueEntityRevision", pointer: "/components/schemas/IssueEntityRevision", value: EntityRefRevision{}},
 	{name: "WorkspacePendingRunResponseV1", pointer: "/components/schemas/WorkspacePendingRunResponseV1", value: pendingRunReceipt{}},
 	{name: "WorkspacePendingRunsResponseV1[]", pointer: "/components/schemas/WorkspacePendingRunsResponseV1/items", value: pendingRunReceipt{}},
 	{name: "RestrictedAgentProfile", pointer: "/components/schemas/RestrictedAgentProfile", value: restrictedAgentProfileResponse{}},

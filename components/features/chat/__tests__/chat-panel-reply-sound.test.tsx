@@ -1,3 +1,4 @@
+vi.mock("../artifact-result-cards", () => ({ ArtifactResultCards: () => null }))
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, render } from "@testing-library/react"
 const resubscribeSession = vi.fn()

@@ -1,0 +1,332 @@
+[
+  {
+    "name": "empty-human",
+    "facts": {
+      "human_owned": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "panels",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": true
+    }
+  },
+  {
+    "name": "empty-crew",
+    "facts": {},
+    "expected": {
+      "content_descriptor": {
+        "type_id": "panels",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "panels",
+    "facts": {
+      "has_panels": true,
+      "human_owned": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "panels",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "draft",
+    "facts": {
+      "has_project": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "panels",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false,
+      "application_descriptor": {
+        "type_id": "application",
+        "schema_version": 1,
+        "supported": true
+      }
+    }
+  },
+  {
+    "name": "withdrawn",
+    "facts": {
+      "has_project": true,
+      "has_application": false
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "panels",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false,
+      "application_descriptor": {
+        "type_id": "application",
+        "schema_version": 1,
+        "supported": true
+      }
+    }
+  },
+  {
+    "name": "published",
+    "facts": {
+      "has_project": true,
+      "has_application": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "panels",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false,
+      "application_descriptor": {
+        "type_id": "application",
+        "schema_version": 1,
+        "supported": true
+      }
+    }
+  },
+  {
+    "name": "panels-application",
+    "facts": {
+      "has_panels": true,
+      "has_project": true,
+      "has_application": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "panels",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false,
+      "application_descriptor": {
+        "type_id": "application",
+        "schema_version": 1,
+        "supported": true
+      }
+    }
+  },
+  {
+    "name": "html-legacy",
+    "facts": {
+      "has_artifact": true,
+      "artifact_profile": "static-html-v1",
+      "artifact_version": 1
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "html",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "html-unknown",
+    "facts": {
+      "has_artifact": true,
+      "artifact_profile": "interactive-html-v1",
+      "artifact_version": 1
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "html",
+        "schema_version": 1,
+        "supported": false,
+        "reason": "unsupported-profile"
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "html-version",
+    "facts": {
+      "has_artifact": true,
+      "artifact_profile": "static-html-v1",
+      "artifact_version": 2
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "html",
+        "schema_version": 2,
+        "supported": false,
+        "reason": "unsupported-version"
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "doc",
+    "facts": {
+      "has_document": true,
+      "document_schema": 2
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "doc",
+        "schema_version": 2,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "doc-version",
+    "facts": {
+      "has_document": true,
+      "document_schema": 99
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "doc",
+        "schema_version": 99,
+        "supported": false,
+        "reason": "unsupported-version"
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "board",
+    "facts": {
+      "has_board": true,
+      "board_format": "crewship-board-excalidraw-0.18.1-v1"
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "board",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "board-profile",
+    "facts": {
+      "has_board": true,
+      "board_format": "future"
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "board",
+        "schema_version": 1,
+        "supported": false,
+        "reason": "unsupported-profile"
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "conflicting-types",
+    "facts": {
+      "has_board": true,
+      "has_document": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "conflicting",
+        "schema_version": 0,
+        "supported": false,
+        "reason": "conflicting-storage"
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "conflicting-panels",
+    "facts": {
+      "has_artifact": true,
+      "has_panels": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "conflicting",
+        "schema_version": 0,
+        "supported": false,
+        "reason": "conflicting-storage"
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "conflicting-source",
+    "facts": {
+      "has_document": true,
+      "has_project": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "conflicting",
+        "schema_version": 0,
+        "supported": false,
+        "reason": "conflicting-storage"
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "doc-legacy-schema-1",
+    "facts": {
+      "has_document": true,
+      "document_schema": 1
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "doc",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "slides-native-viewer",
+    "facts": {
+      "has_slides": true,
+      "slides_schema": 1,
+      "human_owned": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "slides",
+        "schema_version": 1,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "slides-conflicting-document",
+    "facts": {
+      "has_slides": true,
+      "slides_schema": 1,
+      "has_document": true,
+      "document_schema": 2
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "conflicting",
+        "schema_version": 0,
+        "supported": false,
+        "reason": "conflicting-storage"
+      },
+      "can_initialize_content": false
+    }
+  }
+]
