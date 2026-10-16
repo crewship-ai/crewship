@@ -103,6 +103,7 @@ export interface PagesRailProps {
   onEditFolder?: (slug: string) => void
   /** Folder → Sharing (#2533). Absent, the menu has no such item. */
   onShareFolder?: (slug: string) => void
+  onReparentFolder?: (slug: string) => void
   onDeleteFolder?: (slug: string) => void
   /**
    * Several pages at once (#2533). Present, the toolbar gains a Select mode:
@@ -232,6 +233,7 @@ export function PagesRail({
   onCreateFolder,
   onEditFolder,
   onShareFolder,
+  onReparentFolder,
   onDeleteFolder,
   onMovePages,
 }: PagesRailProps) {
@@ -313,12 +315,16 @@ export function PagesRail({
   const groups = React.useMemo(() => {
     if (groupBy === "folder") {
       const all = groupPagesByFolder(displayed, folders ?? [])
-      return narrowing ? all.filter((g) => g.pages.length > 0) : all
+      if (!narrowing) return all
+      const matches = new Set(all.filter((g) => g.pages.length > 0).flatMap((g) => [g.key, ...(g.ancestorKeys ?? [])]))
+      return all.filter((g) => matches.has(g.key))
     }
     // Membership is read from every page, not the filtered list: which crews
     // are MINE does not change because a filter hid the page that said so.
     return groupPagesByOwner(displayed, currentUserId, pages)
   }, [groupBy, displayed, folders, narrowing, currentUserId, pages])
+
+  const visibleGroups = groups.filter((g) => searching || !(g.ancestorKeys ?? []).some((key) => collapsed.has(key)))
 
   const countOf = (g: PageGroup) =>
     g.kind === "folder" && !narrowing && g.pageCount !== undefined ? g.pageCount : g.pages.length
@@ -340,8 +346,11 @@ export function PagesRail({
   // (validation 2026-09-13). `selectedSlug` is in the list so every
   // selection re-runs it, even when the group is the one already open.
   React.useEffect(() => {
-    if (selectedSlug && activeGroupKey) setCollapsed(activeGroupKey, false)
-  }, [selectedSlug, activeGroupKey, setCollapsed])
+    if (selectedSlug && activeGroupKey) {
+      setCollapsed(activeGroupKey, false)
+      for (const key of groups.find((g) => g.key === activeGroupKey)?.ancestorKeys ?? []) setCollapsed(key, false)
+    }
+  }, [selectedSlug, activeGroupKey, setCollapsed, groups])
 
   // ── Row menu ──────────────────────────────────────────────────────────────
   // Which row's "⋯" menu is open, by page slug. Owned here rather than by
@@ -363,7 +372,7 @@ export function PagesRail({
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(() => new Set())
   const anchor = React.useRef<string | null>(null)
   const shiftHeld = React.useRef(false)
-  const visibleOrder = React.useMemo(() => groups.flatMap((g) => g.pages.filter(p => p.canMove === true).map((p) => p.slug)), [groups])
+  const visibleOrder = visibleGroups.flatMap((g) => isOpen(g) ? g.pages.filter((p) => p.canMove === true).map((p) => p.slug) : [])
   const leaveSelectMode = () => {
     setSelecting(false)
     setSelected(new Set())
@@ -656,7 +665,7 @@ export function PagesRail({
           onKeyDown={onListKeyDown}
           className="min-h-0 flex-1 overflow-y-auto pb-1"
         >
-          {groups.map((group) => (
+          {visibleGroups.map((group) => (
             <SidebarSection
               key={group.key}
               collapsible
@@ -709,14 +718,21 @@ export function PagesRail({
               // or folder name has no upper bound; the kit truncates it so the
               // count stays on the line. `title` carries the whole of it.
               headerClassName="min-w-0"
-              headerProps={{ "data-rail-header": group.key, title: group.label }}
+              headerProps={{
+                "data-rail-header": group.key,
+                title: group.label,
+                "data-folder-depth": String(group.depth ?? 0),
+                style: group.depth ? { paddingInlineStart: `${group.depth * 12 + 12}px` } : undefined,
+              }}
               // The section is a hover group so the folder menu beside its
               // header shows when the pointer is over the folder.
               className="group/section"
               actions={
-                group.kind === "folder" && group.folder && ((folderAuthority.get(group.folder.slug)?.canRename === true && onEditFolder) || (folderAuthority.get(group.folder.slug)?.canDelete === true && onDeleteFolder) || (folderAuthority.get(group.folder.slug)?.canShare === true && onShareFolder)) ? (
+                group.kind === "folder" && group.folder && ((folderAuthority.get(group.folder.slug)?.canRename === true && onEditFolder) || (folderAuthority.get(group.folder.slug)?.canDelete === true && onDeleteFolder) || (folderAuthority.get(group.folder.slug)?.canShare === true && onShareFolder) || (folderAuthority.get(group.folder.slug)?.canReparent === true && onReparentFolder)) ? (
                   <FolderHeaderMenu
                     folderName={group.label}
+                    onReparent={folderAuthority.get(group.folder.slug)?.canReparent === true && onReparentFolder
+                      ? () => onReparentFolder(group.folder!.slug) : undefined}
                     onRename={folderAuthority.get(group.folder.slug)?.canRename === true && onEditFolder ? () => onEditFolder(group.folder!.slug) : undefined}
                     onShare={folderAuthority.get(group.folder.slug)?.canShare === true && onShareFolder ? () => onShareFolder(group.folder!.slug) : undefined}
                     onDelete={folderAuthority.get(group.folder.slug)?.canDelete === true && onDeleteFolder ? () => onDeleteFolder(group.folder!.slug) : undefined}

@@ -1278,9 +1278,33 @@ crewship page folder create ops-board --name "Ops board" --owner crew/ops --icon
 | `--owner crew/<slug>` | The owning crew. Required — a folder is owned by a crew, never by a person. The `crew/` prefix may be omitted. |
 | `--icon <name>` | A crew icon name, from the crew icon picker's set. The server refuses anything outside it and says so. |
 | `--color <key>` | A crew palette key: `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime` or `fuchsia`. |
+| `--parent <slug>` | Optional parent folder. Nesting keeps each folder's sharing independent. |
+| `--tree-version <n>` | Required with `--parent`: workspace structure version you reviewed. |
+| `--acl-version <n>` | Required with `--parent`: parent permissions version you reviewed. |
 
 A workspace admin, or a MANAGER (or higher) who belongs to the owning crew,
-may create it; the folder is the crew's from birth.
+may create it; the folder is the crew's from birth. Existing root creation needs
+no tree fences. Nested creation additionally requires parent arrangement access.
+
+### `crewship page folder reparent <slug>`
+
+```bash
+crewship page folder reparent child --parent ops-board --tree-version 3 --acl-version 2
+crewship page folder reparent child --root --tree-version 4
+```
+
+| Flag | Description |
+|---|---|
+| `--parent <slug>` | New parent; choose this or `--root`, never both. |
+| `--root` | Move to the workspace root. |
+| `--tree-version <n>` | Required nonnegative workspace structure version from the folder read you reviewed. |
+| `--acl-version <n>` | Required with `--parent`: the target's reviewed ACL version. |
+
+The source crew manager or workspace administrator must have live authority;
+the target must permit arrangement. Page IDs, slugs, leaf membership and sharing
+remain unchanged. Cycles, excessive depth and stale fences return a refusal.
+The command neither refreshes fences nor retries a 409; read and confirm again.
+
 
 ### `crewship page folder show <slug>`
 

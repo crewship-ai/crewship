@@ -111109,6 +111109,10 @@
                             "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
                             "type": "integer"
                           },
+                          "can_accept_folders": {
+                            "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                            "type": "boolean"
+                          },
                           "can_accept_pages": {
                             "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
                             "type": "boolean"
@@ -111118,6 +111122,10 @@
                             "type": "boolean"
                           },
                           "can_rename": {
+                            "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                            "type": "boolean"
+                          },
+                          "can_reparent": {
                             "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
                             "type": "boolean"
                           },
@@ -111154,6 +111162,11 @@
                             "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
                             "type": "integer"
                           },
+                          "parent_id": {
+                            "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions.",
+                            "nullable": true,
+                            "type": "string"
+                          },
                           "shared": {
                             "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
                             "enum": [
@@ -111167,6 +111180,11 @@
                           },
                           "slug": {
                             "type": "string"
+                          },
+                          "tree_version": {
+                            "description": "Workspace structure fence for nested create and reparent.",
+                            "minimum": 0,
+                            "type": "integer"
                           },
                           "updated_at": {
                             "format": "date-time",
@@ -111189,7 +111207,11 @@
                           "can_rename",
                           "can_share",
                           "can_delete",
-                          "can_accept_pages"
+                          "can_accept_pages",
+                          "parent_id",
+                          "tree_version",
+                          "can_reparent",
+                          "can_accept_folders"
                         ],
                         "type": "object"
                       },
@@ -111303,6 +111325,10 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "acl_version": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
                   "color": {
                     "description": "Optional. A crew palette key; anything else is refused.",
                     "type": "string"
@@ -111318,9 +111344,18 @@
                     "description": "`crew/\u003cslug\u003e`, required. The creator must be a workspace admin, or a MANAGER (or higher) who belongs to that crew.",
                     "type": "string"
                   },
+                  "parent": {
+                    "description": "Optional parent slug; requires tree_version and parent acl_version. Root create stays compatible without fences.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "slug": {
                     "description": "Optional; derived from the name when omitted.",
                     "type": "string"
+                  },
+                  "tree_version": {
+                    "minimum": 0,
+                    "type": "integer"
                   }
                 },
                 "type": "object"
@@ -111339,6 +111374,10 @@
                       "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
                       "type": "integer"
                     },
+                    "can_accept_folders": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
                     "can_accept_pages": {
                       "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
                       "type": "boolean"
@@ -111348,6 +111387,10 @@
                       "type": "boolean"
                     },
                     "can_rename": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_reparent": {
                       "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
                       "type": "boolean"
                     },
@@ -111384,6 +111427,11 @@
                       "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
                       "type": "integer"
                     },
+                    "parent_id": {
+                      "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions.",
+                      "nullable": true,
+                      "type": "string"
+                    },
                     "shared": {
                       "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
                       "enum": [
@@ -111397,6 +111445,11 @@
                     },
                     "slug": {
                       "type": "string"
+                    },
+                    "tree_version": {
+                      "description": "Workspace structure fence for nested create and reparent.",
+                      "minimum": 0,
+                      "type": "integer"
                     },
                     "updated_at": {
                       "format": "date-time",
@@ -111419,7 +111472,11 @@
                     "can_rename",
                     "can_share",
                     "can_delete",
-                    "can_accept_pages"
+                    "can_accept_pages",
+                    "parent_id",
+                    "tree_version",
+                    "can_reparent",
+                    "can_accept_folders"
                   ],
                   "type": "object"
                 }
@@ -111436,6 +111493,10 @@
                       "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
                       "type": "integer"
                     },
+                    "can_accept_folders": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
                     "can_accept_pages": {
                       "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
                       "type": "boolean"
@@ -111445,6 +111506,10 @@
                       "type": "boolean"
                     },
                     "can_rename": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_reparent": {
                       "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
                       "type": "boolean"
                     },
@@ -111481,6 +111546,11 @@
                       "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
                       "type": "integer"
                     },
+                    "parent_id": {
+                      "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions.",
+                      "nullable": true,
+                      "type": "string"
+                    },
                     "shared": {
                       "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
                       "enum": [
@@ -111494,6 +111564,11 @@
                     },
                     "slug": {
                       "type": "string"
+                    },
+                    "tree_version": {
+                      "description": "Workspace structure fence for nested create and reparent.",
+                      "minimum": 0,
+                      "type": "integer"
                     },
                     "updated_at": {
                       "format": "date-time",
@@ -111516,7 +111591,11 @@
                     "can_rename",
                     "can_share",
                     "can_delete",
-                    "can_accept_pages"
+                    "can_accept_pages",
+                    "parent_id",
+                    "tree_version",
+                    "can_reparent",
+                    "can_accept_folders"
                   ],
                   "type": "object"
                 }
@@ -111820,6 +111899,10 @@
                       "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
                       "type": "integer"
                     },
+                    "can_accept_folders": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
                     "can_accept_pages": {
                       "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
                       "type": "boolean"
@@ -111829,6 +111912,10 @@
                       "type": "boolean"
                     },
                     "can_rename": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_reparent": {
                       "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
                       "type": "boolean"
                     },
@@ -112086,6 +112173,11 @@
                       },
                       "type": "array"
                     },
+                    "parent_id": {
+                      "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions.",
+                      "nullable": true,
+                      "type": "string"
+                    },
                     "shared": {
                       "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
                       "enum": [
@@ -112099,6 +112191,11 @@
                     },
                     "slug": {
                       "type": "string"
+                    },
+                    "tree_version": {
+                      "description": "Workspace structure fence for nested create and reparent.",
+                      "minimum": 0,
+                      "type": "integer"
                     },
                     "updated_at": {
                       "format": "date-time",
@@ -112122,6 +112219,10 @@
                     "can_share",
                     "can_delete",
                     "can_accept_pages",
+                    "parent_id",
+                    "tree_version",
+                    "can_reparent",
+                    "can_accept_folders",
                     "pages"
                   ],
                   "type": "object"
@@ -112284,6 +112385,10 @@
                       "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
                       "type": "integer"
                     },
+                    "can_accept_folders": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
                     "can_accept_pages": {
                       "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
                       "type": "boolean"
@@ -112293,6 +112398,10 @@
                       "type": "boolean"
                     },
                     "can_rename": {
+                      "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
+                      "type": "boolean"
+                    },
+                    "can_reparent": {
                       "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply.",
                       "type": "boolean"
                     },
@@ -112329,6 +112438,11 @@
                       "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
                       "type": "integer"
                     },
+                    "parent_id": {
+                      "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions.",
+                      "nullable": true,
+                      "type": "string"
+                    },
                     "shared": {
                       "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
                       "enum": [
@@ -112342,6 +112456,11 @@
                     },
                     "slug": {
                       "type": "string"
+                    },
+                    "tree_version": {
+                      "description": "Workspace structure fence for nested create and reparent.",
+                      "minimum": 0,
+                      "type": "integer"
                     },
                     "updated_at": {
                       "format": "date-time",
@@ -112364,7 +112483,11 @@
                     "can_rename",
                     "can_share",
                     "can_delete",
-                    "can_accept_pages"
+                    "can_accept_pages",
+                    "parent_id",
+                    "tree_version",
+                    "can_reparent",
+                    "can_accept_folders"
                   ],
                   "type": "object"
                 }
@@ -114468,6 +114591,217 @@
           }
         ],
         "summary": "Submit page folder pages batch",
+        "tags": [
+          "page-folders"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/page-folders/{slug}/parent": {
+      "post": {
+        "description": "Submit page folder parent (POST /api/v1/page-folders/{slug}/parent).",
+        "operationId": "post_api_v1_page-folders_slug_parent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "acl_version": {
+                    "description": "Required when parent is a slug.",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "parent": {
+                    "description": "New parent slug, or null for workspace root. No ancestor permission inheritance.",
+                    "minLength": 1,
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "tree_version": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "parent",
+                  "tree_version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "tree_version": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "tree_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page folder parent",
         "tags": [
           "page-folders"
         ],

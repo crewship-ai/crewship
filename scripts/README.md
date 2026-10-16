@@ -225,3 +225,18 @@ crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHI
 Build the real static export first. Missing Chromium, export or opt-in fails;
 `CREWSHIP_BOARD_MERMAID_OUTPUT` selects the evidence directory. Synthetic session
 credentials remain in a private temporary file removed by the Go fixture.
+
+`acceptance-folder-tree-browser.mjs` is called only by the opt-in Linux
+`TestFolderTreeBrowser` fixture after a real `pnpm build`. It exercises folder
+creation, nesting, reparenting, reload, hidden ancestors and revocation through
+the production Router with synthetic preauthenticated sessions; no HTTP mocks,
+shared instance or execution containers. Run through `crewship-heavy`:
+`crewship-heavy env CREWSHIP_FOLDER_TREE_BROWSER=1 go test -tags folder_tree_browser ./internal/api
+-run '^TestFolderTreeBrowser$' -count=1 -timeout 6m`.
+Missing prerequisites fail explicitly; `conformance` vet compiles but does not
+execute this browser fixture.
+
+`CREWSHIP_FOLDER_TREE_OUTPUT` optionally selects an owned retained directory for
+synthetic tree screenshots, reader-filtered JSON and report. The report records
+current source head/dirty state; capture evidence does not establish deployed or
+live WebSocket behavior. Keep this directory outside the public source tree.

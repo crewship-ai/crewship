@@ -868,6 +868,8 @@ export interface PageGroup {
    * row, which happens while the folder list is still loading.
    */
   pageCount?: number
+  depth?: number
+  ancestorKeys?: string[]
 }
 
 const CREW_PREFIX = "crew/"
@@ -960,6 +962,10 @@ export function groupPagesByOwner(
 
 /** What the folder grouping needs to know about a folder the caller may read. */
 export interface PageFolderLike extends PageFolderRef {
+  id?: string
+  parentId?: string | null
+  canReparent?: boolean
+  canAcceptFolders?: boolean
   pageCount: number
 }
 
@@ -1020,7 +1026,49 @@ export function groupPagesByFolder(
         folder: ref,
       })
   }
-  const out = Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label))
+  const sorted = Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label))
+  const keysById = new Map(folders.filter((folder) => folder.id).map((folder) => [folder.id!, folderGroupKey(folder.slug)]))
+  const parents = new Map<string, string>()
+  for (const folder of folders) {
+    const parent = folder.parentId ? keysById.get(folder.parentId) : undefined
+    if (parent && parent !== folderGroupKey(folder.slug)) parents.set(folderGroupKey(folder.slug), parent)
+  }
+  // Only authorized records are supplied by the server. Unknown/malformed edges
+  // become viewer roots; the client never fetches an ancestor by a guessed ID.
+  const ancestors = (key: string): string[] => {
+    const seen = new Set([key])
+    const chain: string[] = []
+    let next = parents.get(key)
+    while (next) {
+      if (seen.has(next) || chain.length >= 8) return []
+      seen.add(next)
+      chain.unshift(next)
+      next = parents.get(next)
+    }
+    return chain
+  }
+  const chains = new Map(sorted.map((group) => [group.key, ancestors(group.key)]))
+  const childrenByParent = new Map<string, PageGroup[]>()
+  // sorted insertion preserves alphabetic siblings without rescanning all groups.
+  for (const group of sorted) {
+    const chain = chains.get(group.key) ?? []
+    const parentKey = chain[chain.length - 1]
+    if (!parentKey) continue
+    const children = childrenByParent.get(parentKey) ?? []
+    children.push(group)
+    childrenByParent.set(parentKey, children)
+  }
+  const out: PageGroup[] = []
+  const visited = new Set<string>()
+  const walk = (group: PageGroup) => {
+    if (visited.has(group.key)) return
+    visited.add(group.key)
+    const chain = chains.get(group.key) ?? []
+    out.push(chain.length ? { ...group, depth: chain.length, ancestorKeys: chain } : group)
+    for (const child of childrenByParent.get(group.key) ?? []) walk(child)
+  }
+  for (const group of sorted) if (!chains.get(group.key)?.length) walk(group)
+  for (const group of sorted) walk(group)
   if (unfiled.length)
     out.push({ key: UNFILED_GROUP_KEY, kind: "unfiled", label: "Unfiled", member: false, pages: unfiled })
   return out

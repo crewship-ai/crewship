@@ -191,7 +191,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// page_folders is how a workspace files its pages (#2527); a restore
 	// that dropped it would hand every page back Unfiled, and pages.folder_id
 	// points at it, so it cannot be left out without breaking the FK either.
-	"page_folders": IntentInclude,
+	"page_folder_structure": IntentInclude,
+	"page_folders":          IntentInclude,
 	// page_folder_acl is the folder's sharing (#2533), inherited by every
 	// page in it: a restore that lost it would silently narrow who reaches
 	// those pages, the same audit-trail loss page_grants guards against.

@@ -358,6 +358,7 @@ workspace backup and restore. These endpoints use `Cache-Control:no-store`.
 | GET | [`/api/v1/page-folders/{slug}`](#get-a-folder) | One folder and the pages in it the caller reaches |
 | PATCH | [`/api/v1/page-folders/{slug}`](#update-a-folder) | Rename a folder, change its icon or colour |
 | DELETE | [`/api/v1/page-folders/{slug}`](#delete-a-folder) | Delete an empty folder |
+| POST | [`/api/v1/page-folders/{slug}/parent`](#reparent-a-folder) | Move a folder without changing Page identity or sharing |
 | POST | [`/api/v1/page-folders/{slug}/pages`](#file-a-page-in-a-folder) | File a page in a folder (a move) |
 | POST | [`/api/v1/page-folders/{slug}/pages:batch`](#file-several-pages-in-a-folder) | File several pages in one all-or-nothing request |
 | DELETE | [`/api/v1/page-folders/{slug}/pages/{page}`](#remove-a-page-from-a-folder) | Take a page out of a folder |
@@ -1200,6 +1201,10 @@ MANAGER (or higher) who belongs to the owning crew.
 | `color` | string | Optional. A crew palette key: `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime` or `fuchsia`. |
 | `owner` | string | Required. `crew/<slug>` — a folder is owned by a crew, never by a person. |
 
+Optional `parent` (slug), `tree_version` and parent `acl_version` create a nested
+folder. A parent requires both nonnegative fences and live arrangement access.
+Existing root creation requires no fences. Maximum depth is eight folder levels.
+
 **Response 201:** the folder, `page_count` 0.
 
 **Statuses:**
@@ -1211,6 +1216,48 @@ MANAGER (or higher) who belongs to the owning crew.
 | 401 | No session or token. |
 | 403 | A MEMBER, or a MANAGER who does not belong to the owning crew. |
 | 409 | A folder with that slug already exists in the workspace. |
+
+---
+
+## Reparent a folder
+
+```
+POST /api/v1/page-folders/{slug}/parent
+```
+
+**Authentication:** human session cookie or CLI token; live workspace membership,
+source owning crew manager or workspace administrator, and target arrangement
+permission. Agents cannot reorganize folders.
+
+**Request body:** `parent` is a folder slug or null for workspace root;
+`tree_version` is a required nonnegative workspace structure fence; parent
+`acl_version` is required when `parent` is a slug. Unknown fields are refused.
+
+```json
+{"parent":"ops-board","tree_version":3,"acl_version":2}
+```
+
+**Response 200:** `{"tree_version":4}`. Page IDs, slugs, leaf folder membership
+and sharing stay unchanged. Parent ACL is never inherited. Reads include nullable
+`parent_id` only when the caller can see that direct parent, plus `tree_version`,
+`can_reparent` and `can_accept_folders`. Visible children of hidden parents appear
+at the viewer root. Notifications reveal no source or parent identifiers.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Reparented, or already at that parent. |
+| 400 | Malformed body or missing fences. |
+| 401 | Missing human authentication. |
+| 403 | Live membership or source/target authority refused. |
+| 404 | Unavailable source or target. |
+| 409 | Stale fences, cycle, more than eight levels including hidden descendants, or subtree exceeding 256 nodes. |
+| 500 | Internal failure. |
+
+Conflicts
+are not automatically retried. Deleting any folder with child folders also returns 409;
+contents and sharing never cascade. Workspace backup/fork preserves topology.
 
 ---
 

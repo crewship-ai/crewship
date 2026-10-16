@@ -542,6 +542,26 @@ describe("groupPagesByFolder", () => {
     expect(groups[1].folder).toEqual({ slug: "ops", name: "Ops", icon: "rocket", color: "amber" })
   })
 
+  it("walks a larger tree once in alphabetic sibling order, with malformed edges rooted", () => {
+    const folders = Array.from({ length: 1200 }, (_, i) => ({
+      id: `id-${i}`, slug: `node-${i}`, name: String(i).padStart(4, "0"),
+      icon: null, color: null, pageCount: 0,
+      parentId: i % 12 === 0 ? null : `id-${i - i % 12}`,
+    })).reverse()
+    folders.push({ id: "cycle-a", slug: "cycle-a", name: "Cycle A", icon: null, color: null, pageCount: 0, parentId: "cycle-b" })
+    folders.push({ id: "cycle-b", slug: "cycle-b", name: "Cycle B", icon: null, color: null, pageCount: 0, parentId: "cycle-a" })
+    folders.push({ id: "missing", slug: "missing", name: "Missing parent", icon: null, color: null, pageCount: 0, parentId: "hidden" })
+    const groups = groupPagesByFolder([], folders)
+    expect(groups).toHaveLength(1203)
+    expect(new Set(groups.map((group) => group.key)).size).toBe(1203)
+    expect(groups.slice(0, 1200).map((group) => group.key)).toEqual(
+      Array.from({ length: 1200 }, (_, i) => `folder/node-${i}`),
+    )
+    expect(groups[11]).toMatchObject({ depth: 1, ancestorKeys: ["folder/node-0"] })
+    expect(groups[12].depth).toBeUndefined()
+    expect(groups.slice(1200).every((group) => group.depth === undefined)).toBe(true)
+  })
+
   it("draws no Unfiled when nothing is unfiled, and no group at all for an empty list without folders", () => {
     expect(groupPagesByFolder(pages.filter((p) => p.folder), [ops]).map((g) => g.key)).toEqual(["folder/ops", "folder/zed"])
     expect(groupPagesByFolder([], [])).toEqual([])
