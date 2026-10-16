@@ -215,6 +215,10 @@ type Options struct {
 	// it with the same rule as /inbox. Nil shows only untargeted items: a
 	// caller that forgot to say who is looking must not see everyone's asks.
 	CanSeeInbox func(targetUserID, targetRole string) bool
+	// CanSeeInboxSource filters supported private source projections without
+	// emitting a gap, count, or edge that announces the withheld source.
+	// It runs after closing source rows so SQLite single-connection readers work.
+	CanSeeInboxSource func(context.Context, string) (bool, error)
 }
 
 // Walk bounds. A chain is a debugging aid, not an export: the caps exist so a

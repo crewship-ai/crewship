@@ -360,6 +360,15 @@ func (w *walker) lookupInboxByID(ctx context.Context, anchor string) (Node, bool
 	if err != nil {
 		return Node{}, false, err
 	}
+	if w.opt.CanSeeInboxSource != nil {
+		allowed, accessErr := w.opt.CanSeeInboxSource(ctx, id)
+		if accessErr != nil {
+			return Node{}, false, accessErr
+		}
+		if !allowed {
+			return Node{}, false, nil
+		}
+	}
 	// A hidden item anchors nothing, and says nothing about existing: the
 	// caller gets the same not-found as for an id that was never there.
 	if !w.canSeeInbox(targetUser, targetRole) {
@@ -844,7 +853,7 @@ func (w *walker) scanInboxNeighbour(fromID string) func(*sql.Rows) (neighbour, e
 		// The inbox's own audience, applied per row (#2986). Without it the
 		// walk returned a manager-targeted ask's title to any member.
 		if !w.canSeeInbox(targetUser, targetRole) {
-			return neighbour{hidden: true}, nil
+			return neighbour{hidden: true, node: inboxNode(id, kind, title, state, createdAt)}, nil
 		}
 		to := inboxNode(id, kind, title, state, createdAt)
 		return neighbour{node: to, edge: Edge{From: fromID, To: to.ID, Kind: EdgeProduces}}, nil
@@ -1147,10 +1156,29 @@ func (w *walker) collect(ctx context.Context, out *[]neighbour, query string, ar
 		return err
 	}
 	defer rows.Close()
+	var selected []neighbour
 	for rows.Next() {
 		nb, err := scan(rows)
 		if err != nil {
 			return err
+		}
+		selected = append(selected, nb)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, nb := range selected {
+		if nb.node.Kind == KindInbox && w.opt.CanSeeInboxSource != nil {
+			allowed, accessErr := w.opt.CanSeeInboxSource(ctx, nb.node.Ref)
+			if accessErr != nil {
+				return accessErr
+			}
+			if !allowed {
+				continue
+			}
 		}
 		if nb.hidden {
 			w.hiddenInbox++
@@ -1158,5 +1186,5 @@ func (w *walker) collect(ctx context.Context, out *[]neighbour, query string, ar
 		}
 		*out = append(*out, nb)
 	}
-	return rows.Err()
+	return nil
 }

@@ -148,6 +148,13 @@ func (h *QueryHandler) resolveTextDecision(req *http.Request, id, workspace, use
 	if err != nil {
 		return false, err
 	}
+	readable, readErr := chataudience.CanReadVerifiedEscalation(req.Context(), tx, workspace, id, user)
+	if readErr != nil {
+		return false, readErr
+	}
+	if !readable {
+		return false, errDecisionDenied
+	}
 	op, _ := req.Context().Value(decisionOperationKey{}).(*decisionOperation)
 	if op != nil {
 		a, e := chataudience.CaptureTrustedQuery(req.Context(), tx, op.Audience.ChatID, user, &op.Audience)

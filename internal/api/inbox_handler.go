@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
@@ -103,6 +104,8 @@ func inboxVisibilityClause(userID, role string) (string, []interface{}) {
 	}
 	clause += `
     )`
+	clause += ` AND (` + chataudience.VerifiedTextInboxReadSQL + `)`
+	args = append(args, chataudience.VerifiedTextReadArgs(userID)...)
 	return clause, args
 }
 
