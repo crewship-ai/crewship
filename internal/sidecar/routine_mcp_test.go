@@ -529,10 +529,11 @@ func TestRoutinesMCP_ListRoutines_ForwardsToWorkspace(t *testing.T) {
 // forwards to the internal run endpoint with workspace + invoker identity
 // injected from IPC (never the caller), and returns the run result payload.
 func TestRoutinesMCP_RunRoutine_ForwardsToInternalRun(t *testing.T) {
-	var gotPath string
+	var gotPath, gotProof string
 	var gotBody map[string]any
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotProof = r.Header.Get("X-Crewship-Run-Token")
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"run_id":"run-123","status":"COMPLETED"}`))
@@ -541,7 +542,7 @@ func TestRoutinesMCP_RunRoutine_ForwardsToInternalRun(t *testing.T) {
 
 	s := newRoutineMCPTestServer(t, &IPCConfig{
 		BaseURL: mock.URL, Token: "t", WorkspaceID: "ws-real",
-		CrewID: "crew-real", AgentID: "agent-real",
+		CrewID: "crew-real", AgentID: "agent-real", RunID: "bootstrap-run", RunChatID: "bootstrap-chat",
 	})
 	// Agent forges invoker identity — must be ignored; IPC values win.
 	body := `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{
@@ -568,6 +569,9 @@ func TestRoutinesMCP_RunRoutine_ForwardsToInternalRun(t *testing.T) {
 	}
 	if gotBody["invoking_crew_id"] != "crew-real" {
 		t.Errorf("invoking_crew_id = %v, want crew-real (forged value overwritten)", gotBody["invoking_crew_id"])
+	}
+	if gotProof != "" || gotBody["source_run_id"] != "" {
+		t.Fatalf("legacy transport invented fresh run correlation: proof=%t source=%v", gotProof != "", gotBody["source_run_id"])
 	}
 	if gotBody["slug"] != "daily-report" {
 		t.Errorf("slug = %v, want daily-report", gotBody["slug"])

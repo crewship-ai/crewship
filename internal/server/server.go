@@ -490,7 +490,7 @@ func (s *Server) mountAPIRouter(
 	// and a drain goroutine so the journal WRITE path never blocks on a
 	// slow/full hub (best-effort: it drops under sustained backpressure;
 	// subscribers reconcile via the SSE replay / a /api/v1/journal refetch).
-	journalBridge := newJournalWSBridge(wsHub, logger)
+	journalBridge := newJournalWSBridgeForSources(deps.DB, wsHub, logger)
 	// The live feed is read-only: audit-only recovered stops must remain
 	// visible without reaching automation or external notification observers.
 	s.journalWriter.AddReadObserver(journalBridge.observe)

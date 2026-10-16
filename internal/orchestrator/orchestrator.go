@@ -876,6 +876,7 @@ type ApprovalGate interface {
 }
 
 type ApprovalCheckInput struct {
+	Correlation map[string]any // trusted host provenance, excluded from rule/reward input
 	WorkspaceID string
 	CrewID      string
 	AgentID     string
@@ -899,12 +900,13 @@ type ApprovalCheckInput struct {
 }
 
 type ApprovalDecision struct {
-	Required  bool
-	Approved  bool
-	Denied    bool
-	Pending   bool
-	RequestID string
-	Reason    string
+	EffectiveMode string // actual gate mode after tuning
+	Required      bool
+	Approved      bool
+	Denied        bool
+	Pending       bool
+	RequestID     string
+	Reason        string
 }
 
 // EpisodicRecaller retrieves past similar journal entries for prompt

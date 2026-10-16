@@ -209,6 +209,7 @@ var TableCategory = map[string]string{
 	"user_models": CategoryMemory, "user_model_provenance": CategoryMemory, "agent_user_preferences": CategoryMemory,
 
 	// Chats.
+	"chat_issue_proposals": CategoryChats, "chat_proposal_operations": CategoryChats,
 	"chats": CategoryChats, "chat_branches": CategoryChats, "message_reactions": CategoryChats,
 	"agent_operations": CategoryChats, "chat_entity_refs": CategoryChats, // durable card history and its receipt parents
 	"message_feedback": CategoryChats, "chat_participants": CategoryChats, "chat_read_cursors": CategoryChats,

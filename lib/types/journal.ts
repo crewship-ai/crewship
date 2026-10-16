@@ -39,6 +39,9 @@ export const JOURNAL_ENTRY_TYPES = [
   "approval.denied",
   "approval.timeout",
   "approval.cancelled",
+  // Host-only privacy markers; ordinary journal reads suppress these rows.
+  "approval.source_retired",
+  "escalation.source_classified",
   // Standing decisions: "approve this gate for me from now on", and the
   // withdrawal of that permission. Namespaced under approval.* on purpose —
   // one filter has to show the one-off decision and the standing grant that

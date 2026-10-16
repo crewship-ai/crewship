@@ -17,9 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	_ "modernc.org/sqlite"
 )
 
@@ -1280,6 +1282,66 @@ func TestRunAgent_RegrantedCredentialRestartsReapedSidecar(t *testing.T) {
 			}
 			if restarted != (count == 0) {
 				t.Fatalf("count=%d restarted=%v", count, restarted)
+			}
+		})
+	}
+}
+
+// Requested sync can be auto-tuned to async. The actual decision controls flow.
+func TestRunAgent_ActualAsyncReviewProceeds(t *testing.T) {
+	t.Parallel()
+	st := newMemState()
+	container := covNewRunContainer(covRunOpts{stream: "{}\n"})
+	o := New(container, st, covQuietLogger())
+	gate := &covGate{dec: ApprovalDecision{Required: true, Pending: true, EffectiveMode: "async", RequestID: "review"}}
+	o.SetApprovalGate(gate)
+	req := covRunReq()
+	req.ApprovalMode = "sync"
+	if err := o.RunAgent(context.Background(), req, nil); err != nil {
+		t.Fatalf("nonblocking review halted execution: %v", err)
+	}
+	if got := covRunStatus(t, st, covRunID); got != "completed" {
+		t.Fatalf("status=%s", got)
+	}
+	container.mu.Lock()
+	effects := 0
+	for _, call := range container.calls {
+		if len(call.Cmd) > 0 && call.Cmd[0] == "stdbuf" {
+			effects++
+		}
+	}
+	container.mu.Unlock()
+	if effects != 1 {
+		t.Fatalf("paid execution count=%d", effects)
+	}
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if len(gate.got) != 1 || gate.got[0].Correlation["run_id"] != covRunID {
+		t.Fatalf("expected one gate with actual run identity: %+v", gate.got)
+	}
+}
+
+func TestApprovalRunCorrelationRequiresHostProvenance(t *testing.T) {
+	req := AgentRunRequest{RunID: "run", ChatID: "chat", WorkspaceID: "ws", AgentID: "agent"}
+	r := &chataudience.Receipt{ChatID: "chat", WorkspaceID: "ws", AgentID: "agent"}
+	for _, tc := range []struct {
+		name    string
+		receipt *chataudience.Receipt
+		trigger string
+		visible bool
+	}{
+		{"bootstrap", nil, "", false}, {"no trigger", r, "", false},
+		{"host chat", r, "message", true},
+		{"other agent", &chataudience.Receipt{ChatID: "chat", WorkspaceID: "ws", AgentID: "other"}, "message", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := runauthority.WithTriggerMessage(chataudience.WithReceipt(context.Background(), tc.receipt), tc.trigger)
+			got := approvalRunCorrelation(ctx, req)
+			if got["run_id"] != "run" {
+				t.Fatal(got)
+			}
+			if _, ok := got["chat_id"]; ok != tc.visible {
+				t.Fatalf("untrusted correlation: %+v", got)
 			}
 		})
 	}

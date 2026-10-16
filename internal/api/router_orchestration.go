@@ -49,7 +49,16 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/issue-mutation-outbox", authed(wsCtx(http.HandlerFunc(r.failedIssueMutationJobs))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/proposals", authed(wsCtx(http.HandlerFunc(r.chatProposals))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/proposals/{sourceId}", authed(wsCtx(http.HandlerFunc(r.chatProposalShow))))
+	r.authedMut("PATCH", "/api/v1/chats/{chatId}/proposals/{sourceId}", roleInline, r.chatProposalMutate)
+	r.authedMut("POST", "/api/v1/chats/{chatId}/proposals/{sourceId}/confirm", roleInline, r.chatProposalConfirm)
+	r.authedMut("POST", "/api/v1/chats/{chatId}/proposals/{sourceId}/discard", roleInline, r.chatProposalDiscard)
 	r.mux.Handle("GET /api/v1/chats/{chatId}/entity-refs", authed(wsCtx(http.HandlerFunc(r.chatEntityRefs))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/run-preflight", authed(wsCtx(http.HandlerFunc(r.chatRunPreflight))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/decisions", authed(wsCtx(http.HandlerFunc(r.chatDecisionList))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}", authed(wsCtx(http.HandlerFunc(r.chatDecisionGet))))
+	r.authedMut("POST", "/api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer", roleInline, r.chatDecisionAnswer)
 	r.mux.Handle("GET /api/v1/operations/{operationId}", authed(wsCtx(http.HandlerFunc(r.chatEntityOperation))))
 	r.mux.Handle("GET /api/v1/issues/{identifier}/revision", authed(wsCtx(http.HandlerFunc(r.issueEntityRevision))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision", authed(wsCtx(http.HandlerFunc(r.issueEntityRevision))))

@@ -47,6 +47,7 @@ var grandfatheredPrefixes = map[string]bool{
 var reservedSegments = []string{
 	"agent",
 	"assign",
+	"chat",
 	"connections",
 	"credentials",
 	"crew",

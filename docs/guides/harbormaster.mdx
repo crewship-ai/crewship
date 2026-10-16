@@ -28,6 +28,8 @@ const (
 | `ModeAsync` | If a rule matches, enqueue and return `Pending=true`. Caller continues. | Low-risk logging; humans see a trailing record but the agent never waits. |
 | `ModeSync` | Poll `approvals_queue` every second until status leaves `pending`. | High-risk actions that must not proceed without a human yes/no. |
 
+`Gate` stores the effective mode after reward tuning in `payload.gate_mode`. Whole-run `agent_run` approvals also carry host run correlation in `payload.correlation`; chat and trigger references appear only with authenticated host provenance. A configured sync gate may therefore produce a nonblocking async review, and a configured async gate may block after tuning. Legacy approval List/Get responses omit this new host correlation; authorized chat source adapters use the unchanged stored metadata. Pending reviews with an unknown adapter mode remain blocked. Direct human chat references additionally require a durable `run.started` source with a current host admission receipt. That requester is checked again after approval before execution proceeds; inherited, missing and legacy provenance contributes only the run ID and keeps its existing gate path.
+
 Sync mode respects `ctx.Done()` (so request cancellation unblocks the poll) and uses a client-side deadline (`TimeoutSecs`, default 3600) on top of the server-side timeout sweeper -- either can flip the row to `timeout` and unblock the gate.
 
 ## Rule evaluation
@@ -70,6 +72,29 @@ Before a run starts, the orchestrator calls the gate once with tool `agent_run`.
 | `full` | `none` | Autonomous — the gate is bypassed, journal-only. |
 
 Because the run-level mode is now sourced from policy on **every** dispatch path, the gate is live everywhere, not just interactive chat. Note that the baked-in default rule set does not match the `agent_run` tool, so raising a crew to `sync` does not block ordinary runs on its own — it takes effect once a rule matches the run (custom `agent_run` rules, cost, or a production target). The mode governs whether the rules are consulted at all.
+
+Operators can explicitly enable the existing whole-run rule for one crew:
+
+```bash
+crewship policy set --crew synthetic-gate-demo --level guided --whole-run-approval
+crewship policy get --crew synthetic-gate-demo --format json
+```
+
+`whole_run_approval` defaults to `false`; an omitted field preserves its saved
+value. The rule matches `agent_run` only. Autonomy still determines whether
+matches block (`strict`/`guided`), log without blocking (`trusted`) or are bypassed
+(`full`). Chat preflight and actual runtime load the same live crew setting.
+Reward tuning still applies, so use a new synthetic agent for an acceptance
+run rather than resetting another agent's approval history.
+
+For a bounded dev acceptance, create a dedicated synthetic crew and agent, enable
+the rule above, and read `crewship chat run-preflight CHAT_ID` before sending a
+human chat message. Confirm that the actual pending whole-run decision appears
+in `crewship chat decision list CHAT_ID`, review its source version, and answer
+through the existing decision API/CLI. Approving releases that specific run;
+rejecting starts no paid work. Change only this synthetic crew's setting back
+with `--whole-run-approval=false` when finished. Do not insert approval rows as
+substitute evidence: they do not prove that the runtime gate matched.
 
 ## Queue schema
 
@@ -363,3 +388,29 @@ decision *is* the signal (no LLM judge needed).
 - [Hooks](/guides/hooks) -- `on_approval_requested` event.
 - [`crewship approvals`](/cli/approvals), [Approvals API](/api-reference/approvals).
 - [`crewship escalation`](/cli/escalation), [Crews API](/api-reference/crews#crew-escalations) -- the escalation lifecycle.
+
+
+### Whole-run decision sources
+
+The chat decision adapter accepts only existing `agent_run` requests whose actual
+persisted gate mode is `sync` and whose host correlation matches a unique durable
+`USER` run start with a human admission receipt. Async reviews, per-tool approvals
+and legacy uncorrelated rows retain their existing Inbox flow. This adapter enables
+no new rule and grants no authority to start a run.
+
+Whole-run replies use `approve` or `reject`, an empty `values` object and no
+`action_id`. New writes require a current trusted chat audience, OWNER or ADMIN,
+and the existing `workspace:admin` token scope. The source version binds the
+reviewed intent. Retry key/hash metadata stays on the approval source row and is
+not serialized; retries recheck current read access and cannot transfer to a
+changed actor or answer.
+
+Newly host-correlated synchronous human approvals also enforce expiry and current
+operator admission, original chat generation and current source read audience
+in the canonical Inbox/store transaction. Approving also
+requires a live original requester. A currently authorized operator may reject a
+pending run after its requester loses access, because refusal grants no execution
+authority. A rejected
+check rolls back the provisional decision and emits no outcome. The committed
+winner alone runs the existing journal/reward tail. Uncorrelated legacy, per-tool
+and nonblocking approval semantics are preserved.

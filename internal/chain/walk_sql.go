@@ -360,6 +360,15 @@ func (w *walker) lookupInboxByID(ctx context.Context, anchor string) (Node, bool
 	if err != nil {
 		return Node{}, false, err
 	}
+	if w.opt.CanSeeInboxSource != nil {
+		allowed, accessErr := w.opt.CanSeeInboxSource(ctx, id)
+		if accessErr != nil {
+			return Node{}, false, accessErr
+		}
+		if !allowed {
+			return Node{}, false, nil
+		}
+	}
 	// A hidden item anchors nothing, and says nothing about existing: the
 	// caller gets the same not-found as for an id that was never there.
 	if !w.canSeeInbox(targetUser, targetRole) {
@@ -677,16 +686,23 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 	// package-level API cannot express "either", and issuing two queries
 	// would double the round trips to reconstruct one index union SQLite
 	// already does.
+	journalAudience := ""
+	journalArgs := []any{w.workspaceID, n.Ref, n.Ref}
+	if w.opt.JournalAudienceSQL != "" {
+		journalAudience = " AND (" + w.opt.JournalAudienceSQL + ")"
+		journalArgs = append(journalArgs, w.opt.JournalAudienceArgs...)
+	}
+	journalArgs = append(journalArgs, w.fanOutLimit())
 	if err := w.collect(ctx, &out, `
 		SELECT DISTINCT a.id, COALESCE(a.name,''), COALESCE(a.slug,''), COALESCE(a.status,'')
 		FROM journal_entries j
 		JOIN agents a ON a.id = j.actor_id AND a.workspace_id = j.workspace_id
 		WHERE j.workspace_id = ?
 		  AND j.actor_type = 'agent'
-		  AND (j.trace_id = ? OR j.run_id = ?)
+		  AND (j.trace_id = ? OR j.run_id = ?)`+journalAudience+`
 		ORDER BY a.id ASC
 		LIMIT ?`,
-		[]any{w.workspaceID, n.Ref, n.Ref, w.fanOutLimit()},
+		journalArgs,
 		func(rows *sql.Rows) (neighbour, error) {
 			var id, name, slug, status string
 			if err := rows.Scan(&id, &name, &slug, &status); err != nil {
@@ -844,7 +860,7 @@ func (w *walker) scanInboxNeighbour(fromID string) func(*sql.Rows) (neighbour, e
 		// The inbox's own audience, applied per row (#2986). Without it the
 		// walk returned a manager-targeted ask's title to any member.
 		if !w.canSeeInbox(targetUser, targetRole) {
-			return neighbour{hidden: true}, nil
+			return neighbour{hidden: true, node: inboxNode(id, kind, title, state, createdAt)}, nil
 		}
 		to := inboxNode(id, kind, title, state, createdAt)
 		return neighbour{node: to, edge: Edge{From: fromID, To: to.ID, Kind: EdgeProduces}}, nil
@@ -1147,10 +1163,29 @@ func (w *walker) collect(ctx context.Context, out *[]neighbour, query string, ar
 		return err
 	}
 	defer rows.Close()
+	var selected []neighbour
 	for rows.Next() {
 		nb, err := scan(rows)
 		if err != nil {
 			return err
+		}
+		selected = append(selected, nb)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, nb := range selected {
+		if nb.node.Kind == KindInbox && w.opt.CanSeeInboxSource != nil {
+			allowed, accessErr := w.opt.CanSeeInboxSource(ctx, nb.node.Ref)
+			if accessErr != nil {
+				return accessErr
+			}
+			if !allowed {
+				continue
+			}
 		}
 		if nb.hidden {
 			w.hiddenInbox++
@@ -1158,5 +1193,5 @@ func (w *walker) collect(ctx context.Context, out *[]neighbour, query string, ar
 		}
 		*out = append(*out, nb)
 	}
-	return rows.Err()
+	return nil
 }

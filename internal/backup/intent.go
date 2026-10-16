@@ -90,6 +90,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"agent_slug_reservations":  IntentInclude, // restored crew data under a slug stays out of reach of a new agent
 	"crew_members":             IntentInclude,
 	"chats":                    IntentInclude,
+	"chat_issue_proposals":     IntentInclude, // durable inert user intent and immutable source provenance
+	"chat_proposal_operations": IntentInclude, // source-owned idempotency receipts; no execution authority
 	"agent_operations":         IntentInclude, // durable mutation results and provenance; not a bearer authority
 	"issue_mutation_outbox":    IntentInclude, // source-transaction delivery intent; forks never resume effects
 	"chat_entity_refs":         IntentInclude, // durable chat cards, including human deletion receipts

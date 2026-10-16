@@ -177,6 +177,16 @@ func scopeForRoute(pattern string) string {
 		// pages:write scope arrives with the grant surface, which is what
 		// would make it mean something.
 		return "workspace:admin"
+	case "chats":
+		// Source proposals and decisions keep their canonical mutation scope.
+		// Their handlers enforce live source authority and replay eligibility.
+		if has("proposals") {
+			return "crews:write"
+		}
+		if has("decisions") {
+			return "workspace:admin"
+		}
+		return ""
 	case "e2e":
 		// The browser-test fixture surface (e2e_fixtures.go): registered
 		// only behind WithE2EFixtures, and it writes runs, sessions and

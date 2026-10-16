@@ -122,6 +122,8 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "approval.denied": XCircle,
   "approval.timeout": Clock,
   "approval.cancelled": Ban,
+  "approval.source_retired": ShieldCheck,
+  "escalation.source_classified": ShieldCheck,
   // A standing grant and its withdrawal. ShieldCheck is the one-off keeper
   // decision's icon and these are the durable form of the same idea; Ban is
   // the withdrawal, matching approval.cancelled, because both mean a decision

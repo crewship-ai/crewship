@@ -32,6 +32,36 @@ func TestCrewPolicy_Get_DefaultsToGuidedWarn(t *testing.T) {
 	if got.BehaviorMode != "warn" {
 		t.Errorf("behavior_mode = %q, want warn", got.BehaviorMode)
 	}
+	if got.WholeRunApproval {
+		t.Fatal("fresh crew opted into whole-run approval")
+	}
+}
+
+func TestCrewPolicy_WholeRunApprovalOptInPreservedWhenOmitted(t *testing.T) {
+	h, wsID, crewID := setupPolicyHandler(t)
+	path := "/api/v1/crews/" + crewID + "/policy"
+	for _, enabled := range []bool{true, false} {
+		for _, body := range []any{
+			crewPolicyUpdateBody{AutonomyLevel: "guided", BehaviorMode: "warn", WholeRunApproval: &enabled},
+			map[string]any{"autonomy_level": "guided", "behavior_mode": "warn"},
+			crewPolicyUpdateBody{AutonomyLevel: "guided", BehaviorMode: "warn", WholeRunApproval: nil},
+		} {
+			w := doPolicyRequest(h, http.MethodPut, path, body, wsID, "u1")
+			if w.Code != 200 {
+				t.Fatalf("PUT %d %s", w.Code, w.Body.String())
+			}
+			var got crewPolicyResponse
+			mustDecode(t, w.Body.Bytes(), &got)
+			if got.WholeRunApproval != enabled {
+				t.Fatalf("PUT whole_run_approval=%v want %v", got.WholeRunApproval, enabled)
+			}
+			w = doPolicyRequest(h, http.MethodGet, path, nil, wsID, "u1")
+			mustDecode(t, w.Body.Bytes(), &got)
+			if w.Code != 200 || got.WholeRunApproval != enabled {
+				t.Fatalf("GET %d %+v", w.Code, got)
+			}
+		}
+	}
 }
 
 // TestCrewPolicy_Put_HappyPath — operator sets trusted/warn with a

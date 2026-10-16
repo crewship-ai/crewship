@@ -96,8 +96,7 @@ func (a *hooksAdapter) Dispatch(ctx context.Context, event string, ec orchestrat
 // approvalGateAdapter wraps harbormaster.Gate so orchestrator.ApprovalGate
 // has a single point of entry. The Evaluator is configured with the
 // default rule set (destructive ops, cost thresholds, production
-// hostnames); workspace admins extend it via DB-backed rules in a
-// follow-up iteration.
+// hostnames), extended by the current crew's explicit whole-run opt-in.
 type approvalGateAdapter struct {
 	db        *sql.DB
 	journ     journal.Emitter
@@ -113,6 +112,10 @@ func newApprovalGateAdapter(db *sql.DB, j journal.Emitter) *approvalGateAdapter 
 }
 
 func (a *approvalGateAdapter) Check(ctx context.Context, in orchestrator.ApprovalCheckInput) (orchestrator.ApprovalDecision, error) {
+	correlation, origin, err := a.approvalOrigin(ctx, in)
+	if err != nil {
+		return orchestrator.ApprovalDecision{}, err
+	}
 	mode := harbormaster.ModeNone
 	switch in.Mode {
 	case "async":
@@ -120,7 +123,15 @@ func (a *approvalGateAdapter) Check(ctx context.Context, in orchestrator.Approva
 	case "sync":
 		mode = harbormaster.ModeSync
 	}
-	dec, err := harbormaster.Gate(ctx, a.db, a.journ, a.evaluator, harbormaster.GateInput{
+	evaluator := a.evaluator
+	if mode != harbormaster.ModeNone && a.db != nil {
+		var err error
+		evaluator, err = harbormaster.EvaluatorForCrew(ctx, a.db, in.WorkspaceID, in.CrewID, evaluator)
+		if err != nil {
+			return orchestrator.ApprovalDecision{}, err
+		}
+	}
+	dec, err := harbormaster.Gate(ctx, a.db, a.journ, evaluator, harbormaster.GateInput{
 		WorkspaceID: in.WorkspaceID,
 		CrewID:      in.CrewID,
 		AgentID:     in.AgentID,
@@ -129,20 +140,27 @@ func (a *approvalGateAdapter) Check(ctx context.Context, in orchestrator.Approva
 		Tool:        in.Tool,
 		Args:        in.Args,
 		Review:      in.Review,
+		Correlation: correlation,
 		Mode:        mode,
 	})
 	if err != nil {
 		return orchestrator.ApprovalDecision{}, err
 	}
+	if dec.Approved || (dec.Pending && dec.EffectiveMode == harbormaster.ModeAsync) {
+		if err := a.recheckApprovalOrigin(ctx, origin); err != nil {
+			return orchestrator.ApprovalDecision{}, err
+		}
+	}
 	return orchestrator.ApprovalDecision{
 		// Required=true means the gate matched at least one rule and an
 		// enqueue happened; NotGated=true on Decision means no rule hit.
-		Required:  !dec.NotGated,
-		Approved:  dec.Approved,
-		Denied:    dec.Denied,
-		Pending:   dec.Pending,
-		RequestID: dec.RequestID,
-		Reason:    dec.Reason,
+		EffectiveMode: dec.EffectiveMode.String(),
+		Required:      !dec.NotGated,
+		Approved:      dec.Approved,
+		Denied:        dec.Denied,
+		Pending:       dec.Pending,
+		RequestID:     dec.RequestID,
+		Reason:        dec.Reason,
 	}, nil
 }
 

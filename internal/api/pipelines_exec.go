@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/runauthority"
 )
@@ -545,6 +546,18 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Missing proof retains the legacy invocation path. An explicitly supplied
+	// credential must bind this exact workspace, agent and active source run.
+	verifiedInvocation := false
+	if proof := r.Header.Get("X-Crewship-Run-Token"); proof != "" {
+		key := internaltoken.DeriveAgentRunKey(h.runTokenSecret, body.WorkspaceID, body.InvokingCrewID)
+		ws, agent, run, valid := internaltoken.ValidateAgentRunToken(key, proof)
+		if h.runTokenSecret == "" || !valid || ws != body.WorkspaceID || agent != body.InvokingAgentID || run != body.SourceRunID {
+			writeChatIssueError(w, runauthority.ErrIdentityMismatch)
+			return
+		}
+		verifiedInvocation = true
+	}
 	p, err := h.store.GetBySlug(r.Context(), body.WorkspaceID, body.Slug)
 	if errors.Is(err, pipeline.ErrNotFound) {
 		replyError(w, http.StatusNotFound, "routine not found")
@@ -578,7 +591,7 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	originID := ""
+	originID, invocationSource := "", ""
 	if body.SourceRunID != "" {
 		tx, e := h.db.BeginTx(r.Context(), nil)
 		if e != nil {
@@ -591,6 +604,14 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 			writeChatIssueError(w, e)
 			return
 		}
+		if verifiedInvocation {
+			invocationSource, e = pipelineInvocationSource(r.Context(), tx, body.SourceRunID, body.InvokingAgentID, body.WorkspaceID)
+			if e != nil {
+				_ = tx.Rollback()
+				writeChatIssueError(w, e)
+				return
+			}
+		}
 		if e = tx.Commit(); e != nil {
 			writeChatIssueError(w, e)
 			return
@@ -599,14 +620,15 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 	}
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
-		PipelineID:      p.ID,
-		ChatOriginID:    originID,
-		WorkspaceID:     body.WorkspaceID,
-		InvokingCrewID:  body.InvokingCrewID,
-		InvokingAgentID: body.InvokingAgentID,
-		Inputs:          body.Inputs,
-		Mode:            pipeline.ModeRun,
-		TriggeredVia:    pipeline.TriggeredViaCallPipeline,
+		PipelineID:            p.ID,
+		ChatOriginID:          originID,
+		InvocationSourceRunID: invocationSource,
+		WorkspaceID:           body.WorkspaceID,
+		InvokingCrewID:        body.InvokingCrewID,
+		InvokingAgentID:       body.InvokingAgentID,
+		Inputs:                body.Inputs,
+		Mode:                  pipeline.ModeRun,
+		TriggeredVia:          pipeline.TriggeredViaCallPipeline,
 	})
 	if err != nil {
 		if writeRoutineOriginError(w, err) {
