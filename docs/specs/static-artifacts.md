@@ -60,7 +60,9 @@ two upload slots cover decoding through publication. Limits are 30 revisions
 per Page per rolling hour and 200 per workspace per rolling hour. At most 200
 source revisions are retained per Page. Retained Board/source references pin
 exact bytes; a fully pinned retention window refuses a write instead of dropping
-pinned history. Receipts for removed source have a 24-hour replay window.
+pinned history. Publication receipts for removed source have a 24-hour replay window. Restore
+retries still require their original source revision to be retained; a receipt
+does not itself pin that source.
 Encrypted workspace/instance backup includes source blobs; fork remaps Page
 namespaces and restores requests inertly, as specified by the foundation.
 

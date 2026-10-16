@@ -22,12 +22,12 @@ import (
 // retry preserves its Page identity, CAS and receipt instead of rebasing.
 func TestAcceptance_PageArtifactHumanFlow(t *testing.T) {
 	db := testutil.MigratedDB(t).DB
-	const ws = "artifact-cli-ws"
+	const ws = "cstaticartifactworkspace0001"
 	token := "crewship_cli_staticfixture000000000000000"
 	for _, q := range []string{
-		`INSERT INTO workspaces(id,name,slug) VALUES('artifact-cli-ws','Static','static-cli')`,
+		`INSERT INTO workspaces(id,name,slug) VALUES('cstaticartifactworkspace0001','Static','static-cli')`,
 		`INSERT INTO users(id,email) VALUES('artifact-cli-owner','static@example.invalid')`,
-		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('artifact-cli-member','artifact-cli-ws','artifact-cli-owner','OWNER')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('artifact-cli-member','cstaticartifactworkspace0001','artifact-cli-owner','OWNER')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)

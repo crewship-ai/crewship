@@ -30,9 +30,11 @@ func staticArtifactsSchemaCatalog() map[string]DomainSchema {
 		required := []string{"page_id", "base_rev", "mutation_id"}
 		if restore {
 			props["revision"] = map[string]any{"type": "integer", "minimum": 1}
+			props["html"] = map[string]any{"type": "string", "enum": []string{""}}
 			required = append(required, "revision")
 		} else {
 			props["html"] = str()
+			props["revision"] = integer()
 			required = append(required, "html")
 		}
 		return strictObj(props, required...)

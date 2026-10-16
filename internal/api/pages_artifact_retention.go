@@ -15,9 +15,6 @@ var errArtifactReceiptLimit = errors.New("artifact mutation receipt limit reache
 // Reserve one source slot. Discussion, active jobs and Board pins retain exact
 // source bytes. Historical restore provenance remains a revision number; the
 // restored revision contains its own immutable source and needs no extra pin.
-func reserveArtifactRevision(ctx context.Context, tx *sql.Tx, pageID string, restoring ...int64) error {
-	return reserveArtifactRevisionAt(ctx, tx, pageID, time.Now(), restoring...)
-}
 func reserveArtifactRevisionAt(ctx context.Context, tx *sql.Tx, pageID string, now time.Time, restoring ...int64) error {
 	if err := compactArtifactReceipts(ctx, tx, pageID, now); err != nil {
 		return err
