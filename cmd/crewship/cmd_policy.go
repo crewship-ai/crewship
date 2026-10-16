@@ -126,6 +126,7 @@ Examples:
 			{"CREW", p.CrewID},
 			{"AUTONOMY", p.AutonomyLevel},
 			{"BEHAVIOR", p.BehaviorMode},
+			{"WHOLE RUN APPROVAL", fmt.Sprint(p.WholeRunApproval)},
 			{"SET BY", dashIfEmpty(p.SetByUserID)},
 			{"SET AT", dashIfEmpty(p.SetAt)},
 			{"REASON", dashIfEmpty(p.Reason)},
@@ -146,6 +147,8 @@ Validation:
   --level    must be one of: strict | guided | trusted | full
   --behavior must be one of: warn | block (default: warn)
   --reason   required when --level=full (the API rejects without it)
+  --whole-run-approval[=false] opts this crew into existing agent_run gate rules
+             (requires --level; omitted preserves the saved setting)
 
 Loose transitions (any → trusted | full) prompt for confirmation
 unless --yes is passed. This matches the safety idiom used by
@@ -178,9 +181,14 @@ At least one of --level / --max-ephemeral is required; --max-ephemeral
 		// it can be set on its own or alongside --level.
 		maxEphemeral, _ := cmd.Flags().GetInt("max-ephemeral")
 		maxEphemeralSet := cmd.Flags().Changed("max-ephemeral")
+		wholeRunApproval, _ := cmd.Flags().GetBool("whole-run-approval")
+		wholeRunApprovalSet := cmd.Flags().Changed("whole-run-approval")
 
 		if crewSlug == "" {
 			return errors.New("--crew is required")
+		}
+		if wholeRunApprovalSet && level == "" {
+			return errors.New("--whole-run-approval requires --level")
 		}
 		// At least one thing to change: a policy level or the ephemeral quota.
 		if level == "" && !maxEphemeralSet {
@@ -236,9 +244,30 @@ At least one of --level / --max-ephemeral is required; --max-ephemeral
 		}
 
 		if level != "" {
-			body := map[string]string{
+			if wholeRunApprovalSet {
+				resp, err := client.Get("/api/v1/crews/" + url.PathEscape(crewID) + "/policy")
+				if err != nil {
+					return err
+				}
+				if err := cli.CheckError(resp); err != nil {
+					return err
+				}
+				var current struct {
+					WholeRunApproval *bool `json:"whole_run_approval"`
+				}
+				if err := cli.ReadJSON(resp, &current); err != nil {
+					return err
+				}
+				if current.WholeRunApproval == nil {
+					return errors.New("server does not support whole-run approval policy; upgrade the server before changing this setting")
+				}
+			}
+			body := map[string]any{
 				"autonomy_level": level,
 				"behavior_mode":  behavior,
+			}
+			if wholeRunApprovalSet {
+				body["whole_run_approval"] = wholeRunApproval
 			}
 			if reason != "" {
 				body["reason"] = strings.TrimSpace(reason)
@@ -252,10 +281,17 @@ At least one of --level / --max-ephemeral is required; --max-ephemeral
 				return err
 			}
 
-			var p policyWire
-			if err := cli.ReadJSON(resp, &p); err != nil {
+			var updated struct {
+				policyWire
+				WholeRunApprovalValue *bool `json:"whole_run_approval"`
+			}
+			if err := cli.ReadJSON(resp, &updated); err != nil {
 				return err
 			}
+			if wholeRunApprovalSet && (updated.WholeRunApprovalValue == nil || *updated.WholeRunApprovalValue != wholeRunApproval) {
+				return errors.New("server did not confirm the requested whole-run approval setting; read the current policy before retrying")
+			}
+			p := updated.policyWire
 			cli.PrintSuccess(fmt.Sprintf("Policy updated for crew %s: %s / %s", p.CrewID, p.AutonomyLevel, p.BehaviorMode))
 		}
 
@@ -392,12 +428,13 @@ Examples:
 // field on the API side requires extending this struct in lockstep
 // (the CLI silently drops unknown JSON fields on decode).
 type policyWire struct {
-	CrewID        string `json:"crew_id" yaml:"crew_id"`
-	AutonomyLevel string `json:"autonomy_level" yaml:"autonomy_level"`
-	BehaviorMode  string `json:"behavior_mode" yaml:"behavior_mode"`
-	SetByUserID   string `json:"set_by_user_id,omitempty" yaml:"set_by_user_id,omitempty"`
-	SetAt         string `json:"set_at,omitempty" yaml:"set_at,omitempty"`
-	Reason        string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	WholeRunApproval bool   `json:"whole_run_approval" yaml:"whole_run_approval"`
+	CrewID           string `json:"crew_id" yaml:"crew_id"`
+	AutonomyLevel    string `json:"autonomy_level" yaml:"autonomy_level"`
+	BehaviorMode     string `json:"behavior_mode" yaml:"behavior_mode"`
+	SetByUserID      string `json:"set_by_user_id,omitempty" yaml:"set_by_user_id,omitempty"`
+	SetAt            string `json:"set_at,omitempty" yaml:"set_at,omitempty"`
+	Reason           string `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
 func init() {
@@ -409,6 +446,7 @@ func init() {
 	policySetCmd.Flags().String("reason", "", "Operator-supplied reason (required when --level=full)")
 	policySetCmd.Flags().Int("max-ephemeral", -1, "Per-crew hire quota: max live ephemeral agents (0-100). Can be set with or without --level")
 	policySetCmd.Flags().Bool("yes", false, "Skip the loose-transition confirmation prompt")
+	policySetCmd.Flags().Bool("whole-run-approval", false, "Opt into whole-run approval rules (requires --level; omitted preserves current setting)")
 
 	policyCmd.AddCommand(policyGetCmd)
 	policyCmd.AddCommand(policySetCmd)
