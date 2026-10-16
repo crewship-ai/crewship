@@ -11,6 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Proposal comments address the chat agent explicitly.** “Send comment to agent” now includes its canonical mention so shared chats trigger the requested reply; rejected sends keep the comment draft.
 
+- **Guests can connect their CLI from the account menu.** Connect CLI now opens the existing browser pairing dialog for Guest accounts after access loads, retaining their current grants. Guest menus also avoid an unavailable system-version request.
 - ⚠️ **Behaviour change: enabling privileged runtime access requires an instance administrator.** Workspace OWNER/ADMIN rights alone no longer enable `allow_privileged_credentials`. Scoped CLI tokens also need `instance:admin`. Workspace administrators may still disable the opt-in; existing privileged containers require separate review and recreation.
 
 - **Protected chat runs wait for confirmed execution results after their observer disconnects.** Chat preserves partial replies and leaves the run admitted for retained-output reconciliation instead of recording a false failure or cancellation.

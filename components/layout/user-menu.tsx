@@ -59,9 +59,11 @@ const ICON = "h-4 w-4 text-muted-foreground"
 export function UserMenu() {
   const { session, signOut } = useAuth()
   const { workspace, workspaceId, role: workspaceRole } = useWorkspace()
-  // A restricted session (#2861) gets account security only — no pairing, no
-  // notification matrix — so those rows are not offered to it.
-  const trusted = useAccessMode() === "trusted"
+  // Guest browser pairing is account security (#3310). Profile and
+  // notification settings still require trusted access.
+  const accessMode = useAccessMode()
+  const trusted = accessMode === "trusted"
+  const canPair = accessMode !== "loading"
   const [open, setOpen] = useState(false)
   const [pairOpen, setPairOpen] = useState(false)
 
@@ -138,7 +140,7 @@ export function UserMenu() {
                 <ActiveSessionsCount />
               </Link>
             </DropdownMenuItem>
-            {trusted && (
+            {canPair && (
               <DropdownMenuItem
                 className={ITEM}
                 onSelect={() => {
@@ -196,11 +198,11 @@ export function UserMenu() {
               <LogOut className="h-4 w-4" />
               Log out
             </DropdownMenuItem>
-            <BuildFooter />
+            {trusted && <BuildFooter />}
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
-      {trusted && <ConnectCliDialog open={pairOpen} onOpenChange={setPairOpen} />}
+      {canPair && <ConnectCliDialog open={pairOpen} onOpenChange={setPairOpen} />}
     </>
   )
 }
