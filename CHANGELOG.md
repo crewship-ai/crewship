@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Shared Guest issue searches have a bounded rate budget.** Browser sessions and CLI tokens share account/workspace and project budgets, including empty searches and pagination. Temporary limits return 429 with retry guidance; existing project audiences, counts and detail permissions are preserved.
+
 - **Proposal comments address the chat agent explicitly.** “Send comment to agent” now includes its canonical mention so shared chats trigger the requested reply; rejected sends keep the comment draft.
 
 - **Guests can connect their CLI from the account menu.** Connect CLI now opens the existing browser pairing dialog for Guest accounts after access loads, retaining their current grants. Guest menus also avoid an unavailable system-version request.

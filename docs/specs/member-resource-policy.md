@@ -175,6 +175,24 @@ searching this dedicated Guest projection does not open them. Collection
 `X-Total-Count` counts the filtered total before pagination; the next-offset header
 supports pagination.
 
+Shared issue collection requests (including empty search and pagination) have a
+per-process authenticated budget shared by browser sessions and CLI tokens of the
+same user/workspace: default 20/minute, burst 15, plus 20/minute, burst 5 for
+each explicitly authorized project or the all-project selection. Both budgets
+are charged together only when admitted. Query text, offset and IP do not create
+new budgets. Detail, comments and project metadata are outside this policy.
+Invalid inputs and forbidden explicit projects retain their existing errors.
+A refusal returns generic 429, `Cache-Control: no-store` and rounded-up
+`Retry-After` seconds; it discloses no audience or workspace counts.
+
+The lazy limiter retains at most 4096 user/workspace entries and 257 audiences
+per entry (256 valid List projects plus all-projects). Capacity overflow is the
+same transient 429; active entries are never evicted to grant a fresh burst.
+Idle entries expire after at least five minutes and the configured full-refill
+interval. Rate settings are exposed in Rate Limiters; process restart resets
+these in-memory budgets and replicas enforce their own budgets. Rate limiting
+does not truncate counts or bound the cost of one large authorized search.
+
 The web catalog keeps an unsubmitted new-issue draft when the search changes.
 A confirmed creation shows its identifier and, when readable, a detail link even
 if the current filter hides the new row. An unconfirmed or other-project response
