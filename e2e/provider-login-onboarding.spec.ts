@@ -198,8 +198,8 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await page.goto("/credentials")
     if (viewport.width > 640) await pinSidebar(page)
     // Open from Recently used is unavailable for an unused secret; the rail is
-    // the canonical list. At mobile width, open it through the explorer toggle.
-    if (viewport.width < 640) await page.getByRole("button", { name: "Expand sidebar", exact: true }).click()
+    // the canonical list. At mobile width it is the panel sheet in the top bar.
+    if (viewport.width < 640) await page.getByRole("button", { name: "Vault", exact: true }).click()
     await page.getByText("Example certificate", { exact: true }).first().click()
     await expect(page.getByTestId("connection-verification")).toContainText("Connection not verified")
     await expect(page.locator('[aria-label="Assigned agents"]')).toContainText("Alex")
