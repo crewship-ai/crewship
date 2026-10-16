@@ -11,11 +11,11 @@ const match = z.object({
   slug: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
   name: z.string().max(4096),
   content_type: z.enum(["document", "slides"]),
-  schema_version: z.number().int().min(1).max(2),
+  schema_version: z.number().int().min(1).max(3),
   source_revision: z.number().int().nonnegative(),
   source_generation: z.number().int().nonnegative(),
   snippet: z.string().refine(value => new TextEncoder().encode(value).length <= 512),
-}).strict()
+}).strict().refine(value => value.content_type === "document" || value.schema_version <= 2)
 const responseSchema = z.object({
   scope: z.literal("native-docs-slides"),
   matches: z.array(match).max(50),

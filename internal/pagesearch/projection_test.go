@@ -45,7 +45,7 @@ func TestDocumentLeafProjectionAndCompleteSourceBinding(t *testing.T) {
 		"mismatched leaf":  func(_ *SourceTag, o *[]DocumentBlock, _ *[]BlockHash) { (*o)[2].Hash = strings.Repeat("e", 64) },
 		"missing ancestor": func(_ *SourceTag, o *[]DocumentBlock, _ *[]BlockHash) { *o = (*o)[1:] },
 		"cycle":            func(_ *SourceTag, o *[]DocumentBlock, _ *[]BlockHash) { (*o)[0].Parent = "item" },
-		"unknown schema":   func(s *SourceTag, _ *[]DocumentBlock, _ *[]BlockHash) { s.Schema = 3 },
+		"unknown schema":   func(s *SourceTag, _ *[]DocumentBlock, _ *[]BlockHash) { s.Schema = 4 },
 		"unknown type":     func(_ *SourceTag, o *[]DocumentBlock, _ *[]BlockHash) { (*o)[2].Type = "codeBlock" },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -188,9 +188,9 @@ func TestProjectionCacheEncodingRejectsCorruption(t *testing.T) {
 		t.Fatal("corrupt bytes admitted")
 	}
 	for _, raw := range [][]byte{
-		[]byte(strings.Replace(string(raw), `"adapter_version":1`, `"adapter_version":1,"adapter_version":1`, 1)),
-		[]byte(strings.Replace(string(raw), `"adapter_version":1`, `"adapter_version":2`, 1)),
-		[]byte(strings.Replace(string(raw), `"adapter_version":1`, `"adapter_version":1,"unexpected":true`, 1)),
+		[]byte(strings.Replace(string(raw), `"adapter_version":2`, `"adapter_version":2,"adapter_version":2`, 1)),
+		[]byte(strings.Replace(string(raw), `"adapter_version":2`, `"adapter_version":1`, 1)),
+		[]byte(strings.Replace(string(raw), `"adapter_version":2`, `"adapter_version":2,"unexpected":true`, 1)),
 		append(append([]byte{}, raw...), []byte(` {}`)...),
 	} {
 		sum := sha256.Sum256(raw)
@@ -225,5 +225,28 @@ func TestFreshDocumentRevisionZeroIsSearchable(t *testing.T) {
 	source.Revision = 1
 	if err := source.Validate(); err != nil {
 		t.Fatalf("Slides head1 rejected: %v", err)
+	}
+}
+
+func TestDocumentAdapterMatchedVersionsAndRichCodeLeaf(t *testing.T) {
+	source, outline, blocks := documentFixture(t)
+	for _, schema := range []int{1, 2, 3} {
+		source.Schema = schema
+		projection, err := FromDocument(source, outline, blocks)
+		if err != nil || len(projection.Segments) != 2 {
+			t.Fatalf("schema%d leaf adapter: %+v %v", schema, projection, err)
+		}
+	}
+	source.Schema = 3
+	outline[len(outline)-1].Type = "codeBlock"
+	projection, err := FromDocument(source, outline, blocks)
+	if err != nil || projection.Segments[1].Kind != "codeBlock" {
+		t.Fatalf("rich code leaf unavailable: %+v %v", projection, err)
+	}
+	for _, schema := range []int{1, 2, 4} {
+		source.Schema = schema
+		if _, err := FromDocument(source, outline, blocks); !errors.Is(err, ErrUnsupported) {
+			t.Fatalf("schema%d admitted unsupported code leaf: %v", schema, err)
+		}
 	}
 }

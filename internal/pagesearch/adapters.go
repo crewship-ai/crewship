@@ -40,7 +40,10 @@ func FromDocument(source SourceTag, outline []DocumentBlock, persisted []BlockHa
 		}
 		seen[block.ID] = true
 		switch block.Type {
-		case "paragraph", "heading":
+		case "paragraph", "heading", "codeBlock":
+			if block.Type == "codeBlock" && source.Schema != 3 {
+				return projection, ErrUnsupported
+			}
 			projection.Segments = append(projection.Segments, Segment{Kind: block.Type, TargetID: block.ID, ParentID: block.Parent, Text: block.Text})
 		case "table", "tableRow", "tableCell", "tableHeader", "bulletList", "orderedList", "listItem":
 			// Their computed text repeats descendants. Do not index it.

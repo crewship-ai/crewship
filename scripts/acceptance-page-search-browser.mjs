@@ -48,6 +48,7 @@ try {
   const raw = await (await reader.request.get(searchURL)).text()
   const result = JSON.parse(raw)
   assert.deepEqual(result.matches.map(item => item.page_id), ['search-browser-doc', 'search-browser-original'])
+  assert.equal(result.matches[0].schema_version, 3, 'matched rich Doc text and code leaves must contribute')
   assert.ok(!raw.includes('search-browser-hidden'))
   assert.equal(result.has_more, false)
   await writeFile(join(output, 'reader-results.json'), raw, { mode: 0o600 })

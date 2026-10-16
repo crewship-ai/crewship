@@ -61,6 +61,11 @@ func TestNativeSearchSourceGuardRechecksAfterCandidateAndAtCacheRead(t *testing.
 	}
 	_ = tx.Rollback()
 	execOrFatal(t, h.db, `UPDATE documents SET generation=generation-1 WHERE page_id=?`, page)
+	execOrFatal(t, h.db, `UPDATE documents SET schema_version=3 WHERE page_id=?`, page)
+	if err = store.Publish(request.Context(), projection, guard); !errors.Is(err, pagesearch.ErrSourceChanged) {
+		t.Fatalf("schema change published old projection: %v", err)
+	}
+	execOrFatal(t, h.db, `UPDATE documents SET schema_version=2 WHERE page_id=?`, page)
 	// Revoking only the real session, keeping membership/grants, is sufficient.
 	if err = sessions.NewDBStore(h.db).Revoke(t.Context(), UserFromContext(request.Context()).SessionID, "synthetic search CAS revocation"); err != nil {
 		t.Fatal(err)

@@ -38,7 +38,7 @@ export function NativePageSearchDialog({ workspaceId, viewerId, onClose, onOpenP
         </li>)}
       </ul>}
       {search.cursor && <Button type="button" variant="outline" className="coarse:min-h-12" disabled={search.busy} onClick={() => { void search.search(query, true) }}>Next results</Button>}
-      <p className="text-xs text-muted-foreground">Each result page rechecks access. Results expire after 15 seconds or a content/access notification; search again explicitly. An unavailable index never counts as no results.</p>
+      <p className="text-xs text-muted-foreground">Each result page rechecks access. Results expire after 15 seconds or a content/access notification; search again explicitly. If search is unavailable, an error appears instead of empty results.</p>
     </DialogContent>
   </Dialog>
 }

@@ -5,6 +5,10 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +25,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/pagesearch"
 )
 
@@ -158,6 +163,14 @@ func TestNativeSearchManagedProjection(t *testing.T) {
 	if _, matched, err := query.Match(projection); err != nil || !matched {
 		t.Fatalf("actual managed leaf text missing: %v", err)
 	}
+	oldEncoded := bytes.Replace(encoded, []byte(`"adapter_version":2`), []byte(`"adapter_version":1`), 1)
+	oldDigest := sha256.Sum256(oldEncoded)
+	execOrFatal(t, h.db, `UPDATE page_search_projections SET adapter_version=1,encoded=?,encoded_sha256=? WHERE page_id=?`, oldEncoded, hex.EncodeToString(oldDigest[:]), pageID)
+	call("GET", "/api/v1/pages/search/content?q=needle", nil, 200)
+	var cacheVersion int
+	if err = h.db.QueryRow(`SELECT adapter_version FROM page_search_projections WHERE page_id=?`, pageID).Scan(&cacheVersion); err != nil || cacheVersion != pagesearch.AdapterVersion {
+		t.Fatalf("old derived adapter not canonically rebuilt: %d %v", cacheVersion, err)
+	}
 	state := call("GET", endpoint, nil, 200)
 	call("POST", endpoint+"/checkpoint", map[string]any{"id": "search-before-human", "schema": 2, "epoch": state["epoch"], "ifRev": state["rev"]}, 200)
 	execOrFatal(t, h.db, `DELETE FROM page_search_projections WHERE page_id=?`, pageID)
@@ -184,6 +197,17 @@ func TestNativeSearchManagedProjection(t *testing.T) {
 			_, status, e = request("POST", endpoint+"/patch", patch)
 			if e != nil || status != 200 {
 				e = fmt.Errorf("actual human patch status%d error%v", status, e)
+				injectionErrors <- e
+				return nil, 500, e
+			}
+		} else if mode.CompareAndSwap(4, 0) {
+			var observed map[string]any
+			if e = json.Unmarshal(raw, &observed); e != nil {
+				return nil, 500, e
+			}
+			_, status, e = request("POST", endpoint+"/upgrade", map[string]any{"id": "search-upgrade-after-read", "schema": 2, "target_schema": 3, "page_id": pageID, "epoch": observed["epoch"], "ifRev": observed["rev"]})
+			if e != nil || status != 200 {
+				e = fmt.Errorf("actual upgrade after read status%d error%v", status, e)
 				injectionErrors <- e
 				return nil, 500, e
 			}
@@ -233,6 +257,58 @@ func TestNativeSearchManagedProjection(t *testing.T) {
 	if err != nil || projection.Source.Revision != 2 || projection.Source.Generation != 1 || projection.Segments[0].Text != "initial needle" {
 		t.Fatalf("restore did not rebuild canonical text: %+v %v", projection, err)
 	}
+	// Legacy initialization is a trusted fixture made by the real version1
+	// Yjs encoder/Store. All subsequent reads/materialization/query are actual
+	// HTTP managed operations with the requesting human's current credential.
+	nativeSearchSeedLegacyDocument(t, h, root, workspace, owner)
+	const richPage = "search-rich-page"
+	execOrFatal(t, h.db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?,?,'search-rich','Rich search',?,'{}')`, richPage, workspace, owner)
+	richBody := map[string]any{"type": "doc", "content": []any{
+		map[string]any{"type": "paragraph", "attrs": map[string]any{"id": "rich-inline"}, "content": []any{
+			map[string]any{"type": "text", "text": "linked needle", "marks": []any{map[string]any{"type": "link", "attrs": map[string]any{"href": "https://example.test/secret-href-canary"}}}},
+			map[string]any{"type": "text", "text": " inline-code", "marks": []any{map[string]any{"type": "code", "attrs": map[string]any{}}}},
+		}},
+		map[string]any{"type": "codeBlock", "attrs": map[string]any{"id": "rich-code"}, "content": []any{map[string]any{"type": "text", "text": "code-leaf second needle <literal>"}}},
+	}}
+	call("POST", "/api/v1/pages/search-rich/document/initialize", map[string]any{"id": "rich-search-init", "schema": 3, "page_id": richPage, "body": richBody}, 200)
+	mixed := call("GET", "/api/v1/pages/search/content?q=needle", nil, 200)
+	versions := map[int]bool{}
+	for _, item := range mixed["matches"].([]any) {
+		versions[int(item.(map[string]any)["schema_version"].(float64))] = true
+	}
+	if len(mixed["matches"].([]any)) != 3 || !versions[1] || !versions[2] || !versions[3] {
+		t.Fatalf("mixed actual schema coverage: %+v", mixed)
+	}
+	codeMatch := call("GET", "/api/v1/pages/search/content?q=code-leaf%20second", nil, 200)
+	if results := codeMatch["matches"].([]any); len(results) != 1 || results[0].(map[string]any)["page_id"] != richPage {
+		t.Fatalf("rich code leaf missing: %+v", codeMatch)
+	}
+	noHref := call("GET", "/api/v1/pages/search/content?q=secret-href-canary", nil, 200)
+	if len(noHref["matches"].([]any)) != 0 {
+		t.Fatalf("link href entered index: %+v", noHref)
+	}
+	execOrFatal(t, h.db, `UPDATE documents SET schema_version=4 WHERE page_id=?`, richPage)
+	unknownRaw, unknownStatus, unknownErr := request("GET", "/api/v1/pages/search/content?q=needle", nil)
+	if unknownErr != nil || unknownStatus != 422 || bytes.Contains(unknownRaw, []byte(`"matches"`)) {
+		t.Fatalf("unknown4 returned partial matches: %d %v %s", unknownStatus, unknownErr, unknownRaw)
+	}
+	execOrFatal(t, h.db, `UPDATE documents SET schema_version=3 WHERE page_id=?`, richPage)
+	// A real human schema2→3 upgrade after managed read invalidates the old
+	// source stamp just like a content commit; a source-schema change is not
+	// silently relabeled current. Restore returns to its retained schema2.
+	execOrFatal(t, h.db, `DELETE FROM page_search_projections WHERE page_id=?`, pageID)
+	mode.Store(4)
+	call("POST", "/fixture-materialize", nil, 409)
+	if err = h.db.QueryRow(`SELECT count(*) FROM page_search_projections WHERE page_id=?`, pageID).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("old schema published after upgrade: %d %v", rows, err)
+	}
+	state = call("GET", endpoint, nil, 200)
+	if state["schema"] != float64(3) {
+		t.Fatalf("actual schema upgrade missing: %+v", state)
+	}
+	call("POST", "/fixture-materialize", nil, 204)
+	call("POST", endpoint+"/restore", map[string]any{"id": "search-rich-return", "schema": 3, "page_id": pageID, "checkpoint": "search-before-human", "epoch": state["epoch"], "ifRev": state["rev"]}, 200)
+	call("POST", "/fixture-materialize", nil, 204)
 	// A native Page created after the initial candidate snapshot cannot be
 	// silently omitted from the final result. The complete retry rebuilds both.
 	execOrFatal(t, h.db, `DELETE FROM page_search_projections WHERE page_id=?`, pageID)
@@ -247,7 +323,7 @@ func TestNativeSearchManagedProjection(t *testing.T) {
 	default:
 	}
 	search := call("GET", "/api/v1/pages/search/content?q=needle", nil, 200)
-	if matches, ok := search["matches"].([]any); !ok || len(matches) != 2 {
+	if matches, ok := search["matches"].([]any); !ok || len(matches) != 4 {
 		t.Fatalf("complete canonical retry omitted new candidate: %+v", search)
 	}
 	execOrFatal(t, h.db, `DELETE FROM page_search_projections WHERE page_id=?`, pageID)
@@ -264,7 +340,7 @@ func TestNativeSearchManagedProjection(t *testing.T) {
 	if err = h.db.QueryRow(`SELECT count(*) FROM workspace_members WHERE workspace_id=? AND user_id=?`, workspace, owner).Scan(&rows); err != nil || rows != 1 {
 		t.Fatal("session race also changed membership")
 	}
-	t.Log("actual Router + managed Node24: initial rev0, nested leaf dedup, human raw CRDT save after read rejected by final CAS, fresh rebuild, checkpoint restore, exact session revocation zero publication")
+	t.Log("actual Router + managed Node24: initial rev0, nested leaf dedup, human raw CRDT save after read rejected by final CAS, fresh rebuild, checkpoint restore, mixed actual schemas1/2/3 and code leaf, href exclusion, old-cache rebuild, real schema upgrade CAS, unknown4 no partial response, exact session revocation zero publication")
 }
 
 func nativeSearchHumanUpdate(ctx context.Context, root string, raw []byte) (string, error) {
@@ -280,4 +356,36 @@ func nativeSearchHumanUpdate(ctx context.Context, root string, raw []byte) (stri
 		return "", errors.New("invalid synthetic human CRDT update")
 	}
 	return string(data), nil
+}
+
+func nativeSearchSeedLegacyDocument(t *testing.T, h *PageHandler, root, workspace, owner string) {
+	t.Helper()
+	const page = "search-legacy-page"
+	execOrFatal(t, h.db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?,?,'search-legacy','Legacy search',?,'{}')`, page, workspace, owner)
+	script := `import {create,snapshot,outline} from './tools/docs-service/schema.mjs';const doc=create({type:'doc',content:[{type:'paragraph',attrs:{id:'legacy-search-leaf'},content:[{type:'text',text:'legacy needle second'}]}]},1);try{console.log(JSON.stringify({snapshot:snapshot(doc),blocks:(await outline(doc,1)).map(({id,hash})=>({id,hash}))}));}finally{doc.destroy();}`
+	command := exec.CommandContext(t.Context(), "node", "--input-type=module", "-e", script)
+	command.Dir = root
+	raw, err := command.Output()
+	if err != nil {
+		t.Fatalf("trusted legacy encoder fixture: %v", err)
+	}
+	var fixture struct {
+		Snapshot string          `json:"snapshot"`
+		Blocks   json.RawMessage `json:"blocks"`
+	}
+	if err = json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := base64.StdEncoding.DecodeString(fixture.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorize := func(ctx context.Context, tx *sql.Tx) (string, error) {
+		var current string
+		err := tx.QueryRowContext(ctx, `SELECT owner_user_id FROM pages WHERE workspace_id=? AND id=?`, workspace, page).Scan(&current)
+		return current, err
+	}
+	if _, err = documents.New(h.db, documents.Options{}).InitRequest(t.Context(), documents.Key{WorkspaceID: workspace, PageID: page}, "legacy-search-fixture", "synthetic-legacy-search-source", 1, snapshot, fixture.Blocks, authorize); err != nil {
+		t.Fatal(err)
+	}
 }

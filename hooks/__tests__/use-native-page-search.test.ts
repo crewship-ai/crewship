@@ -127,6 +127,18 @@ describe("native Page content search authority lifecycle", () => {
     } finally { vi.useRealTimers() }
   })
 
+  it("accepts matched rich Doc3 responses but rejects unknown Slides3", async () => {
+    const wire = (type: string) => new Response(JSON.stringify({ scope: "native-docs-slides", matches: [{ ...match("rich-page"), content_type: type, schema_version: 3 }], has_more: false }), { status: 200 })
+    fetch.mockResolvedValueOnce(wire("document")).mockResolvedValueOnce(wire("slides"))
+    const { result } = renderHook(() => useNativePageSearch("workspace", "viewer", true))
+    await act(async () => { await result.current.search("needle") })
+    expect(result.current.matches[0].schema_version).toBe(3)
+    await act(async () => { await result.current.search("needle") })
+    expect(result.current.matches).toEqual([])
+    expect(result.current.complete).toBe(false)
+    expect(result.current.error).toContain("unsupported response")
+  })
+
   it("disabled or signed-out contexts never send a request", async () => {
     const { result, rerender } = renderHook(({ enabled, viewer }) => useNativePageSearch("workspace", viewer, enabled), { initialProps: { enabled: false, viewer: "viewer" as string | null } })
     await act(async () => { await result.current.search("needle") })

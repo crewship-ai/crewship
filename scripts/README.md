@@ -271,7 +271,10 @@ CREWSHIP_NATIVE_SEARCH_MANAGED=1 go test -tags docs_foundation ./internal/api -r
 Install the frozen `tools/docs-service` dependencies first and use Node 24.21.0.
 The existing Docs foundation workflow runs this gate after its process-recovery
 test. It exercises real human CRDT updates, checkpoint restore, exact session
-revocation and final query snapshot coverage. A green process-recovery test
+revocation, final query snapshot coverage and matched Docs1/2/3 plaintext
+(including schema3 code blocks but excluding link hrefs). Legacy1 initialization
+is a trusted Node encoder/Store fixture; subsequent reads/query are real human
+HTTP operations. A green process-recovery test
 alone does not execute this search gate. On the shared development host, run
 these commands through `crewship-heavy`.
 

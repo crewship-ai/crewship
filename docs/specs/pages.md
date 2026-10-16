@@ -43,10 +43,10 @@ workspace picker change leaves the stable reference rather than bouncing back.
 ## Native content search
 
 `GET /api/v1/pages/search/content?workspace_id=WORKSPACE&q=WORDS` searches
-current native Docs (schema 2) and Slides (schema 1/2) plain text. It requires a
+current native Docs (schemas 1/2/3) and Slides (schema 1/2) plain text. It requires a
 current human session or CLI `pages:read`/`pages:*` credential and live Page read
 access. This is a supported native scope, not fulltext across all Page types.
-Docs paragraph/heading leaves and Slides text, table cells and notes contribute
+Docs paragraph/heading leaves (plus schema3 code blocks) and Slides text, table cells and notes contribute
 once; image metadata, external links, comments and historical revisions do not.
 
 Literal Unicode-folded terms are ANDed across a Page's leaves. Results contain

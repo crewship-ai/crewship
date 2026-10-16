@@ -99,7 +99,7 @@ func TestNativeSearchBrowser(t *testing.T) {
 	}
 	execOrFatal(t, db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('search-browser-original','user',?,'read',?)`, reader, owner)
 	execOrFatal(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('search-browser-doc',?,'search-browser-doc','Canonical Doc',?,'{}')`, workspace, owner)
-	docBody := `{"id":"browser-doc-init","schema":2,"body":{"type":"doc","content":[{"type":"paragraph","attrs":{"id":"browser-doc-leaf"},"content":[{"type":"text","text":"needle second canonical document"}]}]}}`
+	docBody := `{"id":"browser-doc-init","schema":3,"page_id":"search-browser-doc","body":{"type":"doc","content":[{"type":"paragraph","attrs":{"id":"browser-doc-leaf"},"content":[{"type":"text","text":"needle linked text","marks":[{"type":"link","attrs":{"href":"https://example.test/nonindexed-browser-href"}}]}]},{"type":"codeBlock","attrs":{"id":"browser-code-leaf"},"content":[{"type":"text","text":"second canonical code"}]}]}}`
 	docRequest := httptest.NewRequest("POST", "/api/v1/pages/search-browser-doc/document/initialize?workspace_id="+workspace, strings.NewReader(docBody))
 	docRequest.Header.Set("Authorization", "Bearer "+tokens[owner])
 	docRequest.Header.Set("Content-Type", "application/json")
