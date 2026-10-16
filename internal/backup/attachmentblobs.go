@@ -64,8 +64,8 @@ type AttachmentBlobsResult struct {
 }
 
 // attachmentRefs returns, per distinct valid sha256 referenced by the dump's
-// attachments rows, the workspace ids whose rows reference it — first-seen
-// order for both. Rows with an invalid sha or an unsafe workspace component
+// attachments, Artifact revision and Board file/preview rows, the workspace ids naming it,
+// in first-seen order. Rows with an invalid sha or an unsafe workspace component
 // are reported in invalid (they can never resolve to a file).
 func attachmentRefs(dump *DBDump) (order []string, byWorkspace map[string][]string, invalid []string) {
 	byWorkspace = map[string][]string{}
@@ -73,7 +73,32 @@ func attachmentRefs(dump *DBDump) (order []string, byWorkspace map[string][]stri
 		return nil, byWorkspace, nil
 	}
 	seenPair := map[string]bool{}
-	for _, row := range dump.Tables["attachments"] {
+	refs := append([]map[string]any(nil), dump.Tables["attachments"]...)
+	pageWorkspaces := map[string]string{}
+	for _, page := range dump.Tables["pages"] {
+		id, _ := page["id"].(string)
+		ws, _ := page["workspace_id"].(string)
+		pageWorkspaces[id] = ws
+	}
+	for _, revision := range dump.Tables["page_artifact_revisions"] {
+		pageID, _ := revision["page_id"].(string)
+		refs = append(refs, map[string]any{"sha256": revision["sha256"], "workspace_id": pageWorkspaces[pageID]})
+	}
+	for _, file := range dump.Tables["page_board_files"] {
+		pageID, _ := file["board_page_id"].(string)
+		refs = append(refs, map[string]any{"sha256": file["sha256"], "workspace_id": pageWorkspaces[pageID]})
+	}
+	jobWorkspaces := map[string]string{}
+	for _, job := range dump.Tables["page_board_requests"] {
+		id, _ := job["id"].(string)
+		ws, _ := job["workspace_id"].(string)
+		jobWorkspaces[id] = ws
+	}
+	for _, preview := range dump.Tables["page_board_request_previews"] {
+		id, _ := preview["request_id"].(string)
+		refs = append(refs, map[string]any{"sha256": preview["sha256"], "workspace_id": jobWorkspaces[id]})
+	}
+	for _, row := range refs {
 		sha, _ := row["sha256"].(string)
 		ws, _ := row["workspace_id"].(string)
 		if !validSha256Hex(sha) {
@@ -95,8 +120,8 @@ func attachmentRefs(dump *DBDump) (order []string, byWorkspace map[string][]stri
 	return order, byWorkspace, invalid
 }
 
-// WriteAttachmentBlobsSection copies every blob the dump's attachments rows
-// reference into dst under attachment-blobs/<sha[:2]>/<sha>, streaming each
+// WriteAttachmentBlobsSection copies every blob the dump's attachments and
+// private Page content rows reference into dst under attachment-blobs/<sha[:2]>/<sha>, streaming each
 // file. root is the SOURCE instance's storage root. A referenced blob that is
 // not on disk is not a create failure — the rows still ride — but it is
 // returned in Missing so the caller records it in the manifest.
@@ -201,7 +226,7 @@ func (s AttachmentRestoreStats) Incomplete(workspaceID string) []IncompleteItem 
 
 // RestoreAttachmentBlobs writes the blobs carried in payload's
 // attachment-blobs section back under root/attachments/<ws>/<sha[:2]>/<sha>,
-// for every (ws, sha) the dump's attachments rows name. dump must be the
+// for every (ws, sha) the dump's attachments, Artifact revision and Board file/preview rows name. dump must be the
 // dump THIS restore lands, after RemapIDs, so ws is the target id.
 //
 // The write destination is derived from the dump, never from the archive

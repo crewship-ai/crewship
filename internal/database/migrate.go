@@ -2071,6 +2071,7 @@ END;
 	// already showed for it. See migrate_consts_credential_handle_only.go.
 	{version: 20260905091400, name: "credential_handle_only", sql: migrationCredentialHandleOnly},
 	{version: 20260908142800, name: "private_service_configuration", fn: migrationPrivateServices, restoreBackfill: migrationPrivateServices},
+	{version: 20261016082729, name: "static_pages_foundation", fn: migrationStaticPagesFoundation},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
