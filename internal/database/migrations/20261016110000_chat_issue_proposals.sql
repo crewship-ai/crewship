@@ -1,4 +1,4 @@
--- Proposal state belongs to the chat source; operation receipts reuse agent_operations.
+-- Proposal state and operation receipts belong to the chat source.
 CREATE TABLE chat_issue_proposals (
  id TEXT PRIMARY KEY,
  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -39,3 +39,7 @@ CREATE TABLE chat_proposal_operations (
 );
 CREATE TRIGGER chat_proposal_operations_immutable BEFORE UPDATE ON chat_proposal_operations
 BEGIN SELECT RAISE(ABORT,'proposal receipt is immutable'); END;
+
+CREATE INDEX chat_issue_proposals_workspace ON chat_issue_proposals(workspace_id);
+CREATE INDEX chat_issue_proposals_agent ON chat_issue_proposals(agent_id);
+CREATE INDEX chat_proposal_operations_proposal ON chat_proposal_operations(proposal_id);

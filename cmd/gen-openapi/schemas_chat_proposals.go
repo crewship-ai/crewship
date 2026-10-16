@@ -42,13 +42,13 @@ func chatProposalSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		} else {
 			schema.Request = ref(name)
 			schema.RequestRequired = true
-			schema.Parameters = []map[string]any{{"name": "Idempotency-Key", "in": "header", "required": true, "schema": str(1, 200), "description": "Stable actor-scoped operation key; exact retry returns original authorized result. Different intent returns 409."}}
+			schema.Parameters = []map[string]any{{"name": "Idempotency-Key", "in": "header", "required": true, "schema": str(1, 200), "description": "Stable actor-scoped operation key; retries do not repeat effects. Confirmation outcome and issue IDs remain original; source representation reflects later transitions. Different intent returns 409."}}
 			schema.ErrorResponse = map[string]any{"anyOf": []any{errorSchema(), obj(map[string]any{"error": str(1, 200), "current": ref("ChatProposalResponse")}, "error", "current")}}
 		}
 		routes[key] = schema
 	}
 	list := routes["GET "+path]
-	list.Parameters = []map[string]any{{"name": "cursor", "in": "query", "schema": str(0, 4096)}}
+	list.Parameters = []map[string]any{{"name": "cursor", "in": "query", "schema": map[string]any{"type": "string", "maxLength": 4096}}}
 	routes["GET "+path] = list
 	return routes, components
 }
