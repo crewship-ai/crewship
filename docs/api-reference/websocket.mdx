@@ -25,6 +25,8 @@ ws://<host>:8080/ws
 3. Send `{"type":"auth","token":"<jwt>"}` as the first message; the server validates it using the same JWT validator as the REST API and closes the connection if it's missing, invalid, or the underlying session was revoked
 4. After that, the token is no longer needed -- the connection remains authenticated
 
+Subscriptions and queued delivery recheck current account authority. A suspended or deleted account cannot subscribe or receive queued updates, including global, identity and channel-less protocol messages. Any non-null suspension value revokes access; database failures deny new subscriptions and delivery. Conversation channels additionally retain their live audience checks.
+
 The WebSocket server uses `golang.org/x/net/websocket` (not gorilla/websocket). Authentication is token-based. Inbound frames are capped at 64 KiB.
 
 <Warning>
