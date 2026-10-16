@@ -345,7 +345,7 @@ function markdown(json) {
     if (node.type==='codeBlock') { if (table) throw Object.assign(new Error('Markdown export cannot represent a code block inside a simple table; move it outside the table.'), {code:'unsupported_markdown'}); const value = textOf(node), fence = '`'.repeat(Math.max(2, ...(value.match(/`+/g) || []).map(run => run.length)) + 1); return fence + '\n' + value + '\n' + fence + '\n\n'; }
     if (node.type==='heading') return '#'.repeat(node.attrs.level)+' '+(node.content||[]).map(n=>visit(n,depth,table)).join('')+'\n\n';
     if (node.type==='paragraph') return (node.content||[]).map(n=>visit(n,depth,table)).join('')+'\n\n';
-    if (node.type==='bulletList'||node.type==='orderedList') return (node.content||[]).map((n,i)=>'  '.repeat(depth)+(node.type==='bulletList'?'- ':`${(node.attrs.start||1)+i}. `)+visit(n,depth+1).trim().replace(/\n/g,'\n'+'  '.repeat(depth+1))).join('\n')+'\n\n';
+    if (node.type==='bulletList'||node.type==='orderedList') return (node.content||[]).map((n,i)=>'  '.repeat(depth)+(node.type==='bulletList'?'- ':`${(node.attrs.start||1)+i}. `)+visit(n,depth+1,table).trim().replace(/\n/g,'\n'+'  '.repeat(depth+1))).join('\n')+'\n\n';
     if (node.type==='table') {
       const rich = node => !!node.marks?.length || node.type === 'codeBlock' || (node.content || []).some(rich);
       const rows=(node.content||[]).map(r=>r.content.map(c=>(rich(c) ? (c.content||[]).map(n=>visit(n,depth,true).trimEnd()).join(' ') : escape((c.content||[]).map(textOf).join(' '))).replace(/\n/g,' ')));

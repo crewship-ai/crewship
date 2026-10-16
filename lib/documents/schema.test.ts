@@ -5,7 +5,7 @@ import { documentSchema as engine, normalizeDocumentLink } from "./schema"
 const paragraph = (text: string, marks?: unknown[]) => ({type:"paragraph",attrs:{id:"text"},content:[{type:"text",text,...(marks?{marks}:{})}]})
 const link = {type:"link",attrs:{href:"https://example.invalid/a|b"}}
 const doc = (content: unknown[]) => ({type:"doc",content})
-const parsed = (content: unknown[]) => { const holder = document.createElement("div"); holder.innerHTML = String(marked.parse(engine.markdown(doc(content)))); return holder }
+const parsed = (content: unknown[]) => { engine.validateJSON(doc(content),3); const holder = document.createElement("div"); holder.innerHTML = String(marked.parse(engine.markdown(doc(content)))); return holder }
 describe("browser uses the identical closed Docs schema implementation", () => {
  it("binds this browser's Yjs classes and preserves legacy binary/hash and anchors", async () => {
   const state=engine.create(doc([paragraph("legacy 🐎")]),2);expect(state).toBeInstanceOf(Y.Doc);const before=engine.snapshot(state),hash=await engine.hash(engine.validate(state,2));expect(await engine.hash(engine.validate(state,3))).toBe(hash);expect(engine.snapshot(state)).toBe(before);state.destroy()
@@ -35,4 +35,11 @@ it("reports unsupported inline newlines and table code blocks instead of lossy M
  expect(()=>engine.markdown(doc([paragraph("a\nb",[{type:"code",attrs:{}}])]))).toThrow("line breaks")
  const table={type:"table",attrs:{id:"table"},content:[{type:"tableRow",attrs:{id:"row"},content:[{type:"tableCell",attrs:{id:"cell"},content:[{type:"codeBlock",attrs:{id:"code"},content:[{type:"text",text:"a\nb"}]}]}]}]}
  expect(()=>engine.markdown(doc([table]))).toThrow("code block inside a simple table")
+})
+
+it("propagates table export context through nested lists for escaping and unsupported reports", () => {
+ const list = (content: unknown[]) => ({type:"bulletList",attrs:{id:"list"},content:[{type:"listItem",attrs:{id:"item"},content}]})
+ const table = (content: unknown[]) => ({type:"table",attrs:{id:"table"},content:[{type:"tableRow",attrs:{id:"row"},content:[{type:"tableCell",attrs:{id:"cell"},content}]}]})
+ const rich=list([paragraph("a|b",[{type:"code",attrs:{}}])]);const html=parsed([table([rich])]);expect(html.querySelectorAll("th,td")).toHaveLength(1);expect(html.querySelector("code")?.textContent).toBe("a|b")
+ const unsupported=doc([table([list([paragraph("before"),{type:"codeBlock",attrs:{id:"code"},content:[{type:"text",text:"a\nb"}]}])])]);engine.validateJSON(unsupported,3);expect(()=>engine.markdown(unsupported)).toThrow("code block inside a simple table")
 })
