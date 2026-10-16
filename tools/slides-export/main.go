@@ -204,15 +204,20 @@ func decodeExportInput(data []byte) (exportInput, error) {
 }
 
 type boundedOutput struct {
-	bytes.Buffer
-	limit int
+	// Keep the buffer private: embedding promotes ReadFrom and lets io.Copy
+	// bypass Write, defeating the actual subprocess output budget.
+	buffer bytes.Buffer
+	limit  int
 }
+
+func (w *boundedOutput) Len() int       { return w.buffer.Len() }
+func (w *boundedOutput) String() string { return w.buffer.String() }
 
 func (w *boundedOutput) Write(data []byte) (int, error) {
 	if len(data) > w.limit-w.Len() {
 		return 0, errors.New("bounded worker output exceeded")
 	}
-	return w.Buffer.Write(data)
+	return w.buffer.Write(data)
 }
 func run(inputPath, outputDir string) error {
 	file, err := os.Open(inputPath)

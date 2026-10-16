@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 )
@@ -61,5 +63,16 @@ func TestExportJSONStructuralBudgetsBeforeModelDecode(t *testing.T) {
 	}
 	if err := rejectDuplicateKeys([]byte(`{"safe":[{"text":"Český text"}]}`)); err != nil {
 		t.Fatal("bounded JSON refused", err)
+	}
+}
+
+func TestWorkerOutputBoundCannotBeBypassedByCopyFastPath(t *testing.T) {
+	output := &boundedOutput{limit: 4}
+	input := struct{ io.Reader }{bytes.NewReader(bytes.Repeat([]byte("x"), 32))}
+	if _, err := io.Copy(output, input); err == nil {
+		t.Fatal("io.Copy bypassed bounded writer via promoted ReaderFrom")
+	}
+	if output.Len() > 4 {
+		t.Fatal("worker output limit exceeded")
 	}
 }
