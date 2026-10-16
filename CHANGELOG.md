@@ -9,8 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-### Added
-- E2 proposal and decision card contracts with closed form schemas and authorized read-projection fixtures. This foundation does not yet expose proposal confirmation or decision actions in Chat.
+- ⚠️ **Behaviour change: CLI pairing follows its source browser session.** Suspended accounts and missing, logged-out, revoked or expired source sessions cannot redeem codes. Request a fresh browser code for older pairings without session provenance; CLI-token authentication cannot start pairing.
 - **Dependency updates now build and package together.** Refresh the frontend, Go and CI dependencies, explicitly declare lockfile version changes, and retain the version-scoped license inventory.
 - ⚠️ **Behaviour change: crash reporting uses Sentry v11.** Self-hosted Sentry must be 26.4.2 or newer. Browser, Node and Edge initialization disable collection of user identifiers, request metadata, AI content and other payload data. Browser release-health sessions stay off and telemetry consent remains required.
 
@@ -353,6 +352,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Waiting for a routine could report uncertain or canceled work as successful.** `wait` now exits 5 for `needs_reconciliation` and 2 for either cancellation spelling; `routine run --wait` reports these outcomes as errors in human and machine formats.
 - **Reconnecting an owned AI client could lose its working registration after a failed add.** Native edits and verification now run against a staged configuration, preserving the prior registration and ownership receipt on failure and refusing concurrent configuration or receipt edits. ⚠️ **Behaviour change:** owned reconnections require a regular client config file; symlinked configs are refused.
+- E2 proposal and decision card contracts with closed form schemas and authorized read-projection fixtures. This foundation does not yet expose proposal confirmation or decision actions in Chat.
+
 
 ### Changed
 

@@ -218,7 +218,7 @@ A device-code flow (RFC 8628 in spirit) that hands a Crewship session to a local
 
 A bearer token with limited scopes receives `403`: a pairing code must not mint a successor with wider authority. Sign in interactively to pair a CLI.
 
-Mint a new pairing code for the authenticated user.
+Mint a new pairing code bound to the authenticated browser session. CLI-token authentication cannot start pairing.
 
 **Auth:** required.
 
@@ -273,6 +273,8 @@ UI polls this every ~2s while showing the code to the user. The row is reported 
 
 The CLI calls this from the operator's machine to exchange the code for a fresh `cli_tokens` row. **Unauthenticated by design** -- the code IS the credential. Single-use (the UPDATE filters on `status='pending'` so two concurrent redeems can't both win), 10-min TTL, and the route inherits the 10 req/min/IP cap from the auth-tier rate limiter.
 
+The source session must still belong to the same active account at redemption. Logout and session revocation invalidate outstanding codes. Legacy codes without a recorded source session are rejected; request a new code in the browser. The CLI token, once issued, has its own lifecycle.
+
 **Auth:** none.
 
 **Request body:**
@@ -301,7 +303,7 @@ The CLI calls this from the operator's machine to exchange the code for a fresh 
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid JSON, missing/normalised code, unknown code, status not `pending`, or TTL expired. |
+| `400` | Invalid JSON, missing/normalised code, unknown code, status not `pending`, TTL expired, suspended account, or missing, revoked, expired or invalid source session. |
 | `500` | DB read/write failure (token is not minted on error). |
 
 ---
