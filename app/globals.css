@@ -1188,6 +1188,7 @@ body {
     background: var(--background);
   }
   .secondary-panel[data-collapsed="true"] { width: 44px; }
+  .secondary-panel-phone { display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; background: var(--background); }
   .secondary-panel-toolbar {
     display: flex;
     align-items: center;

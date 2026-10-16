@@ -4,14 +4,12 @@ import * as React from "react"
 import type { LucideIcon } from "lucide-react"
 import { Slot } from "radix-ui"
 import { createPortal } from "react-dom"
-import { usePathname } from "next/navigation"
 import { ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { areaOf } from "@/lib/nav-sections"
 
 /**
  * SubBar — the canonical page sub-bar (the strip directly under the global
@@ -104,14 +102,14 @@ export function SubBar<T extends string = string>({
   const hasRow2 = (tabs != null && tabs.length > 0) || tools != null
   const slot = useAppStore((s) => s.pageBarSlot)
   const isMobile = useIsMobile()
-  const pathname = usePathname()
 
   // Harbor 2: on desktop and tablet the identity and the actions join the top
   // bar after the area's breadcrumb; a title that only repeats the area's name
   // stays as the page's accessible heading but is not shown twice.
   if (slot && !isMobile) {
-    const area = pathname ? areaOf(pathname) : undefined
-    const repeatsArea = area != null && area.title.toLowerCase() === title.toLowerCase()
+    // AppToolbar writes the area it names onto the slot.
+    const areaTitle = slot.dataset.areaTitle ?? ""
+    const repeatsArea = areaTitle !== "" && areaTitle.toLowerCase() === title.toLowerCase()
     return (
       <>
         {createPortal(

@@ -9,7 +9,7 @@ import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useAccessMode, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
 import { restrictedPathAllowed } from "@/lib/restricted-surfaces"
 import { useAbilities } from "@/hooks/use-abilities"
-import { useIsInstanceAdmin } from "@/hooks/use-auth"
+import { useAuthAvailable, useIsInstanceAdmin } from "@/hooks/use-auth"
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
 import { SidebarVersion } from "@/components/layout/sidebar-version"
 import { RAIL_ROW, RailCount, RailGroupHead, RailLabel, RailTile, conceptOf } from "@/components/layout/rail"
@@ -60,6 +60,7 @@ export function AppSidebar() {
   const inboxUnread = useInboxUnreadCount(trustedWorkspaceId)
   // A restricted session sees only the screens the server says it may open.
   const surfaces = useRestrictedSurfaces()
+  const authAvailable = useAuthAvailable()
   const visible = (items: NavItem[]) =>
     items.filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
   const row = (item: NavItem) => {
@@ -111,7 +112,7 @@ export function AppSidebar() {
             <SidebarVersion />
           </SidebarMenu>
         )}
-        <UserMenu placement="sidebar" />
+        {authAvailable && <UserMenu placement="sidebar" />}
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
