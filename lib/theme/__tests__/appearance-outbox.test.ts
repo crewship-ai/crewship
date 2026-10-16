@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeEach } from "vitest"
 
 import { createAppearanceOutbox, OUTBOX_STORAGE_KEY, RETRY_DELAYS_MS } from "../appearance-outbox"
 

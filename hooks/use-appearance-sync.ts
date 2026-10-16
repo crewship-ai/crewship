@@ -240,8 +240,6 @@ export function useAppearanceSync(enabled: boolean): void {
       void ob.flush()
     }, APPEARANCE_SYNC_DEBOUNCE_MS)
     return () => clearTimeout(t)
-    // outbox() is a lazy ref getter.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, ready, serialized, style])
 
   // A change made just before the shell unmounts (sign-out, a hard
@@ -259,7 +257,6 @@ export function useAppearanceSync(enabled: boolean): void {
       pendingRef.current = { appearance: null, style: null }
       if (activeOutbox === outboxRef.current) activeOutbox = null
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 }
 
