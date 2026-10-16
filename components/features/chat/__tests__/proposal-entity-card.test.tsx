@@ -147,3 +147,17 @@ it("does not retry an uncertain write until current access is verified", async (
   act(() => view.setChecking(false))
   expect(retry).toBeEnabled()
 })
+
+it("purges only the old source after a late denial without calling a new surface callback", async () => {
+  let finish: (response: Response) => void = () => {}
+  transport.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const view = setup()
+  fireEvent.change(screen.getByLabelText("Issue 1 title"), { target: { value: "Pending edit" } })
+  fireEvent.click(screen.getByRole("button", { name: "Save proposal edits" }))
+  await waitFor(() => expect(transport).toHaveBeenCalledTimes(1))
+  expect(sessionStorage.getItem(proposalRecoveryKey(scope, "edit"))).not.toBeNull()
+  view.unmount()
+  await act(async () => finish(new Response("{}", { status: 403 })))
+  expect(sessionStorage.getItem(proposalRecoveryKey(scope, "edit"))).toBeNull()
+  expect(onAccessLost).not.toHaveBeenCalled()
+})

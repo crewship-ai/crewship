@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { E2VersionConflictSchema, ProposalRefSchema, type ProposalRef } from "@/lib/chat-e2-cards"
 import { randomUUIDv4 } from "@/lib/random-id"
@@ -22,6 +22,8 @@ export function useProposalOperation(scope: ProposalScope, transport: ProposalTr
     }
     return null
   })
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const pending = useRef<ProposalRequest | null>(restored)
   const busy = useRef(false)
   const [state, setState] = useState<ProposalWriteState>(restored ? "unknown" : "idle")
@@ -30,15 +32,19 @@ export function useProposalOperation(scope: ProposalScope, transport: ProposalTr
   const mutation = useMutation({ mutationFn: transport, retry: false })
   const clear = (request: ProposalRequest) => { sessionStorage.removeItem(proposalRecoveryKey(scope, request.action)); pending.current = null }
   const execute = async (request: ProposalRequest) => {
-    if (busy.current) return false
+    if (!mounted.current || busy.current) return false
     busy.current = true
     setState("saving"); setMessage("")
     try {
       const response = await mutation.mutateAsync(request)
       if ([401, 403, 404].includes(response.status)) {
-        purgeProposalRecovery(scope); pending.current = null; setState("unavailable"); onAccessLost(); return false
+        purgeProposalRecovery(scope); pending.current = null
+        if (mounted.current) { setState("unavailable"); onAccessLost() }
+        return false
       }
+      if (!mounted.current) return false
       const body = await response.json()
+      if (!mounted.current) return false
       if (response.ok) {
         const snapshot = ProposalRefSchema.parse(body)
         if (snapshot.entity.id !== scope.proposalId || snapshot.entity.workspace_id !== scope.workspaceId) throw new Error("Wrong source")
@@ -53,7 +59,10 @@ export function useProposalOperation(scope: ProposalScope, transport: ProposalTr
         clear(request); setState("validation"); setMessage("Check the proposal fields and try again."); return false
       }
       throw new Error("Unknown outcome")
-    } catch { setState("unknown"); setMessage("The outcome is unknown. Retry the identical operation."); return false }
+    } catch {
+      if (mounted.current) { setState("unknown"); setMessage("The outcome is unknown. Retry the identical operation.") }
+      return false
+    }
     finally { busy.current = false }
   }
   const submit = async (action: ProposalAction, body: object) => {
