@@ -202,7 +202,7 @@ POST /api/v1/workspaces/{workspaceId}/skills/import
 
 Import a skill from a URL (GitHub raw content) or raw SKILL.md content.
 
-**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role, or a trusted workspace member with explicit `skill.create`. Guest restrictions and scoped CLI `skills:write` still apply.
 
 **Request Body:** Provide exactly one of `url` or `content`. (`internal/api/skills.go:351`)
 
@@ -233,7 +233,8 @@ URLs are validated against SSRF attacks (private IP ranges are blocked).
 | Status | Condition |
 |---|---|
 | `400` | Invalid JSON, no url/content, both provided, invalid URL, parse error |
-| `403` | Insufficient role |
+| `403` | Neither creation role nor explicit `skill.create`, or insufficient CLI scope |
+| `500` | Capability lookup or import storage failure |
 
 ---
 
@@ -245,7 +246,7 @@ POST /api/v1/workspaces/{workspaceId}/skills/generate
 
 Authors a SKILL.md from a natural-language intent by calling Anthropic with a condensed skill-creator prompt, then inserts it with `source = 'GENERATED'`. The user can edit the body via the skills detail page afterwards. (`internal/api/skills_generate.go:94`)
 
-**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role (`canRole(role, "create")`).
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role, or a trusted workspace member with explicit `skill.create`. Guest restrictions and scoped CLI `skills:write` still apply.
 
 <Note>
 This endpoint spends real Anthropic tokens against the workspace's API key on every call.
