@@ -285,7 +285,7 @@ crewship-heavy env D1B_ACCEPTANCE_BINARY="$PWD/crewship" \
   node e2e/docs-d1b-acceptance.mjs
 ```
 
-Use your own output directory. The installed Playwright Chromium must be
+Use your own output prefix. Every run creates a new mode0700 directory with a unique suffix beneath its existing canonical parent; the final `Acceptance evidence:` line names that actual directory. Reports/logs use exclusive mode0600 files. Screenshots and Markdown exports remain untrimmed; service logs are bounded during capture with explicit truncation/dropped-byte metadata and credential redaction. The installed Playwright Chromium must be
 available. The harness creates its own users, sessions, private sockets and
 service secret; it never uses a development environment's sessions. It covers
 Page creation, concurrent human edits, a lost response with exact retry,
