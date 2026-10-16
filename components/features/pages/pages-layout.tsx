@@ -474,7 +474,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   ? "Page link is unavailable. Check your workspace and Page access."
                   : "Opening Page link…"}</p>
                 {reference.kind === "page" && eligible && (identity.error || detail.error) && (
-                  <button type="button" className="mt-3 underline" onClick={() => nav.reloadReference(identity.reload)}>
+                  <button type="button" className="mt-3 inline-flex items-center underline coarse:min-h-12" onClick={() => nav.reloadReference(identity.reload)}>
                     Resolve Page link again
                   </button>
                 )}
