@@ -78,6 +78,10 @@ vi.mock("@/hooks/use-auth", () => ({
   }),
 }))
 
+vi.mock("../reactions/turn-reactions", () => ({ TurnReactions: () => null }))
+
+vi.mock("../artifact/inline-run-images", () => ({ InlineRunImages: ({ agentId, workspaceId, runId }: { agentId: string; workspaceId: string; runId: string }) => <div data-testid="run-images">{`${agentId}:${workspaceId}:${runId}`}</div> }))
+
 import { AssistantTurn } from "../assistant-turn"
 
 function part(partial: Partial<TurnPart> & { type: TurnPart["type"] }): TurnPart {
@@ -94,6 +98,7 @@ function part(partial: Partial<TurnPart> & { type: TurnPart["type"] }): TurnPart
 function turn(parts: TurnPart[], overrides: Partial<ChatTurn> = {}): ChatTurn {
   return {
     id: overrides.id ?? "t-1",
+    runId: overrides.runId,
     role: "assistant",
     parts,
     isStreaming: overrides.isStreaming ?? false,
@@ -370,5 +375,19 @@ describe("AssistantTurn dispatch", () => {
       render(<AssistantTurn turn={turn([part({ type: "thinking", content: "ponder" })])} onCopy={onCopy} onFileClick={onFileClick} />)
       expect(screen.queryByTestId("message-actions")).toBeNull()
     })
+  })
+})
+
+
+describe("authorized run image mount", () => {
+  it("mounts the image viewer from persisted run identity without model image URLs", () => {
+    render(<AssistantTurn turn={turn([part({ type: "text", content: "Here is your chart." })], { runId: "run-chart" })} agentId="agent-chart" workspaceId="ws-chart" chatId="chat-chart" onCopy={() => {}} onFileClick={() => {}} />)
+    expect(screen.getByTestId("run-images")).toHaveTextContent("agent-chart:ws-chart:run-chart")
+  })
+  it("does not discover image paths from model text or unfinished replies", () => {
+    const view = render(<AssistantTurn turn={turn([part({ type: "text", content: "https://untrusted.invalid/chart.png" })])} agentId="agent-chart" workspaceId="ws-chart" chatId="chat-chart" onCopy={() => {}} onFileClick={() => {}} />)
+    expect(screen.queryByTestId("run-images")).toBeNull()
+    view.rerender(<AssistantTurn turn={turn([], { runId: "run-chart", isStreaming: true })} agentId="agent-chart" workspaceId="ws-chart" chatId="chat-chart" onCopy={() => {}} onFileClick={() => {}} />)
+    expect(screen.queryByTestId("run-images")).toBeNull()
   })
 })
