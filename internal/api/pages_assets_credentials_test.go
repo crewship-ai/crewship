@@ -111,7 +111,7 @@ func TestPageAssetRouterRechecksExactCredentialAfterBody(t *testing.T) {
 				t.Fatalf("changed %s accepted after body: %d %s", kind, w.Code, w.Body.String())
 			}
 			var rows int
-			if err = db.QueryRow(`SELECT count(*) FROM page_assets WHERE workspace_id=?`, workspace).Scan(&rows); err != nil || rows != 0 {
+			if err = db.QueryRow(`SELECT count(*) FROM page_assets WHERE page_id=?`, "credential-asset-page").Scan(&rows); err != nil || rows != 0 {
 				t.Fatalf("revoked upload rows=%d err=%v", rows, err)
 			}
 			if n := assetBlobFiles(t, storage); n != 0 {
