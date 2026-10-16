@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
+import { purgeChatDecisionRecovery } from "@/lib/chat-decision-recovery"
 import { E2CardPageSchema, type DecisionRef } from "@/lib/chat-e2-cards"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 
@@ -21,16 +22,32 @@ export function useChatDecisions({ workspaceId, userId, chatId, enabled }: { wor
     queryKey: key, enabled: active, gcTime: 0, staleTime: 0, retry: false,
     refetchInterval: 30_000, refetchOnWindowFocus: "always", refetchOnReconnect: "always",
     queryFn: async ({ signal }) => {
-      const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(chatId)}/decisions?${new URLSearchParams({ workspace_id: workspaceId! })}`, { signal })
-      if (!response.ok) {
-        const unavailable = [401, 403, 404].includes(response.status)
-        if (unavailable) { denied.current = true; client.setQueryData(key, []) }
-        throw new DecisionReadError(unavailable)
+      let cursor = ""
+      let snapshot = ""
+      let restarted = false
+      let references: DecisionRef[] = []
+      for (let pageCount = 0; pageCount < 1000; pageCount++) {
+        const params = new URLSearchParams({ workspace_id: workspaceId!, limit: "100" })
+        if (cursor) params.set("cursor", cursor)
+        const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(chatId)}/decisions?${params}`, { signal })
+        if (response.status === 400 && cursor && !restarted) {
+          const body = await response.json().catch(() => null)
+          if (body?.error === "cursor_invalid") { cursor = ""; snapshot = ""; references = []; restarted = true; continue }
+        }
+        if (!response.ok) {
+          const unavailable = [401, 403, 404].includes(response.status)
+          if (unavailable) { denied.current = true; client.setQueryData(key, []); purgeChatDecisionRecovery(workspaceId!,userId!,chatId) }
+          throw new DecisionReadError(unavailable)
+        }
+        const page = E2CardPageSchema.parse(await response.json())
+        if (page.reset) { references = []; snapshot = page.snapshot_id }
+        if (!snapshot || page.snapshot_id !== snapshot) throw new DecisionReadError(false)
+        references.push(...page.refs.filter((reference): reference is DecisionRef => reference.kind === "decision"))
+        if (page.snapshot_complete && !page.has_more) { denied.current = false; purgeChatDecisionRecovery(workspaceId!,userId!,chatId,new Set(references.filter(ref=>ref.decision.status==="pending").map(ref=>JSON.stringify([ref.decision.source.type,ref.decision.source.id])))); return references }
+        if (!page.has_more || !page.next_cursor || page.next_cursor === cursor) throw new DecisionReadError(false)
+        cursor = page.next_cursor
       }
-      const page = E2CardPageSchema.parse(await response.json())
-      if (!page.reset || !page.snapshot_complete || page.has_more) throw new DecisionReadError(false)
-      denied.current = false
-      return page.refs.filter((reference): reference is DecisionRef => reference.kind === "decision")
+      throw new DecisionReadError(false)
     },
   })
   const reconcile = useCallback(() => { if (active) void client.invalidateQueries({ queryKey: chatDecisionKeys.refs(workspaceId, userId, chatId) }) }, [active, client, workspaceId, userId, chatId])
