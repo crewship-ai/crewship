@@ -42,7 +42,7 @@ describe("folder tree intent fences", () => {
     fireEvent.change(screen.getByLabelText("New parent"), { target: { value: "target" } })
     state.folders = state.folders.map((item) => ({ ...item, treeVersion: 4, aclVersion: 7 }))
     view.rerender(<ReparentFolderDialog workspaceId="ws" folder={state.folders[0]} onOpenChange={close} />)
-    const confirm = screen.getByRole("button", { name: "Move folder", exact: true })
+    const confirm = screen.getByRole("button", { name: "Move folder" })
     expect((confirm as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(confirm)
     expect(state.reparent).not.toHaveBeenCalled()
@@ -60,7 +60,7 @@ describe("folder tree intent fences", () => {
     state.folders = state.folders.map((item) => item.slug === "target"
       ? { ...item, id: "replacement", treeVersion: 4, aclVersion: 9 } : item)
     view.rerender(<FolderEditDialog {...props} />)
-    const confirm = screen.getByRole("button", { name: "Create folder", exact: true })
+    const confirm = screen.getByRole("button", { name: "Create folder" })
     expect((confirm as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(confirm)
     expect(state.create).not.toHaveBeenCalled()
@@ -77,7 +77,7 @@ describe("folder tree intent fences", () => {
     fireEvent.change(screen.getByLabelText("New parent"), { target: { value: "target" } })
     state.folders = [state.folders[0]]
     view.rerender(<ReparentFolderDialog {...props} />)
-    expect((screen.getByRole("button", { name: "Move folder", exact: true }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: "Move folder" }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole("button", { name: "Review updated folders" }) as HTMLButtonElement).disabled).toBe(true)
     expect(state.reparent).not.toHaveBeenCalled()
   })
