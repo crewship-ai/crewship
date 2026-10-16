@@ -229,3 +229,5 @@ credentials remain in a private temporary file removed by the Go fixture.
 
 - `check-slide-mutations.ts` + `slide-mutation-contract/`: execute TS-planned native Slides mutations through actual Go strict decode/semantic apply/canonical output; run through `crewship-heavy pnpm exec tsx scripts/check-slide-mutations.ts`.
 - `acceptance-slides-workflow-browser.mjs`: opt-in `slides_workflow_browser` real Router/DB/production static native Slides human flow using owned synthetic sessions; not login/model acceptance. Captures private evidence under operator-selected output.
+
+- `acceptance-slides-comments-browser.mjs`: opt-in `slides_comments_browser` actual Router/SQLite/static native comments flow with distinct synthetic COMMENT and WRITE humans. Run after production export through `crewship-heavy env CREWSHIP_SLIDES_COMMENTS_BROWSER=1 go test -tags slides_comments_browser ./internal/api -run '^TestSlidesCommentsBrowser$' -count=1 -timeout 6m`. `CREWSHIP_SLIDES_COMMENTS_OUTPUT` selects a private owned evidence directory. Missing prerequisites fail; no shared login, response mocks or model claims.
