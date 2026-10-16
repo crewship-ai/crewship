@@ -9,7 +9,8 @@ import { toast } from "sonner"
 import type { WorkspaceRole } from "@/components/features/inbox/inbox-derive"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
-import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
+import { SecondaryPanel } from "@/components/layout/secondary-panel"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { SubBar } from "@/components/layout/sub-bar"
 import { useApprovals, decideApproval } from "@/hooks/use-approvals"
 import { useInbox, useInboxItem } from "@/hooks/use-inbox"
@@ -52,7 +53,7 @@ export function InboxV2() {
   const [selectedKey, setSelectedKey] = useState<string | null>(requestedID ? `request:${requestedID}` : null)
   const [confirmation, setConfirmation] = useState<InboxV2Confirmation | null>(null)
   const [filters, setFilters] = useState<InboxV2Filters>({ ...EMPTY_INBOX_V2_FILTERS, search: requestedSearch })
-  const closePanelSheet = useCloseSecondaryPanelSheet()
+  const isMobile = useIsMobile()
   const roster = useInboxLookup(workspaceId)
   const wsStatus = useRealtimeStatusSafe()
   const live = wsStatus === "connected"
@@ -239,8 +240,9 @@ export function InboxV2() {
   const selectionMissing = Boolean(selectedKey) && !selected && feedsSettled
   // Preview the first visible row on desktop without opening it. `openEntry`
   // alone marks an unread inbox row as read, so arriving at Inbox cannot do it.
-  // Explicit ?item= links never fall back to a different row.
-  const displayed = selectedKey ? selected : visible[0] ?? null
+  // Explicit ?item= links never fall back to a different row. A phone shows
+  // the list until a row is opened, so it previews nothing.
+  const displayed = selectedKey ? selected : isMobile ? null : visible[0] ?? null
   const selectedInboxID = displayed?.source === "inbox" ? displayed.inboxItem?.id : null
   const detailedInbox = useInboxItem(workspaceId, selectedInboxID)
   // A staged hire is one decision in two places: this waitpoint and a row in
@@ -383,11 +385,11 @@ export function InboxV2() {
         )}
     <div className="relative flex min-h-0 flex-1 overflow-hidden">
       {/* The one SecondaryPanel (Harbor 2, #3350): 272 px, collapse remembered
-          per user, and on a phone a bottom sheet opened from the top bar, so
-          the reading pane is the page at every width. The explorer's kit
-          toolbar becomes the panel toolbar and carries the collapse button;
-          the views are a section inside it, as before. */}
-      <SecondaryPanel id="inbox" label="Inbox views">
+          per user. The explorer's kit toolbar becomes the panel toolbar and
+          carries the collapse button; the views are a section inside it.
+          On a phone the list IS the page while nothing is open (phoneInline),
+          and an opened row shows only the detail with Back (PNL-05). */}
+      {!(isMobile && selectedKey) && <SecondaryPanel id="inbox" label="Inbox views" phoneInline={!selectedKey}>
         <InboxV2Explorer
           view={view}
           onView={showView}
@@ -399,15 +401,13 @@ export function InboxV2() {
           filters={filters}
           onFilters={(next) => { setFilters(next); if (selectedKey) closeEntry() }}
           selectedKey={displayed?.key ?? null}
-          // On a phone the list is a sheet over the detail: close it so the
-          // opened entry shows.
-          onOpen={(entry) => { closePanelSheet(); openEntry(entry) }}
+          onOpen={openEntry}
           onMarkAllRead={!attention && view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
           lookup={lookup}
         />
-      </SecondaryPanel>
+      </SecondaryPanel>}
 
-      <main ref={detailRef} tabIndex={-1} aria-label="Inbox detail" className="min-w-0 flex-1 overflow-y-auto">
+      {!(isMobile && !selectedKey) && <main ref={detailRef} tabIndex={-1} aria-label="Inbox detail" className="min-w-0 flex-1 overflow-y-auto">
         {selectedKey && !confirmation && (
           <div className="sticky top-0 z-10 border-b border-border/60 bg-background px-3 py-2">
             <Button variant="ghost" size="sm" onClick={closeEntry}>← Back to inbox</Button>
@@ -452,7 +452,7 @@ export function InboxV2() {
           lookup={lookup}
           onDenyHire={hireTwin ? denyHire : undefined}
         />
-      </main>
+      </main>}
     </div>
     </div>
   )

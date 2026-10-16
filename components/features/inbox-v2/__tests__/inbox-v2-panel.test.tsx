@@ -7,7 +7,7 @@ import type { InboxItem } from "@/hooks/use-inbox"
 // Harbor 2 M3 (#3350): the inbox list is the section's SecondaryPanel, so
 // width, collapse and the phone pattern are the panel's, not the page's.
 
-const m = vi.hoisted(() => ({ mobile: false, push: vi.fn(), items: [] as InboxItem[] }))
+const m = vi.hoisted(() => ({ mobile: false, push: vi.fn(), patch: vi.fn(async () => {}), items: [] as InboxItem[] }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => m.mobile }))
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: m.push, replace: vi.fn() }),
@@ -20,7 +20,7 @@ vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: () => {}, useRealtime
 vi.mock("@/hooks/use-inbox", () => ({
   useInbox: () => ({
     items: m.items, loading: false, error: null, unreadCount: 0,
-    refresh: vi.fn(async () => {}), patch: vi.fn(async () => {}), actOnInboxItem: vi.fn(async () => {}),
+    refresh: vi.fn(async () => {}), patch: m.patch, actOnInboxItem: vi.fn(async () => {}),
   }),
   useInboxItem: () => ({ data: undefined, isFetching: false }),
 }))
@@ -85,15 +85,25 @@ describe("Inbox on SecondaryPanel", () => {
     expect(within(panel).getByText("Approve the hire")).toBeInTheDocument()
   })
 
-  it("on a phone puts the list in the panel sheet and closes it when a row opens", () => {
+  it("on a phone goes list → detail → back to the list (PNL-05), with no sheet button", () => {
     m.mobile = true
     show()
-    expect(document.querySelector("[data-slot=secondary-panel]")).toBeNull()
-    expect(screen.getByRole("main", { name: "Inbox detail" })).toBeInTheDocument()
-    act(() => useAppStore.getState().setSecondaryPanelOpen(true))
-    const sheet = screen.getByRole("dialog", { name: "Inbox views" })
-    fireEvent.click(within(sheet).getByText("Approve the hire"))
-    expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
+    // List first: the panel content is the page, no preview, nothing marked read.
+    const list = screen.getByRole("region", { name: "Inbox views" })
+    expect(list).toHaveAttribute("data-phone", "inline")
+    expect(useAppStore.getState().secondaryPanel).toBeNull()
+    expect(screen.queryByRole("main", { name: "Inbox detail" })).toBeNull()
+    expect(m.patch).not.toHaveBeenCalled()
+    // Open → only the detail, and opening is what marks the row read.
+    fireEvent.click(within(list).getByText("Approve the hire"))
     expect(m.push).toHaveBeenCalledWith("/inbox?item=wp2")
+    expect(m.patch).toHaveBeenCalledWith("wp2", "read")
+    expect(screen.getByRole("main", { name: "Inbox detail" })).toHaveTextContent("Detail Approve the hire")
+    expect(screen.queryByRole("region", { name: "Inbox views" })).toBeNull()
+    expect(document.querySelector("[data-slot=secondary-panel]")).toBeNull()
+    // Back → the list again.
+    fireEvent.click(screen.getByRole("button", { name: "← Back to inbox" }))
+    expect(screen.getByRole("region", { name: "Inbox views" })).toBeInTheDocument()
+    expect(screen.queryByRole("main", { name: "Inbox detail" })).toBeNull()
   })
 })
