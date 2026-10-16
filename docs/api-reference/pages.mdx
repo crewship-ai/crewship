@@ -2342,3 +2342,7 @@ archived source digest, without the archived panel definition.
 authority, `404` Page or revision missing, `409` unsupported legacy revision,
 `500` archive/integrity error, `503` project storage unavailable.
 The response is `no-store`.
+
+Page read and list responses include `has_document`, which identifies saved native
+document content. Page creation accepts `allow_empty: true` to stage a human-owned
+Page without panels; combining this flag with panels or a crew owner is refused.

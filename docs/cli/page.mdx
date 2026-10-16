@@ -142,6 +142,10 @@ permission decision are opposite failures, and only one of them is safe.
 
 ## `crewship page create --file <file>`
 
+`--allow-empty` explicitly stages a human-owned Page with no panels for native
+document initialization. It requires `--file`, rejects crew ownership and
+nonempty panels, and retains the existing `workspace:admin` CLI scope.
+
 ```bash
 crewship page create --file fleet-201.page.yaml
 ```
