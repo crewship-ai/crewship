@@ -35,6 +35,436 @@ empty, and a line saying so would be read as a key. `page export` is the
 exception in the other direction: it prints YAML unless you ask for
 `--format json`.
 
+## Board collaboration commands
+
+These commands use your existing human profile. Read or comment rights do not
+grant permission to dispatch an agent. All scene edits use server revisions.
+
+### crewship page board threads show
+
+`crewship page board threads show BOARD` lists anchored threads and current
+capabilities; `list` is an alias. No command-specific flags.
+
+### crewship page board threads create
+
+`crewship page board threads create BOARD --board-seq 4 --body "Explain this" --mutation-id review-1`
+creates a thread on the observed Board. Optional `--element-id ID` together with
+`--element-rev REV` anchors to a saved element at that exact revision.
+`--board-seq` and `--body` are required. Retain `--mutation-id` for exact retries;
+when omitted, the command generates one.
+
+### crewship page board threads reply
+
+`crewship page board threads reply BOARD THREAD --base-version 1 --body "More detail" --mutation-id reply-1`
+requires the observed `--base-version` and nonempty `--body`. Optional
+`--mutation-id` preserves retry identity; changed thread versions conflict.
+
+### crewship page board threads resolve
+
+`crewship page board threads resolve BOARD THREAD --base-version 2 --mutation-id resolve-1`
+requires Page write and the observed `--base-version`. Optional `--mutation-id`
+identifies an exact retry. Resolution does not grant an agent authority.
+
+### crewship page board threads reopen
+
+`crewship page board threads reopen BOARD THREAD --base-version 3 --mutation-id reopen-1`
+requires Page write and the observed `--base-version`; optional `--mutation-id`
+identifies the same reopen operation after a lost response.
+
+### crewship page board comments edit
+
+`crewship page board comments edit BOARD THREAD COMMENT --base-version 3 --body "Corrected" --mutation-id edit-1`
+edits your own human comment. Required `--base-version` is the observed thread
+version; required `--body` is nonempty UTF-8 text within 4 KiB. Optional
+`--mutation-id` is generated when omitted; retain it for exact uncertain retries.
+
+### crewship page board comments delete
+
+`crewship page board comments delete BOARD THREAD COMMENT --base-version 4 --mutation-id delete-1`
+tombstones your own human comment; private history remains available to its
+current authorized author. Required `--base-version` and optional `--mutation-id`
+have the same CAS/retry meaning as edit.
+
+### crewship page board comments react
+
+`crewship page board comments react BOARD THREAD COMMENT --base-version 5 --emoji '👀' --active=true --mutation-id reaction-1`
+adds or removes your reaction. `--base-version`, `--emoji` and an explicit
+`--active=true` or `--active=false` are required; supported emoji are `👍`, `❤️`,
+`👀`, `✅`. `--mutation-id` is optional, but unchanged on retry. Current Page
+comment access is required; reactions cannot dispatch an agent.
+
+### crewship page board comments history
+
+`crewship page board comments history BOARD THREAD COMMENT` reads your own
+private body history, including after deletion. No command-specific flags.
+Current Page comment access and actual human authorship are both required.
+
+### crewship page board requests list
+
+`crewship page board requests list BOARD` returns jobs, eligible chats and whether
+the caller may dispatch. No command-specific flags.
+
+### crewship page board requests show
+
+`crewship page board requests show BOARD REQUEST` reads current job state,
+prepared diagram source and authorized output metadata. No command-specific flags.
+
+### crewship page board requests send
+
+`crewship page board requests send BOARD --file request.json` sends one explicit
+selection job. Required `--file` accepts a JSON file or `-` for stdin, at most
+64 KiB. Include a stable `submission_id`, `kind`, eligible `chat_id`, `instruction`,
+`base_seq`, selection IDs and `target` geometry. Diagram jobs also specify
+`dialect:"flowchart-v1"` and `converter_version:"2.2.2"`.
+The server captures the selected content and binds access to the dispatched run.
+
+### crewship page board requests cancel
+
+`crewship page board requests cancel BOARD REQUEST` cancels future job authority.
+No command-specific flags. Already-created private artifacts are preserved.
+
+### crewship page board requests insert
+
+`crewship page board requests insert BOARD REQUEST --file insertion.json` confirms
+one prepared diagram insertion. Required `--file` accepts JSON or `-`, at most
+256 KiB, containing `mutation_id`, current `base_seq`, `source_hash`,
+`converter_version` and new-element `upserts`. The CLI does not execute Mermaid;
+the Studio converter provides the normal human review flow. A changed sequence
+is a conflict, never an instruction to overwrite another person's work.
+
+### crewship page board permissions list
+
+`crewship page board permissions list BOARD` lists one-use permissions and eligible
+live runs. No command-specific flags.
+
+### crewship page board permissions grant
+
+`crewship page board permissions grant BOARD --file permission.json` creates an
+explicit permission for selected human elements. Required `--file` accepts JSON
+or `-` for stdin. Supply a stable `mutation_id`, `run_id`, exact
+`elements:[{element_id,expected_rev}]`, allowed `methods`, `purpose` and
+`expires_in_seconds` (at most one hour). This does not create a Page write grant
+or base run delegation. Preserve the exact payload after an uncertain response.
+
+### crewship page board permissions revoke
+
+`crewship page board permissions revoke BOARD PERMISSION` revokes unused authority.
+No command-specific flags. It does not undo an already-committed agent edit.
+## Staged raster asset commands
+
+### crewship page assets upload
+
+A scoped CLI token needs `pages:write`; `pages:*` also permits upload. Current
+Page write access remains required. A `pages:read` token cannot upload.
+
+```bash
+crewship page assets upload report --file chart.png --mutation-id chart-1
+cat chart.jpg | crewship page assets upload report --file - --mutation-id photo-1
+```
+
+Both flags are required. The human profile uploads raw bounded PNG/JPEG to
+`POST /api/v1/pages/{slug}/assets?mutation_id=ID` and prints server metadata.
+Use the same ID only for identical input under the same author. Staging expires
+in24h. EXIF orientations2–8 are explicitly unsupported; images are canonicalized,
+not stored as original file bytes. This command does not insert an editor image.
+
+### crewship page assets show
+
+Requires `pages:read` (or `pages:*`) and current Page read access.
+
+```bash
+crewship page assets show report ASSET_ID
+```
+
+Reads metadata through `GET /api/v1/pages/{slug}/assets/{assetId}` using current
+Page visibility. Digest knowledge never grants access.
+
+### crewship page assets download
+
+Requires `pages:read` (or `pages:*`); `pages:write` alone grants no read access.
+
+```bash
+crewship page assets download report ASSET_ID > canonical.png
+```
+
+Writes canonical PNG/JPEG bytes to stdout from
+`GET /api/v1/pages/{slug}/assets/{assetId}/bytes`. The metadata MIME identifies
+the actual format. This binary command does not honor table formatting. Expired
+staging and revoked Page access fail; backup restore does not renew expiry.
+
+## Artifact commands
+
+The first artifact surface stores HTML on a human-owned Page. Its preview is
+static: scripts and external resources stay disabled. These commands use your
+existing human CLI profile and the Page's read/write permissions; they do not
+provide agent-run publication authority.
+
+### crewship page artifact create
+
+```bash
+crewship page artifact create report --name "Weekly report"
+```
+
+`--name` supplies the Page name. This stages an empty Page owned by you, using
+`POST /api/v1/pages` with `allow_empty: true`. Publish its first source separately;
+an unsuccessful upload leaves the shell available for retry.
+
+### crewship page artifact show
+
+```bash
+crewship page artifact show report --format json
+crewship page artifact show report --revision 1 --format json
+```
+
+`--revision` selects a positive historical revision; omission selects the head.
+`GET /api/v1/pages/{slug}/artifact` returns source, history, selected revision
+and current head in a JSON envelope. Reading source does not execute it.
+
+### crewship page artifact publish
+
+```bash
+crewship page artifact publish report --file report.html --base-rev 0
+cat report.html | crewship page artifact publish report --file - --base-rev 1
+```
+
+`--file` selects an HTML source file or `-` for stdin. `--base-rev` is required,
+including explicit 0 for the first revision. The command calls
+`POST /api/v1/pages/{slug}/artifact/revisions`; a stale base fails instead of
+replacing somebody else's revision. Inspect the current revision and reconcile
+your source before submitting with a newer base.
+
+`--mutation-id` optionally supplies a retry identifier; otherwise the command
+generates one. Reuse an explicit identifier only for the identical operation,
+base revision and source under the same human identity. The server returns the
+original result for an identical retry and rejects conflicting reuse.
+
+### crewship page artifact copy
+
+```bash
+crewship page artifact copy report report-copy --revision 3 --name "Report copy" --mutation-id copy-report-3
+```
+
+`--revision` selects the required positive source revision; `--name` names the new artifact.
+`--mutation-id` supplies the exact-retry identity (generated once when omitted).
+
+Copies the selected immutable revision into a new private artifact owned by you
+in the same workspace. Source read access and permission to create a Page are
+checked at execution. Grants, comments, requests and agent authority are not
+copied. Supply the same `--mutation-id` and unchanged arguments when retrying
+an unconfirmed response; a revision is required rather than inferred from a
+moving head.
+
+### crewship page artifact restore
+
+```bash
+crewship page artifact restore report --revision 1 --base-rev 2
+```
+
+`--revision` selects the positive historical revision to copy. `--base-rev` is
+required and must match the current head. `--mutation-id` follows the same retry
+rules as publish. `POST /api/v1/pages/{slug}/artifact/restore` appends a new
+revision; it does not discard intervening history.
+
+Source is limited to 10 MiB UTF-8; each artifact retains up to 200 revisions and
+accepts up to 30 committed revisions per hour, including restores. Public
+links and agent credentials do not authorize these artifact routes.
+
+
+### crewship page artifact delegate
+
+```bash
+crewship page artifact delegate report --run RUN_ID
+```
+
+`POST /api/v1/pages/{slug}/artifact/delegations` accepts `run_id`. The Page owner
+may authorize their own verified, live human-initiated chat run to update this
+artifact. The agent must already have an explicit Page write grant. This does
+not grant access to other agents, create a new Page or start work automatically.
+Old runs without captured human authority and unproven dispatch paths are denied.
+
+### crewship page artifact revoke
+
+```bash
+crewship page artifact revoke report --run RUN_ID
+```
+
+`DELETE /api/v1/pages/{slug}/artifact/delegations/{runId}` revokes that run's
+artifact access. Revocation, run termination, the admission deadline or loss of
+the human/agent's access prevents further reads and publication through the
+run-scoped route. A revoked delegation cannot be reactivated for the same run.
+
+### crewship page artifact requests list
+
+```bash
+crewship page artifact requests list report --format json
+```
+
+Reads `GET /api/v1/pages/{slug}/artifact/requests`: durable status, original
+revision and confirmed result revision. Eligible targets are the initiating editor's private,
+unshared chats whose agents already have an explicit Page write grant.
+
+### crewship page artifact requests send
+
+```bash
+crewship page artifact requests send report --chat CHAT_ID --base-rev 2 --instruction "Clarify the totals" --thread THREAD_ID --submission-id review-2
+```
+
+Calls `POST /api/v1/pages/{slug}/artifact/requests`. A current Page editor explicitly
+starts work that can incur agent usage costs. `--chat`, `--base-rev` and
+`--instruction` are required; `--thread` is optional. The source must be the
+current head, and a selected thread must belong to that revision. Instruction
+text is limited to 4 KiB. Saved comments are snapshotted when the request is
+accepted; later replies do not change that task. A mention alone starts nothing.
+
+Use the same `--submission-id` and payload after an uncertain response. If the
+flag is omitted, the CLI generates an ID and includes it in an error so it can
+be reused. A new intentional request uses a new ID. Completion is confirmed by
+an actual published result revision, not by an agent saying it finished.
+
+Use `--result-kind reply` to request an answer without allowing this request to publish a revision. The default `--result-kind revision` requires publication to complete. This choice is fixed after submission.
+
+Use `--retry-of REQUEST_ID` only for a new intentional attempt after a failed or
+cancelled request. Review the current revision and use a new submission ID.
+The previous runtime may still be running; this can duplicate work.
+
+### crewship page artifact requests cancel
+
+```bash
+crewship page artifact requests cancel report REQUEST_ID
+```
+
+Calls `POST /api/v1/pages/{slug}/artifact/requests/{requestId}/cancel`. Cancellation
+blocks further publication for this request and asks an active local run to stop.
+It does not retract already delivered source or undo a committed revision.
+
+### crewship page artifact creation-status
+
+```bash
+crewship page artifact creation-status CHAT_ID --format json
+```
+
+Reads `GET /api/v1/chats/{chatId}/artifact-creation-authorization`, resolving your
+own live chat run and its one-artifact permission on the server. Studio exposes
+the same control in a running chat, so no manual run ID lookup is needed there.
+
+### crewship page artifact authorize-creation
+
+```bash
+crewship page artifact authorize-creation RUN_ID
+```
+
+Calls `POST /api/v1/artifact-creation-authorizations/{runId}` with `{}`. Only the
+server-recorded human initiator of a live chat run, with current Page creation
+rights, can permit that run to create one private artifact. Permission is off by
+default, expires with the run admission and cannot select another owner or audience.
+
+### crewship page artifact revoke-creation
+
+```bash
+crewship page artifact revoke-creation RUN_ID
+```
+
+Calls `DELETE /api/v1/artifact-creation-authorizations/{runId}`. Revokes creation
+and the same run's delegated publication on its created artifact. It preserves
+source history and does not silently re-enable permission when retried.
+
+### crewship page artifact threads list
+
+```bash
+crewship page artifact threads list report --format json
+crewship page artifact threads list report --revision 2 --format json
+```
+
+Reads discussion threads through `GET /api/v1/pages/{slug}/artifact/threads`.
+A revision filter selects the original immutable revision of a thread; a newer
+artifact revision never silently moves a discussion to different content.
+
+### crewship page artifact threads create
+
+```bash
+crewship page artifact threads create report --revision 2 --body "Please explain this result" --mutation-id review-1
+```
+
+`POST /api/v1/pages/{slug}/artifact/threads` creates a whole-document comment
+bound to the required revision. The server supplies the author. A comment or
+`@mention` does not dispatch an agent or grant permission to change the source.
+
+### crewship page artifact threads reply
+
+```bash
+crewship page artifact threads reply report THREAD_ID --base-version 1 --body "Updated in revision 3" --mutation-id reply-1
+```
+
+`POST /api/v1/pages/{slug}/artifact/threads/{threadId}/replies` requires the
+current thread version from the list response. Conflicting changes return 409.
+
+### crewship page artifact threads resolve
+
+```bash
+crewship page artifact threads resolve report THREAD_ID --base-version 2 --mutation-id resolve-1
+```
+
+`PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}` resolves a discussion
+with `resolved: true` and the required `base_version`.
+
+### crewship page artifact threads reopen
+
+```bash
+crewship page artifact threads reopen report THREAD_ID --base-version 3 --mutation-id reopen-1
+```
+
+The same endpoint reopens it with `resolved: false`. Creating or replying requires
+Page comment access; resolving or reopening requires Page write access. Readers
+can list threads. All mutation
+commands generate an ID when `--mutation-id` is omitted. Supply your own stable
+ID when you need to retry after a network error, using the original payload and
+base version. Responses remain escaped JSON, including untrusted comment text.
+
+### crewship page artifact comments edit
+
+```bash
+crewship page artifact comments edit report THREAD_ID COMMENT_ID --body 'Corrected text' --base-version 3 --mutation-id edit-1
+```
+
+`PATCH /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}`
+edits your own human-authored comment. `--base-version` is the current **thread**
+version; replacement text must be nonempty UTF-8 and at most 4 KiB.
+
+### crewship page artifact comments delete
+
+```bash
+crewship page artifact comments delete report THREAD_ID COMMENT_ID --base-version 4 --mutation-id delete-1
+```
+
+`DELETE /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}`
+deletes your own human-authored comment. The comment becomes a tombstone;
+previous bodies remain in its private author history.
+
+### crewship page artifact comments react
+
+```bash
+crewship page artifact comments react report THREAD_ID COMMENT_ID --emoji '👀' --active=true --base-version 5 --mutation-id reaction-1
+```
+
+`PUT /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/reactions/{emoji}`
+adds or removes your reaction. Choose `👍`, `❤️`, `👀`, or `✅` and specify
+`--active=true` or `--active=false`. Each write requires current Page comment
+access and the current thread version. Keep the same `--mutation-id`, body, and
+version when retrying an uncertain result; a stale conflict is never retried
+automatically.
+
+### crewship page artifact comments history
+
+```bash
+crewship page artifact comments history report THREAD_ID COMMENT_ID
+```
+
+`GET /api/v1/pages/{slug}/artifact/threads/{threadId}/comments/{commentId}/history`
+reads your own comment's versions and actions, including deleted-comment history,
+while you still have Page comment access. It does not dispatch or authorize an agent.
+
+
+
 ## Subcommands
 
 | Command | Purpose |
@@ -223,6 +653,8 @@ most 24 panels and 256 KiB of spec.
 
 Remember that [`page update --file`](#crewship-page-update-slug) **replaces**
 the spec: omit any of these on a re-apply and they are deleted.
+
+
 
 ### `--owner crew/<slug>` — whose page it is
 
@@ -846,9 +1278,33 @@ crewship page folder create ops-board --name "Ops board" --owner crew/ops --icon
 | `--owner crew/<slug>` | The owning crew. Required — a folder is owned by a crew, never by a person. The `crew/` prefix may be omitted. |
 | `--icon <name>` | A crew icon name, from the crew icon picker's set. The server refuses anything outside it and says so. |
 | `--color <key>` | A crew palette key: `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime` or `fuchsia`. |
+| `--parent <slug>` | Optional parent folder. Nesting keeps each folder's sharing independent. |
+| `--tree-version <n>` | Required with `--parent`: workspace structure version you reviewed. |
+| `--acl-version <n>` | Required with `--parent`: parent permissions version you reviewed. |
 
 A workspace admin, or a MANAGER (or higher) who belongs to the owning crew,
-may create it; the folder is the crew's from birth.
+may create it; the folder is the crew's from birth. Existing root creation needs
+no tree fences. Nested creation additionally requires parent arrangement access.
+
+### `crewship page folder reparent <slug>`
+
+```bash
+crewship page folder reparent child --parent ops-board --tree-version 3 --acl-version 2
+crewship page folder reparent child --root --tree-version 4
+```
+
+| Flag | Description |
+|---|---|
+| `--parent <slug>` | New parent; choose this or `--root`, never both. |
+| `--root` | Move to the workspace root. |
+| `--tree-version <n>` | Required nonnegative workspace structure version from the folder read you reviewed. |
+| `--acl-version <n>` | Required with `--parent`: the target's reviewed ACL version. |
+
+The source crew manager or workspace administrator must have live authority;
+the target must permit arrangement. Page IDs, slugs, leaf membership and sharing
+remain unchanged. Cycles, excessive depth and stale fences return a refusal.
+The command neither refreshes fences nor retries a 409; read and confirm again.
+
 
 ### `crewship page folder show <slug>`
 
@@ -1822,3 +2278,106 @@ for a retained version) or `crewship page project publish`.
 After a transport timeout the outcome can be unknown; inspect the current
 revision and build status before retrying. Data producers keep pushing through
 the existing panel API/`page.write` path independently of source edits.
+
+## Board commands
+
+These commands use your human CLI profile. Start with an empty human-owned Page
+(for example `crewship page artifact create plan --name Plan`, before publishing
+any artifact revision), then initialize it as a Board. The drawing and artifact
+kinds are mutually exclusive. All output is JSON-safe text.
+
+### crewship page board show
+
+`crewship page board show <slug>` reads the current snapshot, its `seq`, drawing
+records and independently authorized artifact placements.
+
+### crewship page board init
+
+`crewship page board init <slug> --mutation-id <id>` initializes the empty Page.
+`--mutation-id` is required; reuse it only for the same initialization retry.
+
+### crewship page board apply
+
+`crewship page board apply <slug> --file <json>` commits an atomic batch. `--file -`
+reads stdin. Include `mutation_id`, current `base_seq`, `upserts` and `deletes`;
+every changed drawing includes its expected server revision. Optional placement
+updates/deletions are part of the same transaction. Input is limited to 2 MiB.
+The CLI sends the exact JSON and never invents a newer base after conflict.
+
+### crewship page board pin
+
+`crewship page board pin <slug> --file <json>` pins an accessible artifact revision.
+`--file -` reads stdin. Example:
+
+```json
+{"mutation_id":"pin-report-1","base_seq":0,"source_page_slug":"report","source_revision":1,"x":0,"y":0,"width":640,"height":480}
+```
+
+Source read access remains independent of Board access after pinning.
+
+### crewship page board unpin
+
+`crewship page board unpin <slug> <placement-id> --file <json>` removes a placement.
+`--file -` reads stdin; body is `{"mutation_id":"unpin-1","base_seq":2}`.
+Removal preserves the source artifact. Re-read after every confirmed write;
+retain the same JSON on an uncertain retry.
+
+### crewship page artifact chat-results
+
+`crewship page artifact chat-results <chat-id>` lists up to 20 artifact Pages
+linked by the server to that accessible chat. Each result points to an immutable
+revision. The server independently checks current Page access and omits hidden
+results without exposing their names.
+
+### crewship page board delegate
+
+`crewship page board delegate <slug> --run <run-id>` allows that live chat run to
+edit its agent's own drawings. `--run` is required. You must own the Board and be
+the run's verified human initiator; the agent also needs a Page write grant.
+This does not start a run or authorize modifying human drawings.
+
+### crewship page board revoke
+
+`crewship page board revoke <slug> --run <run-id>` permanently revokes that
+run's Board delegation. `--run` is required; only the human Board owner can revoke.
+
+### crewship page board upload
+
+`crewship page board upload <slug> --file <png-or-jpeg> --base-seq <sequence> --mutation-id <id>`
+uploads an immutable Board-owned raster. All three flags are required; `--file -`
+reads stdin, up to 5 MiB. Repeat the exact bytes, sequence and identity after an
+uncertain response. The server validates pixels, re-encodes the image and returns
+an opaque `file_id`. Use it in a subsequent image element batch; upload alone does
+not place an image on the drawing. Unused uploads count toward storage quotas.
+
+### crewship page board download
+
+`crewship page board download <slug> <file-id> --output <new-file>` downloads a
+currently authorized Board image. `--output` is required and must be a new local
+path. Existing files are not overwritten; binary image bytes are never printed
+to the terminal. The canonical image may differ from the uploaded file because
+metadata and trailing bytes are stripped by the server.
+
+
+### crewship page request-result
+
+```bash
+crewship page request-result artifact REQUEST_ID --format json
+crewship page request-result board REQUEST_ID --format json
+```
+
+Calls `GET /api/v1/page-request-results/{kind}/{requestId}` using your current
+workspace and human identity. Returns a current accessible Page slug and optional
+retained result revision. Only the initiating human can resolve the result;
+missing or revoked access returns 404. This reads a result and starts no work.
+
+### crewship page artifact lease
+
+```bash
+crewship page artifact lease report --revision 3 --format json
+```
+
+Calls `GET /api/v1/pages/{slug}/artifact/lease`. `--revision` is required and
+positive. Checks your current human Page access and returns exact retained
+revision metadata with a short expiry, without downloading HTML. It grants no
+additional access and does not enable interactive execution.

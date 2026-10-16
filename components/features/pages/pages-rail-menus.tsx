@@ -102,6 +102,7 @@ export function PageRowMenu({
 }
 
 export interface FolderHeaderMenuProps {
+  onReparent?: () => void
   folderName: string
   onRename?: () => void
   /** Absent, the item is not drawn — a server without folder permissions. */
@@ -109,7 +110,7 @@ export interface FolderHeaderMenuProps {
   onDelete?: () => void
 }
 
-export function FolderHeaderMenu({ folderName, onRename, onShare, onDelete }: FolderHeaderMenuProps) {
+export function FolderHeaderMenu({ folderName, onRename, onShare, onDelete, onReparent }: FolderHeaderMenuProps) {
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
@@ -130,6 +131,12 @@ export function FolderHeaderMenu({ folderName, onRename, onShare, onDelete }: Fo
         onClick={stop}
         onPointerDown={stop}
       >
+        {onReparent && (
+          <DropdownMenuItem onSelect={onReparent}>
+            <FolderInput aria-hidden />
+            Move folder…
+          </DropdownMenuItem>
+        )}
         {onRename && <DropdownMenuItem onSelect={onRename}>
           <Pencil aria-hidden />
           Rename or change icon…

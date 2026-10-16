@@ -103,7 +103,7 @@ interface CLIToken {
 // resource").
 //
 // Only actions that actually gate a route are offered — reads are not
-// scope-gated yet and there is no route-mapped agents:run, so those would
+// scope-gated outside Documents and there is no route-mapped agents:run, so those would
 // mint tokens that grant/gate nothing. This mirrors the backend allowlist
 // (and the reverse invariant TestEveryMintableScopeMapsToARoute). They come
 // back here when a route requires them.
@@ -113,6 +113,7 @@ const SCOPE_GROUPS: Array<{ resource: string; actions: string[] }> = [
   { resource: "credentials", actions: ["write"] },
   { resource: "skills", actions: ["write"] },
   { resource: "webhooks", actions: ["write"] },
+  { resource: "pages", actions: ["read", "write"] },
   { resource: "workspace", actions: ["admin"] },
 ]
 

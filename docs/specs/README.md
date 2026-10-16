@@ -48,7 +48,13 @@ public contract here. Superseded a spec? Move it to
 
 ## Pages and project files
 
-- [Pages](pages.md): panel schemas, freshness, permissions, data model and
+- [Slides persistence foundation](slides.md): typed schema, atomic semantic mutation,
+  immutable revisions and namespaced backup; native UI and agent admission remain separate cuts.
+
+- [Docs persistence foundation](documents.md): opt-in private Go/Node persistence,
+  writer fencing, bounded history and backup contract; no public Docs editor.
+
+- [Pages](pages.md): panel schemas, static HTML artifact revisions, permissions, data model and
   API/CLI surface. Code references its section anchors; preserve them.
   Explicit historical design sections are not claims of current implementation.
 - [Pages Apps](pages-apps.md): custom applications, browser/isolation boundaries

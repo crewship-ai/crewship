@@ -293,7 +293,15 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 	if err := departWorkspace(r.Context(), h.db, h.journal, actorID, workspaceID, memberUserID); err != nil {
 		var needsManual *ErrPagesNeedManualTransfer
 		if errors.As(err, &needsManual) {
-			replyError(w, http.StatusConflict, "cannot remove this member: "+err.Error())
+			// Middleware admission may be stale after waiting for the writer.
+			// This workspace route has no instance-admin exception to Page access.
+			ph := NewPageHandler(h.db, nil, h.logger)
+			liveRole, roleErr := ph.liveContentHumanRole(r.Context(), workspaceID, actorID)
+			if roleErr != nil || !canRole(liveRole, "manage") {
+				replyError(w, http.StatusForbidden, "active trusted workspace administrator required")
+				return
+			}
+			replyPageOwnershipConflict(w, "cannot remove this member: ", needsManual)
 			return
 		}
 		replyInternalError(w, h.logger, "remove member", err)

@@ -41,7 +41,7 @@ func TestIndexRendersOperationsNotJSON(t *testing.T) {
 
 	rec := get(t, h, "/openapi")
 	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /openapi = %d, want 200", rec.Code)
+		t.Fatalf("GET /openapi = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Errorf("Content-Type = %q, want text/html", ct)

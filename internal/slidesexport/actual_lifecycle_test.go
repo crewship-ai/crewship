@@ -1,0 +1,372 @@
+//go:build slides_export_runtime
+
+package slidesexport
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+)
+
+const maliciousEntry = `import {readFile} from 'node:fs/promises';
+let b=await readFile('/opt/slides-export/fixture-frame');
+switch(process.env.FIXTURE_MODE){
+case 'truncated':b=b.subarray(0,b.length-1);break;
+case 'extra':b=Buffer.concat([b,Buffer.from('extra')]);break;
+case 'header_oversize':b.writeUInt32BE(0xffffffff,8);break;
+case 'binary_oversize':b.writeBigUInt64BE(0xffffffffffffffffn,12);break;
+case 'profile_mismatch':case 'hash_mismatch': {
+const h=JSON.parse(b.subarray(20).toString());
+if(process.env.FIXTURE_MODE==='profile_mismatch')h.profile_sha256='b'.repeat(64);else h.sha256='b'.repeat(64);
+const body=Buffer.from(JSON.stringify(h));b=Buffer.concat([b.subarray(0,20),body]);b.writeUInt32BE(body.length,8);break;}
+case 'hold':await new Promise(resolve=>setTimeout(resolve,200000));break;
+}
+process.stdout.write(b);
+`
+
+// These are deliberately untrusted fixture workers derived from the exact built
+// image. Their framing failures qualify host admission, not renderer fidelity.
+func TestActualExportImageLifecycle(t *testing.T) {
+	if os.Getenv("CREWSHIP_JOB_ID") != "" {
+		t.Fatal("actual lifecycle requires authorized isolated CI, never bypass the local gateway")
+	}
+	image := os.Getenv("CREWSHIP_TEST_SLIDES_EXPORT_IMAGE")
+	if !imagePattern.MatchString(image) {
+		t.Fatal("actual immutable image required")
+	}
+	got := actualDocker(t, "image", "inspect", "--format", "{{.Id}}", "crewship-slides-export:ci")
+	if strings.TrimSpace(got) != image {
+		t.Fatal("fixture base tag differs from exact tested image")
+	}
+	raw, err := os.ReadFile("../../tools/slides-export/testdata/supported.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := Binding{Mode: "report", PageID: in.Deck.DeckID, Revision: in.Revision, ContentHash: in.ContentHash}
+	results := map[string]any{"production_image": image, "controlled_late_create_window_ms": 250, "arbitrarily_delayed_daemon_atomic_cleanup": false}
+	// A test-owned foreign container must survive every runner cleanup.
+	foreign := newIntent("foreign_ci")
+	foreign.ContainerID = strings.TrimSpace(actualDocker(t, createArgs(foreign.Name, foreign.Token, foreign.OwnerID, image, "report", "")...))
+	foreign.Phase = "created"
+	if !digestPattern.MatchString(foreign.ContainerID) {
+		t.Fatal("foreign fixture ID")
+	}
+	t.Cleanup(func() {
+		if c, e := inspectOwned(context.Background(), foreign); e == nil && c != nil {
+			_ = removeOwned(context.Background(), c)
+		} else if e != nil {
+			t.Error("foreign fixture cleanup ownership unresolved")
+		}
+	})
+	for _, mode := range []string{"truncated", "extra", "header_oversize", "binary_oversize", "profile_mismatch", "hash_mismatch", "hold"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+			defer cancel()
+			for path, data := range map[string][]byte{"entry.mjs": []byte(maliciousEntry), "frame": fixtureFrame(t, b, nil), "Dockerfile": []byte("FROM crewship-slides-export:ci\nCOPY --chown=1001:1001 entry.mjs /opt/slides-export/entry.mjs\nCOPY --chown=1001:1001 frame /opt/slides-export/fixture-frame\nARG MODE\nENV FIXTURE_MODE=$MODE\n")} {
+				if e := os.WriteFile(filepath.Join(dir, path), data, 0600); e != nil {
+					t.Fatal(e)
+				}
+			}
+			iid := filepath.Join(dir, "iid")
+			out, logs := &capture{limit: 1 << 20, cancel: cancel}, &capture{limit: 1 << 20, cancel: cancel}
+			cmd := exec.CommandContext(ctx, "docker", "build", "--progress=plain", "--build-arg", "MODE="+mode, "--iidfile", iid, dir)
+			cmd.Stdout = out
+			cmd.Stderr = logs
+			cmd.WaitDelay = time.Second
+			if e := cmd.Run(); e != nil {
+				t.Fatal("trusted fixture image build failed", e)
+			}
+			id, e := os.ReadFile(iid)
+			if e != nil || !imagePattern.MatchString(strings.TrimSpace(string(id))) {
+				t.Fatal("fixture immutable image ID", e)
+			}
+			fixtureImage := strings.TrimSpace(string(id))
+			t.Cleanup(func() { actualDocker(t, "image", "rm", fixtureImage) })
+			r := &Runner{Image: fixtureImage, OwnerID: "actual_ci", JournalDir: filepath.Join(t.TempDir(), "journal")}
+			defer r.Close()
+			runCtx, stop := context.WithCancel(t.Context())
+			defer stop()
+			done := make(chan error, 1)
+			go func() { _, e := r.Run(runCtx, raw, b); done <- e }()
+			if mode == "hold" {
+				intent := waitActualIntent(t, r, true)
+				profile := verifyActualIsolation(t, intent.ContainerID, fixtureImage)
+				results["actual_isolation"] = profile
+				stop()
+			}
+			select {
+			case e := <-done:
+				if mode == "hold" {
+					if !errors.Is(e, context.Canceled) || errors.Is(e, ErrCleanup) {
+						t.Fatal("actual running cancellation", e)
+					}
+				} else if !errors.Is(e, ErrProtocol) {
+					t.Fatal("actual malformed frame not rejected", e)
+				}
+			case <-time.After(20 * time.Second):
+				t.Fatal("actual lifecycle exceeded bounded test deadline")
+			}
+			if intents, e := r.journal.list(); e != nil || len(intents) != 0 {
+				t.Fatal("owned settled containers/intents remain", e)
+			}
+			results[mode] = map[string]any{"result": "PASS", "fixture_image": fixtureImage}
+		})
+	}
+	// Exercise actual Docker creation after parent cancellation, plus a controlled
+	// unacknowledged late create. This test-owned CLI wrapper never changes daemon
+	// configuration or DOCKER_HOST; the production independent deadline still runs.
+	realDocker, err := exec.LookPath("docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"cancel_create", "late_unacknowledged_create"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			script := `#!/bin/sh
+if [ "$1" = create ]; then
+ : > "$CREWSHIP_TEST_ACTUAL_CREATE_DIR/entered"
+ if [ "$CREWSHIP_TEST_ACTUAL_CREATE_MODE" = late_unacknowledged_create ]; then
+  (sleep 0.25; "$CREWSHIP_TEST_ACTUAL_DOCKER" "$@" > "$CREWSHIP_TEST_ACTUAL_CREATE_DIR/created" 2> "$CREWSHIP_TEST_ACTUAL_CREATE_DIR/diagnostic" && : > "$CREWSHIP_TEST_ACTUAL_CREATE_DIR/finished") </dev/null >/dev/null 2>&1 &
+  exit 1
+ fi
+ sleep 0.25
+fi
+exec "$CREWSHIP_TEST_ACTUAL_DOCKER" "$@"
+`
+			if e := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0700); e != nil {
+				t.Fatal(e)
+			}
+			t.Setenv("CREWSHIP_TEST_ACTUAL_DOCKER", realDocker)
+			t.Setenv("CREWSHIP_TEST_ACTUAL_CREATE_DIR", dir)
+			t.Setenv("CREWSHIP_TEST_ACTUAL_CREATE_MODE", mode)
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			r := &Runner{Image: image, OwnerID: "actual_ci", JournalDir: filepath.Join(t.TempDir(), "journal")}
+			defer r.Close()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { _, e := r.Run(ctx, raw, b); done <- e }()
+			waitActualFile(t, filepath.Join(dir, "entered"))
+			if mode == "cancel_create" {
+				cancel()
+			}
+			select {
+			case e := <-done:
+				if mode == "cancel_create" {
+					if !errors.Is(e, context.Canceled) || errors.Is(e, ErrCleanup) {
+						t.Fatal("actual late acknowledged create", e)
+					}
+				} else if !errors.Is(e, ErrCleanup) {
+					t.Fatal("uncertain actual create falsely settled", e)
+				}
+			case <-time.After(20 * time.Second):
+				t.Fatal("actual create/cancel cleanup exceeded bounded window")
+			}
+			intents, e := r.journal.list()
+			if e != nil {
+				t.Fatal(e)
+			}
+			if mode == "cancel_create" {
+				if len(intents) != 0 {
+					t.Fatal("acknowledged create retained")
+				}
+			} else {
+				if len(intents) != 1 || intents[0].Phase != "uncertain" {
+					t.Fatal("uncertainty not retained")
+				}
+				v := intents[0]
+				t.Cleanup(func() { uncertainJobs.Delete(v.Name) })
+				waitActualFile(t, filepath.Join(dir, "finished"))
+				created, readErr := os.ReadFile(filepath.Join(dir, "created"))
+				if readErr != nil || !digestPattern.MatchString(strings.TrimSpace(string(created))) {
+					t.Fatal("controlled late producer did not complete a valid create", readErr)
+				}
+				if c, e := inspectOwned(t.Context(), v); e != nil || c != nil {
+					t.Fatal("controlled late create did not eventually clean", e)
+				}
+				if _, e = r.Acquire(t.Context()); !errors.Is(e, ErrCleanup) {
+					t.Fatal("uncertain intent admitted work", e)
+				}
+				// The test owns the completed child and knows this controlled producer is
+				// quiescent. This does not infer arbitrary real-daemon quiescence.
+				if e = r.AcknowledgeCleanup(t.Context(), v.Name, "ci_controlled_producer_completed", true); e != nil {
+					t.Fatal(e)
+				}
+			}
+			results[mode] = "PASS"
+		})
+	}
+	if c, e := inspectOwned(t.Context(), foreign); e != nil || c == nil {
+		t.Fatal("unrelated owned foreign fixture did not survive", e)
+	}
+	results["foreign_container_survived"] = true
+	results["foreign_instance_survived"] = true
+	results["foreign_instance_owner"] = foreign.OwnerID
+	evidence := os.Getenv("CREWSHIP_TEST_SLIDES_EXPORT_EVIDENCE")
+	if evidence == "" {
+		t.Fatal("owned evidence directory required")
+	}
+	if e := os.MkdirAll(evidence, 0700); e != nil {
+		t.Fatal(e)
+	}
+	encoded, _ := json.MarshalIndent(results, "", "  ")
+	if e := os.WriteFile(filepath.Join(evidence, "image-lifecycle.json"), append(encoded, '\n'), 0600); e != nil {
+		t.Fatal(e)
+	}
+}
+func actualDocker(t *testing.T, args ...string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, logs := &capture{limit: 1 << 20, cancel: cancel}, &capture{limit: 1 << 20, cancel: cancel}
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdout = out
+	cmd.Stderr = logs
+	cmd.WaitDelay = time.Second
+	if e := cmd.Run(); e != nil {
+		t.Fatalf("actual Docker helper %s failed: %v", args[0], e)
+	}
+	return out.buffer.String()
+}
+func waitActualFile(t *testing.T, path string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	for {
+		if _, e := os.Stat(path); e == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("controlled actual lifecycle marker timeout")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+func waitActualIntent(t *testing.T, r *Runner, running bool) cleanupIntent {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	for {
+		r.mu.Lock()
+		j := r.journal
+		r.mu.Unlock()
+		if j != nil {
+			if intents, e := j.list(); e == nil && len(intents) == 1 && intents[0].Phase == "created" {
+				v := intents[0]
+				if !running {
+					return v
+				}
+				if strings.TrimSpace(actualDocker(t, "inspect", "--format", "{{.State.Running}}", v.ContainerID)) == "true" {
+					return v
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("actual container never entered running state")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+func verifyActualIsolation(t *testing.T, id, image string) map[string]any {
+	t.Helper()
+	type mount struct {
+		Type, Source, Destination string
+		RW                        bool
+	}
+	type ulimit struct {
+		Name       string
+		Hard, Soft int64
+	}
+	var rows []struct {
+		Image  string
+		Mounts []mount
+		Config struct {
+			User, WorkingDir string
+			Labels           map[string]string
+			Cmd, Entrypoint  []string
+		}
+		HostConfig struct {
+			NetworkMode                             string
+			ReadonlyRootfs, Init                    bool
+			CapDrop, SecurityOpt, Binds             []string
+			Mounts                                  []mount
+			Memory, MemorySwap, NanoCpus, PidsLimit int64
+			Tmpfs                                   map[string]string
+			Ulimits                                 []ulimit
+			LogConfig                               struct{ Type string }
+		}
+	}
+	if json.Unmarshal([]byte(actualDocker(t, "inspect", id)), &rows) != nil || len(rows) != 1 {
+		t.Fatal("actual isolation inspection")
+	}
+	x := rows[0]
+	expectedCmd := []string{"--signal=KILL", "120s", "node", "--max-old-space-size=512", "/opt/slides-export/entry.mjs", "report", ""}
+	if x.Image != image || !reflect.DeepEqual(x.Config.Entrypoint, []string{"timeout"}) || !reflect.DeepEqual(x.Config.Cmd, expectedCmd) {
+		t.Fatal("actual immutable image or fixed entrypoint differs")
+	}
+	if x.Config.Labels[resourcelifecycle.InstanceLabel] != "actual_ci" || x.Config.Labels["crewship.slides.export.owner"] != "actual_ci" || x.Config.WorkingDir != "/tmp" || x.Config.User != "1001:1001" || x.HostConfig.NetworkMode != "none" || !x.HostConfig.ReadonlyRootfs || !x.HostConfig.Init || x.HostConfig.Memory != 1<<30 || x.HostConfig.MemorySwap != 1<<30 || x.HostConfig.NanoCpus != 1e9 || x.HostConfig.PidsLimit != 64 || x.HostConfig.LogConfig.Type != "none" || !reflect.DeepEqual(x.HostConfig.CapDrop, []string{"ALL"}) || !reflect.DeepEqual(x.HostConfig.SecurityOpt, []string{"no-new-privileges"}) {
+		t.Fatal("actual container profile differs from approved limits")
+	}
+	if len(x.HostConfig.Binds) != 0 {
+		t.Fatal("unexpected host bind")
+	}
+	for _, mounts := range [][]mount{x.Mounts, x.HostConfig.Mounts} {
+		if len(mounts) > 1 {
+			t.Fatal("unexpected mount count")
+		}
+		for _, m := range mounts {
+			if m.Type != "tmpfs" || m.Source != "" || m.Destination != "/tmp" || !m.RW {
+				t.Fatal("unexpected mount")
+			}
+		}
+	}
+	if len(x.HostConfig.Tmpfs) != 1 {
+		t.Fatal("unexpected tmpfs count")
+	}
+	opts := map[string]string{}
+	for _, part := range strings.Split(x.HostConfig.Tmpfs["/tmp"], ",") {
+		key, value, _ := strings.Cut(part, "=")
+		if _, ok := opts[key]; ok {
+			t.Fatal("duplicate tmpfs option")
+		}
+		opts[key] = value
+	}
+	if len(opts) != 8 || (opts["size"] != "32m" && opts["size"] != "33554432") || opts["uid"] != "1001" || opts["gid"] != "1001" || (opts["mode"] != "0700" && opts["mode"] != "700") {
+		t.Fatal("actual tmpfs ceiling/ownership differs")
+	}
+	for _, required := range []string{"rw", "nosuid", "nodev", "noexec"} {
+		if value, ok := opts[required]; !ok || value != "" {
+			t.Fatal("missing tmpfs isolation", required)
+		}
+	}
+	limits := map[string]int64{}
+	for _, u := range x.HostConfig.Ulimits {
+		if u.Hard != u.Soft {
+			t.Fatal("asymmetric ulimit")
+		}
+		if _, ok := limits[u.Name]; ok {
+			t.Fatal("duplicate ulimit")
+		}
+		limits[u.Name] = u.Hard
+	}
+	if len(limits) != 2 || limits["nofile"] != 256 || limits["fsize"] != 64<<20 {
+		t.Fatal("actual file ceilings differ")
+	}
+	return map[string]any{"image": x.Image, "entrypoint": x.Config.Entrypoint, "command": x.Config.Cmd, "user": x.Config.User, "working_dir": x.Config.WorkingDir, "instance_owner": x.Config.Labels[resourcelifecycle.InstanceLabel], "network": x.HostConfig.NetworkMode, "readonly": x.HostConfig.ReadonlyRootfs, "init": x.HostConfig.Init, "memory": x.HostConfig.Memory, "memory_swap": x.HostConfig.MemorySwap, "nano_cpus": x.HostConfig.NanoCpus, "pids": x.HostConfig.PidsLimit, "cap_drop": x.HostConfig.CapDrop, "security_opt": x.HostConfig.SecurityOpt, "tmpfs": x.HostConfig.Tmpfs, "ulimits": limits, "bind_count": len(x.HostConfig.Binds), "mounts": x.Mounts, "logs": x.HostConfig.LogConfig.Type}
+}

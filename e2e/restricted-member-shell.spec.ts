@@ -184,7 +184,7 @@ test.describe("mobile artifact selection", () => {
     await expect(composer).toBeVisible({ timeout: 30_000 })
     await composer.fill("Keep this existing draft.")
     const tabs = page.getByRole("tablist", { name: "Chat panel", exact: true })
-    const artifacts = tabs.getByRole("tab", { name: "Artifacts", exact: true })
+    const artifacts = tabs.getByRole("tab", { name: "Files", exact: true })
     const chat = tabs.getByRole("tab", { name: "Chat", exact: true })
     await artifacts.click()
     await page.getByRole("button", { name: /^selection\.csv/ }).click()
@@ -374,8 +374,8 @@ for (const width of [1280, 390]) {
 
     if (width === 1280) {
       // An open Issue belongs to Work and must not cover other side panels.
-      await page.getByRole("tab", { name: "Artifacts", exact: true }).click()
-      await expect(page.getByText("No artifacts yet. Documents, sheets and pages the agent writes appear here.")).toBeVisible()
+      await page.getByRole("tab", { name: "Files", exact: true }).click()
+      await expect(page.getByText("No files yet. Documents, sheets and pages the agent writes appear here.")).toBeVisible()
       await expect(page.getByRole("button", { name: "Back to Work" })).toHaveCount(0)
       await page.getByRole("tab", { name: "Work", exact: true }).click()
       await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()

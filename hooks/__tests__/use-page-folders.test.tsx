@@ -144,6 +144,17 @@ describe("usePageFolders", () => {
 })
 
 describe("usePageFolderMutations", () => {
+  it("reparents through the structural path before the workspace query, preserving reviewed fences", async () => {
+    apiFetch.mockResolvedValue(json({ tree_version: 4 }))
+    const { result } = renderHook(() => usePageFolderMutations("ws-1"), { wrapper: wrapper() })
+    await result.current.reparent.mutateAsync({ slug: "child", parent: "ops", treeVersion: 3, aclVersion: 5 })
+    expect(lastCall()).toEqual({
+      url: "/api/v1/page-folders/child/parent?workspace_id=ws-1",
+      method: "POST",
+      body: { parent: "ops", tree_version: 3, acl_version: 5 },
+    })
+  })
+
   it("files a page with both versions in the body", async () => {
     apiFetch.mockResolvedValue(json({ page: { slug: "p", folder: { slug: "ops" }, pages_version: 4 } }))
     const { result } = renderHook(() => usePageFolderMutations("ws-1"), { wrapper: wrapper() })

@@ -95,6 +95,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/quiesce"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // attachmentGCInterval is how often the collector walks the blob tree.
@@ -234,6 +235,17 @@ func runAttachmentGCPass(ctx context.Context, db *sql.DB, logger *slog.Logger, r
 	}
 	defer wr.Leave()
 	ctx = wr.Context()
+	// Staged Page uploads expire independently of whether a browser returns.
+	// Future immutable revision attachment must promote state atomically; retained
+	// rows are deliberately excluded. A future FK RESTRICT also fails closed.
+	var assetsPresent int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE name='page_assets'`).Scan(&assetsPresent); err != nil {
+		logger.Warn("page asset expiry: schema", "error", err)
+	} else if assetsPresent > 0 {
+		if _, err := db.ExecContext(ctx, `DELETE FROM page_assets WHERE state='staged' AND expires_at<=?`, tsformat.Format(time.Now().UTC())); err != nil {
+			logger.Warn("page asset expiry failed", "error", err)
+		}
+	}
 	sweepAttachmentBlobs(ctx, db, logger, root)
 	reclaimUnpublishedChatAttachments(ctx, db, logger, root, chatAttachmentPublishGrace)
 }

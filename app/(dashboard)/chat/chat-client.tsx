@@ -97,7 +97,7 @@ type MobilePanel = "chat" | "artifacts" | "work"
 
 const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
+  { id: "artifacts", label: "Files", icon: LayoutGrid },
   { id: "work", label: "Work", icon: ListTodo },
 ]
 

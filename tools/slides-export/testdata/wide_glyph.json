@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "revision": 7,
+  "content_hash": "fbc77c851d788715a503b9fd1268a79170591b2cbd9536031c967752a0d9a677",
+  "deck": {
+    "schema_version": 2,
+    "deck_id": "s2_corpus_page",
+    "width": 960,
+    "height": 540,
+    "theme": {
+      "background": "#ffffff",
+      "color": "#112233",
+      "font_family": "DejaVu Sans",
+      "font_size": 24
+    },
+    "slide_order": [
+      "czech",
+      "long_text",
+      "table",
+      "raster",
+      "font_fallback"
+    ],
+    "slides": [
+      {
+        "id": "czech",
+        "notes": "Česká poznámka\nSkutečný druhý řádek",
+        "elements": [
+          {
+            "id": "czech_title",
+            "type": "text",
+            "x": 32,
+            "y": 30,
+            "width": 1,
+            "height": 300,
+            "text": {
+              "value": "W",
+              "font_family": "DejaVu Sans",
+              "font_size": 160,
+              "color": "#112233",
+              "align": "left"
+            }
+          },
+          {
+            "id": "czech_rectangle",
+            "type": "shape",
+            "x": 40,
+            "y": 190,
+            "width": 320,
+            "height": 120,
+            "shape": {
+              "kind": "rectangle",
+              "fill": "#ddeeff",
+              "stroke": "#334455",
+              "stroke_width": 2
+            }
+          },
+          {
+            "id": "czech_ellipse",
+            "type": "shape",
+            "x": 450,
+            "y": 190,
+            "width": 220,
+            "height": 120,
+            "shape": {
+              "kind": "ellipse",
+              "fill": "#ddeeff",
+              "stroke": "#334455",
+              "stroke_width": 2
+            }
+          }
+        ]
+      },
+      {
+        "id": "long_text",
+        "notes": "Dlouhý odstavec se zachovanými LF",
+        "elements": [
+          {
+            "id": "long_body",
+            "type": "text",
+            "x": 32,
+            "y": 32,
+            "width": 896,
+            "height": 470,
+            "text": {
+              "value": "Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. Český dlouhý odstavec s přesnou editovatelnou sazbou. \nZávěrečný řádek.",
+              "font_family": "DejaVu Sans",
+              "font_size": 16,
+              "color": "#112233",
+              "align": "left"
+            }
+          }
+        ]
+      },
+      {
+        "id": "table",
+        "notes": "Jednoduchá tabulka musí zůstat nativní",
+        "elements": [
+          {
+            "id": "native_table",
+            "type": "table",
+            "x": 48,
+            "y": 48,
+            "width": 840,
+            "height": 300,
+            "table": {
+              "cells": [
+                [
+                  "Město",
+                  "Rozpočet",
+                  "Poznámka"
+                ],
+                [
+                  "Plzeň",
+                  "120 000 Kč",
+                  "První řádek\nDruhý řádek"
+                ],
+                [
+                  "Brno",
+                  "98 000 Kč",
+                  "Bez přetečení"
+                ],
+                [
+                  "Žďár",
+                  "77 000 Kč",
+                  "České znaky"
+                ]
+              ],
+              "font_family": "DejaVu Sans",
+              "font_size": 18,
+              "color": "#112233",
+              "fill": "#f4f8ff",
+              "border": "#334455"
+            }
+          }
+        ]
+      },
+      {
+        "id": "raster",
+        "notes": "Soukromý lokální PNG, žádná vzdálená adresa",
+        "elements": [
+          {
+            "id": "raster_title",
+            "type": "text",
+            "x": 32,
+            "y": 30,
+            "width": 880,
+            "height": 70,
+            "text": {
+              "value": "Ověřený lokální PNG",
+              "font_family": "DejaVu Sans",
+              "font_size": 26,
+              "color": "#112233",
+              "align": "left"
+            }
+          },
+          {
+            "id": "private_png",
+            "type": "image",
+            "x": 150,
+            "y": 150,
+            "width": 600,
+            "height": 300,
+            "image": {
+              "asset_id": "s2_private_png",
+              "expected_sha256": "786b0521606ff28d694653dfd810aae8d86bc414c53632e3db645ff8a6d940c7",
+              "alt": "Barevný testovací PNG"
+            }
+          }
+        ]
+      },
+      {
+        "id": "font_fallback",
+        "notes": "Chybějící profil fontu je viditelný v reportu",
+        "elements": [
+          {
+            "id": "missing_font",
+            "type": "text",
+            "x": 32,
+            "y": 40,
+            "width": 880,
+            "height": 160,
+            "text": {
+              "value": "Český text s výslovně popsanou náhradou fontu.",
+              "font_family": "Missing Export Font",
+              "font_size": 26,
+              "color": "#112233",
+              "align": "left"
+            }
+          },
+          {
+            "id": "fallback_shape",
+            "type": "shape",
+            "x": 48,
+            "y": 250,
+            "width": 400,
+            "height": 100,
+            "shape": {
+              "kind": "rectangle",
+              "fill": "#ddeeff",
+              "stroke": "#334455",
+              "stroke_width": 0
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "assets": [
+    {
+      "asset_id": "s2_private_png",
+      "expected_sha256": "786b0521606ff28d694653dfd810aae8d86bc414c53632e3db645ff8a6d940c7",
+      "mime": "image/png",
+      "width": 96,
+      "height": 64,
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAdUlEQVR4nOzQMREAIRDAwMz/+S/RiwJoaTYTBTu1vvLp6U+XAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjQC6A9ADPXAxIPfEqJAAAAAElFTkSuQmCC"
+    }
+  ]
+}

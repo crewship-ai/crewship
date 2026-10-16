@@ -140,6 +140,7 @@ var registrationStart = regexp.MustCompile(`^\s*r\.(mux\.Handle|mux\.HandleFunc|
 // roleInline equivalent), say so explicitly in the reason, because that shifts
 // the guarantee off the chokepoint and onto that handler forever.
 var readRoutesWithoutWorkspace = map[string]string{
+	"GET /api/v1/pages/runtime/board-converter":   "public constant converter bootstrap on the configured cross-site runtime Host; reads no database, Board content or user data",
 	"GET /api/v1/notification-providers":          "the instance's provider registry (which shoutrrr providers exist and which an instance admin enabled), no workspace rows; a member reads it inside their workspace, an instance admin may read it with none (RequireWorkspaceOrInstanceAdmin, optional)",
 	"GET /api/v1/shared-chats/{shareId}/messages": "dedicated share bearer authenticates one live direct agent chat; the handler validates its bound workspace, agent, chat, issuer and expiry on each request and projects text only",
 	"GET /api/v1/pages/runtime/bootstrap":         "public constant HTML bootstrap; reads no database, source, artifact or user data; accepts only the configured runtime Host",

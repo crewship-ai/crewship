@@ -18,7 +18,7 @@ interface RailItem {
 // The shortcut number is derived from the position rather than written down,
 // so removing an entry cannot leave ⌘3 pointing at the second icon.
 const RAIL_PANELS: Omit<RailItem, "shortcut">[] = [
-  { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
+  { id: "artifacts", label: "Files", icon: LayoutGrid },
   { id: "work", label: "Work", icon: ListTodo },
   { id: "memory", label: "Memory", icon: Brain },
 ]
@@ -41,7 +41,7 @@ const ITEMS: RailItem[] = RAIL_PANELS.map((item, i) => ({
  */
 export const DRAWER_TAB_LABELS: Record<DrawerTab, string> = {
   files: "Files",
-  artifacts: "Artifacts",
+  artifacts: "Files",
   work: "Work",
   memory: "Memory",
   triggers: "Triggers",

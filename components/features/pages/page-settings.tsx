@@ -252,7 +252,7 @@ export function pageSubjectIcon(kind: string): React.ComponentType<{ className?:
  * one because it is the floor, not because it does nothing (see rule 3 in
  * the file comment).
  */
-const LEVEL_TONE: Record<PageGrantLevel, DetailTone> = { read: "default", write: "blue", produce: "purple" }
+const LEVEL_TONE: Record<PageGrantLevel, DetailTone> = { read: "default", comment: "default", write: "blue", produce: "purple" }
 
 export function GrantRow({
   grant,

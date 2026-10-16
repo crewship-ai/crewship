@@ -1,0 +1,182 @@
+---
+title: "Slides Commands"
+description: "Read typed Page Slides and submit atomic, revision-checked human mutations."
+icon: "presentation"
+stability: experimental
+tag: Experimental
+---
+
+# crewship slide
+
+The human CLI uses the current profile's workspace and credential. Page read/write
+ACLs apply in addition to `pages:read`/`pages:write` token scopes. This foundation
+has no native viewer, image assets or selected-edit agent admission. Human stable
+comments have the separate commands below.
+See [API contracts](/api-reference/slides) and the [storage contract](../specs/slides.md).
+Every mutation preserves its original `page_id`, `mutation_id`, `base_rev`, order
+version and object hashes. Conflicts stop after one request; there is no automatic
+refresh, identity substitution or rebase. JSON input must pass the same exact,
+bounded schema as the Go server.
+
+## crewship slide read
+
+`crewship slide read report` calls `GET /api/v1/pages/{slug}/slides` and prints
+confirmed `{schema_version,revision,order_version,content_hash,deck}`.
+
+## crewship slide outline
+
+`crewship slide outline report` calls `GET /api/v1/pages/{slug}/slides/outline`.
+It prints confirmed Page/revision/order/hash and ordered slide/element identities
+with their precondition hashes. Fetch `slide read` for full element payloads.
+
+## crewship slide history
+
+`crewship slide history report` calls `GET /api/v1/pages/{slug}/slides/history`.
+The result lists retained immutable revisions with trusted actor attribution.
+
+## crewship slide at-rev
+
+`crewship slide at-rev report 1` calls
+`GET /api/v1/pages/{slug}/slides/revisions/{revision}`. The revision must be a
+positive integer. This reads retained content under current authorization.
+
+## crewship slide initialize
+
+`crewship slide initialize report --file initialize.json` calls
+`POST /api/v1/pages/{slug}/slides/initialize`. `--file` names the exact JSON file;
+`--file -` reads stdin. Required fields are `{page_id,schema_version:1,base_rev:0,
+mutation_id,deck}`. Only the human owner can initialize an empty Page. The full
+deck must bind the same Page ID.
+
+## crewship slide patch
+
+`crewship slide patch report --file patch.json` calls
+`POST /api/v1/pages/{slug}/slides/patch`. `--file` names the exact JSON file;
+`--file -` reads stdin. Required fields are `{page_id,schema_version:1,base_rev,
+mutation_id,operations}`. Structural slide operations additionally require
+`if_order_version`. Every operation hash observes earlier operations in this
+same atomic batch. Preserve the full request on uncertain transport retry.
+
+## crewship slide reorder
+
+`crewship slide reorder report --file order.json` calls
+`POST /api/v1/pages/{slug}/slides/reorder`. `--file` names the exact JSON file;
+`--file -` reads stdin. Supply `{page_id,schema_version:1,base_rev,mutation_id,
+if_order_version,slide_order}` with every existing slide ID exactly once.
+
+## crewship slide restore
+
+`crewship slide restore report --file restore.json` calls
+`POST /api/v1/pages/{slug}/slides/restore`. `--file` names the exact JSON file;
+`--file -` reads stdin. Supply `{page_id,schema_version:1,base_rev,mutation_id,
+if_order_version,revision}`. Restore appends a new confirmed revision and can
+revive the original stable identities; it does not replace live permissions.
+
+Page detail may include `can_edit_slides` for native UI controls; it is advisory, missing=false, and does not replace the CLI mutation authority checks or indicate Docs/Board permissions.
+
+## crewship slide comments
+
+Human-only stable comments. Comment/reply requires COMMENT access; resolve/reopen
+requires WRITE. All mutations preserve immutable Page ID, anchor and thread CAS.
+
+## crewship slide comments list
+
+`crewship slide comments list report --limit 25 --cursor CURSOR` calls
+`GET /api/v1/pages/{slug}/slides/comments`. Omit `--cursor` for a fresh list.
+Follow `has_more` and `next_cursor`; each page rechecks current access.
+
+## crewship slide comments get
+
+`crewship slide comments get report THREAD` calls
+`GET /api/v1/pages/{slug}/slides/comments/{threadId}`. The original anchor,
+current projection revision/status, provenance and first comment are returned.
+
+## crewship slide comments history
+
+`crewship slide comments history report THREAD --limit 25 --cursor CURSOR` calls
+`GET /api/v1/pages/{slug}/slides/comments/{threadId}/history`. The immutable event
+history is paginated with a fixed membership watermark; no events are silently
+omitted. Omit `--cursor` for a fresh history.
+
+## crewship slide comments create
+
+`crewship slide comments create report --file create.json` calls
+`POST /api/v1/pages/{slug}/slides/comments`. `--file -` reads stdin. Supply
+`{page_id,schema_version:1,base_rev,mutation_id,anchor,body}`. Anchor contains
+`{anchor_schema_version:1,kind:"slide"|"element",slide_id,element_id?,revision}`.
+Element ID is present only for element anchors; revision must equal base_rev.
+Body is nonblank UTF-8, at most10000 bytes; the whole request is at most16KiB.
+
+## crewship slide comments reply
+
+`crewship slide comments reply report THREAD --file reply.json` calls
+`POST /api/v1/pages/{slug}/slides/comments/{threadId}/replies`. `--file -` reads
+stdin. Supply `{page_id,schema_version:1,mutation_id,if_version,body}`.
+The original thread version must match; resolved threads reject replies.
+
+## crewship slide comments resolve
+
+`crewship slide comments resolve report THREAD --file resolve.json` calls
+`POST /api/v1/pages/{slug}/slides/comments/{threadId}/resolve`. `--file -` reads
+stdin. Supply `{page_id,schema_version:1,mutation_id,if_version,resolved}` with
+an explicit boolean. `resolved:false` reopens; both transitions require WRITE.
+Conflicts stop after one exact request and never refresh/rebase its preconditions.
+
+## Private image revisions
+
+`crewship page assets upload PAGE --file image.png --mutation-id ID` stages a
+bounded private PNG/JPEG on the owning Page. Use the returned asset ID and SHA in
+an explicit schema2 image element, then the existing `crewship slide initialize`
+or `crewship slide patch PAGE --file request.json` command. Upload requires
+pages:write and metadata/bytes require pages:read independently; neither implies
+the other. CLI mutation never invents a replacement Page ID or refreshes fences.
+
+First image patch on schema1 requires original schema_version/base_rev/operation
+hashes plus target_schema_version2 and original if_content_hash. Other mutation
+requests use the current head schema. `crewship slide restore` creates a new
+revision in the selected immutable source version. Image comments use the
+existing comment protocol1, independently of deck1/2. Image export embedding,
+remote imports and automatic pruning are unavailable in this storage cut.
+
+Image revisions also cap decoded pixels at33,554,432 across unique asset IDs;
+repeated placement of the same asset counts once. This is independent of the
+32MiB encoded byte and32asset limits, and is enforced on write and restore.
+
+## crewship slide request create
+
+`crewship slide request create report --file request.json` admits the exact
+immutable selected-text request. `--file -` reads stdin. Include original
+page_id/base_rev, protocol1, unique submission_id, private chat_id, instruction
+and text_range selection. On conflict stop; no refresh or automatic rebase.
+
+## crewship slide request list
+
+`crewship slide request list report --limit 25 --cursor CURSOR` reads bounded
+request summaries. `--limit` is1..100; omit `--cursor` for a fresh watermark.
+Follow `next_cursor` while `has_more`; every page rechecks current human access.
+
+## crewship slide request get
+
+`crewship slide request get report REQUEST` reads original request/history and
+any owned result revision. Credential and audience metadata are never returned.
+
+## crewship slide request cancel
+
+`crewship slide request cancel report REQUEST --file cancel.json` supplies
+`{page_id,schema_version:1,mutation_id,if_version}`. `--file -` reads stdin.
+Preserve exact JSON for uncertain retries; cancellation uses a separate receipt.
+
+## crewship slide agent read
+
+`crewship slide agent read report REQUEST` reads only the original frozen text
+through the local sidecar using the original run bearer. No human profile,
+server override, proxy or redirect fallback is permitted.
+
+## crewship slide agent replace
+
+`crewship slide agent replace report REQUEST --file replacement.json` sends
+`{page_id,request_schema_version:1,request_id,replacement}`. `--file -` reads stdin.
+Only the admitted UTF16 range changes; original prefix/suffix and style remain.
+Retry uncertain acknowledgement with exactly the same body. Stop on409/403;
+never refresh target, revision, selection or hash. The saved owned revision is
+its checkpoint; no second content write is needed.

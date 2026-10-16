@@ -1,5 +1,6 @@
 "use client"
 
+import { resolvePageContent } from "@/lib/pages/content-types"
 import { usePageCreationAccess, usePageFolderCreationAccess } from "@/hooks/use-page-creation-access"
 
 import { PageApplicationView } from "./page-application"
@@ -60,16 +61,19 @@ import {
 } from "@/hooks/use-pages"
 import type { PanelState } from "@/components/features/pages/panels/types"
 import { PagesRail } from "@/components/features/pages/pages-rail"
+import { ArtifactGallery } from "./artifact-gallery"
 import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
+import { NewBoardDialog } from "./new-board-dialog"
+import { NewArtifactDialog } from "./new-artifact-dialog"
 import { PageEditor } from "@/components/features/pages/page-editor"
 import { PageImportDialog } from "@/components/features/pages/page-import-dialog"
 import { useEditorRoute } from "@/components/features/pages/editor/use-editor-route"
 import { usePageCapabilities } from "@/components/features/pages/editor/use-page-capabilities"
 import { usePageGrants } from "@/hooks/use-page-grants"
-import { PageEditorShell } from "@/components/features/pages/editor/page-editor-shell"
+import { PageEditorShell, UnsavedWorkDialog } from "@/components/features/pages/editor/page-editor-shell"
 import { usePageFolderMutations, usePageFolders } from "@/hooks/use-page-folders"
-import { FolderDeleteDialog, FolderEditDialog, MoveToFolderDialog } from "@/components/features/pages/folder-dialogs"
+import { FolderDeleteDialog, FolderEditDialog, MoveToFolderDialog, ReparentFolderDialog } from "@/components/features/pages/folder-dialogs"
 import { FolderSharingDialog } from "@/components/features/pages/folder-sharing-dialog"
 import { PageChatHandoff } from "@/components/features/pages/page-chat-handoff"
 import { toast } from "sonner"
@@ -84,6 +88,8 @@ export interface PagesLayoutProps {
 
 export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const isMobile = useIsMobile()
+  const [creatingBoard, setCreatingBoard] = React.useState(false)
+  const [creatingArtifact, setCreatingArtifact] = React.useState(false)
 
   // WHICH PAGE IS OPEN, WHETHER THE EDITOR IS OPEN, AND WHICH SECTION IT SHOWS
   // ARE ONE PIECE OF STATE, AND THE ADDRESS BAR IS ITS MIRROR.
@@ -112,6 +118,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
 
   const canCreatePage = usePageCreationAccess(workspaceId)
   const canCreateFolder = usePageFolderCreationAccess(workspaceId)
+  React.useEffect(() => { if (!canCreatePage) { setCreatingBoard(false); setCreatingArtifact(false) } }, [canCreatePage])
   const [importing, setImporting] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
   const [search, setSearch] = React.useState("")
@@ -131,6 +138,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const [folderDialog, setFolderDialog] = React.useState<
     | { kind: "create" }
     | { kind: "edit"; slug: string }
+    | { kind: "reparent"; slug: string }
     | { kind: "delete"; slug: string }
     | { kind: "share"; slug: string }
     | { kind: "move"; slug: string }
@@ -229,7 +237,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // rendered its grant and mint forms and fired reads against a Page that is
   // not there. The address is not allowed to reach a state the data does not
   // support.
-  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null
+  const contentSupported = detail.raw == null || resolvePageContent({ ...detail.raw, has_panels: Array.isArray(detail.raw.panels) && detail.raw.panels.length > 0 }).supported
+  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && contentSupported
 
   // Application | Panels. The switch lives in the page header beside Edit,
   // because that is where the page is named and where a person looks for
@@ -253,7 +262,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // refusal must be visible where the action was, not turned into an absence
   // that reads as "this product cannot do that".
   const grants = usePageGrants(workspaceId, selectedSlug, editing)
-  const capabilities = usePageCapabilities(detail.raw, {
+  const capabilities = usePageCapabilities(contentSupported ? detail.raw : null, {
     mayManageAccess: grants.refusal === null,
   })
 
@@ -269,7 +278,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // Guessing a longer delay would only move the race. The callback ref fires
   // when the node actually attaches, which is the moment that matters.
   const wantsFocus = React.useRef(false)
+  const viewHeadingNode = React.useRef<HTMLHeadingElement | null>(null)
   const viewHeading = React.useCallback((node: HTMLHeadingElement | null) => {
+    viewHeadingNode.current = node
     if (node === null || !wantsFocus.current) return
     wantsFocus.current = false
     node.focus()
@@ -332,8 +343,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               <SubBarSecondary
                 icon={Share2}
                 onClick={() => nav.openEditor("access")}
-                disabled={detail.page == null}
-                title="Who reaches this Page, who may send it data, and its public links"
+                disabled={detail.page == null || !contentSupported}
+                title={contentSupported ? "Who reaches this Page, who may send it data, and its public links" : "This content format is unavailable; sharing through its editor is disabled"}
               >
                 Share
               </SubBarSecondary>
@@ -342,8 +353,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               <SubBarSecondary
                 icon={Pencil}
                 onClick={() => nav.openEditor()}
-                disabled={detail.page == null}
-                title="Edit this Page's content, data, access and history"
+                disabled={detail.page == null || !contentSupported}
+                title={contentSupported ? "Edit this Page's content, data, access and history" : "This content format is unavailable; editing is disabled"}
               >
                 Edit
               </SubBarSecondary>
@@ -353,6 +364,12 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 door that existed only as a CLI command. */}
             {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
+            </SubBarSecondary>}
+            {canCreatePage && <SubBarSecondary icon={FilePlus2} onClick={() => canCreatePage && setCreatingBoard(true)}>
+              New board
+            </SubBarSecondary>}
+            {canCreatePage && <SubBarSecondary icon={FilePlus2} onClick={() => canCreatePage && setCreatingArtifact(true)}>
+              New Doc, Slides or artifact
             </SubBarSecondary>}
             {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
@@ -415,6 +432,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onCreateFolder={canCreateFolder ? () => setFolderDialog({ kind: "create" }) : undefined}
               onEditFolder={(slug) => setFolderDialog({ kind: "edit", slug })}
               onShareFolder={(slug) => setFolderDialog({ kind: "share", slug })}
+              onReparentFolder={(slug) => setFolderDialog({ kind: "reparent", slug })}
               onDeleteFolder={(slug) => setFolderDialog({ kind: "delete", slug })}
               onMovePages={(list) => setFolderDialog({ kind: "move-many", slugs: list.map((p) => p.slug) })}
             />
@@ -428,7 +446,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               inside it — the rail beside it is not, so it never participates in
               the transition and never blinks. */}
           <AnimatePresence mode="wait">
-            {editing && selectedSlug ? (
+            {editing && selectedSlug && contentSupported ? (
               <motion.div
                 key={`editor-${selectedSlug}`}
                 // The editor arrives from the right edge and leaves the same
@@ -465,7 +483,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 flex flex-col overflow-hidden"
               >
-                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={
+                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error || !contentSupported ? null : detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={
                 <PageView
                   headingRef={viewHeading}
                   page={detail.page}
@@ -477,6 +495,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   now={now}
                   workspaceId={workspaceId}
                   mayEditAvatar={capabilities.mayEditMetadata}
+                  onArtifactDirtyChange={nav.setDirty}
                   // Straight from the subscription `usePage` registered — the
                   // header indicator is lit only while this page's channel is
                   // on a live socket, never on a timer of its own (epic #1935).
@@ -493,7 +512,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 overflow-auto"
               >
-                <PagesOverview
+                {filters.content?.length === 1 && filters.content[0] === 'artifact' ? <ArtifactGallery workspaceId={workspaceId} pages={filtered} loading={loading} error={error} onSelect={openPage} onCreate={canCreatePage ? () => setCreatingArtifact(true) : undefined} onOpenChat={() => { window.location.assign('/chat') }} /> : <PagesOverview
                   pages={filtered}
                   allPages={pages}
                   loading={loading}
@@ -503,7 +522,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                     setFilters((f) => ({ ...f, states: togglePageFilter(f.states, state) }))
                   }
                   now={now}
-                />
+                />}
               </motion.div>
             )}
           </AnimatePresence>
@@ -530,6 +549,14 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           onOpenChange={(open) => !open && closeFolderDialog()}
           folder={folderDialog.kind === "edit" ? folderOf(folderDialog.slug) : null}
           defaultOwner={suggestedOwner}
+        />
+      )}
+      {folderDialog?.kind === "reparent" && (
+        <ReparentFolderDialog
+          key={folderDialog.slug}
+          workspaceId={workspaceId}
+          folder={folderOf(folderDialog.slug)}
+          onOpenChange={(open) => { if (!open) closeFolderDialog() }}
         />
       )}
       {folderDialog?.kind === "delete" && (
@@ -575,6 +602,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
       {/* Only creation opens the document editor from here now. Editing an
           existing Page's document belongs to the editor's Content section,
           beside the panels it changes. */}
+      {!editing && <UnsavedWorkDialog pending={nav.pending} onDiscard={() => {}} onReturnFocus={() => viewHeadingNode.current?.focus()} />}
+      {canCreatePage && creatingBoard && <NewBoardDialog workspaceId={workspaceId} onClose={() => setCreatingBoard(false)} onCreated={openPage} />}
+      {canCreatePage && creatingArtifact && <NewArtifactDialog workspaceId={workspaceId} onClose={() => setCreatingArtifact(false)} onCreated={openPage} />}
       {creating && (
         <PageEditor
           workspaceId={workspaceId}

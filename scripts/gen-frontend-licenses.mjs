@@ -32,10 +32,56 @@ const pnpmDir = "node_modules/.pnpm";
 // Adding an entry requires citing where the declaration is observable and a
 // review note; versions not listed here fail hard.
 const EXCEPTIONS = {
+  // Slides export image audit (2026-10-16): exact installed tarballs and
+  // matching npm gitHead READMEs declare MIT but omit a license text.
+  "brotli@1.3.3": "package.json and upstream README declare MIT; https://github.com/devongovett/brotli.js/blob/e36051345f6d27a56e5f39ea70d2f789b8574046/readme.md#license",
+  "dfa@1.2.0": "package.json and upstream README declare MIT; https://github.com/devongovett/dfa/blob/3f5e603e5082caedabefefdf53e8a6ca3111e966/README.md#license",
+  "fontkit@2.0.4": "package.json and upstream README declare MIT; https://github.com/foliojs/fontkit/blob/fbf3b9ef21eebd219eb73e666faed573af0fba09/README.md#license",
+  // The exact https tarball has only package.json, no source or license text.
+  "https@1.0.0": "exact https://registry.npmjs.org/https/-/https-1.0.0.tgz package.json declares ISC; package contains only package.json",
   // XLSX dependency audit (2026-10-15): exact npm 0.1.20 tarball and upstream
   // v0.1.20 tree contain no license text. package.json declares MIT; preserve
   // that declaration honestly as an EXCEPTION-NOTICE, not invented copyright.
   "worker-f@0.1.20": "package.json declares MIT; upstream v0.1.20 commit 32742a0f8a57f19968c73539a09ecb3606efa3f9 also ships no license text: https://gitlab.com/catamphetamine/worker-f/-/blob/32742a0f8a57f19968c73539a09ecb3606efa3f9/package.json",
+  // Excalidraw 0.18.1 integration: exact installed package declarations
+  // verified; npm tarballs omit root license files. Full upstream MIT texts
+  // and attribution are retained in THIRD-PARTY-NOTICES.md.
+  "@excalidraw/excalidraw@0.18.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/primitive@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/primitive@1.1.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-arrow@1.1.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-collection@1.0.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-compose-refs@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-compose-refs@1.1.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-context@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-context@1.1.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-direction@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-dismissable-layer@1.1.5": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-focus-guards@1.1.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-focus-scope@1.1.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-id@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-id@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-popover@1.1.6": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-popper@1.2.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-portal@1.1.4": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-presence@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-presence@1.1.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-primitive@1.0.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-primitive@2.0.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-roving-focus@1.0.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-slot@1.0.1": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-slot@1.1.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-tabs@1.0.2": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-callback-ref@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-callback-ref@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-controllable-state@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-controllable-state@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-escape-keydown@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-layout-effect@1.0.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-layout-effect@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-rect@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/react-use-size@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
+  "@radix-ui/rect@1.1.0": "package.json declares MIT; upstream notice in THIRD-PARTY-NOTICES.md (Excalidraw integration)",
   // Dependency refresh (2026-10-05): inspected the exact registry tarballs
   // linked in PR #2915 and checked their package.json license declarations.
   // None ships a package-level license text; provider-utils only includes a
@@ -110,6 +156,12 @@ const EXCEPTIONS = {
   "@rolldown/binding-linux-x64-musl@1.2.8": "package.json declares MIT",
   "imurmurhash@0.1.4": "package.json declares MIT (dev-tree fallback)",
   "natural-compare@1.4.0": "package.json declares MIT (dev-tree fallback)",
+};
+
+// Reviewed full license embedded in the exact package README, retained verbatim.
+// This is a real upstream text, not an exception notice. A changed file fails.
+const README_LICENSES = {
+  "isarray@1.0.0": { file: "README.md", sha256: "ff138e683771b187f3629c383db72ee7d632009010a36d08e18e8d2a34222ec7" },
 };
 
 const licenseStems = new Set(["license", "licence", "copying", "notice", "patents"]);
@@ -208,6 +260,15 @@ for (const entry of entries) {
       if (!isLicenseFile(f)) continue;
       const st = await stat(path.join(pkgDir, f));
       if (st.isFile() && st.size > 0) found.push(f);
+    }
+    if (found.length === 0 && README_LICENSES[key]) {
+      const reviewed = README_LICENSES[key];
+      const source = path.join(pkgDir, reviewed.file);
+      if (!existsSync(source) || sha256(source) !== reviewed.sha256) {
+        meta.push(`${key}: reviewed README license digest mismatch`);
+        continue;
+      }
+      found.push(reviewed.file);
     }
     if (found.length === 0) {
       const why = EXCEPTIONS[key];

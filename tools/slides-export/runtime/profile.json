@@ -1,0 +1,63 @@
+{
+  "admission_sha256": "ebfca3c965222aa2814e3076d47136ca377d188d81b5f0f499cd7c47d72be6d7",
+  "base_image": "node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315",
+  "files": [
+    {
+      "bytes": 1592,
+      "path": "Dockerfile",
+      "sha256": "aa2cd5213e98956b4d651b9f188700ceadb185223ba3085ef18292b55f818032"
+    },
+    {
+      "bytes": 2400,
+      "path": "entry.mjs",
+      "sha256": "886a6a001f28400ce6587dfa936dea2895d513f8c399bcf6d23e99893dc1ec7f"
+    },
+    {
+      "bytes": 757076,
+      "path": "fonts/DejaVuSans.ttf",
+      "sha256": "7da195a74c55bef988d0d48f9508bd5d849425c1770dba5d7bfc6ce9ed848954"
+    },
+    {
+      "bytes": 8816,
+      "path": "fonts/LICENSE-DejaVu.txt",
+      "sha256": "7a083b136e64d064794c3419751e5c7dd10d2f64c108fe5ba161eae5e5958a93"
+    },
+    {
+      "bytes": 548,
+      "path": "fonts/provenance.json",
+      "sha256": "b1e02c67ac68862f12233626ee5df8f0b7a784b613cb7439b26793ee713608eb"
+    },
+    {
+      "bytes": 385,
+      "path": "package.json",
+      "sha256": "dfe625e8923844a7c1818607071dc1da9d2600f16572a79d94c59b251986a7dc"
+    },
+    {
+      "bytes": 9040,
+      "path": "pnpm-lock.yaml",
+      "sha256": "8b2ec8e82591ed4bd6266efc55ca91746d448638e2f95b1db59b5a6c2fb416e4"
+    },
+    {
+      "bytes": 13,
+      "path": "pnpm-workspace.yaml",
+      "sha256": "b379483d4293500af8e9d3e8d83b4b5a2ad1e844911cd7be7f7e274e4bb80666"
+    },
+    {
+      "bytes": 1882,
+      "path": "profile.go",
+      "sha256": "8c7e50577a9f9ae3a0e1ac322824f3c34903df252fd5c6ab712267f6a8791dba"
+    },
+    {
+      "bytes": 2727,
+      "path": "profile.mjs",
+      "sha256": "86449be848b1e3be74c5c0648ac6838b25266d936305ebff35ce70eb1eb2b03f"
+    },
+    {
+      "bytes": 14957,
+      "path": "worker.mjs",
+      "sha256": "4af65f92b42879617610d959f7abb4d23d28de28ea603b977a29ea5891142045"
+    }
+  ],
+  "license_generator_sha256": "81ce9bdd8e4deae584832c897417658bc0184e49c5f7cb2703bd013a7bcd05f9",
+  "protocol_version": 1
+}

@@ -24,6 +24,8 @@ import { SettingsCard, SettingsRow, SettingsDangerCard, settingsControl, setting
 import { PagesAppearanceCard } from "./pages-appearance-card"
 import { WorkspaceLogoRow } from "./workspace-logo-row"
 import { cn } from "@/lib/utils"
+import { ArtifactCreationPolicyCard } from "./artifact-creation-policy-card"
+import { PageOwnershipCard } from "./page-ownership-card"
 import { PrivilegedCredentialsCard } from "@/components/features/settings/sections/privileged-credentials-card"
 import { AvatarBackfillButton } from "@/components/features/crews/avatar-backfill-button"
 
@@ -305,6 +307,8 @@ export function GeneralSection({
           above the danger zone because it is the other switch on this page
           that changes what the whole workspace is allowed to do. */}
       <PrivilegedCredentialsCard workspaceId={workspaceId} />
+      <ArtifactCreationPolicyCard key={`artifact-policy:${workspaceId}`} workspaceId={workspaceId} role={role} />
+      <PageOwnershipCard key={`page-ownership:${workspaceId}:${role}`} workspaceId={workspaceId} role={role} />
 
       {/* ── Danger Zone ── */}
       {isOwner(role) && (

@@ -368,3 +368,15 @@ it("keeps a real focus destination when the loaded Page has no panels", () => {
   act(() => heading.current?.focus())
   expect(document.activeElement).toBe(heading.current)
 })
+
+
+for (const [field, label] of [["has_document", "Doc"], ["has_slides", "Slides"]] as const) it(`labels native ${label} without panel freshness or subscription claims`, () => {
+  const record = toPageView({ ...wire({}), panels: [], owner: "user/owner", [field]: true })
+  record.state = "fresh"
+  const { container } = render(<PageView page={record} slug="native" loading={false} error={null} notFound={false} onBack={vi.fn()} now={NOW} live="offline" />)
+  expect(screen.getByText(label, { exact: true })).toBeVisible()
+  expect(container.querySelector("[data-slot='page-liveness']")).toBeNull()
+  expect(screen.queryByText("0 panels", { exact: true })).toBeNull()
+  expect(screen.queryByText("Fresh", { exact: true })).toBeNull()
+  cleanup()
+})

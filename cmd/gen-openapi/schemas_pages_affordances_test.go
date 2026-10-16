@@ -19,3 +19,27 @@ func TestPagesAffordanceSchemasDescribeActualCallerFields(t *testing.T) {
 		}
 	}
 }
+
+func TestPagesContentReferencesDescribeDerivedMetadata(t *testing.T) {
+	catalog := pagesSchemaCatalog()
+	detail := catalog["GET /api/v1/pages/{slug}"].Response
+	list := catalog["GET /api/v1/pages"].Response["items"].(map[string]any)
+	for _, schema := range []map[string]any{detail, list} {
+		props := schema["properties"].(map[string]any)
+		for _, field := range []string{"content_descriptor", "application_descriptor"} {
+			reference, ok := props[field].(map[string]any)
+			if !ok {
+				t.Fatalf("missing %s", field)
+			}
+			fields := reference["properties"].(map[string]any)
+			if fields["supported"].(map[string]any)["type"] != "boolean" || fields["schema_version"].(map[string]any)["type"] != "integer" {
+				t.Fatalf("invalid reference %#v", reference)
+			}
+			// Type is intentionally open: future server formats must survive metadata
+			// transport and be rejected at compiled client dispatch, not disappear.
+			if _, closed := fields["type_id"].(map[string]any)["enum"]; closed {
+				t.Fatal("future type hidden by enum")
+			}
+		}
+	}
+}

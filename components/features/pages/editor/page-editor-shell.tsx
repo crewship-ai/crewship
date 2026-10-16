@@ -279,7 +279,7 @@ function SectionFrame({
  * page bar's Save, so the honest offer here is "discard" or "stay". Discard
  * drops the bar's drafts too, so nothing half-typed survives the move.
  */
-function UnsavedWorkDialog({
+export function UnsavedWorkDialog({
   pending,
   onDiscard,
   onReturnFocus,

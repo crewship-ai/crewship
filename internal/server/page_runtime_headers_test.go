@@ -27,3 +27,27 @@ func TestPageRuntimeDoesNotWidenDefaultStudioPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestBoardConverterOnlyPublicProgramAllowsOpaqueLoading(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
+	for _, path := range []string{"/board-converter/runner.js", "/board-converter/other.js", "/api/v1/pages/design/board", "/pages"} {
+		w := httptest.NewRecorder()
+		securityHeadersMiddleware(inner).ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		expected := "same-origin"
+		if path == "/board-converter/runner.js" {
+			expected = "cross-origin"
+		}
+		if path != "/board-converter/runner.js" && w.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatal("private CORS widened")
+		}
+		if path == "/board-converter/runner.js" && w.Header().Get("Access-Control-Allow-Origin") != "*" {
+			t.Fatal("public converter CORS missing")
+		}
+		if got := w.Header().Get("Cross-Origin-Resource-Policy"); got != expected {
+			t.Errorf("%s: %s", path, got)
+		}
+		if w.Header().Get("X-Frame-Options") != "DENY" {
+			t.Fatal("Studio frame policy widened")
+		}
+	}
+}

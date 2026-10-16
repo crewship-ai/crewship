@@ -13,6 +13,7 @@ package main
 //	GET    /api/v1/page-folders/{slug}              page folder show   <slug>
 //	PATCH  /api/v1/page-folders/{slug}              page folder update <slug> --name|--icon|--color
 //	DELETE /api/v1/page-folders/{slug}              page folder delete <slug> --yes
+//	POST   /api/v1/page-folders/{slug}/parent       page folder reparent <slug> --parent SLUG|--root --tree-version N
 //	POST   /api/v1/page-folders/{slug}/pages        page folder add    <folder> <page>   ≡ page move <page> --folder <folder>
 //	POST   /api/v1/page-folders/{slug}/pages:batch  page move <page> <page>... --folder <folder>
 //	DELETE /api/v1/page-folders/{slug}/pages/{page} page folder remove <folder> <page>   ≡ page move <page> --unfiled
@@ -24,7 +25,11 @@ package main
 // in the workspace). Never an agent: an agent reaches a page only by a grant
 // on that page.
 //
-// Two properties this file holds to:
+// Page membership commands read their fences immediately. Nested folder
+// create/reparent instead require explicit reviewed tree/parent ACL fences;
+// they never refresh those fences or retry a refused operation.
+//
+// Two properties the existing Page membership commands hold to:
 //
 //  1. IT READS THE FENCES ITSELF, RIGHT BEFORE IT WRITES. A move is confirmed
 //     against the page's `pages_version` and the folder's `acl_version`
@@ -54,22 +59,26 @@ import (
 // ── The wire (mirrors internal/api/pages_folders.go) ───────────────────────
 
 type PageFolderJSON struct {
-	CanRename      bool   `json:"can_rename" yaml:"can_rename"`
-	CanShare       bool   `json:"can_share" yaml:"can_share"`
-	CanDelete      bool   `json:"can_delete" yaml:"can_delete"`
-	CanAcceptPages bool   `json:"can_accept_pages" yaml:"can_accept_pages"`
-	ID             string `json:"id" yaml:"id"`
-	Slug           string `json:"slug" yaml:"slug"`
-	Name           string `json:"name" yaml:"name"`
-	Icon           string `json:"icon" yaml:"icon"`
-	Color          string `json:"color" yaml:"color"`
-	Owner          string `json:"owner" yaml:"owner"`
-	OwnerCrewName  string `json:"owner_crew_name" yaml:"owner_crew_name"`
-	PageCount      int    `json:"page_count" yaml:"page_count"`
-	Shared         string `json:"shared" yaml:"shared"`
-	ACLVersion     int64  `json:"acl_version" yaml:"acl_version"`
-	CreatedAt      string `json:"created_at" yaml:"created_at"`
-	UpdatedAt      string `json:"updated_at" yaml:"updated_at"`
+	ParentID         *string `json:"parent_id" yaml:"parent_id"`
+	TreeVersion      int64   `json:"tree_version" yaml:"tree_version"`
+	CanReparent      bool    `json:"can_reparent" yaml:"can_reparent"`
+	CanAcceptFolders bool    `json:"can_accept_folders" yaml:"can_accept_folders"`
+	CanRename        bool    `json:"can_rename" yaml:"can_rename"`
+	CanShare         bool    `json:"can_share" yaml:"can_share"`
+	CanDelete        bool    `json:"can_delete" yaml:"can_delete"`
+	CanAcceptPages   bool    `json:"can_accept_pages" yaml:"can_accept_pages"`
+	ID               string  `json:"id" yaml:"id"`
+	Slug             string  `json:"slug" yaml:"slug"`
+	Name             string  `json:"name" yaml:"name"`
+	Icon             string  `json:"icon" yaml:"icon"`
+	Color            string  `json:"color" yaml:"color"`
+	Owner            string  `json:"owner" yaml:"owner"`
+	OwnerCrewName    string  `json:"owner_crew_name" yaml:"owner_crew_name"`
+	PageCount        int     `json:"page_count" yaml:"page_count"`
+	Shared           string  `json:"shared" yaml:"shared"`
+	ACLVersion       int64   `json:"acl_version" yaml:"acl_version"`
+	CreatedAt        string  `json:"created_at" yaml:"created_at"`
+	UpdatedAt        string  `json:"updated_at" yaml:"updated_at"`
 }
 
 type pageFoldersJSON struct {
@@ -88,11 +97,14 @@ type pageFolderShowJSON struct {
 // pageFolderWriteBody is create's body; update sends the subset that changed
 // (pointers, so an empty string clears an icon and an omitted one keeps it).
 type pageFolderWriteBody struct {
-	Slug  string  `json:"slug,omitempty" yaml:"slug,omitempty"`
-	Name  *string `json:"name,omitempty" yaml:"name,omitempty"`
-	Icon  *string `json:"icon,omitempty" yaml:"icon,omitempty"`
-	Color *string `json:"color,omitempty" yaml:"color,omitempty"`
-	Owner string  `json:"owner,omitempty" yaml:"owner,omitempty"`
+	Parent      *string `json:"parent,omitempty" yaml:"parent,omitempty"`
+	TreeVersion *int64  `json:"tree_version,omitempty" yaml:"tree_version,omitempty"`
+	ACLVersion  *int64  `json:"acl_version,omitempty" yaml:"acl_version,omitempty"`
+	Slug        string  `json:"slug,omitempty" yaml:"slug,omitempty"`
+	Name        *string `json:"name,omitempty" yaml:"name,omitempty"`
+	Icon        *string `json:"icon,omitempty" yaml:"icon,omitempty"`
+	Color       *string `json:"color,omitempty" yaml:"color,omitempty"`
+	Owner       string  `json:"owner,omitempty" yaml:"owner,omitempty"`
 }
 
 type pageFolderMoveBody struct {
@@ -243,6 +255,18 @@ picker a crew uses — and the server refuses anything outside either set.`,
 			name = args[0]
 		}
 		body := pageFolderWriteBody{Slug: args[0], Name: &name, Owner: owner}
+		if cmd.Flags().Changed("parent") {
+			parent, _ := cmd.Flags().GetString("parent")
+			tree, _ := cmd.Flags().GetInt64("tree-version")
+			acl, _ := cmd.Flags().GetInt64("acl-version")
+			if strings.TrimSpace(parent) == "" || !cmd.Flags().Changed("tree-version") || tree < 0 || !cmd.Flags().Changed("acl-version") || acl < 0 {
+				return fmt.Errorf("--parent requires nonnegative --tree-version and --acl-version")
+			}
+			body.Parent = &parent
+			body.TreeVersion = &tree
+			body.ACLVersion = &acl
+		}
+
 		if cmd.Flags().Changed("icon") {
 			icon := mustFlagString(cmd, "icon")
 			body.Icon = &icon
@@ -918,6 +942,9 @@ func pageFolderRead(resp *http.Response) ([]byte, error) {
 }
 
 func init() {
+	pageFolderCreateCmd.Flags().String("parent", "", "Optional parent folder slug (organization only)")
+	pageFolderCreateCmd.Flags().Int64("tree-version", 0, "Current tree version, required with --parent")
+	pageFolderCreateCmd.Flags().Int64("acl-version", 0, "Current parent ACL version, required with --parent")
 	pageFolderCreateCmd.Flags().String("name", "", "The folder's display name (defaults to the slug)")
 	pageFolderCreateCmd.Flags().String("owner", "", "The owning crew, crew/<slug> (required)")
 	for _, c := range []*cobra.Command{pageFolderCreateCmd, pageFolderUpdateCmd} {
