@@ -63,6 +63,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineLibrary))))
 	// openapi: responses 200,401,403,404,500
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineLibrary))))
+	// openapi: query limit:integer offset:integer; responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineRunHistory))))
+	// openapi: responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs/{runId}", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineRunHistory))))
 	// openapi: responses 200,401,403,404,409,500
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineDraft))))
 	// openapi: responses 200,400,401,403,404,409,500

@@ -16,6 +16,37 @@ function show() {
 }
 afterEach(() => { cleanup(); api.mockReset() })
 
+it("discards local changes after an explicit reload with the same server revision", async () => {
+  api.mockImplementation(async () => response(draft))
+  show()
+  fireEvent.change(await screen.findByRole("textbox", { name: "Draft name" }), { target: { value: "Unsaved name" } })
+  fireEvent.change(screen.getByRole("textbox", { name: "Draft description" }), { target: { value: "Unsaved description" } })
+  fireEvent.change(screen.getByRole("textbox", { name: "Draft definition JSON" }), { target: { value: "{}" } })
+  fireEvent.click(screen.getByRole("button", { name: "Reload draft and discard local changes" }))
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Draft name" })).toHaveValue(draft.name))
+  expect(screen.getByRole("textbox", { name: "Draft description" })).toHaveValue(draft.description)
+  expect(screen.getByRole("textbox", { name: "Draft definition JSON" })).toHaveValue(JSON.stringify(draft.definition, null, 2))
+})
+
+it("retains local changes when an explicit reload fails", async () => {
+  let status = 200
+  api.mockImplementation(async () => response(draft, status))
+  show()
+  fireEvent.change(await screen.findByRole("textbox", { name: "Draft name" }), { target: { value: "Unsaved name" } })
+  status = 500
+  fireEvent.click(screen.getByRole("button", { name: "Reload draft and discard local changes" }))
+  await screen.findByText("Could not refresh the shared draft. Your local changes are retained.")
+  expect(screen.getByRole("textbox", { name: "Draft name" })).toHaveValue("Unsaved name")
+})
+
+it("retains local changes on a background refresh with the same server revision", async () => {
+  api.mockImplementation(async () => response(draft))
+  const client = show()
+  fireEvent.change(await screen.findByRole("textbox", { name: "Draft name" }), { target: { value: "Unsaved name" } })
+  await act(async () => { await client.invalidateQueries({ queryKey: ["shared-routine-draft"] }) })
+  expect(screen.getByRole("textbox", { name: "Draft name" })).toHaveValue("Unsaved name")
+})
+
 it("saves only the reviewed draft snapshot and content without publishing", async () => {
   api.mockImplementation(async (_url: string, init?: RequestInit) => response(init?.method === "PUT" ? { ...draft, name: "New name", revision: 4 } : draft))
   show()

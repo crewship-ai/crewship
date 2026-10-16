@@ -9,6 +9,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Shared routine results retain private provenance.** Replays preserve their source and trusted caller origins; issue runs, ambiguous legacy origins and malformed authority evidence stay hidden. Final outputs receive the same credential scrubbing as step outputs, including historical shared reads. Oversized selected results return 413.
+
+- **Guests can inspect explicitly shared routine history and outputs.** A new Results share with View exposes run metadata and selected outputs in UI and CLI, without execution authority or transcripts. Inputs are not shown directly; outputs may contain them. Existing View/Run shares retain their previous scope; inherited private conversation audiences still constrain results.
+- **Shared issue searches visit only projects with live List grants.** Search and counts resolve current grant authority before reading issues, avoiding scans of hidden workspace issues. Issuer demotion/suspension and Read/Contribute without List return no list results.
+
+- **Guests can search shared issue titles and identifiers in UI and CLI.** Filtering and total counts retain live project grants; hidden descriptions, comments and unrelated projects are excluded. A new search starts from the first page in the UI. Creation confirmation remains visible when the filter hides the new issue.
+- **Reloading a shared routine draft now discards local edits even when its saved revision has not changed.** A failed reload retains the local edits, and background refreshes of the same revision keep them.
 - ⚠️ **Behaviour change: CLI pairing follows its source browser session.** Suspended accounts and missing, logged-out, revoked or expired source sessions cannot redeem codes. Request a fresh browser code for older pairings without session provenance; CLI-token authentication cannot start pairing.
 - **Dependency updates now build and package together.** Refresh the frontend, Go and CI dependencies, explicitly declare lockfile version changes, and retain the version-scoped license inventory.
 - ⚠️ **Behaviour change: crash reporting uses Sentry v11.** Self-hosted Sentry must be 26.4.2 or newer. Browser, Node and Edge initialization disable collection of user identifiers, request metadata, AI content and other payload data. Browser release-health sessions stay off and telemetry consent remains required.

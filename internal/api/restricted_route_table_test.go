@@ -65,6 +65,8 @@ var restrictedAllowedPatterns = []string{
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs",
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs/{runId}",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}",
 	"GET /api/v1/workspaces/{workspaceId}/restricted-routines",

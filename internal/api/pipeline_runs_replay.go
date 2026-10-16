@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 )
 
 // marshalMetadata serializes a run's metadata object to JSON for
@@ -79,6 +80,21 @@ func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, 
 	// Carry the original run's tags so the replay groups with it.
 	tags, _ := h.runStore.TagsFor(r.Context(), runID)
 
+	// Preserve both the historical source and the trusted caller's ceiling.
+	// A single origin column cannot represent two distinct private sources.
+	originID := orig.ChatOriginID
+	callerOrigin := runauthority.OriginIDFromContext(r.Context())
+	if originID != "" && callerOrigin != "" && originID != callerOrigin {
+		return nil, http.StatusConflict, errors.New("replay has incompatible private origins")
+	}
+	if originID == "" {
+		originID = callerOrigin
+	}
+	triggeredVia := pipeline.TriggeredViaManual
+	if orig.TriggeredVia == pipeline.TriggeredViaIssue {
+		triggeredVia = pipeline.TriggeredViaIssue
+	}
+
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
 		PipelineID:     p.ID,
@@ -89,7 +105,8 @@ func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, 
 		InvocationAuthority: pipeline.RoutineBatchAuthority,
 		Inputs:              inputs,
 		Mode:                pipeline.ModeRun,
-		TriggeredVia:        pipeline.TriggeredViaManual,
+		TriggeredVia:        triggeredVia,
+		ChatOriginID:        originID,
 		TriggeredByID:       runID,
 		Tags:                tags,
 		MetadataJSON:        orig.MetadataJSON,

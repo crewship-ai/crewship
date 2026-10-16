@@ -2078,7 +2078,7 @@ query parameters are required.
 
 `rights` is an explicit array, including when empty. Agent operations are
 `discover`, `chat`, `run`, `delegate`; project operations are `list`, `read`,
-`contribute`, `manage`, `delete_issues`, `write`, `delete`; routine operations are `view` and `run`. Grants do not open application routes whose restricted
+`contribute`, `manage`, `delete_issues`, `write`, `delete`; routine operations are `view`, `results`, `run` and `edit`. Grants do not open application routes whose restricted
 runtime integration is incomplete.
 
 | Status | Condition |
@@ -2177,7 +2177,11 @@ is required for every returned issue. Other workspace memberships do not bypass
 the account restriction.
 
 **Request:** No body. Query parameters: optional `project_id`, `limit` (default
-100, maximum 500), `offset` (default zero). An explicit ungranted project is 404.
+100, maximum 500), `offset` (default zero), and `q` (up to 256 Unicode characters,
+trimmed). `q` performs literal substring matching on issue title or identifier
+with SQLite ASCII case folding. `%` and `_` do not act as wildcards. Descriptions,
+comments and other resource metadata are never searched. The count and pages
+remain filtered by live project.list grants. An explicit ungranted project is 404.
 
 **Response:** `200 OK`, an array of JSON objects with `id`, `identifier`, `title`,
 `status`, `project_id`, `project_name` and booleans `can_read` and `can_contribute`. Description is not
@@ -2190,7 +2194,7 @@ included. `X-Total-Count` counts the filtered total and `X-Next-Offset` pages re
 | Status | Condition |
 | --- | --- |
 | `200` | Filtered list, possibly empty |
-| `400` | Invalid pagination |
+| `400` | Invalid pagination, oversized search or invalid Unicode |
 | `401` | Authentication required |
 | `403` | Workspace authentication gate denied |
 | `404` | Unavailable Guest membership/project |
@@ -2218,7 +2222,7 @@ and run history are excluded. No mutation endpoint is enabled by this read.
 | Status | Condition |
 | --- | --- |
 | `200` | Current authorized detail |
-| `400` | Invalid pagination input |
+| `400` | Invalid pagination input or a collection-only `q` parameter on detail |
 | `401` | Authentication required |
 | `403` | Workspace authentication gate denied |
 | `404` | Foreign, missing or revoked issue/project |
@@ -2375,7 +2379,7 @@ GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}
 ```
 
 Guest only. The directory returns current live routine View/Run shares as
-`id`, `slug`, `name`, `status`, `can_view`, `can_run`, `runtime_ready`, with
+`id`, `slug`, `name`, `status`, `can_view`, `can_results`, `can_run`, `runtime_ready`, with
 `X-Total-Count` for the filtered directory. View is independent of graph
 execution and runtime installation. `can_run` is eligibility; invocation still
 checks current dependencies, definition, inputs, budget and runtime readiness.
@@ -2563,3 +2567,45 @@ Statuses: 200 snapshot/saved draft; 400 malformed body; 401 authentication;
 Guest membership; 409 changed draft or published base; 500 unavailable storage or
 audit. Conflicts are not retried. Trusted review/testing/publication remain
 required after a Guest saves changes.
+
+
+## Guest shared routine run history and outputs
+
+```http
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs
+GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs/{runId}
+```
+
+Require the authenticated Guest's live routine `view` **and** `results`
+shares. The routine accepts an ID or slug. Existing definition-only View and
+invocation-only Run shares do not acquire this audience automatically.
+No agent execution grant or installed runtime is needed for this read.
+
+The collection accepts `limit` (1–500, default 100) and `offset` (0–1000000,
+default 0). It returns an array of `run_id`, `routine_id`, `status`, `mode`,
+`started_at` and nullable `ended_at`; `X-Total-Count` is the visible total
+before pagination. The detail adds nullable `output` and a `step_outputs`
+string map. Inputs are not shown directly; outputs may contain them. Identities,
+errors, costs, transcripts and internal provenance are excluded. Detail rejects
+pagination parameters. Stored output content is limited to 256 KiB and the
+encoded response to 1 MiB; oversized detail returns 413. Credential-shaped
+content is scrubbed from final and step outputs, including historical reads.
+
+The explicit share covers this routine's past/future regular pipeline runs.
+A run's own, pinned-version and current-recipe private chat origins remain
+additional current read ceilings; absent or non-chat origins are unavailable
+through this projection. Both counts and rows apply these audiences before
+pagination. Issue-triggered runs and their replays are excluded. NULL-origin
+runs require valid start-journal evidence and the shared autonomous-run
+predicate; recorded human authority, missing authority, malformed payloads,
+missing evidence and unknown-origin replays are hidden.
+A foreign or hidden run returns the same 404. Private restricted
+runtime jobs retain actor/attempt/proof checks on their existing own-result
+endpoint and are not exposed by reading raw job output columns.
+
+Statuses: 200 authorized projection; 400 invalid pagination; 401 authentication;
+403 workspace/token boundary; 404 absent/foreign/deleted routine or run, missing
+View/Results, inactive issuer, private origin or non-Guest; 413 oversized detail;
+500 unavailable data.
+Responses are `Cache-Control: no-store`.
+CLI: `crewship routine shared-runs <routine-id-or-slug> [run-id]`.

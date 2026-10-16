@@ -152,7 +152,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}", roleInline, r.restrictedProjectMilestones)
 	// openapi: responses 204,400,401,403,404,409,500
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}", roleInline, r.restrictedProjectMilestones)
+	// openapi: responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues", authed(wsCtx(http.HandlerFunc(r.restrictedIssues))))
+	// openapi: responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}", authed(wsCtx(http.HandlerFunc(r.restrictedIssues))))
 	// openapi: responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/deletion", authed(wsCtx(http.HandlerFunc(r.restrictedIssueDeletion))))
