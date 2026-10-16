@@ -28,6 +28,8 @@ const (
 | `ModeAsync` | If a rule matches, enqueue and return `Pending=true`. Caller continues. | Low-risk logging; humans see a trailing record but the agent never waits. |
 | `ModeSync` | Poll `approvals_queue` every second until status leaves `pending`. | High-risk actions that must not proceed without a human yes/no. |
 
+`Gate` stores the effective mode after reward tuning in `payload.gate_mode`. Whole-run `agent_run` approvals also carry host run correlation in `payload.correlation`; chat and trigger references appear only with authenticated host provenance. A configured sync gate may therefore produce a nonblocking async review, and a configured async gate may block after tuning. Legacy approval List/Get responses omit this new host correlation; authorized chat source adapters use the unchanged stored metadata. Pending reviews with an unknown adapter mode remain blocked. Direct human chat references additionally require a durable `run.started` source with a current host admission receipt. That requester is checked again after approval before execution proceeds; inherited, missing and legacy provenance contributes only the run ID and keeps its existing gate path.
+
 Sync mode respects `ctx.Done()` (so request cancellation unblocks the poll) and uses a client-side deadline (`TimeoutSecs`, default 3600) on top of the server-side timeout sweeper -- either can flip the row to `timeout` and unblock the gate.
 
 ## Rule evaluation
