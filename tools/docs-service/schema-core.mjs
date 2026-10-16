@@ -5,7 +5,9 @@ export function createDocumentSchema({ Extension, Node, Mark, getSchema, Table, 
 const VERSION = 2;
 const legacyTypes = ['heading', 'paragraph', 'table', 'tableRow', 'tableCell', 'tableHeader', 'bulletList', 'orderedList', 'listItem'];
 const RICH_VERSION = 3;
-const typesFor = version => { if (![1,2,3].includes(version)) throw new Error('unsupported content schema'); return version === 3 ? [...legacyTypes, 'codeBlock'] : legacyTypes; };
+const IMAGE_VERSION = 4;
+const MAX_IMAGE_REFS = 4096;
+const typesFor = version => { if (![1,2,3,4].includes(version)) throw new Error('unsupported content schema'); return version >= RICH_VERSION ? [...legacyTypes, 'codeBlock', ...(version === IMAGE_VERSION ? ['image'] : [])] : legacyTypes; };
 const idsFor = types => Extension.create({
   name: 'stableIDs',
   addGlobalAttributes: () => [{ types, attributes: { id: {
@@ -40,22 +42,30 @@ function extensionsFor(version = VERSION) {
   Node.create({name:'orderedList',group:'block',content:'listItem+',addAttributes:()=>({start:{default:1},type:{default:null}}),parseHTML:()=>[{tag:'ol'}],renderHTML:({HTMLAttributes})=>['ol',HTMLAttributes,0]}),
   Node.create({name:'listItem',content:'paragraph block*',parseHTML:()=>[{tag:'li'}],renderHTML:({HTMLAttributes})=>['li',HTMLAttributes,0]}),
   Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, idsFor(types),
-  ...(version === RICH_VERSION ? [
+  ...(version >= RICH_VERSION ? [
     Mark.create({ name: 'link', excludes: 'link code', addAttributes: () => ({ href: { default: null } }), parseHTML: () => [{ tag: 'a[href]', getAttrs: element => validLinkHref(element.getAttribute('href')) ? { href: element.getAttribute('href') } : false }], renderHTML: ({ mark }) => ['a', { href: mark.attrs.href, rel: 'noopener noreferrer', target: '_blank' }, 0] }),
     Mark.create({ name: 'code', code: true, excludes: 'link code', parseHTML: () => [{ tag: 'code' }], renderHTML: () => ['code', {}, 0] }),
     Node.create({ name: 'codeBlock', group: 'block', content: 'text*', marks: '', code: true, defining: true, parseHTML: () => [{ tag: 'pre', preserveWhitespace: 'full' }], renderHTML: ({ HTMLAttributes }) => ['pre', HTMLAttributes, ['code', {}, 0]] }),
   ] : []),
+  ...(version === IMAGE_VERSION ? [Node.create({name: 'image',group:'block',atom:true,marks:'',addAttributes:()=>Object.fromEntries(['asset_ref','expected_sha256','alt','width','height'].map(key=>[key,{default:null}])),renderHTML:({node})=>['div',{'data-docs-image-ref':node.attrs.asset_ref},'Private image']})] : []),
  ];
 }
 const extensions = extensionsFor(VERSION);
 const schema = getSchema(extensions);
 const richSchema = getSchema(extensionsFor(RICH_VERSION));
-const schemaFor = (version = VERSION) => { typesFor(version); return version === RICH_VERSION ? richSchema : schema; };
+const imageSchema = getSchema(extensionsFor(IMAGE_VERSION));
+const schemaFor = (version = VERSION) => { typesFor(version); return version === IMAGE_VERSION ? imageSchema : version === RICH_VERSION ? richSchema : schema; };
 function validLinkHref(value) {
   if (typeof value !== 'string' || new TextEncoder().encode(value).length > 2048 || /[\u0000-\u0020\u007f\p{Cs}]/u.test(value)) return false;
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password && url.href === value; } catch { return false; }
 }
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const imageIdentity = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value);
+const imageDigest = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+const imageAlt = value => typeof value === 'string' && new TextEncoder().encode(value).length <= 2048 && !/[\u0000-\u001f\u007f\p{Cs}]/u.test(value);
+const imageDimension = value => Number.isInteger(value) && value >= 1 && value <= 2048;
+const validImageAttributes = attrs => object(attrs) && imageIdentity(attrs.asset_ref) && imageDigest(attrs.expected_sha256) && imageAlt(attrs.alt) && imageDimension(attrs.width) && imageDimension(attrs.height);
+
 function validFormat(key, value) {
   if (!['link', 'code'].includes(key)) return false;
   if (value === null) return true;
@@ -64,7 +74,7 @@ function validFormat(key, value) {
 }
 function validateMarks(marks, version) {
   if (marks === undefined) return;
-  if (!Array.isArray(marks) || marks.length > (version === RICH_VERSION ? 1 : 0)) throw new Error('unsupported marks');
+  if (!Array.isArray(marks) || marks.length > (version >= RICH_VERSION ? 1 : 0)) throw new Error('unsupported marks');
   for (const mark of marks) if (!object(mark) || Object.keys(mark).some(key => !['type','attrs'].includes(key)) || !validFormat(mark.type, mark.attrs ?? {}) || mark.attrs === null) throw new Error('unsupported mark');
 }
 const encode = bytes => {
@@ -95,10 +105,10 @@ const project = doc => yDocToProsemirrorJSON(doc, 'default');
 function validateJSON(json, version = VERSION) {
   const types = typesFor(version);
   const seen = new Set(); let count = 0;
-  const visit = (node, depth = 0) => {
+  const visit = (node, depth = 0, parent = '') => {
     if (depth > 40 || !node || typeof node !== 'object') throw new Error('invalid bounded node');
     if (++count > 10000) throw new Error('node limit');
-    if (version === RICH_VERSION && node.type === 'doc' && (depth !== 0 || Object.keys(node).some(k => !['type','content'].includes(k)))) throw new Error('closed rich root required');
+    if (version >= RICH_VERSION && node.type === 'doc' && (depth !== 0 || Object.keys(node).some(k => !['type','content'].includes(k)))) throw new Error('closed rich root required');
     if (Object.keys(node).some(k => !['type', 'attrs', 'content', 'text', 'marks'].includes(k))) throw new Error('unsupported node properties');
     if (node.type !== 'doc' && node.type !== 'text' && !types.includes(node.type)) throw new Error('unsupported node');
     validateMarks(node.marks, version);
@@ -109,13 +119,14 @@ function validateJSON(json, version = VERSION) {
       if (typeof node.attrs?.id !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(node.attrs.id) || seen.has(node.attrs.id)) throw new Error('invalid or duplicate block ID');
       seen.add(node.attrs.id);
     }
-    const allowed = node.type === 'tableCell' || node.type === 'tableHeader' ? ['id', 'colspan', 'rowspan', 'colwidth', 'align'] : node.type === 'heading' ? ['id', 'level'] : node.type === 'orderedList' ? ['id','start','type'] : ['id'];
+    const allowed = node.type === 'tableCell' || node.type === 'tableHeader' ? ['id', 'colspan', 'rowspan', 'colwidth', 'align'] : node.type === 'heading' ? ['id', 'level'] : node.type === 'orderedList' ? ['id','start','type'] : node.type === 'image' ? ['id','asset_ref','expected_sha256','alt','width','height'] : ['id'];
     if (Object.keys(node.attrs || {}).some(k => !allowed.includes(k))) throw new Error('unsupported attributes');
     if (node.type === 'heading' && ![1,2,3].includes(node.attrs.level)) throw new Error('unsupported heading level');
     if (node.type === 'orderedList' && node.attrs.type != null) throw new Error('unsupported ordered list type');
     if (node.type === 'orderedList' && (!Number.isInteger(node.attrs.start??1) || (node.attrs.start??1)<1 || (node.attrs.start??1)>10000)) throw new Error('invalid ordered list start');
     if (['tableCell', 'tableHeader'].includes(node.type) && ((node.attrs.colspan ?? 1) !== 1 || (node.attrs.rowspan ?? 1) !== 1 || node.attrs.colwidth != null || node.attrs.align != null)) throw new Error('D0 simple table only');
-    for (const child of node.content || []) visit(child, depth + 1);
+    if (node.type === 'image' && (parent !== 'doc' || node.content !== undefined || !validImageAttributes(node.attrs))) throw new Error('invalid closed root image');
+    for (const child of node.content || []) visit(child, depth + 1, node.type);
   };
   visit(json); const pm = schemaFor(version).nodeFromJSON(json); pm.check();
   if (JSON.stringify(json).length > 500000) throw new Error('document limit');
@@ -139,22 +150,22 @@ function validateRetained(doc, version) {
       const key = item.parentSub;
       const cell = ['tableCell', 'tableHeader'].includes(parent.nodeName);
       const allowed = key === 'id' || (key === 'level' && parent.nodeName === 'heading') || (['start','type'].includes(key) && parent.nodeName === 'orderedList') ||
-        (cell && ['colspan', 'rowspan', 'colwidth', 'align'].includes(key));
+        (cell && ['colspan', 'rowspan', 'colwidth', 'align'].includes(key)) || (version === IMAGE_VERSION && parent.nodeName === 'image' && ['asset_ref','expected_sha256','alt','width','height'].includes(key));
       if (!allowed) throw new Error('unsupported retained attributes');
       if (content instanceof Y.ContentDeleted) continue;
       // Yjs coalesces adjacent deleted versions of the same scalar attribute.
       // Active attributes remain scalar; every retained value still needs validation.
       if (!(content instanceof Y.ContentAny) || content.arr.length === 0 || (!item.deleted && content.arr.length !== 1)) throw new Error('unsupported retained attribute content');
       for (const value of content.arr) {
-        const valid = key === 'id' ? value === null || (typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)) :
+        const valid = parent.nodeName === 'image' ? key === 'id' || key === 'asset_ref' ? imageIdentity(value) : key === 'expected_sha256' ? imageDigest(value) : key === 'alt' ? imageAlt(value) : imageDimension(value) : key === 'id' ? value === null || (typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)) :
           key === 'level' ? [1,2,3].includes(value) : key === 'start' ? Number.isInteger(value) && value >=1 && value<=10000 : ['colspan','rowspan'].includes(key) ? value===1 : value===null;
         if (!valid) throw new Error('unsupported retained attribute value');
       }
     } else if (content instanceof Y.ContentType) {
-      if (item.parent instanceof Y.XmlText || !supportedType(content.type) || content.type === root) throw new Error('unsupported retained Yjs type');
+      if (item.parent instanceof Y.XmlText || item.parent.nodeName === 'image' || !supportedType(content.type) || content.type === root) throw new Error('unsupported retained Yjs type');
     } else if (content instanceof Y.ContentString) {
       if (!(item.parent instanceof Y.XmlText)) throw new Error('unsupported retained string parent');
-    } else if (content instanceof Y.ContentFormat && version === RICH_VERSION) {
+    } else if (content instanceof Y.ContentFormat && version >= RICH_VERSION) {
       if (!(item.parent instanceof Y.XmlText) || item.parent.parent?.nodeName === 'codeBlock' || !validFormat(content.key, content.value)) throw new Error('unsupported retained format');
     } else if (!(content instanceof Y.ContentDeleted)) {
       // Includes formatting (even removed marks), embeds, binary and subdocs.
@@ -171,7 +182,7 @@ function validate(doc, version = VERSION) {
     if (depth > 40) throw new Error('node depth limit');
     if (node instanceof Y.XmlText) {
       if (Object.keys(node.getAttributes()).length) throw new Error('unsupported text attributes');
-      if (node.toDelta().some(part => typeof part.insert !== 'string' || Object.keys(part.attributes || {}).length > (version === RICH_VERSION ? 1 : 0) || Object.entries(part.attributes || {}).some(([key,value]) => !validFormat(key,value) || value === null))) throw new Error('unsupported text delta');
+      if (node.toDelta().some(part => typeof part.insert !== 'string' || Object.keys(part.attributes || {}).length > (version >= RICH_VERSION ? 1 : 0) || Object.entries(part.attributes || {}).some(([key,value]) => !validFormat(key,value) || value === null))) throw new Error('unsupported text delta');
     } else if (node instanceof Y.XmlElement || node instanceof Y.XmlFragment) {
       for (const child of node.toArray()) inspect(child, depth + 1);
     } else throw new Error('unsupported Yjs content');
@@ -182,7 +193,42 @@ function validate(doc, version = VERSION) {
   // Prevent opaque client-controlled Yjs roots from becoming a covert payload.
   if ([...doc.share.keys()].some(k => k !== 'default')) throw new Error('unsupported Yjs root');
   validateRetained(doc, version);
+  if (version === IMAGE_VERSION) retainedImageReferences(doc);
   return json;
+}
+// This is a validated binary manifest, not a fresh client mapping override.
+// Each recoverable image type retains one immutable ref/digest pair even after
+// deletion. Gather values per type, never combine historical attrs across nodes.
+function retainedImageReferences(doc) {
+  const root = doc.getXmlFragment('default'), images = new Map();
+  for (const structs of doc.store.clients.values()) for (const item of structs) {
+    if (item instanceof Y.Item && item.content instanceof Y.ContentType && item.content.type instanceof Y.XmlElement && item.content.type.nodeName === 'image') {
+      const type = item.content.type;
+      if (type.parent !== root) throw new Error('retained image must be a root block');
+      images.set(type, new Map());
+    }
+  }
+  for (const structs of doc.store.clients.values()) for (const item of structs) {
+    if (!(item instanceof Y.Item) || !images.has(item.parent) || item.parentSub === null) continue;
+    if (!(item.content instanceof Y.ContentAny)) throw new Error('missing retained image identity');
+    const attrs = images.get(item.parent), values = attrs.get(item.parentSub) || new Set();
+    for (const value of item.content.arr) values.add(value);
+    attrs.set(item.parentSub, values);
+  }
+  const refs = new Map();
+  for (const attrs of images.values()) {
+    for (const key of ['id','asset_ref','expected_sha256']) if (attrs.get(key)?.size !== 1) throw new Error('retained image identity is immutable');
+    const ref = [...attrs.get('asset_ref')][0], digest = [...attrs.get('expected_sha256')][0];
+    if (!imageIdentity(ref) || !imageDigest(digest)) throw new Error('invalid retained image reference');
+    if (refs.has(ref) && refs.get(ref) !== digest) throw new Error('conflicting retained image digest');
+    refs.set(ref, digest);
+    if (refs.size > MAX_IMAGE_REFS) throw new Error('retained image reference limit');
+  }
+  return [...refs].sort(([a],[b])=>a < b ? -1 : a > b ? 1 : 0).map(([asset_ref,expected_sha256])=>({asset_ref,expected_sha256}));
+}
+function imageReferences(doc, version = IMAGE_VERSION) {
+  validate(doc, version);
+  return version === IMAGE_VERSION ? retainedImageReferences(doc) : [];
 }
 async function outline(doc, version = VERSION) {
   const json = validate(doc, version); const blocks = [];
@@ -361,6 +407,7 @@ function markdown(json) {
       if (mark?.type === 'link') return '[' + escape(value) + '](<' + destination(mark.attrs.href) + '>)';
       return escape(value);
     }
+    if (node.type==='image') throw Object.assign(new Error('Markdown export does not include private image bytes or authenticated URLs.'), {code:'unsupported_markdown'});
     if (node.type==='codeBlock') { if (table) throw Object.assign(new Error('Markdown export cannot represent a code block inside a simple table; move it outside the table.'), {code:'unsupported_markdown'}); const value = textOf(node), fence = '`'.repeat(Math.max(2, ...(value.match(/`+/g) || []).map(run => run.length)) + 1); return fence + '\n' + value + '\n' + fence + '\n\n'; }
     if (node.type==='heading') return '#'.repeat(node.attrs.level)+' '+(node.content||[]).map(n=>visit(n,depth,table)).join('')+'\n\n';
     if (node.type==='paragraph') return (node.content||[]).map(n=>visit(n,depth,table)).join('')+'\n\n';
@@ -375,5 +422,5 @@ function markdown(json) {
   return visit(json).trimEnd()+'\n';
 }
 
-return { VERSION, RICH_VERSION, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
+return { VERSION, RICH_VERSION, IMAGE_VERSION, MAX_IMAGE_REFS, imageReferences, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
 }
