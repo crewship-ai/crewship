@@ -361,6 +361,9 @@ func (h *PageHandler) ListBoardElementPermissions(w http.ResponseWriter, r *http
 			if e == nil {
 				e = h.checkArtifactRunPrincipal(r.Context(), a)
 			}
+			if e == nil {
+				e = h.checkDocumentRunPageScope(r.Context(), rec.ID, a)
+			}
 			if e == nil && !h.agentMayEditSpec(r.Context(), a.WorkspaceID, rec, a.AgentID) {
 				e = errors.New("agent page write grant required")
 			}

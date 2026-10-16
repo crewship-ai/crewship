@@ -37,6 +37,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		ArtifactHumanReceipt   *chataudience.Receipt `json:"artifact_human_receipt"`
 		BoardRequestID         string                `json:"board_request_id"`
 		DocumentRequestID      string                `json:"document_request_id"`
+		SlidesRequestID        string                `json:"slides_request_id"`
 		ArtifactRequestID      string                `json:"artifact_request_id"`
 		ArtifactHumanMessageID string                `json:"artifact_human_message_id"`
 		HumanAuthority         *chataudience.Receipt `json:"human_authority"`
@@ -205,15 +206,21 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if body.ArtifactHumanReceipt != nil {
-		if err := captureArtifactChatPrincipal(r, h.db, body.ID, body.WorkspaceID, body.AgentID, agentCrewID, body.ChatID, body.ArtifactHumanMessageID, body.ArtifactHumanReceipt); err != nil {
-			if body.DocumentRequestID != "" || body.ArtifactRequestID != "" || body.BoardRequestID != "" {
+		if err := captureArtifactChatPrincipal(r, h.db, body.ID, body.WorkspaceID, body.AgentID, agentCrewID, body.ChatID, body.ArtifactHumanMessageID, body.ArtifactHumanReceipt, body.SlidesRequestID); err != nil {
+			if body.DocumentRequestID != "" || body.ArtifactRequestID != "" || body.BoardRequestID != "" || body.SlidesRequestID != "" {
 				replyError(w, 403, "artifact human admission refused")
 				return
 			}
 			h.logger.Warn("run has no artifact publication authority", "run_id", body.ID, "error", err)
 		}
 	}
-	if (body.DocumentRequestID != "" && (body.ArtifactRequestID != "" || body.BoardRequestID != "")) || (body.ArtifactRequestID != "" && body.BoardRequestID != "") {
+	origins := 0
+	for _, origin := range []string{body.DocumentRequestID, body.ArtifactRequestID, body.BoardRequestID, body.SlidesRequestID} {
+		if origin != "" {
+			origins++
+		}
+	}
+	if origins > 1 {
 		replyError(w, 403, "one explicit request authority required")
 		return
 	}
@@ -227,6 +234,12 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	if body.DocumentRequestID != "" {
 		if body.ArtifactHumanReceipt == nil || bindDocumentRequestRun(r, h.db, body.DocumentRequestID, body.ID, body.ArtifactHumanReceipt) != nil {
 			replyError(w, 403, "document request admission refused")
+			return
+		}
+	}
+	if body.SlidesRequestID != "" {
+		if body.ArtifactHumanReceipt == nil || bindSelectedSlidesRun(r, h.db, body.SlidesRequestID, body.ID, body.ArtifactHumanReceipt) != nil {
+			replyError(w, 403, "Slides selected request admission refused")
 			return
 		}
 	}

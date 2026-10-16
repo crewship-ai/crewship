@@ -105,6 +105,10 @@ func (h *PageHandler) AuthorizeArtifactCreation(w http.ResponseWriter, r *http.R
 		replyError(w, 403, err.Error())
 		return
 	}
+	if err := h.checkDocumentRunPageScope(r.Context(), "", a); err != nil {
+		replyError(w, 403, err.Error())
+		return
+	}
 	if !h.artifactAgentPolicyAllows(r.Context(), a.WorkspaceID, a.CrewID) {
 		artifactCommentError(w, 403, "artifact_policy_disabled", "Agent artifact creation is disabled for this crew")
 		return
@@ -237,6 +241,10 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 		replyError(w, 403, err.Error())
 		return
 	}
+	if err := h.checkDocumentRunPageScope(r.Context(), "", a); err != nil {
+		replyError(w, 403, err.Error())
+		return
+	}
 	if !h.artifactPrincipalMayCreate(r.Context(), a.WorkspaceID, a.HumanUserID) {
 		replyError(w, 403, "page.create authority required")
 		return
@@ -282,6 +290,10 @@ func (h *PageHandler) CreateArtifactAgent(w http.ResponseWriter, r *http.Request
 	}
 	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
 	if err := h.checkArtifactRunPrincipal(ctx, a); err != nil {
+		replyError(w, 403, err.Error())
+		return
+	}
+	if err := h.checkDocumentRunPageScope(ctx, "", a); err != nil {
 		replyError(w, 403, err.Error())
 		return
 	}

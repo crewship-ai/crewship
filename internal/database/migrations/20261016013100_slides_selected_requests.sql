@@ -50,6 +50,12 @@ CREATE TABLE slides_request_receipts (
 );
 ALTER TABLE page_artifact_run_delegations ADD COLUMN slides_request_id TEXT REFERENCES slides_requests(id) ON DELETE CASCADE;
 CREATE INDEX idx_slides_request_run_origin ON page_artifact_run_delegations(slides_request_id);
+-- Retained origin tombstone intentionally has no request FK: deleting a Page
+-- must never turn its old selected run into a generic content capability.
+ALTER TABLE artifact_run_principals ADD COLUMN slides_request_origin TEXT;
+CREATE TRIGGER slides_principal_origin_immutable BEFORE UPDATE OF slides_request_origin ON artifact_run_principals
+WHEN OLD.slides_request_origin IS NOT NULL AND NEW.slides_request_origin IS NOT OLD.slides_request_origin
+BEGIN SELECT RAISE(ABORT,'Slides principal origin is immutable'); END;
 CREATE TRIGGER slides_request_run_origin_immutable BEFORE UPDATE OF slides_request_id ON page_artifact_run_delegations
 WHEN OLD.slides_request_id IS NOT NULL AND NEW.slides_request_id IS NOT OLD.slides_request_id
 BEGIN SELECT RAISE(ABORT,'Slides request run origin is immutable'); END;

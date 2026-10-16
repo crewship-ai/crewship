@@ -43,7 +43,7 @@ func (h *PageHandler) ArtifactCreationStatus(w http.ResponseWriter, r *http.Requ
 		replyInternalError(w, h.logger, "read live artifact creation run", err)
 		return
 	}
-	if h.checkArtifactRunPrincipal(r.Context(), &a) != nil {
+	if h.checkArtifactRunPrincipal(r.Context(), &a) != nil || h.checkDocumentRunPageScope(r.Context(), "", &a) != nil {
 		writeJSON(w, 200, result)
 		return
 	}

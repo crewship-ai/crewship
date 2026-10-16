@@ -3,6 +3,7 @@ package slides
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"unicode/utf16"
 )
@@ -45,6 +46,29 @@ type VerifiedTextSelection struct {
 	OriginalElement   Element       `json:"original_element"`
 	DeckSchemaVersion int           `json:"deck_schema_version"`
 	ContentHash       string        `json:"content_hash"`
+}
+
+const MaxSelectedReplacementBytes = 256 << 10
+
+type SelectedReplacementInput struct {
+	PageID               string `json:"page_id"`
+	RequestSchemaVersion int    `json:"request_schema_version"`
+	RequestID            string `json:"request_id"`
+	Replacement          string `json:"replacement"`
+}
+
+func DecodeSelectedReplacement(raw []byte) (SelectedReplacementInput, error) {
+	var input SelectedReplacementInput
+	if len(raw) > MaxSelectedReplacementBytes {
+		return input, errors.New("selected replacement wire budget exceeded")
+	}
+	if err := strictRequest(raw, &input, nil, []string{"page_id", "request_schema_version", "request_id", "replacement"}, nil); err != nil {
+		return input, err
+	}
+	if input.RequestSchemaVersion != SelectedRequestProtocolVersion || !identifier.MatchString(input.PageID) || !identifier.MatchString(input.RequestID) || !validText(input.Replacement, MaxTextBytes) {
+		return input, errors.New("invalid replacement-only request")
+	}
+	return input, nil
 }
 
 func DecodeSelectedRequest(raw []byte) (SelectedRequestInput, error) {
@@ -165,7 +189,7 @@ func VerifyTextSelection(state State, request SelectedRequestInput) (VerifiedTex
 func SelectedReplacementPatch(pinned State, pageID, requestID string, baseRev int64, verified VerifiedTextSelection, replacement string) (PatchRequest, error) {
 	var result PatchRequest
 	if !identifier.MatchString(pageID) || !identifier.MatchString(requestID+"-patch") || baseRev < 1 || !SupportedSchema(verified.DeckSchemaVersion) || verified.Selection.SelectionSchemaVersion != SelectionSchemaVersion || verified.Selection.Kind != "text_range" || !identifier.MatchString(verified.Selection.SlideID) || !validText(replacement, MaxTextBytes) || verified.OriginalElement.Type != "text" || verified.OriginalElement.Text == nil || verified.OriginalElement.ID != verified.Selection.ElementID {
-		return result, errors.New("invalid selected replacement")
+		return result, fmt.Errorf("%w: invalid selected replacement", ErrInvalid)
 	}
 	if err := ValidateVerifiedTextSelection(pinned, pageID, baseRev, verified); err != nil {
 		return result, err
@@ -182,7 +206,7 @@ func SelectedReplacementPatch(pinned State, pageID, requestID string, baseRev in
 	text := *original.Text
 	text.Value = string(utf16.Decode(units[:verified.Selection.From])) + replacement + string(utf16.Decode(units[verified.Selection.To:]))
 	if !validText(text.Value, MaxTextBytes) {
-		return result, errors.New("selected replacement exceeds final text budget")
+		return result, fmt.Errorf("%w: selected replacement exceeds final text budget", ErrInvalid)
 	}
 	original.Text = &text
 	return PatchRequest{PageID: pageID, SchemaVersion: verified.DeckSchemaVersion, BaseRev: baseRev, MutationID: requestID + "-patch", Operations: []Operation{{Op: "set_element", SlideID: verified.Selection.SlideID, ElementID: verified.Selection.ElementID, IfHash: verified.Selection.ElementHash, Element: &original}}}, nil

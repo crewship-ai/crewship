@@ -14,6 +14,9 @@ func (h *PageHandler) checkBoardRun(ctx context.Context, rec *pageRecord, a *art
 	if err := h.checkArtifactRunPrincipal(ctx, a); err != nil {
 		return err
 	}
+	if err := h.checkDocumentRunPageScope(ctx, rec.ID, a); err != nil {
+		return err
+	}
 	if !rec.HasBoard || rec.OwnerUserID != a.HumanUserID || rec.OwnerCrewID != "" {
 		return errors.New("board requires explicit current human owner authority")
 	}
