@@ -1267,7 +1267,7 @@ var startCmd = &cobra.Command{
 				// terminal HITL approval rows that were kept forever before
 				// this. Defaults to 90 days; see
 				// internal/harbormaster/retention.go.
-				go harbormaster.StartApprovalsRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
+				go harbormaster.StartApprovalsRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour, srv.JournalWriter())
 
 				// Inbox, chats and Keeper decisions — the windows an instance
 				// admin sets in Admin › Data retention. Forever until set, so

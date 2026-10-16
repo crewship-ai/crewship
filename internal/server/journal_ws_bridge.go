@@ -59,9 +59,10 @@ type journalBroadcaster interface {
 //     output, per-sample container metrics, tracing spans — never hits the
 //     wire even for subscribed clients.
 type journalWSBridge struct {
-	hub    journalBroadcaster
-	logger *slog.Logger
-	ch     chan journal.Entry
+	allowBroadSource func(journal.Entry) bool
+	hub              journalBroadcaster
+	logger           *slog.Logger
+	ch               chan journal.Entry
 
 	// Dropped-frame accounting for the throttled warning. dropped counts
 	// frames shed since the last log; lastDropLog is the Unix-nano timestamp
@@ -79,13 +80,17 @@ func newJournalWSBridge(hub *ws.Hub, logger *slog.Logger) *journalWSBridge {
 // newJournalWSBridgeWith is the interface-typed constructor the production
 // entry point delegates to; tests inject a fake broadcaster through it.
 func newJournalWSBridgeWith(hub journalBroadcaster, logger *slog.Logger) *journalWSBridge {
+	return newJournalWSBridgeWithFilter(hub, logger, nil)
+}
+func newJournalWSBridgeWithFilter(hub journalBroadcaster, logger *slog.Logger, allowBroadSource func(journal.Entry) bool) *journalWSBridge {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	b := &journalWSBridge{
-		hub:    hub,
-		logger: logger,
-		ch:     make(chan journal.Entry, journalWSBridgeBuffer),
+		hub:              hub,
+		allowBroadSource: allowBroadSource,
+		logger:           logger,
+		ch:               make(chan journal.Entry, journalWSBridgeBuffer),
 	}
 	go b.run()
 	return b
@@ -145,6 +150,9 @@ func (b *journalWSBridge) noteDrop() {
 // enqueue without a send-on-closed-channel panic.
 func (b *journalWSBridge) run() {
 	for e := range b.ch {
+		if b.allowBroadSource != nil && !b.allowBroadSource(e) {
+			continue
+		}
 		b.hub.BroadcastChannel(journalWSChannelPrefix, e.WorkspaceID, "journal.entry", journal.SerializeEntry(e))
 	}
 }

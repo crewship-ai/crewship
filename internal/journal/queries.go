@@ -16,9 +16,12 @@ import (
 // validates against an upper bound (1000) before calling in.
 type Query struct {
 	WorkspaceID string
-	CrewID      string
-	AgentID     string
-	MissionID   string
+	// HTTP readers apply the current audience only to verified TEXT source projections.
+	SourceAudienceSQL  string
+	SourceAudienceArgs []any
+	CrewID             string
+	AgentID            string
+	MissionID          string
 	// CrewIDs / AgentIDs are multi-valued counterparts to CrewID /
 	// AgentID. When non-empty they take precedence — the SQL emits an
 	// IN-clause covering every supplied id. Single-valued fields are
@@ -133,6 +136,10 @@ func hasTokenChar(s string) bool {
 func buildJournalFilters(q Query) (conds []string, args []any) {
 	conds = append(conds, "workspace_id = ?")
 	args = append(args, q.WorkspaceID)
+	if q.SourceAudienceSQL != "" {
+		conds = append(conds, q.SourceAudienceSQL)
+		args = append(args, q.SourceAudienceArgs...)
+	}
 
 	if len(q.CrewIDs) > 0 {
 		conds = append(conds, "crew_id IN ("+sqlInPlaceholders(len(q.CrewIDs))+")")

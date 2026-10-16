@@ -1,0 +1,66 @@
+{
+  "error": "proposal_version_conflict",
+  "current": {
+    "event_id": "proposal-event",
+    "operation_id": "proposal-operation",
+    "kind": "proposal",
+    "verb": "proposal.create",
+    "entity": {
+      "id": "proposal-source",
+      "identifier": "",
+      "workspace_id": "workspace"
+    },
+    "provenance": {
+      "actor": {
+        "type": "agent",
+        "id": "agent"
+      },
+      "at": "2026-10-16T10:00:00Z"
+    },
+    "anchor": {
+      "trigger_message_id": "trigger",
+      "run_id": "run",
+      "run_status": null
+    },
+    "revision_at_action": {
+      "revision": 1,
+      "aggregate_revision": 0
+    },
+    "proposal": {
+      "schema_version": 1,
+      "version": 2,
+      "status": "draft",
+      "title": "Reviewed plan",
+      "items": [
+        {
+          "id": "a",
+          "title": "One",
+          "description": "",
+          "crew_id": "crew",
+          "project_id": null,
+          "assignee_id": null,
+          "priority": "none",
+          "selected": true
+        },
+        {
+          "id": "b",
+          "title": "Two",
+          "description": "",
+          "crew_id": "crew",
+          "project_id": null,
+          "assignee_id": null,
+          "priority": "high",
+          "selected": true
+        }
+      ],
+      "expires_at": "2026-10-17T10:00:00Z",
+      "allowed_actions": [
+        "view",
+        "edit",
+        "confirm",
+        "discard"
+      ],
+      "outcome": null
+    }
+  }
+}

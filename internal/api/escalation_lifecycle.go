@@ -100,6 +100,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -180,12 +181,13 @@ const escalationSweepInterval = 60 * time.Second
 // expirableEscalation is the scope a terminal transition needs in order to
 // journal itself: who asked, in which crew, on which conversation.
 type expirableEscalation struct {
-	id          string
-	workspaceID string
-	crewID      string
-	chatID      string
-	fromAgentID string
-	reason      string
+	verifiedText bool
+	id           string
+	workspaceID  string
+	crewID       string
+	chatID       string
+	fromAgentID  string
+	reason       string
 	// deadlineAt is the row's own ANSWER deadline, carried so the expiry
 	// describes the deadline this question actually had rather than whatever
 	// escalationAnswerTTL happens to be when the sweep runs. A row raised under
@@ -380,8 +382,12 @@ func (h *QueryHandler) expireEscalationRow(ctx context.Context, row expirableEsc
 
 	broadcastChannelEvent(h.hub, "session", row.chatID, "escalation_expired",
 		map[string]string{"id": row.id, "status": escalationStatusExpired, "warning": escalationExpiredWarning})
-	broadcastWorkspaceEvent(h.hub, row.workspaceID, "escalation.expired",
-		map[string]string{"id": row.id, "crew_id": row.crewID, "status": escalationStatusExpired})
+	if row.verifiedText {
+		broadcastChatEntityRefsInvalidation(ctx, h.hub, row.chatID)
+	} else {
+		broadcastWorkspaceEvent(h.hub, row.workspaceID, "escalation.expired",
+			map[string]string{"id": row.id, "crew_id": row.crewID, "status": escalationStatusExpired})
+	}
 
 	h.logger.Info("escalation expired unanswered",
 		"escalation_id", row.id, "crew_id", row.crewID, "deadline_at", row.deadlineAt)
@@ -417,7 +423,7 @@ const escalationDuePredicate = `status = ? AND answer_deadline_at IS NOT NULL AN
 func (h *QueryHandler) sweepExpiredEscalations(ctx context.Context, workspaceID string) (int, error) {
 	now := time.Now().UTC()
 	query := `SELECT id, workspace_id, crew_id, chat_id, from_agent_id, reason,
-			COALESCE(answer_deadline_at, ''), COALESCE(credential_id, '')
+			COALESCE(answer_deadline_at, ''), COALESCE(credential_id, ''), (type='TEXT' AND COALESCE(source_run_id,'')<>'')
 		FROM escalations WHERE ` + escalationDuePredicate
 	args := []interface{}{escalationStatusPending, now.Format(time.RFC3339)}
 	if workspaceID != "" {
@@ -438,7 +444,7 @@ func (h *QueryHandler) sweepExpiredEscalations(ctx context.Context, workspaceID 
 	for rows.Next() {
 		var e expirableEscalation
 		if err := rows.Scan(&e.id, &e.workspaceID, &e.crewID, &e.chatID, &e.fromAgentID, &e.reason,
-			&e.deadlineAt, &e.credentialID); err != nil {
+			&e.deadlineAt, &e.credentialID, &e.verifiedText); err != nil {
 			rows.Close()
 			return 0, fmt.Errorf("sweep escalations scan: %w", err)
 		}
@@ -575,13 +581,23 @@ func (h *QueryHandler) CancelEscalation(w http.ResponseWriter, r *http.Request) 
 	// An absent body is fine — a reason is good manners, not a precondition.
 	_ = readJSON(r, &body)
 
+	readable, readErr := chataudience.CanReadVerifiedEscalation(r.Context(), h.db, workspaceID, escalationID, actorID)
+	if readErr != nil {
+		replyInternalError(w, h.logger, "cancel escalation audience", readErr)
+		return
+	}
+	if !readable {
+		replyError(w, 404, "escalation not found")
+		return
+	}
+	var verifiedText bool
 	var status, crewID, chatID, fromAgentID, fromSlug, credentialID string
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT e.status, e.crew_id, e.chat_id, e.from_agent_id, a.slug, COALESCE(e.credential_id, '')
+		SELECT e.status, e.crew_id, e.chat_id, e.from_agent_id, a.slug, COALESCE(e.credential_id, ''), (e.type='TEXT' AND COALESCE(e.source_run_id,'')<>'')
 		FROM escalations e
 		JOIN agents a ON a.id = e.from_agent_id
 		WHERE e.id = ? AND e.workspace_id = ?`,
-		escalationID, workspaceID).Scan(&status, &crewID, &chatID, &fromAgentID, &fromSlug, &credentialID)
+		escalationID, workspaceID).Scan(&status, &crewID, &chatID, &fromAgentID, &fromSlug, &credentialID, &verifiedText)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// A foreign id is the same 404 as an unknown one — the
@@ -603,17 +619,27 @@ func (h *QueryHandler) CancelEscalation(w http.ResponseWriter, r *http.Request) 
 	if body.Reason != "" {
 		resolution = "cancelled: " + body.Reason
 	}
+	cancelArgs := []any{escalationStatusCancelled, resolution, now, escalationID, workspaceID, escalationStatusPending}
+	cancelArgs = append(cancelArgs, chataudience.VerifiedTextReadArgs(actorID)...)
 	res, err := h.db.ExecContext(r.Context(), `
-		UPDATE escalations
-		   SET status = ?, resolution = ?, resolved_at = ?, resolved_by = 'user'
-		 WHERE id = ? AND workspace_id = ? AND status = ?`,
-		escalationStatusCancelled, resolution, now, escalationID, workspaceID, escalationStatusPending)
+ UPDATE escalations AS e SET status=?,resolution=?,resolved_at=?,resolved_by='user'
+ WHERE id=? AND workspace_id=? AND status=? AND (NOT (`+chataudience.VerifiedTextSourceSQL+`) OR (`+chataudience.VerifiedTextReadSQL+`))`, cancelArgs...)
 	if err != nil {
 		replyInternalError(w, h.logger, "cancel escalation update", err)
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		// Lost the race with a resolve or an expiry.
+		// Recheck a source audience lost during the mutation before describing
+		// a competing transition: revoked access must not become a status oracle.
+		readable, accessErr := chataudience.CanReadVerifiedEscalation(r.Context(), h.db, workspaceID, escalationID, actorID)
+		if accessErr != nil {
+			replyInternalError(w, h.logger, "cancel escalation audience", accessErr)
+			return
+		}
+		if !readable {
+			replyError(w, 404, "escalation not found")
+			return
+		}
 		replyError(w, http.StatusConflict, "escalation is no longer pending")
 		return
 	}
@@ -653,9 +679,13 @@ func (h *QueryHandler) CancelEscalation(w http.ResponseWriter, r *http.Request) 
 	})
 
 	broadcastChannelEvent(h.hub, "session", chatID, "escalation_cancelled",
-		map[string]string{"id": escalationID, "status": escalationStatusCancelled, "reason": body.Reason})
-	broadcastWorkspaceEvent(h.hub, workspaceID, "escalation.cancelled",
-		map[string]string{"id": escalationID, "crew_id": crewID, "from_slug": fromSlug})
+		map[string]string{"id": escalationID, "status": escalationStatusCancelled, "reason": inbox.RedactSecrets(body.Reason)})
+	if verifiedText {
+		broadcastChatEntityRefsInvalidation(r.Context(), h.hub, chatID)
+	} else {
+		broadcastWorkspaceEvent(h.hub, workspaceID, "escalation.cancelled",
+			map[string]string{"id": escalationID, "crew_id": crewID, "from_slug": fromSlug})
+	}
 
 	h.logger.Info("escalation cancelled", "escalation_id", escalationID, "crew_id", crewID, "actor", actorID)
 	writeJSON(w, http.StatusOK, map[string]string{

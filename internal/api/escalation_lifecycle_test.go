@@ -149,7 +149,13 @@ func TestEscalationTransitions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _, userID, wsID, crewID, agentID := escLifecycleRig(t)
 			const escID = "lc-esc"
-			seedEscalationWithDeadline(t, h, escID, wsID, crewID, agentID, tc.from, &past)
+			deadline := past
+			// A valid pending answer needs an unexpired HUMAN answer window. A past
+			// answer deadline is rejected by the canonical CAS even before the sweep.
+			if tc.transition == "resolve" && tc.from == "PENDING" {
+				deadline = time.Now().Add(time.Hour)
+			}
+			seedEscalationWithDeadline(t, h, escID, wsID, crewID, agentID, tc.from, &deadline)
 
 			switch tc.transition {
 			case "resolve":
