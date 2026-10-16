@@ -227,9 +227,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   )
 
   // Sessions whose `chats` row this panel has CONFIRMED exists. Confirmed
-  // means one of exactly two things happened: we created the row ourselves
-  // (the POST below came back ok), or the server handed us real messages for
-  // it. It is never INFERRED.
+  // means we created the row, loaded real messages, or received a current
+  // authorized execution profile. Empty history alone is never evidence.
+  // Confirmation is scoped to the viewer, workspace and session.
   //
   // It used to be inferred, and that was the bug: the history GET treated
   // an empty successful response as proof of existence. A draft session
@@ -241,10 +241,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   //
   // A ref, not state: nothing renders from it, and the create path must read
   // the value as it is at click time rather than as it was when the callback
-  // was memoised. Keyed by session id so switching back and forth inside one
-  // mount doesn't re-ask.
+  // was memoised. Scoped keys prevent another viewer/workspace from reusing
+  // existence evidence after the panel context changes.
   const confirmedRowsRef = useRef<Set<string>>(new Set())
-  // In-flight create per session id, so two sends in the same tick (a
+  // In-flight create per viewer/workspace/session, so two sends in the same tick (a
   // suggestion chip plus a fast Enter) share one POST — and one re-subscribe.
   const createInFlightRef = useRef<Map<string, Promise<boolean>>>(new Map())
 
@@ -370,6 +370,8 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const [sharedRestrictedChat,setSharedRestrictedChat] = useState(false)
   // Protected reads require a successful profile probe for this exact identity.
   const chatReadScope = JSON.stringify([currentUserId, workspaceId, sessionId])
+  const currentChatReadScopeRef = useRef(chatReadScope)
+  currentChatReadScopeRef.current = chatReadScope
   const [verifiedChatScope, setVerifiedChatScope] = useState<string | null>(null)
   const [executionProfile, setExecutionProfile] = useState<"trusted" | "restricted" | "pending">("pending")
   // Whether this session's mount-time profile probe has answered. A draft
@@ -384,17 +386,18 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     setExecutionProfile("pending")
     setProfileProbeSettled(false)
     setSharedRestrictedChat(false)
-    if (!sessionId || !workspaceId) return
+    if (!sessionId || !workspaceId || !currentUserId) return
     const sessionSegment = encodeApiPathSegment(sessionId)
     if (!sessionSegment) return
     const controller = new AbortController()
     void apiFetch(`/api/v1/chats/${sessionSegment}/execution-profile?workspace_id=${encodeURIComponent(workspaceId)}`,{signal:controller.signal}).then(async response => {
       if (!response.ok) return
       const profile = await response.json() as {mode:string;audience?:string}
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || currentChatReadScopeRef.current !== chatReadScope) return
+      if (profile.mode === "trusted" || profile.mode === "restricted") confirmedRowsRef.current.add(chatReadScope)
       if (profile.mode === "trusted") setVerifiedChatScope(chatReadScope)
       if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
-    }).catch(() => {}).finally(() => { if (!controller.signal.aborted) setProfileProbeSettled(true) })
+    }).catch(() => {}).finally(() => { if (!controller.signal.aborted && currentChatReadScopeRef.current === chatReadScope) setProfileProbeSettled(true) })
     return () => controller.abort()
   }, [sessionId,workspaceId,currentUserId,chatReadScope])
 
@@ -572,7 +575,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       // Messages exist ⇒ the chat they belong to exists. This is the one
       // reading of a history response that is safe, and it is what lets a
       // conversation the user is coming back to skip the create POST.
-      if (messages.length > 0) confirmedRowsRef.current.add(sessionId)
+      if (messages.length > 0) confirmedRowsRef.current.add(chatReadScope)
       // Replace atomically — including with [] for an empty (newly created)
       // session — so visible turns swap cleanly between sessions.
       loadHistory(messages.map((m) => ({
@@ -589,7 +592,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
     void run()
     return () => { cancelled = true }
-  }, [sessionId, workspaceId, loadHistory, markHistoryUnavailable, historyReloadNonce])
+  }, [sessionId, workspaceId, chatReadScope, loadHistory, markHistoryUnavailable, historyReloadNonce])
 
   // No WebSocket for this chat — a restricted chat never opens one, and a
   // restricted account has none at all — so messages this tab did not send
@@ -674,12 +677,12 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
    * tries again.
    */
   const ensureSession = useCallback(async (): Promise<boolean> => {
-    if (!workspaceId || !sessionId) return false
-    if (confirmedRowsRef.current.has(sessionId)) return true
+    if (!workspaceId || !sessionId || !currentUserId) return false
+    if (confirmedRowsRef.current.has(chatReadScope)) return true
 
     // Two sends racing into the same fresh session share one POST — and
     // therefore one resubscribeSession.
-    const pending = createInFlightRef.current.get(sessionId)
+    const pending = createInFlightRef.current.get(chatReadScope)
     if (pending) return pending
 
     const sid = sessionId
@@ -690,7 +693,8 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sid, origin: "UI" }) },
         )
         if (!res.ok) return false
-        confirmedRowsRef.current.add(sid)
+        confirmedRowsRef.current.add(chatReadScope)
+        if (currentChatReadScopeRef.current !== chatReadScope) return false
         // The conversation begins here, not at mount: a draft session is a URL
         // and a text box until this POST gives it a row. `composer` because
         // typing (or attaching) is what asked for it — the explicit "New
@@ -708,12 +712,12 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       } catch {
         return false
       } finally {
-        createInFlightRef.current.delete(sid)
+        createInFlightRef.current.delete(chatReadScope)
       }
     })()
-    createInFlightRef.current.set(sid, attempt)
+    createInFlightRef.current.set(chatReadScope, attempt)
     return attempt
-  }, [agentId, workspaceId, sessionId, resubscribeSession])
+  }, [agentId, workspaceId, sessionId, currentUserId, chatReadScope, resubscribeSession])
 
   /** ensureSession, plus the one thing the user has to be told about.
    *
@@ -747,7 +751,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         if (!response.ok) ok = false
         else {
           const profile = await response.json() as {mode:string;audience?:string}
-          if (currentSessionRef.current !== sid) return false
+          if (currentChatReadScopeRef.current !== chatReadScope) return false
           if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
           else ok = false
         }
@@ -756,16 +760,16 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     // The user moved to another conversation while this one was being
     // created: its message belongs to the conversation they left, whose
     // composer keeps the draft. Nothing to say, nothing to send.
-    if (currentSessionRef.current !== sid) return false
+    if (currentChatReadScopeRef.current !== chatReadScope) return false
     // A trusted send goes over the socket, which the resolved profile has only
     // just switched on. Restricted sends are HTTP and report connected.
     if (ok && executionProfileRef.current === "trusted") ok = await waitForConnection(sid)
-    if (currentSessionRef.current !== sid) return false
+    if (currentChatReadScopeRef.current !== chatReadScope) return false
     if (!ok) {
       toast.error("Couldn't start this conversation. Check your connection and try again.")
     }
     return ok
-  }, [canChat,ensureSession,sessionId,workspaceId,waitForConnection])
+  }, [canChat,ensureSession,sessionId,workspaceId,chatReadScope,waitForConnection])
 
   // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
   // on a draft session `ensureSessionForSend` awaits a real POST. `isStreaming`

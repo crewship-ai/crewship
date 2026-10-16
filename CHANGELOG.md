@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Shared Guest issue searches have a bounded rate budget.** Browser sessions and CLI tokens share account/workspace and project budgets, including empty searches and pagination. Temporary limits return 429 with retry guidance; existing project audiences, counts and detail permissions are preserved.
+- **Participants can start a conversation in an empty shared chat.** A current authorized execution profile confirms the existing chat without a creator-only create request; every send still rechecks access and refused sends keep the draft.
 
 - **Proposal comments address the chat agent explicitly.** “Send comment to agent” now includes its canonical mention so shared chats trigger the requested reply; rejected sends keep the comment draft.
 
@@ -422,6 +422,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Public documentation now separates product contracts from internal working records and prototypes. Start at `docs/README.md` for guides, specifications and decisions; contributor instructions remain in `AGENTS.md`. Assistant-specific workstation files are ignored and rejected by the tracked-path CI guard. Public builds need no private context checkout. (#2778)
 
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
+
+- **Shared Guest issue searches have a bounded rate budget.** Browser sessions and CLI tokens share account/workspace and project budgets, including empty searches and pagination. Temporary limits return 429 with retry guidance; existing project audiences, counts and detail permissions are preserved.
 
 ### Fixed
 
