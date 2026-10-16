@@ -1324,6 +1324,141 @@
         ],
         "type": "object"
       },
+      "ChatRunPreflight": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "budgets": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "limit_usd": {
+                  "type": "number"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "remaining_usd": {
+                  "type": "number"
+                },
+                "scope": {
+                  "type": "string"
+                },
+                "spent_usd": {
+                  "type": "number"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "window": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "scope",
+                "window",
+                "mode",
+                "limit_usd",
+                "spent_usd",
+                "remaining_usd",
+                "state"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "estimate_state": {
+            "enum": [
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "estimate_usd": {
+            "nullable": true,
+            "type": "number"
+          },
+          "gate": {
+            "properties": {
+              "blocking": {
+                "type": "boolean"
+              },
+              "configured_mode": {
+                "type": "string"
+              },
+              "predicted_mode": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "rule_matches": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "configured_mode",
+              "predicted_mode",
+              "rule_matches",
+              "blocking",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "model": {
+            "type": "string"
+          },
+          "payer": {
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "category",
+              "label"
+            ],
+            "type": "object"
+          },
+          "scope": {
+            "enum": [
+              "configured_chat_agent"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "agent_id",
+          "model",
+          "payer",
+          "budgets",
+          "gate",
+          "estimate_usd",
+          "estimate_state",
+          "constraints"
+        ],
+        "type": "object"
+      },
       "ChatShareCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -59124,6 +59259,157 @@
           "chats"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/chats/{chatId}/run-preflight": {
+      "get": {
+        "description": "Get chat run preflight (GET /api/v1/chats/{chatId}/run-preflight).",
+        "operationId": "get_api_v1_chats_chatId_run-preflight",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatRunPreflight"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store; authorization-sensitive advisory snapshot, neither reservation nor approval",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get chat run preflight",
+        "tags": [
+          "chats"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/chats/{chatId}/steer": {

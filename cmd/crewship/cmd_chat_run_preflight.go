@@ -1,8 +1,9 @@
 package main
 
 import (
-	"github.com/spf13/cobra"
 	"net/url"
+
+	"github.com/spf13/cobra"
 )
 
 func newChatRunPreflightCommand() *cobra.Command {

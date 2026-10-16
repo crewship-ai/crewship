@@ -27,11 +27,21 @@ type chatRunGateProjection struct {
 	Blocking       bool   `json:"blocking"`
 	Reason         string `json:"reason"`
 }
+
+// Credential identity and vault delivery metadata are deliberately absent.
+// The label follows existing credential visibility; otherwise it is generic.
+type chatRunPayer struct {
+	State    string `json:"state"`
+	Category string `json:"category"`
+	Label    string `json:"label"`
+	Provider string `json:"provider,omitempty"`
+}
+
 type chatRunPreflightResponse struct {
 	Scope         string                `json:"scope"`
 	AgentID       string                `json:"agent_id"`
 	Model         string                `json:"model"`
-	Payer         agentModelCredential  `json:"payer"`
+	Payer         chatRunPayer          `json:"payer"`
 	Budgets       []chatRunBudget       `json:"budgets"`
 	Gate          chatRunGateProjection `json:"gate"`
 	EstimateUSD   *float64              `json:"estimate_usd"`
@@ -99,7 +109,7 @@ func (r *Router) chatRunPreflight(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
-	out := chatRunPreflightResponse{Scope: "configured_chat_agent", AgentID: audience.AgentID, Model: model, Payer: payer.ModelCredential, Budgets: []chatRunBudget{}, Gate: chatRunGateProjection{ConfiguredMode: configured, PredictedMode: mode.String(), RuleMatches: matches, Blocking: matches && mode == harbormaster.ModeSync, Reason: reason}, EstimateState: "unknown", Constraints: []string{"Snapshot only: funds are not reserved and approval is not granted.", "Model or provider overrides require a fresh preflight for that launch.", "Provider admission rechecks live budget policy before paid requests."}}
+	out := chatRunPreflightResponse{Scope: "configured_chat_agent", AgentID: audience.AgentID, Model: model, Payer: safeChatRunPayer(payer.ModelCredential), Budgets: []chatRunBudget{}, Gate: chatRunGateProjection{ConfiguredMode: configured, PredictedMode: mode.String(), RuleMatches: matches, Blocking: matches && mode == harbormaster.ModeSync, Reason: reason}, EstimateState: "unknown", Constraints: []string{"Snapshot only: funds are not reserved and approval is not granted.", "Model or provider overrides require a fresh preflight for that launch.", "Provider admission rechecks live budget policy before paid requests."}}
 	for _, s := range statuses {
 		out.Budgets = append(out.Budgets, chatRunBudget{ID: s.Budget.ID, Scope: string(s.Budget.ScopeKind), Window: string(s.Budget.Window), Mode: string(s.Budget.Mode), LimitUSD: s.LimitUSD, SpentUSD: s.SpentUSD, RemainingUSD: math.Max(0, s.LimitUSD-s.SpentUSD), State: string(s.State)})
 	}
@@ -119,4 +129,16 @@ func (r *Router) chatRunPreflight(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	writeJSON(w, 200, out)
+}
+
+func safeChatRunPayer(payer agentModelCredential) chatRunPayer {
+	out := chatRunPayer{State: payer.State, Category: "unknown", Label: "Payer unknown", Provider: payer.Provider}
+	if payer.State == "ready" {
+		out.Category = "connected_provider_account"
+		out.Label = "Connected provider account"
+		if payer.CredentialName != "" {
+			out.Label = payer.CredentialName
+		}
+	}
+	return out
 }

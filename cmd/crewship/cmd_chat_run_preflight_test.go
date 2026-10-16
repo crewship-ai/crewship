@@ -1,9 +1,10 @@
 package main
 
 import (
-	"github.com/crewship-ai/crewship/internal/cli/clitest"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
 
 func TestChatRunPreflightCLIUsesReadOnlyAuthorizedAPI(t *testing.T) {

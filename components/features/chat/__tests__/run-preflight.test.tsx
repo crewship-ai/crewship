@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import { RunPreflight, type ChatRunPreflight } from "../run-preflight"
 const { fetch } = vi.hoisted(() => ({ fetch: vi.fn() }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetch }))
-const base: ChatRunPreflight = { scope: "configured_chat_agent", agent_id: "a", model: "configured-model", payer: { state: "ready", credential_name: "Workspace payer" }, budgets: [{ id: "b", scope: "crew", window: "month", mode: "hard", limit_usd: 100, spent_usd: 40, remaining_usd: 60, state: "ok" }], gate: { configured_mode: "sync", predicted_mode: "async", rule_matches: true, blocking: false, reason: "review" }, estimate_usd: null, estimate_state: "unknown", constraints: ["Snapshot only: funds are not reserved and approval is not granted."] }
+const base: ChatRunPreflight = { scope: "configured_chat_agent", agent_id: "a", model: "configured-model", payer: { state: "ready", category: "connected_provider_account", label: "Workspace payer" }, budgets: [{ id: "b", scope: "crew", window: "month", mode: "hard", limit_usd: 100, spent_usd: 40, remaining_usd: 60, state: "ok" }], gate: { configured_mode: "sync", predicted_mode: "async", rule_matches: true, blocking: false, reason: "review" }, estimate_usd: null, estimate_state: "unknown", constraints: ["Snapshot only: funds are not reserved and approval is not granted."] }
 function setup(enabled = true) {
  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
  return render(<QueryClientProvider client={client}><RunPreflight chatId="chat" workspaceId="workspace" userId="viewer" enabled={enabled} /></QueryClientProvider>)
@@ -24,7 +24,6 @@ it("drops protected facts on revoked access and hides disabled surfaces", async 
  fetch.mockResolvedValueOnce(new Response(JSON.stringify(base))).mockResolvedValueOnce(new Response("{}", { status: 404 }))
  setup()
  await screen.findByText(/Workspace payer/)
- fireEvent.click(screen.getByText(/nonblocking review predicted/))
  fireEvent.click(screen.getByRole("button", { name: "Refresh budget and gate" }))
  await waitFor(() => expect(screen.queryByText(/Workspace payer/)).not.toBeInTheDocument())
  cleanup(); fetch.mockClear(); setup(false)
