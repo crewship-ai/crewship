@@ -166,6 +166,8 @@ func TestSlidesImagesEncryptedBackupForkRetainsNonHeadRefs(t *testing.T) {
 	deck.Slides[0].Elements = append(deck.Slides[0].Elements, image)
 	base := "/api/v1/pages/" + page + "/slides"
 	wantCode(t, f.slideDo(f.boss, "POST", base+"/initialize", slideJSON(t, slides.InitializeRequest{PageID: page, SchemaVersion: 2, MutationID: "init", Deck: deck})), 200, "initialize")
+	comment := slides.CreateCommentRequest{PageID: page, SchemaVersion: 1, BaseRev: 1, MutationID: "backup_image_comment", Anchor: slides.CommentAnchor{AnchorSchemaVersion: 1, Kind: "element", SlideID: deck.Slides[0].ID, ElementID: image.ID, Revision: 1}, Body: "Retained image comment"}
+	wantCode(t, f.slideDo(f.boss, "POST", base+"/comments", slideJSON(t, comment)), 200, "image comment pins original revision")
 	imageHash, _ := slides.ElementHash(image)
 	wantCode(t, f.slideDo(f.boss, "POST", base+"/patch", slideJSON(t, slides.PatchRequest{PageID: page, SchemaVersion: 2, BaseRev: 1, MutationID: "delete", Operations: []slides.Operation{{Op: "delete_element", SlideID: deck.Slides[0].ID, ElementID: image.ID, IfHash: imageHash}}})), 200, "remove only head image")
 	const pass = "slides-image-backup-qualified-password"
@@ -271,6 +273,7 @@ func TestSlidesImagesEncryptedBackupForkRetainsNonHeadRefs(t *testing.T) {
 			if err != nil || attachmentDigest(bytes) != asset.SHA256 {
 				t.Fatal("fork image bytes missing", err)
 			}
+
 			router, err := NewRouter(target, "this-is-a-32-char-test-secret-pad", newTestLogger(), WithStoragePath(root))
 			if err != nil {
 				t.Fatal(err)
@@ -283,6 +286,70 @@ func TestSlidesImagesEncryptedBackupForkRetainsNonHeadRefs(t *testing.T) {
 			if attachmentDigest(response.Body.Bytes()) != asset.SHA256 {
 				t.Fatal("restored route served wrong bytes")
 			}
+			if !fork {
+				mustExec(t, target, `INSERT INTO workspaces(id,name,slug) VALUES('image-foreign','Foreign','image-foreign')`)
+				mustExec(t, target, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('image-foreign-member','image-foreign',?,'OWNER')`, owner)
+				wmSeedPage(t, target, "image-foreign", "foreign-image-page", "foreign-image-page", "Foreign", owner, "")
+				foreignBase := "/api/v1/pages/foreign-image-page"
+				foreignUpload := restoredFixture.do(credential, "POST", foreignBase+"/assets?workspace_id=image-foreign&mutation_id=foreign", string(pageAssetPNG(t)))
+				wantCode(t, foreignUpload, 201, "foreign upload")
+				foreignAsset := assetMeta(t, foreignUpload)
+				foreignDeck := slideTestDeck(t, "foreign-image-page")
+				foreignDeck.SchemaVersion = 2
+				foreignImage := slides.Element{ID: "foreign_image", Type: "image", Width: 10, Height: 10, Image: &slides.Image{AssetID: foreignAsset.ID, ExpectedSHA256: foreignAsset.SHA256, Alt: "Foreign"}}
+				foreignDeck.Slides[0].Elements = append(foreignDeck.Slides[0].Elements, foreignImage)
+				wantCode(t, restoredFixture.do(credential, "POST", foreignBase+"/slides/initialize?workspace_id=image-foreign", slideJSON(t, slides.InitializeRequest{PageID: foreignDeck.DeckID, SchemaVersion: 2, MutationID: "foreign_init", Deck: foreignDeck})), 200, "foreign initialize")
+				mustExec(t, target, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('foreign-image-page','user',?,'read',?)`, owner, owner)
+				var foreignHash string
+				if err = target.QueryRow(`SELECT content_hash FROM slides_heads WHERE page_id='foreign-image-page'`).Scan(&foreignHash); err != nil {
+					t.Fatal(err)
+				}
+				options.Replace = true
+
+				mustExec(t, target, `CREATE TRIGGER image_replace_fault BEFORE INSERT ON slides_heads WHEN NEW.page_id='backup-image-page' BEGIN SELECT RAISE(ABORT,'synthetic replace insert fault'); END`)
+				if _, err = backup.RestoreBackup(t.Context(), target, options); err == nil {
+					t.Fatal("replace synthetic insert failure succeeded")
+				}
+				mustExec(t, target, `DROP TRIGGER image_replace_fault`)
+				var rollbackHead int64
+				if err = target.QueryRow(`SELECT head_rev FROM slides_heads WHERE page_id=?`, newPage).Scan(&rollbackHead); err != nil || rollbackHead != 2 {
+					t.Fatalf("replace failure lost original head %d %v", rollbackHead, err)
+				}
+				if err = target.QueryRow(`SELECT COUNT(*) FROM slides_revision_assets WHERE page_id=? AND rev=1`, newPage).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("replace failure lost original image pin %d %v", count, err)
+				}
+				if err = target.QueryRow(`SELECT COUNT(*) FROM slides_comment_threads WHERE page_id=? AND anchor_revision=1`, newPage).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("replace failure lost comment revision pin %d %v", count, err)
+				}
+				if _, err = backup.RestoreBackup(t.Context(), target, options); err != nil {
+					t.Fatalf("replace existing image revision graph: %v", err)
+				}
+				if err = target.QueryRow(`SELECT COUNT(*) FROM slides_revision_assets WHERE page_id=? AND rev=1 AND asset_id=? AND expected_sha256=?`, newPage, newAsset, asset.SHA256).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("replace retained exact pin %d %v", count, err)
+				}
+				var head int64
+				if err = target.QueryRow(`SELECT head_rev FROM slides_heads WHERE page_id=?`, newPage).Scan(&head); err != nil || head != 2 {
+					t.Fatalf("replace wrong head %d %v", head, err)
+				}
+				var originalRev int64
+				if err = target.QueryRow(`SELECT anchor_revision FROM slides_comment_threads WHERE page_id=? AND id='backup_image_comment'`, newPage).Scan(&originalRev); err != nil || originalRev != 1 {
+					t.Fatalf("replace lost original comment revision pin %d %v", originalRev, err)
+				}
+				var afterHash string
+				if err = target.QueryRow(`SELECT content_hash FROM slides_heads WHERE page_id='foreign-image-page'`).Scan(&afterHash); err != nil || afterHash != foreignHash {
+					t.Fatal("replace touched foreign typed head", err)
+				}
+				if err = target.QueryRow(`SELECT COUNT(*) FROM slides_revision_assets WHERE page_id='foreign-image-page' AND asset_id=?`, foreignAsset.ID).Scan(&count); err != nil || count != 1 {
+					t.Fatal("replace touched foreign image pins", err)
+				}
+				if err = target.QueryRow(`SELECT COUNT(*) FROM page_grants WHERE page_id='foreign-image-page'`).Scan(&count); err != nil || count != 1 {
+					t.Fatal("replace touched foreign Page grants", err)
+				}
+				if _, err = readPageAssetBlob(root, "image-foreign", foreignAsset.SHA256); err != nil {
+					t.Fatal("replace removed foreign image bytes", err)
+				}
+			}
+
 		})
 	}
 }
