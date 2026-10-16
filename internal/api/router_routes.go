@@ -49,6 +49,7 @@ func (r *Router) registerRoutes() {
 	// routes plus the single panel write path.
 	r.registerPageRoutes()
 	r.registerDocumentRoutes()
+	r.registerSlideRoutes()
 
 	// Public pages — the /p/{token} surface (§7.3). Its own registrar because
 	// §7.3.1 makes it a separate product rather than a permission level.

@@ -55,7 +55,7 @@ func (h *PageHandler) projectPage(w http.ResponseWriter, r *http.Request) (*page
 		h.refusePageAction(w, r, rec, "reading or editing project sources requires page edit permission", "page not found")
 		return nil, false
 	}
-	if rec.HasArtifact || rec.HasBoard {
+	if rec.HasArtifact || rec.HasBoard || rec.HasSlides {
 		replyError(w, 409, "artifact pages cannot contain applications")
 		return nil, false
 	}

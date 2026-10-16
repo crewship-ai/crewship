@@ -133,7 +133,7 @@ func (h *documentAuthority) authorize(r *http.Request, k documents.Key, write, i
 		if e != nil {
 			return "", errDocumentAccess
 		}
-		if rec.HasArtifact || rec.HasBoard || rec.HasProject || rec.HasApplication {
+		if rec.HasSlides || rec.HasArtifact || rec.HasBoard || rec.HasProject || rec.HasApplication {
 			return "", errDocumentAccess
 		}
 		panels, e := h.pages.loadPanels(ctx, k.WorkspaceID, k.PageID)

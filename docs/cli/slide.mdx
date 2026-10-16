@@ -1,0 +1,72 @@
+---
+title: "Slides Commands"
+description: "Read typed Page Slides and submit atomic, revision-checked human mutations."
+icon: "presentation"
+stability: experimental
+tag: Experimental
+---
+
+# crewship slide
+
+The human CLI uses the current profile's workspace and credential. Page read/write
+ACLs apply in addition to `pages:read`/`pages:write` token scopes. This foundation
+has no native viewer, image assets, comments or selected-edit agent admission.
+See [API contracts](/api-reference/slides) and the [storage contract](../specs/slides.md).
+Every mutation preserves its original `page_id`, `mutation_id`, `base_rev`, order
+version and object hashes. Conflicts stop after one request; there is no automatic
+refresh, identity substitution or rebase. JSON input must pass the same exact,
+bounded schema as the Go server.
+
+## crewship slide read
+
+`crewship slide read report` calls `GET /api/v1/pages/{slug}/slides` and prints
+confirmed `{schema_version,revision,order_version,content_hash,deck}`.
+
+## crewship slide outline
+
+`crewship slide outline report` calls `GET /api/v1/pages/{slug}/slides/outline`.
+It prints confirmed Page/revision/order/hash and ordered slide/element identities
+with their precondition hashes. Fetch `slide read` for full element payloads.
+
+## crewship slide history
+
+`crewship slide history report` calls `GET /api/v1/pages/{slug}/slides/history`.
+The result lists retained immutable revisions with trusted actor attribution.
+
+## crewship slide at-rev
+
+`crewship slide at-rev report 1` calls
+`GET /api/v1/pages/{slug}/slides/revisions/{revision}`. The revision must be a
+positive integer. This reads retained content under current authorization.
+
+## crewship slide initialize
+
+`crewship slide initialize report --file initialize.json` calls
+`POST /api/v1/pages/{slug}/slides/initialize`. `--file` names the exact JSON file;
+`--file -` reads stdin. Required fields are `{page_id,schema_version:1,base_rev:0,
+mutation_id,deck}`. Only the human owner can initialize an empty Page. The full
+deck must bind the same Page ID.
+
+## crewship slide patch
+
+`crewship slide patch report --file patch.json` calls
+`POST /api/v1/pages/{slug}/slides/patch`. `--file` names the exact JSON file;
+`--file -` reads stdin. Required fields are `{page_id,schema_version:1,base_rev,
+mutation_id,operations}`. Structural slide operations additionally require
+`if_order_version`. Every operation hash observes earlier operations in this
+same atomic batch. Preserve the full request on uncertain transport retry.
+
+## crewship slide reorder
+
+`crewship slide reorder report --file order.json` calls
+`POST /api/v1/pages/{slug}/slides/reorder`. `--file` names the exact JSON file;
+`--file -` reads stdin. Supply `{page_id,schema_version:1,base_rev,mutation_id,
+if_order_version,slide_order}` with every existing slide ID exactly once.
+
+## crewship slide restore
+
+`crewship slide restore report --file restore.json` calls
+`POST /api/v1/pages/{slug}/slides/restore`. `--file` names the exact JSON file;
+`--file -` reads stdin. Supply `{page_id,schema_version:1,base_rev,mutation_id,
+if_order_version,revision}`. Restore appends a new confirmed revision and can
+revive the original stable identities; it does not replace live permissions.

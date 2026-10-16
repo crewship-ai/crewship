@@ -7,6 +7,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"io"
 	"log/slog"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -276,5 +278,48 @@ func TestStoreQuotaHookAndForkReceiptRejectionsAreAtomic(t *testing.T) {
 	}
 	if _, err := store.Initialize(t.Context(), key, InitializeRequest{PageID: key.PageID, SchemaVersion: 1, BaseRev: 0, MutationID: "initialize_one", Deck: deck}, storeAuthority); !errors.Is(err, ErrDuplicate) {
 		t.Fatalf("inert fork historical ID must409, not replay/SQL500: %v", err)
+	}
+}
+
+// A new OS process reads and commits against the persisted database, rather
+// than sharing the first Store, database connection or in-memory candidate.
+func TestStoreSeparateProcessRestart(t *testing.T) {
+	if path := os.Getenv("CREWSHIP_SLIDES_RESTART_TEST_DB"); path != "" {
+		db, err := database.Open("file:" + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		store := New(db.DB, Options{})
+		key := Key{"slides-workspace", "fixture_page"}
+		state, err := store.Read(t.Context(), key, 0, storeAuthority)
+		if err != nil || state.Revision != 1 {
+			t.Fatalf("restart read: %#v %v", state, err)
+		}
+		if _, err := store.Patch(t.Context(), key, textPatch(t, state, "from_new_process", "Confirmed after process restart"), storeAuthority); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	store, db, key, deck, path := storeFixture(t, Options{})
+	initializeStore(t, store, key, deck)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	childContext, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	command := exec.CommandContext(childContext, os.Args[0], "-test.run=^TestStoreSeparateProcessRestart$", "-test.v")
+	command.Env = append(os.Environ(), "CREWSHIP_SLIDES_RESTART_TEST_DB="+path)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("new process: %v\n%s", err, output)
+	}
+	reopened, err := database.Open("file:" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	state, err := New(reopened.DB, Options{}).Read(t.Context(), key, 0, storeAuthority)
+	if err != nil || state.Revision != 2 {
+		t.Fatalf("restarted process commit not durable: %#v %v", state, err)
 	}
 }

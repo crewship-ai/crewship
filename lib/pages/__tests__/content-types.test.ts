@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest"
 import fixtures from "../../../testdata/page-content-derivation.json"
 import { deriveContentTypes, resolvePageContent } from "../content-types"
 describe("compiled Page content contract", () => {
+ for (const content_descriptor of [undefined, {type_id:"slides",schema_version:1,supported:false,reason:"viewer-unavailable"}, {type_id:"slides",schema_version:1,supported:true}]) it(`keeps Slides foundation readonly ${JSON.stringify(content_descriptor)}`, () => {
+  const result=resolvePageContent({human_owned:true,has_slides:true,...(content_descriptor===undefined?{}:{content_descriptor})});expect(result.supported).toBe(false);expect(result.canInitializeContent).toBe(false)
+ })
  for (const fixture of fixtures) it(fixture.name, () => expect(deriveContentTypes(fixture.facts)).toEqual(fixture.expected))
  it("keeps empty human Page attach eligibility", () => expect(resolvePageContent({human_owned:true}).canInitializeContent).toBe(true))
  for (const descriptor of [null, {type_id:"future",schema_version:1,supported:true}, {type_id:"doc",schema_version:2,supported:true}, {type_id:"html",schema_version:1,supported:true}]) it(`fails closed for inconsistent primary ${JSON.stringify(descriptor)}`, () => {

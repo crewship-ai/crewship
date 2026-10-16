@@ -7,9 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 )
+
+var ErrInvalid = errors.New("invalid Slides mutation")
 
 var ErrNotFound = errors.New("Slides not found")
 var ErrDuplicate = errors.New("Slides mutation ID already used")
@@ -225,7 +228,7 @@ func reserveIDs(ctx context.Context, tx *sql.Tx, key Key, ids map[string]string,
 func (s *Store) write(ctx context.Context, tx *sql.Tx, key Key, current State, deck Deck, id, kind, hash, actor string, inserted map[string]string, restore bool) (Receipt, error) {
 	var result Receipt
 	if err := Validate(deck); err != nil {
-		return result, err
+		return result, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	if deck.DeckID != key.PageID {
 		return result, errors.New("Slides deck must retain Page identity")
@@ -388,7 +391,10 @@ func (s *Store) Patch(ctx context.Context, key Key, request PatchRequest, author
 		}
 		candidate, err := ApplyPatch(current.Deck, request)
 		if err != nil {
-			return err
+			if errors.Is(err, ErrConflict) {
+				return err
+			}
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
 		result, err = s.write(ctx, tx, key, current, candidate, request.MutationID, "patch", hash, actor, insertedIDs(request), false)
 		return err

@@ -1,0 +1,140 @@
+---
+title: "Typed Slides API"
+description: "Human semantic mutation, immutable revisions and namespaced Page Slides persistence."
+icon: "presentation"
+stability: experimental
+tag: Experimental
+---
+
+# Typed Slides foundation
+
+Schema 1 admits bounded text, rectangle/ellipse shapes and rectangular tables.
+The [storage contract](../specs/slides.md) and generated OpenAPI describe the
+closed nested schema, canonical hashing, aggregate table-cell bounds and exact
+operation union. Images, author HTML/JavaScript, external resources, native UI,
+comments and selected-edit agent admission are separate cuts. The Page descriptor
+remains unsupported with `viewer-unavailable`. No internal Slides agent route is
+registered. [CLI commands](/cli/slide) use the same human API.
+
+All requests supply `X-Workspace-ID` or `workspace_id`, a live human session/CLI
+credential, active unrestricted workspace membership and the Page ACL. Scoped
+CLI credentials require `pages:read` for reads and `pages:write` for writes.
+Authorization is rechecked under the same SQLite writer transaction, including
+historical reads and receipt replays. The immutable `page_id` prevents a saved
+request from targeting a replacement Page that reuses the slug.
+
+Mutation bodies require exact case-sensitive keys, no unknown/duplicate fields,
+one JSON object, schema version 1, at most 2MiB, and a stable ASCII mutation ID.
+Base revision CAS covers the complete deck. Structural slide changes also carry
+an order precondition. Every successful mutation returns
+`{mutation_id,revision,order_version,content_hash,duplicate}`. This confirms that
+immutable revision; a later writer may already have advanced the head. Exact
+retries preserve the original payload. No automatic rebase is performed.
+
+## `GET /api/v1/pages/{slug}/slides`
+
+**Request:** Page slug and workspace; no JSON body.
+
+**Response:** Confirmed `{schema_version,revision,order_version,content_hash,deck}`.
+Deck contains `{schema_version,deck_id,width,height,theme,slide_order,slides}`;
+canonical slides collection sorts by ID while `slide_order` owns presentation order.
+
+**Permissions:** Current human Page read access and `pages:read` CLI scope.
+
+**Errors:** 401 invalid credential, 403 inaccessible Page, 404 no Slides,
+500 invalid/corrupt stored state. Private content never accompanies a denial.
+
+## `GET /api/v1/pages/{slug}/slides/outline`
+
+**Request:** Page slug and workspace; no JSON body.
+
+**Response:** `{page_id,revision,order_version,content_hash,slides:[{id,hash,
+elements:[{id,type,hash}]}]}` in presentation order. Hashes bind the confirmed
+objects; full payloads come from the read endpoint.
+
+**Permissions:** Current Page read access and `pages:read` CLI scope.
+
+**Errors:** 401 invalid credential, 403 denied, 404 no Slides, 500 corrupt state.
+
+## `GET /api/v1/pages/{slug}/slides/history`
+
+**Request:** Page slug and workspace; no JSON body.
+
+**Response:** Array of retained `{revision,parent_revision,order_version,
+schema_version,content_hash,actor,kind,mutation_id,created_at}` records, bounded
+by the 1000-revision retention quota. Actor attribution comes from trusted authority.
+
+**Permissions:** Current Page read access and `pages:read` CLI scope.
+
+**Errors:** 401 invalid credential, 403 denied, 404 no Slides, 500 storage failure.
+
+## `GET /api/v1/pages/{slug}/slides/revisions/{revision}`
+
+**Request:** Page slug, positive integer retained revision and workspace; no body.
+
+**Response:** The same confirmed state shape as the head read, pinned to the
+requested immutable revision. Reading never changes the current head.
+
+**Permissions:** Current Page read access and `pages:read` CLI scope.
+
+**Errors:** 400 invalid revision, 401 invalid credential, 403 denied,
+404 missing revision, 500 corrupt state.
+
+## `POST /api/v1/pages/{slug}/slides/initialize`
+
+**Request:** `{page_id,schema_version:1,base_rev:0,mutation_id,deck}`. The full
+bounded deck's `deck_id` must equal `page_id`; the Page must contain no other format.
+
+**Response:** Durable mutation receipt. An exact authenticated replay returns
+`duplicate:true` without appending another revision.
+
+**Permissions:** Human Page owner with current write access and `pages:write` scope.
+
+**Errors:** 400 invalid JSON/model, 401 invalid credential, 403 denied,
+409 existing head or identity/replay conflict, 429 retained quota, 500 storage failure.
+
+## `POST /api/v1/pages/{slug}/slides/patch`
+
+**Request:** `{page_id,schema_version:1,base_rev,mutation_id,operations,
+if_order_version?}`. At most 100 operations from `set_element`, `insert_element`,
+`delete_element`, `set_notes`, `insert_slide`, `delete_slide`. Set/delete-element
+uses `slide_id`, `element_id`, `if_hash`; set supplies the full same-ID `element`.
+Insert-element uses `slide_id`, slide `if_hash` and full `element`. Set-notes uses
+`slide_id`, slide `if_hash`, `notes`. Delete-slide uses `slide_id`, slide `if_hash`.
+Insert-slide uses full `slide` and integer `position`. Slide insertion/deletion
+requires `if_order_version`. Hashes observe the progressively modified candidate
+inside this batch; final deck limits apply atomically. Deleted IDs cannot be reused.
+
+**Response:** Durable mutation receipt, or no change when any precondition fails.
+
+**Permissions:** Current human Page write access and `pages:write` CLI scope.
+
+**Errors:** 400 invalid candidate, 401 invalid credential, 403 denied,
+404 missing Slides, 409 revision/order/hash/identity/replay conflict,
+429 retained quota, 500 storage failure.
+
+## `POST /api/v1/pages/{slug}/slides/reorder`
+
+**Request:** `{page_id,schema_version:1,base_rev,mutation_id,if_order_version,
+slide_order}`. The array must include every existing slide ID exactly once.
+
+**Response:** Durable mutation receipt with the confirmed order version.
+
+**Permissions:** Current human Page write access and `pages:write` CLI scope.
+
+**Errors:** 400 invalid order, 401 invalid credential, 403 denied, 404 missing Slides,
+409 revision/order/identity/replay conflict, 429 retained quota, 500 storage failure.
+
+## `POST /api/v1/pages/{slug}/slides/restore`
+
+**Request:** `{page_id,schema_version:1,base_rev,mutation_id,if_order_version,
+revision}`. The target is a retained immutable revision in the same Page namespace.
+
+**Response:** Durable receipt for a new head revision containing the retained
+snapshot. Original identities may revive; current authorization remains unchanged.
+
+**Permissions:** Current human Page write access and `pages:write` CLI scope.
+
+**Errors:** 400 invalid candidate, 401 invalid credential, 403 denied,
+404 missing Slides/revision, 409 revision/order/identity/replay conflict,
+429 retained quota, 500 storage failure.

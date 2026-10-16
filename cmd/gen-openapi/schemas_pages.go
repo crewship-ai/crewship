@@ -177,6 +177,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 
 	page := obj(map[string]any{
 		"content_descriptor": contentReference, "application_descriptor": contentReference,
+		"has_slides":   boolean(),
 		"has_artifact": boolean(),
 		"has_board":    boolean(),
 		"has_project":  map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
@@ -193,6 +194,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 
 	pageRow := obj(map[string]any{
 		"content_descriptor": contentReference, "application_descriptor": contentReference,
+		"has_slides":             boolean(),
 		"has_artifact":           boolean(),
 		"artifact_summary":       obj(map[string]any{"head_rev": map[string]any{"type": "integer", "minimum": 1}, "author_user_id": str(), "author_name": str(), "author_agent_id": str(), "author_agent_name": str(), "author_run_id": str(), "published_at": timeString(), "last_activity_at": timeString()}),
 		"has_board":              boolean(),

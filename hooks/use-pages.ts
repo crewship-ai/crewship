@@ -143,6 +143,7 @@ export interface WirePage {
   content_descriptor?: unknown
   application_descriptor?: unknown
   artifact_summary?: ArtifactSummary
+  has_slides?: boolean
   has_document?: boolean
   has_board?: boolean
   has_artifact?: boolean
