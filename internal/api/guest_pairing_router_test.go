@@ -99,7 +99,7 @@ func TestGuestPairingRouterSessionAndAuthority(t *testing.T) {
 	if err := json.Unmarshal(hidden.Body.Bytes(), &poll); err != nil || poll.Status != "expired" {
 		t.Fatal("foreign pairing disclosed", err)
 	}
-	redeemed := f.call(t, "", "POST", "/api/v1/cli/pair/redeem", `{"code":"`+code+`"}`, 200)
+	redeemed := f.call(t, "", "POST", "/api/v1/auth/pair/redeem", `{"code":"`+code+`"}`, 200)
 	var pair pairRedeemResponse
 	if err := json.Unmarshal(redeemed.Body.Bytes(), &pair); err != nil || pair.UserID != "pair-guest" || pair.CliToken == "" {
 		t.Fatal("bad principal", err)
@@ -143,7 +143,7 @@ func TestGuestPairingRouterSourceLifecycle(t *testing.T) {
 			case "suspend":
 				execOrFatal(t, f.db, `UPDATE users SET suspended_at=datetime('now') WHERE id='pair-guest'`)
 			}
-			f.call(t, "", "POST", "/api/v1/cli/pair/redeem", `{"code":"`+code+`"}`, 400)
+			f.call(t, "", "POST", "/api/v1/auth/pair/redeem", `{"code":"`+code+`"}`, 400)
 			var n int
 			if err := f.db.QueryRow(`SELECT COUNT(*) FROM cli_tokens WHERE user_id='pair-guest'`).Scan(&n); err != nil || n != 0 {
 				t.Fatalf("minted=%d err=%v", n, err)
