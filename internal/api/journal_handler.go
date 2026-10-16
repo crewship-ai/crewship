@@ -134,7 +134,7 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		if user := UserFromContext(r.Context()); user != nil {
 			viewerID = user.ID
 		}
-		allowed, accessErr := chataudience.CanReadVerifiedEscalationJournal(r.Context(), h.db, workspaceID, resumeID, viewerID)
+		allowed, accessErr := chataudience.CanReadDecisionJournal(r.Context(), h.db, workspaceID, resumeID, viewerID)
 		if accessErr == nil && allowed {
 			if resumed, lookupErr := journal.Get(r.Context(), h.db, workspaceID, resumeID); lookupErr == nil && resumed != nil {
 				lastSeenTime = resumed.TS.UTC()
@@ -469,12 +469,12 @@ func (h *JournalHandler) journalQuery(r *http.Request, workspaceID string) (jour
 	if err != nil {
 		return q, err
 	}
-	q.SourceAudienceSQL = chataudience.VerifiedTextJournalReadSQL
+	q.SourceAudienceSQL = chataudience.DecisionJournalReadSQL
 	viewerID := ""
 	if user := UserFromContext(r.Context()); user != nil {
 		viewerID = user.ID
 	}
-	q.SourceAudienceArgs = chataudience.VerifiedTextReadArgs(viewerID)
+	q.SourceAudienceArgs = chataudience.DecisionJournalReadArgs(viewerID)
 	h.resolveJournalRefs(r.Context(), &q)
 	return q, nil
 }
@@ -628,7 +628,7 @@ func (h *JournalHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if user := UserFromContext(r.Context()); user != nil {
 		viewerID = user.ID
 	}
-	allowed, accessErr := chataudience.CanReadVerifiedEscalationJournal(r.Context(), h.db, workspaceID, entryID, viewerID)
+	allowed, accessErr := chataudience.CanReadDecisionJournal(r.Context(), h.db, workspaceID, entryID, viewerID)
 	if accessErr != nil {
 		replyError(w, 500, "journal get failed")
 		return

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/chain"
 	"github.com/crewship-ai/crewship/internal/chataudience"
@@ -60,8 +61,10 @@ func (h *ChainHandler) Get(w http.ResponseWriter, r *http.Request) {
 		userID = u.ID
 	}
 	opt := chain.Options{
-		MaxDepth: atoiOrZero(r.URL.Query().Get("depth")),
-		MaxNodes: atoiOrZero(r.URL.Query().Get("limit")),
+		MaxDepth:            atoiOrZero(r.URL.Query().Get("depth")),
+		MaxNodes:            atoiOrZero(r.URL.Query().Get("limit")),
+		JournalAudienceSQL:  strings.ReplaceAll(chataudience.DecisionJournalReadSQL, "journal_entries.", "j."),
+		JournalAudienceArgs: chataudience.DecisionJournalReadArgs(userID),
 		// The inbox's own audience, per node (#2986, docs/specs/activity-links.md).
 		CanSeeInbox: inboxAudience(userID, RoleFromContext(r.Context())),
 		CanSeeInboxSource: func(ctx context.Context, id string) (bool, error) {

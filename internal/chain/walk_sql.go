@@ -686,16 +686,23 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 	// package-level API cannot express "either", and issuing two queries
 	// would double the round trips to reconstruct one index union SQLite
 	// already does.
+	journalAudience := ""
+	journalArgs := []any{w.workspaceID, n.Ref, n.Ref}
+	if w.opt.JournalAudienceSQL != "" {
+		journalAudience = " AND (" + w.opt.JournalAudienceSQL + ")"
+		journalArgs = append(journalArgs, w.opt.JournalAudienceArgs...)
+	}
+	journalArgs = append(journalArgs, w.fanOutLimit())
 	if err := w.collect(ctx, &out, `
 		SELECT DISTINCT a.id, COALESCE(a.name,''), COALESCE(a.slug,''), COALESCE(a.status,'')
 		FROM journal_entries j
 		JOIN agents a ON a.id = j.actor_id AND a.workspace_id = j.workspace_id
 		WHERE j.workspace_id = ?
 		  AND j.actor_type = 'agent'
-		  AND (j.trace_id = ? OR j.run_id = ?)
+		  AND (j.trace_id = ? OR j.run_id = ?)`+journalAudience+`
 		ORDER BY a.id ASC
 		LIMIT ?`,
-		[]any{w.workspaceID, n.Ref, n.Ref, w.fanOutLimit()},
+		journalArgs,
 		func(rows *sql.Rows) (neighbour, error) {
 			var id, name, slug, status string
 			if err := rows.Scan(&id, &name, &slug, &status); err != nil {

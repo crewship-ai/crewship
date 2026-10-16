@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"time"
 
+	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -15,11 +17,33 @@ import (
 // readers still retrieve the journal row through its current audience fence.
 // This read runs in the existing bridge drain, never on the commit observer.
 func newJournalWSBridgeForSources(db *sql.DB, hub *ws.Hub, logger *slog.Logger) *journalWSBridge {
-	return newJournalWSBridgeWithFilter(hub, logger, func(entry journal.Entry) bool { return allowBroadSourceJournal(context.Background(), db, entry) })
+	return newJournalWSBridgeWithFilter(hub, logger, func(entry journal.Entry) bool {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if approvalID, _ := entry.Refs["approval_id"].(string); approvalID != "" {
+			supported, chat, err := chataudience.RunApprovalJournalSource(ctx, db, entry.WorkspaceID, approvalID)
+			if err != nil {
+				return false
+			}
+			if supported {
+				if chat != "" {
+					goapi.BroadcastSourceEntityHint(ctx, hub, chat)
+				}
+				return false
+			}
+		}
+		return allowBroadSourceJournal(ctx, db, entry)
+	})
 }
 func allowBroadSourceJournal(ctx context.Context, db *sql.DB, entry journal.Entry) bool {
-	if entry.Type == journal.EntryEscalationSourceClassified && entry.ActorType == journal.ActorSystem {
+	if (entry.Type == journal.EntryApprovalSourceRetired || entry.Type == journal.EntryEscalationSourceClassified) && entry.ActorType == journal.ActorSystem {
 		return false
+	}
+	if approvalID, _ := entry.Refs["approval_id"].(string); approvalID != "" {
+		supported, _, err := chataudience.RunApprovalJournalSource(ctx, db, entry.WorkspaceID, approvalID)
+		if err != nil || supported {
+			return false
+		}
 	}
 	sourceID, _ := entry.Refs["escalation_id"].(string)
 	if sourceID == "" {

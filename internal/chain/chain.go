@@ -219,6 +219,10 @@ type Options struct {
 	// emitting a gap, count, or edge that announces the withheld source.
 	// It runs after closing source rows so SQLite single-connection readers work.
 	CanSeeInboxSource func(context.Context, string) (bool, error)
+	// Host-owned projection predicate over journal_entries aliased j. Filtering
+	// precedes DISTINCT/fanout so hidden source events add no agent edge hint.
+	JournalAudienceSQL  string
+	JournalAudienceArgs []any
 }
 
 // Walk bounds. A chain is a debugging aid, not an export: the caps exist so a
