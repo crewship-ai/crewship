@@ -14,7 +14,7 @@ import (
 
 func fixtureJournal(t *testing.T) *cleanupJournal {
 	t.Helper()
-	j, err := openCleanupJournal(t.TempDir(), "unit")
+	j, err := openCleanupJournal(filepath.Join(t.TempDir(), "journal"), "unit")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func fakeAbsentDocker(t *testing.T) {
 }
 func TestUncertainRecoveryRequiresAuditedTrustedAcknowledgement(t *testing.T) {
 	fakeAbsentDocker(t)
-	r := &Runner{OwnerID: "unit", JournalDir: t.TempDir()}
+	r := &Runner{OwnerID: "unit", JournalDir: filepath.Join(t.TempDir(), "journal")}
 	defer r.Close()
 	// Initialize under the same lifetime OS lease as production maintenance.
 	l, err := r.acquire(t.Context(), true)
@@ -165,5 +165,21 @@ func TestCleanupJournalRefusesPermissionsWidenedAfterOpen(t *testing.T) {
 	defer os.Chmod(j.directory, 0700)
 	if !errors.Is(j.verify(), ErrCleanup) {
 		t.Fatal("journal remained usable after private directory permissions widened")
+	}
+}
+
+func TestCleanupJournalCreatesPrivateChildUnderReadableParent(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0755); err != nil {
+		t.Fatal(err)
+	}
+	j, err := openCleanupJournal(filepath.Join(parent, "journal"), "unit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j.close()
+	info, err := j.root.Stat(".")
+	if err != nil || info.Mode().Perm() != 0700 {
+		t.Fatal("production did not create a private child", err)
 	}
 }

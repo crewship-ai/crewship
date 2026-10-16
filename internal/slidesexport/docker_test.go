@@ -5,12 +5,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestLeaseOwnsOneSlotAndZeroValueCannotReleaseIt(t *testing.T) {
-	r := &Runner{Image: "sha256:" + strings.Repeat("a", 64), OwnerID: "unit", JournalDir: t.TempDir()}
+	r := &Runner{Image: "sha256:" + strings.Repeat("a", 64), OwnerID: "unit", JournalDir: filepath.Join(t.TempDir(), "journal")}
 	defer r.Close()
 	l, err := r.Acquire(t.Context())
 	if err != nil {
