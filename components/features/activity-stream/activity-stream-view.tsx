@@ -19,7 +19,8 @@ import { useSearchParams } from "next/navigation"
 import { Activity, ChevronLeft, ChevronRight, FilterX } from "lucide-react"
 
 import { SubBar } from "@/components/layout/sub-bar"
-import { SidebarActiveChip, SidebarActiveChips, SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { SidebarActiveChip, SidebarActiveChips } from "@/components/layout/sidebar-kit"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { Appear } from "@/components/ui/detail"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -28,7 +29,6 @@ import { Spinner } from "@/components/ui/spinner"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalLookup } from "@/hooks/use-journal-lookup"
 import { useJournalStream } from "@/hooks/use-journal-stream"
-import { useIsMobile } from "@/hooks/use-mobile"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { apiFetch } from "@/lib/api-fetch"
@@ -154,7 +154,6 @@ export function ActivityStreamView({
   /** The overview is coming back from a ledger: its rail enters from the left. */
   railEntersFromLeft?: boolean
 }) {
-  const isMobile = useIsMobile()
   const lookup = useJournalLookup()
 
   // The URL is the state: the walk, the lens, the status bucket and the
@@ -182,12 +181,9 @@ export function ActivityStreamView({
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [pinned, setPinned] = React.useState<SpineLink | null>(null)
   const [selected, setSelected] = React.useState<JournalEntry | null>(null)
-  const [railCollapsed, setRailCollapsed] = React.useState(false)
-  // On a phone the rail is a drawer over the content; open by default it hid
-  // the overview on arrival. Start it closed, as the Routines explorer does.
-  React.useEffect(() => {
-    if (isMobile) setRailCollapsed(true)
-  }, [isMobile])
+  // The rail is the section's SecondaryPanel: it owns collapse and, on a
+  // phone, a sheet that starts closed. A rail row that opens a page closes it.
+  const closePanelSheet = useCloseSecondaryPanelSheet()
   // Which catalogue the rail lists. Owned HERE rather than inside the rail so
   // it survives a drill-down: walking into an agent out of a chain graph and
   // pressing back must land the reader on the list they left, not reset them to
@@ -943,70 +939,64 @@ export function ActivityStreamView({
       />
 
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        {isMobile && !railCollapsed && (
-          <button
-            type="button"
-            aria-label="Close filters"
-            onClick={() => setRailCollapsed(true)}
-            className="absolute inset-0 z-20 bg-black/50"
+        {/* The one SecondaryPanel (Harbor 2, #3350). The rail's kit toolbar
+            becomes the panel toolbar and carries the collapse button; on a
+            phone the rail is a bottom sheet from the top bar. Rows that open a
+            page close that sheet; filters and lenses keep it open. */}
+        <SecondaryPanel id="activity" label="Activity views">
+          <ActivitySidebar
+            chains={visibleChains}
+            chainsBeforeStatus={railChains.searched}
+            loadedChainCount={chains.length}
+            chainsHaveMore={chainsHaveMore}
+            chainsHaveUnrecorded={chainsHaveUnrecorded}
+            chainsError={chainsError}
+            onRetryChains={() => void refreshChains()}
+            routineBySlug={routineBySlug}
+            selectedChain={railChain}
+            onSelectChain={(origin) => {
+              if (origin) closePanelSheet()
+              selectChain(origin)
+            }}
+            search={search}
+            onSearchChange={setSearch}
+            facets={facets}
+            onChange={setFacets}
+            crews={crews}
+            agents={agents}
+            issues={issues}
+            routines={routines}
+            crewCounts={crewCounts}
+            issueCounts={issueCounts}
+            routineCounts={routineCounts}
+            focus={focus}
+            // The rail chooses which walk you are on, so it starts a new
+            // path rather than pushing onto the current one.
+            onFocus={(f) => setPath(selectStop(f))}
+            lens={lens}
+            onLens={setLens}
+            // Same rule as onFocus: a row in the rail is where a walk BEGINS.
+            onOpenEntity={(kind, id, label) => {
+              closePanelSheet()
+              setPath(selectStop({ kind, id, label }))
+            }}
+            onOpenSection={onOpenSection && ((section) => {
+              closePanelSheet()
+              onOpenSection(section)
+            })}
+            entersFromLeft={railEntersFromLeft}
+            // The routine focus (#2998): the rail narrows to one routine and
+            // lists its runs; opening one keeps the focus.
+            workspaceId={workspaceId}
+            focusedRoutine={focusedRoutine}
+            onFocusRoutine={setFocusedRoutine}
+            openRunId={stop?.kind === "run" || stop?.kind === "workflow" ? stop.id : null}
+            onOpenRun={(id) => {
+              closePanelSheet()
+              setPath(selectStop({ kind: "run", id, label: id }))
+            }}
           />
-        )}
-
-        <aside
-          className={cn(
-            "shrink-0 overflow-hidden border-r border-foreground/[0.06] bg-card transition-all",
-            railCollapsed ? "w-9" : "w-[280px]",
-            isMobile && !railCollapsed && "absolute inset-y-0 left-0 z-30 shadow-2xl",
-          )}
-        >
-          {railCollapsed ? (
-            <div className="flex h-full flex-col items-center pt-1.5">
-              <SidebarCollapseButton collapsed onToggle={() => setRailCollapsed(false)} />
-            </div>
-          ) : (
-            <ActivitySidebar
-              chains={visibleChains}
-              chainsBeforeStatus={railChains.searched}
-              loadedChainCount={chains.length}
-              chainsHaveMore={chainsHaveMore}
-              chainsHaveUnrecorded={chainsHaveUnrecorded}
-              chainsError={chainsError}
-              onRetryChains={() => void refreshChains()}
-              routineBySlug={routineBySlug}
-              selectedChain={railChain}
-              onSelectChain={selectChain}
-              search={search}
-              onSearchChange={setSearch}
-              facets={facets}
-              onChange={setFacets}
-              crews={crews}
-              agents={agents}
-              issues={issues}
-              routines={routines}
-              crewCounts={crewCounts}
-              issueCounts={issueCounts}
-              routineCounts={routineCounts}
-              focus={focus}
-              // The rail chooses which walk you are on, so it starts a new
-              // path rather than pushing onto the current one.
-              onFocus={(f) => setPath(selectStop(f))}
-              lens={lens}
-              onLens={setLens}
-              // Same rule as onFocus: a row in the rail is where a walk BEGINS.
-              onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
-              onToggleCollapse={() => setRailCollapsed(true)}
-              onOpenSection={onOpenSection}
-              entersFromLeft={railEntersFromLeft}
-              // The routine focus (#2998): the rail narrows to one routine and
-              // lists its runs; opening one keeps the focus.
-              workspaceId={workspaceId}
-              focusedRoutine={focusedRoutine}
-              onFocusRoutine={setFocusedRoutine}
-              openRunId={stop?.kind === "run" || stop?.kind === "workflow" ? stop.id : null}
-              onOpenRun={(id) => setPath(selectStop({ kind: "run", id, label: id }))}
-            />
-          )}
-        </aside>
+        </SecondaryPanel>
 
         <div className="flex min-w-0 flex-1 flex-col">
           {/* An opened activity takes the whole content area. It was a 340px
