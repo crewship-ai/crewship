@@ -20,6 +20,7 @@ var (
 	ErrConflict  = errors.New("document revision conflict")
 	ErrFence     = errors.New("document writer fenced")
 	ErrQuota     = errors.New("document quota exceeded")
+	ErrRateLimit = fmt.Errorf("%w: temporary operation rate limit", ErrQuota)
 	ErrSchema    = errors.New("unsupported document schema")
 	ErrDuplicate = errors.New("idempotency key payload mismatch")
 )
@@ -35,6 +36,7 @@ type Authorize func(context.Context, *sql.Tx) (string, error)
 type Options struct {
 	MaxDocumentBytes, MaxLogBytes, MaxHistoryBytes, MaxCommits, MaxDocuments int
 	LeaseDuration                                                            time.Duration
+	ReceiptWindow                                                            time.Duration
 }
 type Store struct {
 	db   *sql.DB
@@ -98,6 +100,9 @@ func New(db *sql.DB, o Options) *Store {
 	}
 	if o.MaxCommits <= 0 {
 		o.MaxCommits = 10000
+	}
+	if o.ReceiptWindow <= 0 {
+		o.ReceiptWindow = 10 * time.Minute
 	}
 	if o.MaxDocuments <= 0 {
 		o.MaxDocuments = 128
@@ -225,7 +230,7 @@ func (s *Store) InitRequest(ctx context.Context, k Key, id, fingerprint string, 
 			return err
 		}
 		var n int
-		if err := t.QueryRowContext(ctx, "SELECT count(*) FROM documents").Scan(&n); err != nil {
+		if err := t.QueryRowContext(ctx, "SELECT count(*) FROM documents WHERE workspace_id=?", k.WorkspaceID).Scan(&n); err != nil {
 			return err
 		}
 		if n >= s.opts.MaxDocuments {
@@ -416,12 +421,9 @@ func (s *Store) Commit(ctx context.Context, k Key, c Commit, a Authorize) (r Rec
 		if err = hashes(v.Projection, c.IfHashes); err != nil {
 			return err
 		}
-		var count, logCount, logBytes int
-		if err = t.QueryRowContext(ctx, "SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&count); err != nil {
+		var logCount, logBytes int
+		if err = s.admitNewReceipt(ctx, t, k); err != nil {
 			return err
-		}
-		if count >= s.opts.MaxCommits {
-			return ErrQuota
 		}
 		if err = t.QueryRowContext(ctx, "SELECT count(*),coalesce(sum(length(payload)),0) FROM document_updates WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&logCount, &logBytes); err != nil {
 			return err
@@ -519,12 +521,8 @@ func (s *Store) CheckpointRequestGuarded(ctx context.Context, k Key, l Lease, id
 		if err = s.valid(v.Schema, snapshot, v.Projection); err != nil {
 			return err
 		}
-		var count int
-		if err = t.QueryRowContext(ctx, "SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&count); err != nil {
+		if err = s.admitNewReceipt(ctx, t, k); err != nil {
 			return err
-		}
-		if count >= s.opts.MaxCommits {
-			return ErrQuota
 		}
 		var size int
 		if err = t.QueryRowContext(ctx, "SELECT coalesce(sum(length(snapshot)+length(projection)),0) FROM document_checkpoints WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&size); err != nil {
@@ -603,12 +601,8 @@ func (s *Store) RestoreRequestWithFingerprintAtGeneration(ctx context.Context, k
 		if err = s.valid(c.Schema, c.Snapshot, c.Projection); err != nil {
 			return err
 		}
-		var count int
-		if err = t.QueryRowContext(ctx, "SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&count); err != nil {
+		if err = s.admitNewReceipt(ctx, t, k); err != nil {
 			return err
-		}
-		if count >= s.opts.MaxCommits {
-			return ErrQuota
 		}
 		r = Receipt{requestID, v.HeadRev + 1, v.Epoch + 1, actor, "restore"}
 		if _, err = t.ExecContext(ctx, "UPDATE documents SET head_rev=?,epoch=?,generation=generation+1,schema_version=?,snapshot=?,snapshot_rev=?,projection=?,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?", r.Rev, r.Epoch, c.Schema, c.Snapshot, r.Rev, []byte(c.Projection), k.WorkspaceID, k.PageID); err != nil {

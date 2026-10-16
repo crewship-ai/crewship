@@ -80,11 +80,8 @@ func (s *Store) Comment(ctx context.Context, k Key, id, fingerprint, body string
 		if n >= 1000 {
 			return ErrQuota
 		}
-		if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&n); e != nil {
+		if e = s.admitNewReceipt(ctx, tx, k); e != nil {
 			return e
-		}
-		if n >= s.opts.MaxCommits {
-			return ErrQuota
 		}
 		if _, e = tx.ExecContext(ctx, `INSERT INTO document_comments(workspace_id,page_id,id,body,anchor_json,actor,rev) VALUES(?,?,?,?,?,?,?)`, k.WorkspaceID, k.PageID, id, body, string(anchor), actor, v.HeadRev); e != nil {
 			return e
@@ -148,12 +145,8 @@ func (s *Store) ResolveComment(ctx context.Context, k Key, id, fingerprint, comm
 		if v.HeadRev != ifRev || generation == nil || *generation != v.Generation {
 			return ErrConflict
 		}
-		var n int
-		if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&n); e != nil {
+		if e = s.admitNewReceipt(ctx, tx, k); e != nil {
 			return e
-		}
-		if n >= s.opts.MaxCommits {
-			return ErrQuota
 		}
 		result, e := tx.ExecContext(ctx, `UPDATE document_comments SET resolved=?,version=version+1 WHERE workspace_id=? AND page_id=? AND id=? AND version=?`, resolved, k.WorkspaceID, k.PageID, comment, version)
 		if e != nil {

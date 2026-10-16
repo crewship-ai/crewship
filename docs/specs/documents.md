@@ -166,3 +166,36 @@ to its prototype; D1b browser and genuine model-run acceptance are separate.
 A held SQL writer or delayed fixture acknowledgement is not a slow-disk or
 power-loss test. Multi-replica operation, production capacity, offline recovery,
 images and richer formats remain outside this slice.
+
+### Operational admission and retry retention
+
+Receipts remain durable for the lifetime of their Page. The authority never
+prunes them to admit new edits: a human update does not carry an original
+revision, so deleting its receipt could execute an old request again. Exact
+retries require current authority and the original actor/payload identity, return
+the original result, and do not refresh the receipt timestamp or consume another
+operation. Restart, checkpoint restore and admission-window expiry do not expire
+this identity. Full access/session revocation still denies receipt access.
+
+New edits, checkpoints, restores, upgrades and comment mutations share a rolling
+server-time window: by default 10,000 receipts in 600 seconds per Page. Exceeding
+it returns temporary HTTP 429 `document_rate_limit`; retry the original request
+after the window clears. Byte/log/history limits remain separate permanent
+`document_quota` failures. Receipts and retained history still grow; this change
+is not receipt compaction or unlimited document storage.
+
+The default capacity is 128 Docs **per workspace**, independent of other
+workspaces. YAML `documents.max_documents_per_workspace`,
+`documents.max_operations_per_window` and `documents.operation_window_seconds`
+configure these limits. Matching environment variables are
+`CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE`,
+`CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW` and
+`CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS`. Zero selects defaults, negative values are invalid, and
+the configured window cannot exceed 86,400 seconds. No deployment configuration
+is changed automatically.
+
+The managed engine retains at most 32 scheduler tails, evicting the least
+recently used idle tail when needed. Busy keys remain serialized and cannot be
+evicted. The per-key 32 and global 128 queued-operation bounds remain active;
+32 busy keys can still temporarily reject a new key. Scheduler eviction does
+not discard durable content or release another caller's writer lease.

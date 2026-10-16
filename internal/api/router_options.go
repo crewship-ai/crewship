@@ -7,9 +7,12 @@ package api
 
 import (
 	"context"
+	"time"
+
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
@@ -492,4 +495,11 @@ func WithTranscriptSnapshotLock(lock func(context.Context) (func(), error)) Rout
 // WithDocumentService connects the public Pages bridge to a private engine.
 func WithDocumentService(socket string) RouterOption {
 	return func(r *Router) { r.documentsServiceSocket = socket }
+}
+
+// WithDocumentLimits configures workspace capacity and temporary operation admission.
+func WithDocumentLimits(c config.DocumentsConfig) RouterOption {
+	return func(r *Router) {
+		r.documentStoreOptions = documents.Options{MaxDocuments: c.MaxDocumentsPerWorkspace, MaxCommits: c.MaxOperationsPerWindow, ReceiptWindow: time.Duration(c.OperationWindowSeconds) * time.Second}
+	}
 }

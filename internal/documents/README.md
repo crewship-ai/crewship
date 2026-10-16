@@ -31,8 +31,12 @@ Use `RestoreRequestWithFingerprint` with a stable request ID and original
 semantic fingerprint for service restore retries.
 
 Default limits: 1 MiB current snapshot plus projection, 256 KiB replay log,
-16 MiB pinned checkpoint payloads per document, 10,000 initialization/commit/checkpoint/restore audit
-records per document, and 128 documents per database. `Stats` reports logical
+16 MiB pinned checkpoint payloads per document, 10,000 new operations per rolling 600-second server-time window per document,
+and 128 documents per workspace (configurable). Every audit/retry receipt remains
+retained for the Page lifetime; the window is a throughput limit, not receipt
+retention. Exact authorized retries bypass admission without refreshing time.
+Temporary admission returns `document_rate_limit`; byte/history limits remain
+`document_quota`. Receipt storage growth is not solved by this cut. `Stats` reports logical
 payload retention, excluding SQLite page allocation and WAL overhead.
 
 The editor generation is separate from writer lease epochs. Go-authority and

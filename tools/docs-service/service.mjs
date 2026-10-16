@@ -68,7 +68,17 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   function enqueue(key, fn) {
     let entry = documents.get(key);
     if (draining) throw fault(503, 'service draining');
-    if (!entry) { if (documents.size >= 32) throw fault(429, 'open document limit'); entry = { tail: Promise.resolve(), queued: 0, touched: Date.now() }; documents.set(key, entry); }
+    if (!entry) {
+      if (documents.size >= 32) {
+        // These are scheduler tails, not cached document contents. Never remove
+        // a busy tail: doing so would allow concurrent writes for the same key.
+        let oldest;
+        for (const [candidate, value] of documents) if (value.queued === 0 && (!oldest || value.touched < oldest[1].touched)) oldest = [candidate, value];
+        if (!oldest) throw fault(429, 'open document limit');
+        documents.delete(oldest[0]);
+      }
+      entry = { tail: Promise.resolve(), queued: 0, touched: Date.now() }; documents.set(key, entry);
+    }
     if (queued >= 128 || entry.queued >= 32) throw fault(429, 'document queue full');
     queued++; entry.queued++; entry.touched = Date.now();
     const result = entry.tail.then(fn);
