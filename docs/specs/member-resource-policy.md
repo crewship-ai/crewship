@@ -280,6 +280,10 @@ inside the mutation transaction. Content changes commit activity and durable jou
 fields are refused; there is no agent/crew/assignee/routine override or trusted
 board route exposure. Review/execution states and project reassignment stay
 behind the existing trusted workflow. Full Issues Manage is not implemented.
+Intake changes return 409 while a linked routine is queued, running or waiting,
+even if its issue execution has become superseded. The same transactional
+active-work check protects the deletion preview and DELETE; rejected requests
+preserve the issue and execution. Completed runs do not keep work busy.
 
 Every historical comment stays private. Trusted authors may explicitly mark a
 new comment as shared with Guests; Guest contributions are explicitly shared.

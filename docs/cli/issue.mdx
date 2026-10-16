@@ -893,6 +893,11 @@ a conflicting key is not retried automatically. The server rechecks current
 grants and project audience before replaying a saved result.
 
 
+A linked queued, running or waiting routine blocks intake moves and deletion
+with HTTP 409, including after its issue execution becomes superseded. The CLI
+reports the refusal without retrying the mutation. Project reassignment is not
+a Guest intake operation.
+
 ## `crewship issue shared-delete-preview`
 
 Review one Guest issue before permanent removal. Requires current project Read,
