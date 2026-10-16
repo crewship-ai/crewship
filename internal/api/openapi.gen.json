@@ -15622,6 +15622,34 @@
       "SlideDeck": {
         "additionalProperties": false,
         "description": "At most2MiB canonical UTF-8 JSON and1000 total elements. slides array sorted by ID in canonical encoding; slide_order owns presentation order and must contain every slide exactly once. deck_id equals immutable Page ID.",
+        "oneOf": [
+          {
+            "properties": {
+              "schema_version": {
+                "maximum": 1,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "slides": {
+                "items": {
+                  "$ref": "#/components/schemas/SlideV1"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "type": "array"
+              }
+            }
+          },
+          {
+            "properties": {
+              "schema_version": {
+                "maximum": 2,
+                "minimum": 2,
+                "type": "integer"
+              }
+            }
+          }
+        ],
         "properties": {
           "deck_id": {
             "pattern": "^[a-zA-Z0-9_-]{1,128}$",
@@ -15633,7 +15661,7 @@
             "type": "integer"
           },
           "schema_version": {
-            "maximum": 1,
+            "maximum": 2,
             "minimum": 1,
             "type": "integer"
           },
@@ -15704,6 +15732,340 @@
       },
       "SlideElement": {
         "description": "Integer geometry must fit the deck frame; each element admits exactly one matching payload. IDs unique across slides/elements.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "height": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              },
+              "text": {
+                "additionalProperties": false,
+                "properties": {
+                  "align": {
+                    "enum": [
+                      "left",
+                      "center",
+                      "right"
+                    ],
+                    "type": "string"
+                  },
+                  "color": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "font_family": {
+                    "description": "At most128 UTF-8 bytes; no controls or LF/tab.",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "font_size": {
+                    "maximum": 160,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "value": {
+                    "description": "UTF-8 byte bound also enforced; LF/tab allowed, CR and other controls rejected.",
+                    "maxLength": 32768,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value",
+                  "font_family",
+                  "font_size",
+                  "color",
+                  "align"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "text"
+                ],
+                "type": "string"
+              },
+              "width": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "x": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "y": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "x",
+              "y",
+              "width",
+              "height",
+              "text"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "height": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              },
+              "shape": {
+                "additionalProperties": false,
+                "properties": {
+                  "fill": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "rectangle",
+                      "ellipse"
+                    ],
+                    "type": "string"
+                  },
+                  "stroke": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "stroke_width": {
+                    "maximum": 16,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "fill",
+                  "stroke",
+                  "stroke_width"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "shape"
+                ],
+                "type": "string"
+              },
+              "width": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "x": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "y": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "x",
+              "y",
+              "width",
+              "height",
+              "shape"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "height": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              },
+              "table": {
+                "additionalProperties": false,
+                "description": "Rectangular cells; aggregate across ALL tables (including empty cells) at most2000/slide and10000/deck.",
+                "properties": {
+                  "border": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "cells": {
+                    "items": {
+                      "items": {
+                        "description": "UTF-8 byte bound also enforced; LF/tab allowed, CR and other controls rejected.",
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "maxItems": 20,
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "maxItems": 30,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "color": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "fill": {
+                    "pattern": "^#[a-fA-F0-9]{6}$",
+                    "type": "string"
+                  },
+                  "font_family": {
+                    "description": "At most128 UTF-8 bytes; no controls or LF/tab.",
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "font_size": {
+                    "maximum": 160,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "cells",
+                  "font_family",
+                  "font_size",
+                  "color",
+                  "fill",
+                  "border"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "table"
+                ],
+                "type": "string"
+              },
+              "width": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "x": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "y": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "x",
+              "y",
+              "width",
+              "height",
+              "table"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "height": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "id": {
+                "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                "type": "string"
+              },
+              "image": {
+                "additionalProperties": false,
+                "properties": {
+                  "alt": {
+                    "description": "UTF-8 byte bound also enforced; LF/tab allowed, CR and other controls rejected.",
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "asset_id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "expected_sha256": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "asset_id",
+                  "expected_sha256",
+                  "alt"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "image"
+                ],
+                "type": "string"
+              },
+              "width": {
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "x": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "y": {
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "x",
+              "y",
+              "width",
+              "height",
+              "image"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "SlideElementV1": {
         "oneOf": [
           {
             "additionalProperties": false,
@@ -16187,7 +16549,8 @@
                         "enum": [
                           "text",
                           "shape",
-                          "table"
+                          "table",
+                          "image"
                         ],
                         "type": "string"
                       }
@@ -16309,7 +16672,7 @@
             "type": "integer"
           },
           "schema_version": {
-            "maximum": 1,
+            "maximum": 2,
             "minimum": 1,
             "type": "integer"
           }
@@ -16348,7 +16711,7 @@
             "type": "integer"
           },
           "schema_version": {
-            "maximum": 1,
+            "maximum": 2,
             "minimum": 1,
             "type": "integer"
           }
@@ -16359,6 +16722,34 @@
           "order_version",
           "content_hash",
           "deck"
+        ],
+        "type": "object"
+      },
+      "SlideV1": {
+        "additionalProperties": false,
+        "properties": {
+          "elements": {
+            "items": {
+              "$ref": "#/components/schemas/SlideElementV1"
+            },
+            "maxItems": 1000,
+            "minItems": 0,
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "notes": {
+            "description": "UTF-8 byte bound also enforced; LF/tab allowed, CR and other controls rejected.",
+            "maxLength": 16384,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "notes",
+          "elements"
         ],
         "type": "object"
       },
@@ -150252,7 +150643,8 @@
                   },
                   "schema_version": {
                     "enum": [
-                      1
+                      1,
+                      2
                     ],
                     "type": "integer"
                   }
@@ -150588,12 +150980,48 @@
             "application/json": {
               "schema": {
                 "additionalProperties": false,
-                "description": "Progressive candidate semantics: each if_hash sees earlier operations in this atomic batch. if_hash is element hash for set/delete_element, full slide hash for insert_element/set_notes/delete_slide. insert/delete_slide also require if_order_version. Aggregate final deck limits enforced.",
+                "description": "Progressive candidate semantics: each if_hash sees earlier operations in this atomic batch. if_hash is element hash for set/delete_element, full slide hash for insert_element/set_notes/delete_slide. insert/delete_slide also require if_order_version. Aggregate final deck limits enforced. Explicit first-image upgrade requires original schema1, target_schema_version2 and original whole-head if_content_hash together. Schema1 remains closed without images. Image asset ID/SHA must match live owning Page assets; promotion and exact immutable revision pins commit atomically. At most32 unique assets and32MiB unique asset bytes/revision. Restore appends the selected immutable source schema, including explicit mixed1/2 history.",
+                "oneOf": [
+                  {
+                    "not": {
+                      "anyOf": [
+                        {
+                          "required": [
+                            "target_schema_version"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "if_content_hash"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "properties": {
+                      "schema_version": {
+                        "enum": [
+                          1
+                        ],
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "target_schema_version",
+                      "if_content_hash"
+                    ]
+                  }
+                ],
                 "properties": {
                   "base_rev": {
                     "format": "int64",
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "if_content_hash": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
                   },
                   "if_order_version": {
                     "format": "int64",
@@ -150618,7 +151046,14 @@
                   },
                   "schema_version": {
                     "enum": [
-                      1
+                      1,
+                      2
+                    ],
+                    "type": "integer"
+                  },
+                  "target_schema_version": {
+                    "enum": [
+                      2
                     ],
                     "type": "integer"
                   }
@@ -150833,7 +151268,8 @@
                   },
                   "schema_version": {
                     "enum": [
-                      1
+                      1,
+                      2
                     ],
                     "type": "integer"
                   },
@@ -151063,7 +151499,8 @@
                   },
                   "schema_version": {
                     "enum": [
-                      1
+                      1,
+                      2
                     ],
                     "type": "integer"
                   }
