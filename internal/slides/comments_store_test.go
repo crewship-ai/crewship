@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -263,5 +265,56 @@ func TestCommentsHeadCascadeAndFinalAuthorityRollback(t *testing.T) {
 	var pages int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM pages WHERE id=?`, key.PageID).Scan(&pages); err != nil || pages != 1 {
 		t.Fatal("head deletion erased parent Page", err)
+	}
+}
+
+func TestCommentsTypedValidationPreservesValidWireTextBudget(t *testing.T) {
+	store, _, key, deck, _ := storeFixture(t, Options{})
+	initializeStore(t, store, key, deck)
+	anchor := commentAnchorFixture(t, deck, 1)
+	for _, test := range []struct{ name, body string }{
+		{"less_than", strings.Repeat("<", MaxCommentBodyBytes)},
+		{"ampersand", strings.Repeat("&", MaxCommentBodyBytes)},
+		{"line_separator", "x" + strings.Repeat("\u2028", 3333)},
+		{"paragraph_separator", "x" + strings.Repeat("\u2029", 3333)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := CreateCommentRequest{PageID: key.PageID, SchemaVersion: CommentProtocolVersion, BaseRev: 1, MutationID: "wire_" + test.name, Anchor: anchor, Body: "PLACEHOLDER"}
+			encoded, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// These controlled values contain no JSON quotes/backslashes/controls. Actual
+			// Unicode separators are legal wire JSON and cannot be replaced by escapes.
+			wire := strings.Replace(string(encoded), `"PLACEHOLDER"`, `"`+test.body+`"`, 1)
+			if len(wire) > MaxCommentRequestBytes {
+				t.Fatal("fixture exceeds wire budget", len(wire))
+			}
+			request, err = DecodeCreateComment([]byte(wire))
+			if err != nil {
+				t.Fatal("valid original wire rejected", err)
+			}
+			if _, err = store.CreateComment(t.Context(), key, request, storeAuthority); err != nil {
+				t.Fatal("typed reserialization rejected valid wire", err)
+			}
+			reply := ReplyCommentRequest{PageID: key.PageID, SchemaVersion: 1, MutationID: "reply_" + test.name, IfVersion: 1, Body: test.body}
+			if _, err = store.ReplyComment(t.Context(), key, request.MutationID, reply, storeAuthority); err != nil {
+				t.Fatal("typed reply rejected valid field budget", err)
+			}
+			history, err := store.CommentHistory(t.Context(), key, request.MutationID, CommentPageRequest{}, storeAuthority)
+			if err != nil || len(history.Items) != 2 || history.Items[0].Body != test.body || history.Items[1].Body != test.body {
+				t.Fatal("text normalized or lost", err)
+			}
+		})
+	}
+	// Typed field admission never weakens the original HTTP wire limit: escaped
+	// LF must still fit16KiB before the server reaches any typed Store call.
+	oversized := CreateCommentRequest{PageID: key.PageID, SchemaVersion: 1, BaseRev: 1, MutationID: "oversized_wire", Anchor: anchor, Body: "x" + strings.Repeat("\n", MaxCommentBodyBytes-1)}
+	raw, _ := json.Marshal(oversized)
+	if len(raw) <= MaxCommentRequestBytes {
+		t.Fatal("fixture must exceed wire limit")
+	}
+	if _, err := DecodeCreateComment(raw); err == nil {
+		t.Fatal("escaped oversized wire bypassed16KiB")
 	}
 }
