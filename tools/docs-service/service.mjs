@@ -34,7 +34,7 @@ async function verifyTargets(doc, targets, version = VERSION) {
     if (target.hash !== block.hash || target.quote !== block.text.slice(target.from, target.to)) throw fault(409, 'selected text changed');
     const ancestors = []; let parent = block.parent;
     while (parent) { ancestors.push(parent); parent = blocks.get(parent)?.parent; }
-    verified.push({ id: block.id, hash: block.hash, from: target.from, to: target.to, quote: block.text.slice(target.from, target.to), text: block.text, ancestors });
+    verified.push({ id: block.id, hash: block.hash, from: target.from, to: target.to, quote: block.text.slice(target.from, target.to), text: block.text, ancestors, ...(version === RICH_VERSION ? {schema:RICH_VERSION} : {}) });
   }
   return verified;
 }
@@ -106,7 +106,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if (operation === 'verify-targets') {
         if(version === RICH_VERSION) throw fault(403,'Schema3 selected agent requests require the qualified rich semantic guard.');
         if (!Number.isSafeInteger(request.base_rev) || request.base_rev !== state.rev) throw fault(409, 'document request revision changed');
-        return { page_id: page, rev: state.rev, targets: await verifyTargets(doc, request.targets,version) };
+        return { page_id: page, rev: state.rev, ...(version === RICH_VERSION ? {schema:RICH_VERSION} : {}), targets: await verifyTargets(doc, request.targets,version) };
       }
       if(operation==='export') { try { return {markdown:markdown(validate(doc,version))}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; } }
       if(operation==='checkpoints') return {checkpoints:await go(page,'checkpoints',context)};

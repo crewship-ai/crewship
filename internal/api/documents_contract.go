@@ -93,6 +93,7 @@ type documentVerifiedTarget struct {
 	DocumentSelectedTarget
 	Text      string   `json:"text"`
 	Ancestors []string `json:"ancestors"`
+	Schema    int      `json:"schema,omitempty"`
 }
 type DocumentRequestInput struct {
 	PageID       string                   `json:"page_id"`
