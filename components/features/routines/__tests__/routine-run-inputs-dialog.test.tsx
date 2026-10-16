@@ -258,6 +258,15 @@ describe("routine run inputs dialog", () => {
     expect(screen.queryByTestId("routine-input-error-obdobi")).toBeNull()
   })
 
+  it("submits the inputs form from the surface's ⌘↵ / Ctrl↵", () => {
+    open(msnInputs)
+    const dialog = screen.getByRole("dialog")
+    fireEvent.change(screen.getByLabelText(/obdobi/i), { target: { value: "2026-06" } })
+    fireEvent.keyDown(dialog, { key: "Enter", ctrlKey: true })
+    expect(onRun).toHaveBeenCalledTimes(1)
+    expect(onRun.mock.calls[0][0]).toMatchObject({ obdobi: "2026-06" })
+  })
+
   it("cancels without running", () => {
     open(msnInputs)
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))

@@ -4,17 +4,14 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { AlertCircle } from "lucide-react"
 import { toast } from "sonner"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { apiFetch } from "@/lib/api-fetch"
 
 interface ForkDialogProps {
@@ -95,11 +92,17 @@ export function ForkDialog({ open, onOpenChange, missionId, checkpointId, checkp
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Fork from checkpoint</DialogTitle>
-          <DialogDescription>
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      onSubmit={() => void handleConfirm()}
+    >
+      <CreateSurfaceHeader
+        concept="missions"
+        title="Fork from checkpoint"
+        description={
+          <>
             Create a new mission from{" "}
             <span className="font-mono text-foreground">
               {checkpointLabel ?? checkpointId?.slice(0, 8) ?? "this checkpoint"}
@@ -111,8 +114,11 @@ export function ForkDialog({ open, onOpenChange, missionId, checkpointId, checkp
               </>
             )}
             . The source mission is left untouched.
-          </DialogDescription>
-        </DialogHeader>
+          </>
+        }
+        onClose={() => onOpenChange(false)}
+      />
+      <CreateSurfaceBody className="space-y-3">
         <div className="space-y-2">
           <Label htmlFor="fork-label" className="text-xs">
             Label
@@ -124,6 +130,7 @@ export function ForkDialog({ open, onOpenChange, missionId, checkpointId, checkp
             placeholder="e.g. alternative-approach"
             className="h-8 text-xs"
             disabled={submitting}
+            autoFocus
           />
           {!checkpointId && (
             <p className="text-[11px] text-muted-foreground">
@@ -140,16 +147,15 @@ export function ForkDialog({ open, onOpenChange, missionId, checkpointId, checkp
             <span>{error}</span>
           </div>
         )}
-        <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={submitting}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={handleConfirm} disabled={submitting || !checkpointId}>
-            {submitting ? "Forking…" : "Fork"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        onCancel={() => onOpenChange(false)}
+        primaryLabel={submitting ? "Forking…" : "Fork"}
+        onPrimary={() => void handleConfirm()}
+        primaryDisabled={!checkpointId}
+        busy={submitting}
+      />
+    </CreateSurface>
   )
 }
 

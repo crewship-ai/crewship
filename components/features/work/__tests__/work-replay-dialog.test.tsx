@@ -110,7 +110,7 @@ describe("the replay dialog", () => {
         onConfirm={() => { confirmed = true }}
       />,
     )
-    const confirm = screen.getByTestId("replay-confirm")
+    const confirm = screen.getByRole("button", { name: /create new work/i })
     expect(confirm.hasAttribute("disabled")).toBe(true)
     expect(screen.getByTestId("replay-blocked-reason").textContent).toContain("passed its retention window")
     fireEvent.click(confirm)
@@ -130,7 +130,7 @@ describe("the replay dialog", () => {
     )
     expect(baseElement.textContent).toContain("This creates NEW work")
     expect(baseElement.textContent).toContain("replay_of")
-    expect(screen.getByTestId("replay-confirm").textContent).toContain("Create new work")
+    expect(screen.getByRole("button", { name: /create new work/i }).textContent).toContain("Create new work")
   })
 
   it("inherits the original target revision rather than resolving 'latest' for you", () => {
@@ -148,7 +148,7 @@ describe("the replay dialog", () => {
     )
     fireEvent.change(screen.getByDisplayValue("rev-7"), { target: { value: "rev-9" } })
     fireEvent.change(screen.getByPlaceholderText("Why is this being run again?"), { target: { value: "sender re-sent" } })
-    fireEvent.click(screen.getByTestId("replay-confirm"))
+    fireEvent.click(screen.getByRole("button", { name: /create new work/i }))
     expect(calls).toEqual([{ reason: "sender re-sent", targetRevision: "rev-9" }])
   })
 })

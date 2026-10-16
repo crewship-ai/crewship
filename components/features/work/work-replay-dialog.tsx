@@ -28,8 +28,11 @@ import { AlertTriangle, RotateCcw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { FieldLabel } from "@/components/ui/detail"
@@ -64,100 +67,99 @@ export function WorkReplayDialog({
   const blocked = availability.state !== "available"
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Replay this work</DialogTitle>
-          <DialogDescription>
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      size="md"
+      onSubmit={() => { if (!blocked && !pending) onConfirm({ reason, targetRevision }) }}
+    >
+      <CreateSurfaceHeader
+        concept="work"
+        title="Replay this work"
+        description={
+          <>
             This creates NEW work. It does not re-run the original item: a new work id is minted,
             carrying <span className="font-mono">replay_of</span> back to this one and YOUR
             authorization rather than the original caller&apos;s. The original stays exactly as it
             finished.
-          </DialogDescription>
-        </DialogHeader>
+          </>
+        }
+        onClose={() => onOpenChange(false)}
+      />
 
-        <div className="space-y-4">
-          <div className="rounded-lg border border-hairline bg-surface-subtle/60 px-3 py-2.5 text-[11px]">
-            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <span className="text-muted-foreground">Original input</span>
-              <span className="font-mono text-foreground/80" data-testid="replay-input-fingerprint">
-                {item.input_sha256 ? `sha256:${item.input_sha256.slice(0, 16)}…` : "not recorded"}
-              </span>
-            </div>
-            <p className="mt-1 leading-relaxed text-muted-foreground">
-              The accepted input is never returned by the read API — for a chat or assignment
-              source it is the conversation itself. The fingerprint is what identifies it.
-            </p>
+      <CreateSurfaceBody className="space-y-4">
+        <div className="rounded-lg border border-hairline bg-surface-subtle/60 px-3 py-2.5 text-[11px]">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="text-muted-foreground">Original input</span>
+            <span className="font-mono text-foreground/80" data-testid="replay-input-fingerprint">
+              {item.input_sha256 ? `sha256:${item.input_sha256.slice(0, 16)}…` : "not recorded"}
+            </span>
           </div>
-
-          <div>
-            <FieldLabel>Target revision</FieldLabel>
-            <Input
-              value={targetRevision}
-              onChange={(e) => setTargetRevision(e.target.value)}
-              placeholder={item.target_revision || "inherits the original"}
-              className="mt-1.5 h-9 font-mono text-sm coarse:h-12"
-              disabled={blocked || pending}
-            />
-            <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-              Left alone, the replay runs against the revision the original was accepted against
-              ({item.target_revision ? <span className="font-mono">{item.target_revision}</span> : "none recorded"}).
-              Changing it is an explicit re-target — it is never resolved to &ldquo;latest&rdquo; for you.
-            </p>
-          </div>
-
-          <div>
-            <FieldLabel>Reason</FieldLabel>
-            <Textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Why is this being run again?"
-              rows={2}
-              className="mt-1.5 text-sm"
-              disabled={blocked || pending}
-            />
-            <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-              Recorded in the ledger beside the new work item.
-            </p>
-          </div>
-
-          {blocked && (
-            <div
-              role="status"
-              data-testid="replay-blocked-reason"
-              className="flex gap-2.5 rounded-lg border border-warn/30 bg-warn/[0.06] px-3 py-2.5 text-[11px] leading-relaxed text-warn"
-            >
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>{availability.reason}</span>
-            </div>
-          )}
-
-          {error && (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
-              {error}
-            </div>
-          )}
+          <p className="mt-1 leading-relaxed text-muted-foreground">
+            The accepted input is never returned by the read API — for a chat or assignment
+            source it is the conversation itself. The fingerprint is what identifies it.
+          </p>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="h-9 coarse:h-12">
-            Cancel
-          </Button>
-          {/* No button at all when the payload is gone: §9 forbids offering a
-              dead one, and a disabled button beside a sentence saying why is
-              the honest form of "this is not available". */}
-          <Button
-            onClick={() => onConfirm({ reason, targetRevision })}
+        <div>
+          <FieldLabel>Target revision</FieldLabel>
+          <Input
+            value={targetRevision}
+            onChange={(e) => setTargetRevision(e.target.value)}
+            placeholder={item.target_revision || "inherits the original"}
+            className="mt-1.5 h-9 font-mono text-sm coarse:h-12"
             disabled={blocked || pending}
-            className="h-9 gap-1.5 coarse:h-12"
-            data-testid="replay-confirm"
+          />
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            Left alone, the replay runs against the revision the original was accepted against
+            ({item.target_revision ? <span className="font-mono">{item.target_revision}</span> : "none recorded"}).
+            Changing it is an explicit re-target — it is never resolved to &ldquo;latest&rdquo; for you.
+          </p>
+        </div>
+
+        <div>
+          <FieldLabel>Reason</FieldLabel>
+          <Textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Why is this being run again?"
+            rows={2}
+            className="mt-1.5 text-sm"
+            disabled={blocked || pending}
+          />
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            Recorded in the ledger beside the new work item.
+          </p>
+        </div>
+
+        {blocked && (
+          <div
+            role="status"
+            data-testid="replay-blocked-reason"
+            className="flex gap-2.5 rounded-lg border border-warn/30 bg-warn/[0.06] px-3 py-2.5 text-[11px] leading-relaxed text-warn"
           >
-            <RotateCcw className="h-3.5 w-3.5" />
-            {pending ? "Creating…" : "Create new work"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{availability.reason}</span>
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
+            {error}
+          </div>
+        )}
+      </CreateSurfaceBody>
+
+      {/* Disabled with the blocked reason above it when the payload is gone:
+          §9 forbids offering a live-looking button that cannot work. */}
+      <CreateSurfaceFooter
+        onCancel={() => onOpenChange(false)}
+        primaryLabel={pending ? "Creating…" : "Create new work"}
+        primaryIcon={RotateCcw}
+        onPrimary={() => onConfirm({ reason, targetRevision })}
+        primaryDisabled={blocked || pending}
+      />
+    </CreateSurface>
   )
 }
 

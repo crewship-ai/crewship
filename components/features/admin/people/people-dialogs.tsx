@@ -6,11 +6,15 @@ import { Building2, Check, House, UserPlus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { WorkspaceTile } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import { displayName, isPersonal, personStatus, type Person, type Role, type Workspace } from "./people-model"
 import { PersonAvatar, RoleSegmented, SetupLinkBox } from "./people-parts"
-import { MemberDialogIcon } from "@/components/features/settings/members/member-bits"
 import type { SetupLink, usePeople } from "./use-people"
 
 type Actions = ReturnType<typeof usePeople>["actions"]
@@ -39,27 +43,40 @@ export function AddPersonDialog({ open, onOpenChange, workspaces, actions, busy,
     const out = await actions.createPerson(email.trim(), name.trim(), memberships)
     if (out) setResult(out)
   }
+  const formRef = React.useRef<HTMLFormElement>(null)
+  const creating = busy === "create-person"
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px]">
-        <DialogHeader className="flex-row items-start gap-3 space-y-0 text-left">
-          <MemberDialogIcon icon={result ? Check : UserPlus} tint={result ? "var(--success)" : "var(--primary)"} />
-          <div className="min-w-0 space-y-1">
-            <DialogTitle>{result ? "Send them this link" : "Add person"}</DialogTitle>
-            <DialogDescription>Creates the account and gives you a setup link. No email is sent.</DialogDescription>
-          </div>
-        </DialogHeader>
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      size="md"
+      onSubmit={() => { if (!result && valid && !creating) formRef.current?.requestSubmit() }}
+    >
+        <CreateSurfaceHeader
+          icon={result ? Check : UserPlus}
+          accent={result ? "green" : undefined}
+          title={result ? "Send them this link" : "Add person"}
+          description="Creates the account and gives you a setup link. No email is sent."
+          onClose={() => onOpenChange(false)}
+        />
         {result ? (
-          <div className="grid gap-3">
+          <>
+          <CreateSurfaceBody className="grid gap-3">
             <p className="text-control"><b className="font-medium">{result.link.email}</b> has an account now. Send them this link to choose a password.</p>
             <div className="-mx-4"><SetupLinkBox url={result.link.url} expiresAt={result.link.expires_at} /></div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-              <Button onClick={() => { onCreated(result.userId); onOpenChange(false) }}>Open their profile</Button>
-            </DialogFooter>
-          </div>
+          </CreateSurfaceBody>
+          <CreateSurfaceFooter
+            hint={null}
+            onCancel={() => onOpenChange(false)}
+            cancelLabel="Close"
+            primaryLabel="Open their profile"
+            onPrimary={() => { onCreated(result.userId); onOpenChange(false) }}
+          />
+          </>
         ) : (
-          <form onSubmit={submit} className="grid gap-4">
+          <>
+          <CreateSurfaceBody>
+          <form ref={formRef} onSubmit={submit} className="grid gap-4">
             <div className="grid gap-1.5">
               <Label htmlFor="add-person-email">Email</Label>
               <Input id="add-person-email" type="email" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} placeholder="lucie@acme.example" />
@@ -81,14 +98,17 @@ export function AddPersonDialog({ open, onOpenChange, workspaces, actions, busy,
               </div>
               <p className="flex items-center gap-1.5 text-label text-muted-foreground"><House className="h-3 w-3" aria-hidden />Personal accounts are not offered. With none picked, they sign in to nothing until added.</p>
             </fieldset>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button type="submit" disabled={!valid || busy === "create-person"}>Create and get link</Button>
-            </DialogFooter>
           </form>
+          </CreateSurfaceBody>
+          <CreateSurfaceFooter
+            onCancel={() => onOpenChange(false)}
+            primaryLabel="Create and get link"
+            onPrimary={() => formRef.current?.requestSubmit()}
+            primaryDisabled={!valid || creating}
+          />
+          </>
         )}
-      </DialogContent>
-    </Dialog>
+    </CreateSurface>
   )
 }
 
@@ -129,17 +149,23 @@ export function NewWorkspaceDialog({ open, onOpenChange, people, actions, busy, 
     onCreated(id)
     onOpenChange(false)
   }
+  const formRef = React.useRef<HTMLFormElement>(null)
+  const creating = busy === "create-ws"
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px]">
-        <DialogHeader className="flex-row items-start gap-3 space-y-0 text-left">
-          <MemberDialogIcon icon={Building2} />
-          <div className="min-w-0 space-y-1">
-            <DialogTitle>New workspace</DialogTitle>
-            <DialogDescription>A place for a team. It starts empty; its owner adds crews from there. You are not added.</DialogDescription>
-          </div>
-        </DialogHeader>
-        <form onSubmit={submit} className="grid gap-4">
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      size="md"
+      onSubmit={() => { if (valid && !creating) formRef.current?.requestSubmit() }}
+    >
+        <CreateSurfaceHeader
+          icon={Building2}
+          title="New workspace"
+          description="A place for a team. It starts empty; its owner adds crews from there. You are not added."
+          onClose={() => onOpenChange(false)}
+        />
+        <CreateSurfaceBody>
+        <form ref={formRef} onSubmit={submit} className="grid gap-4">
           <div className="grid gap-1.5">
             <Label htmlFor="new-ws-name">Name</Label>
             <Input id="new-ws-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Marketing" />
@@ -179,12 +205,14 @@ export function NewWorkspaceDialog({ open, onOpenChange, people, actions, busy, 
               {addable.map((p) => <option key={p.id} value={p.id}>{displayName(p)} · {p.email}</option>)}
             </select>
           </fieldset>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={!valid || busy === "create-ws"}>Create workspace</Button>
-          </DialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+        </CreateSurfaceBody>
+        <CreateSurfaceFooter
+          onCancel={() => onOpenChange(false)}
+          primaryLabel="Create workspace"
+          onPrimary={() => formRef.current?.requestSubmit()}
+          primaryDisabled={!valid || creating}
+        />
+    </CreateSurface>
   )
 }

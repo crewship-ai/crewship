@@ -4,7 +4,7 @@ import * as React from "react"
 import { ArrowLeft, Layers, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { useProviderPools, type PoolDraft, type ProviderPool } from "@/hooks/use-provider-pools"
 import { LoginBrandMark } from "./provider-login-bits"
 
@@ -36,18 +36,31 @@ export function ProviderPoolsDialog({ workspaceId, onClose }: { workspaceId: str
     if (!editor) return
     patch({ members: checked ? [...editor.draft.members, { credential_id: id, priority: 0 }] : editor.draft.members.filter(m => m.credential_id !== id) })
   }
+  const formRef = React.useRef<HTMLFormElement>(null)
   const valid = editor && editor.draft.name.trim() && editor.draft.provider && editor.draft.members.length > 0 && editor.draft.members.length <= 100 && missing.length === 0 && editor.draft.members.every(m => Number.isSafeInteger(m.priority))
-  return <Dialog open onOpenChange={open => { if (!open && !busy) onClose() }}>
-    <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl" onInteractOutside={e => { if (busy || editor || removing) e.preventDefault() }}>
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2"><Layers className="size-4" />{editor ? editor.current ? "Edit account group" : "Create account group" : removing ? "Remove account group?" : "Account groups"}</DialogTitle>
-        <DialogDescription>Prepare provider accounts together. Groups do not assign accounts or enable automatic switching yet.</DialogDescription>
-      </DialogHeader>
+  // An open editor holds an unsaved draft, so Esc, an overlay click and the
+  // header's close go through the shell's discard guard; nothing closes while
+  // a request is in flight.
+  return <CreateSurface
+    open
+    onOpenChange={open => { if (!open && !busy) onClose() }}
+    size="md"
+    dirty={!!editor}
+    discardLabel="this account group"
+    onSubmit={() => { if (editor) formRef.current?.requestSubmit() }}
+  >
+    <CreateSurfaceHeader
+      icon={Layers}
+      title={editor ? editor.current ? "Edit account group" : "Create account group" : removing ? "Remove account group?" : "Account groups"}
+      description="Prepare provider accounts together. Groups do not assign accounts or enable automatic switching yet."
+      onClose={() => { if (!busy) onClose() }}
+    />
+    <CreateSurfaceBody className="space-y-4">
       {(error || api.error) && <div role="alert" className="rounded-lg border border-destructive/40 p-3 text-sm text-destructive">{error || api.error?.message}</div>}
       {removing ? <div className="space-y-4">
         <p className="text-sm">Remove <strong>{removing.name}</strong>? Its provider accounts will remain. This group will no longer be available; its name stays reserved.</p>
         <div className="flex justify-end gap-2"><Button variant="outline" disabled={busy} onClick={() => { setRemoving(null); setError("") }}>Cancel</Button><Button variant="destructive" disabled={busy} onClick={() => void run(async () => { await api.remove(removing); setRemoving(null); setAfter("") })}><Trash2 className="mr-2 size-4" />{busy ? "Removing…" : "Remove group"}</Button></div>
-      </div> : editor ? <form className="space-y-5" onSubmit={e => { e.preventDefault(); if (valid && !busy) void run(async () => { await api.save(editor.draft, editor.current); setEditor(null); setAfter("") }) }}>
+      </div> : editor ? <form ref={formRef} className="space-y-5" onSubmit={e => { e.preventDefault(); if (valid && !busy) void run(async () => { await api.save(editor.draft, editor.current); setEditor(null); setAfter("") }) }}>
         <fieldset disabled={busy} className="space-y-5">
           <label className="grid gap-2 text-sm">Group name<Input required maxLength={200} value={editor.draft.name} onChange={e => patch({ name: e.target.value })} placeholder="e.g. Development team" /></label>
           <label className="grid gap-2 text-sm">Provider and connection
@@ -75,6 +88,6 @@ export function ProviderPoolsDialog({ workspaceId, onClose }: { workspaceId: str
         {!api.error && api.pools?.items.map(pool => <div key={pool.id} className="flex flex-wrap items-center gap-3 rounded-xl border p-4"><LoginBrandMark provider={pool.provider} /><div className="min-w-0 flex-1"><h3 className="break-words text-sm font-medium">{pool.name}</h3><p className="text-xs text-muted-foreground">{pool.member_count} accounts · {pool.mode === "api_key" ? "API key" : "Subscription"} · Not assigned</p></div><Button size="icon" variant="ghost" aria-label={`Edit ${pool.name}`} disabled={busy} onClick={() => edit(pool)}><Pencil className="size-4" /></Button><Button size="icon" variant="ghost" aria-label={`Remove ${pool.name}`} disabled={busy} onClick={() => { setError(""); setRemoving(pool) }}><Trash2 className="size-4" /></Button></div>)}
         <div className="flex justify-end gap-2">{after && <Button variant="outline" disabled={busy} onClick={() => setAfter("")}>First page</Button>}{api.pools?.next_cursor && <Button variant="outline" disabled={busy} onClick={() => setAfter(api.pools!.next_cursor!)}>Next page</Button>}</div>
       </div>}
-    </DialogContent>
-  </Dialog>
+    </CreateSurfaceBody>
+  </CreateSurface>
 }
