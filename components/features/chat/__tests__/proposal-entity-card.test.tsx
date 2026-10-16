@@ -24,7 +24,7 @@ function setup(initial = base, surface: "card" | "panel" = "card") {
   const view = render(<QueryClientProvider client={client}><Harness /></QueryClientProvider>)
   return { ...view, change: (reference: ProposalRef) => { change(reference) } }
 }
-afterEach(() => { cleanup(); sessionStorage.clear(); vi.clearAllMocks() })
+afterEach(() => { cleanup(); sessionStorage.clear(); transport.mockReset(); onComment.mockReset().mockResolvedValue(true); onAccessLost.mockReset() })
 it("edits/selects bounded issues, saves before explicit count/effect/actor confirmation, then renders immutable receipt and E1 slots", async () => {
   transport.mockImplementation(async request => {
     if (request.action === "edit") { const body = JSON.parse(request.body); return snapshot({ ...base, proposal: { ...base.proposal, ...body, expected_version: undefined, version: 2 } } as ProposalRef) }
@@ -125,7 +125,7 @@ it("sends a comment only explicitly and keeps its draft when send fails", async 
 })
 it("does not send an operation if durable recovery is unavailable", async () => {
   setup()
-  const storage = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("storage disabled") })
+  const storage = vi.spyOn(sessionStorage, "setItem").mockImplementation(() => { throw new Error("storage disabled") })
   fireEvent.click(screen.getByRole("button", { name: "Discard proposal" }))
   await screen.findByText("Recovery storage is unavailable. No request was sent.")
   expect(transport).not.toHaveBeenCalled()
