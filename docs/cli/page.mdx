@@ -35,6 +35,23 @@ empty, and a line saying so would be read as a key. `page export` is the
 exception in the other direction: it prints YAML unless you ask for
 `--format json`.
 
+## crewship page search
+
+```bash
+crewship page search 'needle second' --workspace WORKSPACE_ID --limit 10 --format json
+crewship page search 'needle second' --workspace WORKSPACE_ID --cursor OPAQUE_CURSOR --limit 10 --format json
+```
+
+Search current supported native Docs/Slides plain text, with literal folded AND
+terms and one result per readable Page. This does not search every Page type,
+comments or historical content. Current human read access and `pages:read`
+scopes are required. `--workspace` selects authority; `--limit` accepts 1–50
+(default 50); `--cursor` explicitly continues the same credential/workspace/query
+for five minutes using live results. There is no automatic paging or retry.
+Incomplete canonical coverage returns an error rather than false no-results.
+The JSON response includes `scope`, `matches`, `has_more` and an optional opaque
+`cursor`. Matches carry stable Page IDs, current slugs/revisions and snippets.
+
 ## crewship page resolve
 
 ```bash

@@ -48,6 +48,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pagebuild"
 	"github.com/crewship-ai/crewship/internal/pages"
+	"github.com/crewship-ai/crewship/internal/pagesearch"
 	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -59,6 +60,9 @@ import (
 // freshness verdict is arithmetic against it, and "a panel goes stale exactly
 // at its SLA" is only testable if the test owns the clock.
 type PageHandler struct {
+	nativeSearchInit                 sync.Once
+	nativeSearchSlots                chan struct{}
+	nativeSearchCursors              *pagesearch.CursorStore
 	documentCall                     func(context.Context, string, string, string, string, any) ([]byte, int, error)
 	restrictedWorkflow               func() *restrictedworkflow.Service
 	artifactStoragePath              string

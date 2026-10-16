@@ -42,7 +42,7 @@ import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 
 import { duration } from "@/lib/motion"
-import { AppWindow, FilePlus2, LayoutGrid, MessageSquare, Pencil, Share2, Upload } from "lucide-react"
+import { AppWindow, FilePlus2, LayoutGrid, MessageSquare, Pencil, Search, Share2, Upload } from "lucide-react"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
@@ -68,6 +68,7 @@ import { PagesRail } from "@/components/features/pages/pages-rail"
 import { ArtifactGallery } from "./artifact-gallery"
 import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
+import { NativePageSearchDialog } from "./native-page-search-dialog"
 import { NewBoardDialog } from "./new-board-dialog"
 import { NewArtifactDialog } from "./new-artifact-dialog"
 import { PageEditor } from "@/components/features/pages/page-editor"
@@ -143,6 +144,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   React.useEffect(() => { if (!canCreatePage) { setCreatingBoard(false); setCreatingArtifact(false) } }, [canCreatePage])
   const [importing, setImporting] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
+  const [contentSearchOpen, setContentSearchOpen] = React.useState(false)
   const [search, setSearch] = React.useState("")
   const [filters, setFilters] = React.useState<PageFilters>(EMPTY_PAGE_FILTERS)
 
@@ -381,6 +383,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Edit
               </SubBarSecondary>
             )}
+            <SubBarSecondary icon={Search} onClick={() => setContentSearchOpen(true)}>Search native text</SubBarSecondary>
             {/* Import sits beside New page because they are the same intent —
                 "a page that is not here yet" — and it was the one authoring
                 door that existed only as a CLI command. */}
@@ -399,6 +402,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           </>
         }
       />
+
+      {contentSearchOpen && <NativePageSearchDialog key={`${currentUserId}:${workspaceId}`} workspaceId={workspaceId} viewerId={currentUserId} onClose={() => setContentSearchOpen(false)} onOpenPage={pageId => { nav.openReference({ kind: "page", workspaceId, pageId }); setContentSearchOpen(false) }} />}
 
       {chatHandoffOpen && selectedSlug && <PageChatHandoff
         open={chatHandoffOpen} onOpenChange={setChatHandoffOpen}

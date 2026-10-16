@@ -39,6 +39,8 @@ import {
 export interface EditorNavigation extends EditorRoute {
   /** Open a page in view mode (or the overview with `null`). */
   openPage: (slug: string | null) => void
+  /** Open an immutable Page identity through the same unsaved-work guard. */
+  openReference: (reference: StablePageReference) => void
   /** Canonicalize an authorized stable reference without losing its ID fence. */
   resolveReference: (reference: StablePageReference, slug: string) => void
   /** Re-resolve only after the person accepts discarding unsaved changes. */
@@ -206,6 +208,10 @@ export function useEditorRoute(initialSlug: string | null): EditorNavigation {
     (slug: string | null) => navigate({ slug, mode: "view", section: DEFAULT_EDITOR_SECTION, pane: "section" }),
     [navigate],
   )
+  const openReference = React.useCallback(
+    (reference: StablePageReference) => navigate({ slug: null, mode: "view", section: DEFAULT_EDITOR_SECTION, pane: "section", reference }),
+    [navigate],
+  )
   const resolveReference = React.useCallback(
     (reference: StablePageReference, slug: string) => {
       const current = routeRef.current
@@ -239,5 +245,5 @@ export function useEditorRoute(initialSlug: string | null): EditorNavigation {
     [navigate],
   )
 
-  return { ...route, dirty, pending, openPage, resolveReference, reloadReference, setMode, openEditor, setSection, setPane, setDirty }
+  return { ...route, dirty, pending, openPage, openReference, resolveReference, reloadReference, setMode, openEditor, setSection, setPane, setDirty }
 }

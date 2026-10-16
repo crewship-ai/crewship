@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,15 @@ func TestResetApplicationDataRetainsIdentityAndCleanMigrationDefaults(t *testing
 	if _, err := current.ExecContext(ctx, `INSERT INTO users(id,email,full_name,hashed_password) VALUES('reset-user','reset@example.test','Reset','hash')`); err != nil {
 		t.Fatal(err)
 	}
+	// Derived native text is application data, including a corrupt cache row.
+	// Reset must remove it while restoring the cache writer singleton default.
+	if _, err := current.ExecContext(ctx, `INSERT INTO workspaces(id,name,slug) VALUES('reset-search-workspace','Search','reset-search-workspace');
+ INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('reset-search-page','reset-search-workspace','reset-search-page','Search','reset-user','{}')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := current.ExecContext(ctx, `INSERT INTO page_search_projections(workspace_id,page_id,adapter_version,source_type,source_schema,source_rev,source_generation,source_hash,encoded,encoded_sha256) VALUES('reset-search-workspace','reset-search-page',1,'document',2,0,0,?,CAST('derived text canary' AS BLOB),?)`, strings.Repeat("0", 64), strings.Repeat("0", 64)); err != nil {
+		t.Fatal(err)
+	}
 	if err := clean.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +60,12 @@ func TestResetApplicationDataRetainsIdentityAndCleanMigrationDefaults(t *testing
 		}
 		if count != 0 {
 			t.Fatal("application data retained")
+		}
+		if err := current.QueryRowContext(ctx, `SELECT count(*) FROM page_search_projections`).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("derived search retained: %d %v", count, err)
+		}
+		if err := current.QueryRowContext(ctx, `SELECT count(*) FROM page_search_writer_fence WHERE id=1`).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("cache writer default missing: %d %v", count, err)
 		}
 		var nonce string
 		if err := current.QueryRowContext(ctx, `SELECT db_nonce FROM resource_cleanup_installation WHERE id=1`).Scan(&nonce); err != nil {

@@ -99,6 +99,19 @@ jobs:
           CREWSHIP_BOARD_MERMAID_BROWSER: '1'
           CREWSHIP_BOARD_MERMAID_OUTPUT: ${{ runner.temp }}/board-mermaid-workflow
         run: go test -tags 'artifact_workflow_browser board_mermaid_workflow_browser' ./internal/api -run '^(TestArtifactWorkflowBrowser|TestBoardMermaidWorkflowBrowser)$' -count=1 -timeout 6m
+      # Existing Node22 frontend/runtime scenarios finish before changing the
+      # engine for the separately qualified private Docs process.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.21.0'
+      - name: Install frozen Docs dependencies for native search
+        run: pnpm --dir tools/docs-service install --frozen-lockfile
+      - name: Native Doc and Slides search through actual Router and Chromium
+        timeout-minutes: 6
+        env:
+          CREWSHIP_PAGE_SEARCH_BROWSER: '1'
+          CREWSHIP_PAGE_SEARCH_OUTPUT: ${{ runner.temp }}/native-search-workflow
+        run: go test -tags page_search_browser ./internal/api -run '^TestNativeSearchBrowser$' -count=1 -timeout 5m -v
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         timeout-minutes: 3
         if: always()
@@ -107,4 +120,5 @@ jobs:
           path: |
             ${{ runner.temp }}/artifact-production-workflow/
             ${{ runner.temp }}/board-mermaid-workflow/
+            ${{ runner.temp }}/native-search-workflow/
           if-no-files-found: error

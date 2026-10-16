@@ -259,6 +259,43 @@ Missing prerequisites fail. The script prints its private temporary screenshot,
 filtered identity JSON and report directory; credentials are not persisted in
 evidence. The Go fixture owns and removes its 0600 credential input.
 
+### Native search managed projection gate
+
+The native search materializer's actual Router/private Node test is selected
+explicitly, separately from `TestDocumentsFoundationRealProcesses`:
+
+```bash
+CREWSHIP_NATIVE_SEARCH_MANAGED=1 go test -tags docs_foundation ./internal/api -run '^TestNativeSearchManagedProjection$' -count=1 -timeout 5m
+```
+
+Install the frozen `tools/docs-service` dependencies first and use Node 24.21.0.
+The existing Docs foundation workflow runs this gate after its process-recovery
+test. It exercises real human CRDT updates, checkpoint restore, exact session
+revocation, final query snapshot coverage and matched Docs1/2/3 plaintext
+(including schema3 code blocks but excluding link hrefs). Legacy1 initialization
+is a trusted Node encoder/Store fixture; subsequent reads/query are real human
+HTTP operations. A green process-recovery test
+alone does not execute this search gate. On the shared development host, run
+these commands through `crewship-heavy`.
+
+### Native search browser gate
+
+`acceptance-page-search-browser.mjs` runs through Linux-only
+`TestNativeSearchBrowser` with real Router, private Node, canonical Docs/Slides
+and a built static export. It uses distinct owned synthetic human sessions,
+indexes a private matching Page as owner, tests authorized body-text results,
+immutable-ID navigation after rename/slug reuse, actual grant revocation plus
+bounded batch expiry and stopped-engine refusal. No HTTP responses are mocked.
+After frozen service/frontend installation and production export, run:
+
+```bash
+crewship-heavy env CREWSHIP_PAGE_SEARCH_BROWSER=1 go test -tags page_search_browser ./internal/api -run '^TestNativeSearchBrowser$' -count=1 -timeout 6m -v
+```
+
+Missing prerequisites fail. `CREWSHIP_PAGE_SEARCH_OUTPUT` selects an owned
+private output parent; each execution creates a fresh subdirectory. The script
+prints private report, filtered result JSON and full screenshot paths; no credentials are captured in evidence. The
+Go fixture owns and removes its 0600 credential input and private Node process.
 `acceptance-slides-selected-browser.mjs` runs only through the opt-in Linux
 `TestSlidesSelectedBrowser` fixture after a production static export. Run
 `CREWSHIP_SLIDES_SELECTED_BROWSER=1 go test -tags slides_selected_browser ./internal/api -run '^TestSlidesSelectedBrowser$'` through `crewship-heavy`, preserving the installed
