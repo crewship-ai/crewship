@@ -24,7 +24,8 @@ func (s *Server) handleDocument(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid document path", 400)
 		return
 	}
-	allowed := r.Method == http.MethodGet && len(parts) == 2
+	protected := len(parts) == 3 && ((r.Method == http.MethodGet && parts[2] == "agent-read") || (r.Method == http.MethodPost && (parts[2] == "agent-apply" || parts[2] == "agent-checkpoint")))
+	allowed := protected || (r.Method == http.MethodGet && len(parts) == 2)
 	if r.Method == http.MethodPost && len(parts) == 3 && (parts[2] == "patch" || parts[2] == "checkpoint") {
 		allowed = true
 	}
@@ -67,6 +68,10 @@ func (s *Server) handleDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
+	if protected {
+		s.handleDocumentStructure(w, r, parts[0], parts[2])
+		return
+	}
 	var body []byte
 	if r.Method == http.MethodPost {
 		var err error

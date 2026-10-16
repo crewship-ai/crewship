@@ -85,7 +85,7 @@ func TestDocumentInitializeFirstStateAndRetryReceiptRemainDistinct(t *testing.T)
 }
 
 func TestDocumentSelectionRequestContract(t *testing.T) {
-	contract := documentSchemaCatalog()["POST /api/v1/pages/{slug}/document/requests"].Request
+	contract := documentSchemaCatalog()["POST /api/v1/pages/{slug}/document/requests"].Request["oneOf"].([]any)[0].(map[string]any)
 	required := contract["required"].([]string)
 	for _, want := range []string{"page_id", "base_rev", "targets"} {
 		found := false
@@ -110,5 +110,34 @@ func TestDocumentSelectionRequestContract(t *testing.T) {
 	state := documentSchemaComponents()["DocumentState"].(map[string]any)
 	if _, ok := state["properties"].(map[string]any)["page_id"]; !ok {
 		t.Fatal("public state lacks Page identity")
+	}
+}
+
+func TestDocumentStructuralContractNeverPromotesTextGrantOrModelPreconditions(t *testing.T) {
+	variants := documentSchemaCatalog()["POST /api/v1/pages/{slug}/document/requests"].Request["oneOf"].([]any)
+	if len(variants) != 2 {
+		t.Fatal("text and whole-block grants must be distinct")
+	}
+	structure := variants[1].(map[string]any)
+	props := structure["properties"].(map[string]any)
+	if props["targets"] != nil || structure["additionalProperties"] != false {
+		t.Fatal("structural admission accepts mixed text scope")
+	}
+	selection := props["structure"].(map[string]any)["properties"].(map[string]any)
+	ids := selection["block_ids"].(map[string]any)
+	if ids["maxItems"] != 256 || ids["minItems"] != 1 || ids["uniqueItems"] != true {
+		t.Fatal("structural selection lacks explicit bounded identity")
+	}
+	operations := documentStructureOperationsSchema()["items"].(map[string]any)["oneOf"].([]any)
+	for _, variant := range operations {
+		op := variant.(map[string]any)
+		if op["additionalProperties"] != false {
+			t.Fatal("operation not closed")
+		}
+		for _, forbidden := range []string{"ifRev", "if_hash", "epoch", "page_id", "request_id", "schema"} {
+			if op["properties"].(map[string]any)[forbidden] != nil {
+				t.Fatal("model can override original preconditions", forbidden)
+			}
+		}
 	}
 }

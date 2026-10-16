@@ -599,3 +599,65 @@ test('scheduler never evicts busy document tails', async () => {
     assert.equal((await call(f.socket, '/v1/documents/overflow/read', {})).status, 200);
   } finally { held.resolve(); await Promise.allSettled(pending); await f.close(); }
 });
+
+test('structural human admission captures only explicit schema3 root blocks',async()=>{
+ const model=authorityModel(),doc=create(initialJSON(),3);model.state.schema=3;model.state.snapshot=snapshot(doc);doc.destroy();
+ const f=await fixture(model.handle);await f.start();try{
+  const response=await call(f.socket,'/v1/documents/p/verify-structure',{base_rev:model.state.rev,structure:{block_ids:['title','intro','table'],allow_insert_after:true}});
+  assert.equal(response.status,200);assert.equal(response.body.targets[0].schema,3);assert.deepEqual(response.body.targets[0].structure.blocks.map(block=>block.id),['title','intro','table']);
+  assert.equal((await call(f.socket,'/v1/documents/p/verify-structure',{base_rev:model.state.rev,structure:{block_ids:['intro'],allow_insert_after:true}},{Authorization:'Bearer agtv2.agent'})).status,403);
+  assert.equal(model.acquisitions,0);assert.equal(model.commits,0);
+ }finally{await f.close()}
+});
+
+test('failed second structural operation never commits or reuses its mutated scratch',async()=>{
+ const model=authorityModel(),doc=create(initialJSON(),3);model.state.schema=3;model.state.snapshot=snapshot(doc);doc.destroy();
+ const f=await fixture(model.handle);await f.start();try{
+  const selected=await call(f.socket,'/v1/documents/p/verify-structure',{base_rev:model.state.rev,structure:{block_ids:['intro'],allow_insert_after:true}});
+  model.state.requestScope={requestID:'structural-request',baseRev:model.state.rev,target:selected.body.targets[0]};
+  const confirmed=(await read(f,{Authorization:'Bearer agtv2.agent'})).body;
+  const request={id:'structural-request-patch',schema:3,page_id:'p',request_id:'structural-request',kind:'agent',epoch:confirmed.epoch,ifRev:confirmed.rev,operations:[{op:'insert_after',after_id:'intro',node:{type:'paragraph',content:[{type:'text',text:'must never be published'}]}},{op:'delete',id:'title'}]};
+  const original=model.state.snapshot;
+  assert.equal((await call(f.socket,'/v1/documents/p/patch',request,{Authorization:'Bearer agtv2.agent'})).status,400);
+  assert.equal(model.commits,0);assert.equal(model.checkpoints,0);assert.equal(model.receipts.size,0);assert.equal(model.state.snapshot,original);assert.equal(model.state.rev,confirmed.rev);
+  const fresh=(await read(f,{Authorization:'Bearer agtv2.agent'})).body;
+  assert.equal(fresh.outline.some(block=>block.text.includes('must never be published')),false);
+  request.operations=request.operations.slice(0,1);
+  assert.equal((await call(f.socket,'/v1/documents/p/patch',request,{Authorization:'Bearer agtv2.agent'})).status,200);
+  assert.equal(model.commits,1);
+  assert.equal((await read(f,{Authorization:'Bearer agtv2.agent'})).body.outline.filter(block=>block.text==='must never be published').length,1);
+ }finally{await f.close()}
+});
+
+test('structural tool context is run-bound and exact intent retry survives renewable epoch and newer head',async()=>{
+ const requestID='r'.repeat(64),model=authorityModel(),doc=create(initialJSON(),3);model.state.schema=3;model.state.snapshot=snapshot(doc);doc.destroy();
+ const f=await fixture(model.handle);await f.start();try{
+  assert.equal((await read(f,{Authorization:'Bearer agtv2.agent'})).body.agent_request,undefined);
+  const selected=await call(f.socket,'/v1/documents/p/verify-structure',{base_rev:model.state.rev,structure:{block_ids:['intro'],allow_insert_after:true}});
+  model.state.requestScope={requestID,baseRev:model.state.rev,target:selected.body.targets[0]};
+  assert.equal((await read(f)).body.agent_request,undefined);
+  const confirmed=(await read(f,{Authorization:'Bearer agtv2.agent'})).body;
+  assert.deepEqual(confirmed.agent_request,{kind:'structure',request_id:requestID,page_id:'p',schema:3,base_rev:confirmed.rev});
+  const request={id:`${requestID}-patch`,schema:3,page_id:'p',request_id:requestID,kind:'agent',epoch:confirmed.epoch,ifRev:confirmed.rev,operations:[{op:'insert_after',after_id:'intro',node:{type:'paragraph',content:[{type:'text',text:'original result'}]}}]};
+  const headers={Authorization:'Bearer agtv2.agent'};
+  const first=await call(f.socket,'/v1/documents/p/patch',request,headers);assert.equal(first.status,200);
+  const checkpoint={id:`${requestID}-checkpoint`,schema:3,page_id:'p',epoch:(await read(f,headers)).body.epoch,ifRev:confirmed.rev+1};
+  const cp=await call(f.socket,'/v1/documents/p/checkpoint',checkpoint,headers);assert.equal(cp.status,200);
+  // Restart/restore and later human edits renew transport, not the original intent.
+  model.state.generation++;model.state.epoch++;model.state.rev+=10;
+  const fresh=(await read(f,headers)).body;
+  const retry=await call(f.socket,'/v1/documents/p/patch',{...request,epoch:fresh.epoch},headers);
+  assert.equal(retry.status,200);assert.equal(retry.body.duplicate,true);assert.equal(retry.body.rev,first.body.rev);
+  const cpRetry=await call(f.socket,'/v1/documents/p/checkpoint',{...checkpoint,epoch:fresh.epoch},headers);
+  assert.equal(cpRetry.status,200);assert.equal(cpRetry.body.duplicate,true);assert.equal(cpRetry.body.rev,cp.body.rev);
+  assert.equal(model.commits,1);assert.equal(model.checkpoints,1);
+  const changed=await call(f.socket,'/v1/documents/p/patch',{...request,epoch:fresh.epoch,operations:[{op:'delete',id:'intro'}]},headers);
+  assert.equal(changed.status,409);assert.equal(model.commits,1);
+  model.receipts.delete(request.id);
+  assert.equal((await call(f.socket,'/v1/documents/p/patch',{...request,epoch:fresh.epoch},headers)).status,409);
+  assert.equal(model.commits,1);
+  model.revoked.add(headers.Authorization);
+  assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{...checkpoint,epoch:fresh.epoch},headers)).status,403);
+  assert.equal(model.checkpoints,1);
+ }finally{await f.close()}
+});

@@ -144,6 +144,54 @@ Success requires the admitted agent's one durable semantic patch against the
 original selected baseline and its exact resulting checkpoint. This does not
 claim multi-block or multiple-patch completion.
 
+For separate schema3 whole-block structural authorization, replace `targets`
+with `structure:{block_ids:["root-id",...],allow_insert_after:true}`. IDs must
+be an ordered contiguous range of at most256 root blocks. The server captures
+canonical subtree hashes and surrounding boundaries at the original revision;
+the human does not provide internal proof. **Select all blocks** is explicit
+and unavailable above256, with no truncation. This permits one atomic insert/
+delete/reorder batch inside the selected structural scope. Existing text grants
+remain text-only. Moves with comment anchors are refused; deletion retains
+detached threads. Schema1/2 need an explicit human upgrade before this mode.
+
+## crewship doc agent
+
+These protected commands use only the original run's `CREWSHIP_AGENT_TOKEN`
+and fixed sidecar transport. They never load a human profile or accept server/
+workspace overrides. They require an admitted structural request.
+
+## crewship doc agent read
+
+`crewship doc agent read report` returns current text/outline plus the original
+server-owned request context, excluding binary Yjs snapshot/update bytes.
+Reading a newer head never authorizes rebasing.
+
+## crewship doc agent apply
+
+`crewship doc agent apply report --operations-file operations.json` accepts only
+a JSON **array** of1..256 operations, at most256KiB (or stdin with `-`):
+
+```json
+[{"op":"insert_after","after_id":"selected-root","node":{"type":"paragraph","content":[{"type":"text","text":"New paragraph"}]}}]
+```
+
+Other operations are `{op:"delete",id}` and `{op:"move_before",id,before_id}`.
+Inserted nodes are plain paragraph, heading with level1..3, or codeBlock, without
+caller IDs/marks. The tool supplies original Page/schema/request/revision and
+computes hashes. Model input cannot override those values. The batch is atomic;
+failure publishes no partial update. Repeat unchanged operations after uncertain
+acknowledgement, including after transport epoch renewal, to recover the original
+receipt. A changed human revision without an existing receipt conflicts.
+
+## crewship doc agent checkpoint
+
+`crewship doc agent checkpoint report` takes no JSON envelope. It checkpoints
+only the original request's successful single patch at original base+1; no patch
+or an intervening edit conflicts. Report success after both durable receipts.
+MCP equivalents `doc_read`, `doc_apply` and `doc_checkpoint` use the same protected
+adapter, with `{slug}`, `{slug,operations}` and `{slug}` respectively. MCP HTTP
+results are bounded to1MiB; larger reads use the protected CLI/HTTP adapter.
+
 ## crewship doc request-list
 
 `crewship doc request-list report` calls

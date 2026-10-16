@@ -4704,6 +4704,40 @@
       },
       "DocumentState": {
         "properties": {
+          "agent_request": {
+            "properties": {
+              "base_rev": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "kind": {
+                "enum": [
+                  "structure"
+                ],
+                "type": "string"
+              },
+              "page_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "schema": {
+                "enum": [
+                  3
+                ],
+                "type": "integer"
+              }
+            },
+            "required": [
+              "kind",
+              "request_id",
+              "page_id",
+              "schema",
+              "base_rev"
+            ],
+            "type": "object"
+          },
           "blocks": {
             "items": {
               "properties": {
@@ -143077,6 +143111,254 @@
                       "ifHash"
                     ],
                     "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "allOf": [
+                      {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "schema": {
+                                "enum": [
+                                  1,
+                                  2
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "schema": {
+                                "enum": [
+                                  3
+                                ]
+                              }
+                            },
+                            "required": [
+                              "page_id"
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "description": "Protected adapter supplies original immutable request/Page/schema/base; model supplies only operations through doc_apply or crewship doc agent apply. Explicit whole-root-block human scope is required. No promotion from a text grant; surrounding blocks remain unchanged.",
+                    "properties": {
+                      "epoch": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                        "type": "string"
+                      },
+                      "ifRev": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "kind": {
+                        "enum": [
+                          "agent"
+                        ],
+                        "type": "string"
+                      },
+                      "operations": {
+                        "items": {
+                          "oneOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "after_id": {
+                                  "pattern": "^[A-Za-z0-9_-]{1,80}$",
+                                  "type": "string"
+                                },
+                                "node": {
+                                  "oneOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "content": {
+                                          "items": {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "text": {
+                                                "minLength": 1,
+                                                "type": "string"
+                                              },
+                                              "type": {
+                                                "enum": [
+                                                  "text"
+                                                ],
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "type",
+                                              "text"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          "type": "array"
+                                        },
+                                        "type": {
+                                          "enum": [
+                                            "paragraph",
+                                            "codeBlock"
+                                          ],
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "type"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "attrs": {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "level": {
+                                              "enum": [
+                                                1,
+                                                2,
+                                                3
+                                              ],
+                                              "type": "integer"
+                                            }
+                                          },
+                                          "required": [
+                                            "level"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        "content": {
+                                          "items": {
+                                            "additionalProperties": false,
+                                            "properties": {
+                                              "text": {
+                                                "minLength": 1,
+                                                "type": "string"
+                                              },
+                                              "type": {
+                                                "enum": [
+                                                  "text"
+                                                ],
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "type",
+                                              "text"
+                                            ],
+                                            "type": "object"
+                                          },
+                                          "type": "array"
+                                        },
+                                        "type": {
+                                          "enum": [
+                                            "heading"
+                                          ],
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "attrs"
+                                      ],
+                                      "type": "object"
+                                    }
+                                  ]
+                                },
+                                "op": {
+                                  "enum": [
+                                    "insert_after"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "op",
+                                "after_id",
+                                "node"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "id": {
+                                  "pattern": "^[A-Za-z0-9_-]{1,80}$",
+                                  "type": "string"
+                                },
+                                "op": {
+                                  "enum": [
+                                    "delete"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "op",
+                                "id"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "before_id": {
+                                  "pattern": "^[A-Za-z0-9_-]{1,80}$",
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "pattern": "^[A-Za-z0-9_-]{1,80}$",
+                                  "type": "string"
+                                },
+                                "op": {
+                                  "enum": [
+                                    "move_before"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "op",
+                                "id",
+                                "before_id"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "maxItems": 256,
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      "page_id": {
+                        "type": "string"
+                      },
+                      "request_id": {
+                        "type": "string"
+                      },
+                      "schema": {
+                        "enum": [
+                          3
+                        ],
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "schema",
+                      "epoch",
+                      "kind",
+                      "page_id",
+                      "request_id",
+                      "ifRev",
+                      "operations"
+                    ],
+                    "type": "object"
                   }
                 ]
               }
@@ -143543,80 +143825,145 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": false,
-                "properties": {
-                  "base_rev": {
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  "chat_id": {
-                    "type": "string"
-                  },
-                  "instruction": {
-                    "maxLength": 4096,
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "page_id": {
-                    "type": "string"
-                  },
-                  "submission_id": {
-                    "maxLength": 128,
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "targets": {
-                    "description": "Immutable paragraph/heading selections; total quotes at most4096 UTF-16 code units. Original base and hashes must remain valid; no automatic rebase. Exactly one paragraph or heading selection and one patch are supported.",
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "from": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "hash": {
-                          "pattern": "^[a-f0-9]{64}$",
-                          "type": "string"
-                        },
-                        "id": {
-                          "maxLength": 80,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "quote": {
-                          "description": "Exact nonempty substring at UTF-16 offsets [from,to); aggregate UTF-16 limit4096 enforced by server.",
-                          "maxLength": 4096,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "to": {
-                          "minimum": 0,
-                          "type": "integer"
-                        }
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "base_rev": {
+                        "minimum": 0,
+                        "type": "integer"
                       },
-                      "required": [
-                        "id",
-                        "hash",
-                        "from",
-                        "to",
-                        "quote"
-                      ],
-                      "type": "object"
+                      "chat_id": {
+                        "type": "string"
+                      },
+                      "instruction": {
+                        "maxLength": 4096,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "page_id": {
+                        "type": "string"
+                      },
+                      "submission_id": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "targets": {
+                        "description": "Immutable paragraph/heading selections; total quotes at most4096 UTF-16 code units. Original base and hashes must remain valid; no automatic rebase. Exactly one paragraph or heading selection and one patch are supported.",
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "from": {
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "hash": {
+                              "pattern": "^[a-f0-9]{64}$",
+                              "type": "string"
+                            },
+                            "id": {
+                              "maxLength": 80,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "quote": {
+                              "description": "Exact nonempty substring at UTF-16 offsets [from,to); aggregate UTF-16 limit4096 enforced by server.",
+                              "maxLength": 4096,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "to": {
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "hash",
+                            "from",
+                            "to",
+                            "quote"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 1,
+                        "minItems": 1,
+                        "type": "array"
+                      }
                     },
-                    "maxItems": 1,
-                    "minItems": 1,
-                    "type": "array"
+                    "required": [
+                      "page_id",
+                      "chat_id",
+                      "instruction",
+                      "base_rev",
+                      "submission_id",
+                      "targets"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "base_rev": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "chat_id": {
+                        "type": "string"
+                      },
+                      "instruction": {
+                        "maxLength": 4096,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "page_id": {
+                        "type": "string"
+                      },
+                      "structure": {
+                        "additionalProperties": false,
+                        "description": "Explicit schema3 contiguous ordered root blocks, including Select all within256. Server captures canonical hashes and adjacent boundaries; no truncation or automatic rebase. One atomic structural patch and exact checkpoint. Moves with comment anchors are refused; deletion retains detached threads.",
+                        "properties": {
+                          "allow_insert_after": {
+                            "enum": [
+                              true
+                            ],
+                            "type": "boolean"
+                          },
+                          "block_ids": {
+                            "items": {
+                              "pattern": "^[A-Za-z0-9_-]{1,80}$",
+                              "type": "string"
+                            },
+                            "maxItems": 256,
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "block_ids",
+                          "allow_insert_after"
+                        ],
+                        "type": "object"
+                      },
+                      "submission_id": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "page_id",
+                      "chat_id",
+                      "instruction",
+                      "base_rev",
+                      "submission_id",
+                      "structure"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "page_id",
-                  "chat_id",
-                  "instruction",
-                  "base_rev",
-                  "submission_id",
-                  "targets"
-                ],
-                "type": "object"
+                ]
               }
             }
           },

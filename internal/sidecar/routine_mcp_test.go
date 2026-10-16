@@ -70,7 +70,7 @@ func TestRoutinesMCP_ToolsList_ValidSchema(t *testing.T) {
 			t.Errorf("tool %q inputSchema.type = %v, want object", tl.Name, schema["type"])
 		}
 	}
-	want := []string{"save_routine", "list_routines", "run_routine", "page_project", "save_page", "discover_capabilities", "workspace_overview", "validate_manifest", "get_routine_draft", "save_routine_draft", "artifact_request_update", "artifact_list", "artifact_diff", "artifact_restore", "board_request_file_read", "board_request_source_read", "board_request_preview_read", "artifact_create", "artifact_publish", "artifact_read", "artifact_comments", "artifact_reply", "board_read", "board_apply", "board_diagram_submit", "artifact_request_read", "board_request_read"}
+	want := []string{"save_routine", "list_routines", "run_routine", "page_project", "save_page", "discover_capabilities", "workspace_overview", "validate_manifest", "get_routine_draft", "save_routine_draft", "artifact_request_update", "artifact_list", "artifact_diff", "artifact_restore", "board_request_file_read", "board_request_source_read", "board_request_preview_read", "artifact_create", "artifact_publish", "artifact_read", "artifact_comments", "artifact_reply", "board_read", "board_apply", "board_diagram_submit", "artifact_request_read", "board_request_read", "doc_read", "doc_apply", "doc_checkpoint"}
 	if len(got) != len(want) {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
