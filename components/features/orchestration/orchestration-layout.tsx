@@ -3,12 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
-import { duration, panel } from "@/lib/motion"
+import { panel } from "@/lib/motion"
 import {
   Workflow, Clock, Activity, GitBranch,
-  PanelLeftOpen,
   FileCode2, Container,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
+  ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   CircleDot, FolderKanban, ScrollText,
   Play, GitCompareArrows, MessageCircle,
   AlertTriangle,
@@ -16,7 +15,7 @@ import {
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { cn } from "@/lib/utils"
 import dynamic from "next/dynamic"
 
@@ -169,9 +168,9 @@ function OrchestrationLayoutInner({
   loadError = null,
 }: OrchestrationLayoutProps) {
   const isMobile = useIsMobile()
+  const closePanelSheet = useCloseSecondaryPanelSheet()
 
   // Panel state
-  const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerTab, setDrawerTab] = useState<DrawerTab>("activity")
 
@@ -312,10 +311,6 @@ function OrchestrationLayoutInner({
   const [selectedPipelineSlug, setSelectedPipelineSlug] = useState<string | null>(null)
   const [pipelineSheetOpen, setPipelineSheetOpen] = useState(false)
 
-  // Auto-collapse left panel on mobile
-  useEffect(() => {
-    if (isMobile) setLeftCollapsed(true)
-  }, [isMobile])
 
   // Keyboard shortcuts. The shortcuts are scoped to the issues page —
   // they fire on any keystroke that isn't typed into a form control,
@@ -671,142 +666,61 @@ function OrchestrationLayoutInner({
         style={{
           gridTemplateColumns: isMobile
             ? "1fr"
-            : `${leftCollapsed ? "48px" : "280px"} 1fr ${showRightPanel ? "360px" : "0px"}`,
+            : `auto 1fr ${showRightPanel ? "360px" : "0px"}`,
           gridTemplateRows: "1fr auto",
         }}
       >
-        {/* ---- Left panel ---- */}
-        {isMobile ? (
-          <>
-            {/* Mobile: explorer toggle button */}
-            {leftCollapsed && (
-              <button
-                aria-label="Open explorer"
-                className="absolute top-1 left-2 z-20 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
-                onClick={() => setLeftCollapsed(false)}
-              >
-                <PanelLeftOpen className="h-3.5 w-3.5" />
-              </button>
-            )}
-            {/* Mobile: overlay panel */}
-            <AnimatePresence>
-              {!leftCollapsed && (
-                <>
-                  <motion.div
-                    className="fixed inset-0 bg-black/50 z-30"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: duration.short }}
-                    onClick={() => setLeftCollapsed(true)}
-                  />
-                  <motion.div
-                    className="fixed left-0 top-0 bottom-0 w-[280px] z-40 bg-card border-r border-foreground/[0.1] flex flex-col"
-                    initial={{ x: -280 }}
-                    animate={{ x: 0 }}
-                    exit={{ x: -280 }}
-                    transition={panel.sideLeft.transition}
-                  >
-                    <div className="flex items-center justify-end px-3 py-2 border-b border-foreground/[0.1]">
-                      <button
-                        aria-label="Close explorer"
-                        onClick={() => setLeftCollapsed(true)}
-                        className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="flex-1 min-h-0 flex flex-col">
-                      <UnifiedExplorer
-                        issues={issues}
-                        projects={projects}
-                        search={issueSearch}
-                        onSearchChange={setIssueSearch}
-                        selectedIssue={selectedIssue}
-                        selectedProjectId={selectedProjectId}
-                        onProjectSelect={(id) => {
-                          const newId = id === selectedProjectId ? null : id
-                          setSelectedProjectId(newId)
-                          if (newId) handleIssueClose()
-                        }}
-                        onIssueSelect={handleIssueSelect}
-                        crews={panelCrews}
-                        missions={panelMissions}
-                        onTaskSelect={handleInboxTaskSelect}
-                        filterCrewId={filterCrewId}
-                        onCrewFilter={setFilterCrewId}
-                        filterAgentId={filterAgentId}
-                        onAgentFilter={setFilterAgentId}
-                        filterPriority={filterPriority}
-                        onPriorityFilter={setFilterPriority}
-                        filterStatuses={filterStatuses}
-                        onStatusFilter={setFilterStatuses}
-                        total={issuesTotal}
-                      />
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </>
-        ) : (
-          /* Desktop: grid column left panel */
-          <div className={cn(
-            "row-span-1 border-r border-foreground/[0.1] bg-card flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
-          )}>
-            {leftCollapsed ? (
-              /* Collapsed rail — a single expand button, no empty strip. */
-              <div className="flex h-full flex-col items-center pt-1.5">
-                <SidebarCollapseButton collapsed onToggle={() => setLeftCollapsed(false)} />
-              </div>
-            ) : (
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={selectedMissionId}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -8 }}
-                  transition={{ duration: 0.2, ease: "easeOut" }}
-                  className="flex-1 min-h-0 flex flex-col"
-                >
-                  <UnifiedExplorer
-                    issues={issues}
-                    projects={projects}
-                    search={issueSearch}
-                    onSearchChange={setIssueSearch}
-                    selectedIssue={selectedIssue}
-                    selectedProjectId={selectedProjectId}
-                    onProjectSelect={(id) => {
-                      const newId = id === selectedProjectId ? null : id
-                      setSelectedProjectId(newId)
-                      handleIssueClose()
-                    }}
-                    onIssueSelect={handleIssueSelect}
-                    crews={panelCrews}
-                    missions={panelMissions}
-                    onTaskSelect={handleInboxTaskSelect}
-                    filterCrewId={filterCrewId}
-                    onCrewFilter={setFilterCrewId}
-                    filterAgentId={filterAgentId}
-                    onAgentFilter={setFilterAgentId}
-                    filterPriority={filterPriority}
-                    onPriorityFilter={setFilterPriority}
-                    // Status is the same state the chip row over the board
-                    // owns (`filterStatuses`), surfaced in the explorer too:
-                    // one filter, two affordances, rather than two filtering
-                    // surfaces that disagree. The chips carry the live counts
-                    // and are gone the moment an issue detail takes the pane;
-                    // the dropdown is always reachable.
-                    filterStatuses={filterStatuses}
-                    onStatusFilter={setFilterStatuses}
-                    onToggleCollapse={() => setLeftCollapsed(true)}
-                    total={issuesTotal}
-                  />
-                </motion.div>
-              </AnimatePresence>
-            )}
-          </div>
-        )}
+        {/* ---- Left panel: the one SecondaryPanel (Harbor 2). On a phone it is a
+             sheet opened from the top bar; the explorer's own toolbar becomes the
+             panel toolbar, so collapse is the panel's. ---- */}
+        <SecondaryPanel id="issues" label="Issues views" className="row-span-1">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={selectedMissionId}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -8 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="flex-1 min-h-0 flex flex-col"
+            >
+              <UnifiedExplorer
+                              issues={issues}
+                              projects={projects}
+                              search={issueSearch}
+                              onSearchChange={setIssueSearch}
+                              selectedIssue={selectedIssue}
+                              selectedProjectId={selectedProjectId}
+                              onProjectSelect={(id) => {
+                                const newId = id === selectedProjectId ? null : id
+                                setSelectedProjectId(newId)
+                                handleIssueClose()
+                              }}
+                              onIssueSelect={(issue) => {
+                                closePanelSheet()
+                                handleIssueSelect(issue)
+                              }}
+                              crews={panelCrews}
+                              missions={panelMissions}
+                              onTaskSelect={handleInboxTaskSelect}
+                              filterCrewId={filterCrewId}
+                              onCrewFilter={setFilterCrewId}
+                              filterAgentId={filterAgentId}
+                              onAgentFilter={setFilterAgentId}
+                              filterPriority={filterPriority}
+                              onPriorityFilter={setFilterPriority}
+                              // Status is the same state the chip row over the board
+                              // owns (`filterStatuses`), surfaced in the explorer too:
+                              // one filter, two affordances, rather than two filtering
+                              // surfaces that disagree. The chips carry the live counts
+                              // and are gone the moment an issue detail takes the pane;
+                              // the dropdown is always reachable.
+                              filterStatuses={filterStatuses}
+                              onStatusFilter={setFilterStatuses}
+                              total={issuesTotal}
+                            />
+            </motion.div>
+          </AnimatePresence>
+        </SecondaryPanel>
 
         {/* ---- Center content area ---- */}
         <div className="row-span-1 relative overflow-hidden min-h-0">
@@ -903,7 +817,7 @@ function OrchestrationLayoutInner({
             </div>
           )}
           {activeTab === "issues" && !issueDetailFullWidth && !projectDetailFullWidth && (
-            <div className={cn("h-full overflow-auto", isMobile && leftCollapsed && "pt-[48px]")}>
+            <div className="h-full overflow-auto">
               <IssuesToolbarStrip
                 loaded={issues.length}
                 total={issuesTotal}

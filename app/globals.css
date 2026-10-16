@@ -1177,6 +1177,67 @@ body {
     text-align: left;
   }
   .rail-user:hover, .rail-user[data-state="open"] { background: var(--row-hover-bg); }
+  /* SecondaryPanel (Harbor 2 M3): the second column. */
+  .secondary-panel {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    width: 272px;
+    min-height: 0;
+    border-right: 1px solid var(--border);
+    background: var(--background);
+  }
+  .secondary-panel[data-collapsed="true"] { width: 44px; }
+  .secondary-panel-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    height: 48px;
+    padding: 0 8px 0 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .secondary-panel-rail {
+    display: flex;
+    justify-content: center;
+    padding-top: 10px;
+  }
+  .secondary-panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 4px 6px 14px;
+  }
+  /* Content that brings its own kit toolbar (existing explorers). */
+  .secondary-panel-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .secondary-panel-footer {
+    position: sticky;
+    bottom: 0;
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+    background: var(--card);
+  }
+  .secondary-panel-toggle {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    color: var(--muted-foreground);
+  }
+  .secondary-panel-toggle:hover { background: var(--row-hover-bg); color: var(--foreground); }
+  .secondary-panel-toggle > svg { width: 16px; height: 16px; }
   /* The area's tile at the start of the top bar's breadcrumbs. */
   .area-tile {
     display: inline-grid;
