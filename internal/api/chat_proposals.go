@@ -33,7 +33,7 @@ func (r *Router) readProposal(ctx context.Context, a chataudience.Receipt, id st
 	if err = proposalItemsVisible(ctx, tx, p); err != nil {
 		return ChatCardProjection{}, err
 	}
-	if p.Card.Status == "draft" && proposalHuman(ctx, tx, a, true) == nil {
+	if p.Card.Status == "draft" && canScope(ctx, scopeForRoute("/api/v1/chats/{chatId}/proposals/{sourceId}")) && proposalHuman(ctx, tx, a, true) == nil {
 		p.Card.AllowedActions = []string{"view", "edit", "confirm", "discard"}
 	}
 	return ChatCardProjection{ChatID: p.Chat, Ref: p.response()}, nil
@@ -124,7 +124,7 @@ func (r *Router) chatProposals(w http.ResponseWriter, req *http.Request) {
 			proposalError(w, e2)
 			return
 		}
-		if p.Card.Status == "draft" && proposalHuman(req.Context(), tx, *a, true) == nil {
+		if p.Card.Status == "draft" && canScope(req.Context(), scopeForRoute("/api/v1/chats/{chatId}/proposals/{sourceId}")) && proposalHuman(req.Context(), tx, *a, true) == nil {
 			p.Card.AllowedActions = []string{"view", "edit", "confirm", "discard"}
 		}
 		page.Refs = append(page.Refs, p.response())
