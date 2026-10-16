@@ -48,6 +48,13 @@ func TestSlidesCommentsRestoreHistoryValidationAndProjectionRebuild(t *testing.T
 			r["last_missing_revision"] = nil
 			r["restored_at_revision"] = nil
 		}, true},
+		{"renamed_thread_without_receipts", func(d *backup.DBDump) {
+			d.Tables["slides_comment_threads"][0]["id"] = "renamed_thread"
+			for _, r := range d.Tables["slides_comment_events"] {
+				r["thread_id"] = "renamed_thread"
+			}
+			d.Tables["slides_comment_receipts"] = nil
+		}, false},
 		{"bad_count", func(d *backup.DBDump) { d.Tables["slides_comment_threads"][0]["comment_count"] = 1 }, false},
 		{"bad_version", func(d *backup.DBDump) { d.Tables["slides_comment_threads"][0]["version"] = 3 }, false},
 		{"missing_original_anchor", func(d *backup.DBDump) { d.Tables["slides_comment_threads"][0]["element_id"] = "never_existed" }, false},
@@ -110,7 +117,7 @@ func TestSlidesCommentsRestoreHistoryValidationAndProjectionRebuild(t *testing.T
 	}
 	forkStore := slides.New(target, slides.Options{})
 	thread, err := forkStore.CommentThread(t.Context(), forkKey, threadID, backupSlideAuthority)
-	if err != nil || thread.Anchor != anchor || thread.Status != "restored" || forkKey.PageID == key.PageID {
+	if err != nil || thread.ID != create.MutationID || thread.Anchor != anchor || thread.Status != "restored" || forkKey.PageID == key.PageID {
 		t.Fatal(thread, err)
 	}
 	var count int

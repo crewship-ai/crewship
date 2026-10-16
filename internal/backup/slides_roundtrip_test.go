@@ -153,6 +153,11 @@ func TestSlidesInstanceEncryptedRecovery(t *testing.T) {
 		if _, err := seedBackupSlides(t, f.db, test.ws, test.page, test.owner); err != nil {
 			t.Fatal(err)
 		}
+		key := slides.Key{WorkspaceID: test.ws, PageID: test.page}
+		store := slides.New(f.db, slides.Options{})
+		if _, err := store.CreateComment(t.Context(), key, slides.CreateCommentRequest{PageID: key.PageID, SchemaVersion: 1, BaseRev: 2, MutationID: "instance_comment", Anchor: slides.CommentAnchor{AnchorSchemaVersion: 1, Kind: "slide", SlideID: "slide_one", Revision: 2}, Body: "Instance retained comment"}, backupSlideAuthority); err != nil {
+			t.Fatal(err)
+		}
 	}
 	bundle := f.create(t, true)
 	dir := filepath.Join(t.TempDir(), "recovered")
@@ -166,6 +171,10 @@ func TestSlidesInstanceEncryptedRecovery(t *testing.T) {
 	defer target.Close()
 	store := slides.New(target.DB, slides.Options{})
 	for _, key := range []slides.Key{{WorkspaceID: "ws_e2e_1", PageID: "instance-slides"}, {WorkspaceID: "ws_lab", PageID: "foreign-instance-slides"}} {
+		thread, err := store.CommentThread(t.Context(), key, "instance_comment", backupSlideAuthority)
+		if err != nil || thread.Anchor.Revision != 2 || thread.FirstComment.Body != "Instance retained comment" || thread.ProjectionRevision != 2 {
+			t.Fatal("instance comment recovery", thread, err)
+		}
 		for _, rev := range []int64{0, 1, 2} {
 			state, err := store.Read(t.Context(), key, rev, backupSlideAuthority)
 			if err != nil || state.Deck.DeckID != key.PageID {
