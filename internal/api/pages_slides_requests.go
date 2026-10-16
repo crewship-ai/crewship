@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strconv"
@@ -89,10 +90,13 @@ func (h *slideHTTP) MutateSelectedRequest(w http.ResponseWriter, r *http.Request
 			slideHTTPError(w, err)
 			return
 		}
+		if cancel, ok := h.pages.slidesRequestCancels.Load(result.RequestID); ok {
+			cancel.(context.CancelFunc)()
+		}
 		writeJSON(w, 200, SlidesSelectedCancelResponse{MutationID: result.MutationID, RequestID: result.RequestID, Version: result.Version, Status: result.Status, Duplicate: result.Duplicate})
 		return
 	}
-	if h.pages.artifactDispatch == nil && h.pages.hub == nil {
+	if h.pages.slidesRequestsUnavailable.Load() || (h.pages.artifactDispatch == nil && h.pages.hub == nil) {
 		replyError(w, 503, "Selected agent runtime unavailable")
 		return
 	}

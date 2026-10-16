@@ -238,7 +238,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.SlidesRequestID != "" {
-		if body.ArtifactHumanReceipt == nil || bindSelectedSlidesRun(r, h.db, body.SlidesRequestID, body.ID, body.ArtifactHumanReceipt) != nil {
+		if body.ArtifactHumanReceipt == nil || h.slidesPages == nil || h.slidesPages.bindSelectedSlidesRun(r, body.SlidesRequestID, body.ID, body.ArtifactHumanReceipt) != nil {
 			replyError(w, 403, "Slides selected request admission refused")
 			return
 		}

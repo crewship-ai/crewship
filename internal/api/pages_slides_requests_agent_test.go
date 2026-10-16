@@ -99,6 +99,23 @@ func TestSlidesSelectedActualSidecarRouterFrozenSnapshotReplacementReplayAndRevo
 	started := httptest.NewRecorder()
 	router.ServeHTTP(started, request)
 	wantCode(t, started, 201, "actual trusted run start and selected binding")
+	// Constructor-only restart fixtures deliberately share the test DB, while
+	// real daemons are excluded by the kernel writer lease. Neither a captured
+	// pre-start handler nor an alternate zero-value handler may re-admit this run.
+	for _, candidate := range []*PageHandler{NewPageHandler(f.db, nil, newTestLogger()), {db: f.db}} {
+		if err := candidate.bindSelectedSlidesRun(httptest.NewRequest("POST", "/", nil), admitted.ID, "selected-run", receipt); err == nil {
+			t.Fatal("pre-start/alternate handler bypassed run admission fence")
+		}
+		tx, err := f.db.BeginTx(t.Context(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.WithValue(t.Context(), artifactRunKey{}, &artifactRunAuthority{WorkspaceID: key.WorkspaceID, AgentID: "selected-agent", CrewID: "selected-crew", RunID: "selected-run", HumanUserID: "boss", ChatID: "selected-chat"})
+		if _, err := (&slideHTTP{pages: candidate}).selectedRunAuthority(key, admitted.ID)(ctx, tx); err == nil {
+			t.Fatal("pre-start/alternate handler admitted callback before recovery tick")
+		}
+		tx.Rollback()
+	}
 	host := httptest.NewServer(router)
 	defer host.Close()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

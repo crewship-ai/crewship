@@ -1415,6 +1415,12 @@ var startCmd = &cobra.Command{
 							ph.RunDocumentRequestWorker(artifactCtx, quiesce.SchedulerGate(schedulerLease))
 						}()
 						defer func() { stopArtifacts(); <-documentsDone }()
+						slidesDone := make(chan struct{})
+						go func() {
+							defer close(slidesDone)
+							ph.RunSelectedSlidesRequestWorker(artifactCtx, quiesce.SchedulerGate(schedulerLease))
+						}()
+						defer func() { stopArtifacts(); <-slidesDone }()
 						logger.Info("pages freshness sweeper wired (on_failure → issue; 1m tick)")
 					}
 				}

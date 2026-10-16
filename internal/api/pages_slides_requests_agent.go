@@ -23,6 +23,9 @@ type SlidesSelectedReplacementResponse struct {
 
 func (h *slideHTTP) selectedRunAuthority(key slides.Key, id string) slides.Authorize {
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
+		if h.pages.preStartupSelectedRequest(id) {
+			return "", errSlideAccess
+		}
 		a, ok := ctx.Value(artifactRunKey{}).(*artifactRunAuthority)
 		if !ok || a.WorkspaceID != key.WorkspaceID {
 			return "", errSlideAccess

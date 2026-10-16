@@ -9,14 +9,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/slides"
 )
 
-func bindSelectedSlidesRun(r *http.Request, db *sql.DB, id, run string, expected *chataudience.Receipt) error {
-	if expected == nil || InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" {
+func (pages *PageHandler) bindSelectedSlidesRun(r *http.Request, id, run string, expected *chataudience.Receipt) error {
+	if expected == nil || pages.preStartupSelectedRequest(id) || InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" {
 		return errSlideAccess
 	}
-	pages := &PageHandler{db: db}
 	h := &slideHTTP{pages: pages, store: pages.newSlidesStore()}
 	var key slides.Key
-	if db.QueryRowContext(r.Context(), `SELECT workspace_id,page_id FROM slides_requests WHERE id=?`, id).Scan(&key.WorkspaceID, &key.PageID) != nil {
+	if pages.db.QueryRowContext(r.Context(), `SELECT workspace_id,page_id FROM slides_requests WHERE id=?`, id).Scan(&key.WorkspaceID, &key.PageID) != nil {
 		return errSlideAccess
 	}
 	authorize := func(ctx context.Context, tx *sql.Tx) (string, error) {
