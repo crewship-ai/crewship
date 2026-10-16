@@ -143,7 +143,7 @@ func (h *QueryHandler) resolveTextDecision(req *http.Request, id, workspace, use
 	var role string
 	err = tx.QueryRowContext(req.Context(), `SELECT wm.role FROM workspace_members wm JOIN users u ON u.id=wm.user_id AND u.suspended_at IS NULL WHERE wm.workspace_id=? AND wm.user_id=?`, workspace, user).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && !canRole(role, "read") {
-		return false, errTextDecisionDenied
+		return false, errDecisionDenied
 	}
 	if err != nil {
 		return false, err
@@ -155,14 +155,14 @@ func (h *QueryHandler) resolveTextDecision(req *http.Request, id, workspace, use
 			return false, e
 		}
 		if a == nil {
-			return false, errTextDecisionDenied
+			return false, errDecisionDenied
 		}
 		source, sourceErr := readTextDecision(req.Context(), tx, id, workspace)
 		if sourceErr != nil {
 			return false, sourceErr
 		}
 		if source.Chat != a.ChatID || source.Agent != a.AgentID || source.Run == "" {
-			return false, errTextDecisionDenied
+			return false, errDecisionDenied
 		}
 		var key, hash string
 		if err = tx.QueryRowContext(req.Context(), `SELECT COALESCE(answer_operation_key,''),COALESCE(answer_operation_hash,'') FROM escalations WHERE id=? AND workspace_id=?`, id, workspace).Scan(&key, &hash); err != nil {
@@ -175,14 +175,14 @@ func (h *QueryHandler) resolveTextDecision(req *http.Request, id, workspace, use
 			return true, nil
 		}
 		if !canRole(role, "create") {
-			return false, errTextDecisionDenied
+			return false, errDecisionDenied
 		}
 		if source.version() != op.Version {
 			return false, errDecisionVersion
 		}
 	}
 	if op == nil && !canRole(role, "create") {
-		return false, errTextDecisionDenied
+		return false, errDecisionDenied
 	}
 	var key, hash any
 	if op != nil {
@@ -207,7 +207,8 @@ func (h *QueryHandler) resolveTextDecision(req *http.Request, id, workspace, use
 
 func (r *Router) chatDecisionGet(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if req.PathValue("sourceType") != "escalation" {
+	adapter, ok := r.decisionSourceAdapterFor(req.PathValue("sourceType"))
+	if !ok {
 		replyError(w, 404, "Card not found")
 		return
 	}
@@ -215,7 +216,7 @@ func (r *Router) chatDecisionGet(w http.ResponseWriter, req *http.Request) {
 		r.queryHandler.sweepExpiredEscalationsBestEffort(req.Context(), WorkspaceIDFromContext(req.Context()))
 	}
 	projected := httptest.NewRecorder()
-	r.ChatCardProjectionHandler(r.escalationDecision)(projected, req)
+	r.ChatCardProjectionHandler(adapter.Read)(projected, req)
 	if projected.Code != http.StatusOK {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(projected.Code)
@@ -361,7 +362,7 @@ func (r *Router) chatDecisionAnswer(w http.ResponseWriter, req *http.Request) {
 	}
 	key := req.Header.Get("Idempotency-Key")
 	if !cardText(key, 1, 200) || strings.TrimSpace(key) != key || body.SourceID != req.PathValue("sourceId") || body.Action != "answer" || body.ActionID != "" || len(body.Values) != 1 {
-		replyError(w, 400, "Invalid decision answer")
+		replyError(w, 400, errDecisionInput.Error())
 		return
 	}
 	var answer string
