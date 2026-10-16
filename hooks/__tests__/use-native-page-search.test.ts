@@ -110,6 +110,23 @@ describe("native Page content search authority lifecycle", () => {
     } finally { vi.useRealTimers() }
   })
 
+  it("an older batch expiry cannot clear a newer query result", async () => {
+    vi.useFakeTimers()
+    try {
+      fetch.mockResolvedValueOnce(response("old-page")).mockResolvedValueOnce(response("new-page"))
+      const { result, unmount } = renderHook(() => useNativePageSearch("workspace", "viewer", true))
+      await act(async () => { await result.current.search("old needle") })
+      act(() => vi.advanceTimersByTime(14000))
+      await act(async () => { await result.current.search("new needle") })
+      act(() => vi.advanceTimersByTime(1000))
+      expect(result.current.matches[0].page_id).toBe("new-page")
+      act(() => vi.advanceTimersByTime(14000))
+      expect(result.current.matches).toEqual([])
+      expect(fetch).toHaveBeenCalledTimes(2)
+      unmount()
+    } finally { vi.useRealTimers() }
+  })
+
   it("disabled or signed-out contexts never send a request", async () => {
     const { result, rerender } = renderHook(({ enabled, viewer }) => useNativePageSearch("workspace", viewer, enabled), { initialProps: { enabled: false, viewer: "viewer" as string | null } })
     await act(async () => { await result.current.search("needle") })
