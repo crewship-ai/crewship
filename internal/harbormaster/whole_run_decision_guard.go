@@ -44,6 +44,12 @@ func guardHumanWholeRunDecision(ctx context.Context, q DBTX, row *Request, actor
 	if direct != 1 {
 		return ErrDecisionDenied
 	}
+	// Refusing work grants no execution authority. A currently authorized
+	// operator must still be able to settle this gate after its requester loses
+	// access; only approval needs a live requester execution receipt.
+	if row.Status == StatusDenied {
+		return nil
+	}
 	origin, err := runauthority.Resolve(ctx, q, run, row.AgentID, row.WorkspaceID)
 	if err != nil || origin.TriggerType != "USER" || origin.HumanAuthority == nil || origin.ChatID != chat || origin.TriggerMessageID != trigger {
 		return ErrDecisionDenied

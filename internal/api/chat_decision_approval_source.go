@@ -99,19 +99,17 @@ func (r *Router) runApprovalDecision(ctx context.Context, a chataudience.Receipt
 	switch row.Status {
 	case harbormaster.StatusPending:
 		origin, e := runauthority.Resolve(ctx, r.db, s.Run, a.AgentID, a.WorkspaceID)
-		if e != nil {
-			if errors.Is(e, runauthority.ErrUnavailable) || errors.Is(e, runauthority.ErrIdentityMismatch) || errors.Is(e, runauthority.ErrRequesterStale) {
-				return ChatCardProjection{}, sql.ErrNoRows
-			}
+		if e != nil && !errors.Is(e, runauthority.ErrUnavailable) && !errors.Is(e, runauthority.ErrIdentityMismatch) && !errors.Is(e, runauthority.ErrRequesterStale) {
 			return ChatCardProjection{}, e
 		}
-		if origin.HumanAuthority == nil || *origin.HumanAuthority != s.Requester || origin.TriggerType != "USER" {
-			return ChatCardProjection{}, sql.ErrNoRows
-		}
+		requesterLive := e == nil && origin.HumanAuthority != nil && *origin.HumanAuthority == s.Requester && origin.TriggerType == "USER"
 		if row.TimeoutAt != nil && !row.TimeoutAt.After(time.Now()) {
 			d.Status = "expired"
 		} else if (role == "OWNER" || role == "ADMIN") && canScope(ctx, "workspace:admin") {
-			d.AllowedActions = append(d.AllowedActions, "approve", "reject")
+			if requesterLive {
+				d.AllowedActions = append(d.AllowedActions, "approve")
+			}
+			d.AllowedActions = append(d.AllowedActions, "reject")
 		}
 	case harbormaster.StatusApproved, harbormaster.StatusDenied:
 		if row.DecidedBy == "" || row.DecidedAt == nil {

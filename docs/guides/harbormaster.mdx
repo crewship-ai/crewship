@@ -383,7 +383,10 @@ not serialized; retries recheck current read access and cannot transfer to a
 changed actor or answer.
 
 Newly host-correlated synchronous human approvals also enforce expiry and current
-operator/requester admission in the canonical Inbox/store transaction. A rejected
+operator admission in the canonical Inbox/store transaction. Approving also
+requires a live original requester. A currently authorized operator may reject a
+pending run after its requester loses access, because refusal grants no execution
+authority. A rejected
 check rolls back the provisional decision and emits no outcome. The committed
 winner alone runs the existing journal/reward tail. Uncorrelated legacy, per-tool
 and nonblocking approval semantics are preserved.
