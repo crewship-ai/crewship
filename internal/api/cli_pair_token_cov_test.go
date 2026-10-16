@@ -37,7 +37,7 @@ func covCLIPairHandler(t *testing.T, db *sql.DB) *CliPairHandler {
 func covCLIStartCode(t *testing.T, h *CliPairHandler, userID, email string) string {
 	t.Helper()
 	req := httptest.NewRequest("POST", "/api/v1/cli/pair/start", bytes.NewBufferString(`{}`))
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: email}))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{SessionID: pairTestSession(t, h.db, userID), ID: userID, Email: email}))
 	rr := httptest.NewRecorder()
 	h.Start(rr, req)
 	if rr.Code != http.StatusOK {
@@ -61,7 +61,7 @@ func TestCovCLIPairStart_TolerantOfGarbageBody(t *testing.T) {
 	h := NewCliPairHandler(db, newTestLogger())
 
 	req := httptest.NewRequest("POST", "/api/v1/cli/pair/start", bytes.NewBufferString(`not json at all`))
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "test@example.com"}))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{SessionID: pairTestSession(t, db, userID), ID: userID, Email: "test@example.com"}))
 	rr := httptest.NewRecorder()
 	h.Start(rr, req)
 
@@ -80,7 +80,7 @@ func TestCovCLIPairStart_StripsBadAdapterHint(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/api/v1/cli/pair/start",
 		bytes.NewBufferString(`{"adapter_hint":"bad;hint with spaces"}`))
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "test@example.com"}))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{SessionID: pairTestSession(t, db, userID), ID: userID, Email: "test@example.com"}))
 	rr := httptest.NewRecorder()
 	h.Start(rr, req)
 	if rr.Code != http.StatusOK {
@@ -109,7 +109,7 @@ func TestCovCLIPairStart_DBError500(t *testing.T) {
 	db.Close() // fault injection
 
 	req := httptest.NewRequest("POST", "/api/v1/cli/pair/start", bytes.NewBufferString(`{}`))
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "test@example.com"}))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{SessionID: "db-error-session", ID: userID, Email: "test@example.com"}))
 	rr := httptest.NewRecorder()
 	h.Start(rr, req)
 	if rr.Code != http.StatusInternalServerError {
@@ -176,7 +176,7 @@ func TestCovCLIPairPoll_PendingHappy(t *testing.T) {
 	// Start with a valid hint so the hint.Valid branch in Poll fires.
 	startReq := httptest.NewRequest("POST", "/api/v1/cli/pair/start",
 		bytes.NewBufferString(`{"adapter_hint":"CLAUDE_CODE"}`))
-	startReq = startReq.WithContext(withUser(startReq.Context(), &AuthUser{ID: userID}))
+	startReq = startReq.WithContext(withUser(startReq.Context(), &AuthUser{SessionID: pairTestSession(t, db, userID), ID: userID}))
 	startRR := httptest.NewRecorder()
 	h.Start(startRR, startReq)
 	var start pairStartResponse

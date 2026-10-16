@@ -28,7 +28,7 @@ func TestPairStart_IssuesCodeForAuthedUser(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/api/v1/auth/pair/start", bytes.NewBufferString(`{"adapter_hint":"CLAUDE_CODE"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "test@example.com"}))
+	req = req.WithContext(withUser(req.Context(), &AuthUser{SessionID: pairTestSession(t, db, userID), ID: userID, Email: "test@example.com"}))
 	rr := httptest.NewRecorder()
 
 	h.Start(rr, req)
@@ -78,7 +78,7 @@ func TestPairRedeem_SingleUse(t *testing.T) {
 	// Issue a code via Start so the test exercises the real generator
 	// path (not a hand-rolled SQL insert).
 	startReq := httptest.NewRequest("POST", "/api/v1/auth/pair/start", bytes.NewBufferString(`{}`))
-	startReq = startReq.WithContext(withUser(startReq.Context(), &AuthUser{ID: userID, Email: "test@example.com"}))
+	startReq = startReq.WithContext(withUser(startReq.Context(), &AuthUser{SessionID: pairTestSession(t, db, userID), ID: userID, Email: "test@example.com"}))
 	rrStart := httptest.NewRecorder()
 	h.Start(rrStart, startReq)
 	var start pairStartResponse
@@ -181,7 +181,7 @@ func TestPairPoll_DoesNotLeakOtherUserCodes(t *testing.T) {
 
 	// owner issues a code.
 	startReq := httptest.NewRequest("POST", "/api/v1/auth/pair/start", bytes.NewBufferString(`{}`))
-	startReq = startReq.WithContext(withUser(startReq.Context(), &AuthUser{ID: owner, Email: "test@example.com"}))
+	startReq = startReq.WithContext(withUser(startReq.Context(), &AuthUser{SessionID: pairTestSession(t, db, owner), ID: owner, Email: "test@example.com"}))
 	rrStart := httptest.NewRecorder()
 	h := newPairHandler(t, db)
 	h.Start(rrStart, startReq)
