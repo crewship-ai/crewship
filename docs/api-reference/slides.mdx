@@ -11,7 +11,7 @@ tag: Experimental
 Schema 1 admits bounded text, rectangle/ellipse shapes and rectangular tables.
 The [storage contract](../specs/slides.md) and generated OpenAPI describe the
 closed nested schema, canonical hashing, aggregate table-cell bounds and exact
-operation union. Images, author HTML/JavaScript, external resources, native UI,
+operation union. Schema2 adds private PNG/JPEG references described below. Author HTML/JavaScript, external resources, native UI,
 selected-edit agent admission are separate cuts. Human stable comments are
 described below. The Page descriptor
 remains unsupported with `viewer-unavailable`. No internal Slides agent route is
@@ -229,3 +229,24 @@ human history event; it does not mutate the deck revision or original anchor.
 
 **Errors:** 400, 401, 403, 404, 409 stale version/Page or unchanged resolution,
 429 retained-history quota. Exact session/token and ACL are checked even on retry.
+
+## Schema2 image requests
+
+The canonical image element is `{id,type:"image",x,y,width,height,image:{asset_id,
+expected_sha256,alt}}`. `asset_id` must name a live same-Page private raster; no
+URL input is accepted. At most32 unique asset IDs/32MiB canonical image bytes per
+revision and the existing Page staging/history quota apply. SHA mismatch, missing
+or expired assets and corrupt bytes reject the entire revision with400; storage
+write failures return500. Promotion, exact immutable revision pins and request
+receipt commit atomically. Retried successful requests retain their own revision.
+
+`POST /initialize` explicitly accepts schema1 or schema2 matching the deck. First
+image insertion into an existing schema1 head uses `POST /patch` with original
+`schema_version:1`, `base_rev`, operation `if_hash` and both
+`target_schema_version:2`/`if_content_hash` naming the original whole head.
+The upgrade must attach an image; missing/stale fences do not auto-rebase. Ordinary
+patch/reorder/restore envelopes name the current head schema. Restore appends the
+selected immutable source version, retaining mixed1/2 history. Comments keep
+their independent `schema_version:1` and `anchor_schema_version:1`, including image
+element anchors; schema2 does not admit comment protocol2 or image text ranges.
+See the [raster storage/recovery contract](../specs/slides.md).

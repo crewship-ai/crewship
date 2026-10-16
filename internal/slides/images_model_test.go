@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -137,5 +138,37 @@ func TestImagesRequireTransactionGuard(t *testing.T) {
 	}
 	if state := currentState(t, store, key); state.Revision != 1 || state.SchemaVersion != 1 {
 		t.Fatal("unguarded image changed head")
+	}
+}
+
+func TestImageSchemaSharedFixture(t *testing.T) {
+	raw, err := os.ReadFile("../../testdata/slides-schema-v2.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Deck      json.RawMessage `json:"deck"`
+		Canonical string          `json:"canonical_json"`
+		Hash      string          `json:"hash"`
+	}
+	if err = json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	deck, err := Decode(fixture.Deck)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := Canonical(deck)
+	if err != nil || string(canonical) != fixture.Canonical {
+		t.Fatalf("schema2 canonical mismatch %v", err)
+	}
+	hash, err := DeckHash(deck)
+	if err != nil || hash != fixture.Hash {
+		t.Fatalf("schema2 shared hash mismatch %s %v", hash, err)
+	}
+	deck.SchemaVersion = 1
+	raw, _ = json.Marshal(deck)
+	if _, err = Decode(raw); err == nil {
+		t.Fatal("v2 image fixture admitted as v1")
 	}
 }
