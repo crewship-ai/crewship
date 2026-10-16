@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/crewship-ai/crewship/internal/database"
 	"io"
 	"log/slog"
 	"os"
@@ -13,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 func storeAuthority(context.Context, *sql.Tx) (string, error) { return "user:slides-owner", nil }

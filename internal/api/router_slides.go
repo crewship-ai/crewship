@@ -1,8 +1,9 @@
 package api
 
 import (
-	"github.com/crewship-ai/crewship/internal/slides"
 	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/slides"
 )
 
 func (r *Router) registerSlideRoutes() {

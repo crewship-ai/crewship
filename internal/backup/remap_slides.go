@@ -3,8 +3,9 @@ package backup
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/slides"
 	"math"
+
+	"github.com/crewship-ai/crewship/internal/slides"
 )
 
 // Single rewrite authority for canonical Slides snapshots. A future asset

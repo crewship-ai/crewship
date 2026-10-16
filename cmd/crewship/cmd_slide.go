@@ -17,8 +17,9 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/crewship-ai/crewship/internal/slides"
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/slides"
 )
 
 func newSlideCommand() *cobra.Command {

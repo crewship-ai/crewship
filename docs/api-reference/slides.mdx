@@ -39,7 +39,7 @@ retries preserve the original payload. No automatic rebase is performed.
 Deck contains `{schema_version,deck_id,width,height,theme,slide_order,slides}`;
 canonical slides collection sorts by ID while `slide_order` owns presentation order.
 
-**Permissions:** Current human Page read access and `pages:read` CLI scope.
+**Auth:** Current human Page read access and `pages:read` CLI scope.
 
 **Errors:** 401 invalid credential, 403 inaccessible Page, 404 no Slides,
 500 invalid/corrupt stored state. Private content never accompanies a denial.
@@ -52,7 +52,7 @@ canonical slides collection sorts by ID while `slide_order` owns presentation or
 elements:[{id,type,hash}]}]}` in presentation order. Hashes bind the confirmed
 objects; full payloads come from the read endpoint.
 
-**Permissions:** Current Page read access and `pages:read` CLI scope.
+**Auth:** Current Page read access and `pages:read` CLI scope.
 
 **Errors:** 401 invalid credential, 403 denied, 404 no Slides, 500 corrupt state.
 
@@ -64,7 +64,7 @@ objects; full payloads come from the read endpoint.
 schema_version,content_hash,actor,kind,mutation_id,created_at}` records, bounded
 by the 1000-revision retention quota. Actor attribution comes from trusted authority.
 
-**Permissions:** Current Page read access and `pages:read` CLI scope.
+**Auth:** Current Page read access and `pages:read` CLI scope.
 
 **Errors:** 401 invalid credential, 403 denied, 404 no Slides, 500 storage failure.
 
@@ -75,7 +75,7 @@ by the 1000-revision retention quota. Actor attribution comes from trusted autho
 **Response:** The same confirmed state shape as the head read, pinned to the
 requested immutable revision. Reading never changes the current head.
 
-**Permissions:** Current Page read access and `pages:read` CLI scope.
+**Auth:** Current Page read access and `pages:read` CLI scope.
 
 **Errors:** 400 invalid revision, 401 invalid credential, 403 denied,
 404 missing revision, 500 corrupt state.
@@ -88,7 +88,7 @@ bounded deck's `deck_id` must equal `page_id`; the Page must contain no other fo
 **Response:** Durable mutation receipt. An exact authenticated replay returns
 `duplicate:true` without appending another revision.
 
-**Permissions:** Human Page owner with current write access and `pages:write` scope.
+**Auth:** Human Page owner with current write access and `pages:write` scope.
 
 **Errors:** 400 invalid JSON/model, 401 invalid credential, 403 denied,
 409 existing head or identity/replay conflict, 429 retained quota, 500 storage failure.
@@ -107,7 +107,7 @@ inside this batch; final deck limits apply atomically. Deleted IDs cannot be reu
 
 **Response:** Durable mutation receipt, or no change when any precondition fails.
 
-**Permissions:** Current human Page write access and `pages:write` CLI scope.
+**Auth:** Current human Page write access and `pages:write` CLI scope.
 
 **Errors:** 400 invalid candidate, 401 invalid credential, 403 denied,
 404 missing Slides, 409 revision/order/hash/identity/replay conflict,
@@ -120,7 +120,7 @@ slide_order}`. The array must include every existing slide ID exactly once.
 
 **Response:** Durable mutation receipt with the confirmed order version.
 
-**Permissions:** Current human Page write access and `pages:write` CLI scope.
+**Auth:** Current human Page write access and `pages:write` CLI scope.
 
 **Errors:** 400 invalid order, 401 invalid credential, 403 denied, 404 missing Slides,
 409 revision/order/identity/replay conflict, 429 retained quota, 500 storage failure.
@@ -133,7 +133,7 @@ revision}`. The target is a retained immutable revision in the same Page namespa
 **Response:** Durable receipt for a new head revision containing the retained
 snapshot. Original identities may revive; current authorization remains unchanged.
 
-**Permissions:** Current human Page write access and `pages:write` CLI scope.
+**Auth:** Current human Page write access and `pages:write` CLI scope.
 
 **Errors:** 400 invalid candidate, 401 invalid credential, 403 denied,
 404 missing Slides/revision, 409 revision/order/identity/replay conflict,
