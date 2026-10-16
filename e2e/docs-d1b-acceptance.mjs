@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process'
 import { randomBytes, randomUUID, createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { request as unixRequest } from 'node:http'
-import { mkdtemp, writeFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve, join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -145,7 +145,7 @@ try {
   const errors = []
   for (const page of [alice, bob]) page.on('pageerror', error => errors.push(error.message))
   await alice.goto('/pages')
-  await alice.getByRole('button', { name: 'New Doc or artifact', exact: true }).first().click()
+  await alice.getByRole('button', { name: 'New Doc, Slides or artifact', exact: true }).click()
   await alice.getByLabel('Content', { exact: true }).selectOption('document')
   await alice.getByLabel('Name', { exact: true }).fill('D1b acceptance document')
   await alice.getByLabel('Page address', { exact: true }).fill('d1b-acceptance')
