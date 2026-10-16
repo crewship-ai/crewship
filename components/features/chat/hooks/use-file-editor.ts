@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { useConfirm, type ConfirmOptions } from "@/components/ui/use-confirm"
 
 /**
  * Which tree a file was read from — and therefore the only tree it can be
@@ -64,9 +65,19 @@ interface UseFileEditorReturn {
   setEditorDirty: (dirty: boolean) => void
   setEditorExpanded: (expanded: boolean) => void
   /** The scope is required: every caller has to say which tree it is handing over. */
-  openFileEditor: (node: { path: string; name: string }, scope: EditorScope) => void
-  closeEditor: () => void
+  openFileEditor: (node: { path: string; name: string }, scope: EditorScope) => Promise<void>
+  closeEditor: () => Promise<void>
   handleEditorSave: (content: string) => void
+  /** Asks before unsaved edits are dropped; render it once beside the editor. */
+  confirmDialog: React.ReactElement
+}
+
+const DISCARD_FILE_CHANGES: ConfirmOptions = {
+  title: "Discard unsaved file changes?",
+  description: "The edits made since the last save are lost.",
+  confirmLabel: "Discard changes",
+  cancelLabel: "Keep editing",
+  destructive: true,
 }
 
 export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): UseFileEditorReturn {
@@ -83,6 +94,7 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
   const [editorSaving, setEditorSaving] = useState(false)
   const editorAbortRef = useRef<AbortController | null>(null)
   const saveRef = useRef<(() => void) | null>(null)
+  const { ask, dialog: confirmDialog } = useConfirm()
 
   // Clear editor and abort in-flight downloads when agent/workspace context changes
   useEffect(() => {
@@ -93,9 +105,10 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
     setEditorExpanded(false)
   }, [agentId, workspaceId, setEditorDirty])
 
-  const openFileEditor = useCallback((node: { path: string; name: string }, scope: EditorScope) => {
+  const openFileEditor = useCallback(async (node: { path: string; name: string }, scope: EditorScope) => {
     if (!workspaceId) return
-    if (dirtyRef.current && !window.confirm("Discard unsaved file changes?")) return
+    // Clean editors switch at once, in this same tick; only dirty ones wait for the answer.
+    if (dirtyRef.current && !(await ask(DISCARD_FILE_CHANGES))) return
     editorAbortRef.current?.abort()
     const ac = new AbortController()
     editorAbortRef.current = ac
@@ -110,17 +123,17 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
       .then((text) => { if (!ac.signal.aborted) setEditorContent(text) })
       .catch((err) => { if (err.name !== "AbortError") { setEditorContent(null); toast.error("Failed to load file") } })
       .finally(() => { if (!ac.signal.aborted) setEditorLoading(false) })
-  }, [agentId, workspaceId, setEditorDirty])
+  }, [agentId, workspaceId, setEditorDirty, ask])
 
-  const closeEditor = useCallback(() => {
-    if (dirtyRef.current && !window.confirm("Discard unsaved file changes?")) return
+  const closeEditor = useCallback(async () => {
+    if (dirtyRef.current && !(await ask(DISCARD_FILE_CHANGES))) return
     editorAbortRef.current?.abort()
     setEditorFile(null)
     setEditorContent(null)
     setEditorLoading(false)
     setEditorDirty(false)
     setEditorExpanded(false)
-  }, [setEditorDirty])
+  }, [setEditorDirty, ask])
 
   const handleEditorSave = useCallback((content: string) => {
     if (!workspaceId || !editorFile) return
@@ -153,5 +166,6 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
     openFileEditor,
     closeEditor,
     handleEditorSave,
+    confirmDialog,
   }
 }

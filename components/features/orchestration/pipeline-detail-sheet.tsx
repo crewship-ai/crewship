@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useConfirm } from "@/components/ui/use-confirm"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
@@ -83,6 +84,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<"rollback" | "export" | null>(null)
+  const { ask, dialog } = useConfirm()
   const scopeRef = useRef<DetailScope | null>(null)
   const { runs } = usePipelineRuns(open ? workspaceId : null, open ? slug : null)
 
@@ -115,7 +117,17 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
   const handleRollback = async (version: number) => {
     const scope = scopeRef.current
     if (!scope || pendingAction !== null) return
-    if (!confirm(`Rollback to version ${version}? History is preserved; the next save will be version ${(versions[0]?.version ?? 0) + 1}.`)) return
+    const ok = await ask({
+      title: `Roll back to version ${version}?`,
+      description: `Version ${version}'s definition becomes the current one.`,
+      consequences: [
+        { tone: "kept", text: "History is preserved" },
+        { tone: "warn", text: `The next save will be version ${(versions[0]?.version ?? 0) + 1}` },
+      ],
+      confirmLabel: "Roll back",
+    })
+    // The sheet may have moved to another routine while the question was open.
+    if (!ok || scopeRef.current !== scope) return
     const active = () => scopeRef.current === scope && !scope.controller.signal.aborted
     setPendingAction("rollback")
     setError(null)
@@ -329,6 +341,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
             </TabsContent>
           </Tabs>
         )}
+        {dialog}
       </SheetContent>
     </Sheet>
   )

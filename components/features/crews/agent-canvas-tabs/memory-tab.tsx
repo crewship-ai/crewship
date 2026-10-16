@@ -53,6 +53,7 @@
 // and the server owns it.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useConfirm } from "@/components/ui/use-confirm"
 import { MarkdownEditor } from "@/components/shared/markdown-editor"
 import { apiFetch } from "@/lib/api-fetch"
 import { MemoryExportButton } from "./memory-export-button"
@@ -724,6 +725,7 @@ function PersonaPanel({
   const [history, setHistory] = useState<HistoryState>(LOADING_HISTORY)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const { ask, dialog } = useConfirm()
 
   const load = useCallback(async () => {
     setErr(null)
@@ -786,7 +788,17 @@ function PersonaPanel({
   )
 
   const reset = useCallback(async () => {
-    if (!confirm("Reset agent PERSONA.md? The crew default + synthesized fallback will be used.")) return
+    const ok = await ask({
+      title: "Reset this agent's PERSONA.md?",
+      description: "The agent's own persona layer is removed.",
+      consequences: [
+        { tone: "lost", text: "The agent override is deleted" },
+        { tone: "kept", text: "The crew default and the synthesized fallback are used instead" },
+      ],
+      confirmLabel: "Reset persona",
+      destructive: true,
+    })
+    if (!ok) return
     setSaving(true)
     setErr(null)
     try {
@@ -804,7 +816,7 @@ function PersonaPanel({
     } finally {
       setSaving(false)
     }
-  }, [agentId, load, workspaceId])
+  }, [agentId, ask, load, workspaceId])
 
   const personaContent = agentPersona?.content ?? ""
   const personaBytes = agentPersona?.bytes ?? 0
@@ -848,6 +860,7 @@ function PersonaPanel({
           </p>
         </section>
       )}
+      {dialog}
     </div>
   )
 }
@@ -858,6 +871,7 @@ function PersonaPanel({
 function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: string }) {
   const [peers, setPeers] = useState<PeerEntry[]>([])
   const [active, setActive] = useState<PeerEntry | null>(null)
+  const { ask, dialog } = useConfirm()
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -901,7 +915,14 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
 
   const deleteCard = useCallback(
     async (userID: string) => {
-      if (!confirm("Delete this peer card? The next routine sweep may rebuild it.")) return
+      const ok = await ask({
+        title: "Delete this peer card?",
+        description: `What this agent has noted about ${userID} is deleted.`,
+        consequences: [{ tone: "warn", text: "The next routine sweep may rebuild it" }],
+        confirmLabel: "Delete card",
+        destructive: true,
+      })
+      if (!ok) return
       const r = await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/peers/${encodeURIComponent(userID)}`, {
         method: "DELETE",
         headers: { "X-Workspace-ID": workspaceId },
@@ -913,7 +934,7 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
       setActive(null)
       await load()
     },
-    [agentId, load, workspaceId],
+    [agentId, ask, load, workspaceId],
   )
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading peers...</p>
@@ -972,6 +993,7 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
           <p className="text-sm text-muted-foreground">Select a peer to view their card.</p>
         )}
       </div>
+      {dialog}
     </div>
   )
 }

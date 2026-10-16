@@ -272,6 +272,7 @@ export function CrewLinksPage() {
           <Legend />
         </div>
       )}
+      {links.confirmDialog}
     </DrillPage>
   )
 }

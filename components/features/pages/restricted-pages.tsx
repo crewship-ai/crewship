@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { useConfirm } from "@/components/ui/use-confirm"
 import { LayoutGrid, RotateCw } from "lucide-react"
 import { AccessNotice, type AccessContext } from "@/components/features/restricted/access-notice"
 import { SubBar, SubBarSecondary } from "@/components/layout/sub-bar"
@@ -24,6 +25,7 @@ export function RestrictedPages({ workspaceId, access }: { workspaceId: string; 
   const [error, setError] = useState("")
   const [catalogState, setCatalogState] = useState<RestrictedCatalogState>("loading")
   const [submitting, setSubmitting] = useState(false)
+  const { ask, dialog } = useConfirm()
   // Bumped by "Check again" / "Try again" to re-read the catalog.
   const [reload, setReload] = useState(0)
   const request = useRef<{ key: string; body: string; url: string } | null>(null)
@@ -69,10 +71,15 @@ export function RestrictedPages({ workspaceId, access }: { workspaceId: string; 
   const submit = async () => {
     if (!action || submitting) return
     const workspace = workspaceId
+    // The Page declares its own question; a retry resends the admission
+    // already confirmed, so only a first submit asks.
+    if (!request.current && action.confirm) {
+      const ok = await ask({ title: action.confirm.title, description: action.confirm.body, confirmLabel: "Run action" })
+      if (!ok || owner.current !== workspace) return
+    }
     setSubmitting(true); setError(""); setRun(null)
     try {
       if (!request.current) {
-        if (action.confirm && !window.confirm(`${action.confirm.title}\n\n${action.confirm.body}`)) return
         const inputs: Record<string, string | number | boolean> = {}
         for (const field of action.inputs) {
           const value = values[field.name] ?? ""
@@ -115,5 +122,6 @@ export function RestrictedPages({ workspaceId, access }: { workspaceId: string; 
     {run && <section className="space-y-3" aria-live="polite"><p>Status: {run.status === "needs_reconciliation" ? "Needs review" : run.status}</p>{run.status === "needs_reconciliation" && <p className="text-sm text-muted-foreground">An administrator must review this run’s outcome. It will not run again automatically.</p>}{Object.entries(run.step_outputs).map(([step, output]) => <div key={step}><h2 className="text-sm font-medium">{step}</h2><pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-sm">{output}</pre></div>)}</section>}
     </div>
     </div>
+    {dialog}
   </div>
 }

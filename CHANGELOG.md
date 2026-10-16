@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Confirmations ask inside the page instead of in a browser pop-up.** Deleting a routine schedule or webhook, rotating a webhook secret, discarding a routine draft, disabling or rejecting a routine, unlinking crews, removing channel members, signing a person out everywhere, resetting a persona, rolling back a pipeline and discarding unsaved file or artifact edits now use the app's own confirmation dialog. Each one says what is lost and what is kept; Cancel and Escape change nothing. A test now fails if the browser's `confirm()` returns to `app/` or `components/`.
+
 - ⚠️ **Behaviour change: enabling privileged runtime access requires an instance administrator.** Workspace OWNER/ADMIN rights alone no longer enable `allow_privileged_credentials`. Scoped CLI tokens also need `instance:admin`. Workspace administrators may still disable the opt-in; existing privileged containers require separate review and recreation.
 
 - **Guest CLI pairing accepts verified browser sessions.** Pairing start and poll now pass the restricted route gate only for interactive sessions. CLI bearer callers remain forbidden; redemption retains the same current Guest grants as browser CLI token creation and rejects logout, revocation or suspension.

@@ -3,7 +3,7 @@
 // the draft's exact id and revision.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { RoutinePublishDialog, publicationSummary, scheduleImpact } from "../routine-publish-dialog"
 
 const h = vi.hoisted(() => ({ fetcher: vi.fn(), schedules: [] as unknown[] }))
@@ -44,8 +44,6 @@ function mockServer(over: { test?: unknown; publish?: unknown; publishStatus?: n
 beforeEach(() => {
   h.fetcher.mockReset()
   h.schedules = []
-  vi.stubGlobal("confirm", vi.fn(() => true))
-  window.confirm = vi.fn(() => true)
 })
 
 describe("publicationSummary", () => {
@@ -143,6 +141,16 @@ describe("<RoutinePublishDialog>", () => {
     const discard = screen.getByRole("button", { name: "Discard draft" })
     await waitFor(() => expect(discard).toBeEnabled())
     fireEvent.click(discard)
+    const question = await screen.findByRole("alertdialog", { name: "Discard draft r2?" })
+    expect(question).toHaveTextContent("The draft's changes are lost")
+    fireEvent.click(within(question).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Discard draft r2?" })).not.toBeInTheDocument())
+    expect(h.fetcher.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false)
+    expect(discarded).not.toHaveBeenCalled()
+
+    fireEvent.click(discard)
+    const again = await screen.findByRole("alertdialog", { name: "Discard draft r2?" })
+    fireEvent.click(within(again).getByRole("button", { name: "Discard draft" }))
     await waitFor(() => expect(discarded).toHaveBeenCalled())
     const call = h.fetcher.mock.calls.find(([, init]) => init?.method === "DELETE")!
     expect(call[0]).toBe("/api/v1/workspaces/ws/pipelines/invoice-intake/draft")

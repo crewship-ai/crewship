@@ -14,6 +14,7 @@ import { discardRoutineDraft, loadRoutineDraft, saveRoutineDraft } from "@/lib/r
 import type { PipelineDraftSummary } from "@/hooks/use-pipelines"
 import { DetailCard, Pill } from "@/components/ui/detail"
 import { Button } from "@/components/ui/button"
+import { useConfirm } from "@/components/ui/use-confirm"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineStepDefinition } from "./routine-step-definition"
 import { draftAuthorLabel } from "./routine-identity-header"
@@ -63,6 +64,7 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [retry, setRetry] = useState(0)
+  const { ask, dialog } = useConfirm()
   const [selected, setSelected] = useUrlSelection("version")
   const [detail, setDetail] = useState<VersionDetail | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
@@ -129,7 +131,19 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
   const restoreAsDraft = async (version: number) => {
     if (busy) return
     const expectedDraft = draft ? { id: draft.id, revision: draft.revision } : null
-    if (draft && !window.confirm(`Replace draft r${draft.revision} with the recipe of v${version}? The draft's current content is lost; nothing published changes.`)) return
+    if (draft) {
+      const ok = await ask({
+        title: `Replace draft r${draft.revision} with v${version}?`,
+        description: `The draft gets the recipe of version ${version}.`,
+        consequences: [
+          { tone: "lost", text: "The draft's current content is lost" },
+          { tone: "kept", text: "Nothing published changes" },
+        ],
+        confirmLabel: "Replace draft",
+        destructive: true,
+      })
+      if (!ok) return
+    }
     setBusy(`restore:${version}`)
     try {
       const res = await apiFetch(`${base}/versions/${encodeURIComponent(String(version))}`)
@@ -164,7 +178,16 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
 
   const discard = async () => {
     if (!draft || busy) return
-    if (!window.confirm(`Discard draft r${draft.revision}? The published version stays as it is.`)) return
+    const ok = await ask({
+      title: `Discard draft r${draft.revision}?`,
+      consequences: [
+        { tone: "lost", text: "The draft's changes are lost" },
+        { tone: "kept", text: "The published version stays as it is" },
+      ],
+      confirmLabel: "Discard draft",
+      destructive: true,
+    })
+    if (!ok) return
     setBusy("discard")
     try {
       await discardRoutineDraft(workspaceId, { slug, id: draft.id, revision: draft.revision })
@@ -344,6 +367,7 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
           )}
         </DetailCard>
       )}
+      {dialog}
     </div>
   )
 }

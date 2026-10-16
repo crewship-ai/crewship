@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, act } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, act, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { FileWorkspace } from "./file-workspace"
 import { readPreviewBytes } from "./file-preview-data"
@@ -90,3 +90,38 @@ describe("FileWorkspace", () => {
    await act(async () => resolve(new Response(null, { status: 204 })))
    expect(screen.getByRole("textbox")).toHaveValue("updated content")
  })
+
+// #3342 — Cancel with unsaved edits asks in the page.
+describe("FileWorkspace — discarding edits", () => {
+  async function editWithChanges(onDirtyChange = vi.fn()) {
+    render(<FileWorkspace {...base} file={file} onDirtyChange={onDirtyChange} />)
+    await screen.findByDisplayValue("initial content")
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "File content" }), { target: { value: "updated content" } })
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument()
+  }
+  async function answer(label: "Discard changes" | "Keep editing") {
+    const dialog = await screen.findByRole("alertdialog", { name: "Discard unsaved file changes?" })
+    fireEvent.click(within(dialog).getByRole("button", { name: label }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+  }
+
+  it("keeps editing when the discard is refused", async () => {
+    await editWithChanges()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    await answer("Keep editing")
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument()
+    expect(screen.getByTestId("editor-mode")).toHaveTextContent("editable")
+  })
+
+  it("leaves edit mode and drops the changes once the discard is confirmed", async () => {
+    const onDirtyChange = vi.fn()
+    await editWithChanges(onDirtyChange)
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    await answer("Discard changes")
+    await waitFor(() => expect(screen.getByTestId("editor-mode")).toHaveTextContent("read only"))
+    expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument()
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})

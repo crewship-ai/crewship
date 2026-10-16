@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react"
 
 import { InboxActError, type InboxActResult, type InboxItem } from "@/hooks/use-inbox"
 
@@ -181,25 +181,20 @@ describe("take_over / dismiss", () => {
   })
 
   it("confirms first when the action is irreversible, and does nothing on cancel", async () => {
-    // The DOM shim here ships no window.confirm at all, so this is an
-    // assignment rather than a spy.
-    const original = window.confirm
-    const confirm = vi.fn().mockReturnValue(false)
-    window.confirm = confirm
-    try {
-      mount(card({ actions: [{ ...ACTIONS[2], irreversible: true }] }))
-      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
-      expect(confirm).toHaveBeenCalledTimes(1)
-      expect(confirm.mock.calls[0][0]).toMatch(/cannot be undone/i)
-      expect(onAct).not.toHaveBeenCalled()
+    mount(card({ actions: [{ ...ACTIONS[2], irreversible: true }] }))
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
+    const dialog = await screen.findByRole("alertdialog", { name: "Dismiss?" })
+    expect(dialog).toHaveTextContent(/cannot be undone/i)
+    expect(dialog).toHaveTextContent(ACTIONS[2].effect)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(onAct).not.toHaveBeenCalled()
 
-      confirm.mockReturnValue(true)
-      onAct.mockResolvedValueOnce(receipt("dismiss"))
-      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
-      await waitFor(() => expect(onAct).toHaveBeenCalledWith("dismiss", undefined))
-    } finally {
-      window.confirm = original
-    }
+    onAct.mockResolvedValueOnce(receipt("dismiss"))
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
+    const again = await screen.findByRole("alertdialog", { name: "Dismiss?" })
+    fireEvent.click(within(again).getByRole("button", { name: "Dismiss" }))
+    await waitFor(() => expect(onAct).toHaveBeenCalledWith("dismiss", undefined))
   })
 })
 
