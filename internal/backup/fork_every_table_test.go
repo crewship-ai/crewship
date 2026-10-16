@@ -203,6 +203,17 @@ func resolveFKValue(t *testing.T, db *sql.DB, fk genFK, workspaceID string) (any
 		{fmt.Sprintf(`SELECT %s FROM %s WHERE workspace_id = ? LIMIT 1`, fk.refColumn, fk.refTable), []any{workspaceID}},
 		{fmt.Sprintf(`SELECT %s FROM %s LIMIT 1`, fk.refColumn, fk.refTable), nil},
 	}
+	// The Docs content type is exclusive. Legacy content fixtures must not
+	// attach panels/artifacts to the dedicated document Page merely because
+	// its ID happens to sort first in a parent lookup.
+	if fk.refTable == "pages" {
+		queries = append([]struct {
+			q    string
+			args []any
+		}{
+			{fmt.Sprintf(`SELECT %s FROM pages WHERE workspace_id=? AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.page_id=pages.id) LIMIT 1`, fk.refColumn), []any{workspaceID}},
+		}, queries...)
+	}
 	for _, cand := range queries {
 		var v any
 		if err := db.QueryRowContext(ctx, cand.q, cand.args...).Scan(&v); err == nil && v != nil {
@@ -291,6 +302,16 @@ var genColumnOverrides = map[string]any{
 // BackupTables order) and ultimately report the shortfall.
 func seedOneBackupTable(t *testing.T, db *sql.DB, table, workspaceID string) error {
 	t.Helper()
+	if table == "documents" {
+		// A single synthetic Page cannot host Docs and legacy panels together.
+		// Keep a separate, explicitly human-owned Page so both families and
+		// dependent webhooks are actually exercised by the every-table suite.
+		if _, err := db.ExecContext(context.Background(), `INSERT OR IGNORE INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) SELECT 'gen_documents_page',?,'gen-documents-page','Generated document',owner_user_id,'{}' FROM pages WHERE workspace_id=? AND owner_user_id IS NOT NULL AND owner_crew_id IS NULL LIMIT 1`, workspaceID, workspaceID); err != nil {
+			return err
+		}
+		_, err := db.ExecContext(context.Background(), `INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES(?,'gen_documents_page',1,?,?)`, workspaceID, []byte("generated-document-snapshot"), []byte(`[]`))
+		return err
+	}
 	createSQL := tableCreateSQL(t, db, table)
 	if createSQL == "" {
 		return fmt.Errorf("absent from schema")
