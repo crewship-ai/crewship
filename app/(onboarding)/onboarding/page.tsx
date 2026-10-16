@@ -80,7 +80,7 @@ import type { ApplyProposalResult, OnboardingProposal } from "@/components/featu
 /**
  * Variant D — split-screen onboarding. Left pane: form with vertical
  * stepper (Workspace → Adapter → Crew). Right pane: live preview that
- * animates as the user makes choices. On <lg breakpoints the preview
+ * animates as the user makes choices. On <xl breakpoints the preview
  * collapses below the form into a single column.
  *
  * Step order matters here in a way it wouldn't for an ordinary form: the
@@ -1026,14 +1026,14 @@ export default function OnboardingPage() {
   const adapterCfg = CLI_ADAPTERS[adapter]
 
   return (
-    <div className="min-h-screen bg-background lg:h-screen lg:overflow-hidden">
+    <div className="min-h-screen bg-background xl:h-screen xl:overflow-hidden">
       {/* Subtle hero glow — same radial gradient idea from
           crewship-web's .hero-glow but anchored to the top of the
           form column so the form has a sense of stage lighting
           without distracting from the live preview. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[360px] bg-[radial-gradient(ellipse_60%_50%_at_30%_0%,rgba(30,123,254,0.10),transparent_60%)]" />
 
-      <div className="relative grid min-h-screen grid-cols-1 lg:h-screen lg:min-h-0 lg:grid-cols-2">
+      <div className="relative grid min-h-screen grid-cols-1 xl:h-screen xl:min-h-0 xl:grid-cols-2">
         {/* LEFT: form.
             Anchored to the top, not centred. Centring the whole column meant
             the lockup and the stepper slid up and down as the step content
@@ -1044,8 +1044,8 @@ export default function OnboardingPage() {
             nav is `sticky bottom-0`, so any padding left on THIS box would be
             a transparent strip under the pinned bar with crew cards sliding
             through it. */}
-        <div className="flex items-start border-b border-border p-6 pb-0 lg:h-screen lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-12 lg:pb-0">
-          <div className="touch-form w-full max-w-md mx-auto space-y-7 lg:pt-6">
+        <div className="flex items-start border-b border-border p-6 pb-0 xl:h-screen xl:overflow-y-auto xl:border-b-0 xl:border-r xl:p-12 xl:pb-0">
+          <div className="touch-form w-full max-w-md mx-auto space-y-7 xl:pt-6">
             <motion.div
               initial={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1833,11 +1833,11 @@ export default function OnboardingPage() {
                crew/routine/page in "Built so far" — and Launch used to be
                pushed below the fold by the second crew, with nothing on
                screen hinting that the button finishing setup was down there.
-               `sticky` rather than `fixed`: under lg the panes stack, and a
+               `sticky` rather than `fixed`: under xl the panes stack, and a
                fixed bar would stay welded to the viewport while the user
                scrolled on into the preview pane, offering controls for a
                screen they had already left. */
-            <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-y-2 border-t border-border bg-background pb-6 pt-3 lg:pb-8">
+            <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-y-2 border-t border-border bg-background pb-6 pt-3 xl:pb-8">
               {blockingReason() && !submitting && !persistingCredential && !persistingWorkspace && (
                 <div
                   data-testid="onboarding-blocking-reason"
@@ -1922,7 +1922,7 @@ export default function OnboardingPage() {
                  nav row owns that inset, and the nav row is gone on this
                  screen. Without it the receipt's last button sits flush
                  against the edge of the pane. */
-              <div className="space-y-5 pb-6 lg:pb-8">
+              <div className="space-y-5 pb-6 xl:pb-8">
                 <div>
                   <h2 className="text-2xl font-semibold tracking-tight">
                     {/* Zero is a real case, not a guard against one. Only
@@ -2007,7 +2007,7 @@ export default function OnboardingPage() {
             Top-aligned for the same reason the left column is: the preview
             grows downward as you fill things in, and centring made the
             workspace card drift while it did. */}
-        <div className="onboarding-pane relative flex items-start min-h-0 overflow-hidden p-6 lg:h-screen lg:p-12">
+        <div className="onboarding-pane relative flex items-start min-h-0 overflow-hidden p-6 xl:h-screen xl:p-12">
           {/* Step 3 in chat mode: the right panel becomes a chat with the
               setup agent (PRD §4.1/§1) instead of the static preview.
               Every other step, and step 3's template escape hatch, keep the
