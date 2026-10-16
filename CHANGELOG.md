@@ -106,6 +106,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Invitation creation, reissue, withdrawal and acceptance record non-secret workspace activity atomically with their state changes (#3084).
 - **Private workflow dispatch follows current account status.** Queued and recovered work retains its existing resource, role and execution safety checks.
+- **Restricted routine failures retain their meaning.** Missing graph dependencies return the existing opaque unavailable response, while storage failures remain temporary service errors; unsupported declarations still report a request error.
 
 - **Pages creation and import controls follow current workspace permissions (#3081).** Readers keep access to existing content; authorized roles and explicit `page.create` grants retain authoring. An open draft survives permission loss while submission is disabled.
 
