@@ -168,7 +168,9 @@ are unchanged. Schema 2 adds `type:"image"` with existing integer geometry and a
 `image` payload `{asset_id,expected_sha256,alt}`. The asset ID belongs to the same
 immutable Page ID; the digest identifies canonical PNG/JPEG bytes, never a URL.
 Alt text is bounded to2048 UTF-8 bytes. A revision permits32 unique asset IDs and
-32MiB total canonical asset bytes; repeated placement of one ID counts once.
+32MiB total canonical asset bytes, and33,554,432 decoded pixels across unique
+asset IDs (about128MiB RGBA base, not a process memory SLA); repeated placement
+of one ID counts once for every budget.
 Existing2MiB deck/100 slides/1000 elements and Page64 assets/64MiB staging+history
 limits still apply. Upload/read use the existing private Page asset API/CLI and
 its independent pages:write/pages:read token ceilings. EXIF2..8 are explicitly

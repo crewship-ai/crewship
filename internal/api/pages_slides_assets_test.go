@@ -307,8 +307,8 @@ func TestSlidesImagesEncryptedBackupForkRetainsNonHeadRefs(t *testing.T) {
 				options.Replace = true
 
 				mustExec(t, target, `CREATE TRIGGER image_replace_fault BEFORE INSERT ON slides_heads WHEN NEW.page_id='backup-image-page' BEGIN SELECT RAISE(ABORT,'synthetic replace insert fault'); END`)
-				if _, err = backup.RestoreBackup(t.Context(), target, options); err == nil {
-					t.Fatal("replace synthetic insert failure succeeded")
+				if _, err = backup.RestoreBackup(t.Context(), target, options); err == nil || !strings.Contains(err.Error(), "synthetic replace insert fault") {
+					t.Fatalf("replace must reach injected head INSERT: %v", err)
 				}
 				mustExec(t, target, `DROP TRIGGER image_replace_fault`)
 				var rollbackHead int64
@@ -347,6 +347,11 @@ func TestSlidesImagesEncryptedBackupForkRetainsNonHeadRefs(t *testing.T) {
 				}
 				if _, err = readPageAssetBlob(root, "image-foreign", foreignAsset.SHA256); err != nil {
 					t.Fatal("replace removed foreign image bytes", err)
+				}
+				afterReplace := restoredFixture.do(credential, "GET", "/api/v1/pages/"+page+"/assets/"+newAsset+"/bytes?workspace_id="+workspace, "")
+				wantCode(t, afterReplace, 200, "authorized image bytes after Replace")
+				if attachmentDigest(afterReplace.Body.Bytes()) != asset.SHA256 {
+					t.Fatal("Replace route served wrong canonical bytes")
 				}
 			}
 

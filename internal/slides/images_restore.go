@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/crewship-ai/crewship/internal/pageassets"
 )
 
 // ValidateImagePageTx checks immutable canonical references against their exact
@@ -57,24 +59,30 @@ func ValidateImagePageTx(ctx context.Context, tx *sql.Tx, key Key) error {
 			}
 			continue
 		}
-		pins, err := tx.QueryContext(ctx, `SELECT p.asset_id,p.expected_sha256,a.sha256,a.state,a.byte_size FROM slides_revision_assets p JOIN page_assets a ON a.page_id=p.page_id AND a.id=p.asset_id WHERE p.workspace_id=? AND p.page_id=? AND p.rev=?`, key.WorkspaceID, key.PageID, revision)
+		pins, err := tx.QueryContext(ctx, `SELECT p.asset_id,p.expected_sha256,a.sha256,a.state,a.byte_size,a.width,a.height FROM slides_revision_assets p JOIN page_assets a ON a.page_id=p.page_id AND a.id=p.asset_id WHERE p.workspace_id=? AND p.page_id=? AND p.rev=? LIMIT ?`, key.WorkspaceID, key.PageID, revision, MaxImageAssets+1)
 		if err != nil {
 			return err
 		}
-		count, total := 0, int64(0)
+		count, total, totalPixels := 0, int64(0), int64(0)
 		for pins.Next() {
 			var id, want, sha, status string
-			var size int64
-			if err = pins.Scan(&id, &want, &sha, &status, &size); err != nil {
+			var size, width, height int64
+			if err = pins.Scan(&id, &want, &sha, &status, &size, &width, &height); err != nil {
 				pins.Close()
 				return err
 			}
-			count++
-			total += size
-			if expected[id] != want || sha != want || status != "retained" || size < 1 || total > MaxImageAssetBytes {
+			if expected[id] != want || sha != want || status != "retained" || size < 1 || size > pageassets.MaxOutput || size > MaxImageAssetBytes-total || width < 1 || height < 1 || width > pageassets.MaxDimension || height > pageassets.MaxDimension {
 				pins.Close()
 				return errors.New("Slides retained image root mismatch")
 			}
+			pixels := width * height
+			if pixels > pageassets.MaxPixels || pixels > MaxImageAssetPixels-totalPixels {
+				pins.Close()
+				return errors.New("Slides retained image pixel budget exceeded")
+			}
+			totalPixels += pixels
+			total += size
+			count++
 		}
 		if err = pins.Err(); err != nil {
 			pins.Close()

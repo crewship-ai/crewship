@@ -235,7 +235,8 @@ human history event; it does not mutate the deck revision or original anchor.
 The canonical image element is `{id,type:"image",x,y,width,height,image:{asset_id,
 expected_sha256,alt}}`. `asset_id` must name a live same-Page private raster; no
 URL input is accepted. At most32 unique asset IDs/32MiB canonical image bytes per
-revision and the existing Page staging/history quota apply. SHA mismatch, missing
+revision plus33,554,432 decoded pixels across unique asset IDs and the existing
+Page staging/history quota apply. Repeated placement of one ID counts once. SHA mismatch, missing
 or expired assets and corrupt bytes reject the entire revision with400; storage
 write failures return500. Promotion, exact immutable revision pins and request
 receipt commit atomically. Retried successful requests retain their own revision.

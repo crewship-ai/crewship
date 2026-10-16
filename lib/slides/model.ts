@@ -5,6 +5,7 @@ export const SLIDES_IMAGE_SCHEMA_VERSION = 2
 export const SLIDES_IMAGE_HASH_DOMAIN = "crewship-slides-canonical-json/v2\n"
 export const SLIDES_MAX_IMAGE_ASSETS = 32
 export const SLIDES_MAX_IMAGE_BYTES = 32 << 20
+export const SLIDES_MAX_IMAGE_PIXELS = 32 * 1024 * 1024
 export const SLIDES_MAX_IMAGE_ALT_BYTES = 2048
 export const SLIDES_MAX_TABLE_CELLS = 10000
 export const SLIDES_MAX_TABLE_CELLS_PER_SLIDE = 2000

@@ -36,6 +36,7 @@ func (h *PageHandler) pinSlideAssets(ctx context.Context, tx *sql.Tx, key slides
 	sort.Strings(ids)
 	now := tsformat.Format(time.Now().UTC())
 	total := int64(0)
+	totalPixels := int64(0)
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -53,6 +54,11 @@ func (h *PageHandler) pinSlideAssets(ctx context.Context, tx *sql.Tx, key slides
 		if a.SHA256 != refs[id] || (a.ContentType != "image/png" && a.ContentType != "image/jpeg") || a.Width < 1 || a.Width > pageassets.MaxDimension || a.Height < 1 || a.Height > pageassets.MaxDimension || a.Width > pageassets.MaxPixels/a.Height || a.ByteSize < 1 || a.ByteSize > pageassets.MaxOutput || a.ByteSize > int64(slides.MaxImageAssetBytes)-total {
 			return fmt.Errorf("%w: image identity or budget refused", slides.ErrInvalid)
 		}
+		pixels := int64(a.Width) * int64(a.Height)
+		if pixels > slides.MaxImageAssetPixels-totalPixels {
+			return fmt.Errorf("%w: image pixel budget exceeded", slides.ErrInvalid)
+		}
+		totalPixels += pixels
 		total += a.ByteSize
 		// One bounded canonical blob at a time, not an all-assets allocation. The
 		// digest and exact length detect missing/truncated/corrupt storage bytes.
