@@ -3,9 +3,15 @@
 import * as React from "react"
 import type { LucideIcon } from "lucide-react"
 import { Slot } from "radix-ui"
+import { createPortal } from "react-dom"
+import { usePathname } from "next/navigation"
+import { ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useAppStore } from "@/lib/store"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { areaOf } from "@/lib/nav-sections"
 
 /**
  * SubBar — the canonical page sub-bar (the strip directly under the global
@@ -96,6 +102,50 @@ export function SubBar<T extends string = string>({
   className,
 }: SubBarProps<T>) {
   const hasRow2 = (tabs != null && tabs.length > 0) || tools != null
+  const slot = useAppStore((s) => s.pageBarSlot)
+  const isMobile = useIsMobile()
+  const pathname = usePathname()
+
+  // Harbor 2: on desktop and tablet the identity and the actions join the top
+  // bar after the area's breadcrumb; a title that only repeats the area's name
+  // stays as the page's accessible heading but is not shown twice.
+  if (slot && !isMobile) {
+    const area = pathname ? areaOf(pathname) : undefined
+    const repeatsArea = area != null && area.title.toLowerCase() === title.toLowerCase()
+    return (
+      <>
+        {createPortal(
+          <div className="flex min-w-0 flex-1 items-center gap-2" aria-label={ariaLabel} data-slot="sub-bar">
+            {leading && <div className="flex shrink-0 items-center">{leading}</div>}
+            <h1 className={cn("flex min-w-0 items-center gap-1.5 whitespace-nowrap text-sm", repeatsArea && section == null && "sr-only")}>
+              {!repeatsArea && (
+                <>
+                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
+                  <span className={section != null ? "text-muted-foreground" : "font-semibold text-foreground"}>{title}</span>
+                </>
+              )}
+              {repeatsArea && section == null && <span>{title}</span>}
+              {section != null && (
+                <>
+                  {repeatsArea && <span className="sr-only">{title}</span>}
+                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
+                  <span className="font-semibold text-foreground">{section}</span>
+                </>
+              )}
+            </h1>
+            {description != null && (
+              <span className="hidden min-w-0 truncate text-label text-muted-foreground lg:block">{description}</span>
+            )}
+            {meta}
+            <div className="flex-1" />
+            {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
+          </div>,
+          slot,
+        )}
+        {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} className={className} />}
+      </>
+    )
+  }
 
   return (
     <div className={cn("shrink-0", className)}>
@@ -138,25 +188,36 @@ export function SubBar<T extends string = string>({
         {actions && <div className="flex items-center gap-1.5 shrink-0">{actions}</div>}
       </div>
 
-      {/* ---- Row 2: tabs + tools (only when present) ---- */}
-      {hasRow2 && (
-        <div className={cn(ROW, "gap-0", SCROLL_X)}>
-          {tabs && tabs.length > 0 && (
-            <div role="tablist" aria-label={ariaLabel ? `${ariaLabel} views` : "Views"} className="flex items-center h-full">
-              {tabs.map((tab) => (
-                <SubBarTabButton
-                  key={tab.id}
-                  tab={tab}
-                  active={tab.id === activeTab}
-                  onSelect={() => !tab.locked && !tab.disabled && onTabChange?.(tab.id)}
-                />
-              ))}
-            </div>
-          )}
-          <div className="flex-1" />
-          {tools && <div className="flex items-center gap-1.5 shrink-0">{tools}</div>}
+      {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} />}
+    </div>
+  )
+}
+
+/** Row 2: view tabs and tools. Stays on the page under the top bar. */
+function SubBarRow2<T extends string>({ tabs, activeTab, onTabChange, tools, ariaLabel, className }: {
+  tabs?: SubBarTab<T>[]
+  activeTab?: T
+  onTabChange?: (id: T) => void
+  tools?: React.ReactNode
+  ariaLabel?: string
+  className?: string
+}) {
+  return (
+    <div className={cn(ROW, "gap-0", SCROLL_X, className)}>
+      {tabs && tabs.length > 0 && (
+        <div role="tablist" aria-label={ariaLabel ? `${ariaLabel} views` : "Views"} className="flex items-center h-full">
+          {tabs.map((tab) => (
+            <SubBarTabButton
+              key={tab.id}
+              tab={tab}
+              active={tab.id === activeTab}
+              onSelect={() => !tab.locked && !tab.disabled && onTabChange?.(tab.id)}
+            />
+          ))}
         </div>
       )}
+      <div className="flex-1" />
+      {tools && <div className="flex items-center gap-1.5 shrink-0">{tools}</div>}
     </div>
   )
 }
@@ -202,8 +263,8 @@ function SubBarTabButton<T extends string>({
 
 /* --------------------------------------------------------------------------
  * Action helpers — the ONLY sanctioned way to render sub-bar buttons.
- * They bake in the h-7 toolbar sizing + Style-B variants so every page's
- * actions look identical.
+ * They bake in the Harbor 2 28 px toolbar size (Button size sm) and the
+ * variants, so every page's actions look identical.
  * ------------------------------------------------------------------------ */
 
 type ActionProps = React.ComponentProps<typeof Button> & { icon?: LucideIcon }
@@ -212,7 +273,7 @@ type ActionProps = React.ComponentProps<typeof Button> & { icon?: LucideIcon }
 export function SubBarPrimary({ icon: Icon, className, children, asChild, ...props }: ActionProps) {
   return (
     // Harbor: the page's one primary action is the solid brand button.
-    <Button asChild={asChild} variant="default" size="sm" className={cn("h-7 gap-1.5 rounded-md px-3 text-xs", className)} {...props}>
+    <Button asChild={asChild} variant="default" size="sm" className={cn("gap-1.5 px-3", className)} {...props}>
       {Icon && <Icon className="h-3 w-3" />}
       {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
     </Button>
@@ -222,7 +283,7 @@ export function SubBarPrimary({ icon: Icon, className, children, asChild, ...pro
 /** Secondary / neutral action (Import, secondary create). */
 export function SubBarSecondary({ icon: Icon, className, children, asChild, ...props }: ActionProps) {
   return (
-    <Button asChild={asChild} variant="ghost" size="sm" className={cn("h-7 gap-1.5 text-xs", className)} {...props}>
+    <Button asChild={asChild} variant="ghost" size="sm" className={cn("gap-1.5", className)} {...props}>
       {Icon && <Icon className="h-3 w-3" />}
       {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
     </Button>
@@ -232,7 +293,7 @@ export function SubBarSecondary({ icon: Icon, className, children, asChild, ...p
 /** Utility icon button (settings gear, panel toggles…). */
 export function SubBarIconButton({ icon: Icon, className, children, ...props }: ActionProps) {
   return (
-    <Button variant="ghost" size="icon-sm" className={cn("h-7 w-7", className)} {...props}>
+    <Button variant="ghost" size="icon-sm" className={className} {...props}>
       {Icon ? <Icon className="h-3.5 w-3.5" /> : children}
     </Button>
   )

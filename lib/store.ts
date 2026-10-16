@@ -23,6 +23,15 @@ interface AppState {
    */
   mobileNavOpen: boolean
   setMobileNavOpen: (open: boolean) => void
+  /** The ⌘K palette. Opened by the key (AppToolbar), the sidebar's search
+   *  field and the phone top bar's search button. */
+  /** Where a page's header (SubBar) renders its identity and actions: a slot
+   *  inside the top bar (Harbor 2), registered by AppToolbar. Null on phones
+   *  and outside the app shell, where SubBar renders in place. */
+  pageBarSlot: HTMLElement | null
+  setPageBarSlot: (el: HTMLElement | null) => void
+  commandPaletteOpen: boolean
+  setCommandPaletteOpen: (open: boolean | ((prev: boolean) => boolean)) => void
   setCurrentWorkspaceId: (id: string | null) => void
   setSidebarOpen: (open: boolean) => void
   setBreadcrumbs: (items: BreadcrumbItem[]) => void
@@ -34,8 +43,12 @@ export const useAppStore = create<AppState>((set) => ({
   sidebarOpen: true,
   breadcrumbs: [],
   mobileNavOpen: false,
+  commandPaletteOpen: false,
+  pageBarSlot: null,
+  setPageBarSlot: (el) => set({ pageBarSlot: el }),
   setCurrentWorkspaceId: (id) => set({ currentWorkspaceId: id }),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setBreadcrumbs: (items) => set({ breadcrumbs: items }),
   setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
+  setCommandPaletteOpen: (open) => set((s) => ({ commandPaletteOpen: typeof open === "function" ? open(s.commandPaletteOpen) : open })),
 }))

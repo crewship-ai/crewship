@@ -27,7 +27,7 @@
  * bar in standalone mode, so a page that subtracts a flat 48px is exactly that
  * inset too tall — visible only once installed, which is where `display:
  * standalone` in app/manifest.ts now puts it. */
-:root { --app-header-h: calc(12 * var(--spacing) + env(safe-area-inset-top)); }
+:root { --app-header-h: calc(48px + env(safe-area-inset-top)); }
 
 /* Harbor 2 control heights: 24 / 28 / 32 px at Compact text size (a 13/14
  * root), so the same tokens grow with Standard and Large like everything else.
@@ -263,6 +263,9 @@
      The old 7–9 % foreground overlay left tertiary and status text at
      4.1–4.4:1 on the grey ground; every text token clears 4.5:1 on every
      accent's tint (theme-contrast.test.ts). */
+  /* The current page in the sidebar: a raised surface (Harbor 2). */
+  --nav-selected: #FFFFFF;
+  --shadow-sel: 0 1px 2px rgb(12 17 27 / 0.08), 0 0 0 1px rgb(12 17 27 / 0.05);
   --selection-bg: var(--brand-tint);
   --selection-bg-hover: var(--brand-tint);
   --selection-border: var(--brand);
@@ -452,6 +455,8 @@
      The old 7–9 % foreground overlay left tertiary and status text at
      4.1–4.4:1 on the grey ground; every text token clears 4.5:1 on every
      accent's tint (theme-contrast.test.ts). */
+  --nav-selected: #20232A;
+  --shadow-sel: 0 0 0 1px rgb(255 255 255 / 0.06);
   --selection-bg: var(--brand-tint);
   --selection-bg-hover: var(--brand-tint);
   --selection-border: var(--brand);
@@ -1041,59 +1046,82 @@ body {
      2rem tile column at a fixed inset — half the difference between the
      rail and the tile — and a label that only fades. The panel widening is
      the whole animation. */
+  /* Harbor 2 sidebar (#3350). One grid in both states: an 8 px inset, rows
+     40 px wide in the 56 px rail and 224 px open, the icon column never moves.
+     Sizes are px: the rail must not grow with the user's text size. */
   .rail-inset {
-    /* !important: the collapsed sidebar's own group-data padding is a
-       utility and would otherwise move the column 5.5px on open. */
-    padding-inline: calc((var(--sidebar-width-icon) - 2rem) / 2) !important;
+    padding-inline: 8px !important;
+  }
+  .rail-row {
+    height: 30px !important;
+    padding: 0 10px !important;
+    gap: 10px !important;
+    border-radius: 7px !important;
+    justify-content: flex-start !important;
+    overflow: visible !important;
+    color: var(--muted-foreground);
+    background: transparent;
+  }
+  [data-collapsible="icon"] .rail-row {
+    width: 40px !important;
+    height: 30px !important;
+    padding: 0 12px !important;
+  }
+  .rail-row:hover {
+    background: var(--row-hover-bg) !important;
+    color: var(--foreground) !important;
+  }
+  .rail-row[data-active="true"] {
+    background: var(--nav-selected) !important;
+    color: var(--foreground) !important;
+    font-weight: 550;
+    box-shadow: var(--shadow-sel);
   }
   .rail-tile {
-    --ic: var(--primary);
     position: relative;
     display: inline-grid;
     place-items: center;
     flex-shrink: 0;
-    width: 2rem;
-    height: 2rem;
-    border-radius: 0.6rem;
-    border: 1px solid transparent;
-    color: var(--muted-foreground);
-    transition: border-color 300ms var(--ease-harbor), background-color 300ms var(--ease-harbor), color 200ms var(--ease-harbor);
+    width: 16px;
+    height: 16px;
+    color: var(--muted-foreground-soft);
   }
-  /* Only the glyph moves on hover; the frame and the badge stay put. */
-  .rail-tile > svg { width: 0.95rem; height: 0.95rem; transition: transform 300ms var(--ease-spring); }
-  .rail-tile[data-active="true"],
-  :hover > .rail-tile {
-    color: color-mix(in oklch, var(--ic) var(--tile-text-mix), var(--foreground));
-    background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--ic) 22%, transparent), color-mix(in srgb, var(--ic) 8%, transparent) 70%);
-    border-color: color-mix(in srgb, var(--ic) 34%, transparent);
-    box-shadow: var(--tile-inset);
-  }
-  :hover > .rail-tile:not(.rail-tile-static) > svg {
-    transform: scale(1.12) rotate(-8deg);
-  }
-  :hover > .rail-tile:not(.rail-tile-static) {
-    border-color: color-mix(in srgb, var(--ic) 55%, transparent);
-  }
-  .rail-badge {
-    position: absolute;
-    top: -0.2rem;
-    left: 1.2rem;
-    min-width: 1rem;
-    padding: 0 0.25rem;
+  .rail-tile > svg { width: 16px; height: 16px; }
+  .rail-row:hover .rail-tile,
+  .rail-row[data-active="true"] .rail-tile { color: var(--foreground); }
+  /* A count: an accent pill at the end of the open row; in the rail, the same
+     pill on the icon's corner. */
+  .rail-count {
+    margin-left: auto;
+    min-width: 18px;
+    padding: 0 6px;
     border-radius: 999px;
-    border: 2px solid var(--sidebar);
-    background: var(--info);
-    color: var(--background);
-    font: 600 0.6rem/0.8rem var(--font-mono);
+    background: var(--primary-strong);
+    color: #fff;
+    font: 650 10.5px/16px var(--font-sans);
     text-align: center;
   }
+  .rail-badge {
+    display: none;
+    position: absolute;
+    top: -7px;
+    right: -9px;
+    min-width: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    border: 2px solid var(--sidebar);
+    background: var(--primary-strong);
+    color: #fff;
+    font: 650 10px/12px var(--font-sans);
+    text-align: center;
+  }
+  [data-collapsible="icon"] .rail-badge { display: block; }
   .rail-label {
     opacity: 1;
     transition: opacity 160ms ease 90ms;
   }
-  /* Faded AND zero-width in the rail: the rows no longer clip (the Inbox
-     count overhangs its tile), so a SOON pill or the ⌘B hint would
-     otherwise make the rail scrollable sideways under keyboard focus. */
+  /* Faded AND zero-width in the rail, so nothing in a row (a count, the ⌘B
+     hint) can make the rail scroll sideways under keyboard focus. */
   [data-collapsible="icon"] .rail-label {
     opacity: 0;
     pointer-events: none;
@@ -1106,23 +1134,67 @@ body {
   .rail-group-head {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    height: 1.5rem;
-    margin-top: 0.5rem;
+    height: 28px;
+    padding: 10px 10px 2px;
     white-space: nowrap;
   }
-  .rail-group-rule { display: flex; justify-content: center; width: 2rem; flex-shrink: 0; }
-  .rail-group-rule > i { display: block; width: 1rem; height: 1px; background: var(--border); }
   .rail-group-name {
-    font-family: var(--font-mono);
-    font-size: 0.625rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    font-size: 11px;
+    font-weight: 600;
     color: var(--muted-foreground-soft);
   }
-  @media (prefers-reduced-motion: reduce) {
-    .rail-tile, .rail-tile > svg, :hover > .rail-tile > svg, .rail-label { transition: none; transform: none; }
+  /* In the rail a group is a short hairline on the icon axis. */
+  .rail-group-rule { display: none; }
+  [data-collapsible="icon"] .rail-group-rule { display: flex; justify-content: center; width: 40px; }
+  [data-collapsible="icon"] .rail-group-rule > i { display: block; width: 16px; height: 1px; background: var(--border); }
+  [data-collapsible="icon"] .rail-group-head { padding: 10px 0 4px; }
+  /* The search field under the workspace switcher: opens the ⌘K palette. */
+  .rail-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 30px;
+    padding: 0 9px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--muted-foreground-soft);
+    font-size: var(--typo-label);
   }
+  .rail-search:hover { border-color: var(--line-strong); color: var(--muted-foreground); }
+  .rail-search > svg { width: 14px; height: 14px; flex-shrink: 0; }
+  [data-collapsible="icon"] .rail-search { width: 40px; padding: 0 12px; }
+  /* The signed-in person, last row of the footer. */
+  .rail-user {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 6px;
+    border-radius: 9px;
+    color: var(--muted-foreground);
+    text-align: left;
+  }
+  .rail-user:hover, .rail-user[data-state="open"] { background: var(--row-hover-bg); }
+  /* The area's tile at the start of the top bar's breadcrumbs. */
+  .area-tile {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 28%;
+    color: var(--brand-ink);
+    background: color-mix(in srgb, var(--brand) 13%, transparent);
+    border: 1px solid color-mix(in srgb, var(--brand) 26%, transparent);
+  }
+  .area-tile > svg { width: 13px; height: 13px; }
+  [data-collapsible="icon"] .rail-user { width: 40px; padding: 6px 8px; }
+  @media (prefers-reduced-motion: reduce) {
+    .rail-label { transition: none; }
+  }
+}
 }
 
 /* Streamdown markdown inside chat messages */
@@ -1698,5 +1770,18 @@ body {
   }
   :root[data-density="compact"] [data-slot="table-cell"] {
     padding-block: 0.25rem;
+  }
+}
+
+/* Harbor 2 content frame (#3350): the page sits in a 12 px frame inset 8 px
+ * from the grey ground, hairline instead of a shadow. Desktop and tablet only;
+ * on a phone the page is full-bleed. */
+@media (min-width: 768px) {
+  .peer[data-variant="inset"] ~ [data-slot="sidebar-inset"] {
+    margin: 8px 8px 8px 0;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: none;
+    overflow: hidden;
   }
 }

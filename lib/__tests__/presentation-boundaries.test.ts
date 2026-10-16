@@ -26,7 +26,7 @@ it("rejects a phone-tab configuration whose destination was removed from shared 
  const [removed] = section.items.splice(index, 1)
  try { expect(() => phoneTabs()).toThrow("PHONE_TAB_HREFS names /chat") }
  finally { section.items.splice(index, 0, removed) }
- expect(phoneTabs().map(item => item.href)).toEqual(["/", "/inbox", "/chat"])
+ expect(phoneTabs().map(item => item.href)).toEqual(["/", "/inbox", "/chat", "/issues"])
 })
 
 it.each(["OWNER", "ADMIN", "MEMBER"])("does not treat workspace role %s as instance-admin authority", role => {
