@@ -112,8 +112,10 @@ export function AppToolbar() {
   const [localCmdk, setLocalCmdk] = useState(false)
   const storeCmdk = useAppStore((st) => st.commandPaletteOpen)
   const storeSetCmdk = useAppStore((st) => st.setCommandPaletteOpen)
-  const cmdkOpen = storeSetCmdk ? Boolean(storeCmdk) : localCmdk
-  const setCmdkOpen = storeSetCmdk ?? setLocalCmdk
+  // Typed as always present, but a partial store (tests, embeds) may lack it.
+  const hasStorePalette = typeof (storeSetCmdk as unknown) === "function"
+  const cmdkOpen = hasStorePalette ? Boolean(storeCmdk) : localCmdk
+  const setCmdkOpen = hasStorePalette ? storeSetCmdk : setLocalCmdk
   const { role } = useAbilities()
   const instanceAdmin = useIsInstanceAdmin()
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
