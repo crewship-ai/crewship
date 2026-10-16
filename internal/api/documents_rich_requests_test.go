@@ -15,7 +15,7 @@ func TestDocumentRequestFreezesCanonicalContentSchema(t *testing.T) {
 		stored, verified, target, status int
 	}{
 		{"legacy1", 1, 0, 0, 202}, {"legacy2", 2, 0, 0, 202}, {"rich3", 3, 3, 3, 202},
-		{"missing rich capability", 3, 0, 0, 409}, {"false upgrade", 2, 3, 3, 409}, {"foreign target capability", 3, 3, 0, 409}, {"future", 3, 4, 4, 409},
+		{"missing rich capability", 3, 0, 0, 409}, {"false upgrade", 2, 3, 3, 409}, {"foreign target capability", 3, 3, 0, 409}, {"future", 3, 4, 4, 409}, {"future stored legacy verification", 4, 0, 0, 409},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			h, workspace, user, page := documentRequestFixture(t)

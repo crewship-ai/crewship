@@ -144,7 +144,10 @@ an original selection. The engine remains the trusted binary validator: Go does
 not decode Yjs or infer hidden retained structs from visible JSON.
 
 The schema3 generic semantic path is covered by actual separate Go/Node process
-tests. Selected schema3 request admission remains closed until its immutable
-versioned request/worker contract is qualified. Images are unsupported by3 and
+tests. Selected schema3 request admission freezes the canonical content version in
+the server-owned target snapshot. The worker uses that original version and Page
+ID; subsequent upgrade/restore/human edits cannot refresh the original revision.
+Actual engine admission, scoped patch/checkpoint/replay and human-edit denial are
+covered by the opt-in process suite; no model completion is simulated. Images are unsupported by3 and
 require a separate future schema4 contract. No export fidelity or model-run
 acceptance follows from these protocol tests.

@@ -104,7 +104,6 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         return { schema: state.schema, rev, generation, incarnation, snapshot, snapshotRev, updates, blocks, epoch: syncEpoch(state), content: validate(doc,version), outline: await outline(doc,version) };
       }
       if (operation === 'verify-targets') {
-        if(version === RICH_VERSION) throw fault(403,'Schema3 selected agent requests require the qualified rich semantic guard.');
         if (!Number.isSafeInteger(request.base_rev) || request.base_rev !== state.rev) throw fault(409, 'document request revision changed');
         return { page_id: page, rev: state.rev, ...(version === RICH_VERSION ? {schema:RICH_VERSION} : {}), targets: await verifyTargets(doc, request.targets,version) };
       }

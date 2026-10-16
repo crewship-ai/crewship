@@ -7,10 +7,14 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"net/http/httptest"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
@@ -131,6 +135,64 @@ console.log(JSON.stringify({update:encode(Y.encodeStateAsUpdate(doc,vector))}));
 	state = read()
 	content = state["content"].(map[string]any)["content"].([]any)
 	assertComment()
+	for index, scenario := range []string{"success", "human change"} {
+		base := read()
+		target := base["outline"].([]any)[0].(map[string]any)
+		original := target["text"].(string)
+		run := fmt.Sprintf("rich-selected-run-%d", index)
+		execOrFatal(t, h.db, `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) SELECT ?,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`, run)
+		execOrFatal(t, h.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES(?,?,'artifact-crew','artifact-agent','run.started','system','fixture',?)`, run+"-started", workspace, run)
+		token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, "artifact-crew"), workspace, "artifact-agent", run)
+		input := map[string]any{"page_id": page, "chat_id": "artifact-chat", "instruction": "Revise only selected text", "base_rev": base["rev"], "submission_id": run, "targets": []any{map[string]any{"id": "legacy-intro", "hash": target["hash"], "from": 7, "to": len(original), "quote": original[7:]}}}
+		req := pagesGrantRequest(t, "POST", "/", workspace, user, "OWNER", string(mustDocumentsJSON(t, input)))
+		req.SetPathValue("slug", "rich-legacy")
+		req.Header.Set("Authorization", "Bearer "+human)
+		UserFromContext(req.Context()).SessionID = "docs-session"
+		queued := httptest.NewRecorder()
+		h.CreateDocumentRequest(queued, req)
+		if queued.Code != 202 {
+			t.Fatalf("rich selected admission: %d %s", queued.Code, queued.Body.String())
+		}
+		var result DocumentRequestCreateResponse
+		if err := json.Unmarshal(queued.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		execOrFatal(t, h.db, `UPDATE document_requests SET status='running' WHERE id=?`, result.ID)
+		trusted, err := chataudience.CaptureTrusted(t.Context(), h.db, "artifact-chat", user, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = bindDocumentRequestRun(httptest.NewRequest("POST", "/", nil), h.db, result.ID, run, trusted); err != nil {
+			t.Fatal(err)
+		}
+		current := call(page, "read", token, map[string]any{}, 200)
+		selectedPatch := map[string]any{"id": "patch-" + run, "schema": 3, "page_id": page, "epoch": current["epoch"], "ifRev": base["rev"], "target": "legacy-intro", "ifHash": target["hash"], "text": "Legacy selected"}
+		if scenario == "success" {
+			ack := call(page, "patch", token, selectedPatch, 200)
+			next := call(page, "read", token, map[string]any{}, 200)
+			call(page, "checkpoint", token, map[string]any{"id": result.ID + "-checkpoint", "schema": 3, "page_id": page, "epoch": next["epoch"], "ifRev": next["rev"]}, 200)
+			if call(page, "patch", token, selectedPatch, 200)["duplicate"] != true || read()["rev"] != ack["rev"] {
+				t.Fatal("selected rich exact retry duplicated revision")
+			}
+		} else {
+			call(page, "patch", human, map[string]any{"id": "rich-intervening-human", "schema": 3, "page_id": page, "epoch": current["epoch"], "ifRev": base["rev"], "target": "legacy-intro", "ifHash": target["hash"], "text": "Legacy human"}, 200)
+			fresh := call(page, "read", token, map[string]any{}, 200)
+			selectedPatch["epoch"] = fresh["epoch"]
+			selectedPatch["ifRev"] = fresh["rev"]
+			selectedPatch["ifHash"] = fresh["outline"].([]any)[0].(map[string]any)["hash"]
+			call(page, "patch", token, selectedPatch, 409)
+			if read()["rev"] != fresh["rev"] {
+				t.Fatal("fresh conditions bypassed original rich request")
+			}
+			var receipts int
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM document_receipts WHERE page_id=? AND id=?`, page, selectedPatch["id"]).Scan(&receipts); err != nil || receipts != 0 {
+				t.Fatalf("denied rich receipt=%d %v", receipts, err)
+			}
+		}
+		assertComment()
+	}
+	state = read()
+	content = state["content"].(map[string]any)["content"].([]any)
 	call(page, "checkpoint", human, map[string]any{"id": "rich-three", "schema": 3, "page_id": page, "epoch": state["epoch"], "ifRev": state["rev"]}, 200)
 	call(page, "initialize", agent, map[string]any{"id": "agent-rich-reinit", "schema": 3, "page_id": page, "body": state["content"]}, 403)
 	call(page, "restore", human, map[string]any{"id": "rich-to-legacy", "schema": 3, "page_id": page, "epoch": state["epoch"], "ifRev": state["rev"], "checkpoint": "legacy-one"}, 200)

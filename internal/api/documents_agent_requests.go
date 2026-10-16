@@ -143,7 +143,7 @@ func (h *PageHandler) CreateDocumentRequest(w http.ResponseWriter, r *http.Reque
 	}
 	var rev int64
 	var schema int
-	if tx.QueryRowContext(ctx, `SELECT head_rev,schema_version FROM documents WHERE workspace_id=? AND page_id=?`, workspace, rec.ID).Scan(&rev, &schema) != nil || rev != *body.BaseRev || (schema == 3 && verified.Schema != 3) || (schema != 3 && verified.Schema != 0) {
+	if tx.QueryRowContext(ctx, `SELECT head_rev,schema_version FROM documents WHERE workspace_id=? AND page_id=?`, workspace, rec.ID).Scan(&rev, &schema) != nil || rev != *body.BaseRev || (schema != 1 && schema != 2 && schema != 3) || (schema == 3 && verified.Schema != 3) || (schema != 3 && verified.Schema != 0) {
 		replyError(w, 409, "document revision changed")
 		return
 	}

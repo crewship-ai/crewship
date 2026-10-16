@@ -502,7 +502,7 @@ test('schema3 raw human marks are versioned; old clients and unqualified semanti
   const before=(await read(f)).body;const upgrade={id:'upgrade-marks',schema:2,target_schema:3,page_id:'p',epoch:before.epoch,ifRev:before.rev};assert.equal((await call(f.socket,'/v1/documents/p/upgrade',upgrade)).status,200);
   const current=(await read(f)).body,doc=load(current.snapshot),vector=Y.encodeStateVector(doc);find(doc,'intro').toArray()[0].format(0,8,{link:{href:'https://example.invalid/'}});const update=encode(Y.encodeStateAsUpdate(doc,vector));doc.destroy();
   assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'old-client',schema:2,epoch:current.epoch,kind:'human',update})).status,409);assert.equal(model.commits,0);
-  assert.equal((await call(f.socket,'/v1/documents/p/verify-targets',{base_rev:current.rev,targets:[]})).status,403);
+  assert.equal((await call(f.socket,'/v1/documents/p/verify-targets',{base_rev:current.rev,targets:[]})).status,400);
   assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'raw-agent',schema:3,page_id:'p',epoch:current.epoch,kind:'human',update},{Authorization:'Bearer agtv2.synthetic'})).status,403);assert.equal(model.commits,0);
   assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'foreign-page',schema:3,page_id:'foreign',epoch:current.epoch,kind:'human',update})).status,409);
   const saved=await call(f.socket,'/v1/documents/p/patch',{id:'human-link',schema:3,page_id:'p',epoch:current.epoch,kind:'human',update});assert.equal(saved.status,200);const rich=(await read(f)).body;assert.equal(rich.schema,3);assert.equal(rich.content.content.find(node=>node.attrs?.id==='intro').content[0].marks[0].attrs.href,'https://example.invalid/');
@@ -542,5 +542,14 @@ test('rich semantic proof is private, byte-bounded, and preserves nontext contex
  const state=(await read(f)).body;const request={id:'rich-proof',schema:3,page_id:'p',epoch:state.epoch,ifRev:state.rev,ifHash:state.outline[0].hash,target:'rich-target',text:'prefix changed suffix',rich:{before:{type:'client-forgery'}}};
  assert.equal((await call(f.socket,'/v1/documents/p/patch',request)).status,200);const semantic=model.seen.find(x=>x.op==='commit').data.semantic;assert.equal(semantic.rich.before.type,'doc');assert.deepEqual(semantic.rich.before,state.content);assert.equal(semantic.rich.after.content[0].content[0].marks[0].type,'link');
  const huge=create({type:'doc',content:[{type:'paragraph',attrs:{id:'rich-target'},content:[{type:'text',text:'界'.repeat(170000)}]}]},3);model.state={...model.state,snapshot:snapshot(huge)};huge.destroy();const large=(await read(f)).body;const commits=model.commits;assert.equal((await call(f.socket,'/v1/documents/p/patch',{...request,id:'oversized-rich',epoch:large.epoch,ifRev:large.rev,ifHash:large.outline[0].hash,text:'new'})).status,413);assert.equal(model.commits,commits);assert.equal(model.state.rev,large.rev);
+ }finally{await f.close()}
+});
+
+test('rich selection confirms plaintext and immutable schema while code blocks stay outside agent admission',async()=>{
+ const model=authorityModel(),f=await fixture(model.handle);await f.start();
+ try{
+ const doc=create({type:'doc',content:[{type:'paragraph',attrs:{id:'target'},content:[{type:'text',text:'linked',marks:[{type:'link',attrs:{href:'https://example.invalid/'}}]}]},{type:'codeBlock',attrs:{id:'code'},content:[{type:'text',text:'literal'}]}]},3);model.state={...model.state,schema:3,snapshot:snapshot(doc)};doc.destroy();const state=(await read(f)).body;
+ const selected={id:'target',hash:state.outline[0].hash,from:0,to:6,quote:'linked'};const response=await call(f.socket,'/v1/documents/p/verify-targets',{base_rev:state.rev,targets:[selected]});assert.equal(response.status,200);assert.equal(response.body.schema,3);assert.deepEqual(response.body.targets,[{...selected,text:'linked',ancestors:[],schema:3}]);
+ assert.equal((await call(f.socket,'/v1/documents/p/verify-targets',{base_rev:state.rev,targets:[{id:'code',hash:state.outline[1].hash,from:0,to:7,quote:'literal'}]})).status,400);assert.equal(model.commits,0);assert.equal(model.acquisitions,0);
  }finally{await f.close()}
 });
