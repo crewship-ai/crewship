@@ -2,9 +2,8 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"github.com/crewship-ai/crewship/internal/auth"
-	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"image"
 	"image/color"
 	"image/png"
@@ -16,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/pageassets"
 )
@@ -30,9 +31,20 @@ func pageAssetPNG(t *testing.T) []byte {
 	}
 	return b.Bytes()
 }
+func pageAssetHumanRequest(t *testing.T, h *PageHandler, method, path, ws, user, body string) *http.Request {
+	t.Helper()
+	request := pagesGrantRequest(t, method, path, ws, user, "OWNER", body)
+	session, err := sessions.NewDBStore(h.db).Create(t.Context(), user, "synthetic", "127.0.0.1", auth.RefreshTokenTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	UserFromContext(request.Context()).SessionID = session.ID
+	return request.WithContext(context.WithValue(request.Context(), ctxAuthKind, AuthKindSession))
+}
+
 func uploadAsset(t *testing.T, h *PageHandler, ws, user, slug, mutation string, raw []byte) *httptest.ResponseRecorder {
 	t.Helper()
-	r := pagesGrantRequest(t, "POST", "/api/v1/pages/"+slug+"/assets?mutation_id="+mutation, ws, user, "OWNER", string(raw))
+	r := pageAssetHumanRequest(t, h, "POST", "/api/v1/pages/"+slug+"/assets?mutation_id="+mutation, ws, user, string(raw))
 	r.SetPathValue("slug", slug)
 	w := httptest.NewRecorder()
 	h.UploadPageAsset(w, r)
@@ -48,7 +60,7 @@ func assetMeta(t *testing.T, w *httptest.ResponseRecorder) pageAssetMetadata {
 }
 func getAsset(t *testing.T, h *PageHandler, ws, user, slug, id string, body bool) *httptest.ResponseRecorder {
 	t.Helper()
-	r := pagesGrantRequest(t, "GET", "/api/v1/pages/"+slug+"/assets/"+id, ws, user, "OWNER", "")
+	r := pageAssetHumanRequest(t, h, "GET", "/api/v1/pages/"+slug+"/assets/"+id, ws, user, "")
 	r.SetPathValue("slug", slug)
 	r.SetPathValue("assetId", id)
 	w := httptest.NewRecorder()

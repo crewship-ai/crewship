@@ -172,6 +172,15 @@ they are never described as screenshots of cross-origin iframe content.
 
 ## Private staged raster assets
 
+CLI tokens need `pages:write` for uploads and `pages:read` for metadata/bytes;
+`pages:*` grants both. Neither read nor write implies the other. Sessions and
+legacy unrestricted tokens keep current Page ACL authority; a scope never grants
+access to another Page. Exact credential expiry/revocation and current token
+scopes are rechecked after upload decoding under the same writer transaction.
+The initial unshipped foundation exempted these routes from token ceilings;
+this correction prevents a read-only token from uploading through its human's
+write permission. Scope refusal returns 403; expired or revoked credentials return 401.
+
 Human-authenticated `POST /api/v1/pages/{slug}/assets?mutation_id=ID` accepts raw
 PNG/JPEG bytes; `GET /api/v1/pages/{slug}/assets/{assetId}` returns immutable
 metadata and `GET /api/v1/pages/{slug}/assets/{assetId}/bytes` returns canonical
