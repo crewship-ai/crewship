@@ -103,7 +103,25 @@
     "editor": "page-slides",
     "storage_adapter": "slides-canonical-v1",
     "projection_adapter": "native-react-v1",
-    "anchor_kinds": ["slide", "element"],
+    "anchor_kinds": [
+      "slide",
+      "element"
+    ],
+    "export_formats": [],
+    "execution_profile": "none",
+    "authoring_skill": ""
+  },
+  {
+    "type_id": "slides",
+    "schema_version": 2,
+    "viewer": "page-slides",
+    "editor": "page-slides",
+    "storage_adapter": "slides-canonical-v2",
+    "projection_adapter": "native-react-v2",
+    "anchor_kinds": [
+      "slide",
+      "element"
+    ],
     "export_formats": [],
     "execution_profile": "none",
     "authoring_skill": ""

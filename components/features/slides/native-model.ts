@@ -1,4 +1,4 @@
-import { canonicalSlideDeck, SLIDES_MAX_TABLE_CELLS, SLIDES_MAX_TABLE_CELLS_PER_SLIDE, type Slide, type SlideDeck, type SlideElement } from "@/lib/slides/model"
+import { canonicalSlideDeck, SLIDES_MAX_IMAGE_ASSETS, SLIDES_MAX_IMAGE_ALT_BYTES, SLIDES_MAX_TABLE_CELLS, SLIDES_MAX_TABLE_CELLS_PER_SLIDE, type Slide, type SlideDeck, type SlideElement } from "@/lib/slides/model"
 
 const bytes = (value: string) => new TextEncoder().encode(value).length
 const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
@@ -12,11 +12,11 @@ const id = (value: unknown): value is string => typeof value === "string" && /^[
 // A defensive UI boundary for parsed props, not a replacement for Go admission.
 // Unknown fields/types never become DOM attributes, styles or executable markup.
 export function isNativeSlideDeck(value: unknown): value is SlideDeck {
-  if (!object(value) || !keys(value, ["schema_version", "deck_id", "width", "height", "theme", "slide_order", "slides"]) || value.schema_version !== 1 || !id(value.deck_id) || !integer(value.width, 64, 4096) || !integer(value.height, 64, 4096)) return false
+  if (!object(value) || !keys(value, ["schema_version", "deck_id", "width", "height", "theme", "slide_order", "slides"]) || (value.schema_version !== 1 && value.schema_version !== 2) || !id(value.deck_id) || !integer(value.width, 64, 4096) || !integer(value.height, 64, 4096)) return false
   const theme = value.theme
   if (!object(theme) || !keys(theme, ["background", "color", "font_family", "font_size"]) || !color(theme.background) || !color(theme.color) || !font(theme.font_family, theme.font_size)) return false
   if (!Array.isArray(value.slides) || value.slides.length < 1 || value.slides.length > 100 || !Array.isArray(value.slide_order) || value.slide_order.length !== value.slides.length) return false
-  const ids = new Set<string>(), slideIds = new Set<string>()
+  const ids = new Set<string>(), slideIds = new Set<string>(), imageAssets = new Map<string, string>()
   let count = 0, totalCells = 0
   for (const slide of value.slides) {
     let slideCells = 0
@@ -40,6 +40,12 @@ export function isNativeSlideDeck(value: unknown): value is SlideDeck {
         const cells = columns * v.cells.length
         totalCells += cells; slideCells += cells
         if (totalCells > SLIDES_MAX_TABLE_CELLS || slideCells > SLIDES_MAX_TABLE_CELLS_PER_SLIDE) return false
+      } else if (element.type === "image") {
+        const v = element.image
+        if (value.schema_version !== 2 || !object(v) || !keys(v, ["asset_id", "expected_sha256", "alt"]) || !id(v.asset_id) || typeof v.expected_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(v.expected_sha256) || !text(v.alt, SLIDES_MAX_IMAGE_ALT_BYTES)) return false
+        if (imageAssets.has(v.asset_id) && imageAssets.get(v.asset_id) !== v.expected_sha256) return false
+        imageAssets.set(v.asset_id, v.expected_sha256)
+        if (imageAssets.size > SLIDES_MAX_IMAGE_ASSETS) return false
       } else return false
     }
   }
@@ -80,7 +86,7 @@ export function moveSlide(deck: SlideDeck, slideId: string, direction: -1 | 1): 
   return copy
 }
 
-export function newElement(deck: SlideDeck, type: SlideElement["type"]): SlideElement {
+export function newElement(deck: SlideDeck, type: Exclude<SlideElement["type"], "image">): SlideElement {
   const common = { id: freshSlideId(deck), x: 0, y: 0, width: Math.min(240, deck.width), height: Math.min(100, deck.height) }
   const style = { font_family: deck.theme.font_family, font_size: Math.min(24, deck.theme.font_size), color: deck.theme.color }
   if (type === "text") return { ...common, type, text: { ...style, value: "New text", align: "left" } }
