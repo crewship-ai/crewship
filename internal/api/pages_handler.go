@@ -264,6 +264,7 @@ type pageWire struct {
 	//
 	// Neither carries omitempty: a client must not have to treat an absent
 	// field as a third state.
+	HasSlides          bool   `json:"has_slides"`
 	HasDocument        bool   `json:"has_document"`
 	HasBoard           bool   `json:"has_board"`
 	HasArtifact        bool   `json:"has_artifact"`
@@ -327,6 +328,7 @@ type pageListWire struct {
 	ApplicationDescriptor *pages.ContentReference `json:"application_descriptor,omitempty"`
 	ArtifactSummary       *pageArtifactSummary    `json:"artifact_summary,omitempty"`
 	// See pageWire.HasProject: source that exists versus source that is live.
+	HasSlides          bool   `json:"has_slides"`
 	HasDocument        bool   `json:"has_document"`
 	HasBoard           bool   `json:"has_board"`
 	HasArtifact        bool   `json:"has_artifact"`
@@ -410,6 +412,8 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
+	HasSlides          bool
+	SlidesSchema       int
 	DocumentSchema     int
 	BoardFormat        string
 	ArtifactManifest   string
@@ -555,6 +559,8 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
  EXISTS(SELECT 1 FROM page_boards WHERE page_id=p.id),
  EXISTS(SELECT 1 FROM documents WHERE page_id=p.id),
  EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=p.id),
+ EXISTS(SELECT 1 FROM slides_heads WHERE page_id=p.id),
+ COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=p.id),0),
  COALESCE((SELECT schema_version FROM documents WHERE page_id=p.id),0),
  COALESCE((SELECT format FROM page_boards WHERE page_id=p.id),''),
  COALESCE(ar.manifest_json,''),
@@ -580,7 +586,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasBoard, &p.HasDocument, &p.HasArtifact, &p.DocumentSchema, &p.BoardFormat, &p.ArtifactManifest, &summary.HeadRev, &summary.AuthorUserID, &summary.AuthorName, &summary.AuthorAgentID, &summary.AuthorAgentName, &summary.AuthorRunID, &summary.PublishedAt, &summary.LastActivityAt); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasBoard, &p.HasDocument, &p.HasArtifact, &p.HasSlides, &p.SlidesSchema, &p.DocumentSchema, &p.BoardFormat, &p.ArtifactManifest, &summary.HeadRev, &summary.AuthorUserID, &summary.AuthorName, &summary.AuthorAgentID, &summary.AuthorAgentName, &summary.AuthorRunID, &summary.PublishedAt, &summary.LastActivityAt); err != nil {
 			return nil, err
 		}
 		if summary.HeadRev > 0 {
@@ -664,7 +670,7 @@ func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFol
 	content := derivePageContent(rec, len(row.panels))
 	out := pageListWire{
 		ContentDescriptor: content.ContentDescriptor, ApplicationDescriptor: content.ApplicationDescriptor,
-		HasDocument: rec.HasDocument, HasBoard: rec.HasBoard, HasArtifact: rec.HasArtifact, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasSlides: rec.HasSlides, HasDocument: rec.HasDocument, HasBoard: rec.HasBoard, HasArtifact: rec.HasArtifact, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
 		Name:                rec.Name,
@@ -1047,7 +1053,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if req.Panels != nil && (rec.HasDocument || rec.HasArtifact || rec.HasBoard) {
+	if req.Panels != nil && (rec.HasSlides || rec.HasDocument || rec.HasArtifact || rec.HasBoard) {
 		replyError(w, 409, "artifact pages cannot contain panels")
 		return
 	}
@@ -1062,7 +1068,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	validate := base.Validate
-	if rec.HasDocument || rec.HasArtifact || rec.HasBoard || (len(base.Spec.Panels) == 0 && req.Panels == nil && rec.OwnerUserID != "") {
+	if rec.HasSlides || rec.HasDocument || rec.HasArtifact || rec.HasBoard || (len(base.Spec.Panels) == 0 && req.Panels == nil && rec.OwnerUserID != "") {
 		validate = base.ValidateEmpty
 	}
 	if err := validate(); err != nil {
@@ -1320,13 +1326,13 @@ func pageWorkspaceInvalidation(rec *pageRecord, hasPanels bool) map[string]any {
 }
 
 func pageHasPrivateOutputMetadata(rec *pageRecord, hasPanels bool) bool {
-	return rec.HasDocument || rec.HasArtifact || rec.HasBoard || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
+	return rec.HasSlides || rec.HasDocument || rec.HasArtifact || rec.HasBoard || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
 }
 
 // Use when panels are not already loaded, before deleting or moving the Page.
 // A failed classification must hide descriptive metadata, never disclose it.
 func (h *PageHandler) hasPrivateOutputMetadata(ctx context.Context, rec *pageRecord) bool {
-	if rec.HasDocument || rec.HasArtifact || rec.HasBoard {
+	if rec.HasSlides || rec.HasDocument || rec.HasArtifact || rec.HasBoard {
 		return true
 	}
 	if rec.OwnerUserID == "" || rec.HasProject || rec.HasApplication {
@@ -1353,13 +1359,15 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
  EXISTS(SELECT 1 FROM page_boards WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id),
+ EXISTS(SELECT 1 FROM slides_heads WHERE page_id=pages.id),
+ COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=pages.id),0),
  COALESCE((SELECT schema_version FROM documents WHERE page_id=pages.id),0),
  COALESCE((SELECT format FROM page_boards WHERE page_id=pages.id),''),
  COALESCE((SELECT ar.manifest_json FROM page_artifacts pa JOIN page_artifact_revisions ar ON ar.page_id=pa.page_id AND ar.revision=pa.head_rev WHERE pa.page_id=pages.id),'')
 		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasBoard, &p.HasDocument, &p.HasArtifact, &p.DocumentSchema, &p.BoardFormat, &p.ArtifactManifest)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasBoard, &p.HasDocument, &p.HasArtifact, &p.HasSlides, &p.SlidesSchema, &p.DocumentSchema, &p.BoardFormat, &p.ArtifactManifest)
 	if err != nil {
 		return nil, err
 	}
@@ -1753,7 +1761,7 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 	content := derivePageContent(rec, len(panels))
 	out := pageWire{
 		ContentDescriptor: content.ContentDescriptor, ApplicationDescriptor: content.ApplicationDescriptor,
-		HasDocument: rec.HasDocument, HasBoard: rec.HasBoard, HasArtifact: rec.HasArtifact, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasSlides: rec.HasSlides, HasDocument: rec.HasDocument, HasBoard: rec.HasBoard, HasArtifact: rec.HasArtifact, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,
@@ -2255,7 +2263,7 @@ func derivePageContent(rec *pageRecord, panelCount int) pages.ContentDerivation 
 		}
 	}
 	return pages.DeriveContentTypes(pages.ContentFacts{
-		HasDocument: rec.HasDocument, DocumentSchema: rec.DocumentSchema,
+		HasSlides: rec.HasSlides, SlidesSchema: rec.SlidesSchema, HasDocument: rec.HasDocument, DocumentSchema: rec.DocumentSchema,
 		HasBoard: rec.HasBoard, BoardFormat: rec.BoardFormat,
 		HasArtifact: rec.HasArtifact, ArtifactProfile: profile, ArtifactVersion: version,
 		HasProject: rec.HasProject, HasApplication: rec.HasApplication,

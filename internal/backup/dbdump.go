@@ -311,6 +311,7 @@ var BackupTables = []string{
 	"page_folders",    // pages.folder_id → page_folders, so folders land first; FK owner_crew_id → crews
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
+	"slides_heads", "slides_revisions", "slides_receipts", "slides_object_ids",
 	"documents",
 	"document_updates",
 	"document_receipts",
@@ -1286,6 +1287,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
 			row = safeArtifactRequestRestoreRow(table, row)
 			row = safeBoardHistoryRestoreRow(table, row)
+			if err = validateSlidesRestoreRow(table, row); err != nil {
+				return stats, err
+			}
 			row, err = safeDocumentRestoreRow(table, row)
 			if err != nil {
 				return stats, err

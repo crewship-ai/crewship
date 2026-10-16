@@ -424,6 +424,9 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	if err := remapSlides(dump, idMap); err != nil {
+		return err
+	}
 	remapDocumentCommentAnchors(dump, idMap)
 	remapPageRequestNotices(dump, idMap)
 	remapBoardPageReferences(dump, idMap)

@@ -82,6 +82,8 @@ type ContentReference struct {
 }
 
 type ContentFacts struct {
+	HasSlides       bool   `json:"has_slides"`
+	SlidesSchema    int    `json:"slides_schema"`
 	HasDocument     bool   `json:"has_document"`
 	DocumentSchema  int    `json:"document_schema"`
 	HasBoard        bool   `json:"has_board"`
@@ -114,7 +116,7 @@ func contentReference(id string, version int) ContentReference {
 func DeriveContentTypes(facts ContentFacts) ContentDerivation {
 	result := ContentDerivation{ContentDescriptor: contentReference("panels", 1)}
 	specialized := 0
-	for _, present := range []bool{facts.HasDocument, facts.HasBoard, facts.HasArtifact} {
+	for _, present := range []bool{facts.HasSlides, facts.HasDocument, facts.HasBoard, facts.HasArtifact} {
 		if present {
 			specialized++
 		}
@@ -124,6 +126,8 @@ func DeriveContentTypes(facts ContentFacts) ContentDerivation {
 		return result
 	}
 	switch {
+	case facts.HasSlides:
+		result.ContentDescriptor = ContentReference{TypeID: "slides", SchemaVersion: facts.SlidesSchema, Supported: false, Reason: "viewer-unavailable"}
 	case facts.HasDocument:
 		result.ContentDescriptor = contentReference("doc", facts.DocumentSchema)
 	case facts.HasBoard:

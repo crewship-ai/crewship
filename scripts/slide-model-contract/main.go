@@ -3,8 +3,9 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/crewship-ai/crewship/internal/slides"
 	"os"
+
+	"github.com/crewship-ai/crewship/internal/slides"
 )
 
 func main() {
