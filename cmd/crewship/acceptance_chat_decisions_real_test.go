@@ -106,6 +106,16 @@ func TestAcceptance_ChatDecisions_RealSourceAndCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := []string{"chat", "decision", "answer", "decision-chat", "escalation", source, "--expected-version", card.Decision.Source.Version, "--idempotency-key", "cli-answer-key", "--text", "Tomorrow"}
+	exec(`UPDATE cli_tokens SET scopes='["agents:write"]' WHERE id='decision-token'`)
+	out, err = runFeedbackCLI(t, cfg, args...)
+	if err == nil {
+		t.Fatalf("narrow token answered source: %s", out)
+	}
+	var pendingStatus string
+	if err = db.QueryRow(`SELECT status FROM escalations WHERE id=?`, source).Scan(&pendingStatus); err != nil || pendingStatus != "PENDING" {
+		t.Fatalf("denied scope left source effects: status=%s err=%v", pendingStatus, err)
+	}
+	exec(`UPDATE cli_tokens SET scopes='["workspace:admin"]' WHERE id='decision-token'`)
 	for i := 0; i < 2; i++ {
 		out, err = runFeedbackCLI(t, cfg, args...)
 		if err != nil || !strings.Contains(out, `"answered_by": "decision-user"`) {

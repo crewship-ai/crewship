@@ -27,7 +27,8 @@ An answer requires the `Idempotency-Key` header and this JSON body:
 ```
 
 The human's current workspace role, chat audience and source deadline are checked
-inside the existing source's write transaction. Inbox and chat compete on the
+inside the existing source's write transaction. Scoped CLI tokens additionally
+require `workspace:admin`, matching the canonical Inbox resolver. Inbox and chat compete on the
 same pending-source CAS; only the winner notifies the agent. A successful retry
 with the same key and body returns the terminal source without another delivery.
 Reusing the key with another body returns 409 without an unrelated receipt.

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Chat decision answers preserve the Inbox token scope.** Narrowly scoped CLI tokens cannot answer through chat; the same existing workspace administration scope is required, including retries. Read-only role demotion still permits an authorized completed retry.
+
 - **Guest intake changes and deletion preserve active routine work.** Queued, running and waiting runs still block changes after their issue execution becomes superseded; completed runs do not. Rejected deletion keeps the issue and execution intact.
 
 - **Shared routine results retain private provenance.** Replays preserve their source and trusted caller origins; issue runs, ambiguous legacy origins and malformed authority evidence stay hidden. Final outputs receive the same credential scrubbing as step outputs, including historical shared reads. Oversized selected results return 413.

@@ -52,7 +52,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/chats/{chatId}/entity-refs", authed(wsCtx(http.HandlerFunc(r.chatEntityRefs))))
 	r.mux.Handle("GET /api/v1/chats/{chatId}/decisions", authed(wsCtx(http.HandlerFunc(r.chatDecisionList))))
 	r.mux.Handle("GET /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}", authed(wsCtx(http.HandlerFunc(r.chatDecisionGet))))
-	r.authedMut("POST", "/api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer", roleSelf, r.chatDecisionAnswer)
+	r.authedMut("POST", "/api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer", roleInline, r.chatDecisionAnswer)
 	r.mux.Handle("GET /api/v1/operations/{operationId}", authed(wsCtx(http.HandlerFunc(r.chatEntityOperation))))
 	r.mux.Handle("GET /api/v1/issues/{identifier}/revision", authed(wsCtx(http.HandlerFunc(r.issueEntityRevision))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/issues/{identifier}/revision", authed(wsCtx(http.HandlerFunc(r.issueEntityRevision))))
