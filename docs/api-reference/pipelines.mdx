@@ -1035,3 +1035,17 @@ tag set after the add.
 **Auth:** `member` plus `create` at the route (MANAGER+). `200 OK` returns
 `{ "ok": true }`. A missing pipeline is `404`; tag removal failure is `500`.
 Removing an absent tag is otherwise successful.
+
+## Internal routine invocation provenance
+
+The sidecar invokes saved routines through `POST /api/v1/internal/pipelines/run`
+with its existing internal credential and host-injected invoking identity.
+An optional `X-Crewship-Run-Token` must cryptographically match the body's
+`workspace_id`, `invoking_agent_id` and `source_run_id`. An explicitly supplied
+invalid or mismatched credential returns 403 before creating a run. Calls
+without this header preserve the existing execution path.
+
+Fresh chat correlation is retained only for a verified direct-human invocation
+recorded by the host. Scheduled and peer invocations, source-less legacy calls,
+and a recipe's inherited authoring origin do not supply a new chat question.
+This metadata is private and does not grant execution or approval authority.
