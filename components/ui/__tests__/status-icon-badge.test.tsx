@@ -1,48 +1,40 @@
 import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { StatusIconBadge } from "@/components/ui/status-icon-badge"
-import { RUN_STATUS_CONFIG, STATUS_STYLES } from "@/lib/status-config"
+import { RUN_STATUS_CONFIG } from "@/lib/status-config"
 
-// Pins the rendered contract (label + icon + className) of the shared icon
-// badge renderer. Features migrate their local STATUS_CONFIG maps onto this
-// primitive only if it produces byte-identical output, so this is the
-// reference those migrations are checked against. Changing a class string
-// here is a deliberate visual change, not an incidental one.
-
+// The icon badge is a StatusPill with a glyph: its tone comes from the entry
+// and renders on the chip tokens, never a per-feature palette class.
 describe("StatusIconBadge", () => {
-  it("renders the entry label and a default icon", () => {
+  it("renders the entry label and a default icon inside a status pill", () => {
     const { container } = render(<StatusIconBadge entry={RUN_STATUS_CONFIG.COMPLETED} />)
     expect(screen.getByText("Completed")).toBeInTheDocument()
-    // Default icon is the entry's own component, rendered as an svg.
-    expect(container.querySelector("svg")).toBeTruthy()
+    const pill = container.querySelector('[data-slot="status-pill"]')!
+    expect(pill).toBeTruthy()
+    expect(pill.querySelector("svg")).toBeTruthy()
+    expect(pill.getAttribute("data-tone")).toBe("success")
   })
 
-  it("emits the outline variant with gap-1 border-0 + the entry color classes", () => {
+  it("takes the entry tone and the chip token classes", () => {
     const { container } = render(<StatusIconBadge entry={RUN_STATUS_CONFIG.FAILED} />)
-    const badge = container.querySelector('[data-slot="badge"]')!
-    expect(badge.getAttribute("data-variant")).toBe("outline")
-    expect(badge.classList.contains("gap-1")).toBe(true)
-    expect(badge.classList.contains("border-0")).toBe(true)
-    // red entry color (STATUS_STYLES.red) survives the merge.
-    for (const cls of STATUS_STYLES.red.split(" ")) {
-      expect(badge.classList.contains(cls)).toBe(true)
-    }
+    const pill = container.querySelector('[data-slot="status-pill"]')!
+    expect(pill.getAttribute("data-tone")).toBe("danger")
+    expect(pill.classList.contains("bg-chip-danger-bg")).toBe(true)
+    expect(pill.className).not.toMatch(/\b(?:bg|text)-(?:red|emerald|blue|amber)-\d/)
   })
 
-  it("honors a custom gap and an explicit icon override", () => {
+  it("honors an explicit icon override", () => {
     const { container } = render(
-      <StatusIconBadge
-        entry={RUN_STATUS_CONFIG.RUNNING}
-        gap="gap-1.5"
-        icon={<span data-testid="pulse" />}
-      />,
+      <StatusIconBadge entry={RUN_STATUS_CONFIG.RUNNING} icon={<span data-testid="glyph" />} />,
     )
-    const badge = container.querySelector('[data-slot="badge"]')!
-    expect(badge.classList.contains("gap-1.5")).toBe(true)
-    expect(badge.classList.contains("gap-1")).toBe(false)
-    // The override replaces the default icon entirely (no svg rendered).
-    expect(screen.getByTestId("pulse")).toBeInTheDocument()
+    expect(screen.getByTestId("glyph")).toBeInTheDocument()
     expect(container.querySelector("svg")).toBeNull()
     expect(screen.getByText("Running")).toBeInTheDocument()
+  })
+
+  it("pulses the pill dot instead of a glyph when live", () => {
+    const { container } = render(<StatusIconBadge entry={RUN_STATUS_CONFIG.RUNNING} live />)
+    expect(container.querySelector("svg")).toBeNull()
+    expect(container.querySelector('[data-slot="status-pill-dot"].animate-pulse')).not.toBeNull()
   })
 })

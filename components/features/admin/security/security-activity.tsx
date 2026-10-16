@@ -11,7 +11,7 @@ import type { KeeperLogEntry } from "@/app/(dashboard)/admin/types"
 import type { KeeperWsStatus } from "@/app/(dashboard)/admin/hooks/use-admin-websocket"
 import { STREAMS, filterActivity, streamOf, type DecisionFilter, type Stream } from "./security-model"
 import { StatusPill } from "@/components/ui/status-pill"
-import type { StatusTone } from "@/lib/format-status"
+import { formatStatus, type StatusTone } from "@/lib/format-status"
 
 const DECISION_TONE: Record<string, StatusTone> = {
   ALLOW: "success",
@@ -22,7 +22,8 @@ const DECISION_TONE: Record<string, StatusTone> = {
 
 export function DecisionChip({ decision }: { decision: string | null | undefined }) {
   const d = decision ?? "PENDING"
-  return <StatusPill tone={DECISION_TONE[d] ?? DECISION_TONE.PENDING} label={d} />
+  // The stored decision is an enum (ALLOW, DENY); the pill shows its word.
+  return <StatusPill tone={DECISION_TONE[d] ?? DECISION_TONE.PENDING} label={formatStatus(d).label} />
 }
 
 const when = (iso: string) => new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })

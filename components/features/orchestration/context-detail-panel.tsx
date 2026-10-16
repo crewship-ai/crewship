@@ -13,9 +13,10 @@ import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
-import type { Mission, MissionTask, MissionTaskStatus, EvaluationStatus } from "@/lib/types/mission"
+import type { Mission, MissionTask, EvaluationStatus } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
-import { STATUS_BADGE_CLASSES, COMPLEXITY_BADGE_CLASSES } from "@/lib/colors"
+import { COMPLEXITY_BADGE_CLASSES } from "@/lib/colors"
+import { StatusPill } from "@/components/ui/status-pill"
 
 const crewBgClass: Record<string, string> = {
   blue: "bg-blue-500", emerald: "bg-success", violet: "bg-purple", amber: "bg-warn",
@@ -57,9 +58,9 @@ function parseDependsOn(raw: string): string[] {
 
 function EvalBadge({ status }: { status: EvaluationStatus | null }) {
   if (!status) return null
-  if (status === "PASSED") return <span className="inline-flex items-center gap-1 text-success text-xs"><CheckCircle2 className="size-3" /> Passed</span>
-  if (status === "FAILED") return <span className="inline-flex items-center gap-1 text-destructive text-xs"><XCircle className="size-3" /> Failed</span>
-  return <span className="inline-flex items-center gap-1 text-muted-foreground text-xs"><Clock className="size-3" /> Pending</span>
+  if (status === "PASSED") return <StatusPill tone="success" icon={<CheckCircle2 className="size-3" />} label="Passed" />
+  if (status === "FAILED") return <StatusPill tone="danger" icon={<XCircle className="size-3" />} label="Failed" />
+  return <StatusPill tone="muted" icon={<Clock className="size-3" />} label="Pending" />
 }
 
 function CollapsibleSection({ title, children, defaultOpen = false, tinted }: {
@@ -99,7 +100,7 @@ function TaskDetail({ task, mission, allTasks, onAction }: {
       <div>
         <h3 className="text-sm font-semibold text-foreground leading-tight">{task.title}</h3>
         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-          <Badge className={cn("text-[10px]", STATUS_BADGE_CLASSES[task.status])}>{task.status.replace("_", " ")}</Badge>
+          <StatusPill status={task.status} />
           {task.complexity && <Badge className={cn("text-[10px]", COMPLEXITY_BADGE_CLASSES[task.complexity])}>{task.complexity}</Badge>}
           {task.iteration != null && task.max_iterations != null && task.max_iterations > 1 && (
             <span className="text-[10px] text-muted-foreground">Iter {task.iteration}/{task.max_iterations}</span>
@@ -146,7 +147,7 @@ function TaskDetail({ task, mission, allTasks, onAction }: {
             <div key={d.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <GitBranch className="size-3" />
               <span className="truncate">{d.title}</span>
-              <Badge className={cn("text-[9px] ml-auto", STATUS_BADGE_CLASSES[d.status])}>{d.status}</Badge>
+              <StatusPill status={d.status} className="ml-auto" />
             </div>
           ))}
         </div>
@@ -159,7 +160,7 @@ function TaskDetail({ task, mission, allTasks, onAction }: {
             <div key={b.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <ArrowRight className="size-3" />
               <span className="truncate">{b.title}</span>
-              <Badge className={cn("text-[9px] ml-auto", STATUS_BADGE_CLASSES[b.status])}>{b.status}</Badge>
+              <StatusPill status={b.status} className="ml-auto" />
             </div>
           ))}
         </div>
@@ -238,9 +239,7 @@ function MissionDetail({ mission }: { mission: Mission }) {
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-semibold text-foreground">{mission.title}</h3>
-      <Badge className={cn("text-[10px]", STATUS_BADGE_CLASSES[mission.status as MissionTaskStatus] ?? "bg-muted text-muted-foreground")}>
-        {mission.status}
-      </Badge>
+      <div><StatusPill status={mission.status} /></div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
         <div className="text-muted-foreground">Lead</div>
         <div className="text-foreground/80">@{mission.lead_agent_slug}</div>
@@ -398,7 +397,7 @@ function TraceTimeline({ tasks, missionStatus: _missionStatus }: { tasks: Missio
               {task.agent_slug && <span>{task.agent_slug}</span>}
               {task.duration_ms != null && <span>{(task.duration_ms / 1000).toFixed(1)}s</span>}
               {task.token_count != null && <span>{formatTokens(task.token_count)} tok</span>}
-              <Badge className={cn("text-[9px] px-1 py-0", STATUS_BADGE_CLASSES[task.status as MissionTaskStatus])}>{task.status}</Badge>
+              <StatusPill status={task.status} />
             </div>
             {task.error_message && (
               <p className="text-[10px] text-destructive mt-0.5 line-clamp-2">{task.error_message}</p>

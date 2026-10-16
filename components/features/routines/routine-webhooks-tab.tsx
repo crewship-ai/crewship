@@ -12,8 +12,9 @@ import { useConfirm } from "@/components/ui/use-confirm"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
-import { Card, Pill, FieldLabel } from "./_shared"
+import { Card, FieldLabel } from "./_shared"
 import { EmptyState } from "@/components/layout/empty-state"
+import { StatusPill } from "@/components/ui/status-pill"
 import { RoutineWebhookEditorDialog } from "./routine-webhook-editor-dialog"
 
 // RoutineWebhooksTab — event-driven trigger CRUD restyled for the
@@ -191,11 +192,9 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-semibold">{w.name}</span>
-                    <Pill tone={w.enabled ? "blue" : "default"}>
-                      {w.enabled ? "enabled" : "disabled"}
-                    </Pill>
+                    <StatusPill size="md" status={w.enabled ? "enabled" : "disabled"} label={w.enabled ? "enabled" : "disabled"} />
                     {w.signing_secret_set && (
-                      <Pill tone="success">Signing configured</Pill>
+                      <StatusPill size="md" tone="success" label="Signing configured" />
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">{w.ingress_profile === "github" ? "GitHub pull requests" : "Crewship signature"} · Receiving URL shown once when created</p>

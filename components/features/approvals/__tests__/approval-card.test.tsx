@@ -17,7 +17,7 @@ function row(over: Partial<ApprovalRow> = {}): ApprovalRow {
 describe("ApprovalCard — base rendering", () => {
   it("renders kind, status, and reason", () => {
     render(<ApprovalCard row={row()} active={false} onSelect={() => {}} />)
-    expect(screen.getByText("pending")).toBeInTheDocument()
+    expect(screen.getByText("Pending")).toBeInTheDocument()
     expect(screen.getByText("rm -rf important")).toBeInTheDocument()
   })
 
@@ -74,41 +74,39 @@ describe("ApprovalCard — base rendering", () => {
 })
 
 describe("ApprovalCard — status styling", () => {
-  it.each(["pending", "approved", "denied", "timeout"])(
-    "%s status renders the status text",
-    (status) => {
-      render(
-        <ApprovalCard row={row({ status })} active={false} onSelect={() => {}} />,
-      )
-      expect(screen.getByText(status)).toBeInTheDocument()
-    },
-  )
-
-  it("uppercase status maps via case-insensitive lookup (PENDING → pending styling)", () => {
-    // Component does STATUS_CLASS[row.status.toLowerCase()], so "PENDING"
-    // hits the same amber 'pending' style as the lowercase form. The
-    // visible text is still rendered as the caller provided it (no
-    // forced lowercase), but the colour class matches lowercase.
-    render(
-      <ApprovalCard row={row({ status: "PENDING" })} active={false} onSelect={() => {}} />,
+  // The stored status is an enum; the card shows its word in a StatusPill.
+  it.each([
+    ["pending", "Pending", "warn"],
+    ["approved", "Approved", "success"],
+    ["denied", "Denied", "danger"],
+    ["timeout", "Timed out", "muted"],
+  ])("%s status renders as %s in the %s tone", (status, label, tone) => {
+    const { container } = render(
+      <ApprovalCard row={row({ status })} active={false} onSelect={() => {}} />,
     )
-    // The status badge text is rendered as authored, and its container
-    // carries the amber 'pending' colour class via case-insensitive
-    // lookup. We assert by querying the badge element and its class.
-    const badge = screen.getByText("PENDING")
-    expect(badge).toBeInTheDocument()
-    expect(badge.className).toContain("text-warn")
+    expect(screen.getByText(label)).toBeInTheDocument()
+    expect(screen.queryByText(status)).not.toBeInTheDocument()
+    expect(container.querySelector('[data-slot="status-pill"]')?.getAttribute("data-tone")).toBe(tone)
   })
 
-  it("unknown status falls back to muted styling", () => {
-    render(
+  it("uppercase status maps via case-insensitive lookup (PENDING → pending tone)", () => {
+    const { container } = render(
+      <ApprovalCard row={row({ status: "PENDING" })} active={false} onSelect={() => {}} />,
+    )
+    expect(screen.getByText("Pending")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="status-pill"]')?.getAttribute("data-tone")).toBe("warn")
+  })
+
+  it("unknown status falls back to the muted tone and readable words", () => {
+    const { container } = render(
       <ApprovalCard
         row={row({ status: "weirdo" })}
         active={false}
         onSelect={() => {}}
       />,
     )
-    expect(screen.getByText("weirdo")).toBeInTheDocument()
+    expect(screen.getByText("Weirdo")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="status-pill"]')?.getAttribute("data-tone")).toBe("muted")
   })
 })
 

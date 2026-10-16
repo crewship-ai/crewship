@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
+import { StatusPill } from "@/components/ui/status-pill"
 import { relTime } from "@/lib/time"
 import { routineHref } from "@/lib/routine-href"
 import type {
@@ -81,7 +82,7 @@ function IssueNodeBase({ data: d }: NodeProps<Node<OverviewIssueNodeData>>) {
       <div className="flex items-center gap-1.5">
         <CircleDot aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-blue-300" />
         <span className="truncate font-mono text-[10px] text-blue-300">{d.identifier}</span>
-        <StatusChip status={d.status} />
+        <StatusPill status={d.status} className="ml-auto" />
       </div>
       <div className="mt-1 truncate text-xs text-foreground/90" title={d.title}>
         {d.title}
@@ -149,7 +150,7 @@ function RunNodeBase({ data: d }: NodeProps<Node<OverviewRunNodeData>>) {
           <SI className={cn("h-2.5 w-2.5", tint.icon)} aria-hidden="true" />
         </span>
         <span className="truncate font-mono text-[10px]">{shortId(d.runId)}</span>
-        <span className={cn("ml-auto text-[10px] capitalize", tint.text)}>{d.status}</span>
+        <StatusPill status={d.status} className="ml-auto" />
       </div>
       <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground/60">
         <SourceIcon source={d.triggeredVia} />
@@ -306,25 +307,6 @@ export const overviewNodeTypes: Record<OverviewNodeType, NodeTypes[string]> = {
 }
 
 // ── helpers ────────────────────────────────────────────────────────
-
-function StatusChip({ status }: { status: string }) {
-  const s = status.toLowerCase()
-  const cls =
-    s === "in_progress" || s === "running"
-      ? "bg-primary/15 text-primary"
-      : s === "review"
-        ? "bg-purple/15 text-purple"
-        : s === "completed" || s === "done"
-          ? "bg-success/15 text-success"
-          : s === "failed"
-            ? "bg-destructive/15 text-destructive"
-            : "bg-foreground/[0.06] text-muted-foreground"
-  return (
-    <span className={cn("ml-auto rounded px-1 py-0 text-[9px] font-medium uppercase tracking-wide", cls)}>
-      {status}
-    </span>
-  )
-}
 
 // SourceIcon — purely decorative glyph next to the relative time.
 // Each branch carries aria-hidden so screen readers don't try to

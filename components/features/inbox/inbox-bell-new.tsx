@@ -18,7 +18,7 @@ import {
   type BarMenuBadgeTone,
   type BarMenuChip,
 } from "@/components/layout/bar-menu"
-import { Pill } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
 
 import type { InboxAttentionClass, InboxItem } from "@/hooks/use-inbox"
 import { isBlockingInboxItem } from "@/components/features/inbox-v2/inbox-v2-derive"
@@ -271,9 +271,11 @@ export function InboxBellView({
         title="Inbox"
         pill={
           soonest != null ? (
-            <Pill tone="destructive">
-              {soonest > 0 ? `expires in ${remainingLabel(soonest)}` : "one has expired"}
-            </Pill>
+            <StatusPill
+              size="md"
+              tone="danger"
+              label={soonest > 0 ? `expires in ${remainingLabel(soonest)}` : "one has expired"}
+            />
           ) : undefined
         }
         meta={

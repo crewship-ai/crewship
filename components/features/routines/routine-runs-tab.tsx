@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronRight, CheckCircle2, XCircle, AlertTriangle, HelpCircle, Eye, Play, Square } from "lucide-react"
 import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
+import { StatusPill } from "@/components/ui/status-pill"
+import { formatStatus } from "@/lib/format-status"
+import type { StatusTone } from "@/lib/status-tone"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
 import { usePipelineRunRecords, isActiveRunStatus, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { apiFetch } from "@/lib/api-fetch"
@@ -230,20 +233,7 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
                   />
                   <RunStatusIcon status={run.status} />
                   <span className="shrink-0 font-mono text-sm text-foreground/90">{run.runId.slice(0, 18)}…</span>
-                  <Pill
-                    tone={
-                      run.status === "completed"
-                        ? "success"
-                        : run.status === "failed"
-                          ? "destructive"
-                          : run.status === "running"
-                            ? "blue"
-                            : "default"
-                    }
-                    className="capitalize"
-                  >
-                    {run.status}
-                  </Pill>
+                  <StatusPill size="md" status={run.status} live={run.status === "running"} />
                   {run.triggeredVia && (
                     <span title="Trigger source" className="inline-flex shrink-0">
                       <Pill className="capitalize">{run.triggeredVia.replace(/_/g, " ")}</Pill>
@@ -341,11 +331,11 @@ const VERDICT_OUTCOME_ICON: Record<RunVerdictOutcome, typeof CheckCircle2> = {
   failed: XCircle,
 }
 
-const VERDICT_OUTCOME_PILL_TONE: Record<RunVerdictOutcome, "success" | "warn" | "destructive"> = {
+const VERDICT_OUTCOME_PILL_TONE: Record<RunVerdictOutcome, StatusTone> = {
   goal_met: "success",
   partial: "warn",
   needs_human: "warn",
-  failed: "destructive",
+  failed: "danger",
 }
 
 /** Compact outcome pill + one-liner shown in the (always-visible)
@@ -356,10 +346,12 @@ function RunVerdictSummary({ verdict }: { verdict: RunVerdict }) {
   const Icon = VERDICT_OUTCOME_ICON[verdict.outcome]
   return (
     <span className="flex min-w-0 flex-1 items-center gap-1.5" title={verdict.summary}>
-      <Pill tone={VERDICT_OUTCOME_PILL_TONE[verdict.outcome]} className="inline-flex shrink-0 items-center gap-1">
-        <Icon className="h-3 w-3" />
-        {verdict.outcome.replace(/_/g, " ")}
-      </Pill>
+      <StatusPill
+        size="md"
+        tone={VERDICT_OUTCOME_PILL_TONE[verdict.outcome]}
+        icon={<Icon className="h-3 w-3" />}
+        label={formatStatus(verdict.outcome).label}
+      />
       <span className="min-w-0 truncate text-[12px] text-foreground/70">{verdict.verdict}</span>
     </span>
   )
@@ -456,20 +448,11 @@ function RunWaterfall({
             <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
               {formatRoutineTime(s.ts)}
             </span>
-            <Pill
-              tone={
-                s.kind === "completed"
-                  ? "success"
-                  : s.kind === "failed"
-                    ? "destructive"
-                    : s.kind === "validation_failed"
-                      ? "warn"
-                      : "default"
-              }
-              className="capitalize"
-            >
-              {s.kind.replace(/_/g, " ")}
-            </Pill>
+            <StatusPill
+              size="md"
+              status={s.kind}
+              tone={s.kind === "validation_failed" ? "warn" : undefined}
+            />
             <span className="font-mono text-foreground/90">{s.stepId}</span>
             <span className="ml-auto flex items-center gap-3 font-mono text-[11px] tabular-nums text-muted-foreground">
               <span className="min-w-[3.5rem] text-right" title="Step duration">

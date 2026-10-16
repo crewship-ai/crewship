@@ -2,6 +2,7 @@
 
 import { PROVIDERS, DEFAULT_RUNNER } from "../create-agent/provider-options"
 import { CLI_ADAPTERS } from "@/lib/cli-adapters"
+import { Badge } from "@/components/ui/badge"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { cn } from "@/lib/utils"
 import type { WizardState } from "./types"
@@ -21,8 +22,8 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
         <CrewIcon icon={state.icon} color={state.color} size="sm" />
         <strong>{state.name}</strong>
         <span className="text-muted-foreground font-mono text-xs">@{state.slug}</span>
-        <Pill>icon: {state.icon}</Pill>
-        <Pill>color: {state.color}</Pill>
+        <Badge variant="secondary" className="font-mono">icon: {state.icon}</Badge>
+        <Badge variant="secondary" className="font-mono">color: {state.color}</Badge>
       </Row>
 
       {state.description && (
@@ -34,8 +35,8 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
       <Row label="Lineup" onEdit={onEdit && (() => onEdit(2))}>
         {lineupSummary.count > 0 ? (
           <>
-            <Pill>{lineupSummary.count} agents</Pill>
-            <Pill>{lineupSummary.source}</Pill>
+            <Badge variant="secondary" className="font-mono">{lineupSummary.count} agents</Badge>
+            <Badge variant="secondary" className="font-mono">{lineupSummary.source}</Badge>
             {lineupSummary.agents && (
               <div className="flex flex-wrap gap-1 ml-2">
                 {lineupSummary.agents.slice(0, 6).map((a) => (
@@ -61,12 +62,12 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
         )}
       </Row>
 
-      {state.mode === "browse" && state.provider && <Row label="AI provider"><Pill>{PROVIDERS[state.provider]}</Pill><Pill>{CLI_ADAPTERS[DEFAULT_RUNNER[state.provider]].label}</Pill></Row>}
+      {state.mode === "browse" && state.provider && <Row label="AI provider"><Badge variant="secondary" className="font-mono">{PROVIDERS[state.provider]}</Badge><Badge variant="secondary" className="font-mono">{CLI_ADAPTERS[DEFAULT_RUNNER[state.provider]].label}</Badge></Row>}
 
       <Row label="Size" onEdit={onEdit && (() => onEdit(3))}>
-        <Pill>{prettyMemory(state.memoryMB)}</Pill>
-        <Pill>{state.cpus} CPU</Pill>
-        <Pill>TTL: {state.ttlHours === null ? "never" : `${state.ttlHours} h`}</Pill>
+        <Badge variant="secondary" className="font-mono">{prettyMemory(state.memoryMB)}</Badge>
+        <Badge variant="secondary" className="font-mono">{state.cpus} CPU</Badge>
+        <Badge variant="secondary" className="font-mono">TTL: {state.ttlHours === null ? "never" : `${state.ttlHours} h`}</Badge>
       </Row>
 
       <Row label="Network" onEdit={onEdit && (() => onEdit(3))}>
@@ -77,8 +78,8 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
         <span className="capitalize text-foreground/90">{state.networkMode}</span>
         {state.networkMode === "restricted" && state.allowedDomains.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {state.allowedDomains.slice(0, 6).map((d) => <Pill key={d}>{d}</Pill>)}
-            {state.allowedDomains.length > 6 && <Pill>+{state.allowedDomains.length - 6} more</Pill>}
+            {state.allowedDomains.slice(0, 6).map((d) => <Badge variant="secondary" className="font-mono" key={d}>{d}</Badge>)}
+            {state.allowedDomains.length > 6 && <Badge variant="secondary" className="font-mono">+{state.allowedDomains.length - 6} more</Badge>}
           </div>
         )}
       </Row>
@@ -89,15 +90,15 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
           by a summary with no image in it. The default is a choice too, and
           the row says which one it is. */}
       <Row label="Runs on" onEdit={onEdit && (() => onEdit(3))}>
-        <Pill>{summaryBaseImage(state)}</Pill>
+        <Badge variant="secondary" className="font-mono">{summaryBaseImage(state)}</Badge>
         {!hasContainerOverrides(state) && (
           <span className="text-[11px] text-muted-foreground">the shipped default</span>
         )}
         {summaryFeatureCount(state.devcontainerConfig) > 0 && (
-          <Pill>{summaryFeatureCount(state.devcontainerConfig)} feature{summaryFeatureCount(state.devcontainerConfig) === 1 ? "" : "s"}</Pill>
+          <Badge variant="secondary" className="font-mono">{summaryFeatureCount(state.devcontainerConfig)} feature{summaryFeatureCount(state.devcontainerConfig) === 1 ? "" : "s"}</Badge>
         )}
         {summaryRuntimeCount(state.miseConfig) > 0 && (
-          <Pill>{summaryRuntimeCount(state.miseConfig)} runtime{summaryRuntimeCount(state.miseConfig) === 1 ? "" : "s"}</Pill>
+          <Badge variant="secondary" className="font-mono">{summaryRuntimeCount(state.miseConfig)} runtime{summaryRuntimeCount(state.miseConfig) === 1 ? "" : "s"}</Badge>
         )}
       </Row>
 
@@ -133,10 +134,6 @@ function Row({ label, onEdit, children }: { label: string; onEdit?: (() => void)
       </div>
     </div>
   )
-}
-
-function Pill({ children }: { children: React.ReactNode }) {
-  return <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-foreground/5 text-foreground/80">{children}</span>
 }
 
 function prettyMemory(mb: number): string {

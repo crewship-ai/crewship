@@ -8,6 +8,8 @@ import { DetailCard, Pill, type DetailTone } from "@/components/ui/detail"
 import { InboxMessageSurface, messageSection, messageDivider } from "./inbox-message-surface"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { StatusPill } from "@/components/ui/status-pill"
+import { Badge } from "@/components/ui/badge"
+import { toStatusTone } from "@/lib/status-tone"
 import { entityHref } from "@/lib/entity-links"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { hostOf } from "@/lib/routine-step-describe"
@@ -39,7 +41,7 @@ import {
 function AttentionBadge({ item }: { item: InboxItem }) {
   const badge = attentionBadge(item)
   if (!badge) return null
-  return <Pill tone={badge.tone} data-testid="attention-badge">{badge.label}</Pill>
+  return <StatusPill size="md" tone={toStatusTone(badge.tone)} label={badge.label} data-testid="attention-badge" />
 }
 import { entryKindPill, entryTitle, inboxEntry } from "@/components/features/inbox-v2/inbox-v2-derive"
 
@@ -413,15 +415,16 @@ export function DecisionSubject({ item }: { item: InboxItem }) {
 
   const link = linkToOpen(item)
   const chips: React.ReactNode[] = []
-  if (credential) chips.push(<Pill key="cred" tone="warn">{credential}</Pill>)
-  if (level) chips.push(<Pill key="lvl" tone="destructive">{level}</Pill>)
-  if (risk != null) chips.push(<Pill key="risk" tone="warn">risk {risk}</Pill>)
-  if (scan) chips.push(<Pill key="scan" tone={scan === "clean" ? "success" : "warn"}>scan: {scan}</Pill>)
-  if (failures != null) chips.push(<Pill key="fail" tone="destructive">{failures} failures in a row</Pill>)
-  if (missed != null) chips.push(<Pill key="miss" tone="warn">{missed} missed runs</Pill>)
-  if (policy) chips.push(<Pill key="pol" tone="default">catchup: {policy}</Pill>)
-  if (rules != null) chips.push(<Pill key="rules" tone="purple">{rules} rules</Pill>)
-  if (scanned != null) chips.push(<Pill key="scanned" tone="default">{scanned} entries scanned</Pill>)
+  // Severity facts are status pills; plain counts and settings are Badges.
+  if (credential) chips.push(<StatusPill key="cred" size="md" tone="warn" label={credential} />)
+  if (level) chips.push(<StatusPill key="lvl" size="md" tone="danger" label={level} />)
+  if (risk != null) chips.push(<StatusPill key="risk" size="md" tone="warn" label={`risk ${risk}`} />)
+  if (scan) chips.push(<StatusPill key="scan" size="md" tone={scan === "clean" ? "success" : "warn"} label={`scan: ${scan}`} />)
+  if (failures != null) chips.push(<StatusPill key="fail" size="md" tone="danger" label={`${failures} failures in a row`} />)
+  if (missed != null) chips.push(<StatusPill key="miss" size="md" tone="warn" label={`${missed} missed runs`} />)
+  if (policy) chips.push(<Badge key="pol" variant="secondary">catchup: {policy}</Badge>)
+  if (rules != null) chips.push(<Badge key="rules" variant="secondary">{rules} rules</Badge>)
+  if (scanned != null) chips.push(<Badge key="scanned" variant="secondary">{scanned} entries scanned</Badge>)
 
   if (chips.length === 0 && !intent && reasons.length === 0 && asks.length === 0 && !link) return null
 

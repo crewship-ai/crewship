@@ -25,8 +25,9 @@
 import * as React from "react"
 import { Bot, CircleDot, Clock, ListTree, MessageSquare, type LucideIcon } from "lucide-react"
 
-import { Appear, DetailCard, Pill, StatStrip, type StatItem } from "@/components/ui/detail"
+import { Appear, DetailCard, StatStrip, type StatItem } from "@/components/ui/detail"
 import { EmptyState } from "@/components/layout/empty-state"
+import { StatusPill } from "@/components/ui/status-pill"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { TypedRunDetail } from "@/components/features/activity/typed-run-detail"
 import { entityHref } from "@/lib/entity-links"
@@ -127,7 +128,7 @@ export function IssueDrillDown({ workspaceId, issueId, label, chains, onOpenWork
           {identifier && history.issue?.title && (
             <span className="min-w-0 truncate text-sm text-muted-foreground">{history.issue.title}</span>
           )}
-          {created && <Pill tone="success">created by a run</Pill>}
+          {created && <StatusPill size="md" tone="success" label="created by a run" />}
           {/* Rendered only when there is an identifier to render it with.
               /issues/[identifier] resolves an identifier and nothing else, so a
               workspace that does not use them has no URL for this issue — and a

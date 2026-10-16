@@ -15,7 +15,7 @@ import {
   BarMenuRow,
   BarMenuSection,
 } from "@/components/layout/bar-menu"
-import { Pill } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
 import {
   LiveRunRow,
   MAX_LIVE_ROWS,
@@ -229,9 +229,7 @@ function ActivityDropdownBody({
         // parked on a human. Same slot the Inbox uses for an expiring deadline.
         pill={
           awaitingApproval > 0 ? (
-            <Pill tone="warn">
-              {awaitingApproval} waiting for you
-            </Pill>
+            <StatusPill size="md" tone="warn" label={`${awaitingApproval} waiting for you`} />
           ) : undefined
         }
         meta={liveTotal > 0 ? `${liveTotal} live` : "nothing live"}
