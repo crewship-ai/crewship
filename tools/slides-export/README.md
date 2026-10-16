@@ -9,10 +9,10 @@ JavaScript, remote URLs or rendered external network requests.
 From the repository root, using the managed resource gateway:
 
 ```sh
-crewship-heavy pnpm --dir tools/slides-export install --frozen-lockfile --ignore-scripts
+crewship-heavy pnpm --dir tools/slides-export/runtime install --frozen-lockfile --ignore-scripts
 crewship-heavy go test ./tools/slides-export -count=1
 crewship-heavy go vet ./tools/slides-export
-crewship-heavy pnpm --dir tools/slides-export test
+crewship-heavy pnpm --dir tools/slides-export/runtime test
 crewship-heavy go run ./tools/slides-export --corpus /tmp/my-new-slides-corpus
 crewship-heavy go run ./tools/slides-export --input /tmp/my-new-slides-corpus/supported.json --output /tmp/my-new-slides-export
 ```
@@ -60,7 +60,7 @@ remain our responsibility.
 and matching UNO Python. It creates its own profile/pipe and refuses a reused
 output directory, edits native text/geometry/table cells, saves and reopens PPTX,
 and exports application PDF/PNG. `--envelope` names the synthetic source envelope.
-Use an owned fontconfig pointing to `fonts/` and verify `fc-match` resolves the
+Use an owned fontconfig pointing to `runtime/fonts/` and verify `fc-match` resolves the
 exact packaged font. Never install host packages or attach to a shared Office
 session. Run the process through `crewship-heavy` with a 120-second timeout.
 
@@ -79,11 +79,35 @@ remain separate gates.
 
 ## Font provenance
 
-`fonts/provenance.json` records the official DejaVu 2.37 release archive SHA-256,
-exact unmodified font bytes and license digest. `fonts/LICENSE-DejaVu.txt` retains
+`runtime/fonts/provenance.json` records the official DejaVu 2.37 release archive SHA-256,
+exact unmodified font bytes and license digest. `runtime/fonts/LICENSE-DejaVu.txt` retains
 the upstream redistributable license notices. The converter verifies the actual
 font and license bytes before use; it never downloads fonts during conversion.
 
 Primary interfaces: [PptxGenJS text](https://gitbrent.github.io/PptxGenJS/docs/api-text/),
 [PDFKit text](https://pdfkit.org/docs/text.html), [PDFKit images](https://pdfkit.org/docs/images.html),
 [DejaVu official release](https://github.com/dejavu-fonts/dejavu-fonts/releases/tag/version_2_37).
+
+## One-shot runtime foundation (image qualification pending)
+
+The Node module and exact packaged assets live in `runtime/`. Its generated
+`profile.json` binds every runtime COPY input, the shared Go admission source,
+build-only legal collector and pinned base image. Regenerate after source edits
+with `crewship-heavy node tools/slides-export/runtime/profile.mjs --generate`.
+Go embeds and verifies the same context; an obsolete profile fails closed.
+Build-only inputs are verified against the manifest inside the image build.
+
+`internal/slidesexport` provides the shared strict envelope decoder and one-job
+lease spanning admission through delivery. It introduces no HTTP routes or
+permissions. Runtime frames use magic `CSLEXP1\n`, uint32BE header length,
+uint64BE binary length, strict bounded JSON report/metadata, then optional raw
+binary. Header limits precede allocation/conversion; hash/identity/profile/MIME
+and exact complete-process EOF are mandatory. Reports use protocol2 and a
+versioned canonical hash with sorted ASCII nonnumeric keys, normalized JSON
+numbers and explicit U+2028/U+2029 escaping; this is independent of deck schema1/2.
+
+Run `crewship-heavy node tools/slides-export/runtime/contract.mjs` for independent
+Go/Node fractional/exponent/-0/Unicode/hash conformance and actual fixed-worker
+report/PPTX/PDF framing. These are process/transport tests, not real container
+lifecycle evidence. That gate must execute the full pinned image on an authorized
+CI runner; local gateway rejection cannot be bypassed or counted as acceptance.

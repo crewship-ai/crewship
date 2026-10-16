@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import JSZip from 'jszip';
 import { DOMParser } from '@xmldom/xmldom';
 import { LIMITS, fontProfile, preflight, renderPdf, renderPptx, reportBytes } from './worker.mjs';
-const corpus = async name => JSON.parse(await readFile(new URL(`./testdata/${name}.json`, import.meta.url), 'utf8'));
+const corpus = async name => JSON.parse(await readFile(new URL(`../testdata/${name}.json`, import.meta.url), 'utf8'));
 const sha = data => createHash('sha256').update(data).digest('hex');
 const text = node => [...Array(node.childNodes.length)].map((_, i) => node.childNodes.item(i)).map(child => child.nodeName === 'a:t' ? child.textContent : child.nodeName === 'a:br' ? '\n' : child.childNodes ? text(child) : '').join('');
 function named(document, kind, id) { return [...Array(document.getElementsByTagName(kind).length)].map((_, i) => document.getElementsByTagName(kind).item(i)).find(node => [...Array(node.getElementsByTagName('p:cNvPr').length)].some((_, i) => node.getElementsByTagName('p:cNvPr').item(i).getAttribute('name') === id)); }

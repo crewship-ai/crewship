@@ -2,6 +2,7 @@ import { readFile, writeFile, rename, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkedProfile } from './profile.mjs';
 import PptxGenJS from 'pptxgenjs';
 import PDFDocument from 'pdfkit';
 import { create as createFont } from 'fontkit';
@@ -9,18 +10,32 @@ import { create as createFont } from 'fontkit';
 export const LIMITS = Object.freeze({ envelope: 64 << 20, output: 64 << 20, report: 1 << 20, slides: 100, elements: 1000, cells: 10000, assets: 32, assetBytes: 32 << 20, decodedPixels: 33554432, timeoutSeconds: 120, concurrency: 1, nodeHeapMiB: 512 });
 const root = fileURLToPath(new URL('.', import.meta.url));
 const digest = data => createHash('sha256').update(data).digest('hex');
-const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value;
+export const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value;
+export function canonicalJSON(value) {
+ let count = 0;
+ const check = (v, depth) => {
+  if (++count > 100000 || depth > 32) throw new Error('Report structural budget');
+  if (typeof v === 'string') for (let i = 0; i < v.length; i++) { const c = v.charCodeAt(i); if (c >= 0xd800 && c <= 0xdbff) { const low = v.charCodeAt(++i); if (!(low >= 0xdc00 && low <= 0xdfff)) throw new Error('Report Unicode refused'); } else if (c >= 0xdc00 && c <= 0xdfff) throw new Error('Report Unicode refused'); }
+  if (typeof v === 'number' && !Number.isFinite(v)) throw new Error('Report number refused');
+  if (Array.isArray(v)) v.forEach(x => check(x, depth + 1));
+  else if (v && typeof v === 'object') for (const [key, item] of Object.entries(v)) { if (!/^[\x00-\x7f]*$/.test(key) || /^[0-9]+$/.test(key)) throw new Error('Report key refused'); check(item, depth + 1); }
+ };
+ check(value, 0);
+ return JSON.stringify(stable(value)).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+}
+export const reportHash = report => { const value = { ...report }; delete value.report_hash; return digest('crewship-slides-export-report-v2\n' + canonicalJSON(value)); };
 const color = value => value.replace(/^#/, '');
 const points = pixels => pixels * 0.75;
 const box = element => ({ x: element.x, y: element.y, width: element.width, height: element.height });
 
 export async function fontProfile() {
+ const { manifest, fingerprint } = await checkedProfile();
  const provenance = JSON.parse(await readFile(join(root, 'fonts/provenance.json'), 'utf8'));
  const bytes = await readFile(join(root, 'fonts/DejaVuSans.ttf')), license = await readFile(join(root, 'fonts/LICENSE-DejaVu.txt'));
  if (bytes.length !== provenance.font_bytes || digest(bytes) !== provenance.font_sha256 || digest(license) !== provenance.license_sha256) throw new Error('Packaged font/license provenance mismatch');
  const versions = {};
  for (const name of ['pptxgenjs', 'pdfkit', 'fontkit']) versions[name] = JSON.parse(await readFile(join(root, 'node_modules', name, 'package.json'), 'utf8')).version;
- return { provenance, bytes, font: createFont(bytes), versions };
+ return { provenance, bytes, manifest, fingerprint, font: createFont(bytes), versions };
 }
 function textOptions(doc, size, width, height, align) {
  doc.font('ExportFont').fontSize(points(size));
@@ -36,8 +51,8 @@ export async function preflight(input) {
  // The Go entry validates canonical model/asset digests and all aggregate
  // budgets. This lower boundary still refuses obvious direct worker misuse.
  if (input.schema_version !== 1 || !deck || ![1, 2].includes(deck.schema_version) || !Array.isArray(deck.slides) || deck.slides.length > LIMITS.slides || !Array.isArray(input.assets) || input.assets.length > LIMITS.assets) throw new Error('Validated bounded Go export envelope required');
- const report = { protocol_version: 1, page_id: deck.deck_id, revision: input.revision, content_hash: input.content_hash, deck_schema_version: deck.schema_version,
-  generator: { mapping: 'crewship-slides-export-v1', pdf_layout: 'pdfkit-fixed-box-lineheight-1.2-v1', pptx_layout: 'native-office-absolute-lineheight-1.2-v2', versions: profile.versions, node: process.version, source_sha256: { worker: digest(await readFile(join(root, 'worker.mjs'))), admission: digest(await readFile(join(root, 'main.go'))) } }, font_profile: profile.provenance, limits: LIMITS,
+ const report = { protocol_version: 2, page_id: deck.deck_id, revision: input.revision, content_hash: input.content_hash, deck_schema_version: deck.schema_version,
+  generator: { profile_sha256: profile.fingerprint, mapping: 'crewship-slides-export-v1', pdf_layout: 'pdfkit-fixed-box-lineheight-1.2-v1', pptx_layout: 'native-office-absolute-lineheight-1.2-v2', versions: profile.versions, node: process.version, source_sha256: { worker: digest(await readFile(join(root, 'worker.mjs'))), admission: profile.manifest.admission_sha256 } }, font_profile: profile.provenance, limits: LIMITS,
   native_text: [], native_shapes: [], native_tables: [], source_raster_images: [], rasterized_elements: [], font_substitutions: [], issues: [], measurements: [],
   qualification: { pdf: 'server-generated fixed-page geometry; measured with the same PDFKit font/layout used for output', pptx: 'native editable mapping; application layout must be qualified separately', pptx_fonts: 'not embedded; recipients need the pinned font profile or separate substitution qualification', power_point: 'incomplete; no actual PowerPoint environment qualified' } };
  const doc = new PDFDocument({ size: [points(deck.width), points(deck.height)], margin: 0 }); doc.on('data', () => {}); doc.registerFont('ExportFont', profile.bytes);
@@ -69,7 +84,7 @@ export async function preflight(input) {
  report.can_export = report.issues.length === 0;
  // Report hash is an integrity/preflight binding, never authorization. Font
  // source+exact bytes/license and engine/layout versions participate.
- report.report_hash = digest('crewship-slides-export-report-v1\n' + JSON.stringify(stable(report)));
+ report.report_hash = reportHash(report);
  reportBytes(report);
  return { report, profile };
 }
