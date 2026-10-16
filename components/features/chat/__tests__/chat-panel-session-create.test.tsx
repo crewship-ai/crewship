@@ -206,13 +206,15 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
     viewer.id = "different-viewer"
     profileStatus = 403
     view.rerender(<ChatPanel {...panelProps} />)
+    const currentInput = screen.getByRole("textbox")
+    fireEvent.change(currentInput, { target: { value: "Keep the new viewer draft" } })
     const submit = screen.getByRole("button", { name: /submit/i })
     await waitFor(() => expect(submit).toBeEnabled())
     fireEvent.click(submit)
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(creates).toHaveLength(1)
     expect(sendMessage).not.toHaveBeenCalled()
-    expect(input).toHaveValue("Keep the new viewer draft")
+    expect(currentInput).toHaveValue("Keep the new viewer draft")
   })
 
   // Pressing Send on a draft session starts a POST, and until it answers the
