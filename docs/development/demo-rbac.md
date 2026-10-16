@@ -59,5 +59,32 @@ removed. Existing personal workspaces are preserved. Select the target demo
 workspace after signing in; a personal OWNER workspace tests different rights.
 
 The roster inventory, explicit target guards, request replay and preservation
-checks run with the CLI unit tests. Production-router acceptance coverage is
-tracked separately by #3058.
+checks run with the CLI unit tests. Production-router acceptance coverage is described below.
+
+## Authenticated acceptance boundaries
+
+```sh
+go test ./cmd/crewship -run '^TestAcceptance_DemoRBACMatrix$' -count=1 -timeout 15m
+go test ./internal/api -run 'TestTenWorkspaceHTTPIsolation|TestSettingsAuthorityAndLiveMembershipHTTP|TestRestrictedAuthorityAcrossAuthenticatedRoutes' -count=1 -timeout 15m
+```
+
+On the shared development host, prefix these commands with `crewship-heavy`.
+The matrix logs in with real passwords and revocable sessions through the
+production router. It exercises all 44 fixture profiles plus OWNER, successful
+and denied API operations, the additive CLI, idempotency and existing grant
+drift. Success cases create chats, disabled schedules, issues, Pages, credentials
+and imported skills, complete a transform-only routine, rotate a fixture value
+and reveal it through the actual audit path. Generation authorization is checked
+with invalid input; no model generation or Docker execution is claimed.
+
+The HTTP isolation suite creates ten workspaces and checks all 90 directed
+foreign-workspace pairs with positive own-workspace controls. Settings coverage
+reuses the same authenticated sessions after capability revocation, role
+changes and membership removal. Restricted VIEWER and MEMBER fixtures retain
+private chat isolation, exact granted discovery, closed broad catalogs and
+live revocation.
+
+These tests establish API authority. They do not establish isolation between
+processes sharing UID 1001 inside a runtime: credential directory ownership
+allows the intended agent to read it; actual containment must come from
+filesystem and mount isolation. See the [credential vault contract](../specs/credentials-vault.md).
