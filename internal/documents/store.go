@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -15,6 +16,7 @@ var (
 	ErrConflict  = errors.New("document revision conflict")
 	ErrFence     = errors.New("document writer fenced")
 	ErrQuota     = errors.New("document quota exceeded")
+	ErrRateLimit = fmt.Errorf("%w: temporary operation rate limit", ErrQuota)
 	ErrSchema    = errors.New("unsupported document schema")
 	ErrDuplicate = errors.New("idempotency key payload mismatch")
 )
@@ -30,6 +32,7 @@ type Authorize func(context.Context, *sql.Tx) (string, error)
 type Options struct {
 	MaxDocumentBytes, MaxLogBytes, MaxHistoryBytes, MaxCommits, MaxDocuments int
 	LeaseDuration                                                            time.Duration
+	ReceiptWindow                                                            time.Duration
 }
 type Store struct {
 	db   *sql.DB
@@ -93,6 +96,9 @@ func New(db *sql.DB, o Options) *Store {
 	}
 	if o.MaxCommits <= 0 {
 		o.MaxCommits = 10000
+	}
+	if o.ReceiptWindow <= 0 {
+		o.ReceiptWindow = 10 * time.Minute
 	}
 	if o.MaxDocuments <= 0 {
 		o.MaxDocuments = 128

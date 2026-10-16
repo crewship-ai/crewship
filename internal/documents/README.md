@@ -43,6 +43,14 @@ pinned checkpoint bytes and receipt counts. They do not measure SQLite file or
 WAL allocation. History limits reject new operations without deleting confirmed
 checkpoints or receipts.
 
+Document capacity is scoped to each workspace, with a default of 128 documents.
+New commits, checkpoints and restores share a per-document admission window:
+by default, 10,000 receipts within ten minutes of server time. A full window
+returns `ErrRateLimit`, which also matches `ErrQuota`. Current authorization and
+exact retry lookup run first, so an authorized confirmed retry still succeeds
+when the window is full. Expiring a window never removes receipts; historical
+retry evidence remains available after restart and encrypted backup restoration.
+
 The database migration prevents attaching documents to existing panels or
 application drafts, and prevents removing a document's human owner. Additional
 content types must install reciprocal exclusion checks when their storage is
