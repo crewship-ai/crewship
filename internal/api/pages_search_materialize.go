@@ -22,7 +22,7 @@ func (h *PageHandler) ensureNativeSearchProjection(ctx context.Context, r *http.
 	if err != nil || ready {
 		return err
 	}
-	h.nativeSearchInit.Do(func() { h.nativeSearchSlots = make(chan struct{}, 2) })
+	h.initNativeSearch()
 	select {
 	case h.nativeSearchSlots <- struct{}{}:
 	case <-ctx.Done():

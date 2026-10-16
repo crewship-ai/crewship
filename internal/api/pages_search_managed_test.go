@@ -106,7 +106,12 @@ func TestNativeSearchManagedProjection(t *testing.T) {
 				return nil, 0, e
 			}
 		}
-		req, e := http.NewRequestWithContext(t.Context(), method, server.URL+path+"?workspace_id="+workspace, bytes.NewReader(data))
+		req, e := http.NewRequestWithContext(t.Context(), method, server.URL+path+func() string {
+			if strings.Contains(path, "?") {
+				return "&"
+			}
+			return "?"
+		}()+"workspace_id="+workspace, bytes.NewReader(data))
 		if e != nil {
 			return nil, 0, e
 		}
@@ -182,6 +187,16 @@ func TestNativeSearchManagedProjection(t *testing.T) {
 				injectionErrors <- e
 				return nil, 500, e
 			}
+		} else if mode.CompareAndSwap(3, 0) {
+			_, e = h.db.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?, ?, ?, ?, ?, '{}')`, "search-arriving-page", workspace, "search-arriving", "Newly visible native Doc", owner)
+			if e == nil {
+				_, status, e = request("POST", "/api/v1/pages/search-arriving/document/initialize", map[string]any{"id": "arriving-init", "schema": 2, "body": body})
+			}
+			if e != nil || status != 200 {
+				e = fmt.Errorf("initialize newly visible Doc status%d error%v", status, e)
+				injectionErrors <- e
+				return nil, 500, e
+			}
 		} else if mode.CompareAndSwap(2, 0) {
 			if e = sessions.NewDBStore(h.db).Revoke(ctx, session.ID, "synthetic materialization revocation"); e != nil {
 				injectionErrors <- e
@@ -217,6 +232,23 @@ func TestNativeSearchManagedProjection(t *testing.T) {
 	projection, err = pagesearch.Decode(encoded, encodedHash)
 	if err != nil || projection.Source.Revision != 2 || projection.Source.Generation != 1 || projection.Segments[0].Text != "initial needle" {
 		t.Fatalf("restore did not rebuild canonical text: %+v %v", projection, err)
+	}
+	// A native Page created after the initial candidate snapshot cannot be
+	// silently omitted from the final result. The complete retry rebuilds both.
+	execOrFatal(t, h.db, `DELETE FROM page_search_projections WHERE page_id=?`, pageID)
+	mode.Store(3)
+	rawSearch, searchStatus, searchErr := request("GET", "/api/v1/pages/search/content?q=needle", nil)
+	if searchErr != nil || searchStatus != 503 || bytes.Contains(rawSearch, []byte(`"matches"`)) {
+		t.Fatalf("new final-snapshot candidate must refuse partial response: %d %v %s", searchStatus, searchErr, rawSearch)
+	}
+	select {
+	case e := <-injectionErrors:
+		t.Fatal(e)
+	default:
+	}
+	search := call("GET", "/api/v1/pages/search/content?q=needle", nil, 200)
+	if matches, ok := search["matches"].([]any); !ok || len(matches) != 2 {
+		t.Fatalf("complete canonical retry omitted new candidate: %+v", search)
 	}
 	execOrFatal(t, h.db, `DELETE FROM page_search_projections WHERE page_id=?`, pageID)
 	mode.Store(2)

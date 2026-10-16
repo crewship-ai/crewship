@@ -57,6 +57,10 @@ jobs:
           CREWSHIP_DOCS_FOUNDATION: '1'
           CREWSHIP_DOCS_FOUNDATION_OUTPUT: ${{ runner.temp }}/docs-foundation.json
         run: go test -tags docs_foundation ./internal/api -run '^TestDocumentsFoundationRealProcesses$' -count=1 -timeout 5m
+      - name: Native search managed materialization and final snapshot
+        env:
+          CREWSHIP_NATIVE_SEARCH_MANAGED: '1'
+        run: go test -tags docs_foundation ./internal/api -run '^TestNativeSearchManagedProjection$' -count=1 -timeout 5m
       - name: Preserve measurement conditions and results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

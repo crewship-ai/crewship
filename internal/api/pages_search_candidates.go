@@ -85,6 +85,9 @@ func (h *PageHandler) nativeSearchCandidates(r *http.Request, tx *sql.Tx) ([]nat
 // The same per-call live credential/role reader is used before candidate scan
 // and inside projection read/publication transactions after managed IPC.
 func (h *PageHandler) nativeSearchViewer(ctx context.Context, r *http.Request, tx *sql.Tx) (context.Context, *pageViewer, error) {
+	if err := ctx.Err(); err != nil {
+		return ctx, nil, err
+	}
 	if tx == nil {
 		return ctx, nil, errNativeSearchAuthentication
 	}
@@ -95,10 +98,16 @@ func (h *PageHandler) nativeSearchViewer(ctx context.Context, r *http.Request, t
 	}
 	ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 	if err := validateContentHumanCredential(r.WithContext(ctx), tx, "pages:read"); err != nil {
+		if ctx.Err() != nil {
+			return ctx, nil, ctx.Err()
+		}
 		return ctx, nil, fmt.Errorf("%w: %w", errNativeSearchAuthentication, err)
 	}
 	role, err := h.liveContentHumanRole(ctx, WorkspaceIDFromContext(ctx), user.ID)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx, nil, ctx.Err()
+		}
 		return ctx, nil, errNativeSearchMembership
 	}
 	ctx = context.WithValue(ctx, ctxRole, role)

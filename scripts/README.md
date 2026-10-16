@@ -257,3 +257,19 @@ revocation with hidden ancestors. No API responses are mocked. Run:
 Missing prerequisites fail. The script prints its private temporary screenshot,
 filtered identity JSON and report directory; credentials are not persisted in
 evidence. The Go fixture owns and removes its 0600 credential input.
+
+### Native search managed projection gate
+
+The native search materializer's actual Router/private Node test is selected
+explicitly, separately from `TestDocumentsFoundationRealProcesses`:
+
+```bash
+CREWSHIP_NATIVE_SEARCH_MANAGED=1 go test -tags docs_foundation ./internal/api -run '^TestNativeSearchManagedProjection$' -count=1 -timeout 5m
+```
+
+Install the frozen `tools/docs-service` dependencies first and use Node 24.21.0.
+The existing Docs foundation workflow runs this gate after its process-recovery
+test. It exercises real human CRDT updates, checkpoint restore, exact session
+revocation and final query snapshot coverage. A green process-recovery test
+alone does not execute this search gate. On the shared development host, run
+these commands through `crewship-heavy`.
