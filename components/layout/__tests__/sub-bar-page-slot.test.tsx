@@ -60,4 +60,19 @@ describe("SubBar in the top bar", () => {
     render(<SubBar title="Issues" actions={<SubBarPrimary>New issue</SubBarPrimary>} />)
     expect(slot).not.toContainElement(screen.getByRole("button", { name: "New issue" }))
   })
+
+  it("on a phone does not repeat the area named in the top bar, but keeps the actions", () => {
+    withSlot("Routines")
+    mobile = true
+    render(<SubBar title="Routines" actions={<SubBarPrimary>New routine</SubBarPrimary>} />)
+    expect(screen.getByRole("heading", { level: 1, name: "Routines" }).className).toMatch(/sr-only/)
+    expect(screen.getByRole("button", { name: "New routine" })).toBeVisible()
+  })
+
+  it("on a phone shows a title that differs from the area", () => {
+    withSlot("Settings")
+    mobile = true
+    render(<SubBar title="Members" />)
+    expect(screen.getByRole("heading", { level: 1, name: "Members" }).className).not.toMatch(/sr-only/)
+  })
 })

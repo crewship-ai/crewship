@@ -10,6 +10,7 @@ import {
   SidebarActiveChip,
   SidebarCollapseButton,
 } from "../sidebar-kit"
+import { SecondaryPanelContext } from "../secondary-panel"
 
 describe("sidebar-kit", () => {
   beforeEach(() => cleanup())
@@ -42,6 +43,17 @@ describe("sidebar-kit", () => {
     render(<SidebarFilterButton activeCount={0} />)
     const btn = screen.getByRole("button", { name: /filter/i })
     expect(btn.className).toContain("border-foreground/[0.08]")
+  })
+
+  it("SidebarFilterButton is icon-only inside a 272 px panel so the search keeps its width", () => {
+    render(
+      <SecondaryPanelContext.Provider value={{ toggle: null, claim: () => () => undefined }}>
+        <SidebarFilterButton activeCount={1} />
+      </SecondaryPanelContext.Provider>,
+    )
+    const btn = screen.getByRole("button", { name: /filter/i })
+    expect(btn.querySelector(".sr-only")?.textContent).toBe("Filter")
+    expect(btn.textContent).toContain("1")
   })
 
   it("SidebarViewButton renders an accessible view control", () => {

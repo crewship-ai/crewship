@@ -22,6 +22,7 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { CommandPalette } from "@/components/command-palette"
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
 import { ActivityBell } from "@/components/features/activity/activity-bell"
+import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
@@ -235,7 +236,9 @@ export function AppToolbar() {
           this slot (Harbor 2: one 48 px bar, not a bar plus a sub-bar). */}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {renderBreadcrumbs()}
-        {!isMobile && <div ref={setPageBarSlot} data-slot="page-bar" data-area-title={area?.title ?? ""} className="flex min-w-0 flex-1 items-center gap-2" />}
+        {/* On a phone the slot stays empty and hidden; SubBar still reads the
+            area it names so the page row does not repeat it. */}
+        <div ref={setPageBarSlot} data-slot="page-bar" data-area-title={area?.title ?? ""} className={cn("flex min-w-0 flex-1 items-center gap-2", isMobile && "hidden")} />
       </div>
 
       {/* Right: Status indicators + search + notifications */}
