@@ -155,8 +155,8 @@ section "Tier A - an EXISTING chat you may not see is ALSO 404, not 403"
 # The membership is restored immediately after the request is captured - before
 # any assertion runs, so a FAILING assertion cannot leave the workspace altered
 # - and again from an EXIT trap in case the suite dies unexpectedly.
-T2_EMAIL="${RUN_STREAM_T2_EMAIL:-viewer1@crewship.local}"
-T2_PASSWORD="${RUN_STREAM_T2_PASSWORD:-viewerpass12}"
+T2_EMAIL="${RUN_STREAM_T2_EMAIL:-viewer-baseline@crewship.local}"
+T2_PASSWORD="${RUN_STREAM_T2_PASSWORD:-rbac-demo-1234}"
 T2_PROFILE="harness-run-stream-t2"
 T2_USER_ID=""
 T2_MEMBER_ID=""

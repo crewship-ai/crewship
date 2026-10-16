@@ -620,7 +620,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// openapi: query category:string source:string search:string vendor:string maturity:string runtime:string installed_for_agent_id:string installed:boolean; responses 200,400,401,403,500
 	r.mux.Handle("GET /api/v1/skills", authed(wsCtx(http.HandlerFunc(skills.List))))
 	r.mux.Handle("GET /api/v1/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Get))))
-	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/import", roleCreate, skills.Import)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/import", roleInline, skills.Import)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/skills/{skillId}", roleManage, skills.Delete)
 	skillGen := NewSkillGenerateHandler(r.db, r.logger)
 	// Same stash-for-reuse pattern as creds above — the internal
