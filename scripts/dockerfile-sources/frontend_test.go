@@ -109,7 +109,7 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jsonImports := regexp.MustCompile(`@/([^"'\s]+\.json)`)
+	jsonImports := regexp.MustCompile(`(?:from\s+|import\s*\(\s*)["']((?:@/|\.{1,2}/)[^"'\s]+\.json)["']`)
 	for _, file := range strings.Split(string(output), "\x00") {
 		if !strings.HasSuffix(file, ".ts") && !strings.HasSuffix(file, ".tsx") {
 			continue
@@ -123,6 +123,11 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 		}
 		for _, match := range jsonImports.FindAllSubmatch(content, -1) {
 			dependency := string(match[1])
+			if strings.HasPrefix(dependency, "@/") {
+				dependency = strings.TrimPrefix(dependency, "@/")
+			} else {
+				dependency = filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(file), dependency)))
+			}
 			if !copiedBy(sources, dependency) {
 				t.Errorf("frontend COPY omits JSON contract %s referenced by %s", dependency, file)
 			}
