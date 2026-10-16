@@ -27,6 +27,7 @@
  *     basis to compute, and there is no third glyph).
  */
 
+import type { PageIdentityBinding } from "@/hooks/use-page-identity"
 import { resolvePageContent } from "@/lib/pages/content-types"
 import { useCallback, useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -1219,9 +1220,12 @@ export interface UsePageResult {
 export function usePage(
   workspaceId: string | null | undefined,
   slug: string | null | undefined,
+  identity?: PageIdentityBinding,
 ): UsePageResult {
   const query = useQuery({
-    queryKey: pagesKeys.detail(workspaceId ?? "", slug ?? ""),
+    queryKey: identity
+      ? [...pagesKeys.detail(workspaceId ?? "", slug ?? ""), "stable-reference", identity.viewerId, identity.expectedPageId, identity.scope]
+      : pagesKeys.detail(workspaceId ?? "", slug ?? ""),
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams({ workspace_id: workspaceId! })
       const body = await fetchJSON(
@@ -1229,20 +1233,24 @@ export function usePage(
         signal,
         "page",
       )
+      if (identity && (!body || typeof body !== "object" || Array.isArray(body) || (body as Record<string, unknown>).id !== identity.expectedPageId)) {
+        throw new PagesRequestError(409, "The Page address changed. Resolve this link again.")
+      }
       return normalizePage(body)
     },
     enabled: Boolean(workspaceId) && Boolean(slug),
     retry: false,
   })
 
-  const page = useMemo(() => (query.data ? toPageView(query.data) : null), [query.data])
+  const confirmed = identity && query.error ? undefined : query.data
+  const page = useMemo(() => (confirmed ? toPageView(confirmed) : null), [confirmed])
   const channel = usePagesRealtime(workspaceId, page?.id ?? null)
   const status = useRealtimeStatusSafe()
 
   const err = query.error as Error | null
   return {
     page,
-    raw: query.data ?? null,
+    raw: confirmed ?? null,
     loading: query.isPending && Boolean(workspaceId) && Boolean(slug),
     error: err ? err.message : null,
     notFound: err instanceof PagesRequestError && err.status === 404,

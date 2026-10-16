@@ -245,3 +245,15 @@ live WebSocket behavior. Keep this directory outside the public source tree.
 - `acceptance-slides-workflow-browser.mjs`: opt-in `slides_workflow_browser` real Router/DB/production static native Slides human flow using owned synthetic sessions; not login/model acceptance. Captures private evidence under operator-selected output.
 
 - `acceptance-slides-comments-browser.mjs`: opt-in `slides_comments_browser` actual Router/SQLite/static native comments flow with distinct synthetic COMMENT and WRITE humans. Run after production export through `crewship-heavy env CREWSHIP_SLIDES_COMMENTS_BROWSER=1 go test -tags slides_comments_browser ./internal/api -run '^TestSlidesCommentsBrowser$' -count=1 -timeout 6m`. `CREWSHIP_SLIDES_COMMENTS_OUTPUT` selects a private owned evidence directory. Missing prerequisites fail; no shared login, response mocks or model claims.
+
+
+`acceptance-page-identity-browser.mjs` runs only through the owned Linux
+`TestPageIdentityBrowser` after a real static export. Synthetic sessions access
+the actual Router and database; the fixture renames the original Page and
+reuses its slug between identity resolution and detail GET. It checks refusal,
+explicit retry, canonical ID retention, clipboard, reload and leaf-folder ACL
+revocation with hidden ancestors. No API responses are mocked. Run:
+`crewship-heavy env CREWSHIP_PAGE_IDENTITY_BROWSER=1 go test -tags page_identity_browser ./internal/api -run '^TestPageIdentityBrowser$' -count=1 -timeout 6m`.
+Missing prerequisites fail. The script prints its private temporary screenshot,
+filtered identity JSON and report directory; credentials are not persisted in
+evidence. The Go fixture owns and removes its 0600 credential input.

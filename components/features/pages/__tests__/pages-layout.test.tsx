@@ -13,10 +13,14 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
-const access = vi.hoisted(() => ({role: "MANAGER" as string | null, capabilities: [] as string[], loading: false, error: false}))
+const access = vi.hoisted(() => ({role: "MANAGER" as string | null, capabilities: [] as string[], loading: false, error: false, userId: null as string | null}))
 vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/hooks/use-workspace")>(),
   useWorkspace: () => ({...access, workspaceId: "ws-1", workspaces: [{id:"ws-1",currentUserRole:access.role}], workspace:{id:"ws-1"}}),
+}))
+vi.mock("@/hooks/use-auth", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/hooks/use-auth")>(),
+  useSessionSafe: () => ({ data: access.userId ? { user: { id: access.userId } } : null, status: "authenticated" }),
 }))
 const push = vi.fn()
 vi.mock("next/navigation", () => ({
@@ -125,7 +129,7 @@ function renderLayout(list: WirePage[], slug?: string) {
 describe("PagesLayout", () => {
   beforeEach(() => {
     cleanup()
-    Object.assign(access, {role:"MANAGER",capabilities:[],loading:false,error:false})
+    Object.assign(access, {role:"MANAGER",capabilities:[],loading:false,error:false,userId:null})
     push.mockReset()
     // The editor's mode and section live in the address now, so a test that
     // left `?mode=edit` there would hand it to the next one. (resets the
@@ -133,6 +137,29 @@ describe("PagesLayout", () => {
     window.history.replaceState(null, "", "/pages")
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it("never mounts a reused-slug body and retains the stable ID through canonical navigation", async () => {
+    access.userId = "viewer"
+    window.history.replaceState(null, "", "/pages?ref=original&workspace_id=ws-1")
+    const qc = newQueryClient()
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes("/pages/resolve/id/original?")) return okJSON({ page_id: "original", slug: "reused" })
+      if (url.includes("/pages/reused?")) return okJSON({ ...FLEET, id: "intruder", slug: "reused", name: "Forbidden reused body", has_application: true })
+      if (url.includes("/page-folders")) return okJSON({ folders: [] })
+      return okJSON([])
+    })
+    vi.stubGlobal("fetch", fetch)
+    render(<QueryClientProvider client={qc}><PagesLayout workspaceId="ws-1" now={NOW} /></QueryClientProvider>)
+    await screen.findByRole("button", { name: "Resolve Page link again" })
+    expect(screen.queryByText("Forbidden reused body")).toBeNull()
+    expect(screen.queryByTestId("application")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Copy Page link" })).toBeNull()
+    expect(window.location.pathname).toBe("/pages/reused")
+    expect(window.location.search).toContain("ref=original")
+    expect(window.location.search).toContain("workspace_id=ws-1")
+    expect(qc.getQueryCache().getAll().some(query => JSON.stringify(query.state.data ?? null).includes("Forbidden reused body"))).toBe(false)
+  })
 
   for (const directEdit of [false, true]) it(`keeps unsupported Page read-only (direct edit ${directEdit})`, async () => {
     if (directEdit) window.history.replaceState(null, "", "/pages/fleet-201?mode=edit")
