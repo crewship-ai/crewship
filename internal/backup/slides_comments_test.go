@@ -56,6 +56,7 @@ func TestSlidesCommentsRestoreHistoryValidationAndProjectionRebuild(t *testing.T
 			d.Tables["slides_comment_events"][1]["kind"] = "reopen"
 			d.Tables["slides_comment_events"][1]["body"] = ""
 		}, false},
+		{"receipt_hash_mismatch", func(d *backup.DBDump) { d.Tables["slides_comment_receipts"][0]["request_hash"] = "invalid" }, false},
 		{"receipt_actor_mismatch", func(d *backup.DBDump) { d.Tables["slides_comment_receipts"][0]["actor"] = "other" }, false},
 	}
 	for _, tc := range cases {

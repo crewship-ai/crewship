@@ -12,7 +12,8 @@ Schema 1 admits bounded text, rectangle/ellipse shapes and rectangular tables.
 The [storage contract](../specs/slides.md) and generated OpenAPI describe the
 closed nested schema, canonical hashing, aggregate table-cell bounds and exact
 operation union. Images, author HTML/JavaScript, external resources, native UI,
-comments and selected-edit agent admission are separate cuts. The Page descriptor
+selected-edit agent admission are separate cuts. Human stable comments are
+described below. The Page descriptor
 remains unsupported with `viewer-unavailable`. No internal Slides agent route is
 registered. [CLI commands](/cli/slide) use the same human API.
 
@@ -139,7 +140,92 @@ snapshot. Original identities may revive; current authorization remains unchange
 404 missing Slides/revision, 409 revision/order/identity/replay conflict,
 429 retained quota, 500 storage failure.
 
-
 The native Pages viewer/editor uses the canonical schema1 model, not HTML. `GET /api/v1/pages/{slug}` adds advisory `can_edit_slides`: true only for supported, exclusive, human-owned Slides with current human Page write standing. Missing or false disables Slides editing; it says nothing about Docs/Board capability. Metadata and Slides state are separate reads, so this flag is advisory; every mutation reauthorizes live credentials/ACL under the durable writer fence.
 
 Manual editing holds the original Page ID, base revision and order version until save or explicit discard. Conflict or access loss retains the candidate; no automatic rebase. An uncertain request retries the exact mutation ID/body. A receipt confirms its specific revision even if a newer head exists; the UI never presents that receipt as proof of the latest head. Saved revision previews render the actual native Slides snapshot. Reordering is a separate atomic endpoint: save/discard content changes before reordering, and save/discard a pending reorder before editing content. Images/comments/PPTX/export remain unavailable in this delivery.
+
+## `GET /api/v1/pages/{slug}/slides/comments`
+
+**Request:** `limit` defaults to25, maximum100; optional opaque `cursor` at most1024
+bytes. Page slug/workspace identify the namespace; no body.
+
+**Response:** `{items,next_cursor,watermark,has_more,can_comment,can_resolve}`.
+Each item contains `{id,page_id,anchor,version,resolved,status,projection_revision,
+last_missing_revision?,restored_at_revision?,created_at,updated_at,comment_count,
+first_comment}`. Anchor is immutable; status reflects the reported deck projection
+revision. Follow continuation cursors for the bounded complete list.
+
+**Auth:** Human read access and `pages:read`. Flags reflect current COMMENT/WRITE
+access plus CLI `pages:write`, but every later mutation checks live authority again.
+Run authority is explicitly denied on every comment endpoint.
+
+**Errors:** 400 malformed cursor/limit, 401 invalid credential, 403 inaccessible
+Page, 404 missing Slides, 500 invalid retained history. No content on denial.
+
+## `GET /api/v1/pages/{slug}/slides/comments/{threadId}`
+
+**Request:** Stable thread ID; no body.
+
+**Response:** `{thread,can_comment,can_resolve}` with the same thread structure.
+Deletion detaches; only original-identity restore reattaches with provenance.
+
+**Auth:** Human Page read access and `pages:read`.
+
+**Errors:** 401, 403, 404 unknown Page/thread, 500 invalid stored state.
+
+## `GET /api/v1/pages/{slug}/slides/comments/{threadId}/history`
+
+**Request:** `limit` (default25, maximum100), optional opaque `cursor`.
+
+**Response:** `{items,next_cursor,watermark,has_more,can_comment,can_resolve}`;
+events are `{version,kind,body,actor,mutation_id,created_at}` in increasing version.
+Kinds are comment/reply/resolve/reopen. Human thread versions are independent of
+deck revisions. Watermarks exclude later events until a fresh history read.
+
+**Auth:** Human Page read access and `pages:read`, rechecked for every continuation.
+
+**Errors:** 400 invalid cursor, 401, 403 revoked read, 404 unknown thread, 500 corrupt
+or noncontiguous history.
+
+## `POST /api/v1/pages/{slug}/slides/comments`
+
+**Request:** `{page_id,schema_version:1,base_rev,mutation_id,anchor,body}`; anchor
+is `{anchor_schema_version:1,kind:"slide"|"element",slide_id,element_id?,revision}`.
+Element ID is required only for an element anchor. Anchor revision must equal
+base_rev/current deck head and target must exist. Nonblank body is at most10000
+UTF-8 bytes; whole request at most16KiB. Exact keys/no duplicates/null/trailing JSON.
+
+**Response:** `{mutation_id,thread_id,version,duplicate}`. New thread ID equals
+create mutation ID within this Page namespace. Retries preserve original body and
+anchor; live authorization applies before receipt replay.
+
+**Auth:** Human COMMENT access and `pages:write` CLI scope.
+
+**Errors:** 400 invalid request, 401, 403 revoked authority, 404 no Slides,
+409 stale deck/Page/anchor or changed/reused mutation ID, 429 retained comment quota.
+
+## `POST /api/v1/pages/{slug}/slides/comments/{threadId}/replies`
+
+**Request:** `{page_id,schema_version:1,mutation_id,if_version,body}` under the same
+strict body limits. The current human thread version must match; no deck CAS is
+needed for a reply to the retained original anchor, including a detached thread.
+
+**Response:** `{mutation_id,thread_id,version,duplicate}`.
+
+**Auth:** Human COMMENT access and `pages:write`.
+
+**Errors:** 400, 401, 403, 404, 409 stale version/resolved thread/Page/reused mutation
+ID, 429 retained-history quota. A reply cannot reopen a resolved thread.
+
+## `POST /api/v1/pages/{slug}/slides/comments/{threadId}/resolve`
+
+**Request:** `{page_id,schema_version:1,mutation_id,if_version,resolved}` with an
+explicit boolean (`null` rejected). False reopens; the resolution must change.
+
+**Response:** `{mutation_id,thread_id,version,duplicate}`. Resolution is an immutable
+human history event; it does not mutate the deck revision or original anchor.
+
+**Auth:** Human WRITE access and `pages:write`.
+
+**Errors:** 400, 401, 403, 404, 409 stale version/Page or unchanged resolution,
+429 retained-history quota. Exact session/token and ACL are checked even on retry.

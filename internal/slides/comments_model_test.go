@@ -18,6 +18,7 @@ func TestCommentStrictImmutableAnchorAdmission(t *testing.T) {
 		"case alias anchor":      strings.Replace(good, `"revision":7`, `"revision":7,"REVISION":8`, 1),
 		"unknown anchor field":   strings.Replace(good, `"revision":7`, `"revision":7,"selector":"similar"`, 1),
 		"missing anchor version": strings.Replace(good, `"anchor_schema_version":1,`, "", 1),
+		"future protocol":        strings.Replace(good, `"schema_version":1`, `"schema_version":2`, 1),
 		"future anchor version":  strings.Replace(good, `"anchor_schema_version":1`, `"anchor_schema_version":2`, 1),
 		"anchor version null":    strings.Replace(good, `"anchor_schema_version":1`, `"anchor_schema_version":null`, 1),
 		"wrong original rev":     strings.Replace(good, `"revision":7`, `"revision":8`, 1),
@@ -92,5 +93,27 @@ func TestCommentCursorStrictBoundaries(t *testing.T) {
 	}
 	if _, _, _, err := decodeCommentCursor(key, "", CommentPageRequest{Cursor: base64.RawURLEncoding.EncodeToString([]byte(valid))}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCommentProtocolIndependentOfDeckVersions(t *testing.T) {
+	for _, raw := range []string{
+		`{"page_id":"page","schema_version":2,"base_rev":1,"mutation_id":"create","anchor":{"anchor_schema_version":1,"kind":"slide","slide_id":"slide","revision":1},"body":"Comment"}`,
+		`{"page_id":"page","schema_version":2,"mutation_id":"reply","if_version":1,"body":"Reply"}`,
+		`{"page_id":"page","schema_version":2,"mutation_id":"resolve","if_version":1,"resolved":true}`,
+	} {
+		if strings.Contains(raw, `"base_rev"`) {
+			if _, err := DecodeCreateComment([]byte(raw)); err == nil {
+				t.Fatal("future create protocol accepted")
+			}
+		} else if strings.Contains(raw, `"body"`) {
+			if _, err := DecodeReplyComment([]byte(raw)); err == nil {
+				t.Fatal("future reply protocol accepted")
+			}
+		} else {
+			if _, err := DecodeResolveComment([]byte(raw)); err == nil {
+				t.Fatal("future resolve protocol accepted")
+			}
+		}
 	}
 }

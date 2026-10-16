@@ -105,6 +105,7 @@ func newSlideCommand() *cobra.Command {
 		}
 		root.AddCommand(cmd)
 	}
+	root.AddCommand(newSlideCommentsCommand())
 	return root
 }
 func init() { rootCmd.AddCommand(newSlideCommand()) }
