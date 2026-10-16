@@ -16,7 +16,7 @@ import (
 
 // Uses the foundation suite's actual separate Go authority and Node engine;
 // no computation or durable-response mocks participate in these assertions.
-func exerciseDocumentRichVersions(t *testing.T, h *PageHandler, workspace, user, human, agent, node, root string, call func(string, string, string, map[string]any, int) map[string]any) (string, map[string]any) {
+func exerciseDocumentRichVersions(t *testing.T, h *PageHandler, workspace, user, human, agent, node, root, sourcePage string, call func(string, string, string, map[string]any, int) map[string]any) (string, map[string]any) {
 	t.Helper()
 	const page = "rich-legacy-page"
 	wmSeedPage(t, h.db, workspace, page, "rich-legacy", "Legacy document", user, "")
@@ -122,6 +122,15 @@ console.log(JSON.stringify({update:encode(Y.encodeStateAsUpdate(doc,vector))}));
 	if text["marks"].([]any)[0].(map[string]any)["type"] != "link" {
 		t.Fatal("link not durable")
 	}
+	// The existing live generic run can use only a qualified semantic edit;
+	// the private Go boundary authenticates the entire before/after tree.
+	execOrFatal(t, h.db, `INSERT INTO page_artifact_run_delegations(page_id,run_id,granted_by_user_id,expires_at,granted_at) SELECT ?,run_id,granted_by_user_id,expires_at,granted_at FROM page_artifact_run_delegations WHERE page_id=? AND run_id='artifact-run'`, page, sourcePage)
+	readByAgent := call(page, "read", agent, map[string]any{}, 200)
+	block = readByAgent["outline"].([]any)[0].(map[string]any)
+	call(page, "patch", agent, map[string]any{"id": "actual-rich-semantic", "schema": 3, "page_id": page, "epoch": readByAgent["epoch"], "ifRev": readByAgent["rev"], "target": "legacy-intro", "ifHash": block["hash"], "text": "Legacy changed"}, 200)
+	state = read()
+	content = state["content"].(map[string]any)["content"].([]any)
+	assertComment()
 	call(page, "checkpoint", human, map[string]any{"id": "rich-three", "schema": 3, "page_id": page, "epoch": state["epoch"], "ifRev": state["rev"]}, 200)
 	call(page, "initialize", agent, map[string]any{"id": "agent-rich-reinit", "schema": 3, "page_id": page, "body": state["content"]}, 403)
 	call(page, "restore", human, map[string]any{"id": "rich-to-legacy", "schema": 3, "page_id": page, "epoch": state["epoch"], "ifRev": state["rev"], "checkpoint": "legacy-one"}, 200)

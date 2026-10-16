@@ -25,6 +25,7 @@ type documentSemanticPatch struct {
 	Target string                `json:"target"`
 	Text   string                `json:"text"`
 	Edit   *documentSemanticEdit `json:"edit"`
+	Rich   *documentRichProof    `json:"rich,omitempty"`
 }
 
 func validDocumentTarget(t documentVerifiedTarget) bool {

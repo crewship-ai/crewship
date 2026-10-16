@@ -98,6 +98,7 @@ function validateJSON(json, version = VERSION) {
   const visit = (node, depth = 0) => {
     if (depth > 40 || !node || typeof node !== 'object') throw new Error('invalid bounded node');
     if (++count > 10000) throw new Error('node limit');
+    if (version === RICH_VERSION && node.type === 'doc' && (depth !== 0 || Object.keys(node).some(k => !['type','content'].includes(k)))) throw new Error('closed rich root required');
     if (Object.keys(node).some(k => !['type', 'attrs', 'content', 'text', 'marks'].includes(k))) throw new Error('unsupported node properties');
     if (node.type !== 'doc' && node.type !== 'text' && !types.includes(node.type)) throw new Error('unsupported node');
     validateMarks(node.marks, version);

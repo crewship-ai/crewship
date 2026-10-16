@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
+import { readFile } from 'node:fs/promises';
 import { create, validate, validateJSON, load, snapshot, outline, hash, patch, anchor, resolve, markdown, find } from './schema.mjs';
 const json = value => JSON.parse(JSON.stringify(value));
 const paragraph = content => ({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'rich-text' }, content }] });
@@ -59,4 +60,14 @@ test('marked repeated-text insert stays bounded and does not inherit a link', ()
  assert.deepEqual(patch(doc,{op:'replaceText',id:'rich-text',text:'aaaaa',range:{from:0,to:1}},3),{from:1,to:1,insert:'a'});
  assert.deepEqual(json(validate(doc,3)),paragraph([{type:'text',text:'a',marks:[link]},{type:'text',text:'a'},{type:'text',text:'aaa',marks:[link]}]));
  assert.equal(resolve(doc,unchanged,3).status,'attached'); assert.equal(resolve(doc,unchanged,3).from,2); assert.equal(resolve(doc,unchanged,3).to,5); doc.destroy();
+});
+
+test('rich root is closed and every subtree hash matches the Go contract fixture',async()=>{
+ assert.throws(()=>create({...rich,attrs:{id:'unhashed-root'}},3),/closed rich root/);
+ // Legacy binary/hash behavior is unchanged; only explicit3 closes this root.
+ const legacy=create({...plain,attrs:{id:'legacy-root'}},2);legacy.destroy();
+ const cases=JSON.parse(await readFile(new URL('../../testdata/docs-rich-semantic-v3.json',import.meta.url),'utf8'));
+ for(const fixture of cases){for(const [value,projection] of [[fixture.before,fixture.beforeProjection],[fixture.after,fixture.afterProjection]]){
+ validateJSON(value,3);const actual=[];const visit=async node=>{if(node.attrs?.id)actual.push({id:node.attrs.id,hash:await hash(node)});for(const child of node.content||[])await visit(child)};await visit(value);assert.deepEqual(actual,projection,fixture.name);
+ }}
 });

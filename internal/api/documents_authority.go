@@ -320,6 +320,10 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		}
 		result = wire
 	case "initialize":
+		if in.Schema == 3 && artifactAgentID(r) != "" {
+			replyError(w, 403, "human rich document initialization required")
+			return
+		}
 		var s documents.State
 		s, err = h.store.InitRequest(ctx, k, in.ID, in.Fingerprint, in.Schema, in.Snapshot, in.Blocks, auth)
 		result = h.documentStateWire(s)
@@ -372,8 +376,12 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 400, "semantic target hashes required")
 			return
 		}
+		guard := h.pages.documentRequestGuard(ctx, k.PageID, "commit", in.ID, in.IfRev, in.IfHashes, in.Semantic, in.Blocks)
+		if in.Schema == 3 && in.Kind == "agent" {
+			guard = documentRichSemanticGuard(in.Semantic, in.IfHashes, in.Blocks, guard)
+		}
 		var receipt documents.Receipt
-		receipt, err = h.store.Commit(ctx, k, documents.Commit{Lease: lease, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, IfGeneration: in.Generation, Schema: in.Schema, Update: in.Update, CandidateSnapshot: in.Snapshot, Projection: in.Blocks, IfHashes: in.IfHashes, Kind: in.Kind, Guard: h.pages.documentRequestGuard(ctx, k.PageID, "commit", in.ID, in.IfRev, in.IfHashes, in.Semantic, in.Blocks)}, auth)
+		receipt, err = h.store.Commit(ctx, k, documents.Commit{Lease: lease, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, IfGeneration: in.Generation, Schema: in.Schema, Update: in.Update, CandidateSnapshot: in.Snapshot, Projection: in.Blocks, IfHashes: in.IfHashes, Kind: in.Kind, Guard: guard}, auth)
 		result = documentReceiptWire(receipt)
 	case "checkpoint":
 		if in.Generation == nil {

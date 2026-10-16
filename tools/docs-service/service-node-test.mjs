@@ -534,3 +534,13 @@ test('WRITE to READ downgrade permits original receipt but never a fresh upgrade
  model.revoked.add('Bearer human');assert.equal((await call(f.socket,'/v1/documents/p/upgrade',request)).status,403);
  }finally{await f.close()}
 });
+
+test('rich semantic proof is private, byte-bounded, and preserves nontext context',async()=>{
+ const model=authorityModel(),f=await fixture(model.handle);await f.start();
+ try{
+ const doc=create({type:'doc',content:[{type:'paragraph',attrs:{id:'rich-target'},content:[{type:'text',text:'prefix ',marks:[{type:'link',attrs:{href:'https://example.invalid/'}}]},{type:'text',text:'middle suffix'}]}]},3);model.state={...model.state,schema:3,snapshot:snapshot(doc)};doc.destroy();
+ const state=(await read(f)).body;const request={id:'rich-proof',schema:3,page_id:'p',epoch:state.epoch,ifRev:state.rev,ifHash:state.outline[0].hash,target:'rich-target',text:'prefix changed suffix',rich:{before:{type:'client-forgery'}}};
+ assert.equal((await call(f.socket,'/v1/documents/p/patch',request)).status,200);const semantic=model.seen.find(x=>x.op==='commit').data.semantic;assert.equal(semantic.rich.before.type,'doc');assert.deepEqual(semantic.rich.before,state.content);assert.equal(semantic.rich.after.content[0].content[0].marks[0].type,'link');
+ const huge=create({type:'doc',content:[{type:'paragraph',attrs:{id:'rich-target'},content:[{type:'text',text:'界'.repeat(170000)}]}]},3);model.state={...model.state,snapshot:snapshot(huge)};huge.destroy();const large=(await read(f)).body;const commits=model.commits;assert.equal((await call(f.socket,'/v1/documents/p/patch',{...request,id:'oversized-rich',epoch:large.epoch,ifRev:large.rev,ifHash:large.outline[0].hash,text:'new'})).status,413);assert.equal(model.commits,commits);assert.equal(model.state.rev,large.rev);
+ }finally{await f.close()}
+});

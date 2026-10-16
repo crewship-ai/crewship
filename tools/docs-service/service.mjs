@@ -151,7 +151,6 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if (context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human schema upgrade required');
       if (request.page_id !== page || request.target_schema !== RICH_VERSION || ![1,VERSION].includes(state.schema) || request.ifRev !== state.rev || Object.keys(request).some(key=>!['id','schema','target_schema','page_id','epoch','ifRev'].includes(key))) throw fault(409,'original Page identity, revision and supported upgrade required');
     }
-    if (version === RICH_VERSION && operation === 'patch' && request.kind !== 'human') throw fault(403,'Schema3 semantic writes require the qualified rich semantic guard');
     let doc = load(state.snapshot); let lease;
     try {
       for (const update of state.updates || []) Y.applyUpdate(doc, decode(typeof update === 'string' ? update : update.update));
@@ -188,8 +187,10 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
               const prefix = scope.target.text.slice(0, scope.target.from), suffix = scope.target.text.slice(scope.target.to);
               if (request.text.length < prefix.length + suffix.length || !request.text.startsWith(prefix) || !request.text.endsWith(suffix)) throw fault(409, 'selected text range conflict');
             }
+            const richProof = () => { const value=validate(doc,version); if(Buffer.byteLength(JSON.stringify(value),'utf8')>500000) throw fault(413,'rich semantic proof exceeds 500000 bytes; content unchanged'); return value; };
+            const before = version === RICH_VERSION ? richProof() : undefined;
             const edit = patch(doc, { op: 'replaceText', id: request.target, text: request.text, ...(scope ? { range: { from: scope.target.from, to: scope.target.to } } : {}) },version);
-            semantic = { target: request.target, text: request.text, edit };
+            semantic = { target: request.target, text: request.text, edit, ...(before ? {rich:{before,after:richProof()}} : {}) };
           }
           break;
         case 'restore': {

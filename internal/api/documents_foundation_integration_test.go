@@ -622,7 +622,7 @@ func TestDocumentsFoundationRealProcesses(t *testing.T) {
 			}
 		}
 	}
-	richPage, richUpgrade := exerciseDocumentRichVersions(t, h, workspace, user, human, agent, node, root, call)
+	richPage, richUpgrade := exerciseDocumentRichVersions(t, h, workspace, user, human, agent, node, root, page, call)
 	report := map[string]any{"protocol": documentEngineProtocol, "schema": 2, "documents": 9, "selectedRequestRealHTTP": map[string]any{"scenarios": []string{"selected success", "fresh rebase", "revoked grant"}, "rangeAndTargetRejection": 409, "crossPageGenericDelegationRejection": 403, "deletedRequestAfterRunResetRejection": 403, "freshRebaseRejection": 409, "revokedGrantRejection": 403, "onePatchExactCheckpoint": true, "exactPatchRetry": true, "noRejectedMutationReceiptsOrResults": true, "modelRun": false}, "representativeHistory": representativeReport, "commitMilliseconds": float64(commitDuration.Microseconds()) / 1000, "writerContentionMilliseconds": float64(contentionDuration.Microseconds()) / 1000, "simulatedWriterHoldMilliseconds": 50, "snapshotBytes": snapshotBytes, "replayUpdates": updates, "replayBytes": updateBytes, "nodeRSSKiB": nodeRSSKB, "nodeCrashRestart": true, "goCrashRestart": true, "durableReplay": true}
 	reportPath := os.Getenv("CREWSHIP_DOCS_FOUNDATION_OUTPUT")
 	if reportPath == "" {
