@@ -20,7 +20,9 @@ import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
-import { Card, Pill, FieldLabel } from "./_shared"
+import { Card, FieldLabel } from "./_shared"
+import { StatusPill } from "@/components/ui/status-pill"
+import { toStatusTone } from "@/lib/status-tone"
 import { WakeGateChip } from "./routine-wake-gate-chip"
 import { describeCron } from "@/lib/cron-describe"
 import { scheduleHealth } from "@/lib/schedule-health"
@@ -273,14 +275,17 @@ export function RoutineSchedulesTab({
                         {s.name && s.name !== describeCron(s.cron_expr) && (
                           <span className="truncate text-xs text-muted-foreground">· {s.name}</span>
                         )}
-                        {isDraft && <Pill tone="purple">awaiting activation</Pill>}
+                        {isDraft && <StatusPill size="md" tone="purple" label="awaiting activation" />}
                         {/* Health — read-only. F18/A6: this is the only place a
                         circuit-breaker-disabled schedule's reason is shown;
                         the editor to change breaker settings is Track B. */}
                         {(health.tone === "destructive" || health.tone === "warn") && (
-                          <Pill tone={health.tone} data-testid={`schedule-health-${s.id}`}>
-                            {health.label}
-                          </Pill>
+                          <StatusPill
+                            size="md"
+                            tone={toStatusTone(health.tone)}
+                            label={health.label}
+                            data-testid={`schedule-health-${s.id}`}
+                          />
                         )}
                         <WakeGateChip wakePipelineSlug={s.wake_pipeline_slug} />
                       </div>

@@ -19,7 +19,10 @@ import { ArrowLeft, Clock, Coins, GitBranch, Layers, ListTree } from "lucide-rea
 
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
-import { Appear, FieldLabel, Pill } from "@/components/ui/detail"
+import { Appear, FieldLabel } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
+import { formatStatus } from "@/lib/format-status"
+import { toStatusTone } from "@/lib/status-tone"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { useTrace } from "@/hooks/use-trace"
@@ -202,7 +205,7 @@ export function ActivityDetail({
               {meta.label}
             </span>
             <h1 className="min-w-0 text-lg font-semibold tracking-tight">{entry.summary}</h1>
-            {tone !== "default" && <Pill tone={tone}>{String(entry.severity)}</Pill>}
+            {tone !== "default" && <StatusPill size="md" tone={toStatusTone(tone)} label={formatStatus(String(entry.severity)).label} />}
           </div>
 
           <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

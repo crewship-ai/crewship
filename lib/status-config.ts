@@ -1,51 +1,23 @@
 /**
- * Shared status badge styles used across the app.
+ * Status entries for features that pair a status with a glyph.
  *
- * Each entry maps a semantic status name to the Tailwind className string
- * for badge-style rendering. Components compose their own STATUS_CONFIG by
- * picking from this palette and adding labels / icons specific to their domain.
- *
- * Two intensity variants are provided:
- *  - default (text-{color}-800) — used in most badge contexts
- *  - subtle  (text-{color}-700) — used in list/table views for less emphasis
+ * Each entry names a StatusPill tone (lib/status-tone). The palette class maps
+ * that used to live here (STATUS_STYLES, STATUS_STYLES_SUBTLE: bg-emerald-100
+ * and friends) were replaced by the chip tokens StatusPill renders with, so
+ * every status reads the same in every screen and theme.
  */
 
 import { CheckCircle2, Loader2, XCircle } from "lucide-react"
 
-// ── Badge className palette (text-800 intensity) ────────────────────────────
-/** Tailwind badge class strings keyed by color name (text-800 intensity). */
-export const STATUS_STYLES = {
-  slate:   "bg-slate-100 text-slate-800 dark:bg-slate-900/40 dark:text-slate-300",
-  blue:    "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-  amber:   "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  emerald: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-  red:     "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-  gray:    "bg-gray-100 text-gray-800 dark:bg-gray-900/40 dark:text-gray-300",
-  purple:  "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-  orange:  "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
-  violet:  "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300",
-  green:   "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
-} as const
+import type { StatusTone } from "@/lib/status-tone"
 
-// ── Subtle badge className palette (text-700 intensity) ─────────────────────
-/** Tailwind badge class strings keyed by color name (text-700 subtle intensity). */
-export const STATUS_STYLES_SUBTLE = {
-  slate:   "bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-300",
-  blue:    "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  amber:   "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-  green:   "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  red:     "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-  gray:    "bg-gray-100 text-gray-700 dark:bg-gray-900/40 dark:text-gray-300",
-} as const
-
-// ── Type for components that build their own status config ──────────────────
-/** A status badge entry with label text and Tailwind className. */
+/** A status entry: the word shown and the StatusPill tone. */
 export interface StatusConfigEntry {
   label: string
-  className: string
+  tone: StatusTone
 }
 
-/** Status badge entry extended with a React icon component. */
+/** Status entry extended with a React icon component. */
 export interface StatusConfigEntryWithIcon extends StatusConfigEntry {
   icon: React.ComponentType<{ className?: string }>
 }
@@ -53,11 +25,10 @@ export interface StatusConfigEntryWithIcon extends StatusConfigEntry {
 // ── Shared async-run status entries ─────────────────────────────────────────
 /**
  * Completed / Running / Failed status entries shared by features that track an
- * async run (crew assignments, crew peer conversations). These three entries
- * were byte-identical across those components, so they live here once.
+ * async run (crew assignments, crew peer conversations).
  */
 export const RUN_STATUS_CONFIG: Record<"COMPLETED" | "RUNNING" | "FAILED", StatusConfigEntryWithIcon> = {
-  COMPLETED: { label: "Completed", className: STATUS_STYLES.emerald, icon: CheckCircle2 },
-  RUNNING:   { label: "Running",   className: STATUS_STYLES.blue,    icon: Loader2 },
-  FAILED:    { label: "Failed",    className: STATUS_STYLES.red,     icon: XCircle },
+  COMPLETED: { label: "Completed", tone: "success", icon: CheckCircle2 },
+  RUNNING:   { label: "Running",   tone: "blue",    icon: Loader2 },
+  FAILED:    { label: "Failed",    tone: "danger",  icon: XCircle },
 }

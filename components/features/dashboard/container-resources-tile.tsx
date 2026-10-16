@@ -3,6 +3,8 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/status-tone"
 import { getCrewBgClass, resolveCrewColor } from "@/lib/colors"
 
 export interface ContainerStatsEntry {
@@ -67,7 +69,7 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
             <div className="flex items-center gap-2 text-[11px] font-medium">
               <span className={cn("w-2 h-2 rounded-sm shrink-0", bgClass)} />
               {nameLabel}
-              <StatusPill status={status} className="ml-auto md:hidden" />
+              <ContainerStatus status={status} className="ml-auto md:hidden" />
             </div>
 
             <div className="mt-2 md:mt-0">
@@ -100,7 +102,7 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
               </div>
             </div>
 
-            <StatusPill status={status} className="hidden md:inline-flex" />
+            <ContainerStatus status={status} className="hidden md:inline-flex" />
           </div>
         )
       })}
@@ -136,15 +138,15 @@ function CpuSparkline({ history, color }: { history: number[]; color: string }) 
   )
 }
 
-function StatusPill({ status, className }: { status: "hot" | "running" | "idle"; className?: string }) {
-  const cfg = {
-    hot: { label: "Hot", cls: "text-destructive border-destructive/30 bg-destructive/10" },
-    running: { label: "Running", cls: "text-primary border-primary/30 bg-primary/10" },
-    idle: { label: "Idle", cls: "text-muted-foreground border-border bg-muted/20" },
-  }[status]
-  return (
-    <span className={cn("inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[9px] font-semibold uppercase tracking-wide border", cfg.cls, className)}>
-      {cfg.label}
-    </span>
-  )
+// A container's load, not an agent's state: an idle container is neutral
+// (formatStatus reads IDLE as a healthy agent), so the tone is explicit.
+const CONTAINER_STATUS: Record<"hot" | "running" | "idle", { label: string; tone: StatusTone }> = {
+  hot: { label: "Hot", tone: "danger" },
+  running: { label: "Running", tone: "blue" },
+  idle: { label: "Idle", tone: "muted" },
+}
+
+function ContainerStatus({ status, className }: { status: "hot" | "running" | "idle"; className?: string }) {
+  const cfg = CONTAINER_STATUS[status]
+  return <StatusPill tone={cfg.tone} label={cfg.label} className={className} />
 }

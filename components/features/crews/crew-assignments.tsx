@@ -21,7 +21,8 @@ import {
 import { formatRelativeTime, formatDurationBetween } from "@/lib/time"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { Assignment } from "@/lib/types/assignment"
-import { STATUS_STYLES, RUN_STATUS_CONFIG, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import { RUN_STATUS_CONFIG, type StatusConfigEntryWithIcon } from "@/lib/status-config"
+import { statusTone } from "@/lib/status-tone"
 import { useApiResource } from "@/hooks/use-api-resource"
 
 interface CrewAssignmentsProps {
@@ -31,7 +32,7 @@ interface CrewAssignmentsProps {
 
 const STATUS_CONFIG: Record<Assignment["status"], StatusConfigEntryWithIcon> = {
   ...RUN_STATUS_CONFIG,
-  PENDING: { label: "Pending", className: STATUS_STYLES.amber, icon: Clock },
+  PENDING: { label: "Pending", tone: statusTone("PENDING"), icon: Clock },
 }
 
 function LiveDuration({ startedAt }: { startedAt: string }) {
@@ -122,18 +123,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                           }}
                         >
                           <TableCell>
-                            <StatusIconBadge
-                              entry={config}
-                              gap="gap-1.5"
-                              icon={
-                                a.status === "RUNNING" ? (
-                                  <span aria-hidden="true" className="relative flex h-2 w-2 shrink-0">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                                  </span>
-                                ) : undefined
-                              }
-                            />
+                            <StatusIconBadge entry={config} live={a.status === "RUNNING"} />
                           </TableCell>
                           <TableCell>
                             {hasDetail ? (

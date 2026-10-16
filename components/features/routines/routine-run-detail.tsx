@@ -49,7 +49,9 @@ import {
   Lightbulb,
   XCircle,
 } from "lucide-react"
-import { DetailCard, Pill } from "@/components/ui/detail"
+import { DetailCard } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
+import { toStatusTone } from "@/lib/status-tone"
 import { RoutineIdentityHeader } from "./routine-identity-header"
 import { routineViewHref } from "./routine-navigation"
 import {
@@ -501,7 +503,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           </>
         }
       >
-        <Pill tone={presentation.tone}>{presentation.label}</Pill>
+        <StatusPill size="md" tone={toStatusTone(presentation.tone)} label={presentation.label} />
         {/* The facts of this run as one sentence: what used to be a four-cell
           stat strip below a second row of tabs. */}
         <span className="text-xs text-muted-foreground" data-testid="run-facts">

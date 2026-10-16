@@ -1,7 +1,8 @@
 import React from "react"
 import { toast } from "sonner"
 import { RefreshCw, AlertTriangle, ChevronRight, ExternalLink, Container, ScrollText, Wrench, Trash2, Loader2 } from "lucide-react"
-import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
+import { StatusDot } from "@/components/ui/status-badge"
+import { StatusPill } from "@/components/ui/status-pill"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -118,7 +119,7 @@ const RuntimeInventory = React.memo(function RuntimeInventory({
                     </div>
                     {rt.socket && <p className="mt-0.5 truncate font-mono text-micro text-muted-foreground-soft">{rt.socket}</p>}
                   </div>
-                  <StatusBadge status={rt.in_use ? "COMPLETED" : "PENDING"} label={rt.in_use ? "In use" : "Detected"} className="text-micro" />
+                  <StatusPill status={rt.in_use ? "COMPLETED" : "PENDING"} label={rt.in_use ? "In use" : "Detected"} />
                 </div>
                 {/*
                   Attached to the row rather than collected into one notice at
