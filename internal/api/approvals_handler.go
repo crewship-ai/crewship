@@ -89,6 +89,9 @@ func (h *ApprovalsHandler) List(w http.ResponseWriter, r *http.Request) {
 	if hasMore {
 		rows = rows[:limit]
 	}
+	for i := range rows {
+		rows[i] = approvalReadProjection(rows[i])
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"rows": rows, "status": status, "count": len(rows), "has_more": hasMore,
 	})
@@ -122,7 +125,7 @@ func (h *ApprovalsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, row)
+	writeJSON(w, http.StatusOK, approvalReadProjection(*row))
 }
 
 // Decide serves POST /api/v1/approvals/{id}/decide with body
