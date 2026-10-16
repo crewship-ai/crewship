@@ -77,4 +77,14 @@ func TestWorkerOutputBoundCannotBeBypassedByCopyFastPath(t *testing.T) {
 	}
 }
 
-func TestExportRevisionMustBeJavaScriptSafeInteger(t *testing.T){v:=corpus();v.Revision=1<<53;raw,err:=json.Marshal(v);if err!=nil{t.Fatal(err)};if _,err=decodeExportInput(raw);err==nil{t.Fatal("lossy Node revision admitted")}}
+func TestExportRevisionMustBeJavaScriptSafeInteger(t *testing.T) {
+	v := corpus()
+	v.Revision = 1 << 53
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = decodeExportInput(raw); err == nil {
+		t.Fatal("lossy Node revision admitted")
+	}
+}
