@@ -150,6 +150,40 @@ or base run delegation. Preserve the exact payload after an uncertain response.
 
 `crewship page board permissions revoke BOARD PERMISSION` revokes unused authority.
 No command-specific flags. It does not undo an already-committed agent edit.
+## Staged raster asset commands
+
+### crewship page assets upload
+
+```bash
+crewship page assets upload report --file chart.png --mutation-id chart-1
+cat chart.jpg | crewship page assets upload report --file - --mutation-id photo-1
+```
+
+Both flags are required. The human profile uploads raw bounded PNG/JPEG to
+`POST /api/v1/pages/{slug}/assets?mutation_id=ID` and prints server metadata.
+Use the same ID only for identical input under the same author. Staging expires
+in24h. EXIF orientations2–8 are explicitly unsupported; images are canonicalized,
+not stored as original file bytes. This command does not insert an editor image.
+
+### crewship page assets show
+
+```bash
+crewship page assets show report ASSET_ID
+```
+
+Reads metadata through `GET /api/v1/pages/{slug}/assets/{assetId}` using current
+Page visibility. Digest knowledge never grants access.
+
+### crewship page assets download
+
+```bash
+crewship page assets download report ASSET_ID > canonical.png
+```
+
+Writes canonical PNG/JPEG bytes to stdout from
+`GET /api/v1/pages/{slug}/assets/{assetId}/bytes`. The metadata MIME identifies
+the actual format. This binary command does not honor table formatting. Expired
+staging and revoked Page access fail; backup restore does not renew expiry.
 
 ## Artifact commands
 

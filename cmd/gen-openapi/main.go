@@ -615,6 +615,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range documentSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range pageAssetSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	for key, schema := range pagesSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}

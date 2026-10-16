@@ -95,6 +95,10 @@ func attachmentRefs(dump *DBDump) (order []string, byWorkspace map[string][]stri
 		ws, _ := page["workspace_id"].(string)
 		pageWorkspaces[id] = ws
 	}
+	for _, asset := range dump.Tables["page_assets"] {
+		pageID, _ := asset["page_id"].(string)
+		refs = append(refs, map[string]any{"sha256": asset["sha256"], "workspace_id": pageWorkspaces[pageID]})
+	}
 	for _, revision := range dump.Tables["page_artifact_revisions"] {
 		pageID, _ := revision["page_id"].(string)
 		refs = append(refs, map[string]any{"sha256": revision["sha256"], "workspace_id": pageWorkspaces[pageID]})

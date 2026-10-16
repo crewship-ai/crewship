@@ -308,6 +308,7 @@ var requiredQueryParametersInSpec = []string{
 	// TestPageSubjectAccess_AnswersAdminsAboutAnyoneAndMembersAboutThemselves.
 
 	"GET /api/v1/pages/access ?subject",
+	"POST /api/v1/pages/{slug}/assets ?mutation_id",     // TestPageAssetRequiresMutationID verifies missing identity is400 before publishing bytes.
 	"GET /api/v1/pages/{slug}/artifact/lease ?revision", // TestArtifactLeaseMetadataOnlyExactRevisionAndExpiry rejects absent/ambiguous revisions.
 	"GET /api/v1/admin/backups/download ?path",
 	"GET /api/v1/admin/backups/inspect ?path",

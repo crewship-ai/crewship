@@ -170,6 +170,44 @@ image placement, conflict preservation, local library output and source ACL
 redaction. SVG/PNG selection previews must label embedded artifact placeholders;
 they are never described as screenshots of cross-origin iframe content.
 
+## Private staged raster assets
+
+Human-authenticated `POST /api/v1/pages/{slug}/assets?mutation_id=ID` accepts raw
+PNG/JPEG bytes; `GET /api/v1/pages/{slug}/assets/{assetId}` returns immutable
+metadata and `GET /api/v1/pages/{slug}/assets/{assetId}/bytes` returns canonical
+bytes. These are Page-authorized staged uploads, not Docs/Slides image elements
+or revision attachments. A digest or another Page's asset ID grants no access.
+Reads require current Page visibility, including panel-crew reach; writes
+require spec-edit authority checked before decoding and again under the writer
+fence. Agents cannot use these human routes. Read bytes use nosniff/no-store.
+
+Only decoded PNG/JPEG is reencoded; input MIME is not trusted. Limits are5MiB
+input,8MiB canonical output,2048 pixels per dimension,4,194,304 pixels/image,
+two concurrent decode/upload operations and four reads. Each Page admits at
+most64 asset rows and64MiB canonical bytes. Source metadata is stripped;
+JPEG EXIF orientations2–8 return an explicit unsupported-orientation error,
+not a silently rotated image. Malformed EXIF is rejected; no orientation tag or orientation1 is supported. Animated PNG,
+SVG and remote sources are unsupported.
+
+Uploads are staged for24 hours. Expired staged rows cannot be read and are
+removed by the hourly attachment collector or subsequent Page upload. Current
+retained rows are never expired; this foundation exposes no promotion endpoint.
+A future typed editor must atomically establish immutable revision roots and
+retention before publication. No revision restore or editor image support is
+implied. Blob GC counts asset rows alongside other workspace attachment roots.
+Crashes may leave unreferenced blobs, reclaimed by the existing age-gated sweep.
+Quota/ACL/receipt refusals do not publish blob bytes. Workspace backup and fork
+restore include canonical bytes and remap Page/asset identities; staging expiry
+is absolute and not renewed by restore.
+
+`crewship page assets upload SLUG --file IMAGE --mutation-id ID`,
+`crewship page assets show SLUG ASSET_ID`, and
+`crewship page assets download SLUG ASSET_ID` use the human profile; download
+writes canonical bytes to stdout. Retry identity is stable for the same author
+and identical input bytes during staging lifetime; different input is409 and
+expired receipts are410 until collected. Upload status/metadata does not claim
+attachment to an editor revision.
+
 ## Private content presence
 
 Authenticated humans subscribe to dedicated `artifact:{page_id}` or
