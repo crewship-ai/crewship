@@ -53,7 +53,7 @@ func validRight(r Right) bool {
 			return true
 		}
 	case "routine":
-		return r.Operation == "run" || r.Operation == "view" || r.Operation == "edit"
+		return r.Operation == "run" || r.Operation == "view" || r.Operation == "edit" || r.Operation == "results"
 	case "project":
 		switch r.Operation {
 		case "list", "read", "write", "delete", "contribute", "manage", "delete_issues":

@@ -114,6 +114,17 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 			}
 		} else if right.Kind == "routine" && right.Operation == "view" {
 			decision.Reason = "Explicit View shares the routine definition without execution authority or other people’s private runs."
+		} else if right.Kind == "routine" && right.Operation == "results" {
+			decision.State = "conditional"
+			decision.Reason = "Results with View shares routine run history and outputs, subject to inherited private conversation audiences. It never shares inputs, transcripts or execution authority."
+			if e := store.Check(r.Context(), user, workspace, access.Right{Kind: "routine", ID: right.ID, Operation: "view"}); e != nil {
+				if !errors.Is(e, access.ErrDenied) {
+					h.memberAccessError(w, e)
+					return
+				}
+				decision.State = "denied"
+				decision.Reason = "Reading routine results also requires a current View share."
+			}
 		} else if right.Kind == "routine" && right.Operation == "edit" {
 			decision.State = "conditional"
 			decision.Reason = "Edit allows changes to the collaborative draft with current View access and token scope. Publication still requires trusted review and testing; Edit does not grant execution."

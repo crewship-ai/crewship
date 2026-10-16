@@ -2786,7 +2786,7 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 			terminal.Status = RunStatusFailed
 			terminal.ErrorMessage = "unknown terminal status: " + result.Status
 		}
-		terminal.Output = result.Output
+		terminal.Output = scrubStepOutput(result.Output)
 		if result.ErrorMessage != "" {
 			terminal.ErrorMessage = result.ErrorMessage
 		}

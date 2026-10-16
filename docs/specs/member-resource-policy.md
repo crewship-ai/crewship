@@ -70,7 +70,7 @@ access first. A role change cannot silently remove or bypass the restriction.
 | --- | --- | --- |
 | New GUEST workspace role | Changed: restricted access mode, Guest in UI, account-wide | The current global route fence has no mixed-mode bypass. Keeping one account ceiling avoids granting trusted routes through another workspace while per-resource integration is incomplete. Separate workspace-scoped guest accounts remain a future migration. |
 | New resource_grants registry | Changed: extend versioned access_grants | Reuse the shipped membership revision, resource foreign keys and execution revocation fences rather than introduce two authorities. Pages moves last as originally planned. |
-| Per-object sharing and meaningful type levels | Kept as target; agent operations, routine Run, definition View and project read/contribute delivered | Full View/Edit and crew/credential subjects need separate enforcement and UI work. Routine/project Share dialogs reuse the versioned member policy. |
+| Per-object sharing and meaningful type levels | Kept as target; agent operations, routine Run, definition View, explicit regular Results and project read/contribute supported | Full ordered View/Run/Edit, private-queue result audiences and crew/credential subjects need separate enforcement and UI work. Routine/project Share dialogs reuse the versioned member policy. |
 | Pages model migration | Deferred, as in original phases | Preserve current Pages ACL, issuer checks and data during the first routine/project slice. |
 
 Guest invitation acceptance, restricted provisioning and direct member policy
@@ -128,7 +128,7 @@ Supported operations:
 | Resource | Operations | Current scope |
 | --- | --- | --- |
 | Agent | discover, chat, run, delegate | Discovery is separate from conversation and execution authority. |
-| Routine | view, run, edit | Explicit root-routine grant **and** run on every resolved agent; cross-agent delegation additionally needs delegate. Nested definitions are frozen dependencies. View exposes the stored definition; Edit with View allows collaborative draft changes, with trusted testing/review before publication. |
+| Routine | view, results, run, edit | Explicit root-routine grant **and** run on every resolved agent; cross-agent delegation additionally needs delegate. Nested definitions are frozen dependencies. View exposes the stored definition; Edit with View allows collaborative draft changes, with trusted testing/review before publication. |
 | Project | list, read, contribute, manage, delete_issues, write, delete | List exposes issue metadata; Read exposes shared issue details/comments and project source files. Contribute with Read permits configured intake requests, shared comments and arranging intake work. Manage with Read explicitly shares editable project details and milestones. Delete issues additionally requires Read/Manage and reviewed disposable work. Write/delete apply to project source files with their existing role floor. |
 
 Routine grants replace the workspace-wide `routine.run` requirement for Guests.
@@ -180,7 +180,7 @@ A confirmed creation shows its identifier and, when readable, a detail link even
 if the current filter hides the new row. An unconfirmed or other-project response
 retains the draft for a retry under the same operation key.
 
-Crews, credentials, routine Edit and shared-output audiences, full Issues Manage, explicit
+Crews, credentials, direct routine publication, private restricted-output audiences, full Issues Manage, explicit
 Page-action selection and a Pages grant migration remain separate work. This
 contract does not claim complete resource-access PRD or release-1.0 acceptance.
 
@@ -311,11 +311,12 @@ Run keeps the existing root-routine plus every agent/provider dependency checks.
 | --- | --- | --- |
 | View without Run | Kept for definition inspection | A reviewer can understand a routine without execution authority or a runtime. |
 | Run automatically implies definition View | Changed for existing operations | Existing Run shares deliberately exposed only a minimal invocation contract. Automatically revealing prompts/defaults would expand their disclosure without administrator review; View is explicit. |
+| Regular routine run history and outputs | Kept through deliberate Results with View | Existing definition-only and invocation-only shares are not widened. The new share exposes past/future regular results while retaining every inherited private conversation audience. |
 | View includes other participants’ private outputs | Deferred to an explicit result-audience contract | A routine share must not grant access to another client’s private execution/chat. Existing private run receipts keep their current actor and execution fences. |
 | Edit and version publication | Draft editing delivered; direct Guest publication deferred | The collaborative draft shares current View/Edit authority. Trusted publication retains testing, exact revision review, author provenance and unattended execution protections. |
 
 `GET /workspaces/{workspaceId}/restricted-routine-library` returns only live
-routine View/Run shares, with `can_view`, current graph `can_run`, and runtime
+routine View/Run shares, with `can_view`, `can_results` eligibility, current graph `can_run`, and runtime
 installation metadata. The detail route adds definition/hash/version only with
 a live View share. Both use the authenticated Guest and selected workspace;
 the envelope includes no issuer/member identity or run records. Stored definition literals are deliberately shared as authored; vault credentials are never resolved. Revoked,
@@ -403,3 +404,44 @@ access loss clears the editor. The CLI reads the same JSON snapshot with
 `crewship routine shared-draft save ROUTINE --file draft.json` (or `--file -`).
 Read-only `can_edit` is removed before PUT; the CLI performs no hidden GET or
 conflict retry.
+
+
+### Explicit routine history and outputs
+
+The `results` operation is a deliberate addition to definition View. Existing
+View and Run shares are not widened or backfilled. Administrators can select
+**View runs and outputs** in routine Share or the member editor; it also needs
+current View and active issuers. The share exposes past and future regular
+pipeline run metadata and outputs for this routine, including runs invoked by
+other people or automation. Review authored/output content before sharing.
+Inputs are not shown directly; outputs may contain them. It does not grant execution or disclose requester identities, errors,
+costs, transcripts, internal origin IDs or credentials resolved from the vault.
+
+Dedicated GET collection/detail routes under the Guest definition library use
+one read transaction for local active membership, live View/Results grants,
+recipe existence, origin audience, filtered count and response projection.
+Lists contain only run ID, routine ID, status, mode and timestamps; selected
+results additionally expose final output and `pipeline_run_step_outputs`.
+Counts and pagination use the same visibility predicate before pagination.
+The run, its pinned version and the live recipe retain inherited conversation
+read audiences; a routine share cannot override a private chat or make a
+missing/non-chat origin readable. Detaching a live recipe does not erase a
+historical run/version origin. No execution runtime or agent Run grant is
+needed for an ordinary shared history read.
+
+Private restricted-runtime receipts retain their separate actor/attempt/proof
+ceiling and existing own-result surface; they are not read from raw output
+storage through the history projection. Generalizing those result audiences,
+full ordered View/Run/Edit presets and direct Guest publication remain open.
+UI hard 401/403/404 responses remove result data, while transient refresh errors
+retain the last successful authorized projection with a notice.
+
+Shared history excludes issue-triggered runs and their replays. NULL-origin
+runs also require valid start-journal evidence and the common autonomous-run
+predicate; recorded human authority, missing requester authority, malformed
+payloads, missing evidence and unknown-origin replays are hidden. Replay
+preserves its original origin and any compatible trusted caller origin.
+Selected output content is capped at 256 KiB before loading; the encoded
+response is capped at 1 MiB. Oversized details return 413 while list metadata
+remains available. Final and step outputs are credential-scrubbed on read,
+including historical stored content; final output is also scrubbed on persist.

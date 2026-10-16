@@ -16,7 +16,7 @@ const policySchema = resourcePolicySchema
 type Policy = z.infer<typeof policySchema>
 type Right = z.infer<typeof rightSchema>
 const directorySchema = z.array(z.object({ id: z.string(), name: z.string() }))
-const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "contribute", "manage", "delete_issues", "write", "delete"], routine: ["view", "run", "edit"] }
+const operations = { agent: ["discover", "chat", "run", "delegate"], project: ["list", "read", "contribute", "manage", "delete_issues", "write", "delete"], routine: ["view", "results", "run", "edit"] }
 
 export function MemberResourceAccess({ workspaceId, memberId, label, role, onSaved }: {
   workspaceId: string; memberId: string; label: string; role: string

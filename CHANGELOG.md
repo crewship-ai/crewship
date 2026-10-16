@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Shared routine results retain private provenance.** Replays preserve their source and trusted caller origins; issue runs, ambiguous legacy origins and malformed authority evidence stay hidden. Final outputs receive the same credential scrubbing as step outputs, including historical shared reads. Oversized selected results return 413.
+
+- **Guests can inspect explicitly shared routine history and outputs.** A new Results share with View exposes run metadata and selected outputs in UI and CLI, without execution authority or transcripts. Inputs are not shown directly; outputs may contain them. Existing View/Run shares retain their previous scope; inherited private conversation audiences still constrain results.
 - **Shared issue searches visit only projects with live List grants.** Search and counts resolve current grant authority before reading issues, avoiding scans of hidden workspace issues. Issuer demotion/suspension and Read/Contribute without List return no list results.
 
 - **Guests can search shared issue titles and identifiers in UI and CLI.** Filtering and total counts retain live project grants; hidden descriptions, comments and unrelated projects are excluded. A new search starts from the first page in the UI. Creation confirmation remains visible when the filter hides the new issue.

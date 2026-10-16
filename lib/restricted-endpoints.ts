@@ -63,6 +63,8 @@ export const RESTRICTED_FE_ENDPOINTS = [
   "GET /api/v1/workspaces/{workspaceId}/restricted-pages",
   "GET /api/v1/workspaces/{workspaceId}/restricted-routine-library",
  "GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}",
+ "GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs",
+ "GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs/{runId}",
  "GET /api/v1/workspaces/{workspaceId}/restricted-routines",
   "GET /api/v1/pages/{slug}/application/actions/{pendingId}",
   "POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run",
