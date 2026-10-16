@@ -1,9 +1,8 @@
 import { apiFetch } from "@/lib/api-fetch"
-import { SLIDES_MAX_IMAGE_ASSETS, SLIDES_MAX_IMAGE_BYTES, SLIDES_MAX_IMAGE_PIXELS, type SlideImage, type SlideDeck } from "./model"
+import { SLIDES_MAX_IMAGE_ASSETS, SLIDES_MAX_IMAGE_BYTES, SLIDES_MAX_IMAGE_PIXELS, SLIDES_IMAGE_MAX_DIMENSION, SLIDES_IMAGE_MAX_ASSET_PIXELS, SLIDES_IMAGE_MAX_UPLOAD_BYTES, SLIDES_IMAGE_MAX_STORED_BYTES, type SlideImage, type SlideDeck } from "./model"
 
-// Existing private Page raster API limits: pageassets.MaxInput/MaxOutput.
-export const PAGE_IMAGE_UPLOAD_MAX_BYTES = 5 << 20
-export const PAGE_IMAGE_STORED_MAX_BYTES = 8 << 20
+export const PAGE_IMAGE_UPLOAD_MAX_BYTES = SLIDES_IMAGE_MAX_UPLOAD_BYTES
+export const PAGE_IMAGE_STORED_MAX_BYTES = SLIDES_IMAGE_MAX_STORED_BYTES
 
 export interface PageImageMetadata { id: string; page_id: string; sha256: string; content_type: "image/png" | "image/jpeg"; width: number; height: number; byte_size: number; state: "staged" | "retained"; created_at: string; expires_at: string }
 export class PageImageError extends Error { constructor(message: string, public status?: number) { super(message) } }
@@ -11,7 +10,7 @@ const integer = (value: unknown): value is number => Number.isSafeInteger(value)
 export function validPageImageMetadata(value: unknown, pageId: string): value is PageImageMetadata {
   if (!value || typeof value !== "object") return false
   const v = value as PageImageMetadata
-  return typeof v.id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v.id) && v.page_id === pageId && typeof v.sha256 === "string" && /^[a-f0-9]{64}$/.test(v.sha256) && ["image/png", "image/jpeg"].includes(v.content_type) && integer(v.width) && integer(v.height) && v.width * v.height <= SLIDES_MAX_IMAGE_PIXELS && integer(v.byte_size) && v.byte_size <= PAGE_IMAGE_STORED_MAX_BYTES && ["staged", "retained"].includes(v.state) && typeof v.created_at === "string" && v.created_at.length <= 128 && typeof v.expires_at === "string" && v.expires_at.length <= 128
+  return typeof v.id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v.id) && v.page_id === pageId && typeof v.sha256 === "string" && /^[a-f0-9]{64}$/.test(v.sha256) && ["image/png", "image/jpeg"].includes(v.content_type) && integer(v.width) && v.width <= SLIDES_IMAGE_MAX_DIMENSION && integer(v.height) && v.height <= SLIDES_IMAGE_MAX_DIMENSION && v.width * v.height <= SLIDES_IMAGE_MAX_ASSET_PIXELS && integer(v.byte_size) && v.byte_size <= PAGE_IMAGE_STORED_MAX_BYTES && ["staged", "retained"].includes(v.state) && typeof v.created_at === "string" && v.created_at.length <= 128 && typeof v.expires_at === "string" && v.expires_at.length <= 128
 }
 export function pageImagePath(workspace: string, slug: string, path = "", mutationId?: string) {
   const query = new URLSearchParams({ workspace_id: workspace }); if (mutationId) query.set("mutation_id", mutationId)
@@ -29,6 +28,7 @@ export async function readPageImageMetadata(workspace: string, slug: string, pag
 }
 export async function loadPageImage(workspace: string, slug: string, pageId: string, image: SlideImage, signal: AbortSignal) {
   const metadata = await readPageImageMetadata(workspace, slug, pageId, image, signal)
+  signal.throwIfAborted()
   const response = await checked(await apiFetch(pageImagePath(workspace, slug, `/${encodeURIComponent(image.asset_id)}/bytes`), { signal }))
   if (response.headers.get("Content-Type")?.split(";")[0].trim() !== metadata.content_type || !response.body) throw new PageImageError("Unsupported image bytes.", 409)
   const reader = response.body.getReader(), chunks: Uint8Array[] = []; let size = 0
@@ -55,7 +55,7 @@ export class PageImageCache {
   version = 0
   closed = false
   reason?: string
-  constructor(private load: (image: SlideImage, signal: AbortSignal) => Promise<Loaded>, private createURL = (blob: Blob) => URL.createObjectURL(blob), private revokeURL = (url: string) => URL.revokeObjectURL(url)) {}
+  constructor(private load: (image: SlideImage, signal: AbortSignal) => Promise<Loaded>, private createURL = (blob: Blob) => URL.createObjectURL(blob), private revokeURL = (url: string) => URL.revokeObjectURL(url), private onDenial?: (reason: string) => void) {}
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   snapshot = () => this.version
   private publish() { this.version++; for (const listener of this.listeners) listener() }
@@ -86,7 +86,7 @@ export class PageImageCache {
         if (this.totalBytes + value.bytes > SLIDES_MAX_IMAGE_BYTES || this.totalPixels + value.pixels > SLIDES_MAX_IMAGE_PIXELS) throw new PageImageError("Active images exceed the shared encoded byte or decoded pixel budget.", 409)
         current.bytes = value.bytes; current.pixels = value.pixels; this.totalBytes += value.bytes; this.totalPixels += value.pixels
         current.url = this.createURL(value.blob); return current.url
-      }).catch(cause => { if (cause instanceof PageImageError && [401, 403, 404, 409, 410].includes(cause.status ?? 0)) this.dispose(cause.message); throw cause })
+      }).catch(cause => { if (cause instanceof PageImageError && [401, 403, 404, 409, 410].includes(cause.status ?? 0)) this.deny(cause.message); throw cause })
       entry = current; this.entries.set(key, current)
     }
     entry.refs++
@@ -96,6 +96,7 @@ export class PageImageCache {
       if (--entry.refs === 0 && this.entries.get(key) === entry) { entry.controller.abort(); if (entry.url) this.revokeURL(entry.url); this.totalBytes -= entry.bytes; this.totalPixels -= entry.pixels; this.entries.delete(key) }
     } }
   }
+  deny(reason: string) { this.dispose(reason); this.onDenial?.(reason) }
   dispose(reason?: string) {
     if (this.closed) return
     this.closed = true; this.reason = reason
@@ -127,4 +128,20 @@ export async function uploadPageImage(workspace: string, slug: string, pageId: s
   const metadata: unknown = await response.json()
   if (!validPageImageMetadata(metadata, pageId)) throw new PageImageError("Uploaded image Page identity or metadata changed.", 409)
   return metadata
+}
+
+/** Live authorization is Page-scoped, while image bytes remain revision-scoped.
+ * A denial in any preview invalidates every active revision until explicit reload. */
+export class PageImageAuthorization {
+  private caches = new Set<PageImageCache>()
+  reason?: string
+  register(cache: PageImageCache) {
+    this.caches.add(cache)
+    if (this.reason) cache.dispose(this.reason)
+    return () => { this.caches.delete(cache) }
+  }
+  deny = (reason: string) => {
+    this.reason = reason
+    for (const cache of this.caches) cache.dispose(reason)
+  }
 }

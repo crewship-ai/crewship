@@ -53,7 +53,7 @@ export function SlideImageInsert({ workspaceId, slug, pageId, deck, disabled, on
       if (!current()) return
       if (cause instanceof PageImageError && cause.status && cause.status >= 400 && cause.status < 500 && ![408, 429].includes(cause.status)) {
         setBlocked(true); setStatus("Image insertion rejected. The original file and target are retained; discard this attempt before changing them.")
-        if ([401, 403, 404, 409, 410].includes(cause.status)) imageCache?.dispose("Image access or identity changed.")
+        if ([401, 403, 404, 409, 410].includes(cause.status)) imageCache?.deny("Image access or identity changed.")
       } else setStatus("Image upload or insertion outcome uncertain. Retry keeps the original file, target and upload mutation ID.")
       setError(cause instanceof Error ? cause.message : "Could not insert image.")
     } finally { if (current()) setBusy(false) }

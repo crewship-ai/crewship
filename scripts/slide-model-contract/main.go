@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 
+	"github.com/crewship-ai/crewship/internal/pageassets"
 	"github.com/crewship-ai/crewship/internal/slides"
 )
 
@@ -45,7 +46,7 @@ func main() {
 			elements[element.ID] = h
 		}
 	}
-	if err = json.NewEncoder(os.Stdout).Encode(map[string]any{"canonical_json": string(canonical), "hash": hash, "elements": elements, "table_cell_limits": map[string]int{"deck": slides.MaxTableCellsPerDeck, "slide": slides.MaxTableCellsPerSlide}}); err != nil {
+	if err = json.NewEncoder(os.Stdout).Encode(map[string]any{"canonical_json": string(canonical), "hash": hash, "elements": elements, "raster_limits": map[string]int{"dimension": pageassets.MaxDimension, "pixels": pageassets.MaxPixels, "upload_bytes": pageassets.MaxInput, "stored_bytes": pageassets.MaxOutput}, "table_cell_limits": map[string]int{"deck": slides.MaxTableCellsPerDeck, "slide": slides.MaxTableCellsPerSlide}}); err != nil {
 		panic(err)
 	}
 }

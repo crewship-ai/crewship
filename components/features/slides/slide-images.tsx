@@ -1,25 +1,35 @@
 "use client"
 
-import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
 import type { SlideImage } from "@/lib/slides/model"
-import { loadPageImage, PageImageCache } from "@/lib/slides/page-images"
+import { loadPageImage, PageImageAuthorization, PageImageCache } from "@/lib/slides/page-images"
 
 const ImageContext = createContext<PageImageCache | undefined>(undefined)
+const AuthorizationContext = createContext<{ identity: string; reloadKey: number; scope: PageImageAuthorization } | undefined>(undefined)
 const noSubscription = () => () => {}
 const zero = () => 0
 export function SlideImagesProvider({ workspaceId, slug, pageId, revision, reloadKey = 0, denied = false, children }: { workspaceId: string; slug: string; pageId: string; revision: number; reloadKey?: number; denied?: boolean; children: ReactNode }) {
   const latestSlug = useRef(slug); latestSlug.current = slug
+  const parent = useContext(AuthorizationContext)
+  const identity = JSON.stringify([workspaceId, pageId])
+  const authorization = useMemo(() => {
+    if (parent?.identity === identity) return parent
+    const scope = new PageImageAuthorization()
+    if (denied) scope.deny("Page access or identity changed.")
+    return { identity, reloadKey, scope }
+  }, [parent, identity, reloadKey, denied])
   const source = JSON.stringify([workspaceId, pageId, revision, reloadKey, denied])
-  const [current, setCurrent] = useState<{ source: string; cache: PageImageCache }>()
+  const [current, setCurrent] = useState<{ source: string; cache: PageImageCache; scope: PageImageAuthorization }>()
   useEffect(() => {
     // Allocate the external resource per effect lifetime (including StrictMode
     // replay); never reuse a disposed cache after setup/cleanup/setup.
-    const cache = new PageImageCache((image, signal) => loadPageImage(workspaceId, latestSlug.current, pageId, image, signal))
+    const cache = new PageImageCache((image, signal) => loadPageImage(workspaceId, latestSlug.current, pageId, image, signal), undefined, undefined, authorization.scope.deny)
     if (denied) cache.dispose("Page access or identity changed.")
-    setCurrent({ source, cache })
-    return () => cache.dispose()
-  }, [source, workspaceId, pageId, denied])
-  return <ImageContext.Provider value={current?.source === source ? current.cache : undefined}>{children}</ImageContext.Provider>
+    const unregister = authorization.scope.register(cache)
+    setCurrent({ source, cache, scope: authorization.scope })
+    return () => { unregister(); cache.dispose() }
+  }, [source, workspaceId, pageId, denied, authorization])
+  return <AuthorizationContext.Provider value={authorization}><ImageContext.Provider value={current?.source === source && current.scope === authorization.scope ? current.cache : undefined}>{children}</ImageContext.Provider></AuthorizationContext.Provider>
 }
 export const useSlideImageCache = () => useContext(ImageContext)
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { webcrypto } from "node:crypto"
-import { PageImageCache, PageImageError, loadPageImage, preflightPageImages } from "./page-images"
+import { PageImageCache, PageImageError, loadPageImage, preflightPageImages, validPageImageMetadata } from "./page-images"
 import { SLIDES_MAX_IMAGE_PIXELS, type SlideImage } from "./model"
 import { apiFetch } from "@/lib/api-fetch"
 import { isNativeSlideDeck } from "@/components/features/slides/native-model"
@@ -25,4 +25,9 @@ describe("authorized digest and bounded bytes",()=>{
  it("rejects wrong Page metadata and arbitrary MIME",async()=>{fetch.mockResolvedValueOnce(json({...metadata(),page_id:"foreign"}));await expect(loadPageImage("workspace","report","page_one",image(),new AbortController().signal)).rejects.toThrow("identity");fetch.mockResolvedValueOnce(json(metadata())).mockResolvedValueOnce(new Response("<svg/>",{headers:{"Content-Type":"image/svg+xml"}}));await expect(loadPageImage("workspace","report","page_one",image(),new AbortController().signal)).rejects.toThrow("Unsupported image")})
  it("verifies the actual expected SHA before returning a raster blob",async()=>{const bytes=new Uint8Array([1,2,3]);const hash=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)),b=>b.toString(16).padStart(2,"0")).join("");fetch.mockResolvedValueOnce(json({...metadata(),sha256:hash})).mockResolvedValueOnce(new Response(bytes,{headers:{"Content-Type":"image/png"}}));const value=await loadPageImage("workspace","report","page_one",{...image(),expected_sha256:hash},new AbortController().signal);expect(value.bytes).toBe(3);fetch.mockResolvedValueOnce(json(metadata())).mockResolvedValueOnce(new Response(bytes,{headers:{"Content-Type":"image/png"}}));await expect(loadPageImage("workspace","report","page_one",image(),new AbortController().signal)).rejects.toThrow("digest verification")})
  it("preflights repeated asset IDs once across the whole candidate",async()=>{const parsed:unknown=structuredClone(fixture.deck);if(!isNativeSlideDeck(parsed))throw new Error("Invalid schema2 fixture");const deck=parsed;deck.deck_id="page_one";const img=deck.slides.flatMap(slide=>slide.elements).find(element=>element.type==="image")!;if(img.type!=="image")throw new Error("fixture");img.image=image();deck.slides[0].elements.push({...img,id:"copy_image"});fetch.mockResolvedValue(json(metadata()));await preflightPageImages("workspace","report","page_one",deck);expect(fetch).toHaveBeenCalledTimes(1)})
+})
+
+it("enforces canonical individual raster limits independently of the aggregate revision budget", () => {
+ expect(validPageImageMetadata({...metadata(),width:2048,height:2048},"page_one")).toBe(true)
+ for (const [width,height] of [[2049,1],[1,2049],[2049,2048],[4096,4096]]) expect(validPageImageMetadata({...metadata(),width,height},"page_one")).toBe(false)
 })

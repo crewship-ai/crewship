@@ -7,6 +7,11 @@ export const SLIDES_MAX_IMAGE_ASSETS = 32
 export const SLIDES_MAX_IMAGE_BYTES = 32 << 20
 export const SLIDES_MAX_IMAGE_PIXELS = 32 * 1024 * 1024
 export const SLIDES_MAX_IMAGE_ALT_BYTES = 2048
+// Existing private Page raster policy; checked against actual pageassets Go limits.
+export const SLIDES_IMAGE_MAX_DIMENSION = 2048
+export const SLIDES_IMAGE_MAX_ASSET_PIXELS = 4 * 1024 * 1024
+export const SLIDES_IMAGE_MAX_UPLOAD_BYTES = 5 << 20
+export const SLIDES_IMAGE_MAX_STORED_BYTES = 8 << 20
 export const SLIDES_MAX_TABLE_CELLS = 10000
 export const SLIDES_MAX_TABLE_CELLS_PER_SLIDE = 2000
 export const SLIDES_HASH_DOMAIN = "crewship-slides-canonical-json/v1\n"
