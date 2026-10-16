@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Board image uploads use less memory (#3069).** Bounded private staging streams replace compressed image buffers while preserving raster re-encoding, workspace quotas and exact retry identities.
 - **Removing a Doc owner now explains the required human handoff (#3186).** Owners who belonged to a crew previously received a server error when leaving the workspace. Docs now follow the explicit human-successor flow while preserving content and membership until ownership is resolved.
 - **Agent Doc edits preserve comments on unchanged text (#3188).** Semantic replacements now span all CRDT text children and retain the unchanged prefix and suffix. Comments use paragraph-wide UTF-16 offsets across text children and continue to resolve after reload.
+- **Private Page image uploads recheck the exact live session or CLI credential after decoding (#3197).** Revoked/expired credentials cannot commit rows or blobs. Scoped CLI tokens now need `pages:write` for upload and `pages:read` for metadata/bytes, independently of live Page ACL; neither scope implies the other. This corrects the unshipped foundation's scope exemption. Sessions and legacy unrestricted tokens retain their existing Page authority.
+
 - Add private Page-scoped staged PNG/JPEG upload, metadata and canonical bytes API/CLI with bounded quotas, Page authorization and shared backup/GC. Typed editor image attachment remains separate.
 
 - Pages report compiled content format metadata and show an unavailable state for unsupported or conflicting formats. Empty human Pages retain HTML attachment, and application drafts remain available independently of publication.

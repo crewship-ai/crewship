@@ -43,6 +43,20 @@ func (h *PageHandler) assetPage(w http.ResponseWriter, r *http.Request, write bo
 		replyError(w, 401, "human authentication required")
 		return nil, false
 	}
+	// Token ceilings are independent from Page ACL: a human's read-only
+	// token cannot import bytes merely because its principal may edit.
+	requiredScope := "pages:read"
+	if write {
+		requiredScope = "pages:write"
+	}
+	if err := validateContentHumanCredential(r, h.pageAuthReader(r.Context()), requiredScope); err != nil {
+		status := http.StatusUnauthorized
+		if errors.Is(err, errContentCredentialScope) {
+			status = http.StatusForbidden
+		}
+		replyError(w, status, "current human credential and asset scope required")
+		return nil, false
+	}
 	ws := WorkspaceIDFromContext(r.Context())
 	rec, err := h.loadPage(r.Context(), ws, r.PathValue("slug"))
 	if errors.Is(err, sql.ErrNoRows) {
