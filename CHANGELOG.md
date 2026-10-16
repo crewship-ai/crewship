@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - **Chat decision answers preserve the Inbox token scope.** Narrowly scoped CLI tokens cannot answer through chat; the same existing workspace administration scope is required, including retries. Read-only role demotion still permits an authorized completed retry.
+- **Routine runs distinguish fresh chat invocation from inherited recipe authority.** Verified direct-human calls retain their exact source run privately; legacy and scheduled execution continue without a guessed question. Explicit invalid run credentials are refused before creating a run.
 
 - **Guest intake changes and deletion preserve active routine work.** Queued, running and waiting runs still block changes after their issue execution becomes superseded; completed runs do not. Rejected deletion keeps the issue and execution intact.
 

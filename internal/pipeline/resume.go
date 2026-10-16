@@ -347,18 +347,19 @@ func (e *Executor) runResumedRunWithRetry(ctx context.Context, plan *resumePlan,
 	}
 	for {
 		res, err := e.Run(ctx, RunInput{
-			PipelineID:          rec.PipelineID,
-			WorkspaceID:         rec.WorkspaceID,
-			InvokingCrewID:      rec.InvokingCrewID,
-			InvokingAgentID:     rec.InvokingAgentID,
-			InvokingUserID:      rec.InvokingUserID,
-			InvocationAuthority: rec.InvocationAuthority,
-			ChatOriginID:        rec.ChatOriginID,
-			Inputs:              plan.inputs,
-			Mode:                ModeRun,
-			RunIDOverride:       rec.ID,
-			TriggeredVia:        rec.TriggeredVia,
-			TriggeredByID:       rec.TriggeredByID,
+			PipelineID:            rec.PipelineID,
+			WorkspaceID:           rec.WorkspaceID,
+			InvokingCrewID:        rec.InvokingCrewID,
+			InvokingAgentID:       rec.InvokingAgentID,
+			InvokingUserID:        rec.InvokingUserID,
+			InvocationAuthority:   rec.InvocationAuthority,
+			ChatOriginID:          rec.ChatOriginID,
+			InvocationSourceRunID: rec.InvocationSourceRunID,
+			Inputs:                plan.inputs,
+			Mode:                  ModeRun,
+			RunIDOverride:         rec.ID,
+			TriggeredVia:          rec.TriggeredVia,
+			TriggeredByID:         rec.TriggeredByID,
 			// Re-pin: the run started on this immutable version, so the
 			// resume must execute it too. Run's own drift re-check then
 			// compares the stamped hash against the pinned definition.
