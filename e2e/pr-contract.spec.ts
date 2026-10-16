@@ -285,12 +285,12 @@ test.describe("PR browser contract subset — phone", () => {
     await page.goto("/integrations?tab=incoming")
     // On a phone the explorer is the SecondaryPanel sheet, opened from the top bar.
     await page.getByRole("button", { name: "Integrations", exact: true }).click()
-    const sheet = page.getByRole("dialog", { name: "Integrations" })
-    await expect(sheet.getByRole("textbox", { name: "Search incoming targets" })).toBeVisible()
-    await sheet.getByRole("textbox", { name: "Search incoming targets" }).fill("no-such-target-e2e")
-    await expect(sheet.getByText("No matching targets. Create a routine, agent or Page first.")).toBeVisible()
+    const integrationsSheet = page.getByRole("dialog", { name: "Integrations" })
+    await expect(integrationsSheet.getByRole("textbox", { name: "Search incoming targets" })).toBeVisible()
+    await integrationsSheet.getByRole("textbox", { name: "Search incoming targets" }).fill("no-such-target-e2e")
+    await expect(integrationsSheet.getByText("No matching targets. Create a routine, agent or Page first.")).toBeVisible()
     await page.keyboard.press("Escape")
-    await expect(sheet).toBeHidden()
+    await expect(integrationsSheet).toBeHidden()
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(false)
 
   })
