@@ -32,7 +32,8 @@ func TestActualExportImageCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &Runner{Image: image}
+	r := &Runner{Image: image, OwnerID: "actual_ci", JournalDir: t.TempDir()}
+	defer r.Close()
 	lease, err := r.Acquire(t.Context())
 	if err != nil {
 		t.Fatal(err)

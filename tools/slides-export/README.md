@@ -111,3 +111,39 @@ Go/Node fractional/exponent/-0/Unicode/hash conformance and actual fixed-worker
 report/PPTX/PDF framing. These are process/transport tests, not real container
 lifecycle evidence. That gate must execute the full pinned image on an authorized
 CI runner; local gateway rejection cannot be bypassed or counted as acceptance.
+
+## Owned cleanup and recovery
+
+A runtime `Runner` requires an immutable image ID, installation owner identity and
+private cleanup journal directory. It holds an OS file lease on `journal.lock`
+through its lifetime; another process cannot reconcile or admit jobs concurrently.
+A content-free, fsynced intent precedes container creation. Names and ownership
+tokens are independently random. Cleanup inspects matching owner/token labels
+before removing the immutable container ID; it never removes a name alone.
+
+Parent cancellation permits a five-second independent deadline for a submitted
+create command to acknowledge its ID, plus at most three seconds of pipe teardown.
+Confirmed work has a separate ten-second reconciliation deadline, with at most
+one additional second of CLI pipe teardown. An unacknowledged create can outlive any finite observation
+interval: reconciliation removes matching work observed during its budget but
+retains uncertainty and refuses new exports. Cleanup failure also blocks delivery.
+The journal contains no deck, asset, principal credential or resumable capability.
+Malformed or replaced journal data fails closed and is preserved.
+
+Trusted local maintenance can reconcile acknowledged work with:
+
+```sh
+crewship-heavy go run ./tools/slides-export/maintenance --journal OWN_DIRECTORY --owner ORIGINAL_INSTALLATION_OWNER
+```
+
+Absent uncertain work is insufficient proof of daemon quiescence. After independently
+establishing that no delayed create can arrive, an operator can acknowledge exactly
+one intent using `--ack-name NAME --reference DISPOSITION_ID --daemon-quiescent`.
+The tool writes a durable content-free disposition before removing the intent.
+This is a local operational assertion, not a user/agent export permission; no HTTP,
+MCP or run CLI exposes it. Preserve unresolved journals for recovery.
+
+Process-fixture tests cover cancellation during create and start, exact ownership,
+foreign-container refusal and retained uncertainty. These do not qualify Docker.
+The actual image lifecycle, resource profile and security scan remain independent
+CI gates; a successful image build alone does not complete them.
