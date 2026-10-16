@@ -125,7 +125,7 @@ func readState(ctx context.Context, tx *sql.Tx, key Key, revision int64) (State,
 	if err != nil {
 		return state, err
 	}
-	if state.SchemaVersion != SchemaVersion {
+	if !SupportedSchema(state.SchemaVersion) {
 		return state, ErrSchema
 	}
 	state.Deck, err = Decode(data)
@@ -136,7 +136,7 @@ func readState(ctx context.Context, tx *sql.Tx, key Key, revision int64) (State,
 	if err != nil {
 		return state, err
 	}
-	if state.Deck.DeckID != key.PageID || hash != state.ContentHash {
+	if state.Deck.SchemaVersion != state.SchemaVersion || state.Deck.DeckID != key.PageID || hash != state.ContentHash {
 		return state, errors.New("Slides stored identity/hash mismatch")
 	}
 	return state, nil
@@ -250,6 +250,9 @@ func (s *Store) write(ctx context.Context, tx *sql.Tx, key Key, current State, d
 	if err != nil {
 		return result, err
 	}
+	if len(ImageReferences(deck)) > 0 && s.options.OnRevision == nil {
+		return result, fmt.Errorf("%w: image attachment guard required", ErrInvalid)
+	}
 	if err = s.quota(ctx, tx, key, len(canonical)); err != nil {
 		return result, err
 	}
@@ -268,11 +271,11 @@ func (s *Store) write(ctx context.Context, tx *sql.Tx, key Key, current State, d
 		if count >= s.options.MaxDecks {
 			return result, ErrQuota
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO slides_heads(workspace_id,page_id,schema_version,head_rev,order_version,canonical_json,content_hash) VALUES(?,?,?,?,?,?,?)`, key.WorkspaceID, key.PageID, SchemaVersion, revision, order, canonical, contentHash); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO slides_heads(workspace_id,page_id,schema_version,head_rev,order_version,canonical_json,content_hash) VALUES(?,?,?,?,?,?,?)`, key.WorkspaceID, key.PageID, deck.SchemaVersion, revision, order, canonical, contentHash); err != nil {
 			return result, err
 		}
 	} else {
-		updated, err := tx.ExecContext(ctx, `UPDATE slides_heads SET schema_version=?,head_rev=?,order_version=?,canonical_json=?,content_hash=? WHERE workspace_id=? AND page_id=? AND head_rev=?`, SchemaVersion, revision, order, canonical, contentHash, key.WorkspaceID, key.PageID, current.Revision)
+		updated, err := tx.ExecContext(ctx, `UPDATE slides_heads SET schema_version=?,head_rev=?,order_version=?,canonical_json=?,content_hash=? WHERE workspace_id=? AND page_id=? AND head_rev=?`, deck.SchemaVersion, revision, order, canonical, contentHash, key.WorkspaceID, key.PageID, current.Revision)
 		if err != nil {
 			return result, err
 		}
@@ -287,7 +290,7 @@ func (s *Store) write(ctx context.Context, tx *sql.Tx, key Key, current State, d
 	if err = reserveIDs(ctx, tx, key, inserted, restore, s.options.MaxObjectIDs); err != nil {
 		return result, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO slides_revisions(workspace_id,page_id,rev,parent_rev,order_version,schema_version,canonical_json,content_hash,actor,kind,mutation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, key.WorkspaceID, key.PageID, revision, current.Revision, order, SchemaVersion, canonical, contentHash, actor, kind, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO slides_revisions(workspace_id,page_id,rev,parent_rev,order_version,schema_version,canonical_json,content_hash,actor,kind,mutation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, key.WorkspaceID, key.PageID, revision, current.Revision, order, deck.SchemaVersion, canonical, contentHash, actor, kind, id); err != nil {
 		return result, err
 	}
 	if err := updateCommentProjections(ctx, tx, key, deck, revision, kind); err != nil {
@@ -433,7 +436,7 @@ func (s *Store) Reorder(ctx context.Context, key Key, request ReorderRequest, au
 		if err != nil {
 			return err
 		}
-		if current.Revision != request.BaseRev || current.OrderVersion != request.IfOrderVersion {
+		if current.SchemaVersion != request.SchemaVersion || current.Revision != request.BaseRev || current.OrderVersion != request.IfOrderVersion {
 			return ErrConflict
 		}
 		candidate := current.Deck
@@ -472,7 +475,7 @@ func (s *Store) Restore(ctx context.Context, key Key, request RestoreRequest, au
 		if err != nil {
 			return err
 		}
-		if current.Revision != request.BaseRev || current.OrderVersion != request.IfOrderVersion {
+		if current.SchemaVersion != request.SchemaVersion || current.Revision != request.BaseRev || current.OrderVersion != request.IfOrderVersion {
 			return ErrConflict
 		}
 		target, err := readState(ctx, tx, key, request.Revision)

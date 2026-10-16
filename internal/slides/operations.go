@@ -16,12 +16,14 @@ var hashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 const MaxOperations = 100
 
 type PatchRequest struct {
-	PageID         string      `json:"page_id"`
-	SchemaVersion  int         `json:"schema_version"`
-	BaseRev        int64       `json:"base_rev"`
-	MutationID     string      `json:"mutation_id"`
-	IfOrderVersion *int64      `json:"if_order_version,omitempty"`
-	Operations     []Operation `json:"operations"`
+	PageID              string      `json:"page_id"`
+	SchemaVersion       int         `json:"schema_version"`
+	BaseRev             int64       `json:"base_rev"`
+	MutationID          string      `json:"mutation_id"`
+	IfOrderVersion      *int64      `json:"if_order_version,omitempty"`
+	Operations          []Operation `json:"operations"`
+	TargetSchemaVersion *int        `json:"target_schema_version,omitempty"`
+	IfContentHash       string      `json:"if_content_hash,omitempty"`
 }
 type Operation struct {
 	Op        string   `json:"op"`
@@ -100,7 +102,7 @@ func strictRequest(raw []byte, target any, check func(map[string]json.RawMessage
 	return nil
 }
 func validMutation(schema int, base int64, id, pageID string) error {
-	if schema != SchemaVersion {
+	if !SupportedSchema(schema) {
 		return ErrSchema
 	}
 	if base < 0 || !identifier.MatchString(id) || !identifier.MatchString(pageID) {
@@ -117,6 +119,9 @@ func DecodeInitialize(raw []byte) (InitializeRequest, error) {
 	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID, r.PageID); err != nil {
 		return r, err
 	}
+	if r.SchemaVersion != r.Deck.SchemaVersion {
+		return r, ErrSchema
+	}
 	if r.PageID != r.Deck.DeckID {
 		return r, errors.New("initialize Page identity differs from deck")
 	}
@@ -128,6 +133,15 @@ func DecodeInitialize(raw []byte) (InitializeRequest, error) {
 func DecodePatch(raw []byte) (PatchRequest, error) {
 	var r PatchRequest
 	err := strictRequest(raw, &r, func(object map[string]json.RawMessage) error {
+		var schema int
+		if err := json.Unmarshal(object["schema_version"], &schema); err != nil {
+			return err
+		}
+		if target, ok := object["target_schema_version"]; ok {
+			if err := json.Unmarshal(target, &schema); err != nil {
+				return err
+			}
+		}
 		var operations []json.RawMessage
 		if err := json.Unmarshal(object["operations"], &operations); err != nil {
 			return err
@@ -160,7 +174,7 @@ func DecodePatch(raw []byte) (PatchRequest, error) {
 			}
 			// Nested payloads must go through the same exact model field/type checks.
 			if nested, ok := operation["slide"]; ok {
-				if err := validateRequestSlide(nested); err != nil {
+				if err := validateRequestSlide(nested, schema); err != nil {
 					return err
 				}
 			}
@@ -176,18 +190,25 @@ func DecodePatch(raw []byte) (PatchRequest, error) {
 					placeholder = "__request_slide2"
 				}
 				slide, _ := json.Marshal(map[string]any{"id": placeholder, "notes": "", "elements": []json.RawMessage{nested}})
-				if err := validateRequestSlide(slide); err != nil {
+				if err := validateRequestSlide(slide, schema); err != nil {
 					return err
 				}
 			}
 		}
 		return nil
-	}, []string{"page_id", "schema_version", "base_rev", "mutation_id", "operations"}, []string{"if_order_version"})
+	}, []string{"page_id", "schema_version", "base_rev", "mutation_id", "operations"}, []string{"if_order_version", "target_schema_version", "if_content_hash"})
 	if err != nil {
 		return r, err
 	}
 	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID, r.PageID); err != nil {
 		return r, err
+	}
+	if r.TargetSchemaVersion != nil {
+		if r.SchemaVersion != SchemaVersion || *r.TargetSchemaVersion != ImageSchemaVersion || !hashPattern.MatchString(r.IfContentHash) {
+			return r, errors.New("explicit schema upgrade requires original content hash")
+		}
+	} else if r.IfContentHash != "" {
+		return r, errors.New("content hash upgrade fence requires target schema")
 	}
 	if r.IfOrderVersion != nil && *r.IfOrderVersion < 0 {
 		return r, errors.New("invalid order precondition")
@@ -208,10 +229,10 @@ func DecodePatch(raw []byte) (PatchRequest, error) {
 	}
 	return r, nil
 }
-func validateRequestSlide(raw json.RawMessage) error {
+func validateRequestSlide(raw json.RawMessage, schema int) error {
 	// Use a maximal legal frame for syntax/standalone geometry checks. The final
 	// candidate is revalidated against the real deck dimensions and byte budget.
-	envelope, _ := json.Marshal(map[string]any{"schema_version": SchemaVersion, "deck_id": "__request_deck", "width": 4096, "height": 4096, "theme": Theme{Background: "#FFFFFF", Color: "#000000", FontFamily: "Arial", FontSize: 24}, "slide_order": []string{}, "slides": []json.RawMessage{raw}})
+	envelope, _ := json.Marshal(map[string]any{"schema_version": schema, "deck_id": "__request_deck", "width": 4096, "height": 4096, "theme": Theme{Background: "#FFFFFF", Color: "#000000", FontFamily: "Arial", FontSize: 24}, "slide_order": []string{}, "slides": []json.RawMessage{raw}})
 	var slide struct {
 		ID string `json:"id"`
 	}
@@ -273,7 +294,7 @@ func ObjectIDs(deck Deck) map[string]string {
 	return ids
 }
 func ApplyPatch(current Deck, request PatchRequest) (Deck, error) {
-	if request.PageID != current.DeckID {
+	if request.PageID != current.DeckID || request.SchemaVersion != current.SchemaVersion {
 		return Deck{}, ErrConflict
 	}
 	encoded, err := Canonical(current)
@@ -283,6 +304,13 @@ func ApplyPatch(current Deck, request PatchRequest) (Deck, error) {
 	candidate, err := Decode(encoded)
 	if err != nil {
 		return Deck{}, err
+	}
+	if request.TargetSchemaVersion != nil {
+		hash, err := DeckHash(current)
+		if err != nil || hash != request.IfContentHash || current.SchemaVersion != SchemaVersion || *request.TargetSchemaVersion != ImageSchemaVersion {
+			return Deck{}, ErrConflict
+		}
+		candidate.SchemaVersion = ImageSchemaVersion
 	}
 	used := ObjectIDs(candidate)
 	for _, op := range request.Operations {
@@ -370,6 +398,9 @@ func ApplyPatch(current Deck, request PatchRequest) (Deck, error) {
 		default:
 			return Deck{}, fmt.Errorf("unsupported operation %q", op.Op)
 		}
+	}
+	if request.TargetSchemaVersion != nil && len(ImageReferences(candidate)) == 0 {
+		return Deck{}, errors.New("schema upgrade requires an image attachment")
 	}
 	if err := Validate(candidate); err != nil {
 		return Deck{}, err
