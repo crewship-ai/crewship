@@ -77,9 +77,12 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   // Reads have no path into fingerprint/receipt, writer lease or commit logic.
   async function execute(page, operation, context, request) {
     switch (operation) {
-      case 'read': case 'verify-targets': case 'comments':
-      case 'checkpoints': case 'checkpoint-read': case 'export':
-        return executeRead(page, operation, context, request);
+      case 'read': return executeRead(page, 'read', context, request);
+      case 'verify-targets': return executeRead(page, 'verify-targets', context, request);
+      case 'comments': return executeRead(page, 'comments', context, request);
+      case 'checkpoints': return executeRead(page, 'checkpoints', context, request);
+      case 'checkpoint-read': return executeRead(page, 'checkpoint-read', context, request);
+      case 'export': return executeRead(page, 'export', context, request);
       case 'initialize': case 'patch': case 'checkpoint': case 'restore':
       case 'comment': case 'resolve':
         return executeMutation(page, operation, context, request);

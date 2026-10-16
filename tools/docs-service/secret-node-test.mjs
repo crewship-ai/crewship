@@ -28,38 +28,45 @@ test('secret files reject mode, symlink, nonregular and bounded content violatio
   await assert.rejects(readServiceSecret(join(dir, 'fifo')));
 });
 test('the opened descriptor keeps its original inode when the path is replaced', async t => {
-  const { path } = await fixture(t), original = 'a'.repeat(32);
+  const { dir, path } = await fixture(t), original = 'a'.repeat(32);
   await writeFile(path, original, { mode: 0o600 });
-  const file = await open(path, 'r');
+  // Prepare a distinct inode before checking the original reader. Only rename
+  // changes the pathname afterward; neither descriptor is reopened by path.
+  const replacementPath = join(dir, 'replacement');
+  const replacement = await open(replacementPath, 'wx', 0o600);
   try {
-    await rename(path, path+'.original');
-    const replacement = await open(path, 'wx', 0o600);
+    await replacement.writeFile('b'.repeat(32));
+    await replacement.chmod(0o644);
+    const file = await open(path, 'r');
     try {
-      await replacement.writeFile('b'.repeat(32));
-      await replacement.chmod(0o644);
+      const checked = await file.stat();
+      assert.equal(checked.mode & 0o777, 0o600);
+      await rename(path, path+'.original');
+      await rename(replacementPath, path);
       const originalStat = await file.stat(), replacementStat = await replacement.stat();
       assert.equal(originalStat.dev, replacementStat.dev);
       assert.notEqual(originalStat.ino, replacementStat.ino);
+      assert.equal(originalStat.ino, checked.ino);
       assert.equal(originalStat.mode & 0o777, 0o600);
       assert.equal(replacementStat.mode & 0o777, 0o644);
-    } finally { await replacement.close(); }
-    assert.equal(digest(await readSecretContents(file)), digest(original));
-  } finally { await file.close(); }
+      assert.equal(digest(await readSecretContents(file)), digest(original));
+    } finally { await file.close(); }
+  } finally { await replacement.close(); }
 });
 test('growth after fstat is rejected after reading at most 513 bytes', async t => {
   const { path } = await fixture(t);
   await writeFile(path, 'a'.repeat(32), { mode: 0o600 });
-  const file = await open(path, 'r');
-  const writer = await open(path, 'r+');
+  const file = await open(path, 'r+');
   try {
-    const checked = await file.stat(), writing = await writer.stat();
+    const checked = await file.stat();
     assert.equal(checked.size, 32);
-    assert.equal(checked.dev, writing.dev);
-    assert.equal(checked.ino, writing.ino);
-    await writer.writeFile('a'.repeat(4096));
+    await file.writeFile('a'.repeat(4096));
+    const grown = await file.stat();
+    assert.equal(grown.ino, checked.ino);
+    assert.equal(grown.size, 4096);
     let read = 0;
     const reader = { read: async (...args) => { const result = await file.read(...args); read += result.bytesRead; return result; } };
     await assert.rejects(readSecretContents(reader));
     assert.equal(read, 513);
-  } finally { await writer.close(); await file.close(); }
+  } finally { await file.close(); }
 });
