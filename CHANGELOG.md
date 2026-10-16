@@ -14,6 +14,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Guest CLI pairing accepts verified browser sessions.** Pairing start and poll now pass the restricted route gate only for interactive sessions. CLI bearer callers remain forbidden; redemption retains the same current Guest grants as browser CLI token creation and rejects logout, revocation or suspension.
 
 - Chat shows advisory configured-model payer, budget and gate details above the composer after a current viewer/chat profile check.
+- **Crews can opt into whole-run approval before agent execution.** The existing policy API and `crewship policy set --whole-run-approval` enable a real `agent_run` rule. Chat preflight and runtime use the same crew-scoped rule, while default behavior and autonomy modes remain unchanged.
 - **Decision drafts retain focus during access rechecks.** Typing and caret position survive temporary verification outages; sending waits for verified access and explicit source-version review, while uncertain submitted responses remain locked for exact retry.
 - **Withdrawn chat approval sources cannot be rejected through a stale Inbox ID.** Canonical decisions now retain the original chat generation and current operator audience; authorized refusal still works when only the original requester loses access.
 
