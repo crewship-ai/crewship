@@ -82,3 +82,23 @@ func TestChatCardAudienceRecheckedAfterSourceRead(t *testing.T) {
 		t.Fatalf("revocation race: %d %s", rr.Code, rr.Body)
 	}
 }
+
+// Mirrors NormalizeDecisionAnswer: denial may omit required values, but values
+// actually supplied still have to match the source's closed field types.
+func TestChatDecisionDenialMayOmitRequiredFields(t *testing.T) {
+	f := chatIssueFixture{workspace: "w", crew: "c", agent: "a", user: "u", run: "r"}
+	card := e2DecisionFixture(f, "waitpoint", "rejected")
+	card.Decision.Fields = []chatentities.DecisionField{{ID: "note", Type: "text", Label: "Reason", Required: true}}
+	card.Decision.Resolution.Values = map[string]json.RawMessage{}
+	if err := validateE2Card(card); err != nil {
+		t.Fatal(err)
+	}
+	card.Decision.Resolution.Values["note"] = json.RawMessage(`""`)
+	if err := validateE2Card(card); err != nil {
+		t.Fatal(err)
+	}
+	card.Decision.Resolution.Values["note"] = json.RawMessage(`false`)
+	if validateE2Card(card) == nil {
+		t.Fatal("denial accepted a wrongly typed value")
+	}
+}

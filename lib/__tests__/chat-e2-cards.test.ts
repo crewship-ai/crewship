@@ -46,4 +46,15 @@ describe("E2 shared projection contract", () => {
     expect(E2CommandSchemas.proposal_confirm.safeParse({ proposal_id: "p", reviewed_version: 1, actor_id: "admin" }).success).toBe(false)
     expect(E2CommandSchemas.decision_answer.safeParse({ source_id: "s", expected_version: "opaque", action: "answer", values: { note: { html: "unsafe" } } }).success).toBe(false)
   })
+  it("retains existing source denial semantics without relaxing value types", () => {
+    const card = load("decision-waitpoint-rejected.json")
+    card.decision.fields = [{ id: "note", type: "text", label: "Reason", required: true }]
+    card.decision.resolution.values = {}
+    expect(E2CardSchema.safeParse(card).success).toBe(true)
+    card.decision.resolution.values.note = ""
+    expect(E2CardSchema.safeParse(card).success).toBe(true)
+    card.decision.resolution.values.note = false
+    expect(E2CardSchema.safeParse(card).success).toBe(false)
+  })
+
 })

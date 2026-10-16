@@ -195,7 +195,7 @@ func validateDecisionCard(d chatentities.DecisionCard) error {
 			}
 		default:
 			s, ok := value.(string)
-			if !ok || !cardText(s, 0, 10000) || f.Required && s == "" || f.Type == "datetime" && !cardTime(s) {
+			if !ok || !cardText(s, 0, 10000) || f.Required && d.Status != "rejected" && s == "" || f.Type == "datetime" && !cardTime(s) {
 				return errInvalidCard
 			}
 			if f.Type == "choice" && !slices.ContainsFunc(f.Options, func(o chatentities.DecisionOption) bool { return o.Value == s }) {

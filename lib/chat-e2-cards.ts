@@ -55,7 +55,7 @@ export const DecisionCardSchema = z.strictObject({
     if (!f) { valid = false; continue }
     if (f.type === "boolean" || f.type === "number") valid &&= typeof value === f.type
     else {
-      valid &&= typeof value === "string" && (!f.required || value !== "")
+      valid &&= typeof value === "string" && (!f.required || d.status === "rejected" || value !== "")
       if (f.type === "choice") valid &&= f.options.some((o) => o.value === value)
       if (f.type === "datetime") valid &&= timestamp.safeParse(value).success
     }
