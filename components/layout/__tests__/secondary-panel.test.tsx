@@ -1,0 +1,91 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react"
+
+// Harbor 2 M3: one secondary panel for every section (#3350).
+
+let mobile = false
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })) }))
+
+import { useAppStore } from "@/lib/store"
+import { SecondaryPanel } from "../secondary-panel"
+import { SidebarToolbar } from "../sidebar-kit"
+
+let store: Map<string, string>
+beforeEach(() => {
+  cleanup()
+  mobile = false
+  store = new Map()
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  })
+  act(() => {
+    useAppStore.getState().setSecondaryPanel(null)
+    useAppStore.getState().setSecondaryPanelOpen(false)
+  })
+})
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe("SecondaryPanel", () => {
+  it("is a labelled 272 px column with a toolbar, a body and a collapse button", () => {
+    render(<SecondaryPanel id="issues" label="Issues views" toolbar={<input aria-label="Search" />}><p>Views</p></SecondaryPanel>)
+    const aside = screen.getByRole("complementary", { name: "Issues views" })
+    expect(aside).toHaveClass("secondary-panel")
+    expect(aside).toHaveAttribute("data-collapsed", "false")
+    expect(screen.getByRole("textbox", { name: "Search" })).toBeInTheDocument()
+    expect(screen.getByText("Views")).toBeInTheDocument()
+  })
+
+  it("collapses to a rail and remembers it per section", () => {
+    render(<SecondaryPanel id="issues" label="Issues views"><p>Views</p></SecondaryPanel>)
+    fireEvent.click(screen.getByRole("button", { name: "Hide Issues views" }))
+    expect(screen.getByRole("complementary")).toHaveAttribute("data-collapsed", "true")
+    expect(screen.queryByText("Views")).toBeNull()
+    expect(store.get("crewship.pref.panel.issues.collapsed")).toBe("true")
+    cleanup()
+    render(<SecondaryPanel id="issues" label="Issues views"><p>Views</p></SecondaryPanel>)
+    expect(screen.getByRole("complementary")).toHaveAttribute("data-collapsed", "true")
+    cleanup()
+    render(<SecondaryPanel id="inbox" label="Inbox views"><p>Views</p></SecondaryPanel>)
+    expect(screen.getByRole("complementary")).toHaveAttribute("data-collapsed", "false")
+  })
+
+  it("registers itself for the phone top bar while mounted", () => {
+    const { unmount } = render(<SecondaryPanel id="issues" label="Issues views" />)
+    expect(useAppStore.getState().secondaryPanel).toEqual({ id: "issues", label: "Issues views" })
+    unmount()
+    expect(useAppStore.getState().secondaryPanel).toBeNull()
+  })
+
+  it("on a phone is a bottom sheet opened from the top bar, not a column", () => {
+    mobile = true
+    render(<SecondaryPanel id="issues" label="Issues views"><p>Views</p></SecondaryPanel>)
+    expect(screen.queryByRole("complementary")).toBeNull()
+    expect(screen.queryByText("Views")).toBeNull()
+    act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+    expect(screen.getByRole("dialog", { name: "Issues views" })).toBeInTheDocument()
+    expect(screen.getByText("Views")).toBeInTheDocument()
+  })
+
+  it("keeps a footer for bulk actions", () => {
+    render(<SecondaryPanel id="x" label="X" footer={<button type="button">Archive 3</button>} />)
+    expect(screen.getByRole("button", { name: "Archive 3" }).parentElement).toHaveClass("secondary-panel-footer")
+  })
+
+  it("turns a kit SidebarToolbar inside it into the panel toolbar with one collapse button", () => {
+    render(
+      <SecondaryPanel id="issues" label="Issues views">
+        <SidebarToolbar><input aria-label="Search issues" /></SidebarToolbar>
+        <p>Views</p>
+      </SecondaryPanel>,
+    )
+    const toolbar = screen.getByRole("textbox", { name: "Search issues" }).parentElement!
+    expect(toolbar).toHaveClass("secondary-panel-toolbar")
+    expect(screen.getAllByRole("button", { name: "Hide Issues views" })).toHaveLength(1)
+    expect(toolbar).toContainElement(screen.getByRole("button", { name: "Hide Issues views" }))
+  })
+})

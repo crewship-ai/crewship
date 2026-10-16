@@ -30,6 +30,12 @@ interface AppState {
    *  and outside the app shell, where SubBar renders in place. */
   pageBarSlot: HTMLElement | null
   setPageBarSlot: (el: HTMLElement | null) => void
+  /** The page's secondary panel (Harbor 2 SecondaryPanel), registered while
+   *  it is mounted so the phone top bar can offer it as a sheet. */
+  secondaryPanel: { id: string; label: string } | null
+  setSecondaryPanel: (panel: { id: string; label: string } | null) => void
+  secondaryPanelOpen: boolean
+  setSecondaryPanelOpen: (open: boolean) => void
   commandPaletteOpen: boolean
   setCommandPaletteOpen: (open: boolean | ((prev: boolean) => boolean)) => void
   setCurrentWorkspaceId: (id: string | null) => void
@@ -44,6 +50,10 @@ export const useAppStore = create<AppState>((set) => ({
   breadcrumbs: [],
   mobileNavOpen: false,
   commandPaletteOpen: false,
+  secondaryPanel: null,
+  setSecondaryPanel: (panel) => set({ secondaryPanel: panel }),
+  secondaryPanelOpen: false,
+  setSecondaryPanelOpen: (open) => set({ secondaryPanelOpen: open }),
   pageBarSlot: null,
   setPageBarSlot: (el) => set({ pageBarSlot: el }),
   setCurrentWorkspaceId: (id) => set({ currentWorkspaceId: id }),

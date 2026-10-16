@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation"
 import { useEffect } from "react"
 import Link from "next/link"
 import { useAuth, useIsInstanceAdmin } from "@/hooks/use-auth"
-import { ChevronRight, LogOut, Search, X } from "lucide-react"
+import { ChevronRight, LogOut, PanelLeft, Search, X } from "lucide-react"
 
 import { areaOf, navSections, isHiddenForRole } from "@/lib/nav-sections"
 import { useRealtime } from "@/hooks/use-realtime"
@@ -104,6 +104,8 @@ export function AppToolbar() {
   const mobileNavOpen = useAppStore((st) => st.mobileNavOpen)
   const setMobileNavOpen = useAppStore((st) => st.setMobileNavOpen)
   const setPageBarSlot = useAppStore((st) => st.setPageBarSlot)
+  const secondaryPanel = useAppStore((st) => st.secondaryPanel)
+  const setSecondaryPanelOpen = useAppStore((st) => st.setSecondaryPanelOpen)
   const cmdkOpen = useAppStore((st) => st.commandPaletteOpen)
   const setCmdkOpen = useAppStore((st) => st.setCommandPaletteOpen)
   const { role } = useAbilities()
@@ -257,6 +259,13 @@ export function AppToolbar() {
         {/* Search lives in the sidebar on desktop and tablet (Harbor 2); the
             phone has no sidebar, so it keeps an icon here. ⌘K is still owned
             by the listener above. */}
+        {/* Phone: the page's secondary panel opens as a sheet (Harbor 2 M3). */}
+        {isMobile && secondaryPanel && (
+          <Button variant="ghost" size="icon-sm" aria-label={secondaryPanel.label} onClick={() => setSecondaryPanelOpen(true)}>
+            <PanelLeft className="h-4 w-4" />
+          </Button>
+        )}
+
         {/* Mobile: search icon only */}
         <Button variant="ghost" size="icon-sm" className="md:hidden coarse:h-12 coarse:w-12" aria-label="Search" onClick={() => setCmdkOpen(true)}>
           <Search className="h-4 w-4" />
