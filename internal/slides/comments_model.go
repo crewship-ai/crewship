@@ -7,6 +7,7 @@ import (
 )
 
 const (
+	CommentProtocolVersion = 1
 	AnchorSchemaVersion    = 1
 	MaxCommentBodyBytes    = 10000
 	MaxCommentRequestBytes = 16 << 10
@@ -121,6 +122,17 @@ func validateRawCommentAnchor(raw json.RawMessage) error {
 	}
 	return ValidateCommentAnchor(anchor)
 }
+
+// Comment envelope versions are independent of supported deck versions.
+func validCommentMutation(schema int, base int64, id, pageID string) error {
+	if schema != CommentProtocolVersion {
+		return errors.New("unsupported Slides comment protocol")
+	}
+	if base < 0 || !identifier.MatchString(id) || !identifier.MatchString(pageID) {
+		return errors.New("invalid comment mutation identity or base revision")
+	}
+	return nil
+}
 func commentBodyValid(body string) bool {
 	return strings.TrimSpace(body) != "" && validText(body, MaxCommentBodyBytes)
 }
@@ -136,7 +148,7 @@ func DecodeCreateComment(raw []byte) (CreateCommentRequest, error) {
 	if err != nil {
 		return request, err
 	}
-	if err = validMutation(request.SchemaVersion, request.BaseRev, request.MutationID, request.PageID); err != nil {
+	if err = validCommentMutation(request.SchemaVersion, request.BaseRev, request.MutationID, request.PageID); err != nil {
 		return request, err
 	}
 	if request.BaseRev < 1 || request.Anchor.Revision != request.BaseRev || !commentBodyValid(request.Body) {
@@ -149,7 +161,7 @@ func DecodeReplyComment(raw []byte) (ReplyCommentRequest, error) {
 	if err := commentRequest(raw, &request, nil, "page_id", "schema_version", "mutation_id", "if_version", "body"); err != nil {
 		return request, err
 	}
-	if err := validMutation(request.SchemaVersion, 1, request.MutationID, request.PageID); err != nil {
+	if err := validCommentMutation(request.SchemaVersion, 1, request.MutationID, request.PageID); err != nil {
 		return request, err
 	}
 	if request.IfVersion < 1 || !commentBodyValid(request.Body) {
@@ -168,7 +180,7 @@ func DecodeResolveComment(raw []byte) (ResolveCommentRequest, error) {
 	}, "page_id", "schema_version", "mutation_id", "if_version", "resolved"); err != nil {
 		return request, err
 	}
-	if err := validMutation(request.SchemaVersion, 1, request.MutationID, request.PageID); err != nil {
+	if err := validCommentMutation(request.SchemaVersion, 1, request.MutationID, request.PageID); err != nil {
 		return request, err
 	}
 	if request.IfVersion < 1 {

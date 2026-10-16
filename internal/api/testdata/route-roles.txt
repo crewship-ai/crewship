@@ -353,6 +353,9 @@ POST /api/v1/pages/{slug}/project/restore roleSelf
 POST /api/v1/pages/{slug}/project/unpublish roleSelf
 POST /api/v1/pages/{slug}/public roleSelf
 POST /api/v1/pages/{slug}/rollback roleSelf
+POST /api/v1/pages/{slug}/slides/comments roleSelf
+POST /api/v1/pages/{slug}/slides/comments/{threadId}/replies roleSelf
+POST /api/v1/pages/{slug}/slides/comments/{threadId}/resolve roleSelf
 POST /api/v1/pages/{slug}/slides/initialize roleSelf
 POST /api/v1/pages/{slug}/slides/patch roleSelf
 POST /api/v1/pages/{slug}/slides/reorder roleSelf

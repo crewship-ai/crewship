@@ -10,7 +10,8 @@ tag: Experimental
 
 The human CLI uses the current profile's workspace and credential. Page read/write
 ACLs apply in addition to `pages:read`/`pages:write` token scopes. This foundation
-has no native viewer, image assets, comments or selected-edit agent admission.
+has no native viewer, image assets or selected-edit agent admission. Human stable
+comments have the separate commands below.
 See [API contracts](/api-reference/slides) and the [storage contract](../specs/slides.md).
 Every mutation preserves its original `page_id`, `mutation_id`, `base_rev`, order
 version and object hashes. Conflicts stop after one request; there is no automatic
@@ -70,3 +71,51 @@ if_order_version,slide_order}` with every existing slide ID exactly once.
 `--file -` reads stdin. Supply `{page_id,schema_version:1,base_rev,mutation_id,
 if_order_version,revision}`. Restore appends a new confirmed revision and can
 revive the original stable identities; it does not replace live permissions.
+
+## crewship slide comments
+
+Human-only stable comments. Comment/reply requires COMMENT access; resolve/reopen
+requires WRITE. All mutations preserve immutable Page ID, anchor and thread CAS.
+
+## crewship slide comments list
+
+`crewship slide comments list report --limit 25 --cursor CURSOR` calls
+`GET /api/v1/pages/{slug}/slides/comments`. Omit `--cursor` for a fresh list.
+Follow `has_more` and `next_cursor`; each page rechecks current access.
+
+## crewship slide comments get
+
+`crewship slide comments get report THREAD` calls
+`GET /api/v1/pages/{slug}/slides/comments/{threadId}`. The original anchor,
+current projection revision/status, provenance and first comment are returned.
+
+## crewship slide comments history
+
+`crewship slide comments history report THREAD --limit 25 --cursor CURSOR` calls
+`GET /api/v1/pages/{slug}/slides/comments/{threadId}/history`. The immutable event
+history is paginated with a fixed membership watermark; no events are silently
+omitted. Omit `--cursor` for a fresh history.
+
+## crewship slide comments create
+
+`crewship slide comments create report --file create.json` calls
+`POST /api/v1/pages/{slug}/slides/comments`. `--file -` reads stdin. Supply
+`{page_id,schema_version:1,base_rev,mutation_id,anchor,body}`. Anchor contains
+`{anchor_schema_version:1,kind:"slide"|"element",slide_id,element_id?,revision}`.
+Element ID is present only for element anchors; revision must equal base_rev.
+Body is nonblank UTF-8, at most10000 bytes; the whole request is at most16KiB.
+
+## crewship slide comments reply
+
+`crewship slide comments reply report THREAD --file reply.json` calls
+`POST /api/v1/pages/{slug}/slides/comments/{threadId}/replies`. `--file -` reads
+stdin. Supply `{page_id,schema_version:1,mutation_id,if_version,body}`.
+The original thread version must match; resolved threads reject replies.
+
+## crewship slide comments resolve
+
+`crewship slide comments resolve report THREAD --file resolve.json` calls
+`POST /api/v1/pages/{slug}/slides/comments/{threadId}/resolve`. `--file -` reads
+stdin. Supply `{page_id,schema_version:1,mutation_id,if_version,resolved}` with
+an explicit boolean. `resolved:false` reopens; both transitions require WRITE.
+Conflicts stop after one exact request and never refresh/rebase its preconditions.

@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/slides"
 )
 
@@ -56,6 +59,66 @@ func TestSlidesCommentsRejectRunAuthorityForEveryPermission(t *testing.T) {
 	for _, permission := range []slidePermission{slideRead, slideComment, slideWrite} {
 		if _, err := h.commentAuthority(r, slides.Key{}, permission)(r.Context(), (*sql.Tx)(nil)); err == nil {
 			t.Fatalf("run inherited comment permission %v", permission)
+		}
+	}
+}
+
+func TestSlidesCommentsExactCredentialRevocationDuringBodyAndReplay(t *testing.T) {
+	for _, credential := range []string{"cli", "session"} {
+		for _, replay := range []bool{false, true} {
+			name := credential + "/new"
+			if replay {
+				name = credential + "/receipt"
+			}
+			t.Run(name, func(t *testing.T) {
+				f := newInstanceFixture(t)
+				wmSeedPage(t, f.db, "ws-old", "credential-page", "credential-page", "Slides", "boss", "")
+				deck := slideTestDeck(t, "credential-page")
+				base := "/api/v1/pages/credential-page/slides"
+				wantCode(t, f.slideDo(f.boss, "POST", base+"/initialize", slideJSON(t, slides.InitializeRequest{PageID: deck.DeckID, SchemaVersion: 1, MutationID: "init", Deck: deck})), 200, "initialize")
+				token := f.boss
+				revoke := func() {
+					mustExec(t, f.db, `UPDATE cli_tokens SET revoked_at='2026-01-01T00:00:00Z' WHERE token_hash=?`, sha256Hex(token))
+				}
+				if credential == "session" {
+					now := time.Now().UTC()
+					mustExec(t, f.db, `INSERT INTO user_sessions(id,user_id,created_at,expires_at,last_used_at) VALUES('comment-session','boss',?,?,?)`, now.Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+					validator, e := auth.NewJWTValidator("this-is-a-32-char-test-secret-pad")
+					if e != nil {
+						t.Fatal(e)
+					}
+					token, e = validator.IssueAccessToken("boss", "comment-session", "Boss", "boss@ex.com")
+					if e != nil {
+						t.Fatal(e)
+					}
+					revoke = func() {
+						mustExec(t, f.db, `UPDATE user_sessions SET revoked_at='2026-01-01T00:00:00Z' WHERE id='comment-session'`)
+					}
+				}
+				request := slides.CreateCommentRequest{PageID: deck.DeckID, SchemaVersion: 1, BaseRev: 1, MutationID: "credential_comment", Anchor: slides.CommentAnchor{AnchorSchemaVersion: 1, Kind: "slide", SlideID: deck.SlideOrder[0], Revision: 1}, Body: "Must remain private"}
+				body := slideJSON(t, request)
+				if replay {
+					wantCode(t, f.slideDo(token, "POST", base+"/comments", body), 200, "initial acknowledged receipt")
+				}
+				r := httptest.NewRequest("POST", base+"/comments?workspace_id=ws-old", strings.NewReader(body))
+				r.Header.Set("Authorization", "Bearer "+token)
+				r.Body = &artifactRevokingBody{reader: strings.NewReader(body), revoke: revoke}
+				rr := httptest.NewRecorder()
+				f.r.ServeHTTP(rr, r)
+				wantCode(t, rr, 403, "exact credential revoked during body")
+				var count int
+				if err := f.db.QueryRow(`SELECT COUNT(*) FROM slides_comment_events`).Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				expected := 0
+				if replay {
+					expected = 1
+				}
+				if count != expected {
+					t.Fatal("revocation changed retained history", count)
+				}
+				wantCode(t, f.slideDo(token, "POST", base+"/comments", body), 401, "revoked credential retry")
+			})
 		}
 	}
 }

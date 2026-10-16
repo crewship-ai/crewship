@@ -104,7 +104,7 @@ func RebuildCommentPageTx(ctx context.Context, tx *sql.Tx, key Key) error {
 	}
 	var totalEvents, totalBytes int
 	for _, thread := range threads {
-		events, e := tx.QueryContext(ctx, `SELECT version,kind,body,actor,mutation_id,created_at FROM slides_comment_events WHERE workspace_id=? AND page_id=? AND thread_id=? ORDER BY version LIMIT ?`, key.WorkspaceID, key.PageID, thread.ID, MaxCommentEvents+1)
+		events, e := tx.QueryContext(ctx, `SELECT e.version,e.kind,e.body,e.actor,e.mutation_id,e.created_at,r.request_hash FROM slides_comment_events e LEFT JOIN slides_comment_receipts r ON r.workspace_id=e.workspace_id AND r.page_id=e.page_id AND r.thread_id=e.thread_id AND r.event_version=e.version WHERE e.workspace_id=? AND e.page_id=? AND e.thread_id=? ORDER BY e.version LIMIT ?`, key.WorkspaceID, key.PageID, thread.ID, MaxCommentEvents+1)
 		if e != nil {
 			return e
 		}
@@ -112,7 +112,8 @@ func RebuildCommentPageTx(ctx context.Context, tx *sql.Tx, key Key) error {
 		resolved := false
 		for events.Next() {
 			var event CommentEvent
-			if e = events.Scan(&event.Version, &event.Kind, &event.Body, &event.Actor, &event.MutationID, &event.CreatedAt); e != nil {
+			var receiptHash sql.NullString
+			if e = events.Scan(&event.Version, &event.Kind, &event.Body, &event.Actor, &event.MutationID, &event.CreatedAt, &receiptHash); e != nil {
 				events.Close()
 				return e
 			}
@@ -147,6 +148,13 @@ func RebuildCommentPageTx(ctx context.Context, tx *sql.Tx, key Key) error {
 				}
 				resolved = false
 			}
+			if receiptHash.Valid {
+				hash, err := retainedCommentRequestHash(key, thread, event)
+				if err != nil || hash != receiptHash.String {
+					events.Close()
+					return errors.New("Slides comment receipt hash mismatch")
+				}
+			}
 			if totalEvents > MaxCommentEvents || totalBytes > MaxCommentHistoryBytes {
 				events.Close()
 				return ErrQuota
@@ -173,4 +181,16 @@ func RebuildCommentPageTx(ctx context.Context, tx *sql.Tx, key Key) error {
 		return errors.New("Slides comment receipt/event mismatch")
 	}
 	return nil
+}
+
+func retainedCommentRequestHash(key Key, thread CommentThread, event CommentEvent) (string, error) {
+	switch event.Kind {
+	case "comment":
+		return requestHash(key, "comment/create", CreateCommentRequest{PageID: key.PageID, SchemaVersion: CommentProtocolVersion, BaseRev: thread.Anchor.Revision, MutationID: event.MutationID, Anchor: thread.Anchor, Body: event.Body})
+	case "reply":
+		return requestHash(key, "comment/reply/"+thread.ID, ReplyCommentRequest{PageID: key.PageID, SchemaVersion: CommentProtocolVersion, MutationID: event.MutationID, IfVersion: event.Version - 1, Body: event.Body})
+	case "resolve", "reopen":
+		return requestHash(key, "comment/resolve/"+thread.ID, ResolveCommentRequest{PageID: key.PageID, SchemaVersion: CommentProtocolVersion, MutationID: event.MutationID, IfVersion: event.Version - 1, Resolved: event.Kind == "resolve"})
+	}
+	return "", errors.New("unsupported retained comment event")
 }
