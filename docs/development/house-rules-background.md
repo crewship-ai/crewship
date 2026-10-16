@@ -37,6 +37,16 @@ shared command from a parallel test — `ExecuteC` still rewrites the child
 slice — so don't; build a local command tree instead.
 `cobra_sort_parallel_guard_test.go` fails the build on both halves.
 
+### Empty Docker responses use deterministic test fixtures
+
+Tests that exercise an empty Docker list use the existing httptest Docker API
+helper and the real SDK client, so the empty-list branch runs even without a
+host daemon and in short mode. `TestRestartCrewAgents_NoContainer` verifies
+that listing occurs and no runtime is removed. The separate
+`TestRestartCrewAgents_RealDocker` still covers live container removal when a
+daemon is available. Do not route a fixture around a managed Docker gateway
+just to make a host-dependent empty-list test pass.
+
 ### `go test -race ./internal/api/` needs `-timeout`
 
 That package takes ~23m under the race detector (`ok … 1405s` on a CI runner,

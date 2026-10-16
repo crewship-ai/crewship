@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Crew restart verification runs without a host Docker listing API.** The no-container test uses a deterministic Docker SDK fixture and runs in short mode; the separate live Docker restart integration remains unchanged.
+
 - **Guest CLI pairing accepts verified browser sessions.** Pairing start and poll now pass the restricted route gate only for interactive sessions. CLI bearer callers remain forbidden; redemption retains the same current Guest grants as browser CLI token creation and rejects logout, revocation or suspension.
 
 - Chat shows advisory configured-model payer, budget and gate details above the composer after a current viewer/chat profile check.
