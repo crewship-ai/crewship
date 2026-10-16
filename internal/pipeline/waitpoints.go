@@ -16,7 +16,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/jitter"
 	"github.com/crewship-ai/crewship/internal/policy"
-	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // SQLWaitpointStore is the production WaitpointStore backed by the
@@ -663,95 +662,26 @@ func (s *SQLWaitpointStore) CompleteApproval(ctx context.Context, workspaceID, t
 }
 
 func (s *SQLWaitpointStore) completeApproval(ctx context.Context, workspaceID, token string, approved bool, deciderUserID, payload string, clock func() time.Time) error {
-	now := tsformat.Format(clock())
-	var formJSON string
-	var expired bool
-	if err := s.db.QueryRowContext(ctx, `SELECT decision_form_json, julianday(timeout_at) <= julianday(?) FROM pipeline_waitpoints WHERE token=? AND workspace_id=? AND status='pending'`, now, token, workspaceID).Scan(&formJSON, &expired); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrAlreadyDecided
-		}
-		return fmt.Errorf("waitpoints: update: read decision form: %w", err)
-	}
-	if expired {
-		return s.settleExpiredApproval(ctx, workspaceID, token, now)
-	}
-	if formJSON != "" {
-		var form DecisionForm
-		if err := json.Unmarshal([]byte(formJSON), &form); err != nil {
-			return fmt.Errorf("read decision form: %w", err)
-		}
-		normalized, err := NormalizeDecisionAnswer(&form, approved, payload)
+	decision, err := func() (*WaitpointDecision, error) {
+		tx, err := s.db.Conn(ctx)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("waitpoints: update: %w", err)
 		}
-		payload = normalized
-	}
-	status := "approved"
-	if !approved {
-		status = "denied"
-	}
-	// Expiry is part of the decision CAS, not dependent on the 30-second
-	// sweeper having run. julianday handles historical timezone/fraction forms.
-	// Form decoding may have crossed the deadline since the initial read.
-	now = tsformat.Format(clock())
-	res, err := s.db.ExecContext(ctx, `
-UPDATE pipeline_waitpoints
-SET status = ?, decided_at = ?, decided_by_user_id = ?, decision_payload = ?
-WHERE token = ? AND workspace_id = ? AND status = 'pending'
-  AND julianday(timeout_at) > julianday(?)`,
-		status, now, nullableStr(deciderUserID), nullableStr(payload), token, workspaceID, now,
-	)
-	if err != nil {
-		return fmt.Errorf("waitpoints: update: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return s.settleExpiredApproval(ctx, workspaceID, token, now)
-	}
-	// Mirror the decision into the unified inbox so the row drops
-	// from "needs action" into the resolved feed in real time. The
-	// pipeline_waitpoints UPDATE has already committed by the time
-	// we get here, so a failure in the projection write is safe to
-	// log + swallow — a follow-up rebuild can patch up missed rows.
-	inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", token, status, deciderUserID)
-	s.mu.Lock()
-	if ch, ok := s.listeners[token]; ok {
-		select {
-		case ch <- waitDecision{approved: approved}:
-		default:
-			// Buffered channel full — already delivered. Safe
-			// to drop; the decision is in the DB.
+		defer tx.Close()
+		if _, err = tx.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+			return nil, err
 		}
-	}
-	s.mu.Unlock()
-	return nil
-}
-
-// Settle expiry on the attempted decision as well as on the periodic sweep,
-// so its pending Inbox card does not remain actionable after a refused answer.
-func (s *SQLWaitpointStore) settleExpiredApproval(ctx context.Context, workspaceID, token, now string) error {
-	var runID string
-	err := s.db.QueryRowContext(ctx, `UPDATE pipeline_waitpoints
- SET status='timed_out', decided_at=?
- WHERE workspace_id=? AND token=? AND status='pending' AND julianday(timeout_at)<=julianday(?)
- RETURNING pipeline_run_id`, now, workspaceID, token, now).Scan(&runID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrAlreadyDecided
-	}
-	if err != nil {
-		return fmt.Errorf("waitpoints: settle expiry: %w", err)
-	}
-	inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", token, "timed_out", "")
-	s.mu.Lock()
-	if ch, ok := s.listeners[token]; ok {
-		select {
-		case ch <- waitDecision{approved: false}:
-		default:
+		defer func() { _, _ = tx.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
+		decision, err := s.decideTxClock(ctx, tx, workspaceID, token, approved, WaitpointDecider{Kind: DeciderUser, ID: deciderUserID}, payload, clock)
+		if decision != nil && decision.Applied {
+			if _, commitErr := tx.ExecContext(ctx, "COMMIT"); commitErr != nil {
+				return nil, commitErr
+			}
 		}
-	}
-	s.mu.Unlock()
-	s.resumeRun(runID)
-	return ErrAlreadyDecided
+		return decision, err
+	}()
+	s.AfterDecide(ctx, decision)
+	return err
 }
 
 // CancelWaitpointsForRun flips every still-pending waitpoint belonging to a

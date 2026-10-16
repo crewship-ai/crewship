@@ -45,11 +45,20 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "ChatProposalResponse", pointer: "/components/schemas/ChatProposalResponse", value: proposalResponse{}},
+	{name: "ChatProposalPage", pointer: "/components/schemas/ChatProposalPage", value: proposalPage{}},
 	{name: "RoutineOriginBinding", pointer: "/components/schemas/RoutineOriginBinding", value: routineOriginBindingResponse{}},
 	{name: "FailedIssueMutationJob", pointer: "/components/schemas/FailedIssueMutationJob", value: failedIssueMutationJob{}},
 	{name: "FailedIssueMutationPage", pointer: "/components/schemas/FailedIssueMutationPage", value: failedIssueMutationPage{}},
 	{name: "RoutineOriginDraftBinding", pointer: "/components/schemas/RoutineOriginDraftBinding", value: routineOriginDraftBinding{}},
 	{name: "RoutineOriginScheduleBinding", pointer: "/components/schemas/RoutineOriginScheduleBinding", value: routineOriginScheduleBinding{}},
+	{name: "ChatRunPreflight", pointer: "/components/schemas/ChatRunPreflight", value: chatRunPreflightResponse{}},
+	{name: "ChatRunPreflight payer", pointer: "/components/schemas/ChatRunPreflight/properties/payer", value: chatRunPayer{}},
+	{name: "ChatRunPreflight gate", pointer: "/components/schemas/ChatRunPreflight/properties/gate", value: chatRunGateProjection{}},
+	{name: "ChatRunPreflight budget", pointer: "/components/schemas/ChatRunPreflight/properties/budgets/items", value: chatRunBudget{}},
+	{name: "ChatDecisionReference", pointer: "/components/schemas/ChatDecisionReference", value: chatDecisionWire{}},
+	{name: "ChatDecisionReferencePage", pointer: "/components/schemas/ChatDecisionReferencePage", value: ChatCardPage{}},
+	{name: "ChatDecisionVersionConflict", pointer: "/components/schemas/ChatDecisionVersionConflict", value: ChatCardVersionConflict{}},
 	{name: "ChatEntityReferencePage", pointer: "/components/schemas/ChatEntityReferencePage", value: EntityRefPage{}},
 	{name: "ChatEntityOperation", pointer: "/components/schemas/ChatEntityOperation", value: EntityOperationResponse{}},
 	{name: "WorkspacePendingRunResponseV1", pointer: "/components/schemas/WorkspacePendingRunResponseV1", value: pendingRunReceipt{}},

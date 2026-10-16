@@ -846,3 +846,91 @@ mutation results, retry keys, request hashes and human authority receipts.
 Missing and inaccessible operations both return `404`. Backend failures return
 `503`. This endpoint only reads metadata and never executes or retries work.
 Responses set `Cache-Control: no-store`.
+
+## Issue proposals
+
+| Method | Endpoint | CLI |
+| --- | --- | --- |
+| GET | `/api/v1/chats/{chatId}/proposals` | `crewship chat proposal list` |
+| GET | `/api/v1/chats/{chatId}/proposals/{sourceId}` | `crewship chat proposal show` |
+| PATCH | `/api/v1/chats/{chatId}/proposals/{sourceId}` | `crewship chat proposal edit` |
+| POST | `/api/v1/chats/{chatId}/proposals/{sourceId}/confirm` | `crewship chat proposal confirm` |
+| POST | `/api/v1/chats/{chatId}/proposals/{sourceId}/discard` | `crewship chat proposal discard` |
+
+These endpoints implement the [E2 typed card contract](/specs/chat-e2-card-contract).
+Reads return a `ChatCardResponse`; list returns a `ChatCardPage` replacement
+snapshot with up to 100 cards and an opaque continuation cursor. HTTP reads are
+authoritative and use `Cache-Control: no-store`. Inaccessible source objects,
+including a proposal with any inaccessible item, return generic 404 and are
+omitted from lists without exposing their existence/count.
+
+PATCH accepts `expected_version`, `title` and a complete bounded `items` array.
+Discard accepts `expected_version`; confirm accepts `proposal_id` matching the
+path and `reviewed_version`. Scoped CLI tokens also require `crews:write`, matching canonical issue creation
+at `/api/v1/crews/{crewId}/issues`, for these mutations; ordinary
+chat ownership routes retain their existing scope policy. Every mutation requires `Idempotency-Key` (1–200
+bytes). Keys are scoped to the authenticated actor and workspace. Same-key
+retries recheck current read access and never execute effects again. Confirmation
+retries preserve the original created Issue IDs and accepted outcome. A late edit
+retry after a later revision or acceptance/discard/expiry returns the current
+authorized source snapshot,
+while retaining the immutable original operation receipt; it cannot revive a draft.
+Changed intent returns 409 without an unrelated result. A stale version returns
+409 `ChatCardVersionConflict` with a current authorized snapshot.
+
+Proposals expire 24 hours after creation. They hold 1–20 stable-ID items, titles
+of 1–240 Unicode code points and descriptions of at most 10,000 code points.
+Priorities are `none`, `urgent`, `high`, `medium`, `low`. `assignee_id` is resolved
+inside the mutation transaction against current workspace users and agents;
+exactly one matching active actor is required. Unknown or ambiguous IDs fail the
+whole operation. Optional projects and every crew must belong to the workspace.
+
+Confirmation rechecks current trusted membership, chat audience, issue creation
+role/capability, every crew/project and each assignee inside its write transaction.
+Guests/restricted viewers have no E2 surface. Selected issues, human attribution,
+accepted outcome, Issue card receipts and existing durable audit outbox entries
+commit together. Any failure rolls all of them back. Concurrency has one winner;
+other reviewed versions get 409. The proposing run may already have finished.
+Confirmation does not directly dispatch work: proposals contain no dispatch
+intent. Existing workspace automations still apply to created issues.
+
+Workspace bundle restores preserve source and operation receipts, so a same-key
+confirmation retry returns its original accepted outcome without repeating effects.
+A workspace fork remaps proposal/chat/agent/workspace and typed item/outcome
+references while retaining historical run/trigger IDs. Imported receipts grant
+no execution authority. Because fork IDs change request intent, an original
+source key may return 409; terminal sources remain terminal and never create
+issues again.
+## Source-backed decision cards
+
+The [Chat decisions API](/api-reference/chat-decisions) projects verified TEXT
+escalations into a chat and resolves the same source as Inbox, with current
+human authorization, source versions and stable operation keys.
+
+## Configured chat run preflight
+
+### `GET /api/v1/chats/{chatId}/run-preflight`
+
+**Auth:** An authenticated current trusted member who can read the chat and its
+agent. Guests and restricted profiles have no E2 projection. Existing workspace
+selection applies; the response contains no credential secrets.
+
+**Request:** Supply the chat ID in the path and select the current workspace
+with the usual workspace context or `workspace_id` query parameter. No request
+body is accepted. CLI: `crewship chat run-preflight <chat-id>`.
+
+**Response:** `200 OK` returns `ChatRunPreflight`, with scope
+`configured_chat_agent`, agent/model identity, a visibility-filtered payer label,
+applicable budget balances, configured/predicted gate mode, and constraints.
+`estimate_state` is `unknown` and `estimate_usd` is null without a complete-run
+Paymaster estimate. Reads use `Cache-Control: no-store`.
+
+**Statuses:** `404` hides a missing or inaccessible chat, including access
+withdrawn during the read; `503` means current payer, policy, budget or chat facts
+could not be verified. A temporary failure is not proof of access withdrawal.
+
+This is a snapshot, not a reservation or approval. Model/provider overrides need
+a fresh launch-specific check; paid-provider admission still checks the current
+budget after a human wait. The default evaluator does not match ordinary
+`agent_run` calls, so configured sync mode alone does not promise a blocking gate.
+See [the run gate](/guides/harbormaster#where-the-run-level-mode-comes-from).

@@ -44,6 +44,7 @@ chat_origin_id TEXT,
     id         TEXT PRIMARY KEY,
     deleted_at TEXT);
 CREATE TABLE pipeline_runs (
+invocation_source_run_id TEXT,
 chat_origin_id TEXT,
     id                TEXT PRIMARY KEY,
     workspace_id      TEXT NOT NULL,

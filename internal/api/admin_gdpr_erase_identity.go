@@ -349,8 +349,11 @@ var identitySteps = []identityStep{
 		sql:  `UPDATE attachments SET uploaded_by_user_id = NULL WHERE workspace_id = ? AND uploaded_by_user_id = ?`,
 		args: []identityArg{argWorkspace, argSubject}},
 	{key: "escalations_anonymised",
-		sql:  `UPDATE escalations SET resolved_by = NULL WHERE workspace_id = ? AND resolved_by = ?`,
-		args: []identityArg{argWorkspace, argSubject}},
+		sql: `UPDATE escalations SET
+            resolved_by = CASE WHEN resolved_by = ? THEN NULL ELSE resolved_by END,
+            resolved_by_user_id = CASE WHEN resolved_by_user_id = ? THEN NULL ELSE resolved_by_user_id END
+            WHERE workspace_id = ? AND (resolved_by = ? OR resolved_by_user_id = ?)`,
+		args: []identityArg{argSubject, argSubject, argWorkspace, argSubject, argSubject}},
 	{key: "gate_reward_history_anonymised",
 		sql:  `UPDATE gate_reward_history SET decided_by = NULL WHERE workspace_id = ? AND decided_by = ?`,
 		args: []identityArg{argWorkspace, argSubject}},

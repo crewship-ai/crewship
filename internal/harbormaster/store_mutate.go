@@ -101,14 +101,20 @@ func Enqueue(ctx context.Context, db *sql.DB, j journal.Emitter, req Request) (s
 // ErrNotPending is also returned when the row exists but is already
 // approved/denied/timed out; the caller should treat that as a no-op.
 //
-// This is the autocommit wrapper, so there is no transaction to roll
-// back: a reload failure surfaces as an error even though the CAS
-// itself committed. Loud is right — the caller must not assume the
-// post-decision tail ran.
+// The wrapper owns a transaction so source validation or a failed reload cannot
+// leave a committed decision behind without its post-commit tail.
 
 func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id string, status Status, decidedBy, comment string) error {
-	row, err := DecideTx(ctx, db, workspaceID, id, status, decidedBy, comment)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	row, err := DecideTx(ctx, tx, workspaceID, id, status, decidedBy, comment)
+	if err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
 		return err
 	}
 	AfterDecide(ctx, db, j, row, status, decidedBy, comment)
@@ -117,7 +123,7 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id 
 
 // DBTX is the subset of *sql.DB / *sql.Tx the decision writers need —
 // it lets DecideTx ride a caller-owned transaction while Decide keeps
-// managing its own autocommit statement. Same shape (and rationale) as
+// managing its own transaction. Same shape (and rationale) as
 // auditExecer in internal/api/credential_audit.go: the caller owns
 // commit/rollback, so a handler that must apply side effects
 // atomically with the decision can enlist the CAS in its transaction
@@ -210,6 +216,9 @@ func DecideTx(ctx context.Context, tx DBTX, workspaceID, id string, status Statu
 		// row inside the caller's transaction. Fail closed rather than
 		// hand back a nil row the caller would read as "nothing to do".
 		return nil, fmt.Errorf("harbormaster: reload decided approval %s: row vanished mid-transaction", id)
+	}
+	if err := guardHumanWholeRunDecision(ctx, tx, row, decidedBy); err != nil {
+		return nil, err
 	}
 	return row, nil
 }
