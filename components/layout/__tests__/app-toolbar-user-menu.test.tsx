@@ -84,6 +84,7 @@ describe("AppToolbar — user menu", () => {
     expect(await screen.findByRole("dialog", { name: /connect cli/i })).toBeVisible()
     await waitFor(() => expect(menuAccess.api).toHaveBeenCalledWith("/api/v1/auth/pair/start", expect.objectContaining({ method: "POST" })))
     await waitFor(() => expect(screen.getByTestId("pair-command")).toHaveTextContent("TEST-PAIR"))
+    if (mode === "restricted") expect(menuAccess.api.mock.calls.some(([path]) => path === "/api/v1/system/version")).toBe(false)
   })
 
   it("does not start pairing while account access is loading", () => {
