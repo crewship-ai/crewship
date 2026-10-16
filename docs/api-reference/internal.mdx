@@ -756,3 +756,21 @@ Every arm — refused, held, or allowed — writes an audit entry carrying `deci
 - [Paymaster guide](/guides/paymaster) — billing modes, quota enforcement.
 - [Crew Journal](/guides/crew-journal) — `llm.call`, `budget.*` entry types.
 - [Architecture — IPC](/architecture#ipc-inter-process-communication) — Unix socket mechanics.
+
+### Agent issue proposals
+
+`POST /api/v1/internal/chat-proposals` is reached only through the authenticated
+sidecar transport `POST /chat/proposal/create` or the `crewship-issues` MCP tool
+`propose_issues`. The agent sends `title`, `items` and a stable `operation_key`
+(MCP: `request_key`). The sidecar injects the verified token's agent/run and its
+workspace; the host derives chat and triggering message from durable run origin.
+It accepts only the acting agent's crew targets and current readable references.
+A legacy token or forged chat/run identity cannot create a proposal. The tool
+creates inert intent, grants no human write rights, and never confirms a proposal.
+
+The owner agent can publish a new version via `PATCH /api/v1/internal/chat-proposals/{sourceId}`,
+sidecar `POST /chat/proposal/{sourceId}/edit`, or MCP `edit_issue_proposal`.
+The body is `ProposalEdit` plus the transport operation key; MCP also identifies
+`proposal_id`. The verified actor and exact original chat/workspace must own the proposal;
+a later admitted run can revise it while the original run/trigger remain immutable. Expected-version
+conflicts preserve human edits, and no agent revision can revive a terminal card.

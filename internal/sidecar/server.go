@@ -738,6 +738,10 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			// guardNone rows, because an unauthenticated route that LOOKS like
 			// it grants credential assignment is a standing invitation for
 			// someone to "fix" it by adding the backend half without the gate.
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/chat/proposal/") && strings.HasSuffix(r.URL.Path, "/edit"):
+				s.handleProposalEdit(w, r)
+			case r.Method == http.MethodPost && r.URL.Path == "/chat/proposal/create":
+				s.handleProposalCreate(w, r)
 			case r.Method == http.MethodPost && r.URL.Path == "/issue/create":
 				s.handleIssueCreate(w, r)
 				return

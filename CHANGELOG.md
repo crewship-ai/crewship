@@ -350,6 +350,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Agents can publish reviewable issue plans from their current chat.** Sidecar MCP and agent CLI commands create and revise inert proposals with verified run identity, stable retry keys, and fresh requester checks; later turns preserve the original source provenance.
+
 - **Review agent issue plans before creating work.** Durable chat proposals support bounded edits, version conflicts, explicit human confirmation, and safe retries through the API and CLI; selected backlog issues and audit receipts commit atomically.
 
 - **Experimental typed decision evaluation from the CLI** — recover the opt-in `crewship decisions evaluate`, `triage` and `rerank` pilot with bounded requests, advisory results and credential-free dry runs. This local command uses explicitly supplied provider keys outside server Paymaster accounting; hosted inference remains unverified.

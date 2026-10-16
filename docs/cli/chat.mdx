@@ -749,3 +749,20 @@ human reviewer with the immutable proposing agent/run/chat provenance. It does
 not start agent work. Existing issue creation rights apply to MEMBERs; proposing
 is not mandatory for their ordinary issue commands. Guests and restricted members
 cannot access this surface. See [proposal API](/api-reference/conversations#issue-proposals).
+
+Agents use the same executable with their verified sidecar token, without a
+human login/profile:
+
+```bash
+crewship chat proposal propose --file proposal.json --idempotency-key agent-plan-1
+crewship chat proposal revise <proposal-id> --file proposal.json --version 1 --idempotency-key agent-revision-1
+```
+
+`CREWSHIP_AGENT_TOKEN` must be supplied by the runtime. These commands call the
+loopback sidecar (`--sidecar` defaults to `http://127.0.0.1:9119`), which derives
+the host identity from that token. They cannot confirm work. A revision belongs
+to the original proposing agent and chat, uses a freshly admitted run, and
+preserves the source expiry and original run/trigger provenance.
+Late edit retries after a later revision or terminal transition return the current
+authorized card, preserving the original operation receipt; confirmation retries preserve
+the original accepted outcome and Issue IDs.
