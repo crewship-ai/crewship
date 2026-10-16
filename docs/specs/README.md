@@ -40,6 +40,8 @@ public contract here. Superseded a spec? Move it to
 
 - [Chat entity references](chat-entity-references.md): authorized, bounded Issue
   reference snapshots, operation projections, revision reads and API/CLI fixtures.
+- [E2 card projections](chat-e2-card-contract.md): A1 typed proposal/decision
+  transport and handler fixtures; source storage and public route integration follow separately.
 
 - [Restricted workflows](restricted-workflows.md): private routine admission,
   filtered catalogs, receipts, Page polling and bounded delegated execution.

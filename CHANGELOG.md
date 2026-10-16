@@ -359,6 +359,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Waiting for a routine could report uncertain or canceled work as successful.** `wait` now exits 5 for `needs_reconciliation` and 2 for either cancellation spelling; `routine run --wait` reports these outcomes as errors in human and machine formats.
 - **Reconnecting an owned AI client could lose its working registration after a failed add.** Native edits and verification now run against a staged configuration, preserving the prior registration and ownership receipt on failure and refusing concurrent configuration or receipt edits. ⚠️ **Behaviour change:** owned reconnections require a regular client config file; symlinked configs are refused.
+- E2 proposal and decision card contracts with closed form schemas and authorized read-projection fixtures. This foundation does not yet expose proposal confirmation or decision actions in Chat.
+
 
 ### Changed
 
