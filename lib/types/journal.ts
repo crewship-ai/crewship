@@ -191,6 +191,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "page.folder_membership_changed",
   // Folder permissions (#2533): an entry set or removed on a folder's ACL.
   "page.folder_acl_changed",
+  "page.folder_tree_changed",
   // §4 freshness verdicts and §5's wake gates.
   "page.panel.stale",
   "page.panel.recovered",

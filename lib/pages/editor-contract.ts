@@ -1,3 +1,5 @@
+import { readStablePageReference, writePageReference, type PageLinkReference } from "./stable-links"
+
 /**
  * The Pages editor's shared vocabulary.
  *
@@ -72,6 +74,8 @@ export type EditorMode = "view" | "edit"
 export type EditorPane = "section" | "preview"
 
 export interface EditorRoute {
+  /** Immutable whole-Page link intent; only intentional Page selection clears it. */
+  readonly reference?: PageLinkReference
   /** null on `/pages` — the overview, where the editor cannot be open. */
   readonly slug: string | null
   readonly mode: EditorMode
@@ -120,7 +124,8 @@ export function readEditorRoute(pathname: string, search: string): EditorRoute {
   // else is an address claiming a state the screen does not have.
   const pane: EditorPane =
     mode === "edit" && section === "content" && params.get("pane") === "preview" ? "preview" : "section"
-  return { slug, mode, section, pane }
+  const reference = readStablePageReference(search)
+  return { slug, mode, section, pane, ...(reference ? { reference } : {}) }
 }
 
 /**
@@ -128,13 +133,14 @@ export function readEditorRoute(pathname: string, search: string): EditorRoute {
  * Page keeps the plain `/pages/<slug>` link people already share.
  */
 export function editorRouteHref(route: EditorRoute, currentSearch = ""): string {
-  if (route.slug === null) return "/pages"
-  const path = `/pages/${encodeURIComponent(route.slug)}`
+  if (route.slug === null && !route.reference) return "/pages"
+  const path = route.slug === null ? "/pages" : `/pages/${encodeURIComponent(route.slug)}`
   // Everything the editor does not own is carried through. The panel tab bar
   // writes `?tab=` with its own replaceState, and rebuilding the query from
   // scratch dropped it — so opening a Page on its third tab and clicking Edit
   // came back to the first one.
   const params = new URLSearchParams(currentSearch)
+  writePageReference(params, route.reference)
   for (const key of ["mode", "section", "pane"]) params.delete(key)
   if (route.mode === "edit") {
     params.set("mode", "edit")

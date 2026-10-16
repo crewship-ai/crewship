@@ -43,6 +43,9 @@ import (
 // either add it to BackupTables (FK-safe order, plus BackupTableIntent) or
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
+	"page_search_projections":           "Runtime-only authorized native text projection; exclude from workspace/fork bundles and rebuild canonical text after scoped restore or offline instance cache clearing.",
+	"artifact_workspace_writes":         "rolling write-rate state is initialized anew on a restored installation",
+	"artifact_run_principals":           "active chat/run admission is installation-bound; restore must not resurrect publication authority",
 	"journal_replay_receipts":           "dedup authority binds this installation's protected spool and run identities; workspace bundles retain visible journal history, not the excluded execution capability",
 	"service_operation_leases":          "provider operations must be admitted on the destination host",
 	"service_backup_fences":             "host maintenance fences are reconstructed by physical service-data restore",

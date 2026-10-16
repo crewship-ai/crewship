@@ -20,9 +20,12 @@ it is safe against a shared development instance.
 | PR throughput evidence | `python3 scripts/ci/pr-throughput.py --since YYYY-MM-DD --output /tmp/throughput.json --raw-output /tmp/throughput-raw.json` | Read-only bounded GitHub queries for merged PR latency, workflow attempts, failures and queue/execution; see [metric definitions and limitations](ci/pr-throughput.md) |
 | Plan repository merge policy | `python3 scripts/ci/repository-policy.py --output /tmp/policy-plan.json` | Reads the current main ruleset and prepares a preservation-first queue/CodeQL plan. Explicit `--apply --plan ... --documentation-commit ...` changes live rules only after review; see [the policy runbook](../docs/runbooks/ci-cd-implementation-2026-09-11.md#review-and-apply-repository-policy-2932) |
 | Plan repository merge policy | `python3 scripts/ci/repository-policy.py --output /tmp/policy-plan.json` | Reads the current main ruleset and prepares a preservation-first queue/CodeQL plan. Every `--apply --plan ...` requires `--analysis-commit ...` for reviewed source already on main and actual PR canary review; queue activation also requires `--documentation-commit ...`. See [the policy runbook](../docs/runbooks/ci-cd-implementation-2026-09-11.md#review-and-apply-repository-policy-2932) |
+| Slides canonical model contract | `node scripts/check-slide-model.mjs` (Node24, Go; run via `crewship-heavy`) | Compares actual Go/TS schema1 canonical JSON and domain-separated deck/element hashes against the shared Unicode fixture |
+| Page content registry contract | `node scripts/check-page-content-types.mjs` (Node 24, Go; run via `crewship-heavy`) | Compares actual Go and TypeScript compiled descriptors and derivations against one shared fixture |
 | Documentation inventory | `make docs-inventory:strict` | Checks documented API/CLI references and writes ignored inventory reports |
 | Built chat XLSX worker | `pnpm test:chat-xlsx-worker` after `pnpm build` | Exercises the shipped local XLSX worker in Chromium with synthetic saved formulas, coordinates, corruption, macros and resource bounds |
 | Built chat table worker | `pnpm test:chat-worker` after `pnpm build` | Exercises the actual bundled worker in Chromium with synthetic quoted Unicode data, malformed input and resource bounds; requires the Playwright browser |
+| Page content browser compatibility | `scripts/throwaway-server.sh run NAME --binary OWN_BINARY -- node e2e/pages-content-types-smoke.mjs` with `PAGE_TYPES_OUTPUT` | Real embedded empty Page attachment; explicitly injected future metadata must not mount content adapters |
 | Browser tests | See [e2e/README.md](../e2e/README.md) | Selects the appropriate suite and target instance |
 
 The verification script's current Go timeout is 25 minutes. Some full local
@@ -40,6 +43,8 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 | [check-chat-table-worker.mjs](check-chat-table-worker.mjs), [check-chat-xlsx-worker.mjs](check-chat-xlsx-worker.mjs) | Chromium acceptance of built `out/chat-workers` bundles with synthetic CSV/XLSX; runs through `pnpm test:chat-worker` / `pnpm test:chat-xlsx-worker` in CI Playwright PR subset; no live server or external parser |
 | [prepare-chat-workers.mjs](prepare-chat-workers.mjs) | Bundles chat preview workers as local JavaScript before frontend dev/build; public output is generated and ignored |
 | [prepare-pdf-assets.mjs](prepare-pdf-assets.mjs) | Prepares browser PDF assets; invoked by frontend dev/build commands |
+| [prepare-board-assets.mjs](prepare-board-assets.mjs) | Copies pinned Excalidraw fonts and license notices for Board fixtures; `--production` prepares local assets for dev/build |
+| [prepare-board-converter.mjs](prepare-board-converter.mjs) | Builds the pinned Mermaid converter into a local browser IIFE; called by Board asset preparation for fixtures and production. Generated `public/board-converter/runner.js` is ignored; production needs no Node process. |
 | [gen-avatar-fixtures.mjs](gen-avatar-fixtures.mjs) | Regenerates avatar validator test fixtures |
 | [generate-team-avatars.mjs](generate-team-avatars.mjs) | Generates demo team portraits; distinct from validator fixtures |
 | [gen-notices.sh](gen-notices.sh) | Regenerates third-party notices from Go dependencies; invoked by `make notices` |
@@ -172,3 +177,132 @@ runs `go vet -tags conformance ./...`, which compiles this test but does not
 execute Chromium. Executing either tagged test set requires the explicit browser
 environment and real static export; missing configuration fails rather than skips.
 `go test -tags conformance ./...` therefore also requires those prerequisites.
+
+
+`acceptance-artifact-workflow-browser.mjs` is invoked by the Linux-only
+`TestArtifactWorkflowBrowser` harness (`artifact_workflow_browser` or
+`conformance` build tag). Build the real static export first. It uses an owned
+httptest server, migrated temporary database and synthetic preauthenticated DB
+sessions with production authorization routes; it does not mock HTTP, perform
+login, execute agents, send email, create Docker resources or contact dev4.
+It verifies HTML upload, commenter discussion and dispatch denial, exact saved
+revision comparison, and restore preserving the original comment anchor.
+
+```bash
+crewship-heavy pnpm exec prisma generate # generated TypeScript types only
+crewship-heavy pnpm build
+crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_ARTIFACT_WORKFLOW_BROWSER=1 go test -tags artifact_workflow_browser ./internal/api -run '^TestArtifactWorkflowBrowser$' -count=1 -timeout 6m
+```
+
+`CREWSHIP_ARTIFACT_WORKFLOW_OUTPUT` optionally chooses a local report directory;
+otherwise output uses an OS temporary directory. Fixture session tokens remain
+in a private mode-0600 temporary file that the Go test removes. Missing opt-in,
+static export or Chromium fails rather than skips. The conformance tag permits
+compile-only checks (`-run '^$'`); this harness is not automatically executed by
+CI and does not establish real-agent acceptance or login-flow coverage.
+
+`acceptance-board-mermaid-browser.mjs` is called only by Linux-only
+`TestBoardMermaidWorkflowBrowser` (`board_mermaid_workflow_browser` or
+compile-only `conformance`). It uses migrated temporary storage, real Router
+handlers and production UI with two synthetic authenticated sessions. The
+canonical converter bootstrap and built pinned runner use separate owned HTTPS
+loopback sites. It seeds admitted Mermaid source without executing an agent.
+An aborted insertion before network leaves the job ready across client loss;
+two independently converted proposals are held before the real POSTs race.
+The test checks one commit, the existing-result receipt and reload persistence.
+It also sends HTML, directives, links, oversized source and an unsupported
+diagram directly through the canonical converter's one-shot MessageChannel,
+bypassing Studio prevalidation. It requires opaque-origin, readable rejection
+without geometry or Studio DOM execution. A third owned HTTPS canary has a
+successful browser reachability control; hostile resource successes fail in
+both browser evidence and server counters. Attempted and failed requests are
+recorded without claiming zero DNS/TCP speculation or general network silence.
+It mocks no API responses and creates no Docker or persistent dev resources.
+
+```bash
+crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_BOARD_MERMAID_BROWSER=1 go test -tags board_mermaid_workflow_browser ./internal/api -run '^TestBoardMermaidWorkflowBrowser$' -count=1 -timeout 6m
+```
+
+Build the real static export first. Missing Chromium, export or opt-in fails;
+`CREWSHIP_BOARD_MERMAID_OUTPUT` selects the evidence directory. Synthetic session
+credentials remain in a private temporary file removed by the Go fixture.
+
+`acceptance-folder-tree-browser.mjs` is called only by the opt-in Linux
+`TestFolderTreeBrowser` fixture after a real `pnpm build`. It exercises folder
+creation, nesting, reparenting, reload, hidden ancestors and revocation through
+the production Router with synthetic preauthenticated sessions; no HTTP mocks,
+shared instance or execution containers. Run through `crewship-heavy`:
+`crewship-heavy env CREWSHIP_FOLDER_TREE_BROWSER=1 go test -tags folder_tree_browser ./internal/api
+-run '^TestFolderTreeBrowser$' -count=1 -timeout 6m`.
+Missing prerequisites fail explicitly; `conformance` vet compiles but does not
+execute this browser fixture.
+
+`CREWSHIP_FOLDER_TREE_OUTPUT` optionally selects an owned retained directory for
+synthetic tree screenshots, reader-filtered JSON and report. The report records
+current source head/dirty state; capture evidence does not establish deployed or
+live WebSocket behavior. Keep this directory outside the public source tree.
+- `check-slide-mutations.ts` + `slide-mutation-contract/`: execute TS-planned native Slides mutations through actual Go strict decode/semantic apply/canonical output; run through `crewship-heavy pnpm exec tsx scripts/check-slide-mutations.ts`.
+- `acceptance-slides-workflow-browser.mjs`: opt-in `slides_workflow_browser` real Router/DB/production static native Slides human flow using owned synthetic sessions; not login/model acceptance. Captures private evidence under operator-selected output.
+
+- `acceptance-docs-rich-browser.mjs`: opt-in `docs_rich_browser` actual Router/SQLite/managed Node/static editor flow with two distinct synthetic human identities. Run after production export through `crewship-heavy env CREWSHIP_DOCS_RICH_BROWSER=1 go test -tags docs_rich_browser ./internal/api -run '^TestDocumentsRichBrowser$' -count=1 -timeout 6m`. Set `CREWSHIP_DOCS_RICH_OUTPUT` to an owned private evidence directory. Covers exact upgrade retry, durable links/code, schema2/3 checkpoint restore and revocation draft retention; no response mocks or model claim.
+- `acceptance-slides-comments-browser.mjs`: opt-in `slides_comments_browser` actual Router/SQLite/static native comments flow with distinct synthetic COMMENT and WRITE humans. Run after production export through `crewship-heavy env CREWSHIP_SLIDES_COMMENTS_BROWSER=1 go test -tags slides_comments_browser ./internal/api -run '^TestSlidesCommentsBrowser$' -count=1 -timeout 6m`. `CREWSHIP_SLIDES_COMMENTS_OUTPUT` selects a private owned evidence directory. Missing prerequisites fail; no shared login, response mocks or model claims.
+
+
+`acceptance-page-identity-browser.mjs` runs only through the owned Linux
+`TestPageIdentityBrowser` after a real static export. Synthetic sessions access
+the actual Router and database; the fixture renames the original Page and
+reuses its slug between identity resolution and detail GET. It checks refusal,
+explicit retry, canonical ID retention, clipboard, reload and leaf-folder ACL
+revocation with hidden ancestors. No API responses are mocked. Run:
+`crewship-heavy env CREWSHIP_PAGE_IDENTITY_BROWSER=1 go test -tags page_identity_browser ./internal/api -run '^TestPageIdentityBrowser$' -count=1 -timeout 6m`.
+Missing prerequisites fail. The script prints its private temporary screenshot,
+filtered identity JSON and report directory; credentials are not persisted in
+evidence. The Go fixture owns and removes its 0600 credential input.
+
+### Native search managed projection gate
+
+The native search materializer's actual Router/private Node test is selected
+explicitly, separately from `TestDocumentsFoundationRealProcesses`:
+
+```bash
+CREWSHIP_NATIVE_SEARCH_MANAGED=1 go test -tags docs_foundation ./internal/api -run '^TestNativeSearchManagedProjection$' -count=1 -timeout 5m
+```
+
+Install the frozen `tools/docs-service` dependencies first and use Node 24.21.0.
+The existing Docs foundation workflow runs this gate after its process-recovery
+test. It exercises real human CRDT updates, checkpoint restore, exact session
+revocation, final query snapshot coverage and matched Docs1/2/3 plaintext
+(including schema3 code blocks but excluding link hrefs). Legacy1 initialization
+is a trusted Node encoder/Store fixture; subsequent reads/query are real human
+HTTP operations. A green process-recovery test
+alone does not execute this search gate. On the shared development host, run
+these commands through `crewship-heavy`.
+
+### Native search browser gate
+
+`acceptance-page-search-browser.mjs` runs through Linux-only
+`TestNativeSearchBrowser` with real Router, private Node, canonical Docs/Slides
+and a built static export. It uses distinct owned synthetic human sessions,
+indexes a private matching Page as owner, tests authorized body-text results,
+immutable-ID navigation after rename/slug reuse, actual grant revocation plus
+bounded batch expiry and stopped-engine refusal. No HTTP responses are mocked.
+After frozen service/frontend installation and production export, run:
+
+```bash
+crewship-heavy env CREWSHIP_PAGE_SEARCH_BROWSER=1 go test -tags page_search_browser ./internal/api -run '^TestNativeSearchBrowser$' -count=1 -timeout 6m -v
+```
+
+Missing prerequisites fail. `CREWSHIP_PAGE_SEARCH_OUTPUT` selects an owned
+private output parent; each execution creates a fresh subdirectory. The script
+prints private report, filtered result JSON and full screenshot paths; no credentials are captured in evidence. The
+Go fixture owns and removes its 0600 credential input and private Node process.
+`acceptance-slides-selected-browser.mjs` runs only through the opt-in Linux
+`TestSlidesSelectedBrowser` fixture after a production static export. Run
+`CREWSHIP_SLIDES_SELECTED_BROWSER=1 go test -tags slides_selected_browser ./internal/api -run '^TestSlidesSelectedBrowser$'` through `crewship-heavy`, preserving the installed
+`PLAYWRIGHT_BROWSERS_PATH` when HOME is isolated. Optional
+`CREWSHIP_SLIDES_SELECTED_OUTPUT` selects owned evidence output. It serves real
+Router/SQLite/static UI with separate synthetic WRITE/READ sessions, verifies
+actual textarea selection, exact lost-ack retry, cancellation, original-revision
+conflicts and confirmed result preview. The production worker uses a deterministic
+trusted Store replacement instead of model dispatch; this is not model or new
+sidecar execution evidence. No execution containers or shared server are used.

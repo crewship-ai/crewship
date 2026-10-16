@@ -1,0 +1,153 @@
+# Managed Docs engine
+
+This standalone Node 24 service owns document computation, never SQL storage.
+It has no database mount, public listener or WebSocket endpoint. D1b exposes it through the authenticated Go Pages bridge. Go
+performs live authorization, writer fencing and durable commits for every
+operation. Run `pnpm install --frozen-lockfile` and `pnpm test` in this directory.
+The package and lockfile are independent of the D0 experiment.
+
+Set `CREWSHIP_DOCS_SOCKET`, `CREWSHIP_DOCS_AUTHORITY_SOCKET` and
+`CREWSHIP_DOCS_SERVICE_TOKEN_FILE`; the regular mode-0600 token file must be at most 512 bytes and hold a trimmed secret of 32..256 bytes. All three paths must be distinct, clean absolute paths of at most 100 bytes.
+The listener refuses an existing path and creates a mode-0600 Unix socket.
+Operators remove a stale socket only after proving its process has exited.
+Both processes must be able to access the private socket directory and secret.
+Run the container with a read-only root, private `/tmp` tmpfs, no network,
+non-root user matching the Go authority UID (image default 1001:1001), bounded memory/CPU/PIDs, and only socket directories and the
+read-only token file mounted. The Docker image intentionally publishes no port.
+
+All requests require `X-Crewship-Docs-Service`. Document requests additionally
+carry `X-Workspace-ID` and the original `Authorization: Bearer …`; Go decides
+whether the live human or agent run has permission, including whether raw
+human updates are allowed. Never expose the service directly to users.
+
+Go, Node and the packaged healthcheck open secret files once on Unix with
+no-follow/nonblocking flags, validate the opened descriptor, and read at most
+513 bytes from that descriptor. Path replacement cannot substitute a different
+file between validation and reading; growth after validation is rejected.
+
+`GET /health/live` and `/health/ready` return protocol 3, schema 2 and a SHA-256
+build identity over the lockfile, schema, service and secret-file helper. `POST /drain` stops new
+admission and waits for pending work and lease releases. SIGTERM drains and
+closes. Drain waits at most 30 seconds, then reports failure. Document requests are `POST /v1/documents/{page}/{operation}` with JSON:
+
+- `read`: `{}`.
+- `initialize`: `{id,schema,body}` with schema-valid JSON content.
+- `verify-targets`: internal human request admission only; `{base_rev,targets}`
+  verifies stable text-block IDs, original hashes, UTF-16 ranges and exact quotes
+  against confirmed state without a writer lease or content change. It returns
+  canonical text and ancestor IDs for Go's immutable request snapshot. No public
+  route exposes this operation. The original agent bearer cannot admit targets.
+- `patch`: `{id,schema,epoch,kind:"human",update}` or
+  `{id,schema,epoch,target,text,ifRev,ifHash}` for semantic replaceText.
+Semantic replacement preserves the shared prefix and suffix character identities, changing only the bounded middle interval across the paragraph’s live text children. Comment ranges use aggregate UTF-16 offsets over those children and retain per-child relative spans (at most 64 spans and 8192 encoded bytes). Reads never normalize them. Existing one-child anchors remain readable. Older engines fail closed as detached for a new cross-child anchor because its legacy start/end still belong to different text types; additive span data does not require a document-schema change (the private scope/edit contract independently requires matching protocol 3 engines).
+
+- `checkpoint`: `{id,schema,epoch,ifRev}`.
+- `restore`: `{id,schema,epoch,ifRev,checkpoint}` (checkpoint is a string ID).
+
+The authority protocol is POST `/internal/docs/v1/{page}/{operation}`, forwarding
+the same three headers. State, receipt and checkpoint-read are live authorized;
+lease/renew/release use opaque epoch-fenced leases. Initialize, commit,
+checkpoint and restore return only durable Go acknowledgements. A stable hash
+of the original request identifies retries; receipt lookup precedes mutation.
+Commit sends an incremental Yjs update, full candidate snapshot, block hashes,
+expected revision, generation, writer epoch, owner and opaque lease token. Restore delegates the
+new durable epoch to Go. An authority error never causes automatic lease theft.
+
+Admission is bounded to 32 document keys, 128 total operations and 32 per key.
+Idle keys unload after 30 seconds. Every operation reloads the Go snapshot and
+update log into an isolated Y.Doc, validates it and destroys it afterward.
+Bodies are capped at 2 MiB, authority replies at 4 MiB; each authority call has
+a 10-second timeout. No content, bearer or service secret is logged.
+
+D1b retains a fenced engine lease across document operations, renews it using
+that operation's live principal, and releases it on idle or drain. Every operation
+reloads confirmed binary state: unacknowledged content is never a shared cache.
+The public editor epoch combines a fresh Go authority identity, Node boot UUID
+and durable document generation; it is distinct from the private writer epoch.
+Restore/restart therefore resynchronizes editors, while lease acquisition alone
+does not. Startup binds the configured socket first, then calls Go's idempotent
+service-only recovery barrier. Until that acknowledgement, readiness and document
+admission fail closed. A second bind cannot fence the existing engine.
+
+Schema 2 adds bounded lists and headings 1–3. Existing schema-1 documents are
+readable and upgrade on a validated commit; future schema versions fail closed.
+Comments, checkpoint listing/reading, and Markdown projection use the same bounded
+queue and private authority. Comments check generation/revision and live comment
+permission transactionally, without acquiring a text writer lease.
+
+At most 128 document HTTP requests are admitted before decoding their bodies;
+health and drain remain responsive. Drain aborts incomplete request bodies and
+waits for queued operations and lease release, up to 30 seconds. Queue overload
+is retryable; permanent document quota refusal retains confirmed history and
+reports `document_quota` so the editor can offer recovery without repeated writes.
+
+Mode-0600 socket and secret access requires both processes to run as the same UID.
+The image defaults to Go container UID 1001. For a development authority running
+as the host user, override the container user with that host UID/GID.
+
+`compose.yaml` is an optional, default-off `docs` profile. Set `DOCS_IMAGE` to a
+qualified immutable image reference (for example, a registry image pinned by
+`@sha256:…`) after building and qualifying that image. The Compose file does not
+build or select an image automatically. Set the required matching UID/GID,
+private socket directories and mode-0600 secret file before enabling the profile.
+
+The local image build attempt exited 125 in the shared heavy-job gateway without
+build output. D1a subsequently qualified an actual built image in CI. That result applies to
+its exact source/image; the changed D1b engine needs its own image workflow run.
+Passing native Node and Go process tests alone does not qualify a Docker image.
+
+Node 24's native Unix listener removes its configured socket pathname when it
+closes, even if another process replaced that path. A dedicated private socket
+directory is therefore a support boundary: operators must not replace or remove
+the socket while the service process is alive. There is no custody guarantee
+against replacement by another actor able to write that directory. The service
+adds no separate unlink on shutdown. Container image smoke qualification is scoped to the workflow below; it does
+not qualify an Ansible deployment or published immutable registry image.
+
+The supplemental `Docs foundation` workflow builds this Dockerfile and runs
+`DOCS_IMAGE=<local-image> node tools/docs-service/image-smoke.mjs` against that
+exact image. The smoke uses a private, controlled authority fixture to exercise
+matching-UID mode-0600 access, the packaged healthcheck, unavailable-authority
+readiness, drain and graceful container restart with a read-only filesystem and
+no network. It does not prove Go durability or power-loss behavior; the separate
+real Go/Node process integration covers persistence and process crashes.
+
+The native suite also holds an authority response until explicitly released,
+proves the 32-operation per-document queue rejects overflow, and verifies that
+drain waits for all admitted failed responses. This is controlled downstream
+backpressure and failure injection, not a slow-disk throughput measurement.
+
+Private protocol 3 requires an explicit protocol-3 recovery request and acknowledgement before admission. Protocol 3 adds private immutable request scope to authorized state and requires semantic edit interval metadata; mismatched engines fail before recovery. The current matched pair also negotiates explicit latest content capability3 before recovery. A protocol3 pair with missing/older/newer content capability fails before fencing. Stored schema1/2 binary, canonical hashes and checkpoint source versions remain readable; no read upgrades them.
+
+Schema3 adds closed HTTP(S) link and inline code marks plus plain code blocks.
+Explicit human upgrade binds the original Page ID, revision and synchronization
+epoch; it advances revision/generation atomically without rewriting the old Yjs
+binary. Restore uses the actual checkpoint schema and rotates the writer fence.
+An authorized WRITE→READ principal may read their own existing durable receipt
+without creating another mutation; a fresh upgrade requires live write authority.
+Full access/session revocation denies both reads and receipt replay. Schema3
+initialization and upgrades are human-only at both the engine and Go authority.
+
+For schema3 semantic commits, the trusted engine supplies private `semantic.rich`
+`before`/`after` document JSON, never client-supplied scope. Each proof is bounded
+to500000UTF8 bytes and the existing private HTTP body limit remains3MiB. Go checks
+closed root/unique IDs/bounded tree and authenticates every nontext FULL subtree
+hash in exact preorder against the stored projection and candidate projection.
+This covers ancestor attributes and root ordering, not only leaf text hashes.
+Go reconstructs only the supplied UTF16 edit in the target paragraph/heading,
+inserts plain text, and compares the entire candidate tree. Adjacent equal-mark
+text fragments and absent/empty text-content lists are normalized only for this
+comparison; Yjs bytes, character IDs, marks outside the edit and stored hashes
+are never normalized or rewritten. The existing immutable request guard runs in
+the same writer transaction after this proof; fresh preconditions cannot expand
+an original selection. The engine remains the trusted binary validator: Go does
+not decode Yjs or infer hidden retained structs from visible JSON.
+
+The schema3 generic semantic path is covered by actual separate Go/Node process
+tests. Selected schema3 request admission freezes the canonical content version in
+the server-owned target snapshot. The worker uses that original version and Page
+ID; subsequent upgrade/restore/human edits cannot refresh the original revision.
+Actual engine admission, scoped patch/checkpoint/replay and human-edit denial are
+covered by the opt-in process suite; no model completion is simulated. Images are unsupported by3 and
+require a separate future schema4 contract. No export fidelity or model-run
+acceptance follows from these protocol tests.

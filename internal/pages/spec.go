@@ -413,7 +413,13 @@ func trailingIsEmpty(d Document) bool {
 
 // Validate checks the document's shape and every declared limit. It resolves
 // nothing: whether crew/lookout exists is the handler's question.
-func (d *Document) Validate() error {
+func (d *Document) Validate() error { return d.validate(false) }
+
+// ValidateEmpty permits a staged human Page with no panels, before its first
+// artifact revision. Manifest/panel validation keeps requiring a panel.
+func (d *Document) ValidateEmpty() error { return d.validate(true) }
+
+func (d *Document) validate(allowEmpty bool) error {
 	if d.APIVersion != DocumentAPIVersion {
 		return newError(CodeInvalidSpec, "", "apiVersion %q; want %q", d.APIVersion, DocumentAPIVersion)
 	}
@@ -435,7 +441,7 @@ func (d *Document) Validate() error {
 	}
 
 	switch {
-	case len(d.Spec.Panels) == 0:
+	case len(d.Spec.Panels) == 0 && !allowEmpty:
 		return newError(CodeInvalidSpec, "",
 			"a page needs at least one panel; there is nothing to render and nothing to push to")
 	case len(d.Spec.Panels) > MaxPanelsPerPage:

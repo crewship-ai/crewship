@@ -82,6 +82,24 @@ function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
 }
 
+// Capture the authority the person reviewed; a refetch must not rebase intent.
+interface FolderTreeFence {
+  id: string
+  slug: string
+  treeVersion: number
+  aclVersion: number
+}
+
+function treeFence(folder: PageFolderView | null | undefined): FolderTreeFence | null {
+  if (!folder || typeof folder.treeVersion !== "number" || typeof folder.aclVersion !== "number") return null
+  return { id: folder.id, slug: folder.slug, treeVersion: folder.treeVersion, aclVersion: folder.aclVersion }
+}
+
+function sameTreeFence(snapshot: FolderTreeFence | null, current: PageFolderView | undefined): boolean {
+  return snapshot !== null && current?.id === snapshot.id && current.slug === snapshot.slug &&
+    current.treeVersion === snapshot.treeVersion && current.aclVersion === snapshot.aclVersion
+}
+
 // ── New folder / Rename ────────────────────────────────────────────────────
 
 export interface FolderEditDialogProps {
@@ -105,6 +123,11 @@ export function FolderEditDialog({
   onSaved,
 }: FolderEditDialogProps) {
   const creating = folder === null
+  const availableFolders = usePageFolders(workspaceId, open && creating)
+  const [parent, setParent] = React.useState("")
+  const [parentFence, setParentFence] = React.useState<FolderTreeFence | null>(null)
+  const parentFolder = availableFolders.folders.find((candidate) => candidate.slug === parent)
+  const staleParent = parent !== "" && (!sameTreeFence(parentFence, parentFolder) || parentFolder?.canAcceptFolders !== true)
   const [name, setName] = React.useState(folder?.name ?? "")
   const [owner, setOwner] = React.useState<string>(folder?.ownerRef ?? defaultOwner ?? "")
   const [icon, setIcon] = React.useState<string | null>(folder?.icon ?? null)
@@ -119,6 +142,8 @@ export function FolderEditDialog({
     setOwner(folder?.ownerRef ?? defaultOwner ?? "")
     setIcon(folder?.icon ?? null)
     setColor(folder?.color ?? null)
+    setParent("")
+    setParentFence(null)
     setRefusal(null)
   }, [open, folder, defaultOwner])
 
@@ -140,14 +165,23 @@ export function FolderEditDialog({
   const dirty = creating
     ? trimmedName !== "" || icon !== null || color !== null
     : trimmedName !== folder.name || icon !== folder.icon || color !== folder.color
-  const submittable = trimmedName !== "" && (creating ? owner !== "" : dirty) && !busy
+  const submittable = trimmedName !== "" && !busy && (creating
+    ? owner !== "" && (!parent || (parentFence !== null && !staleParent))
+    : dirty)
 
   const submit = async () => {
     if (!submittable) return
     setRefusal(null)
     try {
       const saved = creating
-        ? await create.mutateAsync({ name: trimmedName, owner, icon, color })
+        ? await create.mutateAsync({
+            name: trimmedName, owner, icon, color,
+            ...(parent && parentFence ? {
+              parent: parentFence.slug,
+              treeVersion: parentFence.treeVersion,
+              aclVersion: parentFence.aclVersion,
+            } : {}),
+          })
         : await update.mutateAsync({
             slug: folder.slug,
             ...(trimmedName !== folder.name ? { name: trimmedName } : {}),
@@ -228,6 +262,30 @@ export function FolderEditDialog({
             )}
           </CreateSurfaceField>
 
+          {creating && (
+            <CreateSurfaceField label="Parent folder" hint="Nesting changes organization. Each folder keeps its own sharing.">
+              <select aria-label="Parent folder" className={SELECT_CLASS} value={parent} onChange={(event) => {
+                const chosen = availableFolders.folders.find((candidate) => candidate.slug === event.target.value)
+                setParent(event.target.value)
+                setParentFence(treeFence(chosen))
+                setRefusal(null)
+              }}>
+                <option value="">Workspace root</option>
+                {availableFolders.folders.filter((candidate) => candidate.canAcceptFolders === true)
+                  .map((candidate) => <option key={candidate.id} value={candidate.slug}>{candidate.name}</option>)}
+              </select>
+              {staleParent && (
+                <div role="alert" className="mt-2 text-xs">
+                  Folder organization or sharing changed. Review the updated folders before confirming.
+                  <Button type="button" variant="outline" size="sm" className="mt-2"
+                    disabled={parentFolder?.canAcceptFolders !== true}
+                    onClick={() => setParentFence(treeFence(parentFolder))}>
+                    Review updated folders
+                  </Button>
+                </div>
+              )}
+            </CreateSurfaceField>
+          )}
           <CreateSurfaceField label="Icon and colour">
             <div className="flex items-center gap-3">
               {icon ? (
@@ -325,7 +383,7 @@ export function FolderDeleteDialog({ workspaceId, open, onOpenChange, folder, on
                 nothing is in it — pages are never deleted with it.
               </>
             ) : (
-              <>The folder is removed from the list. It holds no page you can see; pages are never deleted with a folder.</>
+              <>The folder is removed only when it has no pages or child folders, including those you cannot see. Move them out first; contents are never deleted with a folder.</>
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -610,6 +668,91 @@ export function MoveToFolderDialog({ workspaceId, open, onOpenChange, subject, s
         primaryDisabled={!submittable}
         busy={busy}
         guardCancel={false}
+      />
+    </CreateSurface>
+  )
+}
+
+
+export function ReparentFolderDialog({
+  workspaceId,
+  folder,
+  onOpenChange,
+}: {
+  workspaceId: string
+  folder: PageFolderView | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const list = usePageFolders(workspaceId)
+  const writes = usePageFolderMutations(workspaceId)
+  const [parent, setParent] = React.useState("")
+  const [refusal, setRefusal] = React.useState<string | null>(null)
+  const [sourceFence, setSourceFence] = React.useState(() => treeFence(folder))
+  const [targetFence, setTargetFence] = React.useState<FolderTreeFence | null>(null)
+  const target = list.folders.find((candidate) => candidate.slug === parent)
+  const stale = !sameTreeFence(sourceFence, folder ?? undefined) || folder?.canReparent !== true ||
+    (parent !== "" && (!sameTreeFence(targetFence, target) || target?.canAcceptFolders !== true))
+  const ready = sourceFence !== null && !stale && !writes.reparent.isPending
+  const review = () => {
+    setSourceFence(treeFence(folder))
+    setTargetFence(treeFence(target))
+    setRefusal(null)
+  }
+  const submit = async () => {
+    if (!ready || !sourceFence || (parent && !targetFence)) return
+    setRefusal(null)
+    try {
+      await writes.reparent.mutateAsync({
+        slug: sourceFence.slug,
+        parent: targetFence && parent ? targetFence.slug : null,
+        treeVersion: sourceFence.treeVersion,
+        ...(parent && targetFence ? { aclVersion: targetFence.aclVersion } : {}),
+      })
+      onOpenChange(false)
+    } catch (error) {
+      setRefusal(messageOf(error, "The folder could not be moved."))
+    }
+  }
+  return (
+    <CreateSurface open onOpenChange={onOpenChange} size="sm" onSubmit={() => void submit()}>
+      <CreateSurfaceHeader
+        concept="pages"
+        title="Move folder"
+        context={folder?.name}
+        description="Pages keep their identity and sharing. Parent folders do not add access."
+        onClose={() => onOpenChange(false)}
+      />
+      <CreateSurfaceBody>
+        <CreateSurfaceField label="New parent">
+          <select aria-label="New parent" className={SELECT_CLASS} value={parent} onChange={(event) => {
+            const chosen = list.folders.find((candidate) => candidate.slug === event.target.value)
+            setParent(event.target.value)
+            setTargetFence(treeFence(chosen))
+            setRefusal(null)
+          }}>
+            <option value="">Workspace root</option>
+            {list.folders.filter((candidate) => candidate.canAcceptFolders === true && candidate.id !== folder?.id)
+              .map((candidate) => <option key={candidate.id} value={candidate.slug}>{candidate.name}</option>)}
+          </select>
+        </CreateSurfaceField>
+        {stale && (
+          <div role="alert" className="mt-2 text-xs">
+            Folder organization or sharing changed. Review the updated folders before confirming.
+            <Button type="button" variant="outline" size="sm" className="mt-2"
+              disabled={folder?.canReparent !== true || (parent !== "" && target?.canAcceptFolders !== true)}
+              onClick={review}>
+              Review updated folders
+            </Button>
+          </div>
+        )}
+      </CreateSurfaceBody>
+      <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
+      <CreateSurfaceFooter
+        onCancel={() => onOpenChange(false)}
+        primaryLabel="Move folder"
+        onPrimary={() => void submit()}
+        primaryDisabled={!ready}
+        busy={writes.reparent.isPending}
       />
     </CreateSurface>
   )

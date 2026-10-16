@@ -16,6 +16,7 @@ type unauthenticatedOperation struct {
 }
 
 var expectedUnauthenticatedOperations = []unauthenticatedOperation{
+	{"GET", "/api/v1/pages/runtime/board-converter", "constant converter HTML only on the configured cross-site runtime Host; no database or tenant content; parent-origin and MessagePort handshake protect browser initialization"},
 	{"GET", "/api/v1/pages/runtime/bootstrap", "constant public HTML on the configured runtime Host; no DB, user data, project source or artifacts; initialization requires the configured Studio parent"},
 	{"GET", "/api/health", "liveness probe must work before login"},
 	{"POST", "/api/v1/auth/forgot", "starts account recovery before login"},

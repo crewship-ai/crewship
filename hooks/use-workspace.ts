@@ -31,6 +31,8 @@ export interface WorkspaceData {
 }
 
 interface UseWorkspaceReturn {
+  /** Authenticated directory owner; never a credential or session token. */
+  readonly userId?: string | null
   workspaceId: string | null
   workspaceUnavailable: boolean
   workspace: WorkspaceData | null
@@ -256,6 +258,7 @@ export function useWorkspace(): UseWorkspaceReturn {
   const workspace = state.workspaces.find((w) => w.id === state.currentId) ?? null
 
   return {
+    userId: sessionIdentity ?? null,
     workspaceId: state.currentId,
     workspaceUnavailable: state.currentId !== null && workspace === null && !state.loading,
     workspace,

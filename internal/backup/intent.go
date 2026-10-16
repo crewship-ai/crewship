@@ -36,6 +36,26 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"page_search_projections":  IntentExcludeRuntime, // authorized read-through derived text; rebuild from canonical native heads
+	"page_search_writer_fence": IntentExcludeRuntime, // installation-local cache serialization singleton
+	"slides_requests":          IntentInclude, "slides_request_events": IntentInclude, "slides_request_receipts": IntentInclude,
+	"slides_comment_threads": IntentInclude, "slides_comment_events": IntentInclude, "slides_comment_receipts": IntentInclude,
+	"slides_revision_assets": IntentInclude, "slides_heads": IntentInclude, "slides_revisions": IntentInclude, "slides_receipts": IntentInclude, "slides_object_ids": IntentInclude,
+	"slides_writer_fence":   IntentExcludeRuntime,
+	"documents":             IntentInclude,
+	"document_comments":     IntentInclude,
+	"document_requests":     IntentInclude, // durable history; restore clears live dispatch authority
+	"document_updates":      IntentInclude,
+	"document_receipts":     IntentInclude,
+	"document_checkpoints":  IntentInclude,
+	"document_writer_fence": IntentExcludeRuntime, // installation-local SQL serialization singleton
+
+	"artifact_workspace_writes":             IntentExcludeRuntime, // per-installation rolling write-rate receipts are initialized anew on restore
+	"artifact_creation_authorizations":      IntentExcludeRuntime, // explicit live-run creation opt-in must not survive restore
+	"page_artifact_request_updates":         IntentInclude,        // immutable typed progress/reply history, never live authority
+	"page_artifact_requests":                IntentInclude,        // history restored with live dispatch authority cleared
+	"artifact_run_principals":               IntentExcludeRuntime, // active chat/run admission must be freshly captured after restore
+	"page_artifact_run_delegations":         IntentExcludeRuntime, // restoring history must never resurrect a live run's publication authority
 	"restricted_workflow_recipe_bindings":   IntentExcludeRuntime, // frozen private recipe authority requires fresh admission after restore
 	"restricted_workflow_provider_policies": IntentExcludeRuntime, // immutable provider policies belong to private queued authority
 	"restricted_workflow_delegate_slots":    IntentExcludeRuntime, // active host delegation slots cannot survive restore
@@ -68,22 +88,24 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"workspace_conversation_outbox":        IntentInclude,
 
 	// === Core entities (round-trip) =========================
-	"crews":                    IntentInclude,
-	"environment_revisions":    IntentInclude,        // provenance only; does not restore images or grant execution authority
-	"service_operation_leases": IntentExcludeRuntime, // host provider admissions cannot be restored
-	"service_backup_fences":    IntentExcludeRuntime, // host maintenance fences cannot be transplanted
-	"service_runtime_intents":  IntentInclude,        // Durable user-requested service state.
-	"agents":                   IntentInclude,
-	"agent_skills":             IntentInclude,
-	"agent_slug_reservations":  IntentInclude, // restored crew data under a slug stays out of reach of a new agent
-	"crew_members":             IntentInclude,
-	"chats":                    IntentInclude,
-	"agent_operations":         IntentInclude, // durable mutation results and provenance; not a bearer authority
-	"issue_mutation_outbox":    IntentInclude, // source-transaction delivery intent; forks never resume effects
-	"chat_entity_refs":         IntentInclude, // durable chat cards, including human deletion receipts
-	"execution_origins":        IntentInclude, // durable provenance; a fork strips its admission receipt
-	"agent_mcp_bindings":       IntentInclude,
-	"journal_entries":          IntentInclude,
+	"workspace_artifact_creation_policy": IntentInclude,
+	"workspace_artifact_creation_crews":  IntentInclude,
+	"crews":                              IntentInclude,
+	"environment_revisions":              IntentInclude,        // provenance only; does not restore images or grant execution authority
+	"service_operation_leases":           IntentExcludeRuntime, // host provider admissions cannot be restored
+	"service_backup_fences":              IntentExcludeRuntime, // host maintenance fences cannot be transplanted
+	"service_runtime_intents":            IntentInclude,        // Durable user-requested service state.
+	"agents":                             IntentInclude,
+	"agent_skills":                       IntentInclude,
+	"agent_slug_reservations":            IntentInclude, // restored crew data under a slug stays out of reach of a new agent
+	"crew_members":                       IntentInclude,
+	"chats":                              IntentInclude,
+	"agent_operations":                   IntentInclude, // durable mutation results and provenance; not a bearer authority
+	"issue_mutation_outbox":              IntentInclude, // source-transaction delivery intent; forks never resume effects
+	"chat_entity_refs":                   IntentInclude, // durable chat cards, including human deletion receipts
+	"execution_origins":                  IntentInclude, // durable provenance; a fork strips its admission receipt
+	"agent_mcp_bindings":                 IntentInclude,
+	"journal_entries":                    IntentInclude,
 	// Replay receipts authenticate execution against this installation's
 	// protected spool and run identities, which workspace bundles do not carry.
 	// Their opaque fingerprints cannot be re-keyed for a forked workspace.
@@ -175,14 +197,44 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// page_folders is how a workspace files its pages (#2527); a restore
 	// that dropped it would hand every page back Unfiled, and pages.folder_id
 	// points at it, so it cannot be left out without breaking the FK either.
-	"page_folders": IntentInclude,
+	"page_folder_structure": IntentInclude,
+	"page_folders":          IntentInclude,
 	// page_folder_acl is the folder's sharing (#2533), inherited by every
 	// page in it: a restore that lost it would silently narrow who reaches
 	// those pages, the same audit-trail loss page_grants guards against.
-	"page_folder_acl": IntentInclude,
-	"pages":           IntentInclude,
-	"page_panels":     IntentInclude,
-	"page_versions":   IntentInclude,
+	"page_folder_acl":                 IntentInclude,
+	"pages":                           IntentInclude,
+	"page_panels":                     IntentInclude,
+	"page_versions":                   IntentInclude,
+	"page_boards":                     IntentInclude,
+	"page_board_files":                IntentInclude,
+	"page_board_element_permissions":  IntentExcludeRuntime, // Live one-batch human-element authority is never restored.
+	"page_board_run_delegations":      IntentExcludeRuntime, // live run edit authority is never restored
+	"page_board_elements":             IntentInclude,
+	"page_board_mutations":            IntentInclude,
+	"page_board_artifact_placements":  IntentInclude,
+	"page_assets":                     IntentInclude,
+	"page_artifacts":                  IntentInclude,
+	"page_artifact_mutation_receipts": IntentInclude,
+	"page_artifact_creations":         IntentInclude,
+	"page_artifact_revisions":         IntentInclude,
+	"page_board_source_history":       IntentInclude,
+	"page_board_write_audit":          IntentInclude,
+	"page_board_request_previews":     IntentInclude,
+	"page_board_requests":             IntentInclude,
+	"page_board_request_files":        IntentInclude,
+	"page_board_request_sources":      IntentInclude,
+	"page_board_threads":              IntentInclude,
+	"page_board_comment_history":      IntentInclude,
+	"page_board_comment_reactions":    IntentInclude,
+	"page_board_comments":             IntentInclude,
+	"page_board_comment_mutations":    IntentInclude,
+	"page_artifact_threads":           IntentInclude,
+	"page_artifact_copies":            IntentInclude,
+	"page_artifact_comment_history":   IntentInclude,
+	"page_artifact_comment_reactions": IntentInclude,
+	"page_artifact_comments":          IntentInclude,
+	"page_artifact_comment_mutations": IntentInclude,
 	// Durable draft metadata and revision audit. Source files live outside
 	// SQLite; until file-phase integration, back up page_projects_path alongside
 	// the DB (docs/prd/pages-apps-v1.md). Never silently drop the metadata.

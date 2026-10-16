@@ -108,3 +108,15 @@ func TestPendingMigrationDiagnosticsDistinguishFreshEmptyAndBrokenLedger(t *test
 	_, _, _, err = PendingMigrations(context.Background(), db)
 	require.Error(t, err)
 }
+
+func TestPendingMigrationsCountsUnappliedVersionsBelowMaximum(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "source.db"))
+	require.NoError(t, err)
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE _migrations(version INTEGER); INSERT INTO _migrations VALUES(123),(125)`)
+	require.NoError(t, err)
+	usePostDeployRegistry(t, []migration{{version: 123}, {version: 124}, {version: 125}, {version: 126}})
+	from, to, pending, err := PendingMigrations(t.Context(), db)
+	require.NoError(t, err)
+	require.Equal(t, []int{125, 126, 2}, []int{from, to, pending}, "the pre-upgrade snapshot must cover holes in the migration ledger")
+}

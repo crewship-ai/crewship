@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // replace.go — implementation of `--replace` restore mode.
@@ -37,7 +38,8 @@ import (
 //     once their intent is declared.
 //   - DELETE order is REVERSE FK dependency: children before parents
 //     so FK constraints don't fire. resolveDeletionOrder uses the
-//     same JoinPath introspection the dump uses.
+//     same JoinPath introspection the dump uses. Native Slides are the explicit
+//     exception: retained children delete only through their owning head graph.
 //   - All inside the caller-supplied transaction so a failure rolls
 //     back cleanly.
 
@@ -82,7 +84,8 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 		return nil, err
 	}
 	// DELETE in FK-safe topological order: children before parents
-	// so PK-cascade rules don't fire. Heuristic depth-sort was a
+	// after the retained Slides graph has cascaded through its owning head.
+	// Heuristic depth-sort was a
 	// crutch — defer_foreign_keys hid the ordering bug. Real
 	// topological sort means we can drop defer_foreign_keys later.
 	order, err := resolveDeletionOrder(ctx, tx, include)
@@ -90,7 +93,10 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 		return nil, err
 	}
 
-	deleted := map[string]int{}
+	deleted, err := deleteSlidesGraphForReplace(ctx, tx, include, targetIDs)
+	if err != nil {
+		return nil, err
+	}
 	for _, st := range order {
 		expr, args := st.WorkspaceScopeFilterIDs(targetIDs)
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", quoteIdent(st.Name), expr)
@@ -99,7 +105,7 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 			return nil, fmt.Errorf("backup: replace delete from %s: %w", st.Name, err)
 		}
 		if n, err := res.RowsAffected(); err == nil && n > 0 {
-			deleted[st.Name] = int(n)
+			deleted[st.Name] += int(n)
 		}
 	}
 
@@ -126,6 +132,56 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 	}
 	if n, err := res.RowsAffected(); err == nil && n > 0 {
 		deleted["workspaces"] = int(n)
+	}
+	return deleted, nil
+}
+
+// Native Slides retain immutable children until their owning head/revision is
+// actually deleted. A whole-workspace replace intentionally replaces that owned
+// graph, so delete its root before the generic children-first loop. Pages and
+// grants are left to the existing mapping/order; no trigger or FK is disabled.
+func deleteSlidesGraphForReplace(ctx context.Context, tx *sql.Tx, include []ScopedTable, targetIDs []string) (map[string]int, error) {
+	deleted := map[string]int{}
+	var head *ScopedTable
+	for i := range include {
+		if include[i].Name == "slides_heads" {
+			head = &include[i]
+			break
+		}
+	}
+	if head == nil {
+		return deleted, nil
+	}
+	before := map[string]int{}
+	count := func(st ScopedTable) (int, error) {
+		expr, args := st.WorkspaceScopeFilterIDs(targetIDs)
+		var n int
+		err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+quoteIdent(st.Name)+" WHERE "+expr, args...).Scan(&n)
+		return n, err
+	}
+	for _, st := range include {
+		if strings.HasPrefix(st.Name, "slides_") {
+			n, err := count(st)
+			if err != nil {
+				return nil, fmt.Errorf("backup: count Slides graph for replace: %w", err)
+			}
+			before[st.Name] = n
+		}
+	}
+	expr, args := head.WorkspaceScopeFilterIDs(targetIDs)
+	if _, err := tx.ExecContext(ctx, "DELETE FROM "+quoteIdent(head.Name)+" WHERE "+expr, args...); err != nil {
+		return nil, fmt.Errorf("backup: replace owned Slides graph: %w", err)
+	}
+	for _, st := range include {
+		if n, ok := before[st.Name]; ok {
+			after, err := count(st)
+			if err != nil {
+				return nil, err
+			}
+			if n > after {
+				deleted[st.Name] = n - after
+			}
+		}
 	}
 	return deleted, nil
 }

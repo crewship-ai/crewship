@@ -20,7 +20,6 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	if migrationRegistryErr != nil {
 		return fmt.Errorf("migration registry is invalid, refusing to migrate: %w", migrationRegistryErr)
 	}
-
 	if err := ensureMigrationsTable(ctx, db); err != nil {
 		return err
 	}

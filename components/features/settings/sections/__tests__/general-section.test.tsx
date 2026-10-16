@@ -9,6 +9,10 @@ import { GeneralSection } from "../general-section"
 // rest of settings copies from: nothing typed = nothing on screen, one write
 // per Save, and a failed write never eats what someone typed.
 
+vi.mock("@/components/features/settings/sections/page-ownership-card", () => ({
+  PageOwnershipCard: () => <div data-testid="page-ownership-card" />,
+}))
+
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a) }))
 
@@ -16,6 +20,12 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a
 // here it only has to prove it landed on this section.
 vi.mock("@/components/features/settings/sections/privileged-credentials-card", () => ({
   PrivilegedCredentialsCard: () => <div data-testid="privileged-credentials-card" />,
+}))
+
+// Artifact policy has independent query/permission tests; these exercise the
+// Identity/delete card and must not consume its API responses.
+vi.mock("@/components/features/settings/sections/artifact-creation-policy-card", () => ({
+  ArtifactCreationPolicyCard: () => <div data-testid="artifact-creation-policy-card" />,
 }))
 
 const onUpdated = vi.fn()

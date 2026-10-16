@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/slides"
 )
 
 // BackupTables is the ordered list of tables exported in workspace /
@@ -100,6 +102,8 @@ var BackupTables = []string{
 	"skills",
 	// Depth 1: direct workspace_id children
 	"crews",
+	"workspace_artifact_creation_policy",
+	"workspace_artifact_creation_crews",
 	"environment_revisions",
 	"service_runtime_intents",
 	"chats",
@@ -306,12 +310,51 @@ var BackupTables = []string{
 	// depend on `crews` and `pipeline_runs` already being restored —
 	// page_panels.owner_crew_id and page_panel_data.producer_run_id are
 	// real foreign keys, and pages.owner_user_id is ON DELETE RESTRICT.
+	"page_folder_structure",
 	"page_folders",    // pages.folder_id → page_folders, so folders land first; FK owner_crew_id → crews
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
-	"page_panels",               // FK page_id → pages; FK owner_crew_id → crews
-	"page_panel_data",           // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
-	"page_versions",             // FK page_id → pages
+	"slides_heads", "slides_revisions", "slides_revision_assets", "slides_receipts", "slides_object_ids",
+	"slides_comment_threads", "slides_comment_events", "slides_comment_receipts",
+	"slides_requests", "slides_request_events", "slides_request_receipts",
+	"documents",
+	"document_updates",
+	"document_receipts",
+	"document_checkpoints",
+	"document_comments",
+	"document_requests",
+	"page_panels",     // FK page_id → pages; FK owner_crew_id → crews
+	"page_panel_data", // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
+	"page_versions",   // FK page_id → pages
+	"page_assets",
+	"page_artifacts",
+	"page_artifact_revisions",
+	"page_artifact_creations",
+	"page_artifact_copies",
+	"page_artifact_mutation_receipts",
+	"page_artifact_requests",
+	"page_artifact_request_updates",
+	"page_board_threads",
+	"page_board_comments",
+	"page_board_comment_history",
+	"page_board_comment_reactions",
+	"page_board_comment_mutations",
+	"page_artifact_threads",
+	"page_artifact_comments",
+	"page_artifact_comment_history",
+	"page_artifact_comment_reactions",
+	"page_artifact_comment_mutations",
+	"page_boards",
+	"page_board_files",
+	"page_board_requests",
+	"page_board_request_previews",
+	"page_board_request_files",
+	"page_board_request_sources",
+	"page_board_elements",
+	"page_board_artifact_placements",
+	"page_board_mutations",
+	"page_board_write_audit",
+	"page_board_source_history",
 	"page_project_builds",       // FK page_id → pages; nullable requested_by → users
 	"page_project_publications", // Build and Page rows precede immutable publications.
 	"page_project_live",
@@ -458,9 +501,25 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "pipeline_run_step_outputs", "pipeline_step_executions", "pipeline_run_artifacts":
 		// No workspace_id column — scoped via its run.
 		return "run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
+	case "page_artifact_copies":
+		return "workspace_id = ?", []any{workspaceID}, true
+	case "page_board_source_history", "page_board_write_audit", "page_board_files", "page_board_elements", "page_board_mutations", "page_board_artifact_placements":
+		return "board_page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "page_assets", "document_requests", "page_board_comment_history", "page_artifact_comment_history", "page_board_threads", "page_board_comment_mutations", "page_boards", "page_artifact_mutation_receipts", "page_artifact_requests", "page_artifact_creations", "page_artifact_threads", "page_artifact_comment_mutations", "page_artifacts", "page_artifact_revisions", "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
 		// Scope through the owning page, never the nullable (or cross-workspace) editor.
 		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "page_artifact_request_updates":
+		return "request_id IN (SELECT q.id FROM page_artifact_requests q JOIN pages p ON p.id=q.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
+	case "page_board_request_previews", "page_board_request_files", "page_board_request_sources":
+		return "request_id IN (SELECT q.id FROM page_board_requests q WHERE q.workspace_id=?)", []any{workspaceID}, true
+	case "page_board_comments":
+		return "thread_id IN (SELECT t.id FROM page_board_threads t JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
+	case "page_board_comment_reactions":
+		return "comment_id IN (SELECT c.id FROM page_board_comments c JOIN page_board_threads t ON t.id=c.thread_id JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
+	case "page_artifact_comment_reactions":
+		return "comment_id IN (SELECT c.id FROM page_artifact_comments c JOIN page_artifact_threads t ON t.id=c.thread_id JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
+	case "page_artifact_comments":
+		return "thread_id IN (SELECT t.id FROM page_artifact_threads t JOIN pages p ON p.id=t.page_id WHERE p.workspace_id=?)", []any{workspaceID}, true
 	case "pipeline_versions":
 		// Human/autonomous historical versions have no execution origin. Scope
 		// through the owning routine, never the optional admission fence.
@@ -638,6 +697,28 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 				where = "(" + where + `) OR id IN (SELECT user_id FROM workspace_members WHERE workspace_id = ?)`
 				args = append(args, workspaceID)
 			}
+			// Immutable update attribution may outlive workspace membership.
+			hasUpdates, err := tableExists(ctx, tx, "page_artifact_request_updates")
+			if err != nil {
+				return nil, fmt.Errorf("backup: probe artifact update attribution: %w", err)
+			}
+			if hasUpdates {
+				where = "(" + where + `) OR id IN (SELECT u.on_behalf_of_user_id FROM page_artifact_request_updates u JOIN page_artifact_requests q ON q.id=u.request_id JOIN pages p ON p.id=q.page_id WHERE p.workspace_id=? AND u.on_behalf_of_user_id IS NOT NULL)`
+				args = append(args, workspaceID)
+			}
+			// Document request attribution can also outlive membership.
+			hasDocumentRequests, err := tableExists(ctx, tx, "document_requests")
+			if err != nil {
+				return nil, fmt.Errorf("backup: probe document request attribution: %w", err)
+			}
+			if hasDocumentRequests {
+				where = "(" + where + `) OR id IN (SELECT q.human_user_id FROM document_requests q JOIN pages p ON p.id=q.page_id WHERE p.workspace_id=?)`
+				args = append(args, workspaceID)
+			}
+			where, args, err = includeDiscussionUsers(ctx, tx, workspaceID, where, args)
+			if err != nil {
+				return nil, err
+			}
 			where, args, err = includeConversationUsers(ctx, tx, workspaceID, where, args)
 			if err != nil {
 				return nil, err
@@ -713,7 +794,7 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			}
 			row := make(map[string]any, len(cols))
 			for i, c := range cols {
-				row[c] = normalizeScan(raw[i])
+				row[c] = normalizeDocumentScan(table, c, raw[i])
 			}
 			out = append(out, row)
 		}
@@ -854,7 +935,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 			}
 			row := make(map[string]any, len(cols))
 			for i, c := range cols {
-				row[c] = normalizeScan(raw[i])
+				row[c] = normalizeDocumentScan(f.table, c, raw[i])
 			}
 			out = append(out, row)
 		}
@@ -1061,6 +1142,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		hooks = &RestoreDumpHooks{}
 	}
 	var stats RestoreStats
+	prepared, err := prepareSelectedRestoreDump(dump)
+	if err != nil {
+		return stats, err
+	}
+	dump = prepared
 	// PRAGMA foreign_keys is a no-op inside an open transaction per
 	// the SQLite docs, so we must set it on a held connection BEFORE
 	// BeginTx. db.Conn pins us to a single pooled connection; we
@@ -1147,6 +1233,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			return stats, fmt.Errorf("backup: probe %s: %w", table, err)
 		}
 		if !exists {
+			if table == "slides_requests" || table == "slides_request_events" || table == "slides_request_receipts" {
+				return stats, fmt.Errorf("backup: target cannot retain selected Slides request history")
+			}
 			// Target lacks this table — skip rather than failing so a
 			// bundle from a newer schema can restore (partially) here.
 			continue
@@ -1154,6 +1243,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		allowed, err := tableColumns(ctx, tx, table)
 		if err != nil {
 			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
+		}
+		if table == "slides_requests" && (!allowed["restored"] || !allowed["protocol_version"] || !allowed["verified_json"] || !allowed["original_run_id"] || !allowed["credential_id"]) {
+			return stats, fmt.Errorf("backup: target cannot preserve selected Slides authority fences")
 		}
 		// Dropping an admission fence is a security downgrade, not ordinary
 		// schema skew: an older target would classify this work as autonomous.
@@ -1195,6 +1287,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				return stats, err
 			}
 		}
+		rows, err = orderPageRequestRetryRows(table, rows)
+		if err != nil {
+			return stats, err
+		}
 		if table == "chat_entity_refs" {
 			rows = orderedChatEntityRefs(rows)
 		}
@@ -1205,6 +1301,20 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			// copies whatever row is current — has to come after it or its
 			// CANCELLED status would be thrown away.
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
+			row = safeArtifactRequestRestoreRow(table, row)
+			row = safeBoardHistoryRestoreRow(table, row)
+			if err = validateSlidesRestoreRow(table, row); err != nil {
+				return stats, err
+			}
+			row, err = safeDocumentRestoreRow(table, row)
+			if err != nil {
+				return stats, err
+			}
+			if table == "documents" {
+				if _, err := tx.ExecContext(ctx, `UPDATE documents SET epoch=MAX(epoch+1,?),generation=generation+1,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?`, row["epoch"], row["workspace_id"], row["page_id"]); err != nil {
+					return stats, fmt.Errorf("backup: fence existing document writer: %w", err)
+				}
+			}
 			// Restoring a held issue must not restart work that was still stopping
 			// at backup time. Preserve historical terminal runs and their brief
 			// snapshots; import nonterminal held runs as cancelled.
@@ -1254,6 +1364,12 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					continue
 				}
 				val := row[k]
+				if documentBinaryColumn(table, k) {
+					val, err = restoreDocumentBinary(val)
+					if err != nil {
+						return stats, fmt.Errorf("backup: %s.%s: %w", table, k, err)
+					}
+				}
 				// The one VALUE-level check in this loop, and it is
 				// deliberately here rather than in the PreInsert hook:
 				// PreInsert is composed by the caller (runner_restore.go),
@@ -1379,6 +1495,59 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	// rows describing it. PRAGMA foreign_key_check returns one row per
 	// violation regardless of defer_foreign_keys, so it's the right
 	// probe to run inside the open tx.
+	// Validate original anchors/history and rebuild derived projections against
+	// the actual retained head, including same-identity INSERT OR IGNORE restores.
+	commentPages := map[slides.Key]bool{}
+	for _, table := range []string{"slides_comment_threads", "slides_comment_events", "slides_comment_receipts"} {
+		for _, row := range dump.Tables[table] {
+			workspace, wok := row["workspace_id"].(string)
+			page, pok := row["page_id"].(string)
+			if !wok || !pok || workspace == "" || page == "" {
+				return stats, fmt.Errorf("backup: invalid Slides comment Page identity")
+			}
+			commentPages[slides.Key{WorkspaceID: workspace, PageID: page}] = true
+		}
+	}
+	for key := range commentPages {
+		if err := slides.RebuildCommentPageTx(ctx, tx, key); err != nil {
+			return stats, fmt.Errorf("backup: invalid Slides comments: %w", err)
+		}
+	}
+	imagePages := map[slides.Key]bool{}
+	for _, table := range []string{"slides_heads", "slides_revisions", "slides_revision_assets"} {
+		for _, row := range dump.Tables[table] {
+			workspace, wok := row["workspace_id"].(string)
+			page, pok := row["page_id"].(string)
+			if !wok || !pok || workspace == "" || page == "" {
+				return stats, fmt.Errorf("backup: invalid Slides image Page identity")
+			}
+			imagePages[slides.Key{WorkspaceID: workspace, PageID: page}] = true
+		}
+	}
+	for key := range imagePages {
+		if err := slides.ValidateImagePageTx(ctx, tx, key); err != nil {
+			return stats, fmt.Errorf("backup: invalid Slides image references: %w", err)
+		}
+	}
+	selectedPages := map[slides.Key][]string{}
+	for _, row := range dump.Tables["slides_requests"] {
+		workspace, wok := row["workspace_id"].(string)
+		page, pok := row["page_id"].(string)
+		id, iok := row["id"].(string)
+		if !wok || !pok || !iok || workspace == "" || page == "" || id == "" {
+			return stats, fmt.Errorf("backup: invalid selected Slides request identity")
+		}
+		key := slides.Key{WorkspaceID: workspace, PageID: page}
+		selectedPages[key] = append(selectedPages[key], id)
+	}
+	for key, ids := range selectedPages {
+		if err := slides.FenceSelectedRestorePageTx(ctx, tx, key, ids); err != nil {
+			return stats, fmt.Errorf("backup: invalid selected Slides request history: %w", err)
+		}
+	}
+	if err := clearRestoredSearchProjections(ctx, tx, dump); err != nil {
+		return stats, fmt.Errorf("backup: clear restored native search projections: %w", err)
+	}
 	if hooks.PostInsert != nil {
 		if err := hooks.PostInsert(ctx, tx); err != nil {
 			return stats, fmt.Errorf("backup: post-insert hook: %w", err)

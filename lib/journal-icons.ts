@@ -298,6 +298,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "page.folder_membership_changed": FolderInput,
   // Folder permissions (#2533): who a folder is shared with changed.
   "page.folder_acl_changed": FolderKey,
+  "page.folder_tree_changed": FolderInput,
   // Freshness (§4) reads as a clock going quiet and a clock catching up; a
   // wake gate (§5) is the one entry here that means an agent was started.
   "page.panel.stale": Clock,

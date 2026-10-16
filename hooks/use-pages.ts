@@ -27,6 +27,8 @@
  *     basis to compute, and there is no third glyph).
  */
 
+import type { PageIdentityBinding } from "@/hooks/use-page-identity"
+import { resolvePageContent } from "@/lib/pages/content-types"
 import { useCallback, useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -127,7 +129,26 @@ export interface WirePanel {
   refresh?: string | null
 }
 
+export interface ArtifactSummary {
+  head_rev: number
+  author_user_id: string
+  author_name: string
+  author_agent_id?: string
+  author_agent_name?: string
+  author_run_id?: string
+  published_at: string
+  last_activity_at: string
+}
+
 export interface WirePage {
+  content_descriptor?: unknown
+  application_descriptor?: unknown
+  artifact_summary?: ArtifactSummary
+  has_slides?: boolean
+  can_edit_slides?: boolean
+  has_document?: boolean
+  has_board?: boolean
+  has_artifact?: boolean
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
   /**
@@ -469,6 +490,15 @@ function emptyTally(): PanelTally {
 
 /** A page as every Pages surface consumes it. */
 export interface PageView {
+  contentSupported?: boolean
+  contentType?: string
+  artifactSummary?: ArtifactSummary
+  hasDocument?: boolean
+  hasSlides?: boolean
+  canEditSlides?: boolean
+  hasBoard?: boolean
+  hasArtifact?: boolean
+  artifactEligible?: boolean
   id: string
   slug: string
   name: string
@@ -612,11 +642,21 @@ export function toPageView(raw: WirePage): PageView {
     : toDate(raw.last_produced_at)
 
   const slug = trimmed(raw.slug) ?? ""
+  const content = resolvePageContent({ ...raw, has_panels: tally.total > 0, human_owned: Boolean(raw.owner?.startsWith("user/")) })
   return {
+    contentSupported: content.supported,
+    contentType: content.primary?.type_id,
     id: trimmed(raw.id) ?? slug,
     slug,
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),
+    hasDocument: raw.has_document === true,
+    hasSlides: raw.has_slides === true,
+    canEditSlides: raw.can_edit_slides === true,
+    hasBoard: raw.has_board === true,
+    hasArtifact: raw.has_artifact === true,
+    artifactSummary: raw.artifact_summary,
+    artifactEligible: content.supported && (raw.has_artifact === true || content.canInitializeContent),
     ownerRef: ownerRefOf(raw),
     ownerLabel: ownerLabelOf(raw),
     reach: reachOf(raw),
@@ -718,6 +758,7 @@ export function summarisePages(pages: readonly PageView[], now: Date = new Date(
 
 /** Facet state. Both facets are MULTI-select (#1776 — that is the whole point). */
 export interface PageFilters {
+  content?: ("artifact" | "board")[]
   states: PanelState[]
   owners: string[]
   /** Only pages reached through a grant and nothing else — "shared with me". */
@@ -727,7 +768,7 @@ export interface PageFilters {
 export const EMPTY_PAGE_FILTERS: PageFilters = { states: [], owners: [], shared: false }
 
 export function pageFilterCount(f: PageFilters): number {
-  return f.states.length + f.owners.length + (f.shared ? 1 : 0)
+  return f.states.length + f.owners.length + (f.content?.length ?? 0) + (f.shared ? 1 : 0)
 }
 
 /**
@@ -762,6 +803,7 @@ export function matchesPageFilters(
   filters: PageFilters,
   search: string,
 ): boolean {
+  if (filters.content?.length && !filters.content.some(kind => kind === "artifact" ? page.hasArtifact : page.hasBoard)) return false
   const q = search.trim().toLowerCase()
   if (q) {
     // The folder's name is in the haystack too: "ops" finds every page filed
@@ -833,6 +875,8 @@ export interface PageGroup {
    * row, which happens while the folder list is still loading.
    */
   pageCount?: number
+  depth?: number
+  ancestorKeys?: string[]
 }
 
 const CREW_PREFIX = "crew/"
@@ -925,6 +969,10 @@ export function groupPagesByOwner(
 
 /** What the folder grouping needs to know about a folder the caller may read. */
 export interface PageFolderLike extends PageFolderRef {
+  id?: string
+  parentId?: string | null
+  canReparent?: boolean
+  canAcceptFolders?: boolean
   pageCount: number
 }
 
@@ -985,7 +1033,49 @@ export function groupPagesByFolder(
         folder: ref,
       })
   }
-  const out = Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label))
+  const sorted = Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label))
+  const keysById = new Map(folders.filter((folder) => folder.id).map((folder) => [folder.id!, folderGroupKey(folder.slug)]))
+  const parents = new Map<string, string>()
+  for (const folder of folders) {
+    const parent = folder.parentId ? keysById.get(folder.parentId) : undefined
+    if (parent && parent !== folderGroupKey(folder.slug)) parents.set(folderGroupKey(folder.slug), parent)
+  }
+  // Only authorized records are supplied by the server. Unknown/malformed edges
+  // become viewer roots; the client never fetches an ancestor by a guessed ID.
+  const ancestors = (key: string): string[] => {
+    const seen = new Set([key])
+    const chain: string[] = []
+    let next = parents.get(key)
+    while (next) {
+      if (seen.has(next) || chain.length >= 8) return []
+      seen.add(next)
+      chain.unshift(next)
+      next = parents.get(next)
+    }
+    return chain
+  }
+  const chains = new Map(sorted.map((group) => [group.key, ancestors(group.key)]))
+  const childrenByParent = new Map<string, PageGroup[]>()
+  // sorted insertion preserves alphabetic siblings without rescanning all groups.
+  for (const group of sorted) {
+    const chain = chains.get(group.key) ?? []
+    const parentKey = chain[chain.length - 1]
+    if (!parentKey) continue
+    const children = childrenByParent.get(parentKey) ?? []
+    children.push(group)
+    childrenByParent.set(parentKey, children)
+  }
+  const out: PageGroup[] = []
+  const visited = new Set<string>()
+  const walk = (group: PageGroup) => {
+    if (visited.has(group.key)) return
+    visited.add(group.key)
+    const chain = chains.get(group.key) ?? []
+    out.push(chain.length ? { ...group, depth: chain.length, ancestorKeys: chain } : group)
+    for (const child of childrenByParent.get(group.key) ?? []) walk(child)
+  }
+  for (const group of sorted) if (!chains.get(group.key)?.length) walk(group)
+  for (const group of sorted) walk(group)
   if (unfiled.length)
     out.push({ key: UNFILED_GROUP_KEY, kind: "unfiled", label: "Unfiled", member: false, pages: unfiled })
   return out
@@ -1031,6 +1121,8 @@ function usePagesRealtime(
 
   const channel = pageId ? `page:${pageId}` : null
 
+  useRealtimeEventSafe("page.updated", invalidate)
+  useRealtimeEventSafe("page.deleted", invalidate)
   useRealtimeEventSafe("page.panel.updated", invalidate)
   useRealtimeEventSafe("realtime.reconnected", invalidate)
   useRealtimeChannelSafe(channel)
@@ -1128,9 +1220,12 @@ export interface UsePageResult {
 export function usePage(
   workspaceId: string | null | undefined,
   slug: string | null | undefined,
+  identity?: PageIdentityBinding,
 ): UsePageResult {
   const query = useQuery({
-    queryKey: pagesKeys.detail(workspaceId ?? "", slug ?? ""),
+    queryKey: identity
+      ? [...pagesKeys.detail(workspaceId ?? "", slug ?? ""), "stable-reference", identity.viewerId, identity.expectedPageId, identity.scope]
+      : pagesKeys.detail(workspaceId ?? "", slug ?? ""),
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams({ workspace_id: workspaceId! })
       const body = await fetchJSON(
@@ -1138,20 +1233,24 @@ export function usePage(
         signal,
         "page",
       )
+      if (identity && (!body || typeof body !== "object" || Array.isArray(body) || (body as Record<string, unknown>).id !== identity.expectedPageId)) {
+        throw new PagesRequestError(409, "The Page address changed. Resolve this link again.")
+      }
       return normalizePage(body)
     },
     enabled: Boolean(workspaceId) && Boolean(slug),
     retry: false,
   })
 
-  const page = useMemo(() => (query.data ? toPageView(query.data) : null), [query.data])
+  const confirmed = identity && query.error ? undefined : query.data
+  const page = useMemo(() => (confirmed ? toPageView(confirmed) : null), [confirmed])
   const channel = usePagesRealtime(workspaceId, page?.id ?? null)
   const status = useRealtimeStatusSafe()
 
   const err = query.error as Error | null
   return {
     page,
-    raw: query.data ?? null,
+    raw: confirmed ?? null,
     loading: query.isPending && Boolean(workspaceId) && Boolean(slug),
     error: err ? err.message : null,
     notFound: err instanceof PagesRequestError && err.status === 404,
