@@ -231,7 +231,7 @@ credentials remain in a private temporary file removed by the Go fixture.
 creation, nesting, reparenting, reload, hidden ancestors and revocation through
 the production Router with synthetic preauthenticated sessions; no HTTP mocks,
 shared instance or execution containers. Run through `crewship-heavy`:
-`CREWSHIP_FOLDER_TREE_BROWSER=1 go test -tags folder_tree_browser ./internal/api
+`crewship-heavy env CREWSHIP_FOLDER_TREE_BROWSER=1 go test -tags folder_tree_browser ./internal/api
 -run '^TestFolderTreeBrowser$' -count=1 -timeout 6m`.
 Missing prerequisites fail explicitly; `conformance` vet compiles but does not
 execute this browser fixture.

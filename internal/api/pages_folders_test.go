@@ -7,12 +7,16 @@ package api
 // rule cannot be loosened without the refusal going green in the diff.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
 // foldersFixture is newPagesFixture plus crew/engine and a cast:
@@ -54,10 +58,23 @@ func newFoldersFixture(t *testing.T) *foldersFixture {
 	return &foldersFixture{h: h, spy: spy, wsID: wsID, owner: ownerID}
 }
 
+// Synthetic handler tests still carry a real current session row. Production
+// exact-credential checks must not be weakened for hand-built contexts.
+func (f *foldersFixture) request(t *testing.T, method, path, userID, role, body string) *http.Request {
+	t.Helper()
+	req := pagesGrantRequest(t, method, path, f.wsID, userID, role, body)
+	session, err := sessions.NewDBStore(f.h.db).Create(t.Context(), userID, "synthetic", "127.0.0.1", auth.RefreshTokenTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	UserFromContext(req.Context()).SessionID = session.ID
+	return req.WithContext(context.WithValue(req.Context(), ctxAuthKind, AuthKindSession))
+}
+
 // call routes a request to the folder handler the method and path name.
 func (f *foldersFixture) call(t *testing.T, method, path, userID, role, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := pagesGrantRequest(t, method, path, f.wsID, userID, role, body)
+	req := f.request(t, method, path, userID, role, body)
 	rest := strings.TrimPrefix(path, "/api/v1/page-folders")
 	rest = strings.TrimPrefix(rest, "/")
 	parts := strings.Split(rest, "/")

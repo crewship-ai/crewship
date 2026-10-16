@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/backup"
 )
 
@@ -49,7 +51,7 @@ func treeMove(t *testing.T, f *foldersFixture, source, parent, user string, vers
 		body["acl_version"] = acl
 	}
 	encoded, _ := json.Marshal(body)
-	r := pagesGrantRequest(t, "POST", "/api/v1/page-folders/"+source+"/parent", f.wsID, user, "OWNER", string(encoded))
+	r := f.request(t, "POST", "/api/v1/page-folders/"+source+"/parent", user, "OWNER", string(encoded))
 	r.SetPathValue("slug", source)
 	w := httptest.NewRecorder()
 	f.h.ReparentFolder(w, r)
@@ -288,7 +290,7 @@ func TestFolderTreeRechecksRevokedActorAfterBody(t *testing.T) {
 	f := newFoldersFixture(t)
 	artifactExpect(t, treeCreate(t, f, "source", "engine", ""), 201)
 	body := &folderBlockedBody{entered: make(chan struct{}), release: make(chan struct{}), reader: strings.NewReader(`{"parent":null,"tree_version":1}`)}
-	r := pagesGrantRequest(t, "POST", "/", f.wsID, "mia", "MANAGER", "")
+	r := f.request(t, "POST", "/", "mia", "MANAGER", "")
 	r.SetPathValue("slug", "source")
 	r.Body = body
 	done := make(chan *httptest.ResponseRecorder, 1)
@@ -336,11 +338,101 @@ func TestFolderTreeTargetACLAndStructureFencesAreNotRebased(t *testing.T) {
 	version := treeVersion(t, f)
 	execOrFatal(t, f.h.db, `UPDATE page_folders SET acl_version=acl_version+1 WHERE id=?`, folderID(t, f, "fenced-target"))
 	body := fmt.Sprintf(`{"parent":"fenced-target","tree_version":%d,"acl_version":0}`, version)
-	r := pagesGrantRequest(t, "POST", "/api/v1/page-folders/fenced-source/parent", f.wsID, f.owner, "OWNER", body)
+	r := f.request(t, "POST", "/api/v1/page-folders/fenced-source/parent", f.owner, "OWNER", body)
 	r.SetPathValue("slug", "fenced-source")
 	w := httptest.NewRecorder()
 	f.h.ReparentFolder(w, r)
 	artifactExpect(t, w, 409)
 	artifactExpect(t, treeCreate(t, f, "other-change", "engine", ""), 201)
 	artifactExpect(t, treeMove(t, f, "fenced-source", "fenced-target", f.owner, version), 409)
+}
+
+func TestFolderTreeRouterRechecksExactCredentialAfterBody(t *testing.T) {
+	for _, test := range []struct{ name, kind, change string }{
+		{"valid-session", "session", ""}, {"valid-cli", "cli", ""},
+		{"revoked-session", "session", "revoked"}, {"revoked-cli", "cli", "revoked"},
+		{"expired-session", "session", "expired"}, {"expired-cli", "cli", "expired"},
+		{"cli-scope-change", "cli", "scope"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			kind := test.kind
+			f := newFoldersFixture(t)
+			artifactExpect(t, treeCreate(t, f, "credential-source", "engine", ""), 201)
+			artifactExpect(t, treeCreate(t, f, "credential-parent", "engine", ""), 201)
+			const secret = "synthetic-folder-credential-secret-long-enough"
+			validator, err := auth.NewJWTValidator(secret)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var credential, credentialID string
+			if kind == "session" {
+				session, err := sessions.NewDBStore(f.h.db).Create(t.Context(), f.owner, "synthetic", "127.0.0.1", auth.RefreshTokenTTL)
+				if err != nil {
+					t.Fatal(err)
+				}
+				credentialID = session.ID
+				credential, err = validator.IssueAccessToken(f.owner, session.ID, "Synthetic", "synthetic@example.test")
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				credential = "crewship_cli_folder_delayed_test"
+				credentialID = "folder-delayed-cli"
+				execOrFatal(t, f.h.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier,scopes,created_at) VALUES(?,?,'synthetic delayed',?,'STANDARD','["workspace:admin"]','2026-10-15T00:00:00Z')`, credentialID, f.owner, hashStandard(credential))
+			}
+			router, err := NewRouter(f.h.db, secret, newTestLogger(), WithInternalToken("synthetic-folder-internal"), WithStoragePath(t.TempDir()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(router.Shutdown)
+			body := &folderBlockedBody{entered: make(chan struct{}), release: make(chan struct{}), reader: strings.NewReader(fmt.Sprintf(`{"parent":"credential-parent","tree_version":%d,"acl_version":0}`, treeVersion(t, f)))}
+			t.Cleanup(func() {
+				select {
+				case <-body.release:
+				default:
+					close(body.release)
+				}
+			})
+			request := httptest.NewRequest("POST", "/api/v1/page-folders/credential-source/parent?workspace_id="+f.wsID, body)
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Authorization", "Bearer "+credential)
+			result := make(chan *httptest.ResponseRecorder, 1)
+			go func() { w := httptest.NewRecorder(); router.ServeHTTP(w, request); result <- w }()
+			select {
+			case <-body.entered:
+			case w := <-result:
+				t.Fatalf("credential never admitted to body: %d %s", w.Code, w.Body.String())
+			case <-time.After(3 * time.Second):
+				t.Fatal("body not reached")
+			}
+			table := "cli_tokens"
+			if kind == "session" {
+				table = "user_sessions"
+			}
+			switch test.change {
+			case "revoked":
+				execOrFatal(t, f.h.db, `UPDATE `+table+` SET revoked_at='2026-10-16T00:00:00Z' WHERE id=?`, credentialID)
+			case "expired":
+				execOrFatal(t, f.h.db, `UPDATE `+table+` SET expires_at='2020-01-01T00:00:00Z' WHERE id=?`, credentialID)
+			case "scope":
+				execOrFatal(t, f.h.db, `UPDATE cli_tokens SET scopes='["pages:*"]' WHERE id=?`, credentialID)
+			}
+			close(body.release)
+			var w *httptest.ResponseRecorder
+			select {
+			case w = <-result:
+			case <-time.After(3 * time.Second):
+				t.Fatal("handler did not finish after body release")
+			}
+			if test.change == "" {
+				artifactExpect(t, w, 200)
+			} else if w.Code != 401 && w.Code != 403 {
+				t.Fatalf("changed %s credential accepted after middleware: %d %s", kind, w.Code, w.Body.String())
+			}
+			var parent sql.NullString
+			if err = f.h.db.QueryRow(`SELECT parent_id FROM page_folders WHERE id=?`, folderID(t, f, "credential-source")).Scan(&parent); err != nil || parent.Valid != (test.change == "") {
+				t.Fatalf("credential outcome changed parent incorrectly: %v %v", parent, err)
+			}
+		})
+	}
 }

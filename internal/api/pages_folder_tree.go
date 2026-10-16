@@ -36,6 +36,12 @@ func (h *PageHandler) beginFolderTree(w http.ResponseWriter, r *http.Request) (*
 		replyInternalError(w, h.logger, "fence folder tree", err)
 		return nil, r, nil, 0, false
 	}
+	// Use the actual existing folder route scope, not Docs' pages scope.
+	if err = validateContentHumanCredential(r, tx, scopeForRoute("/api/v1/page-folders")); err != nil {
+		fail()
+		replyError(w, 401, "current human credential required")
+		return nil, r, nil, 0, false
+	}
 	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
 	role, err := h.liveContentHumanRole(ctx, ws, user.ID)
 	if err != nil {

@@ -673,7 +673,7 @@ export function usePageFolderMutations(workspaceId: string | null | undefined): 
   const reparent = useMutation<void, Error, ReparentFolderInput>({
     retry: false,
     mutationFn: async (input) => {
-      const res = await apiFetch(`${folderRoute(workspaceId!, input.slug)}/parent`, {
+      const res = await apiFetch(`${FOLDERS}/${encodeURIComponent(input.slug)}/parent${ws(workspaceId!)}`, {
         method: "POST",
         headers: JSON_HEADERS,
         body: JSON.stringify({
