@@ -45,7 +45,7 @@ it("edits/selects bounded issues, saves before explicit count/effect/actor confi
   expect(JSON.parse(transport.mock.calls[0][0].body).items[0]).toMatchObject({ title: "Measure latency", priority: "urgent", assignee_id: "agent-1" })
   fireEvent.click(screen.getByRole("button", { name: "Review confirmation" }))
   expect(screen.getByText("Create 1 issues as viewer.")).toBeVisible()
-  expect(screen.getByText("All selected issues are created together. No work will be started.")).toBeVisible()
+  expect(screen.getByText("All selected issues are created together. Direct start is a separate action; existing workspace automations still apply.")).toBeVisible()
   fireEvent.click(screen.getByRole("button", { name: "Confirm creation of 1 issues" }))
   await screen.findByText("Issue card ENG-1")
   expect(screen.queryByRole("textbox")).toBeNull()
