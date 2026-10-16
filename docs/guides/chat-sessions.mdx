@@ -30,6 +30,25 @@ For one-off "ask the agent a question" use, just open `/chat/<agent>` and start 
 
 ## Key concepts
 
+### Questions and decisions
+
+When an agent asks for information, its authorized decision form appears at the
+originating conversation turn and under **Waiting for you** in Work. Open the
+question on the right, or in the full-screen panel on a phone. Both surfaces
+refer to the same source; answering in Inbox also updates the chat card.
+
+An answered, expired, rejected or cancelled source displays its authoritative
+result without reopening the form. A workflow choice applies to that workflow
+step; a whole-run approval applies only to its named run. An information reply
+does not grant permission for another operation. Available kinds depend on the
+source backends installed on your server.
+
+If a response times out, retry the same response with its saved operation key.
+Reloading does not send it automatically. A changed version requires explicit
+review before another answer. Temporary access-check failures preserve the
+draft and disable submitting; explicit denial removes the card, detail and
+protected recovery. Restricted accounts do not receive these decision cards.
+
 ### Issue proposals in chat
 
 An agent's issue proposal appears beside its originating conversation turn. Review

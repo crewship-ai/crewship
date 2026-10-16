@@ -46,10 +46,13 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { anchorEntityRefs, type EntityRef } from "@/lib/chat-entity-cards"
 import { IssueEntityCard } from "./issue-entity-card"
 import { ChatProposalCard } from "./chat-proposal-card"
+import { ChatDecisionCard } from "./chat-decision-card"
+import { DecisionWaitingSection } from "./decision-waiting-section"
+import { useChatDecisions } from "@/hooks/use-chat-decisions"
 import { useChatE2Cards } from "@/hooks/use-chat-e2-cards"
 import { useIssuePeople } from "@/hooks/use-issue-people"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
-import type { ProposalRef } from "@/lib/chat-e2-cards"
+import type { DecisionRef, ProposalRef } from "@/lib/chat-e2-cards"
 import { ChatIssuePanel, type PanelTarget } from "./chat-issue-panel"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { PinToTopSpacer } from "./pin-to-top-spacer"
@@ -987,6 +990,38 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const proposals = useChatE2Cards({ kind: "proposal", workspaceId, chatId: sessionId, userId: currentUserId ?? undefined,
     enabled: accessMode === "trusted" && executionProfile === "trusted" && canChat })
   const proposalRefs = proposals.refs.filter((ref): ref is ProposalRef => ref.kind === "proposal")
+  const decisions = useChatDecisions({ workspaceId, chatId: sessionId, userId: currentUserId ?? undefined,
+    enabled: accessMode === "trusted" && executionProfile === "trusted" && canChat })
+  const decisionRefs = decisions.references
+  const reconcileDecisions = decisions.reconcile
+  const decisionKey = (ref: DecisionRef) => JSON.stringify([ref.decision.source.type, ref.decision.source.id])
+  const [decisionTarget, setDecisionTarget] = useState<string | null>(null)
+  const decisionOpener = useRef<HTMLElement | null>(null)
+  const decisionPanelStart = useRef<HTMLButtonElement | null>(null)
+  const selectedDecision = decisionRefs.find(ref => decisionKey(ref) === decisionTarget)
+  const closeDecision = useCallback(() => {
+    setDecisionTarget(null)
+    requestAnimationFrame(() => { if (decisionOpener.current?.isConnected) decisionOpener.current.focus() })
+  }, [])
+  useEffect(() => { setDecisionTarget(null) }, [sessionId, workspaceId, currentUserId])
+  useEffect(() => {
+    if (decisions.unavailable || !decisions.rechecking && decisionTarget && !selectedDecision) setDecisionTarget(null)
+  }, [decisions.unavailable, decisions.rechecking, decisionTarget, selectedDecision])
+  useEffect(() => {
+    if (decisionTarget && !isMobile && drawerActiveTab === "work") decisionPanelStart.current?.focus()
+  }, [decisionTarget, isMobile, drawerActiveTab])
+  useEffect(() => {
+    if (!decisionTarget || isMobile || drawerActiveTab !== "work") return
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) closeDecision() }
+    window.addEventListener("keydown", escape)
+    return () => window.removeEventListener("keydown", escape)
+  }, [decisionTarget, isMobile, drawerActiveTab, closeDecision])
+  const previousDecisionConnection = useRef(connectionStatus)
+  useEffect(() => {
+    const previous = previousDecisionConnection.current
+    previousDecisionConnection.current = connectionStatus
+    if (connectionStatus === "connected" && previous !== "connected") reconcileDecisions()
+  }, [connectionStatus, reconcileDecisions])
   const pickerEnabled = proposals.state === "ready" && proposalRefs.length > 0
   const proposalPeople = useIssuePeople(workspaceId ?? "", pickerEnabled)
   const proposalAgents = useWorkspaceAgentDirectory(pickerEnabled ? workspaceId ?? undefined : undefined)
@@ -1016,6 +1051,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const selectedRef = entities.refs.find((r) => r.entity.id === issueTarget?.id && !r.entity.deleted)
   const anchors = useMemo(() => anchorEntityRefs(turns, entities.slots), [turns, entities.slots])
   const proposalAnchors = useMemo(() => anchorEntityRefs(turns, proposalRefs), [turns, proposalRefs])
+  const decisionAnchors = useMemo(() => anchorEntityRefs(turns, decisionRefs), [turns, decisionRefs])
   const selectedProposal = proposalRefs.find(ref => ref.entity.id === proposalTarget)
   useEffect(() => { setProposalTarget(null) }, [sessionId, workspaceId, currentUserId])
   useEffect(() => {
@@ -1032,6 +1068,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     if (entities.state === "unavailable" || entities.state === "ready" && issueTarget && !selectedRef) setIssueTarget(null)
   }, [entities.state, issueTarget, selectedRef])
   const openIssue = (ref: EntityRef) => {
+    setDecisionTarget(null)
     setProposalTarget(null)
     issueOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     useArtifactStore.getState().setOpen(false)
@@ -1039,12 +1076,30 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     useDrawerStore.getState().setActiveTab("work")
   }
   const openProposal = (ref: ProposalRef) => {
+    setDecisionTarget(null)
     proposalOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setIssueTarget(null)
     useArtifactStore.getState().setOpen(false)
     setProposalTarget(ref.entity.id)
     useDrawerStore.getState().setActiveTab("work")
   }
+  const openDecision = (ref: DecisionRef) => {
+    decisionOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setIssueTarget(null)
+    setProposalTarget(null)
+    useArtifactStore.getState().setOpen(false)
+    setDecisionTarget(decisionKey(ref))
+    useDrawerStore.getState().setActiveTab("work")
+  }
+  const renderDecision = (ref: DecisionRef, surface: "card" | "panel") => <ChatDecisionCard
+    key={JSON.stringify([workspaceId, currentUserId, sessionId, ref.decision.source.type, ref.decision.source.id, surface])}
+    reference={ref} chatId={sessionId} userId={currentUserId!} rechecking={decisions.rechecking}
+    onChanged={decisions.reconcile} onOpen={surface === "card" ? () => openDecision(ref) : undefined}
+    onAccessLost={() => {
+      if (decisionTarget === decisionKey(ref)) closeDecision()
+      decisions.evictSource(ref.decision.source.type, ref.decision.source.id)
+      decisions.reconcile()
+    }} />
   const renderProposal = (ref: ProposalRef, surface: "card" | "panel") => <ChatProposalCard
     key={`${workspaceId}:${currentUserId}:${ref.entity.id}:${surface}`} reference={ref} chatId={sessionId}
     userId={currentUserId!} surface={surface} rechecking={proposals.state !== "ready"} assignees={proposalAssignees}
@@ -1067,18 +1122,32 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const renderEntityCards = (turn: ChatTurn) => {
     const group = anchors.get(turn.id)
     const proposalGroup = proposalAnchors.get(turn.id)
-    if (!group && !proposalGroup) return null
+    const decisionGroup = decisionAnchors.get(turn.id)
+    if (!group && !proposalGroup && !decisionGroup) return null
     return <div className="min-w-0">
       {group?.withoutReply && entities.state === "ready" && <p className="mt-2 text-xs text-muted-foreground" role="status">{group.refs[0]?.anchor.run_status === "running" ? "Run in progress" : group.refs[0]?.anchor.run_status ? `Run ended without a reply · ${group.refs[0].anchor.run_status}` : "Run without a reply · status unknown"}</p>}
       {group?.refs.filter(ref => !proposalGroup?.refs.some(proposal => proposal.proposal.outcome?.issues.some(issue => issue.id === ref.entity.id))).map((ref) => <IssueEntityCard key={`${workspaceId}:${currentUserId}:${ref.event_id}`} reference={ref} chatId={sessionId} userId={currentUserId ?? undefined}
         rechecking={entities.state !== "ready"} live={entities.live} checkedAt={entities.checkedAt} onOpen={openIssue} reconcile={entities.reconcile} />)}
       {proposalGroup?.withoutReply && proposals.state === "ready" && <p role="status" className="mt-2 text-xs text-muted-foreground">Proposal from a run without a reply</p>}
       {proposalGroup?.refs.map(ref => renderProposal(ref, "card"))}
+      {decisionGroup?.withoutReply && !decisions.rechecking && <p role="status" className="mt-2 text-xs text-muted-foreground">Decision from a run without a reply</p>}
+      {decisionGroup?.refs.map(ref => <section key={decisionKey(ref)} aria-label="Decision in chat">{renderDecision(ref, "card")}</section>)}
     </div>
   }
   const proposalPanel = selectedProposal && proposals.state !== "unavailable" ? <section aria-label="Proposal detail" className="min-w-0 space-y-3 p-3">
     <Button ref={proposalPanelStart} variant="outline" className="coarse:min-h-12" onClick={closeProposal}>Back to Work</Button>{renderProposal(selectedProposal, "panel")}
   </section> : null
+  const decisionPanel = selectedDecision && !decisions.unavailable ? <section aria-label="Decision detail" className="min-w-0 space-y-3 p-3">
+    <Button ref={decisionPanelStart} variant="outline" className="coarse:min-h-12" onClick={closeDecision}>Back to Work</Button>{renderDecision(selectedDecision, "panel")}
+  </section> : null
+  const actionableDecisions = decisionRefs.filter(ref => ref.decision.status === "pending" && ref.decision.allowed_actions.some(action => action !== "view"))
+  const waitingForYou = actionableDecisions.length
+    ? <DecisionWaitingSection references={actionableDecisions} rechecking={decisions.rechecking} onOpen={openDecision} /> : null
+  const mobileDecisionPanel = isMobile ? <Sheet open={!!decisionTarget && !decisions.unavailable} onOpenChange={open => { if (!open) closeDecision() }}>
+    <SheetContent side="right" onCloseAutoFocus={event => { event.preventDefault(); if (decisionOpener.current?.isConnected) decisionOpener.current.focus() }} className="w-full max-w-full gap-0 overflow-y-auto p-0 sm:max-w-full">
+      <SheetTitle className="sr-only">Decision detail</SheetTitle>{decisionPanel}
+    </SheetContent>
+  </Sheet> : null
   const mobileProposalPanel = isMobile ? <Sheet open={!!proposalTarget && proposals.state !== "unavailable"} onOpenChange={open => { if (!open) closeProposal() }}>
     <SheetContent side="right" onCloseAutoFocus={event => { event.preventDefault(); if (proposalOpener.current?.isConnected) proposalOpener.current.focus() }} className="w-full max-w-full gap-0 overflow-y-auto p-0 sm:max-w-full">
       <SheetTitle className="sr-only">Proposal detail</SheetTitle>{proposalPanel}
@@ -1203,11 +1272,13 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     </div>
     return (
       <div className="relative h-full">
+        {mobileDecisionPanel}
         <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
           initialTab={mobilePanel}
+          workHeader={waitingForYou}
           style={{ width: "100%", height: "100%" }}
         />
         {mobilePanel === "artifacts" && executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} />}
@@ -1218,7 +1289,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   if (mobilePanel === "chat") {
     return (
       <div className="relative flex flex-col h-full">
-        {mobileIssuePanel}{mobileProposalPanel}
+        {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
         <ReconnectBanner status={connectionStatus} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
@@ -1420,17 +1491,18 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
       {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
-        {(drawerActiveTab === "work" ? proposalPanel ?? issuePanel : null) ?? <RightPanel
+        {(drawerActiveTab === "work" ? decisionPanel ?? proposalPanel ?? issuePanel : null) ?? <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
           initialTab={drawerActiveTab}
+          workHeader={waitingForYou}
           hideTabs
           style={{ width: "100%", height: "100%" }}
         />
         }
       </RightDrawer>}
-      {mobileIssuePanel}{mobileProposalPanel}
+      {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
 
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightRail className={cn(pushOpen && "border-l-0")} />}
       {/* workspaceId is what makes the server-driven Actions group exist at

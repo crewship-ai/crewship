@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Decision drafts retain focus during access rechecks.** Typing and caret position survive temporary verification outages; sending waits for verified access and explicit source-version review, while uncertain submitted responses remain locked for exact retry.
+
 - **Guest intake changes and deletion preserve active routine work.** Queued, running and waiting runs still block changes after their issue execution becomes superseded; completed runs do not. Rejected deletion keeps the issue and execution intact.
 
 - **Shared routine results retain private provenance.** Replays preserve their source and trusted caller origins; issue runs, ambiguous legacy origins and malformed authority evidence stay hidden. Final outputs receive the same credential scrubbing as step outputs, including historical shared reads. Oversized selected results return 413.
@@ -19,12 +21,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Guests can search shared issue titles and identifiers in UI and CLI.** Filtering and total counts retain live project grants; hidden descriptions, comments and unrelated projects are excluded. A new search starts from the first page in the UI. Creation confirmation remains visible when the filter hides the new issue.
 - **Reloading a shared routine draft now discards local edits even when its saved revision has not changed.** A failed reload retains the local edits, and background refreshes of the same revision keep them.
 - **Agent images and charts appear in chat.** Authorized PNG, JPEG and WebP outputs from the reply’s run render inline with a filename caption, alt text and byte version. Access rechecks remove unavailable images; SVG and disguised active content stay outside the viewer.
+- **Decision reply drafts remain scoped to their viewer and source.** Reload restores an uncertain reply with its original retry key; definitive access loss removes protected recovery, and paginated source lists reconcile as complete snapshots.
+
+- **Decision cards gain a typed response view.** Source-defined workflow actions retain their identity, terminal decisions show read-only receipts, and uncertain replies keep the same operation key for retry. Integration with live decision sources follows separately.
 
 - ⚠️ **Behaviour change: CLI pairing follows its source browser session.** Suspended accounts and missing, logged-out, revoked or expired source sessions cannot redeem codes. Request a fresh browser code for older pairings without session provenance; CLI-token authentication cannot start pairing.
 - **Dependency updates now build and package together.** Refresh the frontend, Go and CI dependencies, explicitly declare lockfile version changes, and retain the version-scoped license inventory.
 - ⚠️ **Behaviour change: crash reporting uses Sentry v11.** Self-hosted Sentry must be 26.4.2 or newer. Browser, Node and Edge initialization disable collection of user identifiers, request metadata, AI content and other payload data. Browser release-health sessions stay off and telemetry consent remains required.
 
 ### Fixed
+- **Agent questions stay connected across chat and Work.** Authorized decision forms appear beside their run and in “Waiting for you”; opening one uses the same source in the Work panel or a full-screen phone panel. Inbox answers refresh the card to a read-only receipt. Uncertain replies retain their original operation key across reload; temporary failures preserve drafts, while access denial clears the source and recovery data.
 - Chat pull-request cards label their data as stored metadata, including empty lists; live CI remains unavailable. The credential diagnostic runbook distinguishes a local missing credential (412) from a forge failure.
 - **Issue proposals are interactive in their originating chat.** Review and edit the proposed selection, confirm or discard the reviewed version, and open the same proposal in Work or a full-screen phone panel. Card and panel drafts stay separate; uncertain writes retain their retry key. Temporary access-check failures preserve drafts with writes disabled, while explicit access loss and sign-out clear protected recovery data.
 - **Personal memory withdrawal stays inside its workspace.** A guest invitation or restricted-membership change no longer erases saved preferences in another workspace. Local withdrawn preferences remain forgotten; previously erased values cannot be reconstructed. Clearing all preferences also works for agents without a crew.
