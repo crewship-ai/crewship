@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as Y from 'yjs';
 import { readFile } from 'node:fs/promises';
 import { create, validate, validateJSON, load, snapshot, outline, hash, patch, anchor, resolve, markdown, find } from './schema.mjs';
 const json = value => JSON.parse(JSON.stringify(value));

@@ -163,7 +163,7 @@ function validateRetained(doc, version) {
   }
 }
 function validate(doc, version = VERSION) {
-  const types = typesFor(version);
+  typesFor(version);
   if(doc.store.pendingStructs || doc.store.pendingDs)throw new Error("unresolved Yjs dependencies");
   // Projection serializers omit some raw Yjs metadata. Validate the binary
   // tree as well so omitted attributes cannot bypass the content contract.
