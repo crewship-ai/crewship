@@ -1116,7 +1116,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     onAccessLost={() => { closeProposal(); proposals.evictSource(ref.entity.id); entities.reconcile() }}
     onComment={async comment => {
       if (proposals.state !== "ready" || isStreaming || !canChat) return false
-      const text = `Regarding proposal ${ref.entity.id}:\n${comment}`
+      const target = agentSlug?.trim()
+      if (!target) return false
+      const text = `@${target} Regarding proposal ${ref.entity.id}:\n${comment}`
       if (sendMessageWithPage(text) === false) return false
       onSend?.(sessionId, text)
       return true
