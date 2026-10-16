@@ -352,7 +352,9 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	// target's stable row satisfies the FK at restore time.
 	idMap := map[string]map[string]string{}
 	for _, table := range BackupTables {
-		if nonRemappablePKTables[table] {
+		// Comment IDs are scoped by the remapped Page, not globally deduplicated.
+		// Preserve ID == original create mutation while still restoring a new row.
+		if nonRemappablePKTables[table] || table == "slides_comment_threads" {
 			continue
 		}
 		rows := dump.Tables[table]

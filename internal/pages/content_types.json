@@ -103,7 +103,7 @@
     "editor": "page-slides",
     "storage_adapter": "slides-canonical-v1",
     "projection_adapter": "native-react-v1",
-    "anchor_kinds": [],
+    "anchor_kinds": ["slide", "element"],
     "export_formats": [],
     "execution_profile": "none",
     "authoring_skill": ""

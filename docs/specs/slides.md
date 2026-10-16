@@ -2,10 +2,13 @@
 
 This is the S1a foundation on existing human-owned Pages. It supplies bounded
 schema 1 storage, revisions and a human API/CLI. It does not supply a native
-viewer/editor, Present, comments, image assets, selected-edit agent admission,
+viewer/editor, Present, image assets, selected-edit agent admission,
 or an Office export gate. The derived Page descriptor is `slides` with
 `supported:false` and `reason:viewer-unavailable`; clients must not initialize
 another content type over it. A working Slides product requires those later cuts.
+
+Human comments are a separate retained history described below. Native comment UI
+is supplied by a later integration; these API/CLI routes do not advertise a viewer.
 
 ## Canonical contract
 
@@ -48,7 +51,7 @@ crewship slide reorder PAGE --file request.json
 crewship slide restore PAGE --file request.json
 ```
 
-Corresponding reads are `GET /api/v 1/pages/{slug}/slides`, `/outline`, `/history`
+Corresponding reads are `GET /api/v1/pages/{slug}/slides`, `/outline`, `/history`
 and `/revisions/{revision}`. Mutations are `POST` under the same Slides path
 with `/initialize`, `/patch`, `/reorder` and `/restore`. The generated OpenAPI
 catalog also supplies the existing generic CLI/MCP discovery mechanism.
@@ -107,3 +110,53 @@ mutation IDs reject historical mutation-ID reuse with 409. `remap_slides.go` is 
 single canonical rewrite authority; future image references must join this rewrite
 before hash recomputation. Restore rejects malformed canonical data, wrong hashes,
 Page binding and row/snapshot schema mismatches before committing any rows.
+
+## Stable human comments
+
+Comments use envelope `schema_version:1` and `anchor_schema_version:1`, both
+independent of deck schema; mixed-version retained deck history remains valid. An original
+anchor contains `{kind:slide|element,slide_id,element_id?,revision}`; element ID is
+required only for an element anchor. Create requires immutable `page_id`,
+`schema_version:1`, `base_rev`, `mutation_id`, `anchor` and nonblank `body`.
+`anchor.revision` must equal the current `base_rev`; the target must exist there.
+Reply requires `page_id`, `schema_version`, `mutation_id`, `if_version`, `body`;
+resolve/reopen replaces body with a required boolean `resolved`. All three reject
+unknown/case-aliased/duplicate keys, null fields and trailing JSON, within16KiB.
+
+COMMENT access permits create/reply. WRITE access permits resolve/reopen. Read
+requires Page read access. Every route explicitly rejects run authority; these
+human comments do not grant agent comment capability. Exact live session/CLI
+credentials and ACL apply to initial mutations, receipt retries and each list
+page. CLI token reads require `pages:read`; mutations require `pages:write`.
+Advisory `can_comment`/`can_resolve` flags are captured under the same read fence.
+Workspace invalidation emits only `slides.comments.changed` with an empty payload.
+
+Thread human version increments for each immutable comment/reply/resolve/reopen
+event, independently of the deck revision. Replying to a resolved thread returns
+409; reopening requires WRITE. Comment body is at most10000 UTF-8 bytes. Retention
+caps per Page are1000 threads,10000 events and16MiB of event bodies. Quotas reject
+new events without pruning history. Events retain opaque trusted actor attribution
+without a user/agent/chat foreign key that could erase comment history.
+
+Original anchors never change. Text or geometry changes and reorder preserve
+attachment. Target deletion marks a thread `detached`; explicit restore of the
+original identity marks it `restored` with `last_missing_revision` and
+`restored_at_revision` provenance. There is no fuzzy matching. `projection_revision`
+identifies the deck revision used for the current status. Internal projection
+updates and the existing trusted external `OnRevision` hook share one transaction;
+projection updates do not consume human thread versions.
+
+Thread and event lists use `limit` (default25, maximum100) and an opaque `cursor`.
+Responses include `items`, `next_cursor`, `watermark`, `has_more`, `can_comment`,
+`can_resolve`. Membership watermarks exclude later-created threads/events until a
+fresh list; current permissions are rechecked on every continuation. Clients must
+follow `has_more`/`next_cursor` rather than treating the first page as complete.
+
+Pages backups include threads, immutable events and receipts. Original anchor
+revisions are pinned with a deferred NO ACTION foreign key; Page/head deletion
+still cascades the entire owned graph. Restore validates the original anchor at
+its pinned snapshot and contiguous event versions/kinds/count/resolution state,
+then reconstructs projection/provenance from actual retained deck history.
+Imported projection fields are not trusted. Fork remaps the Page namespace while preserving thread IDs,
+keeps stable slide/element anchors and historical event mutation IDs, and clears
+comment replay receipts. A historical mutation ID remains a409 tombstone.

@@ -18,14 +18,15 @@ export interface SlidesEditorProps {
   readOnly?: boolean
   reorderDisabled?: boolean
   persistenceStatus?: string
+  commentsAvailable?: boolean
 }
 
-export function SlidesEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus }: SlidesEditorProps) {
+export function SlidesEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus, commentsAvailable }: SlidesEditorProps) {
   if (!isNativeSlideDeck(deck)) return <p role="alert">This Slides format is unavailable. Its content cannot be edited.</p>
-  return <NativeEditor deck={deck} onChange={onChange} readOnly={readOnly || !onChange} reorderDisabled={reorderDisabled} persistenceStatus={persistenceStatus} />
+  return <NativeEditor deck={deck} onChange={onChange} readOnly={readOnly || !onChange} reorderDisabled={reorderDisabled} persistenceStatus={persistenceStatus} commentsAvailable={commentsAvailable} />
 }
 
-function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus }: SlidesEditorProps & { deck: SlideDeck; readOnly: boolean }) {
+function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus, commentsAvailable }: SlidesEditorProps & { deck: SlideDeck; readOnly: boolean }) {
   const [slideId, setSlideId] = React.useState(deck.slide_order[0])
   const [elementId, setElementId] = React.useState<string>()
   const [present, setPresent] = React.useState(false)
@@ -49,7 +50,7 @@ function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceSt
   })
   const position = deck.slide_order.indexOf(slideId)
   return <section aria-label="Slides editor" className="space-y-3">
-    <p role="status" className="text-sm text-muted-foreground">{persistenceStatus ?? "Changes in this preview are not saved."} Images and comments are not available.</p>
+    <p role="status" className="text-sm text-muted-foreground">{persistenceStatus ?? "Changes in this preview are not saved."} {commentsAvailable ? "Images are not available." : "Images and comments are not available."}</p>
     {error && <p role="alert">{error}</p>}
     <div className="flex flex-wrap gap-2" aria-label="Slide actions">
       <button className={control} disabled={readOnly || !slide || deck.slides.length >= 100} onClick={() => { const next = insertSlide(deck, slideId); if (changed(next.deck)) { setSlideId(next.slideId); setElementId(undefined) } }}>New slide</button>

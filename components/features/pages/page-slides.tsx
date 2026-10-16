@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { SlideComments } from "@/components/features/slides/slide-comments"
 import { SlidesEditor } from "@/components/features/slides/slides-editor"
 import { slidesRequest, usePageSlides } from "@/hooks/use-page-slides"
 import type { SlidesState } from "@/lib/slides/mutations"
@@ -8,13 +9,14 @@ import type { SlidesState } from "@/lib/slides/mutations"
 interface SlideRevision { revision: number; created_at: string; kind: string; actor: string }
 export function PageSlides({ workspaceId, slug, pageId, onDirtyChange }: { workspaceId: string; slug: string; pageId: string; onDirtyChange?: (dirty: boolean) => void }) {
   const sync = usePageSlides(workspaceId, slug, pageId)
+  const [commentDirty, setCommentDirty] = useState(false)
   const [history, setHistory] = useState<SlideRevision[]>(), [preview, setPreview] = useState<SlidesState>(), [historyError, setHistoryError] = useState<string>()
-  useEffect(() => { onDirtyChange?.(sync.dirty || sync.retry); return () => onDirtyChange?.(false) }, [sync.dirty, sync.retry, onDirtyChange])
+  useEffect(() => { onDirtyChange?.(sync.dirty || sync.retry || commentDirty); return () => onDirtyChange?.(false) }, [sync.dirty, sync.retry, commentDirty, onDirtyChange])
   useEffect(() => {
-    if (!sync.dirty && !sync.retry) return
+    if (!sync.dirty && !sync.retry && !commentDirty) return
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
     window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn)
-  }, [sync.dirty, sync.retry])
+  }, [sync.dirty, sync.retry, commentDirty])
   async function loadHistory() {
     setHistoryError(undefined)
     try {
@@ -39,7 +41,8 @@ export function PageSlides({ workspaceId, slug, pageId, onDirtyChange }: { works
     {sync.error && <p role="alert">{sync.error}</p>}
     {sync.orderOnly && <p role="status">Save or discard this reorder before editing content.</p>}
     {sync.dirty && !sync.orderOnly && <p className="text-sm">Save or discard content changes before reordering slides.</p>}
-    {!sync.draft ? <p role="status">{sync.status}</p> : <SlidesEditor key={`${sync.base?.deck.deck_id}:${sync.base?.revision}`} deck={sync.draft} onChange={sync.change} readOnly={!sync.canWrite || sync.busy || sync.blocked || sync.retry || sync.orderOnly} reorderDisabled={sync.dirty} persistenceStatus={sync.status} />}
+    {!sync.draft ? <p role="status">{sync.status}</p> : <SlidesEditor key={`${sync.base?.deck.deck_id}:${sync.base?.revision}`} deck={sync.draft} onChange={sync.change} readOnly={!sync.canWrite || sync.busy || sync.blocked || sync.retry || sync.orderOnly} reorderDisabled={sync.dirty} persistenceStatus={sync.status} commentsAvailable />}
+    {sync.base && <SlideComments key={`${workspaceId}:${pageId}`} workspaceId={workspaceId} slug={slug} pageId={pageId} saved={sync.base} contentPending={sync.dirty || sync.retry} onDirtyChange={setCommentDirty} />}
     {historyError && <p role="alert">{historyError}</p>}
     {history && <section aria-label="Slides history" className="space-y-2"><h3 className="font-medium">Saved revisions</h3>{history.map(item => <div key={item.revision} className="flex flex-wrap items-center gap-2"><span>Revision {item.revision} · {item.kind} · {item.created_at}</span><button className={controls} onClick={() => void viewRevision(item.revision)}>View revision {item.revision}</button><button className={controls} disabled={!sync.canWrite || sync.busy || sync.blocked || sync.dirty || sync.retry} onClick={() => { setPreview(undefined); void sync.restore(item.revision) }}>Restore revision {item.revision}</button></div>)}</section>}
     {preview && <section aria-label="Saved Slides revision" className="rounded border p-3"><h3>Saved revision {preview.revision}</h3><button className={controls} onClick={() => setPreview(undefined)}>Close revision preview</button><SlidesEditor key={`${preview.deck.deck_id}:${preview.revision}`} deck={preview.deck} readOnly persistenceStatus={`Saved revision ${preview.revision}; read only`} /></section>}

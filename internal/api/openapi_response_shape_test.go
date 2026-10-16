@@ -46,6 +46,13 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "SlideCommentAnchor", pointer: "/components/schemas/SlideCommentAnchor", value: slides.CommentAnchor{}},
+	{name: "SlideCommentEvent", pointer: "/components/schemas/SlideCommentEvent", value: slides.CommentEvent{}},
+	{name: "SlideCommentThread", pointer: "/components/schemas/SlideCommentThread", value: slides.CommentThread{}},
+	{name: "SlideCommentReceipt", pointer: "/components/schemas/SlideCommentReceipt", value: slides.CommentReceipt{}},
+	{name: "SlideCommentThreads", pointer: "/components/schemas/SlideCommentThreads", value: SlidesCommentThreadsResponse{}},
+	{name: "SlideCommentHistory", pointer: "/components/schemas/SlideCommentHistory", value: SlidesCommentHistoryResponse{}},
+	{name: "SlideCommentThreadResponse", pointer: "/components/schemas/SlideCommentThreadResponse", value: SlidesCommentThreadResponse{}},
 	{name: "SlideState", pointer: "/components/schemas/SlideState", value: slides.State{}},
 	{name: "SlideReceipt", pointer: "/components/schemas/SlideReceipt", value: slides.Receipt{}},
 	{name: "SlideRevision", pointer: "/components/schemas/SlideRevision", value: slides.Revision{}},
