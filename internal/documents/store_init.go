@@ -56,7 +56,7 @@ func (s *Store) InitRequest(ctx context.Context, k Key, id, fingerprint string, 
 			return err
 		}
 		var n int
-		if err := t.QueryRowContext(ctx, "SELECT count(*) FROM documents").Scan(&n); err != nil {
+		if err := t.QueryRowContext(ctx, "SELECT count(*) FROM documents WHERE workspace_id=?", k.WorkspaceID).Scan(&n); err != nil {
 			return err
 		}
 		if n >= s.opts.MaxDocuments {
