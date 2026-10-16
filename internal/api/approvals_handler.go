@@ -182,6 +182,9 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err == nil:
 		// ok
+	case errors.Is(err, harbormaster.ErrDecisionDenied):
+		replyError(w, http.StatusForbidden, "whole-run approval access denied")
+		return
 	case errors.Is(err, harbormaster.ErrNotFound):
 		replyError(w, http.StatusNotFound, "not found")
 		return

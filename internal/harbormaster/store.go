@@ -108,6 +108,15 @@ func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Request, err
 	return getTx(ctx, db, workspaceID, id)
 }
 
+// GetTx reads an existing source inside a caller-owned reserved transaction.
+// External source adapters must provide a nonempty workspace.
+func GetTx(ctx context.Context, tx DBTX, workspaceID, id string) (*Request, error) {
+	if workspaceID == "" {
+		return nil, ErrNotFound
+	}
+	return getTx(ctx, tx, workspaceID, id)
+}
+
 // getTx is Get over the DBTX subset so DecideTx can read its own
 // uncommitted write from inside the caller's transaction. Same
 // workspace-scoping contract as Get.
