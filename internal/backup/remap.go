@@ -413,5 +413,8 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 		return err
 	}
 	remapChatEntityHistory(dump, idMap)
+	if err := remapChatProposals(dump, idMap); err != nil {
+		return err
+	}
 	return nil
 }
