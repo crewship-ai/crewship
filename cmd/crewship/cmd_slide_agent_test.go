@@ -30,6 +30,9 @@ func executeSelectedAgentCLI(t *testing.T, transport http.RoundTripper, stdin st
 		parent.PersistentFlags().String(flag, "", "unavailable to protected adapter")
 	}
 	parent.PersistentFlags().Bool("server-allow-mismatch", false, "unavailable")
+	originalFormat := flagFormat
+	t.Cleanup(func() { flagFormat = originalFormat })
+	parent.PersistentFlags().StringVarP(&flagFormat, "format", "f", "table", "presentation only; never a profile")
 	slide := &cobra.Command{Use: "slide"}
 	slide.AddCommand(newSlideAgentCommandWithTransport(transport))
 	parent.AddCommand(slide)
@@ -54,7 +57,7 @@ func TestSlidesAgentCLIRejectsFallbackOverridesAndInvalidIdentity(t *testing.T) 
 	if _, err := executeSelectedAgentCLI(t, transport, "", "read", "report", "request"); err == nil {
 		t.Fatal("missing run capability fell back to human profile")
 	}
-	t.Setenv("CREWSHIP_AGENT_TOKEN", "agtv2.synthetic")
+	t.Setenv("CREWSHIP_AGENT_TOKEN", "agtv2.fixture-placeholder")
 	for _, args := range [][]string{{"read", "report", "request", "--server", "http://evil.invalid"}, {"read", "report", "request", "--profile", "human"}, {"read", "../report", "request"}, {"read", "report", "request?refresh=1"}} {
 		if _, err := executeSelectedAgentCLI(t, transport, "", args...); err == nil {
 			t.Fatal("protected override/path accepted", args)
@@ -179,5 +182,40 @@ func TestSlidesAgentCLIActualSidecarPreservesWireAndStopsOnConflict(t *testing.T
 	}
 	if reads != 1 || replaces != 1 {
 		t.Fatal("conflict triggered read/rebase/retry", reads, replaces)
+	}
+}
+
+// The historical gitleaks fingerprint is a malformed synthetic fixture, not
+// an issued run capability. The real signed-token verifier must reject it.
+func TestSlidesAgentHistoricalSyntheticFixtureCannotAuthenticate(t *testing.T) {
+	if _, _, _, ok := internaltoken.ValidateAgentRunToken("fixture-placeholder-signing-key", "agtv2."+"synthetic"); ok {
+		t.Fatal("historical synthetic fixture authenticated as a signed run token")
+	}
+}
+
+func TestSlidesAgentCLIHonorsOutputFlagWithoutHumanProfile(t *testing.T) {
+	token := internaltoken.DeriveAgentRunToken("fixture-placeholder-key", "workspace", "agent", "run")
+	t.Setenv("CREWSHIP_AGENT_TOKEN", token)
+	transport := selectedAgentRoundTrip(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"revision":2,"content_hash":"fixture"}`))}, nil
+	})
+	for _, format := range []string{"json", "yaml", "ndjson"} {
+		output, err := executeSelectedAgentCLI(t, transport, "", "read", "report", "request", "--format", format)
+		if err != nil {
+			t.Fatal(format, err)
+		}
+		if format == "yaml" {
+			if !strings.Contains(output, "revision: 2") {
+				t.Fatal("output flag ignored", output)
+			}
+		} else {
+			var payload struct {
+				Revision    int    `json:"revision"`
+				ContentHash string `json:"content_hash"`
+			}
+			if err := json.Unmarshal([]byte(output), &payload); err != nil || payload.Revision != 2 || payload.ContentHash != "fixture" {
+				t.Fatal("machine snapshot output differs", output, err)
+			}
+		}
 	}
 }

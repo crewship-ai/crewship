@@ -16798,39 +16798,6 @@
         ],
         "type": "object"
       },
-      "SlideSelectedReplacement": {
-        "additionalProperties": false,
-        "properties": {
-          "content_hash": {
-            "type": "string"
-          },
-          "duplicate": {
-            "type": "boolean"
-          },
-          "mutation_id": {
-            "pattern": "^[a-zA-Z0-9_-]{1,128}$",
-            "type": "string"
-          },
-          "order_version": {
-            "format": "int64",
-            "minimum": 1,
-            "type": "integer"
-          },
-          "revision": {
-            "format": "int64",
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "mutation_id",
-          "revision",
-          "order_version",
-          "content_hash",
-          "duplicate"
-        ],
-        "type": "object"
-      },
       "SlideSelectedRequest": {
         "additionalProperties": false,
         "properties": {
@@ -16921,22 +16888,6 @@
           "can_dispatch",
           "can_cancel",
           "eligible_chats"
-        ],
-        "type": "object"
-      },
-      "SlideSelectedSnapshot": {
-        "additionalProperties": false,
-        "properties": {
-          "original_element": {
-            "$ref": "#/components/schemas/SlideElement"
-          },
-          "request": {
-            "$ref": "#/components/schemas/SlideSelectedSummary"
-          }
-        },
-        "required": [
-          "request",
-          "original_element"
         ],
         "type": "object"
       },

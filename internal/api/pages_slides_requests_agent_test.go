@@ -71,7 +71,6 @@ func TestSlidesSelectedActualSidecarRouterFrozenSnapshotReplacementReplayAndRevo
 	}
 	key := slides.Key{WorkspaceID: "ws-old", PageID: input.PageID}
 	store := router.pages.newSlidesStore()
-	request := httptest.NewRequest("POST", "/", nil)
 	// Claim is a trusted worker operation; its authorization uses the same
 	// actual admission fence as the later host run binding.
 	claimAuth := func(ctx context.Context, tx *sql.Tx) (string, error) {
@@ -93,7 +92,7 @@ func TestSlidesSelectedActualSidecarRouterFrozenSnapshotReplacementReplayAndRevo
 		t.Fatal(receipt, err)
 	}
 	start := map[string]any{"id": "selected-run", "agent_id": "selected-agent", "workspace_id": "ws-old", "chat_id": "selected-chat", "artifact_human_receipt": receipt, "artifact_human_message_id": "selected-trigger", "human_authority": receipt, "trigger_message_id": "selected-trigger", "slides_request_id": admitted.ID}
-	request = httptest.NewRequest("POST", "/api/v1/internal/runs", strings.NewReader(slideJSON(t, start)))
+	request := httptest.NewRequest("POST", "/api/v1/internal/runs", strings.NewReader(slideJSON(t, start)))
 	request.RemoteAddr = "127.0.0.1:12345"
 	request.Header.Set("X-Internal-Token", master)
 	started := httptest.NewRecorder()

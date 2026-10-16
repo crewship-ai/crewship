@@ -54,8 +54,6 @@ var responseShapeContracts = []struct {
 	{name: "SlideSelectedRequest", pointer: "/components/schemas/SlideSelectedRequest", value: SlidesSelectedRequestResponse{}},
 	{name: "SlideSelectedAdmission", pointer: "/components/schemas/SlideSelectedAdmission", value: SlidesSelectedAdmissionResponse{}},
 	{name: "SlideSelectedCancel", pointer: "/components/schemas/SlideSelectedCancel", value: SlidesSelectedCancelResponse{}},
-	{name: "SlideSelectedSnapshot", pointer: "/components/schemas/SlideSelectedSnapshot", value: SlidesSelectedSnapshotResponse{}},
-	{name: "SlideSelectedReplacement", pointer: "/components/schemas/SlideSelectedReplacement", value: SlidesSelectedReplacementResponse{}},
 	{name: "SlideCommentThreads", pointer: "/components/schemas/SlideCommentThreads", value: SlidesCommentThreadsResponse{}},
 	{name: "SlideCommentHistory", pointer: "/components/schemas/SlideCommentHistory", value: SlidesCommentHistoryResponse{}},
 	{name: "SlideCommentThreadResponse", pointer: "/components/schemas/SlideCommentThreadResponse", value: SlidesCommentThreadResponse{}},
