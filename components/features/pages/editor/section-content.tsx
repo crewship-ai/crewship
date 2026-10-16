@@ -112,7 +112,7 @@ function SlidesPageContent(props: EditorSectionProps) {
   const reportIdentity = React.useCallback((value: boolean) => { dirty.current.identity = value; props.onDirtyChange(dirty.current.identity || dirty.current.slides) }, [props.onDirtyChange])
   const reportSlides = React.useCallback((value: boolean) => { dirty.current.slides = value; props.onDirtyChange(dirty.current.identity || dirty.current.slides) }, [props.onDirtyChange])
   if (!props.page?.id) return <p role="alert">The saved Page identity is unavailable.</p>
-  return <div className="space-y-4"><PageIdentityCard workspaceId={props.workspaceId} slug={props.slug} page={props.page} mayEdit={props.capabilities.mayEditMetadata} onDirtyChange={reportIdentity} /><PageSlides key={props.page.id} workspaceId={props.workspaceId} slug={props.slug} pageId={props.page.id} onDirtyChange={reportSlides} /></div>
+  return <div className="space-y-4"><PageIdentityCard workspaceId={props.workspaceId} slug={props.slug} page={props.page} mayEdit={props.capabilities.mayEditMetadata} onDirtyChange={reportIdentity} /><PageSlides key={`${props.workspaceId}:${props.page.id}`} workspaceId={props.workspaceId} slug={props.slug} pageId={props.page.id} onDirtyChange={reportSlides} /></div>
 }
 
 // ── The ordinary panel Page ────────────────────────────────────────────────

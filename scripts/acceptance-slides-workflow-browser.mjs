@@ -17,7 +17,7 @@ try{
   const endpoint=(path='')=>`${fixture.server}/api/v1/pages/${slug}/slides${path}?workspace_id=${fixture.workspace}`
   const state=async()=>{const r=await ctx.request.get(endpoint());expect(r.status()).toBe(200);return r.json()}
   await page.goto(`${fixture.server}/pages`)
-  await page.getByRole('button',{name:'New page',exact:true}).click()
+  await page.getByRole('button',{name:'New Doc, Slides or artifact',exact:true}).click()
   const dialog=page.getByRole('dialog');await dialog.getByLabel('Content',{exact:true}).selectOption('slides');await dialog.getByLabel('Name',{exact:true}).fill(`Native ${mode}`);await dialog.getByRole('button',{name:'Create Slides page',exact:true}).click()
   const work=page.getByRole('region',{name:'Slides Page',exact:true});await expect(work).toBeVisible()
   await work.getByRole('button',{name:'Add text',exact:true}).click();const literal=`<script>window.__slideExecuted=1</script> Native ${mode} 🐎`

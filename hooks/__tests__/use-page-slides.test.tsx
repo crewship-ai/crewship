@@ -57,4 +57,21 @@ describe("durable Slides host",()=>{
   act(()=>h.result.current.change(edit(h.result.current.draft!)))
   expect(h.result.current.orderOnly).toBe(true);expect(h.result.current.draft?.slides[0].notes).toBe(fixture.deck.slides[0].notes);expect(h.result.current.error).toContain("before editing")
  })
+ for(const uncertain of [false,true])it(`keeps immutable draft across same-Page slug rename (uncertain=${uncertain})`,async()=>{
+  fetch.mockImplementation(async(url)=>String(url).includes("/slides")?json(state()):page())
+  const h=renderHook(({slug})=>usePageSlides("ws",slug,"fixture_page"),{initialProps:{slug:"report"}})
+  await waitFor(()=>expect(h.result.current.base?.revision).toBe(7));act(()=>h.result.current.change(edit(h.result.current.draft!)))
+  let original:string|undefined
+  if(uncertain){fetch.mockImplementation(async(_url,options)=>{original=options?.body as string;throw new Error("ack lost")});await act(async()=>{await h.result.current.save()})}
+  fetch.mockClear();h.rerender({slug:"renamed-report"})
+  await act(async()=>{await Promise.resolve()})
+  expect(fetch).not.toHaveBeenCalled();expect(h.result.current.base?.revision).toBe(7);expect(h.result.current.draft?.slides[0].notes).toBe("unsaved notes");expect(h.result.current.retry).toBe(uncertain)
+  fetch.mockImplementation(async(url,options)=>{
+   expect(String(url)).toContain("/renamed-report/slides")
+   if(options?.method==="POST"){if(uncertain)expect(options.body).toBe(original);const body=JSON.parse(options.body as string);expect(body.base_rev).toBe(7);expect(body.page_id).toBe("fixture_page");return json({mutation_id:body.mutation_id,revision:8,order_version:3,content_hash:"a".repeat(64),duplicate:uncertain})}
+   const confirmed=state(8);confirmed.deck=edit(confirmed.deck);return json(confirmed)
+  })
+  await act(async()=>{await h.result.current.save()});expect(h.result.current.dirty).toBe(false)
+ })
+
 })

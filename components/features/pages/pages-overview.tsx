@@ -124,7 +124,7 @@ export function PagesOverview({
           <EmptyState
             icon={CONCEPT_ICON.pages}
             title="No pages yet"
-            description="A page is a named set of panels a producer pushes to. Write the spec, create it with crewship page create --file page.yaml, then send a first payload with crewship page set <page>/<panel> --data -."
+            description="Create a Doc, Slides or HTML artifact, draw on a board, or arrange panels in a page. Choose a creation action above to get started."
           />
         </div>
       </div>

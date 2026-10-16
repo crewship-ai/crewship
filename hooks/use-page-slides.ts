@@ -39,7 +39,11 @@ export function usePageSlides(workspace: string, slug: string, pageID: string) {
     } catch (cause) { if (current()) { setCanWrite(false); setError(cause instanceof Error ? cause.message : "Could not read Slides."); setStatus("Slides unavailable; any draft is retained") } }
     finally { if (current()) setBusy(false) }
   }, [read, workspace, slug, pageID])
-  useEffect(() => { live.current = true; void reopen(); return () => { live.current = false; ++generation.current } }, [reopen])
+  // A slug is a mutable lookup alias. Same-identity route changes only update
+  // the endpoint closures; they must never reopen over a retained candidate.
+  const reopenLatest = useRef(reopen)
+  reopenLatest.current = reopen
+  useEffect(() => { live.current = true; void reopenLatest.current(); return () => { live.current = false; ++generation.current } }, [workspace, pageID])
   const change = (next: SlideDeck) => {
     if (!base || !draft || !canWrite || busy || blocked || attempt.current) return
     if (orderOnly) { setError("Save or discard the pending reorder before editing content."); return }
