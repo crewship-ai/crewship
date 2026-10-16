@@ -309,4 +309,27 @@ describe("useAuth / AuthProvider", () => {
       expect(result.current.data?.user.id).toBe("u1")
     })
   })
+  it("keeps same-user E2 recovery on reload/outage but purges it on acknowledged logout", async () => {
+    const proposalKey = 'chat-proposal:["workspace","u1","proposal","card","comment"]'
+    const decisionKey = 'chat-decision:["workspace","u1","decision","card","answer"]'
+    const foreignKey = 'chat-proposal:["workspace","other","proposal","card","comment"]'
+    sessionStorage.setItem(proposalKey, "private draft")
+    sessionStorage.setItem(decisionKey, "private answer")
+    sessionStorage.setItem(foreignKey, "previous user")
+    sessionStorage.setItem("unrelated-preference", "keep")
+    mockFetch.mockResolvedValueOnce(okJSON({ user: { id: "u1" }, expires: "2026-12-01" }))
+      .mockResolvedValueOnce(errJSON(500, {})).mockResolvedValueOnce(okJSON({}))
+    const { result } = renderHook(() => useAuth(), { wrapper })
+    await waitFor(() => expect(result.current.status).toBe("authenticated"))
+    expect(sessionStorage.getItem(proposalKey)).toBe("private draft")
+    expect(sessionStorage.getItem(foreignKey)).toBeNull()
+    await act(async () => { await result.current.signOut() })
+    expect(sessionStorage.getItem(proposalKey)).toBe("private draft")
+    await act(async () => { await result.current.signOut() })
+    expect(sessionStorage.getItem(proposalKey)).toBeNull()
+    expect(sessionStorage.getItem(decisionKey)).toBeNull()
+    expect(sessionStorage.getItem("unrelated-preference")).toBe("keep")
+    sessionStorage.clear()
+  })
+
 })

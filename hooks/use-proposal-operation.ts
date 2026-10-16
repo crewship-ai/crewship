@@ -11,7 +11,7 @@ export type ProposalRequest = { action: ProposalAction; body: string; key: strin
 export type ProposalTransport = (request: ProposalRequest) => Promise<Response>
 export type ProposalWriteState = "idle" | "saving" | "unknown" | "conflict" | "validation" | "unavailable"
 
-/** No transport is provided by fixtures: production wiring waits for A2. */
+/** Transport uses the same durable request body and key until its outcome is known. */
 export function useProposalOperation(scope: ProposalScope, transport: ProposalTransport, onSnapshot: (snapshot: ProposalRef, action?: ProposalAction) => void, onAccessLost: () => void) {
   const [restored] = useState<ProposalRequest | null>(() => {
     for (const action of ["edit", "confirm", "discard"] as const) {
@@ -68,9 +68,10 @@ export function useProposalOperation(scope: ProposalScope, transport: ProposalTr
     return execute(request)
   }
   return { state, message, current, submit, retry: () => pending.current ? execute(pending.current) : Promise.resolve(false),
-    reviewCurrent: () => {
-      if (!current || busy.current) return
+    reviewCurrent: (snapshot?: ProposalRef) => {
+      const reviewed = snapshot ?? current
+      if (!reviewed || busy.current || reviewed.entity.id !== scope.proposalId || reviewed.entity.workspace_id !== scope.workspaceId) return
       if (pending.current) clear(pending.current)
-      onSnapshot(current); setCurrent(null); setState("idle")
+      onSnapshot(reviewed); setCurrent(null); setState("idle")
     } }
 }

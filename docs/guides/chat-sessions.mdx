@@ -30,6 +30,31 @@ For one-off "ask the agent a question" use, just open `/chat/<agent>` and start 
 
 ## Key concepts
 
+### Issue proposals in chat
+
+An agent's issue proposal appears beside its originating conversation turn. Review
+the selected issues, edit their titles, priorities and assignees, then save the
+reviewed version before confirming. Confirmation creates the selected issues
+atomically with your current permissions. It does not start their agents.
+Discarding a proposal creates no issues.
+
+**Open in Work** shows the same proposal in the right panel; on a phone it opens
+a full-screen panel. **Back to Work**, Escape or closing the phone panel returns
+to the conversation. The card and panel keep separate field and comment drafts.
+A comment is sent through the existing conversation composer path; it is not a
+new comment on an issue that has not been created yet.
+
+If somebody changes the proposal, review the current version explicitly before
+replacing your field draft. After an uncertain save or confirmation, retry the
+original operation instead of submitting a different action. A conflicting
+operation key requires reading and reviewing the current proposal first.
+
+A temporary network or server failure leaves the last verified card and draft
+visible with writes disabled. Explicit access denial clears the card, panel and
+their private recovery data. Signing out or changing the verified signed-in user
+also clears protected proposal/decision recovery; an ordinary reload by the same
+user preserves it. Restricted accounts do not receive proposal cards.
+
 <Accordion title="Glossary — session, origin, branch, attachment, panel, and friends">
 
 | Term | What it means here |
