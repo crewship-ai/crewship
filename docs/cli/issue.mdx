@@ -802,19 +802,26 @@ command uses project grants and does not request the shared workspace board.
 
 ```bash
 crewship issue shared --project PROJECT_ID --limit 100 --offset 0
+crewship issue shared --search "client request" --project PROJECT_ID
 crewship issue shared ISSUE_IDENTIFIER --format json
 ```
 
 | Flag | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `--project` | string | none | Restrict the list to a granted project ID. |
-| `--limit` | integer | 100 | Maximum returned rows, capped at 500 by the API. |
-| `--offset` | integer | 0 | Pagination offset. |
+| `--limit` | integer | 100 | Rows per page, 1–500; larger values are rejected. |
+| `--offset` | integer | 0 | Pagination offset, 0–1,000,000. |
+| `--search` | string | none | Literal title/identifier substring, maximum 256 Unicode characters, sent as `q`; only valid when listing. |
 
 Listing requires project.list; detail requires project.read. A revoked or
 foreign issue returns 404, never a cached body. No issue mutations, comments,
 related-resource metadata or run history are returned.
 
+
+Search stays within live shared-project grants and never matches descriptions or
+comments. SQLite ASCII case folding applies; `%` and `_` are literal. Search does
+not change pagination offsets automatically in CLI; pass `--offset 0` for a new
+search. Combining `--search` with an issue identifier is rejected locally.
 
 Trusted collaborators can explicitly publish a new project comment with
 `crewship issue comment CLIENT-1 --body "Staff answer" --guest-visible`.

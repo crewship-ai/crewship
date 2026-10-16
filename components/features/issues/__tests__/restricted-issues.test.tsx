@@ -4,19 +4,141 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RestrictedIssues } from "../restricted-issues"
 
 const fetchMock = vi.hoisted(() => vi.fn())
+const identity = vi.hoisted(() => ({ user: "guest", workspace: "w" }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "w", workspace: { name: "Workspace" } }) }))
-vi.mock("@/hooks/use-auth", () => ({ useSession: () => ({ data: { user: { id: "guest" } } }), useSessionSafe: () => ({ data: null }) }))
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: identity.workspace, workspace: { name: "Workspace" } }) }))
+vi.mock("@/hooks/use-auth", () => ({ useSession: () => ({ data: { user: { id: identity.user } } }), useSessionSafe: () => ({ data: null }) }))
 vi.mock("@/hooks/use-access-mode", () => ({ useRestrictedSurfaces: () => ["issues", "account_security"] }))
-afterEach(() => { cleanup(); fetchMock.mockReset() })
+afterEach(() => { cleanup(); fetchMock.mockReset(); identity.user = "guest"; identity.workspace = "w" })
 const row = { id: "issue-1", identifier: "CLIENT-1", title: "Shared issue", status: "TODO", project_id: "project-1", project_name: "Client project", can_read: true, can_contribute: false }
 const project = { id: "project-1", name: "Client project", can_contribute: true, intake_ready: true }
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status })
 function show(identifier?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  render(<QueryClientProvider client={client}><RestrictedIssues identifier={identifier} /></QueryClientProvider>)
-  return { client }
+  const view = render(<QueryClientProvider client={client}><RestrictedIssues identifier={identifier} /></QueryClientProvider>)
+  return { client, rerender: () => view.rerender(<QueryClientProvider client={client}><RestrictedIssues identifier={identifier} /></QueryClientProvider>) }
 }
+
+it("submits a literal search from the first page and can clear the filter", async () => {
+  fetchMock.mockImplementation(async (path: string) => {
+    if (path.includes("restricted-issue-projects")) return response([])
+    const params = new URL(path, "http://fixture.test").searchParams
+    if (params.get("q")) return response([{ ...row, title: "Matched request" }])
+    if (params.get("offset") === "100") return response([{ ...row, title: "Second page" }])
+    return response(Array.from({ length: 100 }, (_, index) => ({ ...row, id: `row-${index}`, title: `Row ${index}` })))
+  })
+  show()
+  await screen.findByRole("link", { name: "Row 0" })
+  fireEvent.click(screen.getByRole("button", { name: "Next" }))
+  await screen.findByRole("link", { name: "Second page" })
+  fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "CLIENT & %_" } })
+  expect(fetchMock.mock.calls.some(([path]) => new URL(path, "http://fixture.test").searchParams.has("q"))).toBe(false)
+  fireEvent.click(screen.getByRole("button", { name: "Search" }))
+  await screen.findByRole("link", { name: "Matched request" })
+  const searched = fetchMock.mock.calls.map(([path]) => new URL(path, "http://fixture.test")).find(url => url.searchParams.has("q"))!
+  expect(searched.searchParams.get("q")).toBe("CLIENT & %_")
+  expect(searched.searchParams.get("offset")).toBe("0")
+  expect(screen.queryByRole("link", { name: "Second page" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Clear search" }))
+  await screen.findByRole("link", { name: "Row 0" })
+  expect(screen.getByLabelText("Search shared issues")).toHaveValue("")
+})
+
+it("does not present an empty search as an access denial", async () => {
+  fetchMock.mockImplementation(async () => response([]))
+  show()
+  fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "missing" } })
+  fireEvent.click(screen.getByRole("button", { name: "Search" }))
+  await screen.findByText(/No matching shared issues/)
+  expect(screen.queryByText("No issues shared here")).toBeNull()
+})
+
+it("keeps an unsubmitted new issue draft when searching the catalog", async () => {
+  fetchMock.mockImplementation(async (path: string) => response(path.includes("restricted-issue-projects") ? [project] : path.includes("q=") ? [] : [row]))
+  show()
+  fireEvent.click(await screen.findByText("New issue"))
+  fireEvent.change(screen.getByLabelText("Project", { exact: true }), { target: { value: "project-1" } })
+  fireEvent.change(screen.getByLabelText("Title", { exact: true }), { target: { value: "Keep my request" } })
+  fireEvent.change(screen.getByLabelText("Description", { exact: true }), { target: { value: "Keep my brief" } })
+  fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "another request" } })
+  fireEvent.click(screen.getByRole("button", { name: "Search" }))
+  await screen.findByText(/No matching shared issues/)
+  expect(screen.getByLabelText("Title", { exact: true })).toHaveValue("Keep my request")
+  expect(screen.getByLabelText("Description", { exact: true })).toHaveValue("Keep my brief")
+  expect(screen.getByLabelText("Project", { exact: true })).toHaveValue("project-1")
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false)
+})
+
+it("confirms a created issue even when it does not match the current search", async () => {
+  fetchMock.mockImplementation(async (path: string, init?: RequestInit) => init?.method === "POST" ? response(row, 201) : response(path.includes("restricted-issue-projects") ? [project] : []))
+  show()
+  fireEvent.click(await screen.findByText("New issue"))
+  fireEvent.change(screen.getByLabelText("Project", { exact: true }), { target: { value: "project-1" } })
+  fireEvent.change(screen.getByLabelText("Title", { exact: true }), { target: { value: "Shared issue" } })
+  fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "Unrelated filter" } })
+  fireEvent.click(screen.getByRole("button", { name: "Search" }))
+  await screen.findByText(/No matching shared issues/)
+  fireEvent.click(screen.getByRole("button", { name: "Create issue" }))
+  await screen.findByText("Created CLIENT-1.")
+  expect(screen.getByRole("link", { name: "Open CLIENT-1" })).toHaveAttribute("href", "/issues/CLIENT-1")
+  expect(screen.getByLabelText("Search shared issues")).toHaveValue("Unrelated filter")
+  expect(screen.getByLabelText("Title", { exact: true })).toHaveValue("")
+})
+
+it.each([{ id: "partial" }, { ...row, project_id: "foreign-project", project_name: "FOREIGN_PROJECT_METADATA" }])("retains an uncertain creation draft and reuses its operation key on retry", async invalid => {
+  let malformed = true
+  fetchMock.mockImplementation(async (path: string, init?: RequestInit) => init?.method === "POST" ? response(malformed ? invalid : row, 201) : response(path.includes("restricted-issue-projects") ? [project] : []))
+  show()
+  fireEvent.click(await screen.findByText("New issue"))
+  fireEvent.change(screen.getByLabelText("Project", { exact: true }), { target: { value: "project-1" } })
+  fireEvent.change(screen.getByLabelText("Title", { exact: true }), { target: { value: "Uncertain request" } })
+  fireEvent.click(screen.getByRole("button", { name: "Create issue" }))
+  await screen.findByText(/Could not confirm the created issue/)
+  expect(screen.getByLabelText("Title", { exact: true })).toHaveValue("Uncertain request")
+  expect(screen.queryByText("FOREIGN_PROJECT_METADATA")).toBeNull()
+  expect(screen.queryByRole("link", { name: /^Open CLIENT/ })).toBeNull()
+  malformed = false
+  fireEvent.click(screen.getByRole("button", { name: "Create issue" }))
+  await screen.findByText("Created CLIENT-1.")
+  const writes = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")
+  expect(writes).toHaveLength(2)
+  expect(new Headers(writes[0][1].headers).get("Idempotency-Key")).toBe(new Headers(writes[1][1].headers).get("Idempotency-Key"))
+})
+
+it("does not offer a created-issue link when the response denies reading", async () => {
+  fetchMock.mockImplementation(async (path: string, init?: RequestInit) => init?.method === "POST" ? response({ ...row, can_read: false }, 201) : response(path.includes("restricted-issue-projects") ? [project] : []))
+  show()
+  fireEvent.click(await screen.findByText("New issue"))
+  fireEvent.change(screen.getByLabelText("Project", { exact: true }), { target: { value: "project-1" } })
+  fireEvent.change(screen.getByLabelText("Title", { exact: true }), { target: { value: "Shared issue" } })
+  fireEvent.click(screen.getByRole("button", { name: "Create issue" }))
+  await screen.findByText("Created CLIENT-1.")
+  expect(screen.queryByRole("link", { name: "Open CLIENT-1" })).toBeNull()
+})
+
+it("does not retain another account or workspace's search input", async () => {
+  fetchMock.mockImplementation(async (path: string) => response(path.includes("restricted-issue-projects") ? [] : [row]))
+  const { rerender } = show()
+  await screen.findByRole("link", { name: "Shared issue" })
+  fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "Client confidential term" } })
+  fireEvent.click(screen.getByRole("button", { name: "Search" }))
+  await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => path.includes("q="))).toBe(true))
+  identity.user = "second-guest"
+  identity.workspace = "other-workspace"
+  rerender()
+  expect(screen.getByLabelText("Search shared issues")).toHaveValue("")
+  await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/workspaces/other-workspace/restricted-issues?limit=100&offset=0")).toBe(true))
+})
+
+it("does not show old search results when a different search fails", async () => {
+  fetchMock.mockImplementation(async (path: string) => path.includes("restricted-issue-projects") ? response([]) : path.includes("q=") ? response({}, 503) : response([row]))
+  show()
+  await screen.findByRole("link", { name: "Shared issue" })
+  fireEvent.change(screen.getByLabelText("Search shared issues"), { target: { value: "another filter" } })
+  fireEvent.click(screen.getByRole("button", { name: "Search" }))
+  await screen.findByRole("alert")
+  expect(screen.queryByRole("link", { name: "Shared issue" })).toBeNull()
+})
 it("uses filtered projections and clears data on a rejected refresh", async () => {
   let refused = false
   fetchMock.mockImplementation(async (path: string) => path.includes("restricted-issue-projects") ? response([]) : refused ? response({}, 404) : response([row]))

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -26,6 +28,14 @@ type sharedIssue struct {
 var issueSharedCmd = &cobra.Command{
 	Use: "shared [identifier-or-id]", Short: "List or read project issues shared with your Guest account", Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		search, _ := cmd.Flags().GetString("search")
+		if !utf8.ValidString(search) || utf8.RuneCountInString(search) > 256 {
+			return fmt.Errorf("search must contain at most 256 valid Unicode characters")
+		}
+		search = strings.TrimSpace(search)
+		if len(args) == 1 && cmd.Flags().Changed("search") {
+			return fmt.Errorf("--search is only available when listing shared issues")
+		}
 		if err := requireAuth(); err != nil {
 			return err
 		}
@@ -42,6 +52,9 @@ var issueSharedCmd = &cobra.Command{
 			path += "/" + url.PathEscape(args[0])
 		} else {
 			query := url.Values{}
+			if search != "" {
+				query.Set("q", search)
+			}
 			project, _ := cmd.Flags().GetString("project")
 			if project != "" {
 				query.Set("project_id", project)
@@ -81,6 +94,7 @@ var issueSharedCmd = &cobra.Command{
 
 func init() {
 	issueSharedCmd.Flags().String("project", "", "Filter to a shared project ID")
+	issueSharedCmd.Flags().String("search", "", "Search shared issue titles and identifiers (maximum 256 characters)")
 	issueSharedCmd.Flags().Int("limit", 100, "Maximum returned rows")
 	issueSharedCmd.Flags().Int("offset", 0, "Pagination offset")
 	issueCmd.AddCommand(issueSharedCmd)
