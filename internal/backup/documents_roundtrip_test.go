@@ -145,6 +145,9 @@ func TestDocumentBackupWorkspaceRoundtrip(t *testing.T) {
 func TestDocumentInstanceBackupRecovery(t *testing.T) {
 	f := newInstanceFixture(t)
 	seedBackupDocument(t, f.db, "ws_e2e_1", "instance-document", "u_admin")
+	if _, err := f.db.Exec(`UPDATE documents SET schema_version=3 WHERE page_id='instance-document'`); err != nil {
+		t.Fatal(err)
+	}
 	seedBackupDocument(t, f.db, "ws_lab", "foreign-instance-document", "u_lab")
 	bundle := f.create(t, true)
 	dir := filepath.Join(t.TempDir(), "recovered")
@@ -157,6 +160,10 @@ func TestDocumentInstanceBackupRecovery(t *testing.T) {
 	}
 	defer target.Close()
 	assertBackupDocument(t, target.DB, 2)
+	var schema int
+	if err = target.QueryRow(`SELECT schema_version FROM documents WHERE page_id='instance-document'`).Scan(&schema); err != nil || schema != 3 {
+		t.Fatalf("physical recovery lost rich source schema: %d %v", schema, err)
+	}
 }
 
 func TestDocumentRestoreCorruptBinaryRollsBackFence(t *testing.T) {
@@ -178,5 +185,38 @@ func TestDocumentRestoreCorruptBinaryRollsBackFence(t *testing.T) {
 	}
 	if epoch != 41 || writer != "source-engine" || owner != "source-owner" || lease != 4102444800000 {
 		t.Fatal("failed restore changed live authority")
+	}
+}
+
+// Backup treats Yjs as opaque bytes. This tests version/byte/fence preservation,
+// not decoding or re-resolving a rich comment in Node.
+func TestDocumentRichSchemaOpaqueEncryptedForkRestore(t *testing.T) {
+	source := openMigratedDB(t)
+	workspace := seedWorkspace(t, source)
+	seedBackupDocument(t, source, workspace, "rich-document", "u_admin")
+	if _, err := source.Exec(`UPDATE documents SET schema_version=3 WHERE page_id='rich-document'`); err != nil {
+		t.Fatal(err)
+	}
+	actor := backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}
+	bundle, err := backup.CreateBackup(t.Context(), source, backup.CreateOptions{Scope: backup.ScopeWorkspace, WorkspaceID: workspace, OutputDir: t.TempDir(), Passphrase: "synthetic-rich-doc-backup", Actor: actor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fork := range []bool{false, true} {
+		t.Run(map[bool]string{false: "same", true: "fork"}[fork], func(t *testing.T) {
+			target := openMigratedDB(t)
+			options := backup.RestoreOptions{Path: bundle.Path, Passphrase: "synthetic-rich-doc-backup", Actor: actor}
+			if fork {
+				options.AsWorkspace = "rich-fork"
+			}
+			if _, err := backup.RestoreBackup(t.Context(), target, options); err != nil {
+				t.Fatal(err)
+			}
+			assertBackupDocument(t, target, 1)
+			var schema, checkpoint int
+			if err := target.QueryRow(`SELECT d.schema_version,c.schema_version FROM documents d JOIN document_checkpoints c ON c.workspace_id=d.workspace_id AND c.page_id=d.page_id`).Scan(&schema, &checkpoint); err != nil || schema != 3 || checkpoint != 1 {
+				t.Fatalf("source checkpoint versions relabeled: %d/%d %v", schema, checkpoint, err)
+			}
+		})
 	}
 }

@@ -81,11 +81,11 @@ function DocumentWorkspace({ workspaceId, slug, pageId, onDirtyChange, sync }: D
   useEffect(() => { editor?.setEditable(sync.editable && !restoring && !upgrading) }, [editor, sync.editable, restoring, upgrading])
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || restoring || upgrading || sync.recovery || commentDirty || agentDirty); return () => onDirtyChange?.(false) }, [sync.pending, restoring, upgrading, sync.recovery, commentDirty, agentDirty, onDirtyChange])
   useEffect(() => {
-    if (!restoring && !upgrading) return
+    if (!restoring && !upgrading && !commentDirty && !agentDirty) return
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
     window.addEventListener("beforeunload", warn)
     return () => window.removeEventListener("beforeunload", warn)
-  }, [restoring,upgrading])
+  }, [restoring,upgrading,commentDirty,agentDirty])
   async function upgradeRich() {
     if (!sync.state || !pageId || (!upgradeAttempt && (commentDirty || agentDirty || sync.pending>0 || sync.recovery || sync.status!=="Saved"))) return
     const input=upgradeAttempt ?? {id:crypto.randomUUID(),schema:sync.state.schema,target_schema:3 as const,page_id:pageId,epoch:sync.state.epoch,ifRev:sync.state.rev}

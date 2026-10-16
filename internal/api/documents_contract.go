@@ -2,7 +2,7 @@ package api
 
 import "encoding/json"
 
-// Public Docs wire contracts mirror the managed engine's schema-2 projection.
+// Public Docs wire contracts mirror the versioned managed engine projection.
 // Binary Yjs state is authoritative; these structs do not grant write authority.
 type DocumentAvailability struct {
 	Enabled bool `json:"enabled"`
@@ -12,7 +12,14 @@ type DocumentNode struct {
 	Attrs   *DocumentAttributes `json:"attrs,omitempty"`
 	Content []DocumentNode      `json:"content,omitempty"`
 	Text    string              `json:"text,omitempty"`
-	Marks   []struct{}          `json:"marks,omitempty"`
+	Marks   []DocumentMark      `json:"marks,omitempty"`
+}
+type DocumentMark struct {
+	Type  string                  `json:"type"`
+	Attrs *DocumentMarkAttributes `json:"attrs,omitempty"`
+}
+type DocumentMarkAttributes struct {
+	Href *string `json:"href,omitempty"`
 }
 type DocumentAttributes struct {
 	ID       string  `json:"id,omitempty"`
@@ -53,23 +60,25 @@ type DocumentStateResponse struct {
 	CanResolve  bool                   `json:"can_resolve"`
 }
 type DocumentMutationRequest struct {
-	ID         string        `json:"id"`
-	Schema     int           `json:"schema"`
-	Epoch      string        `json:"epoch"`
-	Kind       string        `json:"kind,omitempty"`
-	Update     string        `json:"update,omitempty"`
-	Target     string        `json:"target,omitempty"`
-	Text       string        `json:"text,omitempty"`
-	IfRev      *int64        `json:"ifRev,omitempty"`
-	IfHash     string        `json:"ifHash,omitempty"`
-	Checkpoint string        `json:"checkpoint,omitempty"`
-	Block      string        `json:"block,omitempty"`
-	From       *int          `json:"from,omitempty"`
-	To         *int          `json:"to,omitempty"`
-	Comment    string        `json:"comment,omitempty"`
-	Version    *int64        `json:"version,omitempty"`
-	Resolved   *bool         `json:"resolved,omitempty"`
-	Body       *DocumentNode `json:"body,omitempty"`
+	ID           string        `json:"id"`
+	Schema       int           `json:"schema"`
+	PageID       string        `json:"page_id,omitempty"`
+	TargetSchema *int          `json:"target_schema,omitempty"`
+	Epoch        string        `json:"epoch"`
+	Kind         string        `json:"kind,omitempty"`
+	Update       string        `json:"update,omitempty"`
+	Target       string        `json:"target,omitempty"`
+	Text         string        `json:"text,omitempty"`
+	IfRev        *int64        `json:"ifRev,omitempty"`
+	IfHash       string        `json:"ifHash,omitempty"`
+	Checkpoint   string        `json:"checkpoint,omitempty"`
+	Block        string        `json:"block,omitempty"`
+	From         *int          `json:"from,omitempty"`
+	To           *int          `json:"to,omitempty"`
+	Comment      string        `json:"comment,omitempty"`
+	Version      *int64        `json:"version,omitempty"`
+	Resolved     *bool         `json:"resolved,omitempty"`
+	Body         *DocumentNode `json:"body,omitempty"`
 }
 type DocumentMutationResponse struct {
 	ID         string `json:"id"`
