@@ -283,12 +283,14 @@ test.describe("PR browser contract subset — phone", () => {
     expect(small, "fields under 16px make iOS zoom the page and stay zoomed").toEqual([])
 
     await page.goto("/integrations?tab=incoming")
-    await page.getByRole("button", { name: "Expand sidebar", exact: true }).click()
-    await expect(page.getByRole("textbox", { name: "Search incoming targets" })).toBeVisible()
-    await page.getByRole("textbox", { name: "Search incoming targets" }).fill("no-such-target-e2e")
-    await expect(page.getByText("No matching targets. Create a routine, agent or Page first.")).toBeVisible()
-    await page.getByRole("button", { name: "Close the integrations list" }).click({ position: { x: 330, y: 300 } })
-    await expect(page.getByRole("button", { name: "Expand sidebar", exact: true })).toBeVisible()
+    // On a phone the explorer is the SecondaryPanel sheet, opened from the top bar.
+    await page.getByRole("button", { name: "Integrations", exact: true }).click()
+    const integrationsSheet = page.getByRole("dialog", { name: "Integrations" })
+    await expect(integrationsSheet.getByRole("textbox", { name: "Search incoming targets" })).toBeVisible()
+    await integrationsSheet.getByRole("textbox", { name: "Search incoming targets" }).fill("no-such-target-e2e")
+    await expect(integrationsSheet.getByText("No matching targets. Create a routine, agent or Page first.")).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(integrationsSheet).toBeHidden()
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(false)
 
   })
