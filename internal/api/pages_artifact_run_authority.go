@@ -17,7 +17,7 @@ import (
 
 // Only trusted human-chat admission can create this immutable binding. Neither
 // crew IPC nor general run metadata can nominate a human principal.
-func captureArtifactChatPrincipal(r *http.Request, db *sql.DB, run, ws, agent, crew, chat, message string, receipt *chataudience.Receipt) error {
+func captureArtifactChatPrincipal(r *http.Request, db *sql.DB, run, ws, agent, crew, chat, message string, receipt *chataudience.Receipt, selectedOrigin ...string) error {
 	if InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" || receipt == nil || message == "" {
 		return errors.New("host human admission required")
 	}
@@ -35,8 +35,23 @@ func captureArtifactChatPrincipal(r *http.Request, db *sql.DB, run, ws, agent, c
 	if n != 1 {
 		return errors.New("human message missing")
 	}
-	_, err = db.ExecContext(r.Context(), `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO NOTHING`, run, ws, agent, crew, receipt.UserID, chat, message, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, tsformat.Format(time.Now().UTC().Add(time.Hour)))
-	return err
+	var origin any
+	expectedOrigin := ""
+	if len(selectedOrigin) > 1 {
+		return errors.New("one selected principal origin required")
+	}
+	if len(selectedOrigin) == 1 && selectedOrigin[0] != "" {
+		expectedOrigin, origin = selectedOrigin[0], selectedOrigin[0]
+	}
+	_, err = db.ExecContext(r.Context(), `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at,slides_request_origin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO NOTHING`, run, ws, agent, crew, receipt.UserID, chat, message, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, tsformat.Format(time.Now().UTC().Add(time.Hour)), origin)
+	if err != nil {
+		return err
+	}
+	var actualOrigin string
+	if err = db.QueryRowContext(r.Context(), `SELECT COALESCE(slides_request_origin,'') FROM artifact_run_principals WHERE run_id=?`, run).Scan(&actualOrigin); err != nil || actualOrigin != expectedOrigin {
+		return errors.New("immutable selected principal origin changed")
+	}
+	return nil
 }
 
 type artifactRunAuthority struct{ WorkspaceID, AgentID, CrewID, RunID, HumanUserID, ChatID, MessageID, RequestID string }

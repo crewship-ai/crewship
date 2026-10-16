@@ -257,3 +257,14 @@ revocation with hidden ancestors. No API responses are mocked. Run:
 Missing prerequisites fail. The script prints its private temporary screenshot,
 filtered identity JSON and report directory; credentials are not persisted in
 evidence. The Go fixture owns and removes its 0600 credential input.
+
+`acceptance-slides-selected-browser.mjs` runs only through the opt-in Linux
+`TestSlidesSelectedBrowser` fixture after a production static export. Run
+`CREWSHIP_SLIDES_SELECTED_BROWSER=1 go test -tags slides_selected_browser ./internal/api -run '^TestSlidesSelectedBrowser$'` through `crewship-heavy`, preserving the installed
+`PLAYWRIGHT_BROWSERS_PATH` when HOME is isolated. Optional
+`CREWSHIP_SLIDES_SELECTED_OUTPUT` selects owned evidence output. It serves real
+Router/SQLite/static UI with separate synthetic WRITE/READ sessions, verifies
+actual textarea selection, exact lost-ack retry, cancellation, original-revision
+conflicts and confirmed result preview. The production worker uses a deterministic
+trusted Store replacement instead of model dispatch; this is not model or new
+sidecar execution evidence. No execution containers or shared server are used.

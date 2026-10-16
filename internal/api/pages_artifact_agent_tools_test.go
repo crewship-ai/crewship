@@ -61,7 +61,7 @@ func TestArtifactAgentRestoreCompletesOnlyBoundRequestAtomically(t *testing.T) {
 	h, workspace, user, page := requestFixture(t)
 	id := createArtifactRequestForTest(t, h, workspace, user, requestBody, 202)
 	h.artifactDispatch = func(ctx context.Context, _, _, _ string, opts ws.ChatMessageOption) error {
-		execOrFatal(t, h.db, `INSERT INTO artifact_run_principals SELECT 'restore-request-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
+		execOrFatal(t, h.db, `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) SELECT 'restore-request-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
 		if err := bindArtifactRequestRun(httptest.NewRequest("POST", "/", nil), h.db, id, "restore-request-run", opts.HumanAuthority); err != nil {
 			t.Fatal(err)
 		}

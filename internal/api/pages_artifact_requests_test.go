@@ -63,7 +63,7 @@ func TestArtifactRequestDispatchPublishesVerifiedResult(t *testing.T) {
 		if actualUser != user || chat != "artifact-chat" || opts.ArtifactRequestID != id || !strings.Contains(prompt, `request_id:"`+id+`"`) {
 			t.Fatal("dispatch lost trusted context")
 		}
-		execOrFatal(t, h.db, `INSERT INTO artifact_run_principals SELECT 'request-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
+		execOrFatal(t, h.db, `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) SELECT 'request-run',workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at FROM artifact_run_principals WHERE run_id='artifact-run'`)
 		r := httptest.NewRequest("POST", "/", nil)
 		if err := bindArtifactRequestRun(r, h.db, id, "request-run", opts.HumanAuthority); err != nil {
 			t.Fatal(err)

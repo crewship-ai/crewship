@@ -30,6 +30,7 @@ type ChatMessageOption struct {
 	HumanAuthority    *chataudience.Receipt `json:"-"`
 	BoardRequestID    string                `json:"-"`
 	DocumentRequestID string                `json:"-"`
+	SlidesRequestID   string                `json:"-"`
 	ArtifactRequestID string                `json:"-"`
 	HumanResume       bool                  `json:"-"`
 	// MaxTurns overrides the adapter agent-loop cap for this run. 0 = leave the
