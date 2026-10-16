@@ -214,9 +214,15 @@ func (r *Router) chatProposalMutate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if result.Proposal.Status == "draft" {
-		result.Proposal.AllowedActions = authorized.Ref.Proposal.AllowedActions
+		// A concurrent later revision/terminal transition may settle before the
+		// response projection. Never replace that source with an older draft.
+		if authorized.Ref.Proposal.Version != result.Proposal.Version || authorized.Ref.Proposal.Status != "draft" {
+			result = authorized.Ref
+		} else {
+			result.Proposal.AllowedActions = authorized.Ref.Proposal.AllowedActions
+		}
 	}
-	broadcastChatEntityRefsInvalidation(req.Context(), r.hub, a.ChatID)
+	broadcastProposalInvalidation(req.Context(), r.db, r.hub, a.WorkspaceID, id)
 	writeJSON(w, 200, result)
 }
 
@@ -257,10 +263,7 @@ func (r *Router) internalProposalCreate(w http.ResponseWriter, req *http.Request
 		proposalError(w, err)
 		return
 	}
-	var chat string
-	if err = r.db.QueryRowContext(req.Context(), `SELECT chat_id FROM chat_issue_proposals WHERE id=?`, result.Entity.ID).Scan(&chat); err == nil {
-		broadcastChatEntityRefsInvalidation(req.Context(), r.hub, chat)
-	}
+	broadcastProposalInvalidation(req.Context(), r.db, r.hub, body.WorkspaceID, result.Entity.ID)
 	writeJSON(w, 201, result)
 }
 
@@ -334,9 +337,6 @@ func (r *Router) internalProposalEdit(w http.ResponseWriter, req *http.Request) 
 		proposalError(w, err)
 		return
 	}
-	var chat string
-	if err = r.db.QueryRowContext(req.Context(), `SELECT chat_id FROM chat_issue_proposals WHERE id=?`, result.Entity.ID).Scan(&chat); err == nil {
-		broadcastChatEntityRefsInvalidation(req.Context(), r.hub, chat)
-	}
+	broadcastProposalInvalidation(req.Context(), r.db, r.hub, body.WorkspaceID, result.Entity.ID)
 	writeJSON(w, 200, result)
 }

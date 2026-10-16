@@ -464,3 +464,18 @@ func TestChatProposalLaterAgentTurnPreservesOriginAndFencesRequester(t *testing.
 		t.Fatalf("revoked requester revision: %d %s", rr.Code, rr.Body)
 	}
 }
+
+func TestChatProposalResponseDoesNotReviveSourceSettledBeforeProjection(t *testing.T) {
+	f, r, c := proposalFixture(t)
+	// Settle immediately after the edit write, before its response projection;
+	// the competing terminal state must win over the mutation's old draft view.
+	execOrFatal(t, r.db, `CREATE TRIGGER settle_proposal_before_response AFTER UPDATE ON chat_issue_proposals WHEN NEW.version=2 AND NEW.status='draft' BEGIN UPDATE chat_issue_proposals SET version=3,status='discarded' WHERE id=NEW.id; END`)
+	rr := proposalMutate(t, f, r, c.Entity.ID, "edit", "settled-response", chatentities.ProposalEdit{ExpectedVersion: 1, Title: "Edit", Items: c.Proposal.Items}, 200)
+	var result ChatCardResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Proposal.Status != "discarded" || result.Proposal.Version != 3 || len(result.Proposal.AllowedActions) != 1 {
+		t.Fatalf("response revived old draft: %s", rr.Body)
+	}
+}
