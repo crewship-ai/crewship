@@ -102,6 +102,12 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		replyError(w, http.StatusBadRequest, "role must be one of ADMIN, MANAGER, MEMBER, VIEWER")
 		return
 	}
+	// Provisioning must follow the same ADMIN assignment boundary as
+	// membership updates and invitations, before changing the target account.
+	if role == "ADMIN" && RoleFromContext(r.Context()) != "OWNER" {
+		replyError(w, http.StatusForbidden, "Only workspace owner can assign ADMIN role")
+		return
+	}
 
 	if req.AccessMode == "" {
 		req.AccessMode = "trusted"
