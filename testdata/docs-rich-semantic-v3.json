@@ -1,0 +1,969 @@
+[
+  {
+    "name": "marks",
+    "before": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "orderedList",
+          "attrs": {
+            "id": "ancestor",
+            "start": 2
+          },
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": {
+                "id": "item"
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "target"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "prefix ",
+                      "marks": [
+                        {
+                          "type": "link",
+                          "attrs": {
+                            "href": "https://example.invalid/"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "text": "middle"
+                    },
+                    {
+                      "type": "text",
+                      "text": " suffix",
+                      "marks": [
+                        {
+                          "type": "code",
+                          "attrs": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "id": "other",
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Preserve ancestor, root order and marks"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "id": "code"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <script> & 😀"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "orderedList",
+          "attrs": {
+            "id": "ancestor",
+            "start": 2
+          },
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": {
+                "id": "item"
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "target"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "prefix ",
+                      "marks": [
+                        {
+                          "type": "link",
+                          "attrs": {
+                            "href": "https://example.invalid/"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "text": "CHANGED"
+                    },
+                    {
+                      "type": "text",
+                      "text": " suffix",
+                      "marks": [
+                        {
+                          "type": "code",
+                          "attrs": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "id": "other",
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Preserve ancestor, root order and marks"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "id": "code"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <script> & 😀"
+            }
+          ]
+        }
+      ]
+    },
+    "beforeProjection": [
+      {
+        "id": "ancestor",
+        "hash": "2f09628647721b11d5cd0b9f017c21ad8f5fd07e0ff884c5ba9b59c5b65dcef9"
+      },
+      {
+        "id": "item",
+        "hash": "b204b5fae72644bff4dc4c0471b80f28859858e6c57b5333b145392e7817d6c2"
+      },
+      {
+        "id": "target",
+        "hash": "e93cfbe77392bc24c83ccb65d9a4d091862135d7612147770babea9fac1f0e0f"
+      },
+      {
+        "id": "other",
+        "hash": "f9085ca5528727f2b30cd519010b8cfcca42a14e5f2917e474e28fa72f9d4de4"
+      },
+      {
+        "id": "code",
+        "hash": "247f23717b6a906192e394f00c375f1669a30126dd7c0d6e0b176e9199d6e9b9"
+      }
+    ],
+    "afterProjection": [
+      {
+        "id": "ancestor",
+        "hash": "ea97115e2d45aa9bed8a04d253578c8491600cd488f24576dab7400a78bdc6d7"
+      },
+      {
+        "id": "item",
+        "hash": "d5115f98945317f0f6dba45b68f1552859ab1a940581d2b1b2c7a7552b99c6e1"
+      },
+      {
+        "id": "target",
+        "hash": "7e9f612e92460debcab8176239212fda6d8ac61bba647f7bff01d4398e15f145"
+      },
+      {
+        "id": "other",
+        "hash": "f9085ca5528727f2b30cd519010b8cfcca42a14e5f2917e474e28fa72f9d4de4"
+      },
+      {
+        "id": "code",
+        "hash": "247f23717b6a906192e394f00c375f1669a30126dd7c0d6e0b176e9199d6e9b9"
+      }
+    ],
+    "semantic": {
+      "target": "target",
+      "text": "prefix CHANGED suffix",
+      "edit": {
+        "from": 7,
+        "to": 13,
+        "insert": "CHANGED"
+      }
+    }
+  },
+  {
+    "name": "delete",
+    "before": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "orderedList",
+          "attrs": {
+            "id": "ancestor",
+            "start": 2
+          },
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": {
+                "id": "item"
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "target"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "all marked",
+                      "marks": [
+                        {
+                          "type": "code",
+                          "attrs": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "id": "other",
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Preserve ancestor, root order and marks"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "id": "code"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <script> & 😀"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "orderedList",
+          "attrs": {
+            "id": "ancestor",
+            "start": 2
+          },
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": {
+                "id": "item"
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "target"
+                  },
+                  "content": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "id": "other",
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Preserve ancestor, root order and marks"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "id": "code"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <script> & 😀"
+            }
+          ]
+        }
+      ]
+    },
+    "beforeProjection": [
+      {
+        "id": "ancestor",
+        "hash": "1d18c8ddbcc43c74988be1b16b71553201dab86010cf98fa0b95e0bf32d5adff"
+      },
+      {
+        "id": "item",
+        "hash": "0a5d309c4952be513945aeefb9873f2b67b4b6f8c23e43e65702f3d4488f336c"
+      },
+      {
+        "id": "target",
+        "hash": "519c4e3f6b8536ea7c9fe336453fdcf475663c3ecb185970caacc478dbd6dd24"
+      },
+      {
+        "id": "other",
+        "hash": "f9085ca5528727f2b30cd519010b8cfcca42a14e5f2917e474e28fa72f9d4de4"
+      },
+      {
+        "id": "code",
+        "hash": "247f23717b6a906192e394f00c375f1669a30126dd7c0d6e0b176e9199d6e9b9"
+      }
+    ],
+    "afterProjection": [
+      {
+        "id": "ancestor",
+        "hash": "3f47d109c123e7f91c721e3f73734785fda0cf27d207ab636975ed11bf64fb0e"
+      },
+      {
+        "id": "item",
+        "hash": "e5c8887cc9b45e7711342ec85383a2d297a31a78bc7975c899b416caecccd6c5"
+      },
+      {
+        "id": "target",
+        "hash": "59561b7573e5a8683275467445606be2b22ab401ccaa1a4bf8c8244d2dc42b43"
+      },
+      {
+        "id": "other",
+        "hash": "f9085ca5528727f2b30cd519010b8cfcca42a14e5f2917e474e28fa72f9d4de4"
+      },
+      {
+        "id": "code",
+        "hash": "247f23717b6a906192e394f00c375f1669a30126dd7c0d6e0b176e9199d6e9b9"
+      }
+    ],
+    "semantic": {
+      "target": "target",
+      "text": "",
+      "edit": {
+        "from": 0,
+        "to": 10,
+        "insert": ""
+      }
+    }
+  },
+  {
+    "name": "repeated",
+    "before": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "orderedList",
+          "attrs": {
+            "id": "ancestor",
+            "start": 2
+          },
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": {
+                "id": "item"
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "target"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "aaaa",
+                      "marks": [
+                        {
+                          "type": "link",
+                          "attrs": {
+                            "href": "https://example.invalid/"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "id": "other",
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Preserve ancestor, root order and marks"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "id": "code"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <script> & 😀"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "orderedList",
+          "attrs": {
+            "id": "ancestor",
+            "start": 2
+          },
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": {
+                "id": "item"
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "target"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "a",
+                      "marks": [
+                        {
+                          "type": "link",
+                          "attrs": {
+                            "href": "https://example.invalid/"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "text": "a"
+                    },
+                    {
+                      "type": "text",
+                      "text": "aaa",
+                      "marks": [
+                        {
+                          "type": "link",
+                          "attrs": {
+                            "href": "https://example.invalid/"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "id": "other",
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Preserve ancestor, root order and marks"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "id": "code"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <script> & 😀"
+            }
+          ]
+        }
+      ]
+    },
+    "beforeProjection": [
+      {
+        "id": "ancestor",
+        "hash": "7a8f99a2d2f5e3a1658d3fbfdff1fce179afadbc63223e8c35582976302850ea"
+      },
+      {
+        "id": "item",
+        "hash": "79df11de8515a858dce1997de68234d616e41f90ec6a2b7ef1176b0db6b49b55"
+      },
+      {
+        "id": "target",
+        "hash": "5fd5df34a320b787a1c261c096307dd814ef1ccf0fd27af91a475ec73a510b43"
+      },
+      {
+        "id": "other",
+        "hash": "f9085ca5528727f2b30cd519010b8cfcca42a14e5f2917e474e28fa72f9d4de4"
+      },
+      {
+        "id": "code",
+        "hash": "247f23717b6a906192e394f00c375f1669a30126dd7c0d6e0b176e9199d6e9b9"
+      }
+    ],
+    "afterProjection": [
+      {
+        "id": "ancestor",
+        "hash": "bd151a0598aa1d8b106b42181a51190fec839f2fbbb878518b3a6f91145b0ef8"
+      },
+      {
+        "id": "item",
+        "hash": "71b866de42b757fa9c6d30ba1670fa2b8d6599e117a582993a1751692e4e361e"
+      },
+      {
+        "id": "target",
+        "hash": "056b1698bb5e0ee16442f7354746253c1be083de2e2843a9e9937fdf5f81d200"
+      },
+      {
+        "id": "other",
+        "hash": "f9085ca5528727f2b30cd519010b8cfcca42a14e5f2917e474e28fa72f9d4de4"
+      },
+      {
+        "id": "code",
+        "hash": "247f23717b6a906192e394f00c375f1669a30126dd7c0d6e0b176e9199d6e9b9"
+      }
+    ],
+    "semantic": {
+      "target": "target",
+      "text": "aaaaa",
+      "edit": {
+        "from": 1,
+        "to": 1,
+        "insert": "a"
+      }
+    }
+  },
+  {
+    "name": "unicode",
+    "before": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "orderedList",
+          "attrs": {
+            "id": "ancestor",
+            "start": 2
+          },
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": {
+                "id": "item"
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "target"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "α😀<>&   middle suffix",
+                      "marks": [
+                        {
+                          "type": "code",
+                          "attrs": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "id": "other",
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Preserve ancestor, root order and marks"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "id": "code"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <script> & 😀"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "orderedList",
+          "attrs": {
+            "id": "ancestor",
+            "start": 2
+          },
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": {
+                "id": "item"
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "target"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "α😀<>&   ",
+                      "marks": [
+                        {
+                          "type": "code",
+                          "attrs": {}
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "text": "X"
+                    },
+                    {
+                      "type": "text",
+                      "text": " suffix",
+                      "marks": [
+                        {
+                          "type": "code",
+                          "attrs": {}
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "id": "other",
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Preserve ancestor, root order and marks"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "id": "code"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <script> & 😀"
+            }
+          ]
+        }
+      ]
+    },
+    "beforeProjection": [
+      {
+        "id": "ancestor",
+        "hash": "b2a9aa5d561dc82b8566640c9d9965806e9c278b6f62378aac1a4d48fb57ac93"
+      },
+      {
+        "id": "item",
+        "hash": "cfec1aa23492782fe4d51864e40fede64e22378d67815585e8138f9c6172403e"
+      },
+      {
+        "id": "target",
+        "hash": "1462835b57345e322c1f7dbf8fa78a0945fbc85efa800fda806ea067daaab270"
+      },
+      {
+        "id": "other",
+        "hash": "f9085ca5528727f2b30cd519010b8cfcca42a14e5f2917e474e28fa72f9d4de4"
+      },
+      {
+        "id": "code",
+        "hash": "247f23717b6a906192e394f00c375f1669a30126dd7c0d6e0b176e9199d6e9b9"
+      }
+    ],
+    "afterProjection": [
+      {
+        "id": "ancestor",
+        "hash": "eb35c957dd3312143efed1fd659e36f23c217f3ac68844d990a8ef8742dce894"
+      },
+      {
+        "id": "item",
+        "hash": "0fd9ff12c00a6ffae9aff1010e07b53791b1f3ac5e14bf067662a82809ba77c1"
+      },
+      {
+        "id": "target",
+        "hash": "c2984caa9dded3eb54be8f40205a3de69455c25d29e9c1e2a38a88b5dfcc3e89"
+      },
+      {
+        "id": "other",
+        "hash": "f9085ca5528727f2b30cd519010b8cfcca42a14e5f2917e474e28fa72f9d4de4"
+      },
+      {
+        "id": "code",
+        "hash": "247f23717b6a906192e394f00c375f1669a30126dd7c0d6e0b176e9199d6e9b9"
+      }
+    ],
+    "semantic": {
+      "target": "target",
+      "text": "α😀<>&   X suffix",
+      "edit": {
+        "from": 9,
+        "to": 15,
+        "insert": "X"
+      }
+    }
+  },
+  {
+    "name": "empty",
+    "before": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "orderedList",
+          "attrs": {
+            "id": "ancestor",
+            "start": 2
+          },
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": {
+                "id": "item"
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "target"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "id": "other",
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Preserve ancestor, root order and marks"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "id": "code"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <script> & 😀"
+            }
+          ]
+        }
+      ]
+    },
+    "after": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "orderedList",
+          "attrs": {
+            "id": "ancestor",
+            "start": 2
+          },
+          "content": [
+            {
+              "type": "listItem",
+              "attrs": {
+                "id": "item"
+              },
+              "content": [
+                {
+                  "type": "paragraph",
+                  "attrs": {
+                    "id": "target"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "new"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "heading",
+          "attrs": {
+            "id": "other",
+            "level": 2
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Preserve ancestor, root order and marks"
+            }
+          ]
+        },
+        {
+          "type": "codeBlock",
+          "attrs": {
+            "id": "code"
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "literal <script> & 😀"
+            }
+          ]
+        }
+      ]
+    },
+    "beforeProjection": [
+      {
+        "id": "ancestor",
+        "hash": "e258e81584f827116cb317fb494f9e025e6fdc30c18843667d43a9001d36249c"
+      },
+      {
+        "id": "item",
+        "hash": "0fddd67c22d2200a45d4ba0b8eb173c70ab32071bfd7310dfa60f46fee69ba94"
+      },
+      {
+        "id": "target",
+        "hash": "50f247b3f1734abc8bd0d2f4f001d19d0ea35b7272f1b0c8a5e92533f4b84e82"
+      },
+      {
+        "id": "other",
+        "hash": "f9085ca5528727f2b30cd519010b8cfcca42a14e5f2917e474e28fa72f9d4de4"
+      },
+      {
+        "id": "code",
+        "hash": "247f23717b6a906192e394f00c375f1669a30126dd7c0d6e0b176e9199d6e9b9"
+      }
+    ],
+    "afterProjection": [
+      {
+        "id": "ancestor",
+        "hash": "ba0ef6c99f19223c5080a50438af1a82ebb62c423b192fbb6b69a14475dc4508"
+      },
+      {
+        "id": "item",
+        "hash": "606c490cacf1d9d66b9909eb38155f0fa3e23a68cdd990e0c195325faa914010"
+      },
+      {
+        "id": "target",
+        "hash": "03377cf0aa6510fb69390d78b41c054e96eac8d177c6efd67448edf4c3fedfdf"
+      },
+      {
+        "id": "other",
+        "hash": "f9085ca5528727f2b30cd519010b8cfcca42a14e5f2917e474e28fa72f9d4de4"
+      },
+      {
+        "id": "code",
+        "hash": "247f23717b6a906192e394f00c375f1669a30126dd7c0d6e0b176e9199d6e9b9"
+      }
+    ],
+    "semantic": {
+      "target": "target",
+      "text": "new",
+      "edit": {
+        "from": 0,
+        "to": 0,
+        "insert": "new"
+      }
+    }
+  }
+]
