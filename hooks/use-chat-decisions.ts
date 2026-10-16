@@ -62,6 +62,9 @@ export function useChatDecisions({ workspaceId, userId, chatId, enabled }: { wor
     if (workspaceId && userId) purgeChatDecisionSourceRecovery(workspaceId,userId,chatId,type,id)
   }, [client,workspaceId,userId,chatId])
   const reconcile = useCallback(() => { if (active) void client.invalidateQueries({ queryKey: chatDecisionKeys.refs(workspaceId, userId, chatId) }) }, [active, client, workspaceId, userId, chatId])
+  useRealtimeEventSafe("chat.entity_refs_changed", event => {
+    if (event.channel === `chat-hints:${chatId}` && event.payload.contract_version === 1) reconcile()
+  })
   useRealtimeEventSafe("escalation.resolved", reconcile)
   useRealtimeEventSafe("escalation.created", reconcile)
   useRealtimeEventSafe("workspace.updated", reconcile)

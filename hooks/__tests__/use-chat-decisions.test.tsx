@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import reference from "@/internal/api/testdata/chat-e2/decision-escalation-pending.json"
 import { DecisionEntityCard } from "@/components/features/chat/decision-entity-card"
 import { useChatDecisions } from "../use-chat-decisions"
+import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 const { fetch } = vi.hoisted(() => ({fetch:vi.fn()}))
 vi.mock("@/lib/api-fetch", () => ({apiFetch:fetch}))
 vi.mock("@/hooks/use-realtime", () => ({useRealtimeEventSafe:vi.fn()}))
@@ -111,4 +112,18 @@ it("rejects a foreign workspace reference without publishing any page",async()=>
  await waitFor(()=>expect(client.getQueryState(["chat-decisions",reference.entity.workspace_id,"viewer","chat"])?.status).toBe("error"))
  expect(hook.result.current.references).toEqual([])
  expect(hook.result.current.rechecking).toBe(true)
+})
+
+it("reconciles data-free hints only for its current chat and contract", async () => {
+ const page={contract_version:1,reset:true,next_cursor:"",snapshot_id:"snapshot",snapshot_complete:true,has_more:false,refs:[reference]}
+ fetch.mockImplementation(async()=>new Response(JSON.stringify(page)))
+ const client=new QueryClient({defaultOptions:{queries:{retry:false}}})
+ const wrapper=({children}:{children:React.ReactNode})=><QueryClientProvider client={client}>{children}</QueryClientProvider>
+ const hook=renderHook(()=>useChatDecisions({workspaceId:reference.entity.workspace_id,userId:"viewer",chatId:"chat",enabled:true}),{wrapper})
+ await waitFor(()=>expect(hook.result.current.references).toHaveLength(1))
+ const hint=vi.mocked(useRealtimeEventSafe).mock.calls.find(([type])=>type==="chat.entity_refs_changed")![1]
+ act(()=>{hint({type:"chat.entity_refs_changed",channel:"chat-hints:other",payload:{contract_version:1}} as Parameters<typeof hint>[0]);hint({type:"chat.entity_refs_changed",channel:"chat-hints:chat",payload:{contract_version:2}} as Parameters<typeof hint>[0])})
+ expect(fetch).toHaveBeenCalledTimes(1)
+ act(()=>hint({type:"chat.entity_refs_changed",channel:"chat-hints:chat",payload:{contract_version:1}} as Parameters<typeof hint>[0]))
+ await waitFor(()=>expect(fetch).toHaveBeenCalledTimes(2))
 })
