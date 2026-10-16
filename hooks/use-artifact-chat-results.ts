@@ -3,7 +3,7 @@ import { useCallback } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
-export interface ArtifactChatResult { page_slug: string; title: string; revision: number; created_at: string; agent_id: string; agent_name: string; run_id: string; on_behalf_of_user_id: string }
+export interface ArtifactChatResult { page_id?: string; type?: "artifact" | "document"; page_slug: string; title: string; revision: number; created_at: string; agent_id: string; agent_name: string; run_id: string; on_behalf_of_user_id: string }
 interface ArtifactChatResults { results: ArtifactChatResult[] }
 export class ArtifactChatResultsError extends Error { constructor(message: string, public status: number) { super(message) } }
 /** Only server-verified publication links. Never parse model text or infer a
@@ -25,7 +25,7 @@ export function useArtifactChatResults(workspaceId: string, chatId: string, stre
         throw new ArtifactChatResultsError(body?.error ?? "Could not refresh published artifacts.", response.status)
       }
       if (!Array.isArray(body?.results) || body.results.length > 20) throw new Error("Invalid published artifact response.")
-      const results: ArtifactChatResult[] = body.results.filter((item: ArtifactChatResult) => item && typeof item.page_slug === "string" && item.page_slug && typeof item.title === "string" && Number.isSafeInteger(item.revision) && item.revision > 0 && typeof item.agent_id === "string" && item.agent_id && typeof item.run_id === "string" && item.run_id && typeof item.on_behalf_of_user_id === "string" && item.on_behalf_of_user_id)
+      const results: ArtifactChatResult[] = body.results.filter((item: ArtifactChatResult) => item && typeof item.page_slug === "string" && item.page_slug && typeof item.title === "string" && Number.isSafeInteger(item.revision) && ((item.type === "document" && item.revision === 0 && typeof item.page_id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(item.page_id)) || ((item.type === undefined || item.type === "artifact") && item.revision > 0)) && typeof item.agent_id === "string" && item.agent_id && typeof item.run_id === "string" && item.run_id && typeof item.on_behalf_of_user_id === "string" && item.on_behalf_of_user_id)
       return { results }
     },
   })

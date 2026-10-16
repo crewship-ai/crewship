@@ -318,6 +318,7 @@ var BackupTables = []string{
 	"slides_comment_threads", "slides_comment_events", "slides_comment_receipts",
 	"slides_requests", "slides_request_events", "slides_request_receipts",
 	"documents",
+	"document_creations",
 	"document_updates",
 	"document_receipts",
 	"document_checkpoints",

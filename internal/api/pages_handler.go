@@ -45,6 +45,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pagebuild"
 	"github.com/crewship-ai/crewship/internal/pages"
@@ -63,6 +64,7 @@ type PageHandler struct {
 	nativeSearchInit                 sync.Once
 	nativeSearchSlots                chan struct{}
 	nativeSearchCursors              *pagesearch.CursorStore
+	documentStoreOptions             documents.Options
 	documentCall                     func(context.Context, string, string, string, string, any) ([]byte, int, error)
 	restrictedWorkflow               func() *restrictedworkflow.Service
 	artifactStoragePath              string

@@ -59989,16 +59989,28 @@
                           "on_behalf_of_user_id": {
                             "type": "string"
                           },
+                          "page_id": {
+                            "type": "string"
+                          },
                           "page_slug": {
                             "type": "string"
                           },
                           "revision": {
+                            "description": "Initial Docs creation revision is0; HTML artifact revisions begin1.",
+                            "minimum": 0,
                             "type": "integer"
                           },
                           "run_id": {
                             "type": "string"
                           },
                           "title": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "enum": [
+                              "artifact",
+                              "document"
+                            ],
                             "type": "string"
                           }
                         },

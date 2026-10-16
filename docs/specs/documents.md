@@ -6,6 +6,41 @@ Artifacts 1.0 release. Review readiness and runtime qualification do not activat
 Docs on a deployment. [Pages](pages.md) owns identity, ownership and grants;
 HTML artifacts and Boards keep their storage and routes.
 
+## Create a document from chat
+
+When Docs are enabled, a human can choose **Create document** before sending a
+message in a trusted agent chat. One Send records the original human, workspace,
+chat, message and submission identity. Ordinary message metadata, replayed
+transcripts and the existing HTML authorization cannot grant this capability.
+The trusted transcript append syncs JSONL before its SQL mirror/consent transaction;
+a later mirror failure preserves the message but reports that the run did not
+start. Ordinary transcript replay never reconstructs the missing consent.
+
+The live bound run can call `doc_create` or protected
+`crewship doc create --file draft.json`. The original run bearer and the fixed
+sidecar destination are required; human profiles, server overrides and fallback
+credentials are unavailable. The input contains `slug`, `name`, `mutation_id` and
+readable `blocks`: paragraph, heading(level1..3), bulletList, orderedList or
+codeBlock. It permits at most128 input blocks,512 generated blocks,256KiB total
+UTF8 text and64KiB per text/list item, within a1MiB request. Images, raw Yjs,
+caller-provided IDs/hashes and arbitrary rich node JSON are rejected.
+
+Private Node preparation validates schema3 and generates block identities before
+Go opens the short writer transaction. Current authority is rechecked there;
+Page ownership, initial document revision0, creation provenance, receipt and
+single-use allowance commit together. Node/SQL failure publishes no empty Page.
+Retries must reuse the exact original payload and mutation ID: an authorized
+exact retry returns the same durable result before materializing again; a changed
+payload conflicts. The saved result includes PageID, workspace, current address,
+initial revision and a stable workspace/Page link. The chat card reads durable
+provenance under current chat and Page access, independent of model reply text.
+
+This capability creates one human-owned private document. It adds no agent Page
+grant or run write delegation; subsequent edits require separate human authority.
+Creation provenance is backed up and its opaque run identity is remapped on fork;
+nonportable consent/run authority is excluded. This is an initial creation flow,
+not structural editing, arbitrary revision reads or model-runtime qualification.
+
 ## Service and activation
 
 Configure distinct clean absolute `authority_socket`, `service_socket` and

@@ -1190,6 +1190,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// env / FIFO / exit files from RunID. Set from the id this path already
 	// mints for CreateRun and journal.WithRunID, so a chat turn and a
 	// concurrent routine/webhook run of the same agent no longer share them.
+	if documentCreation != nil {
+		req.UserMessage = content + "\n\nThe human selected Create document for this message. Create one complete private Docs with doc_create (or crewship doc create --file). Supply readable blocks; the tool generates identities and hashes. Return the durable result link after success. This request does not authorize editing other Pages or later edits to the created document."
+	}
 	req.RunID = runID
 	runMeta := map[string]interface{}{
 		"cli_adapter":               info.CLIAdapter,

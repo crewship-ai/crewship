@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **A chat can create a populated private Doc when the human chooses Create document (#3254).** The bound run authors readable blocks through MCP or protected CLI; trusted preparation supplies identities and commits content, ownership and provenance together. Exact retries return the same saved document, and the chat shows a durable link. The create capability does not grant later agent editing.
+
 - **Agent Docs requests must match their authenticated sidecar workspace and crew (#3249).** General document reads, semantic patches and checkpoints now reject mismatched transport identities before dispatch. Existing run, human delegation and Page checks remain in force.
 
 - **Docs can return one current text block with its saved identity and hash (#3241).** `crewship doc read --block ID` and the existing document read API return bounded complete plaintext while rechecking current access and the original source after materialization. Conflicts, oversized blocks and unavailable full read envelopes return explicit errors. Existing sidecar run reads retain their authority; arbitrary history and structural editing remain separate.

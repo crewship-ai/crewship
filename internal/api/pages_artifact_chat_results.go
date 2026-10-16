@@ -10,6 +10,8 @@ import (
 )
 
 type artifactChatResult struct {
+	PageID           string `json:"page_id"`
+	Type             string `json:"type"`
 	PageSlug         string `json:"page_slug"`
 	Title            string `json:"title"`
 	Revision         int64  `json:"revision"`
@@ -58,13 +60,18 @@ func (h *PageHandler) ListChatArtifactResults(w http.ResponseWriter, r *http.Req
 	}
 	// Bound work before per-Page ACL resolution. Inaccessible results are omitted
 	// entirely, with no hidden count, title, source ID or inferred placeholder.
-	rows, err := tx.QueryContext(ctx, `SELECT p.id,p.slug,p.name,v.revision,v.created_at,v.author_agent_id,COALESCE(a.name,''),v.author_run_id,COALESCE(v.author_user_id,'')
+	rows, err := tx.QueryContext(ctx, `SELECT * FROM (
+ SELECT p.id AS page_id,p.slug AS slug,p.name AS title,v.revision AS revision,v.created_at AS created_at,v.author_agent_id AS agent_id,COALESCE(a.name,'') AS agent_name,v.author_run_id AS run_id,COALESCE(v.author_user_id,'') AS human_id,'artifact' AS content_type
  FROM page_artifact_revisions v JOIN pages p ON p.id=v.page_id JOIN page_artifacts art ON art.page_id=p.id
  LEFT JOIN agents a ON a.id=v.author_agent_id AND a.workspace_id=p.workspace_id
  WHERE p.workspace_id=? AND v.author_agent_id=? AND v.author_run_id IS NOT NULL AND (
- v.source_chat_id=?
- OR (v.source_chat_id IS NULL AND EXISTS(SELECT 1 FROM page_artifact_requests req WHERE req.page_id=p.id AND req.chat_id=? AND req.agent_id=v.author_agent_id AND req.run_id=v.author_run_id AND req.status='succeeded' AND req.result_revision=v.revision)))
- ORDER BY v.created_at DESC,v.revision DESC,p.id LIMIT 100`, workspace, chatAgent, chat, chat)
+ v.source_chat_id=? OR (v.source_chat_id IS NULL AND EXISTS(SELECT 1 FROM page_artifact_requests req WHERE req.page_id=p.id AND req.chat_id=? AND req.agent_id=v.author_agent_id AND req.run_id=v.author_run_id AND req.status='succeeded' AND req.result_revision=v.revision)))
+ UNION ALL
+ SELECT p.id,p.slug,p.name,c.revision,c.created_at,c.agent_id,COALESCE(a.name,''),c.run_id,COALESCE(c.human_user_id,''),'document'
+ FROM document_creations c JOIN pages p ON p.id=c.page_id AND p.workspace_id=c.workspace_id JOIN documents d ON d.page_id=p.id AND d.workspace_id=p.workspace_id
+ LEFT JOIN agents a ON a.id=c.agent_id AND a.workspace_id=p.workspace_id
+ WHERE p.workspace_id=? AND c.agent_id=? AND c.source_chat_id=?
+ ) ORDER BY created_at DESC,revision DESC,page_id LIMIT 100`, workspace, chatAgent, chat, chat, workspace, chatAgent, chat)
 	if err != nil {
 		replyInternalError(w, h.logger, "load chat artifact results", err)
 		return
@@ -76,11 +83,12 @@ func (h *PageHandler) ListChatArtifactResults(w http.ResponseWriter, r *http.Req
 	candidates := make([]candidate, 0)
 	for rows.Next() {
 		var v candidate
-		if err = rows.Scan(&v.pageID, &v.result.PageSlug, &v.result.Title, &v.result.Revision, &v.result.CreatedAt, &v.result.AgentID, &v.result.AgentName, &v.result.RunID, &v.result.OnBehalfOfUserID); err != nil {
+		if err = rows.Scan(&v.pageID, &v.result.PageSlug, &v.result.Title, &v.result.Revision, &v.result.CreatedAt, &v.result.AgentID, &v.result.AgentName, &v.result.RunID, &v.result.OnBehalfOfUserID, &v.result.Type); err != nil {
 			rows.Close()
 			replyInternalError(w, h.logger, "read chat artifact result", err)
 			return
 		}
+		v.result.PageID = v.pageID
 		candidates = append(candidates, v)
 	}
 	err = rows.Err()

@@ -51,3 +51,12 @@ it('never carries cards across selected chats or infers a publication from incom
   await act(async () => { await view.client.refetchQueries({ queryKey: ['artifact-chat-results', 'ws', 'other-chat'] }) })
   await waitFor(() => expect(screen.queryByText('Saved report')).toBeNull())
 })
+
+it('opens a durable document result by explicit workspace and stable identity without requiring revision1', async () => {
+  results = [{ page_id: 'saved-document', type: 'document', page_slug: 'old-address', title: 'Finished plan', revision: 0, created_at: '2026-10-16T08:00:00Z', agent_id: 'agent', agent_name: 'Ada', run_id: 'verified-run', on_behalf_of_user_id: 'human' }]
+  mount()
+  const link = await screen.findByRole('link', { name: 'Open document Finished plan' })
+  expect(link.getAttribute('href')).toBe('/pages?ref=saved-document&workspace_id=ws')
+  expect(screen.getByText('Document · Ada')).toBeTruthy()
+  expect(screen.queryByText('Revision 0 · Ada')).toBeNull()
+})

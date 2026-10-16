@@ -8,7 +8,8 @@ tag: Experimental
 
 # crewship doc
 
-Work with opt-in collaborative Docs on an existing human-owned Page. The current
+Work with opt-in collaborative Docs on a human-owned Page. The protected
+`doc create` command below is a separate live-run creation capability. The current
 CLI profile supplies the workspace and exact human bearer. Page ACLs apply;
 scoped tokens need `pages:read` for reads and `pages:write` for mutations.
 `pages:*` grants both. These commands do not mint agent authority.
@@ -18,6 +19,28 @@ opaque `epoch` returned by a fresh read. A transport retry reuses the exact ID
 and payload. A conflict requires rereading and human review; the CLI does not
 silently rebase. JSON input is one object, at most 2 MiB. See the
 [API contracts](/api-reference/documents) for every field.
+
+## crewship doc create
+
+`crewship doc create --file draft.json` creates one private human-owned Doc for
+this run's original **Create document** chat request. `--file -` reads stdin.
+The protected command uses only the original `CREWSHIP_AGENT_TOKEN` and fixed
+sidecar endpoint; human profiles and `--config`, `--server`, `--profile` and
+`--workspace` overrides are rejected. The sidecar forwards to the protected internal host
+creation handler; this is not a new human CLI creation route.
+
+```json
+{"slug":"launch-plan","name":"Launch plan","mutation_id":"launch-once","blocks":[{"type":"heading","level":1,"text":"Launch plan"},{"type":"paragraph","text":"A useful first draft."},{"type":"bulletList","items":["Confirm the owner","Publish the checklist"]}]}
+```
+
+Readable blocks may be paragraph, heading(level1..3), bulletList, orderedList or
+codeBlock. Supply text, not IDs, hashes, HTML, images or Yjs. Limits are128 input
+blocks,512 generated blocks,256KiB total UTF8 text and64KiB per text/list item,
+within a1MiB JSON object. Success prints the durable PageID/workspace/address,
+revision0 and stable link. After an uncertain response, rerun the same file with
+its unchanged `mutation_id`; changed content conflicts. This create-only grant
+adds no later read/write authority. The model-facing `doc_create` MCP tool has
+the same authoring payload.
 
 ## crewship doc status
 

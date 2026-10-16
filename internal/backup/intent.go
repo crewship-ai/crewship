@@ -42,6 +42,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"slides_comment_threads": IntentInclude, "slides_comment_events": IntentInclude, "slides_comment_receipts": IntentInclude,
 	"slides_revision_assets": IntentInclude, "slides_heads": IntentInclude, "slides_revisions": IntentInclude, "slides_receipts": IntentInclude, "slides_object_ids": IntentInclude,
 	"slides_writer_fence":   IntentExcludeRuntime,
+	"document_creations":    IntentInclude, // durable human-owned creation provenance; no live consent
 	"documents":             IntentInclude,
 	"document_comments":     IntentInclude,
 	"document_requests":     IntentInclude, // durable history; restore clears live dispatch authority

@@ -65,6 +65,10 @@ jobs:
         env:
           CREWSHIP_DOCUMENT_BLOCK_READ: '1'
         run: go test -tags docs_foundation ./internal/api -run '^TestDocumentBlockReadManagedRouterAndSidecar$' -count=1 -timeout 5m
+      - name: Chat document creation through managed engine and protected CLI
+        env:
+          CREWSHIP_DOCUMENT_CREATE: '1'
+        run: go test -tags docs_foundation ./internal/api -run '^TestDocumentCreationManagedRouterSidecarCLI$' -count=1 -timeout 5m
       - name: Preserve measurement conditions and results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

@@ -46,7 +46,7 @@ vi.mock("@/hooks/use-auth", () => ({
   useSessionSafe: () => ({ data: { user: { id: "user-1" } } }), useSession: () => ({ data: { user: { id: "user-1" } } }),
 }))
 vi.mock("@/hooks/use-workspace", () => ({
-  useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),
+  useWorkspace: () => ({ workspaceId: activeWorkspace, loading: false }),
 }))
 
 // The panel's neighbours — each opens its own surface and none of them is what
@@ -80,6 +80,10 @@ const panelProps = {
 /** Rows the fake server has. Unknown chats use the status selected by each
  * test to cover both history-response contracts. */
 let serverMessages: Record<string, { id: string; role: string; content: string; ts: string }[]> = {}
+let activeWorkspace = "ws-test"
+let docsEnabled = false
+let draftProfile = false
+const createdChatIds = new Set<string>()
 let createStatus = 201
 let missingHistoryStatus = 200
 let creates: { url: string; body: Record<string, unknown> }[] = []
@@ -92,6 +96,8 @@ function installFetch() {
     const u = String(url)
     const method = (init?.method ?? "GET").toUpperCase()
 
+    if (u.includes("/documents/status")) return {ok:true,status:200,json:async()=>({enabled:docsEnabled})} as unknown as Response
+    if (u.includes("/execution-profile") && draftProfile && !createdChatIds.has(u.split("/chats/")[1].split("/")[0])) return {ok:false,status:404,json:async()=>({error:"Chat not found"})} as unknown as Response
     if (u.includes("/execution-profile")) {return {ok:true,status:200,json:async()=>({mode:"trusted"})} as unknown as Response}
     if (u.includes("/messages")) {
       const id = u.split("/chats/")[1].split("/")[0]
@@ -115,6 +121,7 @@ function installFetch() {
       if (createStatus >= 400) {
         return { ok: false, status: createStatus, json: async () => ({ error: "nope" }) } as unknown as Response
       }
+      createdChatIds.add(body.session_id)
       return { ok: true, status: createStatus, json: async () => ({ id: body.session_id }) } as unknown as Response
     }
     return { ok: true, status: 200, json: async () => [] } as unknown as Response
@@ -130,6 +137,11 @@ async function firstChip() {
 describe("ChatPanel — the first send creates the row, whatever the history said", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sendMessage.mockReset()
+    activeWorkspace = "ws-test"
+    docsEnabled = false
+    draftProfile = false
+    createdChatIds.clear()
     serverMessages = {}
     createStatus = 201
     missingHistoryStatus = 200
@@ -345,4 +357,55 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
     await waitFor(() => expect(creates).toHaveLength(2))
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
   })
+  it("preserves the selected document intent through the first draft-chat create and one Send", async () => {
+    docsEnabled = true
+    draftProfile = true
+    missingHistoryStatus = 404
+    render(<ChatPanel {...panelProps} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Create document" }))
+    const input = screen.getByRole("textbox")
+    fireEvent.change(input, { target: { value: "Write a useful launch plan" } })
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }))
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    expect(creates).toHaveLength(1)
+    expect(creates[0].body.session_id).toBe("draft-1")
+    expect(sendMessage).toHaveBeenCalledWith("Write a useful launch plan", { document_creation: { submission_id: expect.any(String) } })
+    expect(screen.getByRole("button", { name: "Create document" }).getAttribute("aria-pressed")).toBe("false")
+  })
+
+  it("keeps the same document intent and draft after offline Send, then submits it once connected", async () => {
+    docsEnabled = true
+    sendMessage.mockReturnValueOnce(false).mockReturnValue(true)
+    render(<ChatPanel {...panelProps} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Create document" }))
+    const input = screen.getByRole("textbox")
+    fireEvent.change(input, { target: { value: "Write the plan" } })
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }))
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    const firstIntent = sendMessage.mock.calls[0][1]
+    expect((input as HTMLTextAreaElement).value).toBe("Write the plan")
+    expect(screen.getByRole("button", { name: "Create document" }).getAttribute("aria-pressed")).toBe("true")
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }))
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2))
+    expect(sendMessage.mock.calls[1][1]).toEqual(firstIntent)
+  })
+
+  it("does not carry document consent into another chat or workspace", async () => {
+    docsEnabled = true
+    const { rerender } = render(<ChatPanel {...panelProps} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Create document" }))
+    rerender(<ChatPanel {...panelProps} sessionId="draft-2" />)
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create document" }).getAttribute("aria-pressed")).toBe("false"))
+    rerender(<ChatPanel {...panelProps} sessionId="draft-1" />)
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create document" }).getAttribute("aria-pressed")).toBe("false"))
+    rerender(<ChatPanel {...panelProps} sessionId="draft-2" />)
+    fireEvent.click(screen.getByRole("button", { name: "Create document" }))
+    activeWorkspace = "other-workspace"
+    rerender(<ChatPanel {...panelProps} sessionId="draft-2" />)
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create document" }).getAttribute("aria-pressed")).toBe("false"))
+    activeWorkspace = "ws-test"
+    rerender(<ChatPanel {...panelProps} sessionId="draft-2" />)
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create document" }).getAttribute("aria-pressed")).toBe("false"))
+  })
+
 })
