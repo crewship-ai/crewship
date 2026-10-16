@@ -21,6 +21,7 @@ type waitpointCardRig struct {
 	f     chatIssueFixture
 	r     *Router
 	token string
+	id    string
 	a     chataudience.Receipt
 }
 
@@ -45,12 +46,16 @@ func newWaitpointCardRig(t *testing.T, form *pipeline.DecisionForm) waitpointCar
 	if err != nil || a == nil {
 		t.Fatalf("audience %v %v", a, err)
 	}
-	return waitpointCardRig{f: f, r: &Router{db: f.h.db, PipelinesHandler: h, logger: newTestLogger()}, token: token, a: *a}
+	var id string
+	if err := f.h.db.QueryRow(`SELECT chat_source_id FROM pipeline_waitpoints WHERE token=?`, token).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return waitpointCardRig{f: f, id: id, r: &Router{db: f.h.db, PipelinesHandler: h, logger: newTestLogger()}, token: token, a: *a}
 }
 
 func (d waitpointCardRig) read(t *testing.T) ChatCardResponse {
 	t.Helper()
-	p, err := d.r.waitpointDecisionAdapter().Read(t.Context(), d.a, d.token)
+	p, err := d.r.waitpointDecisionAdapter().Read(t.Context(), d.a, d.id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +64,7 @@ func (d waitpointCardRig) read(t *testing.T) ChatCardResponse {
 
 func (d waitpointCardRig) answer(version, key, action string) (chatentities.DecisionAnswer, *decisionOperation) {
 	values := map[string]json.RawMessage{"timing": json.RawMessage(`"now"`), "ready": json.RawMessage(`false`)}
-	answer := chatentities.DecisionAnswer{SourceID: d.token, ExpectedVersion: version, Action: "answer", ActionID: action, Values: values}
+	answer := chatentities.DecisionAnswer{SourceID: d.id, ExpectedVersion: version, Action: "answer", ActionID: action, Values: values}
 	raw, _ := json.Marshal(answer)
 	return answer, &decisionOperation{Audience: d.a, Version: version, Key: key, Hash: string(raw)}
 }
@@ -109,7 +114,7 @@ func TestChatDecisionWaitpointReplayCurrentReadAndRevocation(t *testing.T) {
 	if err := d.resolve(t, answer, op); !errors.Is(err, errDecisionDenied) {
 		t.Fatalf("revoked replay %v", err)
 	}
-	if _, err := d.r.waitpointDecision(t.Context(), d.a, d.token); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := d.r.waitpointDecision(t.Context(), d.a, d.id); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("revoked read %v", err)
 	}
 }
@@ -238,7 +243,7 @@ func TestChatDecisionWaitpointUnsupportedFormsKeepInbox(t *testing.T) {
 				}
 			}
 			d := newWaitpointCardRig(t, form)
-			if _, err := d.r.waitpointDecision(t.Context(), d.a, d.token); !errors.Is(err, sql.ErrNoRows) {
+			if _, err := d.r.waitpointDecision(t.Context(), d.a, d.id); !errors.Is(err, sql.ErrNoRows) {
 				t.Fatalf("unsupported source exposed %v", err)
 			}
 			raw, _ := json.Marshal(map[string]any{"approved": true, "action_id": "ship", "data": data})
@@ -263,18 +268,18 @@ func TestChatDecisionWaitpointProvenanceAndScope(t *testing.T) {
 		t.Fatalf("scope bypass %v", err)
 	}
 	execOrFatal(t, d.f.h.db, `UPDATE pipeline_runs SET invocation_source_run_id=NULL WHERE id='card-pipeline-run'`)
-	if _, err := d.r.waitpointDecision(t.Context(), d.a, d.token); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := d.r.waitpointDecision(t.Context(), d.a, d.id); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("legacy inferred source %v", err)
 	}
 	execOrFatal(t, d.f.h.db, `UPDATE pipeline_runs SET invocation_source_run_id=? WHERE id='card-pipeline-run'`, d.f.run)
 	execOrFatal(t, d.f.h.db, `UPDATE pipeline_runs SET invoking_agent_id='foreign-agent' WHERE id='card-pipeline-run'`)
-	if _, err := d.r.waitpointDecision(t.Context(), d.a, d.token); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := d.r.waitpointDecision(t.Context(), d.a, d.id); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("foreign invoking agent %v", err)
 	}
 	execOrFatal(t, d.f.h.db, `UPDATE pipeline_runs SET invoking_agent_id=? WHERE id='card-pipeline-run'`, d.f.agent)
 	foreign := d.a
 	foreign.ChatID = "foreign-chat"
-	if _, err := d.r.waitpointDecision(t.Context(), foreign, d.token); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := d.r.waitpointDecision(t.Context(), foreign, d.id); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("foreign chat %v", err)
 	}
 }
@@ -312,7 +317,7 @@ func TestChatDecisionWaitpointLegacyBooleanGate(t *testing.T) {
 	if len(card.WorkflowActions) != 0 || len(card.Fields) != 0 {
 		t.Fatalf("legacy contract %+v", card)
 	}
-	answer := chatentities.DecisionAnswer{SourceID: d.token, ExpectedVersion: card.Source.Version, Action: "reject", Values: map[string]json.RawMessage{}}
+	answer := chatentities.DecisionAnswer{SourceID: d.id, ExpectedVersion: card.Source.Version, Action: "reject", Values: map[string]json.RawMessage{}}
 	op := &decisionOperation{Audience: d.a, Version: answer.ExpectedVersion, Key: "legacy-reject", Hash: "legacy-intent"}
 	if err := d.resolve(t, answer, op); err != nil {
 		t.Fatal(err)

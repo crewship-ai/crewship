@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/chatentities"
@@ -28,7 +29,7 @@ func (r *Router) waitpointDecisionUpper(ctx context.Context, a chataudience.Rece
 }
 
 func (r *Router) waitpointDecisionScan(ctx context.Context, a chataudience.Receipt, after, upper int64, limit int) ([]decisionSourceRow, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT w.token,w.rowid FROM pipeline_waitpoints w JOIN pipeline_runs p ON p.id=w.pipeline_run_id AND p.workspace_id=w.workspace_id WHERE `+waitpointDecisionCandidates+` AND w.rowid>? AND w.rowid<=? ORDER BY w.rowid LIMIT ?`, a.WorkspaceID, a.AgentID, a.ChatID, after, upper, limit)
+	rows, err := r.db.QueryContext(ctx, `SELECT w.chat_source_id,w.rowid FROM pipeline_waitpoints w JOIN pipeline_runs p ON p.id=w.pipeline_run_id AND p.workspace_id=w.workspace_id WHERE `+waitpointDecisionCandidates+` AND w.rowid>? AND w.rowid<=? ORDER BY w.rowid LIMIT ?`, a.WorkspaceID, a.AgentID, a.ChatID, after, upper, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +127,13 @@ func (r *Router) resolveWaitpointDecision(req *http.Request, op *decisionOperati
 	if err != nil {
 		return err
 	}
+	if strings.Contains(op.Key, source.Token) {
+		return errDecisionInput
+	}
+	intent, err := json.Marshal(answer)
+	if err != nil || strings.Contains(string(intent), source.Token) {
+		return errDecisionInput
+	}
 	// Recheck projection eligibility and provenance under the reserved writer.
 	if _, err = waitpointDecisionProjection(ctx, tx, *live, source); err != nil {
 		return err
@@ -150,7 +158,10 @@ func (r *Router) resolveWaitpointDecision(req *http.Request, op *decisionOperati
 	if err != nil {
 		return err
 	}
-	result, decisionErr := store.DecideTx(ctx, tx, live.WorkspaceID, source.ID, approved, pipeline.WaitpointDecider{Kind: pipeline.DeciderUser, ID: live.UserID}, payload)
+	if strings.Contains(payload, source.Token) {
+		return errDecisionInput
+	}
+	result, decisionErr := store.DecideTx(ctx, tx, live.WorkspaceID, source.Token, approved, pipeline.WaitpointDecider{Kind: pipeline.DeciderUser, ID: live.UserID}, payload)
 	if decisionErr != nil && (result == nil || !result.Applied) {
 		if errors.Is(decisionErr, pipeline.ErrAlreadyDecided) {
 			return errDecisionVersion
@@ -161,7 +172,7 @@ func (r *Router) resolveWaitpointDecision(req *http.Request, op *decisionOperati
 		return errDecisionVersion
 	}
 	if !result.Expired {
-		if _, err = tx.ExecContext(ctx, `UPDATE pipeline_waitpoints SET answer_operation_key=?,answer_operation_hash=? WHERE workspace_id=? AND token=?`, op.Key, op.Hash, live.WorkspaceID, source.ID); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE pipeline_waitpoints SET answer_operation_key=?,answer_operation_hash=? WHERE workspace_id=? AND token=?`, op.Key, op.Hash, live.WorkspaceID, source.Token); err != nil {
 			return err
 		}
 	}

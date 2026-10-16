@@ -16,19 +16,19 @@ import (
 )
 
 type waitpointDecisionSource struct {
-	ID, Workspace, PipelineRun, Run, Agent, Prompt, Created, Deadline, Status string
-	Form, Payload, Actor, Resolved, OperationKey, OperationHash               string
+	ID, Token, Workspace, PipelineRun, Run, Agent, Prompt, Created, Deadline, Status string
+	Form, Payload, Actor, Resolved, OperationKey, OperationHash                      string
 }
 
 func readWaitpointDecision(ctx context.Context, q issueOperationQueryer, workspace, id string) (waitpointDecisionSource, error) {
 	var s waitpointDecisionSource
-	err := q.QueryRowContext(ctx, `SELECT w.token,w.workspace_id,w.pipeline_run_id,COALESCE(p.invocation_source_run_id,''),COALESCE(p.invoking_agent_id,''),w.prompt,w.created_at,w.timeout_at,w.status,w.decision_form_json,COALESCE(w.decision_payload,''),COALESCE(w.decided_by_user_id,''),COALESCE(w.decided_at,''),COALESCE(w.answer_operation_key,''),COALESCE(w.answer_operation_hash,'') FROM pipeline_waitpoints w JOIN pipeline_runs p ON p.id=w.pipeline_run_id AND p.workspace_id=w.workspace_id WHERE w.workspace_id=? AND w.token=? AND w.kind='approval'`, workspace, id).Scan(&s.ID, &s.Workspace, &s.PipelineRun, &s.Run, &s.Agent, &s.Prompt, &s.Created, &s.Deadline, &s.Status, &s.Form, &s.Payload, &s.Actor, &s.Resolved, &s.OperationKey, &s.OperationHash)
+	err := q.QueryRowContext(ctx, `SELECT w.chat_source_id,w.token,w.workspace_id,w.pipeline_run_id,COALESCE(p.invocation_source_run_id,''),COALESCE(p.invoking_agent_id,''),w.prompt,w.created_at,w.timeout_at,w.status,w.decision_form_json,COALESCE(w.decision_payload,''),COALESCE(w.decided_by_user_id,''),COALESCE(w.decided_at,''),COALESCE(w.answer_operation_key,''),COALESCE(w.answer_operation_hash,'') FROM pipeline_waitpoints w JOIN pipeline_runs p ON p.id=w.pipeline_run_id AND p.workspace_id=w.workspace_id WHERE w.workspace_id=? AND w.chat_source_id=? AND w.kind='approval'`, workspace, id).Scan(&s.ID, &s.Token, &s.Workspace, &s.PipelineRun, &s.Run, &s.Agent, &s.Prompt, &s.Created, &s.Deadline, &s.Status, &s.Form, &s.Payload, &s.Actor, &s.Resolved, &s.OperationKey, &s.OperationHash)
 	return s, err
 }
 
 func (s waitpointDecisionSource) version() string {
 	// The receipt authenticates retries; it is not a second source revision.
-	s.OperationKey, s.OperationHash = "", ""
+	s.Token, s.OperationKey, s.OperationHash = "", "", ""
 	b, _ := json.Marshal(s)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
@@ -83,7 +83,7 @@ func waitpointDecisionForm(raw string) ([]chatentities.DecisionField, []chatenti
 }
 
 func waitpointDecisionProjection(ctx context.Context, q issueOperationQueryer, a chataudience.Receipt, s waitpointDecisionSource) (ChatCardProjection, error) {
-	if s.Run == "" || s.Agent != a.AgentID {
+	if s.Token == "" || s.Run == "" || s.Agent != a.AgentID {
 		return ChatCardProjection{}, sql.ErrNoRows
 	}
 	var count int
@@ -179,6 +179,15 @@ func waitpointDecisionProjection(ctx context.Context, q issueOperationQueryer, a
 		return ChatCardProjection{}, sql.ErrNoRows
 	}
 	ref := ChatCardResponse{EntityRefResponse: EntityRefResponse{EventID: "decision:waitpoint:" + s.ID, Kind: "decision", Verb: "asked", Entity: EntityRefEntity{ID: s.ID, WorkspaceID: s.Workspace}, Provenance: EntityRefProvenance{Actor: EntityRefActor{Type: "agent", ID: a.AgentID}, At: s.Created}, Anchor: EntityRefAnchor{RunID: s.Run, TriggerMessageID: proof.Trigger}}, Decision: &d}
+	encoded, err := json.Marshal(ref)
+	if err != nil {
+		return ChatCardProjection{}, err
+	}
+	// Labels, options and historical answers are untrusted source data too.
+	// Omit any card that would echo its known callback capability anywhere.
+	if strings.Contains(string(encoded), s.Token) {
+		return ChatCardProjection{}, sql.ErrNoRows
+	}
 	if validateE2Card(ref) != nil {
 		return ChatCardProjection{}, sql.ErrNoRows
 	}
