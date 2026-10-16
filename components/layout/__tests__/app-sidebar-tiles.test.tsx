@@ -12,7 +12,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test" }) }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
 vi.mock("@/hooks/use-inbox", () => ({ useInboxUnreadCount: () => 37 }))
-vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => true }))
+vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => true, useAuthAvailable: () => true }))
 vi.mock("@/components/layout/workspace-switcher", () => ({ WorkspaceSwitcher: () => null }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 vi.mock("@/components/layout/sidebar-version", () => ({ SidebarVersion: () => null }))
