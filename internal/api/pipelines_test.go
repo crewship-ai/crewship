@@ -86,6 +86,7 @@ chat_origin_id TEXT,
 
 CREATE TABLE pipeline_runs (
 chat_origin_id TEXT,
+invocation_source_run_id TEXT,
     id                  TEXT PRIMARY KEY,
     workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     pipeline_id         TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,

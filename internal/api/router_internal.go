@@ -255,6 +255,8 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	}
 	r.mux.Handle("GET /api/v1/internal/issues", internalAuth(http.HandlerFunc(internalIssues.List)))
 	r.mux.Handle("GET /api/v1/internal/issues/{identifier}", internalAuth(http.HandlerFunc(internalIssues.Get)))
+	r.mux.Handle("PATCH /api/v1/internal/chat-proposals/{sourceId}", internalAuth(http.HandlerFunc(r.internalProposalEdit)))
+	r.mux.Handle("POST /api/v1/internal/chat-proposals", internalAuth(http.HandlerFunc(r.internalProposalCreate)))
 	r.mux.Handle("POST /api/v1/internal/issues", internalAuth(http.HandlerFunc(internalIssues.Create)))
 	r.mux.Handle("POST /api/v1/internal/issues/authority", internalAuth(http.HandlerFunc(internalIssues.ClassifyRun)))
 	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/show", internalAuth(http.HandlerFunc(internalIssues.Show)))

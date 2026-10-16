@@ -1035,3 +1035,10 @@ tag set after the add.
 **Auth:** `member` plus `create` at the route (MANAGER+). `200 OK` returns
 `{ "ok": true }`. A missing pipeline is `404`; tag removal failure is `500`.
 Removing an absent tag is otherwise successful.
+
+## Internal routine invocation provenance
+
+Saved routines use the sidecar's internal IPC transport. Its authenticated run
+identity and fresh-chat correlation are documented in
+[Routine invocation provenance](/api-reference/internal#routine-invocation-provenance).
+This is not a public pipeline endpoint and grants no new execution authority.
