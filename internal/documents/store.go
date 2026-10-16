@@ -39,22 +39,28 @@ type Lease struct {
 	Owner, Writer string
 	Epoch         int64
 	ExpiresAt     time.Time
+	Generation    int64
 }
 type Update struct {
 	Rev     int64
 	Payload []byte
 }
 type State struct {
-	Schema                      int
-	HeadRev, Epoch, SnapshotRev int64
-	Snapshot                    []byte
-	Projection                  json.RawMessage
-	Updates                     []Update
+	Schema                                  int
+	HeadRev, Epoch, SnapshotRev, Generation int64
+	Snapshot                                []byte
+	Projection                              json.RawMessage
+	Updates                                 []Update
 }
+
+// MutationGuard enforces application-specific immutable request bounds inside the writer transaction.
+type MutationGuard func(context.Context, *sql.Tx, string, State) error
 type Commit struct {
+	Guard                     MutationGuard
 	Lease                     Lease
 	ID, Fingerprint           string
 	IfRev                     int64
+	IfGeneration              *int64
 	Schema                    int
 	Update, CandidateSnapshot []byte
 	Projection                json.RawMessage
@@ -123,7 +129,7 @@ func (s *Store) tx(ctx context.Context, k Key, a Authorize, fn func(*sql.Tx, str
 	return t.Commit()
 }
 func state(ctx context.Context, t *sql.Tx, k Key) (v State, e error) {
-	e = t.QueryRowContext(ctx, "SELECT schema_version,head_rev,epoch,snapshot_rev,snapshot,projection FROM documents WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection)
+	e = t.QueryRowContext(ctx, "SELECT schema_version,head_rev,epoch,snapshot_rev,snapshot,projection,generation FROM documents WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection, &v.Generation)
 	if errors.Is(e, sql.ErrNoRows) {
 		e = ErrNotFound
 	}
