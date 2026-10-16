@@ -79,6 +79,9 @@ func scanCommentThread(row commentScanner) (CommentThread, error) {
 	}
 	if err == nil {
 		err = validateCommentEvent(thread.FirstComment)
+		if err == nil && thread.ID != thread.FirstComment.MutationID {
+			err = errors.New("Slides comment thread identity differs from original create mutation")
+		}
 	}
 	return thread, err
 }

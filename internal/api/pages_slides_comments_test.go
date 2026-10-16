@@ -44,6 +44,16 @@ func TestSlidesCommentsHTTPRolesRevocationAndImmutablePage(t *testing.T) {
 	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='comment-page'`)
 	wantCode(t, f.slideDo(token, "GET", base+"/comments?cursor="+url.QueryEscape(page.NextCursor), ""), 403, "revocation before page two")
 	wantCode(t, f.slideDo(token, "POST", base+"/comments/thread_one/replies", slideJSON(t, reply)), 403, "revoked receipt replay")
+	// Comment history is retained independently of the author's account.
+	mustExec(t, f.db, `DELETE FROM cli_tokens WHERE user_id='commenter'`)
+	mustExec(t, f.db, `DELETE FROM workspace_members WHERE user_id='commenter'`)
+	mustExec(t, f.db, `DELETE FROM users WHERE id='commenter'`)
+	retained := f.slideDo(f.boss, "GET", base+"/comments/thread_one/history", "")
+	wantCode(t, retained, 200, "history survives author deletion")
+	var retainedHistory SlidesCommentHistoryResponse
+	if err := json.Unmarshal(retained.Body.Bytes(), &retainedHistory); err != nil || len(retainedHistory.Items) != 3 || retainedHistory.Items[0].Body != "Český komentář" || retainedHistory.Items[0].Actor != "user:commenter" {
+		t.Fatal("author deletion changed retained history", retained.Body.String(), err)
+	}
 	mustExec(t, f.db, `DELETE FROM pages WHERE id='comment-page'`)
 	wmSeedPage(t, f.db, "ws-old", "comment-page-new", "comment-page", "Slides", "boss", "")
 	deck.DeckID = "comment-page-new"

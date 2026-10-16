@@ -157,6 +157,6 @@ revisions are pinned with a deferred NO ACTION foreign key; Page/head deletion
 still cascades the entire owned graph. Restore validates the original anchor at
 its pinned snapshot and contiguous event versions/kinds/count/resolution state,
 then reconstructs projection/provenance from actual retained deck history.
-Imported projection fields are not trusted. Fork remaps Page/thread namespaces,
+Imported projection fields are not trusted. Fork remaps the Page namespace while preserving thread IDs,
 keeps stable slide/element anchors and historical event mutation IDs, and clears
 comment replay receipts. A historical mutation ID remains a409 tombstone.
