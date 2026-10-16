@@ -267,8 +267,8 @@ func (r *pagesIdentityRig) seedIdentityShapes(t *testing.T, wsID, tag, crew stri
 	pidExec(t, r.db, `INSERT INTO attachments (id, workspace_id, owner_type, mission_id, filename, content_type, size_bytes, sha256, storage_key, uploaded_by_user_id)
 		VALUES (?,?,'issue',?,'a.png','image/png',1,?,?,?)`,
 		id("at"), wsID, id("mi"), strings.Repeat("a", 64), "k-"+tag, u)
-	pidExec(t, r.db, `INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, created_at, status, resolved_by)
-		VALUES (?,?,?,?,?,'help','2026-01-01T00:00:00Z','RESOLVED',?)`, id("es"), wsID, crew, "chat-"+tag, id("ag"), u)
+	pidExec(t, r.db, `INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, created_at, status, resolved_by, resolved_by_user_id)
+		VALUES (?,?,?,?,?,'help','2026-01-01T00:00:00Z','RESOLVED',?,?)`, id("es"), wsID, crew, "chat-"+tag, id("ag"), u, u)
 	pidExec(t, r.db, `INSERT INTO gate_reward_history (id, workspace_id, tool_name, args_hash, outcome, decided_by)
 		VALUES (?,?,'bash','h','approved',?)`, id("gr"), wsID, u)
 	pidExec(t, r.db, `INSERT INTO keeper_governance_settings (workspace_id, security_contact_user_id, updated_by) VALUES (?,?,?)`,

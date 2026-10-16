@@ -1088,6 +1088,601 @@
         },
         "type": "object"
       },
+      "ChatDecisionAnswer": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "answer",
+              "approve",
+              "reject"
+            ],
+            "type": "string"
+          },
+          "action_id": {
+            "$ref": "#/components/schemas/ChatDecisionAnswer__schema0"
+          },
+          "expected_version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_id": {
+            "$ref": "#/components/schemas/ChatDecisionAnswer__schema0"
+          },
+          "values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "maxLength": 10000,
+                  "minLength": 0,
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "propertyNames": {
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "source_id",
+          "expected_version",
+          "action",
+          "values"
+        ],
+        "type": "object"
+      },
+      "ChatDecisionAnswer__schema0": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "ChatDecisionReference": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/ChatDecision__schema5"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ChatDecision__schema18"
+          },
+          "entity": {
+            "$ref": "#/components/schemas/ChatDecision__schema3"
+          },
+          "event_id": {
+            "$ref": "#/components/schemas/ChatDecision__schema0"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChatDecision__schema17"
+          },
+          "operation_id": {
+            "$ref": "#/components/schemas/ChatDecision__schema1"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ChatDecision__schema16"
+          },
+          "revision_at_action": {
+            "$ref": "#/components/schemas/ChatDecision__schema6"
+          },
+          "verb": {
+            "$ref": "#/components/schemas/ChatDecision__schema2"
+          }
+        },
+        "required": [
+          "event_id",
+          "operation_id",
+          "verb",
+          "entity",
+          "provenance",
+          "anchor",
+          "revision_at_action",
+          "kind",
+          "decision"
+        ],
+        "type": "object"
+      },
+      "ChatDecisionReferencePage": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "enum": [
+              1
+            ],
+            "type": "number"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "maxLength": 4096,
+            "minLength": 0,
+            "type": "string"
+          },
+          "refs": {
+            "items": {
+              "$ref": "#/components/schemas/ChatDecisionReference"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "reset": {
+            "type": "boolean"
+          },
+          "snapshot_complete": {
+            "type": "boolean"
+          },
+          "snapshot_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract_version",
+          "reset",
+          "next_cursor",
+          "snapshot_id",
+          "snapshot_complete",
+          "has_more",
+          "refs"
+        ],
+        "type": "object"
+      },
+      "ChatDecisionVersionConflict": {
+        "additionalProperties": false,
+        "properties": {
+          "current": {
+            "$ref": "#/components/schemas/ChatDecisionReference"
+          },
+          "error": {
+            "enum": [
+              "decision_version_conflict"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "current"
+        ],
+        "type": "object"
+      },
+      "ChatDecision__schema0": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "ChatDecision__schema1": {
+        "maxLength": 200,
+        "minLength": 0,
+        "type": "string"
+      },
+      "ChatDecision__schema16": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ChatDecision__schema0"
+              },
+              "type": {
+                "enum": [
+                  "agent",
+                  "human",
+                  "system"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "id"
+            ],
+            "type": "object"
+          },
+          "at": {
+            "$ref": "#/components/schemas/ChatDecision__schema4"
+          }
+        },
+        "required": [
+          "actor",
+          "at"
+        ],
+        "type": "object"
+      },
+      "ChatDecision__schema17": {
+        "enum": [
+          "decision"
+        ],
+        "type": "string"
+      },
+      "ChatDecision__schema18": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_actions": {
+            "$ref": "#/components/schemas/ChatDecision__schema33"
+          },
+          "decision_type": {
+            "$ref": "#/components/schemas/ChatDecision__schema21"
+          },
+          "expires_at": {
+            "$ref": "#/components/schemas/ChatDecision__schema32"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/ChatDecision__schema26"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/ChatDecision__schema34"
+          },
+          "schema_version": {
+            "$ref": "#/components/schemas/ChatDecision__schema19"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ChatDecision__schema20"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ChatDecision__schema22"
+          },
+          "title": {
+            "$ref": "#/components/schemas/ChatDecision__schema25"
+          },
+          "workflow_actions": {
+            "$ref": "#/components/schemas/ChatDecision__schema23"
+          }
+        },
+        "required": [
+          "schema_version",
+          "source",
+          "decision_type",
+          "status",
+          "title",
+          "fields",
+          "expires_at",
+          "allowed_actions",
+          "resolution"
+        ],
+        "type": "object"
+      },
+      "ChatDecision__schema19": {
+        "enum": [
+          1
+        ],
+        "type": "number"
+      },
+      "ChatDecision__schema2": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "ChatDecision__schema20": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ChatDecision__schema0"
+          },
+          "type": {
+            "enum": [
+              "escalation",
+              "waitpoint",
+              "run_approval"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "version"
+        ],
+        "type": "object"
+      },
+      "ChatDecision__schema21": {
+        "enum": [
+          "information",
+          "workflow",
+          "whole_run_approval"
+        ],
+        "type": "string"
+      },
+      "ChatDecision__schema22": {
+        "enum": [
+          "pending",
+          "answered",
+          "approved",
+          "rejected",
+          "expired",
+          "cancelled"
+        ],
+        "type": "string"
+      },
+      "ChatDecision__schema23": {
+        "items": {
+          "$ref": "#/components/schemas/ChatDecision__schema24"
+        },
+        "maxItems": 20,
+        "minItems": 2,
+        "type": "array"
+      },
+      "ChatDecision__schema24": {
+        "additionalProperties": false,
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "id": {
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 240,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "approved"
+        ],
+        "type": "object"
+      },
+      "ChatDecision__schema25": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      },
+      "ChatDecision__schema26": {
+        "items": {
+          "$ref": "#/components/schemas/ChatDecision__schema27"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "ChatDecision__schema27": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ChatDecision__schema28"
+              },
+              "label": {
+                "$ref": "#/components/schemas/ChatDecision__schema29"
+              },
+              "required": {
+                "$ref": "#/components/schemas/ChatDecision__schema30"
+              },
+              "type": {
+                "enum": [
+                  "text",
+                  "textarea",
+                  "boolean",
+                  "number",
+                  "datetime"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "required",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ChatDecision__schema28"
+              },
+              "label": {
+                "$ref": "#/components/schemas/ChatDecision__schema29"
+              },
+              "options": {
+                "items": {
+                  "$ref": "#/components/schemas/ChatDecision__schema31"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "type": "array"
+              },
+              "required": {
+                "$ref": "#/components/schemas/ChatDecision__schema30"
+              },
+              "type": {
+                "enum": [
+                  "choice"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "required",
+              "type",
+              "options"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "ChatDecision__schema28": {
+        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+        "type": "string"
+      },
+      "ChatDecision__schema29": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      },
+      "ChatDecision__schema3": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ChatDecision__schema0"
+          },
+          "identifier": {
+            "maxLength": 200,
+            "minLength": 0,
+            "type": "string"
+          },
+          "workspace_id": {
+            "$ref": "#/components/schemas/ChatDecision__schema0"
+          }
+        },
+        "required": [
+          "id",
+          "identifier",
+          "workspace_id"
+        ],
+        "type": "object"
+      },
+      "ChatDecision__schema30": {
+        "type": "boolean"
+      },
+      "ChatDecision__schema31": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "maxLength": 240,
+            "minLength": 1,
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/ChatDecision__schema0"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "type": "object"
+      },
+      "ChatDecision__schema32": {
+        "$ref": "#/components/schemas/ChatDecision__schema4",
+        "nullable": true
+      },
+      "ChatDecision__schema33": {
+        "items": {
+          "enum": [
+            "view",
+            "answer",
+            "approve",
+            "reject"
+          ],
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "ChatDecision__schema34": {
+        "additionalProperties": false,
+        "nullable": true,
+        "properties": {
+          "action_id": {
+            "$ref": "#/components/schemas/ChatDecision__schema0"
+          },
+          "answered_at": {
+            "$ref": "#/components/schemas/ChatDecision__schema4"
+          },
+          "answered_by": {
+            "$ref": "#/components/schemas/ChatDecision__schema0"
+          },
+          "values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "maxLength": 10000,
+                  "minLength": 0,
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "propertyNames": {
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "answered_by",
+          "answered_at",
+          "values"
+        ],
+        "type": "object"
+      },
+      "ChatDecision__schema4": {
+        "format": "date-time",
+        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+        "type": "string"
+      },
+      "ChatDecision__schema5": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "$ref": "#/components/schemas/ChatDecision__schema0"
+          },
+          "run_status": {
+            "maxLength": 64,
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          },
+          "trigger_message_id": {
+            "$ref": "#/components/schemas/ChatDecision__schema0"
+          }
+        },
+        "required": [
+          "trigger_message_id",
+          "run_id",
+          "run_status"
+        ],
+        "type": "object"
+      },
+      "ChatDecision__schema6": {
+        "additionalProperties": false,
+        "properties": {
+          "aggregate_revision": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "revision": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "aggregate_revision"
+        ],
+        "type": "object"
+      },
       "ChatEntityIdentity": {
         "properties": {
           "deleted": {
@@ -1680,6 +2275,141 @@
           "anchor",
           "revision_at_action",
           "proposal"
+        ],
+        "type": "object"
+      },
+      "ChatRunPreflight": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "budgets": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "limit_usd": {
+                  "type": "number"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "remaining_usd": {
+                  "type": "number"
+                },
+                "scope": {
+                  "type": "string"
+                },
+                "spent_usd": {
+                  "type": "number"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "window": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "scope",
+                "window",
+                "mode",
+                "limit_usd",
+                "spent_usd",
+                "remaining_usd",
+                "state"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "estimate_state": {
+            "enum": [
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "estimate_usd": {
+            "nullable": true,
+            "type": "number"
+          },
+          "gate": {
+            "properties": {
+              "blocking": {
+                "type": "boolean"
+              },
+              "configured_mode": {
+                "type": "string"
+              },
+              "predicted_mode": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "rule_matches": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "configured_mode",
+              "predicted_mode",
+              "rule_matches",
+              "blocking",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "model": {
+            "type": "string"
+          },
+          "payer": {
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "category",
+              "label"
+            ],
+            "type": "object"
+          },
+          "scope": {
+            "enum": [
+              "configured_chat_agent"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "agent_id",
+          "model",
+          "payer",
+          "budgets",
+          "gate",
+          "estimate_usd",
+          "estimate_state",
+          "constraints"
         ],
         "type": "object"
       },
@@ -57176,6 +57906,569 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/chats/{chatId}/decisions": {
+      "get": {
+        "description": "List chat decisions (GET /api/v1/chats/{chatId}/decisions).",
+        "operationId": "get_api_v1_chats_chatId_decisions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatDecisionReferencePage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List chat decisions",
+        "tags": [
+          "chats"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}": {
+      "get": {
+        "description": "Get chat decision (GET /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}).",
+        "operationId": "get_api_v1_chats_chatId_decisions_sourceType_sourceId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sourceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact authoritative source scope; workflow and whole-run decisions are not interchangeable.",
+            "in": "path",
+            "name": "sourceType",
+            "required": true,
+            "schema": {
+              "enum": [
+                "escalation",
+                "waitpoint",
+                "run_approval"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatDecisionReference"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get chat decision",
+        "tags": [
+          "chats"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer": {
+      "post": {
+        "description": "Submit chat decision answer (POST /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer).",
+        "operationId": "post_api_v1_chats_chatId_decisions_sourceType_sourceId_answer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sourceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact authoritative source scope; workflow and whole-run decisions are not interchangeable.",
+            "in": "path",
+            "name": "sourceType",
+            "required": true,
+            "schema": {
+              "enum": [
+                "escalation",
+                "waitpoint",
+                "run_approval"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key scoped to this source and authenticated human. Reuse with different intent returns409 without a receipt.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatDecisionAnswer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatDecisionReference"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatDecisionVersionConflict"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatDecisionVersionConflict"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatDecisionVersionConflict"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatDecisionVersionConflict"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatDecisionVersionConflict"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChatDecisionVersionConflict"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit chat decision answer",
+        "tags": [
+          "chats"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/chats/{chatId}/entity-refs": {
       "get": {
         "description": "List chat entity refs (GET /api/v1/chats/{chatId}/entity-refs).",
@@ -60412,6 +61705,157 @@
           "chats"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/chats/{chatId}/run-preflight": {
+      "get": {
+        "description": "Get chat run preflight (GET /api/v1/chats/{chatId}/run-preflight).",
+        "operationId": "get_api_v1_chats_chatId_run-preflight",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chatId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatRunPreflight"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store; authorization-sensitive advisory snapshot, neither reservation nor approval",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get chat run preflight",
+        "tags": [
+          "chats"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/chats/{chatId}/steer": {

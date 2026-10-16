@@ -314,12 +314,14 @@ func buildDocument(routes []route) map[string]any {
 	_, chatShareComponents := chatShareSchemaCatalog()
 	_, chatEntityComponents := chatEntitySchemaCatalog()
 	_, chatProposalComponents := chatProposalSchemaCatalog()
+	_, chatRunPreflightComponents := chatRunPreflightSchemaCatalog()
+	_, chatDecisionComponents := chatDecisionSchemaCatalog()
 	_, routineOriginComponents := routineOriginBindingSchemaCatalog()
 	_, issueOutboxComponents := issueOutboxFailedSchemaCatalog()
 	for _, catalog := range []map[string]any{
 		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
-		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, chatProposalComponents, routineOriginComponents, issueOutboxComponents, restrictedContextComponents, restrictedWorkflowComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, chatProposalComponents, chatRunPreflightComponents, chatDecisionComponents, routineOriginComponents, issueOutboxComponents, restrictedContextComponents, restrictedWorkflowComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -680,6 +682,14 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	chatProposalRoutes, _ := chatProposalSchemaCatalog()
 	for key, schema := range chatProposalRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	chatRunPreflightRoutes, _ := chatRunPreflightSchemaCatalog()
+	for key, schema := range chatRunPreflightRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	chatDecisionRoutes, _ := chatDecisionSchemaCatalog()
+	for key, schema := range chatDecisionRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	chatEntityRoutes, _ := chatEntitySchemaCatalog()

@@ -1,0 +1,34 @@
+---
+title: chat decision
+description: Inspect and answer source-backed chat information requests
+stability: experimental
+tag: Experimental
+---
+
+```sh
+crewship chat decision list <chat-id> [--limit 100] [--cursor <opaque-next-cursor>]
+crewship chat decision show <chat-id> escalation <source-id>
+crewship chat decision answer <chat-id> escalation <source-id> --expected-version <version> --idempotency-key <stable-key> --text 'The information requested'
+crewship chat decision answer <chat-id> waitpoint <source-id> --expected-version <version> --idempotency-key <stable-key> --action-id <declared-action> --values-json '{"count": 3, "confirmed": true}'
+crewship chat decision answer <chat-id> run_approval <source-id> --expected-version <version> --idempotency-key <stable-key> --action approve
+```
+
+Read the source first and use its exact opaque version. Keep the operation key
+and text unchanged when retrying an uncertain answer. A version conflict requires
+explicit review of the current source. These commands resolve the same source as Inbox. TEXT `--text` supplies
+information; waitpoint `--action-id` selects a declared workflow effect with
+optional typed `--values-json`; run_approval `--action approve|reject` applies to
+that exact synchronous whole run. Source modes and flags cannot be mixed.
+Credentials remain in the existing vault/Inbox flow and must never be supplied
+as an information answer.
+
+
+Waitpoint denial may use an empty `--values-json '{}'` when required inputs are
+omitted. Supplied inputs remain typed and are validated against the frozen form.
+Unsupported forms and async run reviews stay on their existing source surfaces.
+Never place credential values in any information or workflow argument.
+
+Form-less boolean workflow waitpoints accept `--action approve` or `--action
+reject`, with no `--action-id`, `--values-json` or `--text`. The API equivalent
+uses that action, an empty `values` object and no `action_id`. Typed workflow
+forms continue to require their declared action ID and typed field values.

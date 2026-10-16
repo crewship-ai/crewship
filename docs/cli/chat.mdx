@@ -784,3 +784,9 @@ the original accepted outcome and Issue IDs.
 | `--version` | Existing proposal version reviewed by this agent turn. Required. |
 | `--idempotency-key` | Stable revision key retained for retries. Required. |
 | `--sidecar` | HTTP loopback origin; defaults to `http://127.0.0.1:9119`. |
+## Source-backed decisions
+
+[`crewship chat decision`](/cli/chat-decision) lists, shows and answers existing
+TEXT information requests. Use the reviewed source version and preserve the
+operation key across uncertain retries. These commands share the authoritative
+source with Inbox and cannot approve workflows, credentials or entire runs.
