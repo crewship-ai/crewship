@@ -290,6 +290,9 @@ func (s *Store) write(ctx context.Context, tx *sql.Tx, key Key, current State, d
 	if _, err = tx.ExecContext(ctx, `INSERT INTO slides_revisions(workspace_id,page_id,rev,parent_rev,order_version,schema_version,canonical_json,content_hash,actor,kind,mutation_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, key.WorkspaceID, key.PageID, revision, current.Revision, order, SchemaVersion, canonical, contentHash, actor, kind, id); err != nil {
 		return result, err
 	}
+	if err := updateCommentProjections(ctx, tx, key, deck, revision, kind); err != nil {
+		return result, err
+	}
 	if s.options.OnRevision != nil {
 		if err = s.options.OnRevision(ctx, tx, key, revision, deck); err != nil {
 			return result, err

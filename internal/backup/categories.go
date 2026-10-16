@@ -183,6 +183,7 @@ const categoryWorkOnly = ""
 // TableCategory maps every table in BackupTables to its category. A table
 // missing here fails TestTableCategory_CoversEveryBackupTable.
 var TableCategory = map[string]string{
+	"slides_comment_threads": CategoryPages, "slides_comment_events": CategoryPages, "slides_comment_receipts": CategoryPages,
 	"slides_heads": CategoryPages, "slides_revisions": CategoryPages, "slides_receipts": CategoryPages, "slides_object_ids": CategoryPages,
 	"documents": CategoryPages, "document_comments": CategoryPages, "document_requests": CategoryPages,
 	"document_updates": CategoryPages, "document_receipts": CategoryPages, "document_checkpoints": CategoryPages,
