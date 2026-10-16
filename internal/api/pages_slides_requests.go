@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"net/http"
 	"strconv"
@@ -11,10 +12,13 @@ import (
 )
 
 type SlidesSelectedRequestsResponse struct {
-	Items      []slides.SelectedRequestSummary `json:"items"`
-	NextCursor string                          `json:"next_cursor"`
-	Watermark  int64                           `json:"watermark"`
-	HasMore    bool                            `json:"has_more"`
+	CanCancel     bool                            `json:"can_cancel"`
+	CanDispatch   bool                            `json:"can_dispatch"`
+	EligibleChats []DocumentRequestTarget         `json:"eligible_chats"`
+	Items         []slides.SelectedRequestSummary `json:"items"`
+	NextCursor    string                          `json:"next_cursor"`
+	Watermark     int64                           `json:"watermark"`
+	HasMore       bool                            `json:"has_more"`
 }
 type SlidesSelectedRequestResponse struct {
 	Request slides.SelectedRequestSummary `json:"request"`
@@ -60,12 +64,35 @@ func (h *slideHTTP) ReadSelectedRequests(w http.ResponseWriter, r *http.Request)
 		}
 		page.Limit = limit
 	}
+	canDispatch, canCancel := false, false
+	readAuthority := authorize
+	writeAuthority := h.selectedHumanAuthority(r, key, true, nil)
+	authorize = func(ctx context.Context, tx *sql.Tx) (string, error) {
+		actor, err := readAuthority(ctx, tx)
+		if err != nil {
+			return "", err
+		}
+		_, writeErr := writeAuthority(ctx, tx)
+		canCancel = writeErr == nil
+		canDispatch = canCancel && !h.pages.slidesRequestsUnavailable.Load() && (h.pages.artifactDispatch != nil || h.pages.hub != nil)
+		return actor, nil
+	}
 	result, err := h.store.ListSelectedRequests(r.Context(), key, page, authorize)
 	if err != nil {
 		slideHTTPError(w, err)
 		return
 	}
-	writeJSON(w, 200, SlidesSelectedRequestsResponse{Items: result.Items, NextCursor: result.NextCursor, Watermark: result.Watermark, HasMore: result.HasMore})
+	targets := []DocumentRequestTarget{}
+	if canDispatch {
+		user := UserFromContext(r.Context())
+		rec, loadErr := h.pages.loadPage(r.Context(), key.WorkspaceID, r.PathValue("slug"))
+		if user == nil || loadErr != nil || rec.ID != key.PageID {
+			canDispatch = false
+		} else {
+			targets = h.pages.documentRequestTargets(r.Context(), rec, key.WorkspaceID, user.ID)
+		}
+	}
+	writeJSON(w, 200, SlidesSelectedRequestsResponse{Items: result.Items, NextCursor: result.NextCursor, Watermark: result.Watermark, HasMore: result.HasMore, CanDispatch: canDispatch, CanCancel: canCancel, EligibleChats: targets})
 }
 
 func (h *slideHTTP) MutateSelectedRequest(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import type { SlideTextRange } from "@/lib/slides/selected"
 import type { SlideDeck, SlideElement } from "@/lib/slides/model"
 import { insertSlide, isNativeSlideDeck, moveSlide, newElement, orderedSlides } from "./native-model"
 import { SlideCanvas } from "./slide-canvas"
@@ -20,14 +21,15 @@ export interface SlidesEditorProps {
   persistenceStatus?: string
   commentsAvailable?: boolean
   imagesAvailable?: boolean
+  onTextSelection?: (range?: SlideTextRange) => void
 }
 
-export function SlidesEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus, commentsAvailable, imagesAvailable }: SlidesEditorProps) {
+export function SlidesEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus, commentsAvailable, imagesAvailable, onTextSelection }: SlidesEditorProps) {
   if (!isNativeSlideDeck(deck)) return <p role="alert">This Slides format is unavailable. Its content cannot be edited.</p>
-  return <NativeEditor deck={deck} onChange={onChange} readOnly={readOnly || !onChange} reorderDisabled={reorderDisabled} persistenceStatus={persistenceStatus} commentsAvailable={commentsAvailable} imagesAvailable={imagesAvailable} />
+  return <NativeEditor deck={deck} onChange={onChange} readOnly={readOnly || !onChange} reorderDisabled={reorderDisabled} persistenceStatus={persistenceStatus} commentsAvailable={commentsAvailable} imagesAvailable={imagesAvailable} onTextSelection={onTextSelection} />
 }
 
-function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus, commentsAvailable, imagesAvailable }: SlidesEditorProps & { deck: SlideDeck; readOnly: boolean }) {
+function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus, commentsAvailable, imagesAvailable, onTextSelection }: SlidesEditorProps & { deck: SlideDeck; readOnly: boolean }) {
   const [slideId, setSlideId] = React.useState(deck.slide_order[0])
   const [elementId, setElementId] = React.useState<string>()
   const [present, setPresent] = React.useState(false)
@@ -49,6 +51,7 @@ function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceSt
     const target = value.elements.find(item => item.id === elementId)
     if (target) edit(target)
   })
+  React.useEffect(() => { onTextSelection?.(undefined) }, [slideId, elementId, deck, onTextSelection])
   const position = deck.slide_order.indexOf(slideId)
   return <section aria-label="Slides editor" className="space-y-3">
     <p role="status" className="text-sm text-muted-foreground">{persistenceStatus ?? "Changes in this preview are not saved."} {imagesAvailable ? (commentsAvailable ? "" : "Comments are not available in this view.") : commentsAvailable ? "Images are not available." : "Images and comments are not available."}</p>
@@ -82,7 +85,7 @@ function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceSt
         {element ? <fieldset disabled={readOnly} className="space-y-2"><legend>Selected {element.type}</legend>
           <div className="grid grid-cols-2 gap-2">{(["x", "y", "width", "height"] as const).map(field => <label key={field} className="block">{field}<input className={input} type="number" step={1} min={field === "width" || field === "height" ? 1 : 0} max={field === "x" || field === "width" ? deck.width : deck.height} value={element[field]} onChange={event => editElement(value => { value[field] = Number(event.target.value) })} /></label>)}</div>
           {element.type === "text" && <>
-            <label className="block">Text<textarea className={`${input} min-h-24`} value={element.text.value} onChange={event => editElement(value => { if (value.type === "text") value.text.value = event.target.value })} /></label>
+            <label className="block">Text<textarea className={`${input} min-h-24`} value={element.text.value} onSelect={event => { const field = event.currentTarget; onTextSelection?.(field.selectionEnd > field.selectionStart ? { slide_id: slideId, element_id: element.id, from: field.selectionStart, to: field.selectionEnd, quote: field.value.slice(field.selectionStart, field.selectionEnd) } : undefined) }} onChange={event => editElement(value => { if (value.type === "text") value.text.value = event.target.value })} /></label>
             <label className="block">Alignment<select className={input} value={element.text.align} onChange={event => editElement(value => { if (value.type === "text") value.text.align = event.target.value as "left" | "center" | "right" })}>{["left", "center", "right"].map(value => <option key={value}>{value}</option>)}</select></label>
           </>}
           {(element.type === "text" || element.type === "table") && <>

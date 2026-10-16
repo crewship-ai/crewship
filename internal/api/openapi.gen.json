@@ -16854,6 +16854,46 @@
       "SlideSelectedRequests": {
         "additionalProperties": false,
         "properties": {
+          "can_cancel": {
+            "type": "boolean"
+          },
+          "can_dispatch": {
+            "type": "boolean"
+          },
+          "eligible_chats": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "agent_id": {
+                  "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                  "type": "string"
+                },
+                "agent_name": {
+                  "type": "string"
+                },
+                "agent_slug": {
+                  "type": "string"
+                },
+                "chat_id": {
+                  "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "chat_id",
+                "title",
+                "agent_id",
+                "agent_name",
+                "agent_slug"
+              ],
+              "type": "object"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
           "has_more": {
             "type": "boolean"
           },
@@ -16877,7 +16917,10 @@
           "items",
           "next_cursor",
           "watermark",
-          "has_more"
+          "has_more",
+          "can_dispatch",
+          "can_cancel",
+          "eligible_chats"
         ],
         "type": "object"
       },

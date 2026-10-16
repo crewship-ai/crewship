@@ -131,3 +131,36 @@ func TestSlidesSelectedActualRouterExactCredentialRevocationDuringBodyAndReplay(
 		}
 	}
 }
+
+func TestSlidesSelectedEligibleChatsAreAdvisoryAndScopeBound(t *testing.T) {
+	f, base, _ := selectedSlidesHTTPFixture(t)
+	read := func(token string) SlidesSelectedRequestsResponse {
+		t.Helper()
+		response := f.slideDo(token, "GET", base+"/requests", "")
+		wantCode(t, response, 200, "request list advisory")
+		var result SlidesSelectedRequestsResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	allowed := read(f.boss)
+	if !allowed.CanDispatch || !allowed.CanCancel || len(allowed.EligibleChats) != 1 || allowed.EligibleChats[0].ChatID != "selected-chat" {
+		t.Fatal("eligible private target missing", allowed)
+	}
+	readOnly := mintIngressScopedToken(t, f.db, "boss", "selected-readonly", "pages:read")
+	denied := read(readOnly)
+	if denied.CanDispatch || denied.CanCancel || len(denied.EligibleChats) != 0 {
+		t.Fatal("read-only credential exposed agent creation metadata", denied)
+	}
+	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='selected-page' AND subject_type='agent'`)
+	revoked := read(f.boss)
+	if len(revoked.EligibleChats) != 0 {
+		t.Fatal("revoked agent remained eligible", revoked)
+	}
+	f.r.pages.slidesRequestsUnavailable.Store(true)
+	unavailable := read(f.boss)
+	if unavailable.CanDispatch || !unavailable.CanCancel || len(unavailable.EligibleChats) != 0 {
+		t.Fatal("runtime unavailable lost human cancellation or exposed dispatch", unavailable)
+	}
+}
