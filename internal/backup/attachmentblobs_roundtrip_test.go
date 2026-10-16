@@ -231,3 +231,59 @@ func TestRestore_AttachmentBlobNeverOverwritesADifferentFile(t *testing.T) {
 		t.Fatalf("attachments_conflicts = %d, want 1", res.AttachmentsConflicts)
 	}
 }
+
+// Routine outputs use the same blob tree but have no attachments row.
+func TestBackupRestore_RoutineOutputBlobRoundTrip(t *testing.T) {
+	for _, fork := range []string{"", "routine-output-fork"} {
+		t.Run("fork="+fork, func(t *testing.T) {
+			ctx := context.Background()
+			source := openMigratedDB(t)
+			ws := seedWorkspace(t, source)
+			root := t.TempDir()
+			content := "immutable routine output"
+			sum := sha256.Sum256([]byte(content))
+			sha := hex.EncodeToString(sum[:])
+			for _, statement := range []string{
+				`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash) VALUES ('p','ws_e2e_1','output','Output','{}','hash')`,
+				`INSERT INTO pipeline_runs(id,workspace_id,pipeline_id,pipeline_slug,status,mode,started_at,triggered_via) VALUES ('r','ws_e2e_1','p','output','completed','run','2026-10-13T00:00:00Z','manual')`,
+				`INSERT INTO pipeline_step_executions(id,run_id,step_id,execution_path,attempt,kind,status,started_at) VALUES ('e','r','write','/write',1,'script','completed','2026-10-13T00:00:00Z')`,
+			} {
+				if _, err := source.Exec(statement); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := source.Exec(`INSERT INTO pipeline_run_artifacts(id,run_id,step_execution_id,kind,label,state,sha256,created_at) VALUES ('a','r','e','file','result.txt','available',?,'2026-10-13T00:00:00Z')`, sha); err != nil {
+				t.Fatal(err)
+			}
+			blob := filepath.Join(root, "attachments", ws, sha[:2], sha)
+			if err := os.MkdirAll(filepath.Dir(blob), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(blob, []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			const password = "routine-output-roundtrip-passphrase"
+			created, err := backup.CreateBackup(ctx, source, backup.CreateOptions{Scope: backup.ScopeWorkspace, WorkspaceID: ws, OutputDir: t.TempDir(), Actor: backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}, Passphrase: password, AttachmentRoot: root})
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := openMigratedDB(t)
+			targetRoot := t.TempDir()
+			restored, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{Path: created.Path, Passphrase: password, AsWorkspace: fork, Actor: backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}, AttachmentRoot: targetRoot})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var targetSHA string
+			if err := target.QueryRow(`SELECT sha256 FROM pipeline_run_artifacts WHERE label='result.txt'`).Scan(&targetSHA); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(filepath.Join(targetRoot, "attachments", restored.RestoredWorkspaceID, targetSHA[:2], targetSHA))
+			if err != nil || string(got) != content {
+				t.Fatalf("routine metadata restored but blob lost: %q %v", got, err)
+			}
+			if created.Manifest.Contents.AttachmentsIncluded != 1 || restored.AttachmentsRestored != 1 {
+				t.Fatalf("blob reporting: included=%d restored=%d", created.Manifest.Contents.AttachmentsIncluded, restored.AttachmentsRestored)
+			}
+		})
+	}
+}

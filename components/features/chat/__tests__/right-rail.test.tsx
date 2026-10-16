@@ -27,10 +27,10 @@ describe("RightRail — the controls say what they are", () => {
   it("gives every control an accessible name", () => {
     render(<RightRail />)
 
-    for (const label of ["Artifacts", "Work"]) {
+    for (const label of ["Files", "Work"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument()
     }
-    expect(screen.queryByRole("tab", { name: "Files" })).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Artifacts" })).toBeNull()
     expect(screen.queryByRole("tab", { name: "Team" })).toBeNull()
     expect(screen.getByRole("tablist", { name: /side panels/i })).toBeInTheDocument()
   })
@@ -51,16 +51,16 @@ describe("RightRail — the controls say what they are", () => {
     // Shortcuts follow the visible order when the panel set changes.
     render(<RightRail />)
 
-    expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-keyshortcuts", "Meta+1")
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-keyshortcuts", "Meta+1")
     expect(screen.getByRole("tab", { name: "Work" })).toHaveAttribute("aria-keyshortcuts", "Meta+2")
   })
 
   it("marks the open panel as the selected tab", () => {
     render(<RightRail />)
 
-    fireEvent.click(screen.getByRole("tab", { name: "Artifacts" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }))
 
-    expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "true")
     expect(screen.getByRole("tab", { name: "Work" })).toHaveAttribute("aria-selected", "false")
   })
 

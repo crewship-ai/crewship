@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/slides"
 )
 
 // forkExtraRows returns the rows a forked restore writes ON TOP of the ones the
@@ -203,6 +204,17 @@ func resolveFKValue(t *testing.T, db *sql.DB, fk genFK, workspaceID string) (any
 		{fmt.Sprintf(`SELECT %s FROM %s WHERE workspace_id = ? LIMIT 1`, fk.refColumn, fk.refTable), []any{workspaceID}},
 		{fmt.Sprintf(`SELECT %s FROM %s LIMIT 1`, fk.refColumn, fk.refTable), nil},
 	}
+	// The Docs content type is exclusive. Legacy content fixtures must not
+	// attach panels/artifacts to the dedicated document Page merely because
+	// its ID happens to sort first in a parent lookup.
+	if fk.refTable == "pages" {
+		queries = append([]struct {
+			q    string
+			args []any
+		}{
+			{fmt.Sprintf(`SELECT %s FROM pages WHERE workspace_id=? AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.page_id=pages.id) AND NOT EXISTS(SELECT 1 FROM slides_heads s WHERE s.page_id=pages.id) LIMIT 1`, fk.refColumn), []any{workspaceID}},
+		}, queries...)
+	}
 	for _, cand := range queries {
 		var v any
 		if err := db.QueryRowContext(ctx, cand.q, cand.args...).Scan(&v); err == nil && v != nil {
@@ -291,6 +303,50 @@ var genColumnOverrides = map[string]any{
 // BackupTables order) and ultimately report the shortfall.
 func seedOneBackupTable(t *testing.T, db *sql.DB, table, workspaceID string) error {
 	t.Helper()
+	if table == "slides_heads" {
+		var owner string
+		if err := db.QueryRow(`SELECT owner_user_id FROM pages WHERE workspace_id=? AND owner_user_id IS NOT NULL AND owner_crew_id IS NULL LIMIT 1`, workspaceID).Scan(&owner); err != nil {
+			return err
+		}
+		_, err := seedBackupSlides(t, db, workspaceID, "gen_slides_page", owner)
+		return err
+	}
+	if table == "slides_requests" {
+		seedBackupSelected(t, db, workspaceID, "gen_selected_page", "u_admin", "a_alice", "ch_alice_1")
+		store := slides.New(db, slides.Options{})
+		key := slides.Key{WorkspaceID: workspaceID, PageID: "gen_selected_page"}
+		if err := store.SettleSelectedRequest(t.Context(), key, "gen_selected_page-result", "succeeded", "", backupSlideAuthority); err != nil {
+			return err
+		}
+		_, err := store.CancelSelectedRequest(t.Context(), key, "gen_selected_page-pending", slides.CancelSelectedRequestInput{PageID: key.PageID, SchemaVersion: 1, MutationID: "gen_pending_cancel", IfVersion: 1}, backupSlideAuthority)
+		return err
+	}
+	if table == "slides_comment_threads" {
+		store := slides.New(db, slides.Options{})
+		key := slides.Key{WorkspaceID: workspaceID, PageID: "gen_slides_page"}
+		_, err := store.CreateComment(t.Context(), key, slides.CreateCommentRequest{PageID: key.PageID, SchemaVersion: 1, BaseRev: 2, MutationID: "gen_comment", Anchor: slides.CommentAnchor{AnchorSchemaVersion: 1, Kind: "slide", SlideID: "slide_one", Revision: 2}, Body: "Retained fixture"}, backupSlideAuthority)
+		return err
+	}
+	if table == "slides_revisions" || table == "slides_receipts" || table == "slides_object_ids" || table == "slides_comment_events" || table == "slides_comment_receipts" || table == "slides_request_events" || table == "slides_request_receipts" {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE workspace_id=?`, workspaceID).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			return fmt.Errorf("Slides parent not seeded")
+		}
+		return nil
+	}
+	if table == "documents" {
+		// A single synthetic Page cannot host Docs and legacy panels together.
+		// Keep a separate, explicitly human-owned Page so both families and
+		// dependent webhooks are actually exercised by the every-table suite.
+		if _, err := db.ExecContext(context.Background(), `INSERT OR IGNORE INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) SELECT 'gen_documents_page',?,'gen-documents-page','Generated document',owner_user_id,'{}' FROM pages WHERE workspace_id=? AND owner_user_id IS NOT NULL AND owner_crew_id IS NULL LIMIT 1`, workspaceID, workspaceID); err != nil {
+			return err
+		}
+		_, err := db.ExecContext(context.Background(), `INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES(?,'gen_documents_page',1,?,?)`, workspaceID, []byte("generated-document-snapshot"), []byte(`[]`))
+		return err
+	}
 	createSQL := tableCreateSQL(t, db, table)
 	if createSQL == "" {
 		return fmt.Errorf("absent from schema")
@@ -521,6 +577,14 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 			if got := after[table] - before[table]; got != 0 {
 				t.Errorf("%s is listed in knownForkDrops (%s) but the fork added %d row(s) — "+
 					"if that gap is fixed, delete the knownForkDrops entry", table, reason, got)
+			}
+			continue
+		}
+		if table == "slides_receipts" || table == "slides_comment_receipts" || table == "slides_request_receipts" {
+			// Explicit fork security policy: source replay capability is not
+			// copied. Immutable revision mutation IDs remain409 tombstones.
+			if got := after[table] - before[table]; got != 0 {
+				t.Errorf("fork revived %d Slides receipts", got)
 			}
 			continue
 		}

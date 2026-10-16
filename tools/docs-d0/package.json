@@ -1,0 +1,25 @@
+{
+  "name": "crewship-docs-d0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "build": "esbuild browser.mjs --bundle --format=esm --outfile=dist/browser.js",
+    "test": "node --test schema-node-test.mjs hocuspocus-node-test.mjs fixture-boundaries-node-test.mjs fixture-websocket-node-test.mjs"
+  },
+  "dependencies": {
+    "@hocuspocus/provider": "4.7.1",
+    "@hocuspocus/server": "4.7.1",
+    "@tiptap/core": "3.32.0",
+    "@tiptap/extension-collaboration": "3.32.0",
+    "@tiptap/extension-table": "3.32.0",
+    "@tiptap/pm": "3.32.0",
+    "@tiptap/y-tiptap": "3.0.7",
+    "ws": "8.22.0",
+    "yjs": "13.6.33"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "esbuild": "0.25.12"
+  }
+}

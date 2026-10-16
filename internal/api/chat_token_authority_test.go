@@ -41,6 +41,9 @@ func TestChatTokenAuthorityWSTicketNeverDropsLimitedScope(t *testing.T) {
 	for _, tc := range chatTokenScopeCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := withUser(t.Context(), &AuthUser{ID: user})
+			// RequireAuth records the human credential kind independently of
+			// its scope fence; an AuthUser alone is not proven human authority.
+			ctx = context.WithValue(ctx, ctxAuthKind, AuthKindCLIToken)
 			if tc.scopes != nil {
 				ctx = context.WithValue(ctx, ctxTokenScopes, tc.scopes)
 			}

@@ -11,7 +11,7 @@ tag: Experimental
 Crewship can be configured via a YAML file passed at startup. Environment variables override YAML values. The config is loaded and validated in `internal/config/config.go`.
 
 <Info>
-  The config file has thirteen top-level sections: `server`, `ipc`, `container`, `storage`, `state`, `logging`, `auth`, `llm_proxy`, `keeper`, `license`, `composio`, `local_models`, and `orchestrator`. The [Complete Reference](#complete-reference) below shows every field with its default; [Section Details](#section-details) explains the load-bearing ones.
+  The config file includes these top-level sections: `server`, `ipc`, `container`, `storage`, `state`, `logging`, `auth`, `llm_proxy`, `keeper`, `license`, `composio`, `local_models`, `orchestrator`, and `documents`. The [Complete Reference](#complete-reference) below shows every field with its default; [Section Details](#section-details) explains the load-bearing ones.
 </Info>
 
 ## Loading Order
@@ -380,3 +380,26 @@ keeper:
   ollama_url: "http://ollama-host:11434"
   model: "claude-haiku-4-5"
 ```
+
+
+## Collaborative documents
+
+Docs default to disabled. Environment variables override these values. Go and
+the separately managed Node service share private, mode-0600 sockets and a
+service secret, with matching process UID. Paths must be distinct clean absolute
+paths of at most 100 bytes. The token is a regular mode-0600 file containing a
+trimmed 32–256 byte secret. Do not mount the database into Node or publish its
+listener. Deploy shared-host service changes through the infrastructure workflow.
+
+```yaml
+documents:
+  enabled: false
+  authority_socket: /run/crewship-docs/authority.sock
+  service_socket: /run/crewship-docs/service.sock
+  service_token_file: /run/crewship-docs/service-token
+```
+
+With `enabled: true`, all three paths are required. A configured authority startup
+failure prevents startup. The editor exposes confirmed saves; it preserves an
+unsaved draft when a restore, restart or access change requires recovery. See
+[document API contracts](/api-reference/documents).

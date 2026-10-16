@@ -5,6 +5,10 @@ import { GeneralSection } from "../sections/general-section"
 // #881 — the workspace delete flow requires typing the slug to confirm and
 // sends { confirm_slug } in the DELETE body (the server re-validates it).
 
+vi.mock("@/components/features/settings/sections/page-ownership-card", () => ({
+  PageOwnershipCard: () => <div data-testid="page-ownership-card" />,
+}))
+
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a) }))
 
@@ -13,6 +17,12 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a
 // its own test file; here it is out of scope.
 vi.mock("@/components/features/settings/sections/privileged-credentials-card", () => ({
   PrivilegedCredentialsCard: () => <div data-testid="privileged-credentials-card" />,
+}))
+
+// Artifact policy has independent query/permission tests; these exercise the
+// Identity/delete card and must not consume its API responses.
+vi.mock("@/components/features/settings/sections/artifact-creation-policy-card", () => ({
+  ArtifactCreationPolicyCard: () => <div data-testid="artifact-creation-policy-card" />,
 }))
 
 function renderSection() {

@@ -98,6 +98,9 @@ var leaseSweepInterval = 15 * time.Second
 
 // stats collector, and all background goroutines. It blocks until ctx is done.
 func (s *Server) Start(ctx context.Context) error {
+	if s.documentsStartupErr != nil {
+		return fmt.Errorf("Docs authority startup: %w", s.documentsStartupErr)
+	}
 	s.startedAt = time.Now()
 
 	// Recover orphaned RUNNING runs from previous crashes/restarts.

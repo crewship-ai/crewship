@@ -151,7 +151,8 @@ describe("PagesOverview", () => {
   it("tells an empty workspace how to make the first page exist", () => {
     renderOverview([])
     expect(screen.getByText("No pages yet")).toBeTruthy()
-    expect(screen.getByText(/crewship page create --file/i)).toBeTruthy()
+    expect(screen.getByText(/Create a Doc, Slides or HTML artifact, draw on a board, or arrange panels in a page/i)).toBeTruthy()
+    expect(screen.getByText(/Choose a creation action above to get started/i)).toBeTruthy()
   })
 
   it("shows a skeleton in the final geometry while the first load is in flight", () => {

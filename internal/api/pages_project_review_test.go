@@ -1181,6 +1181,14 @@ func TestPageWireHasProjectIsNotHasApplication(t *testing.T) {
 		if !okProject || !okApplication {
 			t.Fatalf("%s: has_project/has_application missing from the page wire: %v", slug, doc)
 		}
+		descriptor, ok := doc["content_descriptor"].(map[string]any)
+		if !ok || descriptor["type_id"] != "panels" || descriptor["supported"] != true {
+			t.Fatalf("primary panels descriptor missing: %v", doc)
+		}
+		source, hasSourceDescriptor := doc["application_descriptor"].(map[string]any)
+		if hasSourceDescriptor != (project || application) || (hasSourceDescriptor && (source["type_id"] != "application" || source["supported"] != true)) {
+			t.Fatalf("application source descriptor inconsistent: %v", doc)
+		}
 		return project, application
 	}
 	listed := func(slug string) (bool, bool) {
@@ -1203,6 +1211,10 @@ func TestPageWireHasProjectIsNotHasApplication(t *testing.T) {
 			application, okApplication := row["has_application"].(bool)
 			if !okProject || !okApplication {
 				t.Fatalf("%s: has_project/has_application missing from the list row: %v", slug, row)
+			}
+			source, hasSourceDescriptor := row["application_descriptor"].(map[string]any)
+			if hasSourceDescriptor != (project || application) || (hasSourceDescriptor && (source["type_id"] != "application" || source["supported"] != true)) {
+				t.Fatalf("listed application source descriptor inconsistent: %v", row)
 			}
 			return project, application
 		}

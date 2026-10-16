@@ -306,6 +306,7 @@ func buildDocument(routes []route) map[string]any {
 	_, finalCoreRequestComponents := finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog()
 	_, finalAuthComponents := finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog()
 	_, onboardingProposalComponents := onboardingProposalSchemaCatalog()
+	_, workspacePageOwnershipComponents := workspacePageOwnershipSchemaCatalog()
 	_, workspaceConversationComponents := workspaceConversationSchemaCatalog()
 	_, routinesWorkspaceComponents := routinesWorkspaceSchemaCatalog()
 	_, workLedgerComponents := workLedgerSchemaCatalog()
@@ -316,9 +317,9 @@ func buildDocument(routes []route) map[string]any {
 	_, routineOriginComponents := routineOriginBindingSchemaCatalog()
 	_, issueOutboxComponents := issueOutboxFailedSchemaCatalog()
 	for _, catalog := range []map[string]any{
-		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
+		slideSchemaComponents(), slideCommentComponents(), slideSelectedComponents(), documentSchemaComponents(), coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
-		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, routineOriginComponents, issueOutboxComponents, restrictedContextComponents, restrictedWorkflowComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspacePageOwnershipComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, chatEntityComponents, routineOriginComponents, issueOutboxComponents, restrictedContextComponents, restrictedWorkflowComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -610,7 +611,26 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range hookSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	result["GET /api/v1/page-request-results/{kind}/{requestId}"] = pageRequestResultSchema()
+	for key, schema := range slideSelectedCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range slideCommentCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range slideSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range documentSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range pageAssetSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	for key, schema := range pagesSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range boardSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, name := range executionResponseSchemas() {
@@ -659,6 +679,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	onboardingProposalRoutes, _ := onboardingProposalSchemaCatalog()
 	for key, schema := range onboardingProposalRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	workspacePageOwnershipRoutes, _ := workspacePageOwnershipSchemaCatalog()
+	for key, schema := range workspacePageOwnershipRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	workspaceConversationRoutes, _ := workspaceConversationSchemaCatalog()

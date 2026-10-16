@@ -2240,10 +2240,10 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     name: Go Lint
     runs-on: ubuntu-latest
-    # 15 min: same calculus as the Go job above. golangci-lint
-    # itself runs in ~30s with the cached binary; the rest of the
-    # budget is one-time cold-cache buffer.
-    timeout-minutes: 15
+    # Native runs repeatedly reached the 5m tool deadline; the same full
+    # scope completes locally in 3m19s. Bound cold install (8m), analysis
+    # step (8m) and setup inside 20m; retain timing for native qualification.
+    timeout-minutes: 20
     env:
       GOLANGCI_VERSION: v2.14.0
     steps:
@@ -2304,11 +2304,11 @@ jobs:
         timeout-minutes: 8
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_VERSION }}
 
-      # --timeout=5m (golangci's own) < 8m (this step) < 15m (the job). The
+      # --timeout=7m (golangci's own) < 8m (this step) < 20m (the job). The
       # inner deadline is the one that names the linter that hung.
       - name: Run golangci-lint
         timeout-minutes: 8
-        run: ${{ steps.gopath.outputs.bin }}/golangci-lint run --timeout=5m ./...
+        run: /usr/bin/time -v ${{ steps.gopath.outputs.bin }}/golangci-lint run --timeout=7m -v ./...
 
       # tsformat proximity lint (#990, #1073c): flags any RFC3339Nano
       # token added within `window` lines of an ExecContext/QueryContext

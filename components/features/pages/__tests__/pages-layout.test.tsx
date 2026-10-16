@@ -134,11 +134,29 @@ describe("PagesLayout", () => {
   })
   afterEach(() => vi.unstubAllGlobals())
 
+  for (const directEdit of [false, true]) it(`keeps unsupported Page read-only (direct edit ${directEdit})`, async () => {
+    if (directEdit) window.history.replaceState(null, "", "/pages/fleet-201?mode=edit")
+    const { mockFetch } = renderLayout([{ ...FLEET, content_descriptor: { type_id: "future", schema_version: 1, supported: true } }], "fleet-201")
+    await screen.findByText(/unsupported or conflicting content format/)
+    const edit = screen.getByRole("button", { name: "Edit" })
+    const share = screen.getByRole("button", { name: "Share" })
+    expect(edit).toBeDisabled()
+    expect(share).toBeDisabled()
+    expect(edit).toHaveAttribute("title", expect.stringContaining("unavailable"))
+    fireEvent.click(edit)
+    fireEvent.click(share)
+    expect(document.querySelector("[data-slot='page-editor']")).toBeNull()
+    expect(screen.queryByTestId("application")).toBeNull()
+    expect(mockFetch.mock.calls.map(([url]) => String(url)).some(url => /\/(application|artifact|project|document)(?:[/?]|$)/.test(url))).toBe(false)
+  })
+
   it("keeps readable Pages while hiding creation and import for VIEWER without page.create", async () => {
     access.role = "VIEWER"
     renderLayout([FLEET])
     await waitFor(() => expect(screen.getByText("Flotila .201")).toBeTruthy())
     expect(screen.queryByRole("button", {name:/^New page$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New board$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New Doc, Slides or artifact$/})).toBeNull()
     expect(screen.queryByRole("button", {name:/^Import$/})).toBeNull()
     expect(screen.queryByRole("button",{name:"New folder"})).toBeNull()
   })
@@ -147,6 +165,8 @@ describe("PagesLayout", () => {
     access.role="VIEWER"
     renderLayout([])
     expect(screen.queryByRole("button", {name:/^New page$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New board$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New Doc, Slides or artifact$/})).toBeNull()
     expect(screen.queryByText(/Or author one as YAML/)).toBeNull()
   })
 
@@ -155,12 +175,16 @@ describe("PagesLayout", () => {
     renderLayout([])
     expect(screen.getAllByRole("button", {name:/^New page$/}).length).toBeGreaterThan(0)
     expect(screen.getAllByRole("button", {name:/^Import$/}).length).toBeGreaterThan(0)
+    expect(screen.getByRole("button", {name:/^New board$/})).toBeTruthy()
+    expect(screen.getByRole("button", {name:/^New Doc, Slides or artifact$/})).toBeTruthy()
   })
   it("preserves an explicit VIEWER page.create grant", () => {
     access.role="VIEWER";access.capabilities=["page.create"]
     renderLayout([])
     expect(screen.getAllByRole("button", {name:/^New page$/}).length).toBeGreaterThan(0)
     expect(screen.getAllByRole("button", {name:/^Import$/}).length).toBeGreaterThan(0)
+    expect(screen.getByRole("button", {name:/^New board$/})).toBeTruthy()
+    expect(screen.getByRole("button", {name:/^New Doc, Slides or artifact$/})).toBeTruthy()
     expect(screen.queryByRole("button",{name:"New folder"})).toBeNull()
   })
 

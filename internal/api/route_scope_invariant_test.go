@@ -88,6 +88,12 @@ func TestEveryMintableScopeMapsToARoute(t *testing.T) {
 		return false
 	}
 	for scope := range knownScopes {
+		// Document and asset reads gate scopes through live authority,
+		// rather than the public mutation registry.
+		// TestDocumentCLITokenLiveRevocationAndScopeUnderWriter exercises it.
+		if scope == "pages:read" {
+			continue
+		}
 		if !satisfiesSomeRoute(scope) {
 			t.Errorf("mintable scope %q maps to no mutation route — a token scoped to it can exercise nothing. Remove it from knownScopes (and the New Token dialog + auth.mdx) until a route requires it, or wire the route that should require it.", scope)
 		}
@@ -103,6 +109,9 @@ func TestScopeForRoute(t *testing.T) {
 		pattern string
 		want    string
 	}{
+		{"/api/v1/pages/{slug}/assets", "pages:write"},
+		{"/api/v1/pages/{slug}/document/patch", "pages:write"},
+		{"/api/v1/pages/{slug}/document/requests", "pages:write"},
 		{"/api/v1/agents", "agents:write"},
 		{"/api/v1/agents/{agentId}/persona", "agents:write"},
 		{"/api/v1/agents/{agentId}/credentials", "credentials:write"}, // sub-resource borrows scope
