@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Participants can start a conversation in an empty shared chat.** A current authorized execution profile confirms the existing chat without a creator-only create request; every send still rechecks access and refused sends keep the draft.
+
 - **Proposal comments address the chat agent explicitly.** “Send comment to agent” now includes its canonical mention so shared chats trigger the requested reply; rejected sends keep the comment draft.
 
 - **Guests can connect their CLI from the account menu.** Connect CLI now opens the existing browser pairing dialog for Guest accounts after access loads, retaining their current grants. Guest menus also avoid an unavailable system-version request.
