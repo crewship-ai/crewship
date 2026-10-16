@@ -34,7 +34,7 @@ jobs:
       - name: Run an exhaustive partition of the migration race suite
         timeout-minutes: 95
         run: bash scripts/ci/database-race-shard.sh "${{ matrix.shard }}" 4
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: database-race-${{ github.sha }}-${{ matrix.shard }}
@@ -60,7 +60,7 @@ jobs:
           go test ./internal/untrusted -run '^$' -fuzz '^FuzzFenceWrap$' -fuzztime 60s -parallel 2 -timeout 3m
           go test ./internal/sidecar -run '^$' -fuzz '^FuzzDomainAllowlistIsAllowed$' -fuzztime 60s -parallel 2 -timeout 3m
           go test ./internal/manifest -run '^$' -fuzz '^FuzzLoad$' -fuzztime 60s -parallel 2 -timeout 3m
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: failure()
         with:
           name: fuzz-reproducers-${{ github.sha }}

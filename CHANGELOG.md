@@ -10,9 +10,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - ⚠️ **Behaviour change: CLI pairing follows its source browser session.** Suspended accounts and missing, logged-out, revoked or expired source sessions cannot redeem codes. Request a fresh browser code for older pairings without session provenance; CLI-token authentication cannot start pairing.
+- **Dependency updates now build and package together.** Refresh the frontend, Go and CI dependencies, explicitly declare lockfile version changes, and retain the version-scoped license inventory.
+- ⚠️ **Behaviour change: crash reporting uses Sentry v11.** Self-hosted Sentry must be 26.4.2 or newer. Browser, Node and Edge initialization disable collection of user identifiers, request metadata, AI content and other payload data. Browser release-health sessions stay off and telemetry consent remains required.
 
 ### Fixed
-- **Personal memory stays forgotten across access changes.** Clearing all preferences also works for agents without a crew. Switching an account to restricted access withdraws its stored preferences; restoring trusted access does not reactivate them.
+- **Personal memory withdrawal stays inside its workspace.** A guest invitation or restricted-membership change no longer erases saved preferences in another workspace. Local withdrawn preferences remain forgotten; previously erased values cannot be reconstructed. Clearing all preferences also works for agents without a crew.
+- **Chat drafts survive temporary access-check outages.** Network errors and server failures keep the last verified cards mounted as rechecking with writes disabled. Explicit access denial still clears protected data and cannot be undone by another failed check.
 - ⚠️ **Upgrade: restart agent containers after updating the backend and sidecar.** Coordinate an idle window and use `crewship crew restart-agents` so existing containers receive the matching sidecar; old sidecars can fail issue writes. Follow [the execution-authority rollout](RELEASING.md#execution-authority-rollout-3068), including the read-only `doctor execution-origins` audit against the actual stage/production database before upgrade.
 - **Chat issue drafts survive saving and access rechecks.** Field and comment drafts clear independently; editors retain focus during successful refreshes. Unknown writes retain their original retry key across panel close and reload, and conflicts reload current values alongside the draft.
 
@@ -22,7 +25,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Chat Artifacts includes supported files in the canonical per-run output folder while retaining internal, hidden-directory and attachment filters.
 - **Mobile table selections return to Chat without covering the draft.** Asking about selected rows closes the artifact overlay and preserves existing draft text. Switching between Chat, Work and Artifacts keeps previews within the selected panel and retains their tabs.
 
-- **Chat issue references stay scoped to the current viewer (#3068).** Reconciliation replaces complete snapshots, clears protected projections after a failed or denied access check, and preserves durable run anchors. Uncertain human writes retain the same revision and idempotency key through recovery, including a denied retry after a lost acknowledgement.
+- **Chat issue references stay scoped to the current viewer (#3068).** Reconciliation replaces complete snapshots, clears protected projections after a denied access check, and preserves durable run anchors. Uncertain human writes retain the same revision and idempotency key through recovery, including a denied retry after a lost acknowledgement.
 - Chat CSV/TSV artifacts gain bounded local-worker previews with sorting, filtering, virtual rows and source-preserving selection. Ask about selection appends a versioned reference to the draft without sending it. Access denial clears displayed artifact bytes.
 - Chat XLSX artifacts gain bounded local worksheet previews, saved formula results and source-preserving draft selection. Corrupt, encrypted, macro-enabled and oversized workbooks, and those with external data connections, retain an explicit download fallback. Macro-enabled `.xlsm` outputs remain discoverable for download only.
 

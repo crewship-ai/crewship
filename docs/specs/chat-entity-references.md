@@ -532,15 +532,19 @@ contract uses `chat.entity_refs_changed` and `issue.revision_changed` with
 `{ "contract_version": 1 }`; hints carry no object data. A client also accepts
 unversioned E0 snapshot responses, and rejects unsupported version markers.
 The current batch projection is the card's freshness source; no per-card
-revision requests are necessary. Failed reconciliation hides protected fields
-and is never labelled live. Restricted and Guest sessions show only a generic
+revision requests are necessary. Transport/server reconciliation failures retain
+the last verified snapshot as rechecking, with writes disabled and never labelled
+live. An explicit 401/403/404 clears protected snapshots and detail cache; later
+transport errors cannot restore them before successful reauthorization.
+Restricted and Guest sessions show only a generic
 “Unavailable” capability state and make no card/object requests.
 
 Opening a card reuses `IssueDetailSurface` in the right panel, or a focus-trapped
 sheet on phones. A completed snapshot independently reauthorizes that detail
 while preserving mounted editors and their local drafts during a pending check.
-Successful checks replace server values atomically; failed checks hide protected
-views. Detail freshness is its own fetch time;
+Successful checks replace server values atomically; explicit access denial hides
+protected views. Temporary snapshot-check failures retain mounted drafts in a
+rechecking state. Detail freshness is its own fetch time;
 run and automation data have separate fetches. Allowed actions are intersected
 with the detail's current server permissions and govern individual controls.
 Legacy detail callers retain the existing `editable` fallback. Direct work
