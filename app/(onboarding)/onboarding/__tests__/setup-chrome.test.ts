@@ -81,12 +81,23 @@ describe("the setup wizard's chrome holds still", () => {
   })
 
   it("moves the edge light to the seam when the panes stack", () => {
-    // Under lg the pane sits above the form, so a highlight on its top edge
+    // Under xl the pane sits above the form, so a highlight on its top edge
     // would run along the top of the viewport, describing a seam that is not
     // there. The shared edge is the bottom one.
     const css = readFileSync(join(process.cwd(), "app", "globals.css"), "utf8")
-    const stacked = css.slice(css.indexOf("@media (max-width: 1023px)"))
-    expect(stacked.slice(0, 400)).toMatch(/inset 0 -1px 0/)
+    const at = css.indexOf("@media (max-width: 1279px)")
+    expect(at, "the stacked rule moved off the xl edge").toBeGreaterThan(-1)
+    const stacked = css.slice(at)
+    expect(stacked.slice(0, 400)).toMatch(/onboarding-pane[\s\S]*inset 0 -1px 0/)
+  })
+
+  it("splits and stacks on the same xl edge (#3345)", () => {
+    // The split is page layout, so it sits on the app's desktop edge (xl,
+    // 1280) — the same one the stacked-pane CSS above names. A split left on
+    // lg would put the seam light on the wrong edge from 1024 to 1279.
+    const code = stripComments(PAGE)
+    expect(code).toMatch(/\bxl:grid-cols-2\b/)
+    expect(code, "a layout class is still on lg").not.toMatch(/\blg:/)
   })
 })
 
@@ -107,7 +118,7 @@ describe("the wizard's controls stay reachable however tall the step grows", () 
   }
 
   it("pins Back / Skip / Launch to the bottom of the column", () => {
-    // sticky, not fixed: the wizard stacks under lg, where the form column is
+    // sticky, not fixed: the wizard stacks under xl, where the form column is
     // followed by the preview pane. `fixed` would leave the bar welded to the
     // viewport while the user scrolled through the preview, describing
     // controls that no longer apply to what is on screen. Sticky releases the
@@ -135,9 +146,9 @@ describe("the wizard's controls stay reachable however tall the step grows", () 
   })
 
   it("scrolls the step content rather than the whole desktop page", () => {
-    // The two columns are independent full-height panes on lg; scrolling the
+    // The two columns are independent full-height panes on xl; scrolling the
     // document there would move the preview too.
-    expect(leftColumn()).toMatch(/lg:overflow-y-auto/)
+    expect(leftColumn()).toMatch(/xl:overflow-y-auto/)
   })
 })
 
