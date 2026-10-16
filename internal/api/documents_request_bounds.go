@@ -18,18 +18,23 @@ type documentSemanticEdit struct {
 }
 
 type documentRequestScope struct {
-	BaseRev int64                  `json:"baseRev"`
-	Target  documentVerifiedTarget `json:"target"`
+	RequestID string                 `json:"requestID"`
+	BaseRev   int64                  `json:"baseRev"`
+	Target    documentVerifiedTarget `json:"target"`
 }
 
 type documentSemanticPatch struct {
-	Target string                `json:"target"`
-	Text   string                `json:"text"`
-	Edit   *documentSemanticEdit `json:"edit"`
-	Rich   *documentRichProof    `json:"rich,omitempty"`
+	Target    string                   `json:"target"`
+	Text      string                   `json:"text"`
+	Edit      *documentSemanticEdit    `json:"edit"`
+	Rich      *documentRichProof       `json:"rich,omitempty"`
+	Structure *documentStructuralProof `json:"structure,omitempty"`
 }
 
 func validDocumentTarget(t documentVerifiedTarget) bool {
+	if t.Structure != nil {
+		return false
+	}
 	u := utf16.Encode([]rune(t.Text))
 	q := utf16.Encode([]rune(t.Quote))
 	boundary := func(n int) bool {
@@ -51,6 +56,9 @@ func (h *PageHandler) documentRequestGuard(rctx context.Context, page, operation
 			return errDocumentAccess
 		}
 		if request == "" {
+			if semantic != nil && semantic.Structure != nil {
+				return errDocumentAccess
+			}
 			var bound int
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM document_requests WHERE run_id=?) OR EXISTS(SELECT 1 FROM page_artifact_run_delegations WHERE run_id=? AND document_request_id IS NOT NULL)`, a.RunID, a.RunID).Scan(&bound); err != nil || bound != 0 {
 				return errDocumentAccess
@@ -76,7 +84,16 @@ func (h *PageHandler) documentRequestGuard(rctx context.Context, page, operation
 			}
 			return nil
 		}
-		if operation != "commit" || ifRev != base || state.HeadRev != base || semantic == nil || len(hashes) != 1 {
+		if operation != "commit" || ifRev != base || state.HeadRev != base || semantic == nil {
+			return documents.ErrConflict
+		}
+		if targets[0].Structure != nil {
+			if id != request+"-patch" {
+				return documents.ErrConflict
+			}
+			return documentStructuralGuard(ctx, tx, a.WorkspaceID, page, request, targets[0], semantic, hashes, projection, state)
+		}
+		if len(hashes) != 1 || semantic.Structure != nil {
 			return documents.ErrConflict
 		}
 		var target *documentVerifiedTarget
@@ -185,8 +202,8 @@ func (h *PageHandler) documentRequestReadScope(ctx context.Context, tx *sql.Tx, 
 		return nil, errDocumentAccess
 	}
 	var targets []documentVerifiedTarget
-	if json.Unmarshal([]byte(raw), &targets) != nil || len(targets) != 1 || !validDocumentTarget(targets[0]) {
+	if json.Unmarshal([]byte(raw), &targets) != nil || len(targets) != 1 || (!validDocumentTarget(targets[0]) && !validDocumentStructureTarget(targets[0])) {
 		return nil, documents.ErrConflict
 	}
-	return &documentRequestScope{BaseRev: base, Target: targets[0]}, nil
+	return &documentRequestScope{RequestID: origin, BaseRev: base, Target: targets[0]}, nil
 }

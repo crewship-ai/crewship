@@ -4,6 +4,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
+import { captureStructure, structuralPatch } from './structure.mjs';
 import { VERSION, RICH_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
 import { readServiceSecret } from './secret.mjs';
 
@@ -48,7 +49,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   for (const path of [socket, authoritySocket, tokenFile]) if (!isAbsolute(path) || normalize(path) !== path || Buffer.byteLength(path) > 100) throw new Error('clean absolute Unix socket path required (maximum 100 bytes)');
   const secret = await readServiceSecret(tokenFile);
   const build = createHash('sha256');
-  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'service.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
+  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'structure.mjs', 'service.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
   const identity = { protocol: PROTOCOL, schema: RICH_VERSION, build: build.digest('hex') };
   const leases = new Map();
   const owner = randomUUID();const syncEpoch=state=>`${state.incarnation??"legacy"}:${owner}:${state.generation??state.epoch}`; const documents = new Map(); let queued = 0; let draining = false;let ready=false;let admitted=0;const decoding=new Set();
@@ -91,6 +92,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     switch (operation) {
       case 'read': return executeRead(page, 'read', context, request);
       case 'verify-targets': return executeRead(page, 'verify-targets', context, request);
+      case 'verify-structure': return executeRead(page, 'verify-structure', context, request);
       case 'comments': return executeRead(page, 'comments', context, request);
       case 'checkpoints': return executeRead(page, 'checkpoints', context, request);
       case 'checkpoint-read': return executeRead(page, 'checkpoint-read', context, request);
@@ -102,13 +104,18 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     }
   }
   async function executeRead(page, operation, context, request) {
-    if (operation === 'verify-targets' && context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'human request admission required');
+    if (['verify-targets','verify-structure'].includes(operation) && context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'human request admission required');
     const state = await go(page, 'state', context);
     if (!supportedSchema(state.schema)) throw fault(409, 'unsupported schema; content preserved');
     const version = contentSchema(state.schema);
     const doc = load(state.snapshot);
     try {
       for (const update of state.updates || []) Y.applyUpdate(doc, decode(typeof update === 'string' ? update : update.update));
+      if (operation === 'verify-structure') {
+        if (request.base_rev !== state.rev || state.schema !== 3 || Object.keys(request).some(key => !['base_rev','structure'].includes(key))) throw fault(409, 'original schema3 structure required');
+        const structure = await captureStructure(doc, request.structure, state.schema), first = structure.blocks[0];
+        return { page_id: page, rev: state.rev, schema: 3, tree: validate(doc, 3), targets: [{ id: first.id, hash: first.hash, from: 0, to: 0, quote: '', text: '', ancestors: [], schema: 3, structure }] };
+      }
       if (operation === 'read') {
         const { rev, generation, incarnation, snapshot, snapshotRev, updates, blocks } = state;
         return { schema: state.schema, rev, generation, incarnation, snapshot, snapshotRev, updates, blocks, epoch: syncEpoch(state), content: validate(doc,version), outline: await outline(doc,version) };
@@ -160,6 +167,10 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if (context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human schema upgrade required');
       if (request.page_id !== page || request.target_schema !== RICH_VERSION || ![1,VERSION].includes(state.schema) || request.ifRev !== state.rev || Object.keys(request).some(key=>!['id','schema','target_schema','page_id','epoch','ifRev'].includes(key))) throw fault(409,'original Page identity, revision and supported upgrade required');
     }
+    if (operation === 'patch' && request.operations !== undefined) {
+      const scope = state.requestScope;
+      if (!context.authorization.startsWith('Bearer agtv2.') || request.kind !== 'agent' || state.schema !== 3 || !scope?.target?.structure || request.request_id !== scope.requestID || request.id !== `${scope.requestID}-patch` || request.ifRev !== scope.baseRev || state.rev !== scope.baseRev || Object.keys(request).some(key => !['id','schema','page_id','request_id','kind','epoch','ifRev','operations'].includes(key))) throw fault(409, 'original structural request required');
+    } else if (operation === 'patch' && state.requestScope?.target?.structure) throw fault(409, 'structural request cannot become a text grant');
     let doc = load(state.snapshot); let lease;
     try {
       for (const update of state.updates || []) Y.applyUpdate(doc, decode(typeof update === 'string' ? update : update.update));
@@ -182,7 +193,15 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       const hashes = {}; let semantic; let resultVersion = version;
       switch (operation) {
         case 'patch':
-          if (request.kind === 'human') {
+          if (request.operations !== undefined) {
+            const scope = state.requestScope;
+            // doc is a new disposable reconstruction for this request. On any
+            // failed operation finally destroys it; no commit/renew/publication
+            // is reached and neither the service nor scheduler caches it.
+            const structure = await structuralPatch(doc, request.operations, scope.requestID, scope.target.structure, version);
+            for (const block of scope.target.structure.blocks) hashes[block.id] = block.hash;
+            semantic = { structure };
+          } else if (request.kind === 'human') {
             if (context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'agent raw update forbidden');
             if (typeof request.update !== 'string' || request.update.length > 1400000) throw fault(400, 'bounded update required');
             Y.applyUpdate(doc, decode(request.update));
@@ -254,7 +273,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if (req.method === 'POST' && req.url === '/drain') { await drain(); return reply(200, { drained: true }); }
       if(draining){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'service draining');}
       if(!ready){res.setHeader('Connection','close');res.once('finish',()=>req.socket.destroy());throw fault(503,'engine recovering');}
-      const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(initialize|upgrade|read|verify-targets|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
+      const match = /^\/v1\/documents\/([a-zA-Z0-9_-]{1,128})\/(initialize|upgrade|read|verify-targets|verify-structure|patch|checkpoint|restore|comments|comment|resolve|checkpoints|checkpoint-read|export)$/.exec(req.url);
       if (req.method !== 'POST' || !match) throw fault(404, 'unknown operation');
       const context = { workspace: req.headers['x-workspace-id'], authorization: req.headers.authorization };
       if (!id(context.workspace) || typeof context.authorization !== 'string' || !/^Bearer \S+$/.test(context.authorization)) throw fault(401, 'workspace and bearer required');

@@ -60,25 +60,27 @@ type DocumentStateResponse struct {
 	CanResolve  bool                   `json:"can_resolve"`
 }
 type DocumentMutationRequest struct {
-	ID           string        `json:"id"`
-	Schema       int           `json:"schema"`
-	PageID       string        `json:"page_id,omitempty"`
-	TargetSchema *int          `json:"target_schema,omitempty"`
-	Epoch        string        `json:"epoch"`
-	Kind         string        `json:"kind,omitempty"`
-	Update       string        `json:"update,omitempty"`
-	Target       string        `json:"target,omitempty"`
-	Text         string        `json:"text,omitempty"`
-	IfRev        *int64        `json:"ifRev,omitempty"`
-	IfHash       string        `json:"ifHash,omitempty"`
-	Checkpoint   string        `json:"checkpoint,omitempty"`
-	Block        string        `json:"block,omitempty"`
-	From         *int          `json:"from,omitempty"`
-	To           *int          `json:"to,omitempty"`
-	Comment      string        `json:"comment,omitempty"`
-	Version      *int64        `json:"version,omitempty"`
-	Resolved     *bool         `json:"resolved,omitempty"`
-	Body         *DocumentNode `json:"body,omitempty"`
+	ID           string                       `json:"id"`
+	Schema       int                          `json:"schema"`
+	PageID       string                       `json:"page_id,omitempty"`
+	TargetSchema *int                         `json:"target_schema,omitempty"`
+	Epoch        string                       `json:"epoch"`
+	Kind         string                       `json:"kind,omitempty"`
+	Update       string                       `json:"update,omitempty"`
+	Target       string                       `json:"target,omitempty"`
+	Text         string                       `json:"text,omitempty"`
+	IfRev        *int64                       `json:"ifRev,omitempty"`
+	IfHash       string                       `json:"ifHash,omitempty"`
+	Checkpoint   string                       `json:"checkpoint,omitempty"`
+	Block        string                       `json:"block,omitempty"`
+	From         *int                         `json:"from,omitempty"`
+	To           *int                         `json:"to,omitempty"`
+	Comment      string                       `json:"comment,omitempty"`
+	Version      *int64                       `json:"version,omitempty"`
+	Resolved     *bool                        `json:"resolved,omitempty"`
+	Body         *DocumentNode                `json:"body,omitempty"`
+	RequestID    string                       `json:"request_id,omitempty"`
+	Operations   []DocumentStructureOperation `json:"operations,omitempty"`
 }
 type DocumentMutationResponse struct {
 	ID         string `json:"id"`
@@ -99,18 +101,20 @@ type DocumentSelectedTarget struct {
 	Quote string `json:"quote"`
 }
 type documentVerifiedTarget struct {
+	Structure *documentStructureScope `json:"structure,omitempty"`
 	DocumentSelectedTarget
 	Text      string   `json:"text"`
 	Ancestors []string `json:"ancestors"`
 	Schema    int      `json:"schema,omitempty"`
 }
 type DocumentRequestInput struct {
-	PageID       string                   `json:"page_id"`
-	Targets      []DocumentSelectedTarget `json:"targets"`
-	ChatID       string                   `json:"chat_id"`
-	Instruction  string                   `json:"instruction"`
-	BaseRev      *int64                   `json:"base_rev"`
-	SubmissionID string                   `json:"submission_id"`
+	PageID       string                      `json:"page_id"`
+	Targets      []DocumentSelectedTarget    `json:"targets"`
+	ChatID       string                      `json:"chat_id"`
+	Instruction  string                      `json:"instruction"`
+	BaseRev      *int64                      `json:"base_rev"`
+	SubmissionID string                      `json:"submission_id"`
+	Structure    *DocumentStructureSelection `json:"structure,omitempty"`
 }
 type DocumentRequestResult struct {
 	ID             string `json:"id"`

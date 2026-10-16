@@ -358,7 +358,12 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		guard := h.pages.documentRequestGuard(ctx, k.PageID, "commit", in.ID, in.IfRev, in.IfHashes, in.Semantic, in.Blocks)
-		if in.Schema == 3 && in.Kind == "agent" {
+		if in.Semantic != nil && in.Semantic.Structure != nil {
+			if in.Schema != 3 || in.Kind != "agent" || artifactAgentID(r) == "" || guard == nil {
+				replyError(w, 403, "original structural agent request required")
+				return
+			}
+		} else if in.Schema == 3 && in.Kind == "agent" {
 			guard = documentRichSemanticGuard(in.Semantic, in.IfHashes, in.Blocks, guard)
 		}
 		var receipt documents.Receipt
