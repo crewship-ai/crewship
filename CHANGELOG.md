@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **The setup wizard splits into form and preview from 1280px, matching the rest of the app.** Layout now reads one breakpoint scale — phone < 768, tablet 768–1279, desktop ≥ 1280, wide ≥ 1536 (Tailwind `md`/`xl`/`2xl`) — through `useLayoutBreakpoint()` beside `useIsMobile()`. Between 1024 and 1279px onboarding now stacks the preview under the form instead of splitting at a separate 1024px edge; other widths are unchanged. A guard test rejects new hand-written layout media queries.
+
 - ⚠️ **Behaviour change: enabling privileged runtime access requires an instance administrator.** Workspace OWNER/ADMIN rights alone no longer enable `allow_privileged_credentials`. Scoped CLI tokens also need `instance:admin`. Workspace administrators may still disable the opt-in; existing privileged containers require separate review and recreation.
 
 - **Protected chat runs wait for confirmed execution results after their observer disconnects.** Chat preserves partial replies and leaves the run admitted for retained-output reconciliation instead of recording a false failure or cancellation.
