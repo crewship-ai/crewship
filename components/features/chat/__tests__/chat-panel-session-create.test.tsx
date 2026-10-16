@@ -399,7 +399,7 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
     rerender(<ChatPanel {...panelProps} sessionId="draft-1" />)
     await waitFor(() => expect(screen.getByRole("button", { name: "Create document" }).getAttribute("aria-pressed")).toBe("false"))
     rerender(<ChatPanel {...panelProps} sessionId="draft-2" />)
-    fireEvent.click(screen.getByRole("button", { name: "Create document" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Create document" }))
     activeWorkspace = "other-workspace"
     rerender(<ChatPanel {...panelProps} sessionId="draft-2" />)
     await waitFor(() => expect(screen.getByRole("button", { name: "Create document" }).getAttribute("aria-pressed")).toBe("false"))
