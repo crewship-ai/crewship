@@ -86,6 +86,8 @@ func TestChatDecisionApprovalSourceReplayAndIntent(t *testing.T) {
 	if err := d.resolve(t, version, "same", "approve"); err != nil {
 		t.Fatal(err)
 	}
+	// An ordinary process restart retains the generation and durable receipt.
+	d.r = &Router{db: d.f.h.db, logger: newTestLogger(), journal: d.r.Journal()}
 	if err := d.resolve(t, version, "same", "approve"); err != nil {
 		t.Fatalf("lost reply replay %v", err)
 	}
@@ -114,6 +116,44 @@ func TestChatDecisionApprovalSourceReplayAndIntent(t *testing.T) {
 	execOrFatal(t, d.f.h.db, `UPDATE users SET suspended_at='2026-10-16' WHERE id=?`, d.a.UserID)
 	if err := d.resolve(t, version, "same", "approve"); !errors.Is(err, errDecisionDenied) {
 		t.Fatalf("revoked replay %v", err)
+	}
+}
+
+func TestChatDecisionApprovalRecreatedChatCannotReanchorSource(t *testing.T) {
+	for _, terminal := range []bool{false, true} {
+		t.Run(fmt.Sprint(terminal), func(t *testing.T) {
+			d := newApprovalDecisionRig(t)
+			version := d.read(t).Ref.Decision.Source.Version
+			if terminal {
+				if err := d.resolve(t, version, "original", "approve"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rewards := d.count(t, "gate_reward_history")
+			execOrFatal(t, d.f.h.db, `DELETE FROM chats WHERE id=?`, d.f.chat)
+			execOrFatal(t, d.f.h.db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES(?,?,?,?,'private')`, d.f.chat, d.f.workspace, d.f.agent, d.f.user)
+			live, err := chataudience.CaptureTrusted(t.Context(), d.f.h.db, d.f.chat, d.f.user, nil)
+			if err != nil || live == nil || live.ChatGeneration == d.a.ChatGeneration {
+				t.Fatalf("fresh recreated audience %+v %v", live, err)
+			}
+			d.a = *live
+			if _, err = d.r.runApprovalDecision(t.Context(), d.a, d.id); !errors.Is(err, sql.ErrNoRows) {
+				t.Fatalf("recreated chat exposed original source: %v", err)
+			}
+			for _, action := range []string{"approve", "reject"} {
+				if err = d.resolve(t, version, "original", action); !errors.Is(err, sql.ErrNoRows) {
+					t.Fatalf("recreated chat %s/replay: %v", action, err)
+				}
+			}
+			row, err := harbormaster.Get(t.Context(), d.f.h.db, d.f.workspace, d.id)
+			want := harbormaster.StatusPending
+			if terminal {
+				want = harbormaster.StatusApproved
+			}
+			if err != nil || row.Status != want || d.count(t, "gate_reward_history") != rewards {
+				t.Fatalf("recreated source changed: %+v %v", row, err)
+			}
+		})
 	}
 }
 func TestChatDecisionApprovalInboxAndChatOneWinner(t *testing.T) {

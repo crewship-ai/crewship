@@ -63,7 +63,7 @@ func readRunApprovalSource(ctx context.Context, q harbormaster.DBTX, a chataudie
 		return s, sql.ErrNoRows
 	}
 	s.Requester = *origin.Human
-	if s.Requester.ChatID != a.ChatID || s.Requester.WorkspaceID != a.WorkspaceID || s.Requester.AgentID != a.AgentID {
+	if s.Requester.ChatID != a.ChatID || s.Requester.WorkspaceID != a.WorkspaceID || s.Requester.AgentID != a.AgentID || s.Requester.ChatGeneration == "" || s.Requester.ChatGeneration != a.ChatGeneration {
 		return s, sql.ErrNoRows
 	}
 	s.Row = row
