@@ -22,6 +22,8 @@ export const RESTRICTED_FE_ENDPOINTS = [
  "GET /api/v1/workspaces/{workspaceId}/access/me",
  "POST /api/v1/auth/invitation/accept",
  "POST /api/v1/auth/cli-token",
+ "POST /api/v1/auth/pair/start",
+ "GET /api/v1/auth/pair/poll",
  "GET /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/deletion",
  "DELETE /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}",
  "GET /api/v1/workspaces/{workspaceId}/restricted-issues",
