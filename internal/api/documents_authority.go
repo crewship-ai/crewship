@@ -36,7 +36,7 @@ func (r *Router) DocumentAuthority(ctx context.Context, secret string) (http.Han
 	if len(secret) < 32 {
 		return nil, errors.New("Docs service secret requires at least 32 characters")
 	}
-	s := documents.New(r.db, documents.Options{})
+	s := documents.New(r.db, r.documentStoreOptions)
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return nil, err
@@ -178,6 +178,10 @@ func (h *documentAuthority) authorize(r *http.Request, k documents.Key, write, i
 	}
 }
 func documentAuthorityError(w http.ResponseWriter, err error) {
+	if errors.Is(err, documents.ErrRateLimit) {
+		writeJSON(w, 429, map[string]string{"error": "temporary document operation limit; wait and retry the original request", "code": "document_rate_limit"})
+		return
+	}
 	if errors.Is(err, documents.ErrQuota) {
 		writeJSON(w, 429, map[string]string{"error": "document quota exceeded; confirmed history preserved", "code": "document_quota"})
 		return

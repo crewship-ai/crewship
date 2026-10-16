@@ -114,3 +114,18 @@ it('blocks an invalid local mark without misreporting a network disconnection or
 it('classifies malformed saved binary as bounded recovery rather than a network retry',async()=>{
  fetchMock.mockImplementation(()=>response({page_id:'page',schema:3,rev:1,epoch:'go:node:1',can_write:true,snapshot:'%%%invalid%%%'}));const {result,unmount}=renderHook(()=>usePageDocument('w','slug','page'));await waitFor(()=>expect(result.current.recovery).toBe(true));expect(result.current.editable).toBe(false);expect(result.current.status).toContain('rejected');expect(result.current.error).toContain('Confirmed document content rejected');await act(async()=>{await new Promise(resolve=>setTimeout(resolve,600))});expect(fetchMock).toHaveBeenCalledTimes(1);unmount()
 });
+
+it('retries temporary operation admission with the identical request and retained draft',async()=>{
+ const bodies:string[]=[];let limited=true;
+ fetchMock.mockImplementation((url:string,init?:RequestInit)=>{
+  if(url.includes('/patch')){bodies.push(init!.body as string);return limited?response({error:'wait and retry original request',code:'document_rate_limit'},429):response({rev:2})}
+  return response({schema:2,rev:limited?1:2,epoch:'go:node:1',can_write:true,snapshot:emptySnapshot})
+ });
+ const {result,unmount}=renderHook(()=>usePageDocument('w','p'));
+ await waitFor(()=>expect(result.current.status).toBe('Saved'));
+ act(()=>text(result.current.doc).insert(0,'unsaved draft'));
+ await waitFor(()=>expect(result.current.status).toContain('Temporarily rate limited'));
+ expect(result.current.recovery).toBe(false);expect(result.current.pending).toBe(1);expect(text(result.current.doc).toString()).toBe('unsaved draft');
+ limited=false;await waitFor(()=>expect(result.current.pending).toBe(0),{timeout:4000});
+ expect(bodies.length).toBeGreaterThan(1);expect(new Set(bodies).size).toBe(1);unmount()
+});

@@ -562,3 +562,40 @@ test('table code with an unrepresentable backslash pipe returns actionable 422 w
  model.state={...model.state,schema:3,snapshot:snapshot(doc)};doc.destroy();const f=await fixture(model.handle);await f.start();
  try{const before=structuredClone(model.state),result=await call(f.socket,'/v1/documents/p/export',{});assert.equal(result.status,422);assert.equal(result.body.code,'unsupported_markdown');assert.match(result.body.error,/move this code outside the table/);assert.deepEqual(model.state,before);assert.equal(model.commits,0);assert.equal(model.receipts.size,0);assert.equal(model.acquisitions,0)}finally{await f.close()}
 });
+
+test('idle scheduler keys do not deny the 33rd sequential document read', async () => {
+  const model = authorityModel(), f = await fixture(model.handle, { idleMs: 60000 });
+  await f.start();
+  try {
+    for (let i = 0; i < 32; i++) {
+      const response = await call(f.socket, `/v1/documents/page-${i}/read`, {});
+      assert.equal(response.status, 200, `sequential read ${i}`);
+    }
+    const response = await call(f.socket, '/v1/documents/page-32/read', {});
+    assert.equal(response.status, 200, `33rd idle document: ${JSON.stringify(response.body)}`);
+    assert.equal(model.acquisitions, 0);
+    assert.equal(model.commits, 0);
+  } finally { await f.close(); }
+});
+
+test('scheduler never evicts busy document tails', async () => {
+  const model = authorityModel(), held = deferred(), allStarted = deferred();
+  let active = 0;
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'state') { if (++active === 32) allStarted.resolve(); await held.promise; }
+    return model.handle(op, data, req, res);
+  }, { idleMs: 60000 });
+  await f.start();
+  const pending = [];
+  try {
+    for (let i = 0; i < 32; i++) pending.push(call(f.socket, `/v1/documents/busy-${i}/read`, {}));
+    await allStarted.promise;
+    assert.equal((await call(f.socket, '/v1/documents/overflow/read', {})).status, 429);
+    const sameKey = call(f.socket, '/v1/documents/busy-0/read', {});
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(active, 32, 'same-key request must remain behind its original busy tail');
+    held.resolve();
+    assert.ok((await Promise.all([...pending, sameKey])).every(response => response.status === 200));
+    assert.equal((await call(f.socket, '/v1/documents/overflow/read', {})).status, 200);
+  } finally { held.resolve(); await Promise.allSettled(pending); await f.close(); }
+});

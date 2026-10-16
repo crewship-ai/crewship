@@ -91,6 +91,8 @@ export function usePageDocument(workspace: string, slug: string, pageId?: string
           blocked = true; setDenied(true); setRecovery(queue.length > 0); setStatus("Document access is unavailable.")
         } else if (cause instanceof DocumentAPIError && ([400, 413, 422].includes(cause.status) || (cause.status === 429 && cause.code === "document_quota"))) {
           blocked = true; setRecovery(true); setStatus("Document update was rejected. Recover your draft before reopening.")
+        } else if (cause instanceof DocumentAPIError && cause.status === 429 && cause.code === "document_rate_limit") {
+          setStatus("Temporarily rate limited · changes are unsaved")
         } else if (cause instanceof DocumentAPIError && cause.status === 409) {
           blocked = true; setRecovery(true); setStatus("Document changed. Recover your draft before reopening.")
         } else setStatus(queue.length ? "Disconnected · changes are unsaved" : "Disconnected")

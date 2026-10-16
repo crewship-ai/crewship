@@ -53,7 +53,10 @@ Commit sends an incremental Yjs update, full candidate snapshot, block hashes,
 expected revision, generation, writer epoch, owner and opaque lease token. Restore delegates the
 new durable epoch to Go. An authority error never causes automatic lease theft.
 
-Admission is bounded to 32 document keys, 128 total operations and 32 per key.
+Admission is bounded to 32 active scheduler keys, 128 total operations and 32 per key.
+An incoming key evicts the least recently used idle scheduler tail if necessary;
+busy keys are never evicted. Idle reads therefore do not impose a lifetime
+32-document capacity. Writer leases remain independently fenced.
 Idle keys unload after 30 seconds. Every operation reloads the Go snapshot and
 update log into an isolated Y.Doc, validates it and destroys it afterward.
 Bodies are capped at 2 MiB, authority replies at 4 MiB; each authority call has

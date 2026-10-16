@@ -1039,7 +1039,7 @@ func (s *Server) mountAPIRouter(
 	opts = append(opts, goapi.WithRateLimitStore(rateLimitStore))
 
 	if cfg.Documents.Enabled {
-		opts = append(opts, goapi.WithDocumentAuthority(cfg.Documents.AuthoritySocket, cfg.Documents.ServiceTokenFile), goapi.WithDocumentService(cfg.Documents.ServiceSocket))
+		opts = append(opts, goapi.WithDocumentAuthority(cfg.Documents.AuthoritySocket, cfg.Documents.ServiceTokenFile), goapi.WithDocumentService(cfg.Documents.ServiceSocket), goapi.WithDocumentLimits(cfg.Documents))
 	}
 	apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 	if err != nil {

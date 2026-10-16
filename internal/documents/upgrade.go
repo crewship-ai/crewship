@@ -56,14 +56,14 @@ func (s *Store) UpgradeRequest(ctx context.Context, k Key, lease Lease, id, fing
 		if targetSchema != LatestSchema || (fromSchema != 1 && fromSchema != 2) || v.Schema != fromSchema {
 			return ErrSchema
 		}
-		var count, logBytes int
-		if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&count); e != nil {
+		var logBytes int
+		if e = s.admitNewReceipt(ctx, tx, k); e != nil {
 			return e
 		}
 		if e = tx.QueryRowContext(ctx, "SELECT coalesce(sum(length(payload)),0) FROM document_updates WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&logBytes); e != nil {
 			return e
 		}
-		if count >= s.opts.MaxCommits || logBytes+2 > s.opts.MaxLogBytes {
+		if logBytes+2 > s.opts.MaxLogBytes {
 			return ErrQuota
 		}
 		r = Receipt{id, v.HeadRev + 1, v.Epoch + 1, actor, "upgrade"}

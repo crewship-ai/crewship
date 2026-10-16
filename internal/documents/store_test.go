@@ -219,7 +219,10 @@ func TestQuotaAndAtomicRollback(t *testing.T) {
 	if _, e := s.Init(ctx, other, 1, []byte("other"), projection, allow); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.Init(ctx, Key{"w", "p"}, 1, []byte("third"), projection, allow); !errors.Is(e, ErrQuota) {
+	if _, e := db.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('page-d','workspace-a','d','D','document-owner','{}')`); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Init(ctx, Key{"workspace-a", "page-d"}, 1, []byte("third"), projection, allow); !errors.Is(e, ErrQuota) {
 		t.Fatal(e)
 	}
 	// A database failure after update/receipt insertion rolls the entire commit back.
