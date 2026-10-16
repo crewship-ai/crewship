@@ -101,6 +101,8 @@ icon: "terminal"
 
 <Note>
 Import via the API endpoint `POST /api/v1/workspaces/{id}/skills/import` with the SKILL.md content as the body.
+
+Import requires the workspace creation role or an explicit `skill.create` capability, matching skill generation. A trusted MEMBER or VIEWER can import when granted that capability; revoking it removes that authority on the next request. Guest restrictions and scoped CLI `skills:write` requirements still apply. URL validation, content scanning and license checks remain required.
 </Note>
 
 ## Skill Categories
