@@ -4,8 +4,8 @@ This package stores document state separately from the Page specification.
 Pages keep their existing IDs, workspace boundaries and ownership. Documents
 require a human-owned Page without existing panels or application source.
 
-The initial storage foundation supports initialization and reading of schema 1
-state. It adds no public endpoint, editor, background service or enabled runtime.
+The storage foundation supports schemas 1 through 3. Public endpoints and the
+editor are delivered separately; the runtime remains disabled by default.
 The storage API also supports writer leases, atomic edits, receipt lookup,
 pinned checkpoints and explicit restoration. Public endpoint wiring is
 delivered separately.
@@ -37,6 +37,24 @@ checkpoints and retry receipts. Checkpoint and restore retries bind the original
 generation when supplied; changing that condition conflicts, while requests
 without it retain their previous digest representation. Authorization still
 runs before retry lookup, including after a writer lease has rotated.
+
+An explicit schema upgrade requires a human's confirmed revision and generation.
+It preserves the snapshot, projection and character identities, adds an empty
+CRDT update, advances the epoch and generation, and clears the writer lease.
+An authorized exact retry returns the original upgrade receipt.
+
+The Go server can enable a private Unix authority with `documents.enabled`,
+`authority_socket`, `service_socket` and `service_token_file` configuration.
+Paths must be distinct, clean absolute paths. The authority requires the service
+credential and a current human session or CLI credential; Page permissions,
+credential validity and CLI read/write scope are rechecked in the storage
+transaction. These routes are absent from the public HTTP router.
+
+The engine must acknowledge protocol 3 and schema capability 3 before recovery.
+An incompatible engine cannot fence a live writer. Recovery of the same boot
+identity is idempotent; a replacement engine fences old leases atomically.
+Listener startup refuses an existing path before changing leases, and a
+configured authority startup failure prevents the server from serving.
 
 Logical storage statistics distinguish the current snapshot, replay updates,
 pinned checkpoint bytes and receipt counts. They do not measure SQLite file or

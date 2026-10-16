@@ -98,7 +98,7 @@ func TestInitValidationRollsBack(t *testing.T) {
 		opts                 Options
 		want                 error
 	}{
-		{"unsupported schema", 2, []byte("state"), projection, Options{}, ErrSchema},
+		{"unsupported schema", LatestSchema + 1, []byte("state"), projection, Options{}, ErrSchema},
 		{"empty snapshot", 1, nil, projection, Options{}, nil},
 		{"invalid projection", 1, []byte("state"), []byte(`{`), Options{}, nil},
 		{"document quota", 1, []byte("state"), projection, Options{MaxDocuments: 1}, ErrQuota},

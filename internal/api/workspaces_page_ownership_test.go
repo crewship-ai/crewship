@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,19 +17,49 @@ import (
 )
 
 // Adapted from the private-output custody regressions: handlers use migrated
-// SQLite and synthetic extension tables, without publishing content or agents.
+// SQLite, installed Document persistence and otherwise synthetic extensions,
+// without publishing content or agents.
 func ownershipFixture(t *testing.T, table string) (*pagesTransferRig, *WorkspaceHandler) {
 	t.Helper()
 	r := pagesTransferSetup(t)
 	r.seedPage(t, "private-output", "private-output", "Private output", r.userID, "")
-	mustExec(t, r.db, `CREATE TABLE `+table+`(page_id TEXT PRIMARY KEY REFERENCES pages(id), private_content TEXT)`)
-	mustExec(t, r.db, `INSERT INTO `+table+` VALUES('private-output','NEVER_EXPOSE_THIS')`)
+	seedOwnershipOutput(t, r.db, r.wsID, "private-output", table)
 	mustExec(t, r.db, `INSERT INTO users(id,email) VALUES('reader','reader@example.test'),('ungranted','ungranted@example.test')`)
 	mustExec(t, r.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('reader-member',?,'reader','MEMBER'),('ungranted-member',?,'ungranted','MEMBER')`, r.wsID, r.wsID)
 	mustExec(t, r.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('private-output','user','reader','read',?)`, r.userID)
 	h := NewWorkspaceHandler(r.db, newTestLogger())
 	h.SetJournal(r.spy)
 	return r, h
+}
+
+func seedOwnershipOutput(t *testing.T, db *sql.DB, workspace, pageID, table string) {
+	t.Helper()
+	var installed bool
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=?)`, table).Scan(&installed); err != nil {
+		t.Fatal(err)
+	}
+	if !installed {
+		mustExec(t, db, `CREATE TABLE `+table+`(page_id TEXT PRIMARY KEY REFERENCES pages(id), private_content TEXT)`)
+	}
+	if ownershipContentColumn(t, db, table) == "snapshot" {
+		mustExec(t, db, `INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES(?,?,1,?,?)`, workspace, pageID, []byte("NEVER_EXPOSE_THIS"), []byte("[]"))
+	} else {
+		mustExec(t, db, `INSERT INTO `+table+`(page_id,private_content) VALUES(?,?)`, pageID, "NEVER_EXPOSE_THIS")
+	}
+}
+
+func ownershipContentColumn(t *testing.T, db *sql.DB, table string) string {
+	t.Helper()
+	if table == "documents" {
+		var snapshot bool
+		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name='snapshot')`, table).Scan(&snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot {
+			return "snapshot"
+		}
+	}
+	return "private_content"
 }
 
 func ownershipCall(t *testing.T, r *pagesTransferRig, h *WorkspaceHandler, method, target, body string) *httptest.ResponseRecorder {
@@ -78,7 +109,7 @@ func TestPrivateOwnershipExplicitTransferPreservesContentAndGrants(t *testing.T)
 			if err := r.db.QueryRow(`SELECT owner_user_id FROM pages WHERE id='private-output'`).Scan(&owner); err != nil || owner != "reader" {
 				t.Fatalf("owner %s %v", owner, err)
 			}
-			if err := r.db.QueryRow(`SELECT private_content FROM ` + table + ` WHERE page_id='private-output'`).Scan(&content); err != nil || content != "NEVER_EXPOSE_THIS" {
+			if err := r.db.QueryRow(`SELECT ` + ownershipContentColumn(t, r.db, table) + ` FROM ` + table + ` WHERE page_id='private-output'`).Scan(&content); err != nil || content != "NEVER_EXPOSE_THIS" {
 				t.Fatalf("private content changed %s %v", content, err)
 			}
 			if err := r.db.QueryRow(`SELECT granted_by_user_id FROM page_grants WHERE page_id='private-output'`).Scan(&issuer); err != nil || issuer != r.userID {
