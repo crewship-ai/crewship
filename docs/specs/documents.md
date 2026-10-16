@@ -38,7 +38,9 @@ provenance under current chat and Page access, independent of model reply text.
 This capability creates one human-owned private document. It adds no agent Page
 grant or run write delegation; subsequent edits require separate human authority.
 Creation provenance is backed up and its opaque run identity is remapped on fork;
-nonportable consent/run authority is excluded. This is an initial creation flow,
+nonportable consent/run authority is excluded. Physical instance recovery also
+clears creation consent and its bound run authority while retaining provenance.
+This is an initial creation flow,
 not structural editing, arbitrary revision reads or model-runtime qualification.
 
 ## Service and activation

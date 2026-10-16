@@ -1,10 +1,13 @@
 package backup_test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"filippo.io/age"
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 // The bytes are deliberately opaque fixtures: this proves encrypted transport
@@ -72,5 +75,51 @@ func TestDocumentCreationEncryptedProvenanceFork(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDocumentCreationInstanceRecoveryClearsOnlyCreationAuthority(t *testing.T) {
+	f := newInstanceFixture(t)
+	seedBackupDocument(t, f.db, "ws_e2e_1", "instance-created-doc", "u_admin")
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := f.db.Exec(query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO crews(id,workspace_id,name,slug) VALUES('instance-create-crew','ws_e2e_1','Creator','instance-create')`)
+	exec(`INSERT INTO agents(id,workspace_id,crew_id,name,slug) VALUES('instance-create-agent','ws_e2e_1','instance-create-crew','Creator','instance-create-agent')`)
+	exec(`INSERT INTO chats(id,workspace_id,agent_id,created_by) VALUES('instance-create-chat','ws_e2e_1','instance-create-agent','u_admin')`)
+	exec(`INSERT INTO conversation_messages(id,session_id,agent_id,role,content,ts,author_user_id) VALUES('instance-create-message','instance-create-chat','instance-create-agent','user','Create a useful Doc','2026-10-16T10:00:00Z','u_admin')`)
+	for _, run := range []string{"creation-live-run", "unrelated-html-run"} {
+		exec(`INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) VALUES(?,'ws_e2e_1','instance-create-agent','instance-create-crew','u_admin','instance-create-chat','instance-create-message','fixture-member',1,'fixture-generation',1,'2099-01-01T00:00:00Z')`, run)
+	}
+	exec(`INSERT INTO document_creation_consents(message_id,workspace_id,human_user_id,chat_id,submission_id,run_id,expires_at,created_at) VALUES('instance-create-message','ws_e2e_1','u_admin','instance-create-chat','instance-consent','creation-live-run','2099-01-01T00:00:00Z','2026-10-16T10:00:00Z')`)
+	exec(`INSERT INTO document_creations(page_id,workspace_id,run_id,agent_id,human_user_id,source_chat_id,submission_id,mutation_id,request_digest,created_at) VALUES('instance-created-doc','ws_e2e_1','historical-created-run','instance-create-agent','u_admin','instance-create-chat','historical-submission','historical-mutation',?,'2026-10-16T09:00:00Z')`, strings.Repeat("a", 64))
+	bundle := f.create(t, true)
+	dir := filepath.Join(t.TempDir(), "recovered-document-creation")
+	report, err := backup.RecoverInstance(t.Context(), backup.RecoverOptions{BundlePath: bundle.Path, Identities: []age.Identity{f.identity}, DataDir: dir, Actor: "u_admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := database.Open("file:" + filepath.Join(dir, "crewship.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+	for _, query := range []string{`SELECT COUNT(*) FROM document_creation_consents`, `SELECT COUNT(*) FROM artifact_run_principals WHERE run_id='creation-live-run'`} {
+		var count int
+		if err := target.QueryRow(query).Scan(&count); err != nil || count != 0 {
+			t.Errorf("creation authority survived physical recovery: count%d %v (%s)", count, err, query)
+		}
+	}
+	for _, query := range []string{`SELECT COUNT(*) FROM artifact_run_principals WHERE run_id='unrelated-html-run'`, `SELECT COUNT(*) FROM document_creations WHERE run_id='historical-created-run' AND mutation_id='historical-mutation'`} {
+		var count int
+		if err := target.QueryRow(query).Scan(&count); err != nil || count != 1 {
+			t.Errorf("unrelated authority or historical provenance changed: count%d %v", count, err)
+		}
+	}
+	if !strings.Contains(strings.Join(report.RuntimeReset, "\n"), "document creation") {
+		t.Error("creation authority reset not reported")
 	}
 }
