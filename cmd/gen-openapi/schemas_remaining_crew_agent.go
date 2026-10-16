@@ -230,7 +230,9 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	addRequest("PUT", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaRequestV1", object(map[string]any{"content": str()}))
 	addRequest("PATCH", "/api/v1/agents/{agentId}/learning", "RemainingAgentLearningRequestV1", object(map[string]any{"enabled": boolean(), "mode": str()}))
 	addRequest("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaRequestV1", object(map[string]any{"content": str()}))
-	addRequest("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyRequestV1", object(map[string]any{"autonomy": str(), "execution": str(), "approval_required": boolean()}))
+	crewPolicyRequest := object(map[string]any{"autonomy_level": str(), "behavior_mode": str(), "whole_run_approval": map[string]any{"type": "boolean", "nullable": true, "description": "Omitted or null preserves the current whole-run approval setting."}, "reason": str()})
+	crewPolicyRequest["required"] = []string{"autonomy_level", "behavior_mode"}
+	addRequest("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyRequestV1", crewPolicyRequest)
 
 	// Remaining subroute actions. These handlers deliberately return compact
 	// maps (or a file/task envelope), rather than the parent resource.
