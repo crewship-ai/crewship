@@ -9,8 +9,27 @@ vi.mock("sonner", () => ({
   },
 }))
 
-import { renderHook, act } from "@testing-library/react"
+import { createElement } from "react"
+import { renderHook, render, act, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { useFileEditor } from "../hooks/use-file-editor"
+
+/** Mount the hook with its discard question rendered, as a caller would. */
+function renderEditor() {
+  const result = { current: null as unknown as ReturnType<typeof useFileEditor> }
+  function Harness() {
+    const editor = useFileEditor({ agentId: "a1", workspaceId: "ws-1" })
+    result.current = editor
+    return editor.confirmDialog
+  }
+  render(createElement(Harness))
+  return { result }
+}
+
+async function answerDiscard(label: "Discard changes" | "Keep editing") {
+  const dialog = await screen.findByRole("alertdialog", { name: "Discard unsaved file changes?" })
+  fireEvent.click(within(dialog).getByRole("button", { name: label }))
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+}
 
 async function flushAsync() {
   for (let i = 0; i < 6; i++) await Promise.resolve()
@@ -36,7 +55,6 @@ describe("useFileEditor", () => {
     toastError.mockReset()
     mockFetch = vi.fn()
     vi.stubGlobal("fetch", mockFetch)
-    vi.stubGlobal("confirm", vi.fn(() => true))
   })
 
   afterEach(() => {
@@ -45,21 +63,36 @@ describe("useFileEditor", () => {
 
   it("keeps dirty edits when discarding on close or another file is cancelled", async () => {
     mockFetch.mockResolvedValue(okText("original"))
-    const confirm = vi.fn(() => false)
-    vi.stubGlobal("confirm", confirm)
-    const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
+    const { result } = renderEditor()
     await act(async () => {
-      result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
+      void result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
       await flushAsync()
     })
     act(() => { result.current.setEditorDirty(true) })
-    act(() => { result.current.closeEditor() })
+    act(() => { void result.current.closeEditor() })
+    await answerDiscard("Keep editing")
     expect(result.current.editorFile?.path).toBe("a.ts")
     expect(result.current.editorDirty).toBe(true)
-    act(() => { result.current.openFileEditor({ path: "b.ts", name: "b.ts" }, { kind: "agent" }) })
+    act(() => { void result.current.openFileEditor({ path: "b.ts", name: "b.ts" }, { kind: "agent" }) })
+    await answerDiscard("Keep editing")
     expect(result.current.editorFile?.path).toBe("a.ts")
     expect(mockFetch).toHaveBeenCalledTimes(1)
-    expect(confirm).toHaveBeenCalledTimes(2)
+  })
+
+  it("opens the next file once discarding the dirty one is confirmed", async () => {
+    mockFetch.mockResolvedValue(okText("original"))
+    const { result } = renderEditor()
+    await act(async () => {
+      void result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
+      await flushAsync()
+    })
+    act(() => { result.current.setEditorDirty(true) })
+    act(() => { void result.current.openFileEditor({ path: "b.ts", name: "b.ts" }, { kind: "agent" }) })
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    await answerDiscard("Discard changes")
+    await waitFor(() => expect(result.current.editorFile?.path).toBe("b.ts"))
+    expect(result.current.editorDirty).toBe(false)
+    expect(mockFetch).toHaveBeenCalledTimes(2)
   })
 
   it("starts with everything closed and empty", () => {
@@ -169,7 +202,7 @@ describe("useFileEditor", () => {
     expect(firstSignal.aborted).toBe(true)
   })
 
-  it("closeEditor aborts and resets all editor state", () => {
+  it("closeEditor aborts and resets all editor state once the discard is confirmed", async () => {
     mockFetch.mockImplementation((_, init: RequestInit) => {
       return new Promise((_resolve, reject) => {
         ;(init.signal as AbortSignal).addEventListener("abort", () =>
@@ -178,19 +211,21 @@ describe("useFileEditor", () => {
       })
     })
 
-    const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
+    const { result } = renderEditor()
     act(() => {
-      result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
+      void result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
     })
     const signal = (mockFetch.mock.calls[0][1] as RequestInit).signal as AbortSignal
 
     act(() => {
       result.current.setEditorDirty(true)
       result.current.setEditorExpanded(true)
-      result.current.closeEditor()
+      void result.current.closeEditor()
     })
+    expect(signal.aborted).toBe(false)
+    await answerDiscard("Discard changes")
 
-    expect(signal.aborted).toBe(true)
+    await waitFor(() => expect(signal.aborted).toBe(true))
     expect(result.current.editorFile).toBeNull()
     expect(result.current.editorContent).toBeNull()
     expect(result.current.editorLoading).toBe(false)

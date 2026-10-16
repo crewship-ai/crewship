@@ -14,6 +14,7 @@ import {
   CreateSurfaceSecondaryAction,
 } from "@/components/layout/create-surface"
 import { DetailCard } from "@/components/ui/detail"
+import { useConfirm } from "@/components/ui/use-confirm"
 import { apiFetch } from "@/lib/api-fetch"
 import { relTime } from "@/lib/time"
 import { discardRoutineDraft, loadRoutineDraft, type RoutineDraft } from "@/lib/routine-drafts"
@@ -131,6 +132,7 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
   const [refusal, setRefusal] = React.useState<string | null>(null)
   const [riskReasons, setRiskReasons] = React.useState<string[] | null>(null)
   const [approveRisk, setApproveRisk] = React.useState(false)
+  const { ask, dialog } = useConfirm()
   const base = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines`
 
   React.useEffect(() => {
@@ -226,7 +228,16 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
 
   const discard = async () => {
     if (!draft || busy) return
-    if (!window.confirm(`Discard draft r${draft.revision}? v${routine.head_version ?? 0} stays as it is.`)) return
+    const ok = await ask({
+      title: `Discard draft r${draft.revision}?`,
+      consequences: [
+        { tone: "lost", text: "The draft's changes are lost" },
+        { tone: "kept", text: `v${routine.head_version ?? 0} stays as it is` },
+      ],
+      confirmLabel: "Discard draft",
+      destructive: true,
+    })
+    if (!ok) return
     setBusy("discard")
     setRefusal(null)
     try {
@@ -244,6 +255,7 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
   const canPublish = !!draft && !!check?.passed && !busy && (!riskReasons || approveRisk)
 
   return (
+    <>
     <CreateSurface open={open} onOpenChange={onOpenChange} size="md" onSubmit={() => void publish()} ariaLabel="Publish the draft">
       <CreateSurfaceHeader
         concept="routines"
@@ -357,5 +369,9 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
         busy={busy === "publish"}
       />
     </CreateSurface>
+    {/* Beside the surface, as its own discard guard is: keys pressed in the
+    question must not reach the surface's ⌘↵ handler. */}
+    {dialog}
+    </>
   )
 }

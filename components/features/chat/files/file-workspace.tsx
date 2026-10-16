@@ -11,6 +11,7 @@ import { isPreviewable } from "@/lib/file-format"
 import { isManagerTier } from "@/lib/permissions/tiers"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { Button } from "@/components/ui/button"
+import { useConfirm } from "@/components/ui/use-confirm"
 import { Spinner } from "@/components/ui/spinner"
 import { getChatFileIcon, getEditorLanguage } from "../chat-tree-row"
 import { fileRoute, type EditorScope } from "../hooks/use-file-editor"
@@ -58,6 +59,7 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
   const [editing, setEditing] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const { ask, dialog } = useConfirm()
   const [saveError, setSaveError] = useState("")
   const [editorVersion, setEditorVersion] = useState(0)
   const saveRef = useRef<(() => void) | null>(null)
@@ -132,8 +134,14 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       <Button variant="outline" size="sm" asChild><AuthenticatedDownload href={route} download={file.name} aria-label="Download file"><Download className="size-3.5" /> Download</AuthenticatedDownload></Button>
       {canEdit && content !== null && !editing && <Button variant="outline" size="sm" onClick={() => setEditing(true)}><Pencil className="size-3.5" /> Edit</Button>}
       {editing && <>
-        <Button variant="outline" size="sm" disabled={saving} onClick={() => {
-          if (dirty && !window.confirm("Discard unsaved file changes?")) return
+        <Button variant="outline" size="sm" disabled={saving} onClick={async () => {
+          if (dirty && !(await ask({
+            title: "Discard unsaved file changes?",
+            description: "The edits made since the last save are lost.",
+            confirmLabel: "Discard changes",
+            cancelLabel: "Keep editing",
+            destructive: true,
+          }))) return
           setEditing(false); setDirty(false); onDirtyChange?.(false); setEditorVersion((value) => value + 1)
         }}><X className="size-3.5" /> Cancel</Button>
         <Button size="sm" disabled={!dirty || saving} onClick={() => saveRef.current?.()}>
@@ -162,5 +170,6 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       <span>{textFile ? getEditorLanguage(file.name) : file.name.split(".").pop()?.toUpperCase()}</span>
     </footer>
     {saveError && <p role="alert" className="border-t px-3 py-1.5 text-xs text-destructive">{saveError}</p>}
+    {dialog}
   </section>
 }

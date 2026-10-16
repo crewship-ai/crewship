@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent, waitFor, act, within } from "@testing-library/react"
 
 // =============================================================================
 // P0.4 — the pane asked the *listing* route for file contents.
@@ -370,11 +370,6 @@ describe("ArtifactPane — document and table editing", () => {
 })
 
 describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
-  const confirmMock = vi.fn()
-  beforeEach(() => {
-    window.confirm = confirmMock as unknown as typeof window.confirm
-    confirmMock.mockReset()
-  })
   const openEditorWithEdits = async () => {
     apiFetch.mockImplementation((url: string) =>
       String(url).includes("/files/download")
@@ -391,6 +386,13 @@ describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Editing")
   }
 
+  /** Answer the in-page discard question (#3342). */
+  const answer = async (label: "Discard changes" | "Keep editing") => {
+    const dialog = await screen.findByRole("alertdialog", { name: "Discard unsaved artifact changes?" })
+    fireEvent.click(within(dialog).getByRole("button", { name: label }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+  }
+
   afterEach(() => {
     vi.restoreAllMocks()
     useArtifactStore.setState({ open: false, tabs: [], activeId: null })
@@ -398,40 +400,55 @@ describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
 
   it("keeps the current tab when a dirty switch is refused", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(false)
 
     fireEvent.click(screen.getByRole("button", { name: "two.md" }))
+    await answer("Keep editing")
 
-    expect(confirmMock).toHaveBeenCalledWith("Discard unsaved artifact changes?")
     expect(useArtifactStore.getState().activeId).toBe("t1")
     expect(screen.getByTestId("editor-code")).toHaveTextContent("draft")
   })
 
   it("switches tabs once the discard is confirmed", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(true)
 
     fireEvent.click(screen.getByRole("button", { name: "two.md" }))
+    expect(useArtifactStore.getState().activeId).toBe("t1")
+    await answer("Discard changes")
 
-    expect(useArtifactStore.getState().activeId).toBe("t2")
+    await waitFor(() => expect(useArtifactStore.getState().activeId).toBe("t2"))
   })
 
   it("keeps a dirty tab open when its close is refused", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(false)
 
     fireEvent.click(screen.getByRole("button", { name: "Close one.md" }))
+    await answer("Keep editing")
 
     expect(useArtifactStore.getState().tabs.map((t) => t.id)).toContain("t1")
   })
 
-  it("asks before hiding the pane with unsaved changes", async () => {
+  it("asks before hiding the pane with unsaved changes, and hides it on confirm", async () => {
     await openEditorWithEdits()
-    confirmMock.mockReturnValue(false)
 
     fireEvent.click(screen.getByRole("button", { name: "Back to artifacts" }))
-
-    expect(confirmMock).toHaveBeenCalledWith("Discard unsaved artifact changes?")
+    await answer("Keep editing")
     expect(useArtifactStore.getState().open).toBe(true)
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to artifacts" }))
+    await answer("Discard changes")
+    await waitFor(() => expect(useArtifactStore.getState().open).toBe(false))
+  })
+
+  it("asks before Preview drops the edits, and switches on confirm", async () => {
+    await openEditorWithEdits()
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+    await answer("Keep editing")
+    expect(screen.getByTestId("editor-code")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+    await answer("Discard changes")
+    await waitFor(() => expect(screen.queryByTestId("editor-code")).not.toBeInTheDocument())
+    expect(screen.getByRole("status")).not.toHaveTextContent("Editing")
   })
 })

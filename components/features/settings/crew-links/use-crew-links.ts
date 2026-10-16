@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { readApiError } from "@/lib/api-error"
 import { useAbilities } from "@/hooks/use-abilities"
 import { isManagerTier } from "@/lib/permissions/tiers"
+import { useConfirm } from "@/components/ui/use-confirm"
 
 import { connectionBetween, stateOf, type Connection, type Crew, type CrewAgent, type FileAccess, type PairState } from "./crew-links-model"
 
@@ -37,6 +38,9 @@ export function useCrewLinks(workspaceId: string | null) {
   // Writes chain (link, then its file level); each step needs the rows the
   // previous one produced, not the ones this render closed over.
   const latest = useRef<Connection[]>([])
+  // Removing the link severs every dispatch, message and shared-file path
+  // between two crews — it keeps its question.
+  const { ask, dialog: confirmDialog } = useConfirm()
 
   const reload = useCallback(async () => {
     if (!workspaceId) return
@@ -87,6 +91,15 @@ export function useCrewLinks(workspaceId: string | null) {
     const existing = connectionBetween(latest.current, self.id, other.id)
     const current = stateOf(existing, self.id)
     if (current === next) return true
+    if (next === "none" && existing) {
+      const ok = await ask({
+        title: `Unlink ${self.name} and ${other.name}?`,
+        description: "Agents will no longer be able to hand work between them.",
+        confirmLabel: "Unlink",
+        destructive: true,
+      })
+      if (!ok) return false
+    }
 
     setPending(true)
     let removed: Connection | null = null
@@ -118,11 +131,8 @@ export function useCrewLinks(workspaceId: string | null) {
     const version = (c: Connection) => (c.access_version ? `&expected_version=${c.access_version}` : "")
 
     try {
-      // Removing the link severs every dispatch, message and shared-file path
-      // between two crews — it keeps its question.
       if (next === "none") {
         if (!existing) return true
-        if (!window.confirm(`Unlink ${self.name} and ${other.name}? Agents will no longer be able to hand work between them.`)) return false
         const res = await apiFetch(`/api/v1/crew-connections/${existing.id}?workspace_id=${workspaceId}${version(existing)}`, { method: "DELETE" })
         if (!res.ok) { toast.error(await readApiError(res, "Failed to unlink")); await reload(); return false }
         toast.success(`${self.name} and ${other.name} unlinked`)
@@ -167,7 +177,7 @@ export function useCrewLinks(workspaceId: string | null) {
     } finally {
       setPending(false)
     }
-  }, [workspaceId, canManage, reload])
+  }, [workspaceId, canManage, reload, ask])
 
   /** What `requester` may do with `target`'s shared files. */
   const setFileAccess = useCallback(async (requester: Crew, target: Crew, level: FileAccess): Promise<boolean> => {
@@ -196,5 +206,5 @@ export function useCrewLinks(workspaceId: string | null) {
     }
   }, [workspaceId, canManage, reload])
 
-  return { crews, connections, agentsByCrew, loading, loadError, pending, canManage, reload, setPair, setFileAccess }
+  return { crews, connections, agentsByCrew, loading, loadError, pending, canManage, reload, setPair, setFileAccess, confirmDialog }
 }

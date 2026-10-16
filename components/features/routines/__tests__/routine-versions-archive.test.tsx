@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { toast } from "sonner"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { RoutineVersionsTab } from "../routine-versions-tab"
 
@@ -18,8 +18,15 @@ const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body
 
 beforeEach(() => {
   fetcher.mockReset()
-  window.confirm = vi.fn(() => true)
 })
+
+/** Answer the in-page confirmation titled `title` with `label`. */
+async function answer(title: string | RegExp, label: string) {
+  const dialog = await screen.findByRole("alertdialog", { name: title })
+  fireEvent.click(within(dialog).getByRole("button", { name: label }))
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+  return dialog
+}
 
 describe("historical recipe inspection", () => {
   it("compares archives without writing to the server and marks the published one", async () => {
@@ -71,6 +78,11 @@ describe("historical recipe inspection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review and publish" }))
     expect(publish).toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    const dialog = await answer("Discard draft r3?", "Cancel")
+    expect(dialog).toHaveTextContent("The published version stays as it is")
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false)
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    await answer("Discard draft r3?", "Discard draft")
     await waitFor(() => expect(changed).toHaveBeenCalled())
     const del = fetcher.mock.calls.find(([, init]) => init?.method === "DELETE")!
     expect(del[0]).toBe("/api/v1/workspaces/ws/pipelines/recipe/draft")
@@ -95,6 +107,7 @@ describe("restore draft concurrency", () => {
     })
     render(<RoutineVersionsTab workspaceId="ws" slug="recipe" draft={seen ? { ...seen, updated_at: "2026-09-16T00:00:00Z", updated_by: "someone" } : undefined} onChanged={changed} />)
     fireEvent.click(await screen.findByRole("button", { name: "Restore as draft" }))
+    if (seen) await answer(`Replace draft r${seen.revision} with v1?`, "Replace draft")
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
     expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false)
     expect(changed).not.toHaveBeenCalled()
@@ -114,10 +127,29 @@ describe("restore draft concurrency", () => {
     })
     render(<RoutineVersionsTab workspaceId="ws" slug="recipe" draft={{ id: "draft-old", revision: 3, updated_at: "2026-09-16T00:00:00Z" }} onChanged={changed} />)
     fireEvent.click(await screen.findByRole("button", { name: "Restore as draft" }))
+    await answer("Replace draft r3 with v1?", "Replace draft")
     await waitFor(() => expect(status === 409 ? toast.error : changed).toHaveBeenCalled())
     const writes = fetcher.mock.calls.filter(([, init]) => init?.method === "POST")
     expect(writes).toHaveLength(1)
     expect(JSON.parse(String(writes[0][1].body))).toMatchObject({ id: "draft-old", revision: 3, base_pipeline_id: "pipe-1", base_revision: 2, document: { definition } })
     if (status === 409) expect(changed).not.toHaveBeenCalled()
+  })
+})
+
+// #3342 — replacing an existing draft asks first; Cancel loads nothing.
+describe("restore over an existing draft", () => {
+  it("says what is lost and kept, and Cancel leaves the draft alone", async () => {
+    const changed = vi.fn()
+    fetcher.mockImplementation(async (url: string) => {
+      if (url.endsWith("/versions")) return json([{ version: 2, is_head: true }, { version: 1 }])
+      throw new Error(`unexpected ${url}`)
+    })
+    render(<RoutineVersionsTab workspaceId="ws" slug="recipe" draft={{ id: "draft-old", revision: 3, updated_at: "2026-09-16T00:00:00Z" }} onChanged={changed} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Restore as draft" }))
+    const dialog = await answer("Replace draft r3 with v1?", "Cancel")
+    expect(dialog).toHaveTextContent("The draft's current content is lost")
+    expect(dialog).toHaveTextContent("Nothing published changes")
+    expect(fetcher.mock.calls.filter(([url]) => String(url).includes("/versions/"))).toHaveLength(0)
+    expect(changed).not.toHaveBeenCalled()
   })
 })

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { renderHook, waitFor, act } from "@testing-library/react"
+import { createElement } from "react"
+import { render, screen, fireEvent, within, waitFor, act } from "@testing-library/react"
 import { toast } from "sonner"
 
 import { useCrewLinks } from "../use-crew-links"
@@ -27,10 +28,17 @@ function serve(connections: unknown[], overrides: (url: string, init?: RequestIn
   })
 }
 
+// The hook owns its unlink question; the harness renders it the way the page does.
 async function mount() {
-  const hook = renderHook(() => useCrewLinks("ws1"))
-  await waitFor(() => expect(hook.result.current.loading).toBe(false))
-  return hook
+  const result = { current: null as unknown as ReturnType<typeof useCrewLinks> }
+  function Harness() {
+    const links = useCrewLinks("ws1")
+    result.current = links
+    return links.confirmDialog
+  }
+  render(createElement(Harness))
+  await waitFor(() => expect(result.current.loading).toBe(false))
+  return { result }
 }
 
 beforeEach(() => {
@@ -44,19 +52,27 @@ beforeEach(() => {
 describe("useCrewLinks writes", () => {
   it("unlinks by deleting the stored row with its version, once confirmed", async () => {
     serve([conn("c-eng", "c-ops", "bidirectional")])
-    vi.stubGlobal("confirm", vi.fn(() => true))
     const { result } = await mount()
-    await act(() => result.current.setPair(ENG, OPS, "none"))
+    let done: Promise<boolean> = Promise.resolve(false)
+    act(() => { done = result.current.setPair(ENG, OPS, "none") })
+    const dialog = await screen.findByRole("alertdialog", { name: "Unlink Engineering and Ops?" })
+    expect(dialog).toHaveTextContent("Agents will no longer be able to hand work between them.")
+    expect(writes()).toHaveLength(0)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Unlink" }))
+    await act(async () => { expect(await done).toBe(true) })
     expect(writes()).toHaveLength(1)
     expect(String(writes()[0][0])).toContain("/crew-connections/cc-c-eng-c-ops?workspace_id=ws1&expected_version=1")
   })
 
   it("does not unlink when the confirmation is declined", async () => {
     serve([conn("c-eng", "c-ops", "bidirectional")])
-    vi.stubGlobal("confirm", vi.fn(() => false))
     const { result } = await mount()
-    await act(() => result.current.setPair(ENG, OPS, "none"))
+    let done: Promise<boolean> = Promise.resolve(true)
+    act(() => { done = result.current.setPair(ENG, OPS, "none") })
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Cancel" }))
+    await act(async () => { expect(await done).toBe(false) })
     expect(writes()).toHaveLength(0)
+    expect(result.current.pending).toBe(false)
   })
 
   it("re-points a link stored the other way round, carrying each side's file level", async () => {
