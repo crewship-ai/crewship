@@ -367,3 +367,25 @@ describe("stable reference navigation guards", () => {
     expect(result.current.reference).toEqual(reference)
   })
 })
+
+describe("native search result identity navigation", () => {
+  it("uses the existing dirty guard before adopting immutable identity", () => {
+    window.history.replaceState(null, "", "/pages/original?mode=edit")
+    const { result } = renderHook(() => useEditorRoute("original"))
+    act(() => result.current.setDirty(true))
+    const reference = { kind: "page" as const, workspaceId: "workspace", pageId: "immutable-page" }
+    act(() => result.current.openReference(reference))
+    expect(result.current.reference).toBeUndefined()
+    expect(window.location.pathname).toBe("/pages/original")
+    act(() => result.current.pending?.keep())
+    expect(result.current.slug).toBe("original")
+    expect(result.current.dirty).toBe(true)
+    act(() => result.current.openReference(reference))
+    act(() => result.current.pending?.discard())
+    expect(result.current.reference).toEqual(reference)
+    expect(result.current.slug).toBeNull()
+    expect(window.location.search).toContain("ref=immutable-page")
+    expect(window.location.search).toContain("workspace_id=workspace")
+    expect(result.current.dirty).toBe(false)
+  })
+})

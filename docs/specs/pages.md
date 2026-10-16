@@ -68,6 +68,16 @@ derived caches: workspace/fork backups exclude them, scoped restore clears them,
 and physical instance recovery clears all of them before canonical rebuilding.
 No bearer is stored in the cache or cursor. This does not establish backlinks.
 
+The Pages **Search native text** dialog submits explicitly and opens results by
+stable Page ID plus workspace through the existing unsaved-work guard. **Next
+results** replaces the displayed batch rather than retaining earlier metadata.
+A batch has a maximum local lifetime of 15 seconds and clears on Page/folder
+updates, reconnect, focus, visibility return or identity/workspace change.
+Grant/issuer changes without a realtime event are therefore bounded by that
+local expiry, not guaranteed instantaneous. Clearing asks for explicit search;
+it never automatically retries incomplete coverage. Search is currently a human
+session/CLI capability, not delegated agent-runtime authorization.
+
 ## Delivery boundary
 
 **Artifacts and Boards 1.0 use static artifact previews.** The Board drawing editor
