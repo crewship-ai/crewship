@@ -141,11 +141,15 @@ func TestChatDecisionWaitpointBundleRestoreAndForkIdentity(t *testing.T) {
 	}
 	op.Audience = *current
 	req := withWorkspaceUser(httptest.NewRequest("POST", "/", nil), d.f.user, d.f.workspace, "OWNER")
-	if err := r.resolveWaitpointDecision(req, op, answer); err != nil {
-		t.Fatalf("restored retry %v", err)
+	if err := r.resolveWaitpointDecision(req, op, answer); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("restored stale-generation retry %v", err)
 	}
-	if card, err := r.waitpointDecision(t.Context(), *current, d.id); err != nil || card.Ref.Decision.Status != "approved" {
-		t.Fatalf("restored card %v %v", card, err)
+	if _, err := r.waitpointDecision(t.Context(), *current, d.id); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("restore revived original invocation generation: %v", err)
+	}
+	var preservedAlias, preservedToken, preservedStatus, preservedKey, preservedHash string
+	if err := target.QueryRow(`SELECT chat_source_id,token,status,answer_operation_key,answer_operation_hash FROM pipeline_waitpoints WHERE workspace_id=?`, d.f.workspace).Scan(&preservedAlias, &preservedToken, &preservedStatus, &preservedKey, &preservedHash); err != nil || preservedAlias != d.id || preservedToken != d.token || preservedStatus != "approved" || preservedKey != op.Key || preservedHash != op.Hash {
+		t.Fatalf("restore lost source receipt: %v", err)
 	}
 	var count int
 	if err := target.QueryRow(`SELECT COUNT(*) FROM pipeline_waitpoints WHERE workspace_id=?`, d.f.workspace).Scan(&count); err != nil || count != 1 {
@@ -179,5 +183,48 @@ func TestChatDecisionWaitpointBundleRestoreAndForkIdentity(t *testing.T) {
 	}
 	if _, err := d.r.waitpointDecision(t.Context(), *live, d.id); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("fork accepted source alias: %v", err)
+	}
+}
+
+func TestChatDecisionWaitpointRecreatedChatGenerationCannotReadOrAnswer(t *testing.T) {
+	d := newWaitpointCardRig(t, waitpointCardForm())
+	version := d.read(t).Decision.Source.Version
+	original := d.a.ChatGeneration
+	execOrFatal(t, d.f.h.db, `DELETE FROM chats WHERE id=?`, d.f.chat)
+	execOrFatal(t, d.f.h.db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES(?,?,?,?,'private')`, d.f.chat, d.f.workspace, d.f.agent, d.f.user)
+	live, err := chataudience.CaptureTrusted(t.Context(), d.f.h.db, d.f.chat, d.f.user, nil)
+	if err != nil || live == nil || live.ChatGeneration == original {
+		t.Fatalf("fresh generation %v %v", live, err)
+	}
+	d.a = *live
+	if _, err := d.r.waitpointDecision(t.Context(), d.a, d.id); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("recreated chat read original source: %v", err)
+	}
+	answer, op := d.answer(version, "recreated-chat", "ship")
+	if err := d.resolve(t, answer, op); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("recreated chat answered original source: %v", err)
+	}
+	var status, key string
+	if err := d.f.h.db.QueryRow(`SELECT status,COALESCE(answer_operation_key,'') FROM pipeline_waitpoints WHERE token=?`, d.token).Scan(&status, &key); err != nil || status != "pending" || key != "" {
+		t.Fatalf("old source changed status=%q key=%q err=%v", status, key, err)
+	}
+}
+
+func TestChatDecisionWaitpointAnotherCurrentAuthorizedHumanCanAnswer(t *testing.T) {
+	d := newWaitpointCardRig(t, waitpointCardForm())
+	execOrFatal(t, d.f.h.db, `INSERT INTO users(id,email) VALUES('waitpoint-other-user','waitpoint-other@example.invalid')`)
+	execOrFatal(t, d.f.h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('waitpoint-other-member',?,'waitpoint-other-user','ADMIN')`, d.f.workspace)
+	live, err := chataudience.CaptureTrusted(t.Context(), d.f.h.db, d.f.chat, "waitpoint-other-user", nil)
+	if err != nil || live == nil {
+		t.Fatalf("other current audience %v %v", live, err)
+	}
+	d.a = *live
+	d.f.user = "waitpoint-other-user"
+	answer, op := d.answer(d.read(t).Decision.Source.Version, "another-current-human", "ship")
+	if err := d.resolve(t, answer, op); err != nil {
+		t.Fatal(err)
+	}
+	if card := d.read(t).Decision; card.Status != "approved" || card.Resolution.AnsweredBy != d.f.user {
+		t.Fatalf("current human denied %+v", card)
 	}
 }

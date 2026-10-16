@@ -101,7 +101,7 @@ func waitpointDecisionProjection(ctx context.Context, q issueOperationQueryer, a
 	if count != 1 || json.Unmarshal([]byte(raw), &proof) != nil {
 		return ChatCardProjection{}, sql.ErrNoRows
 	}
-	if proof.Chat != a.ChatID || proof.Trigger == "" || proof.TriggerType != "USER" || proof.ChatOrigin != "" || proof.Human == nil || proof.Human.WorkspaceID != a.WorkspaceID || proof.Human.ChatID != a.ChatID || proof.Human.AgentID != a.AgentID {
+	if proof.Chat != a.ChatID || proof.Trigger == "" || proof.TriggerType != "USER" || proof.ChatOrigin != "" || proof.Human == nil || proof.Human.WorkspaceID != a.WorkspaceID || proof.Human.ChatID != a.ChatID || proof.Human.AgentID != a.AgentID || proof.Human.ChatGeneration == "" || proof.Human.ChatGeneration != a.ChatGeneration {
 		return ChatCardProjection{}, sql.ErrNoRows
 	}
 	fields, actions, err := waitpointDecisionForm(s.Form)

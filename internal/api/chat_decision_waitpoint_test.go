@@ -91,8 +91,14 @@ func TestChatDecisionWaitpointReplayCurrentReadAndRevocation(t *testing.T) {
 	if accepted.Decision.Status != "approved" || accepted.Decision.Resolution.ActionID != "ship" || string(accepted.Decision.Resolution.Values["ready"]) != "false" {
 		t.Fatalf("outcome %+v", accepted.Decision)
 	}
-	// Reconstruct the adapter after a lost response/restart; durable source owns receipt.
-	d.r = &Router{db: d.f.h.db, PipelinesHandler: d.r.PipelinesHandler, logger: newTestLogger()}
+	// Ordinary restart preserves chat generation and replays the exact source
+	// snapshot from durable state without any prior in-memory store.
+	d.r.PipelinesHandler.waitpoints.(*pipeline.SQLWaitpointStore).Close()
+	restartedStore := pipeline.NewSQLWaitpointStore(d.f.h.db)
+	t.Cleanup(restartedStore.Close)
+	restartedHandler := NewPipelineHandler(d.f.h.db, newTestLogger(), nil, nil)
+	restartedHandler.SetWaitpointStore(restartedStore)
+	d.r = &Router{db: d.f.h.db, PipelinesHandler: restartedHandler, logger: newTestLogger()}
 	execOrFatal(t, d.f.h.db, `UPDATE workspace_members SET role='VIEWER' WHERE id=?`, d.a.MemberID)
 	live, err := chataudience.CaptureTrusted(t.Context(), d.f.h.db, d.f.chat, d.f.user, nil)
 	if err != nil || live == nil {
@@ -102,6 +108,11 @@ func TestChatDecisionWaitpointReplayCurrentReadAndRevocation(t *testing.T) {
 	op.Audience = *live
 	if err := d.resolve(t, answer, op); err != nil {
 		t.Fatalf("read replay %v", err)
+	}
+	beforeJSON, _ := json.Marshal(accepted)
+	afterJSON, _ := json.Marshal(d.read(t))
+	if string(beforeJSON) != string(afterJSON) {
+		t.Fatal("ordinary restart changed retry source snapshot")
 	}
 	if actions := d.read(t).Decision.AllowedActions; len(actions) != 1 || actions[0] != "view" {
 		t.Fatalf("viewer actions %v", actions)
