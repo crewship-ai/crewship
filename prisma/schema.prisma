@@ -286,6 +286,7 @@ model VerificationToken {
 }
 
 model CliPairing {
+  source_session_id String?
   id           String    @id @default(cuid())
   user_id      String
   code         String    @unique

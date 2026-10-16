@@ -489,6 +489,12 @@ try {
   await pages.desktop.getByRole('button',{name:'Save shared draft',exact:true}).click()
   await check('Guest saves an explicit shared draft through the real Router',(await draftSave).status()===200)
   await expect(pages.desktop.getByText(/Draft revision 1/)).toBeVisible()
+  await pages.desktop.getByRole('textbox',{name:'Draft description',exact:true}).fill('Unsaved changes to discard without a revision change')
+  const sameRevisionReload=pages.desktop.waitForResponse(response=>response.url()===draftPath && response.request().method()==='GET')
+  await pages.desktop.getByRole('button',{name:'Reload draft and discard local changes',exact:true}).click()
+  const sameRevisionResponse=await sameRevisionReload
+  await expect(pages.desktop.getByRole('textbox',{name:'Draft description',exact:true})).toHaveValue('UNPUBLISHED_CLIENT_DRAFT_CANARY')
+  await check('explicit Guest draft reload discards local changes at the unchanged saved revision',sameRevisionResponse.status()===200 && (await sameRevisionResponse.json()).revision===1)
   const publishedAfterDraft=await contexts.desktop.request.get(draftPath.replace(/\/draft$/,''))
   await check('Guest draft save leaves the published definition unchanged',publishedAfterDraft.status()===200 && !(await publishedAfterDraft.text()).includes('UNPUBLISHED_CLIENT_DRAFT_CANARY'))
   const otherDraft=await contexts.other.request.get(draftPath)
