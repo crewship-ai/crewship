@@ -186,6 +186,46 @@ test('read dispatch cannot turn mutation fields into a write or bypass live stat
     assert.equal(model.acquisitions, 0); assert.equal(model.commits, 0); assert.equal(model.receipts.size, 0);
   } finally { await f.close(); }
 });
+test('every read route stays read-only with mutation-shaped fields and live authority', async () => {
+  const model = authorityModel();
+  const f = await fixture((op, data, req, res) => {
+    if (op === 'comments') return [];
+    if (op === 'checkpoints') return [];
+    return model.handle(op, data, req, res);
+  });
+  await f.start();
+  try {
+    const state = (await read(f)).body;
+    const block = state.outline.find(block => block.id === 'intro');
+    const before = structuredClone(model.state);
+    const malicious = { operation: 'patch', schema: 999, id: '../invalid', epoch: 'forged',
+      ifRev: 999, snapshot: 'forged', base_rev: state.rev, checkpoint: 'fixture-checkpoint',
+      targets: [{ id: block.id, hash: block.hash, from: 0, to: 8, quote: block.text.slice(0, 8) }] };
+    for (const operation of ['read', 'verify-targets', 'comments', 'checkpoints', 'checkpoint-read', 'export']) {
+      assert.equal((await call(f.socket, `/v1/documents/p/${operation}`, malicious)).status, 200, operation);
+    }
+    assert.deepEqual(model.state, before);
+    assert.equal(model.acquisitions, 0); assert.equal(model.commits, 0);
+    assert.equal(model.checkpoints, 0); assert.equal(model.restores, 0); assert.equal(model.receipts.size, 0);
+    assert.equal(model.seen.filter(({ op }) => ['receipt', 'lease', 'renew', 'commit', 'checkpoint', 'restore', 'comment', 'resolve'].includes(op)).length, 0);
+    model.revoked.add('Bearer human');
+    for (const operation of ['read', 'verify-targets', 'comments', 'checkpoints', 'checkpoint-read', 'export']) {
+      assert.equal((await call(f.socket, `/v1/documents/p/${operation}`, malicious)).status, 403, operation);
+    }
+  } finally { await f.close(); }
+});
+test('every mutation route requires its own valid schema and operation ID', async () => {
+  const model = authorityModel(), f = await fixture(model.handle); await f.start();
+  try {
+    for (const operation of ['initialize', 'patch', 'checkpoint', 'restore', 'comment', 'resolve']) {
+      const invalid = { schema: 999, id: 'valid-id', body: initialJSON() };
+      assert.equal((await call(f.socket, `/v1/documents/p/${operation}`, invalid)).status, operation === 'initialize' ? 400 : 409, operation);
+      assert.equal((await call(f.socket, `/v1/documents/p/${operation}`, { ...invalid, schema: 2, id: '../invalid' })).status, 400, operation);
+    }
+    assert.equal(model.acquisitions, 0); assert.equal(model.commits, 0); assert.equal(model.receipts.size, 0);
+    assert.equal(model.seen.filter(({ op }) => ['receipt', 'lease', 'renew', 'commit', 'checkpoint', 'restore', 'comment', 'resolve'].includes(op)).length, 0);
+  } finally { await f.close(); }
+});
 test('startup rejects an old Go recovery acknowledgement before admitting requests', async () => {
   let calls = 0;
   const f = await fixture((op, data) => {

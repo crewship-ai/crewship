@@ -10,7 +10,6 @@ import { readServiceSecret } from './secret.mjs';
 export const PROTOCOL = 3;
 const fault = (status, message,code) => Object.assign(new Error(message), { status,...(code?{code}:{}) });
 const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
-const readOperations = new Set(['read', 'verify-targets', 'comments', 'checkpoints', 'checkpoint-read', 'export']);
 // Offsets are ProseMirror/JavaScript UTF-16 positions. Do not admit a range
 // which splits a surrogate pair, even when its submitted quote matches it.
 const textBoundary = (text, index) => index === 0 || index === text.length ||
@@ -74,26 +73,26 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     entry.tail = result.catch(() => {}).finally(() => { queued--; entry.queued--; entry.touched = Date.now(); });
     return result;
   }
+  // Dispatch uses only the closed URL operation, never fields in the body.
+  // Reads have no path into fingerprint/receipt, writer lease or commit logic.
   async function execute(page, operation, context, request) {
-    if (operation === 'verify-targets' && context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'human request admission required');
-    if (operation === 'initialize') {
-      if (request.schema !== VERSION || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
-      const fingerprint = await hash({ operation, request });
-      try { const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint }); if (receipt.found) return { ...receipt, duplicate: true }; } catch (error) { if (error.status !== 404) throw error; }
-      const doc = create(request.body);
-      try { return await go(page, 'initialize', context, { id: request.id, fingerprint, schema: VERSION, snapshot: snapshot(doc), blocks: (await outline(doc)).map(({ id, hash }) => ({ id, hash })) }); }
-      finally { doc.destroy(); }
+    switch (operation) {
+      case 'read': case 'verify-targets': case 'comments':
+      case 'checkpoints': case 'checkpoint-read': case 'export':
+        return executeRead(page, operation, context, request);
+      case 'initialize': case 'patch': case 'checkpoint': case 'restore':
+      case 'comment': case 'resolve':
+        return executeMutation(page, operation, context, request);
+      default: throw fault(404, 'unknown operation');
     }
+  }
+  async function executeRead(page, operation, context, request) {
+    if (operation === 'verify-targets' && context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'human request admission required');
     const state = await go(page, 'state', context);
     if (state.schema !== VERSION && state.schema !== 1) throw fault(409, 'unsupported schema; content preserved');
-    if (!readOperations.has(operation) && request.schema !== VERSION) throw fault(409, 'unsupported client schema');
-    if (!readOperations.has(operation) && !id(request.id)) throw fault(400, 'operation ID required');
-    const fingerprint = readOperations.has(operation) ? undefined : await hash({ operation, request });
-    if (fingerprint) { const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint }); if (receipt.found) return { ...receipt, schema:VERSION, epoch:syncEpoch(state), duplicate: true }; }
-    let doc = load(state.snapshot); let lease;
+    const doc = load(state.snapshot);
     try {
       for (const update of state.updates || []) Y.applyUpdate(doc, decode(typeof update === 'string' ? update : update.update));
-      const baseVector = Y.encodeStateVector(doc);
       if (operation === 'read') {
         const { rev, generation, incarnation, snapshot, snapshotRev, updates, blocks } = state;
         return { schema: VERSION, rev, generation, incarnation, snapshot, snapshotRev, updates, blocks, epoch: syncEpoch(state), content: validate(doc), outline: await outline(doc) };
@@ -113,6 +112,29 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
           return { ...comment, anchor: publicAnchor, ...publicAnchor, status: comment.resolved ? 'resolved' : status, from, to };
         }) };
       }
+      throw fault(404, 'unknown read operation');
+    } finally { doc.destroy(); }
+  }
+  async function executeMutation(page, operation, context, request) {
+    if (operation === 'initialize') {
+      if (request.schema !== VERSION || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
+      const fingerprint = await hash({ operation, request });
+      try { const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint }); if (receipt.found) return { ...receipt, duplicate: true }; } catch (error) { if (error.status !== 404) throw error; }
+      const doc = create(request.body);
+      try { return await go(page, 'initialize', context, { id: request.id, fingerprint, schema: VERSION, snapshot: snapshot(doc), blocks: (await outline(doc)).map(({ id, hash }) => ({ id, hash })) }); }
+      finally { doc.destroy(); }
+    }
+    const state = await go(page, 'state', context);
+    if (state.schema !== VERSION && state.schema !== 1) throw fault(409, 'unsupported schema; content preserved');
+    if (request.schema !== VERSION) throw fault(409, 'unsupported client schema');
+    if (!id(request.id)) throw fault(400, 'operation ID required');
+    const fingerprint = await hash({ operation, request });
+    const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint });
+    if (receipt.found) return { ...receipt, schema:VERSION, epoch:syncEpoch(state), duplicate: true };
+    let doc = load(state.snapshot); let lease;
+    try {
+      for (const update of state.updates || []) Y.applyUpdate(doc, decode(typeof update === 'string' ? update : update.update));
+      const baseVector = Y.encodeStateVector(doc);
       if (request.epoch !== syncEpoch(state)) throw fault(409, 'old epoch; reload document');
       if(operation==='comment') { if(request.ifRev!==state.rev)throw fault(409,'comment revision changed');const selected=anchor(doc,request.block,request.from,request.to,request.id,state.rev);const result=await go(page,'comment',context,{id:request.id,fingerprint,body:request.text,anchor:selected,ifRev:state.rev,generation:state.generation??0});return {...result,epoch:syncEpoch(state)}; }
       if(operation==='resolve') return {...await go(page,'resolve',context,{id:request.id,fingerprint,comment:request.comment,version:request.version,resolved:request.resolved,ifRev:request.ifRev,generation:state.generation??0}),epoch:syncEpoch(state)};
