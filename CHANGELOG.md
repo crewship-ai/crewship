@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Added
+- E2 proposal and decision card contracts with closed form schemas and authorized read-projection fixtures. This foundation does not yet expose proposal confirmation or decision actions in Chat.
+
 ### Fixed
 - **Personal memory withdrawal stays inside its workspace.** A guest invitation or restricted-membership change no longer erases saved preferences in another workspace. Local withdrawn preferences remain forgotten; previously erased values cannot be reconstructed. Clearing all preferences also works for agents without a crew.
 - **Chat drafts survive temporary access-check outages.** Network errors and server failures keep the last verified cards mounted as rechecking with writes disabled. Explicit access denial still clears protected data and cannot be undone by another failed check.
