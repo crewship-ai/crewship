@@ -103,7 +103,8 @@ interface ExplorerProps<K extends string> {
   /** Shown in place of the list when it is empty. */
   itemsEmpty?: React.ReactNode
 
-  onToggleCollapse: () => void
+  /** Omit inside a SecondaryPanel, whose toolbar carries the collapse button. */
+  onToggleCollapse?: () => void
   /** Rendered at the very bottom — instance-level controls, usually. */
   footer?: React.ReactNode
 }
@@ -162,7 +163,7 @@ export function IntegrationsExplorer<K extends string>({
               onClick={() => setFilterOpen((v) => !v)}
             />
           )}
-          <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
+          {onToggleCollapse && <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />}
         </SidebarToolbar>
 
         <AnimatePresence>

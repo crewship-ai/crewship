@@ -36,7 +36,6 @@ import { isGhost, effectiveStatus, ttlRemaining } from "@/lib/agent-ephemeral"
 import {
   SidebarActiveChip,
   SidebarActiveChips,
-  SidebarCollapseButton,
   SidebarFacet,
   SidebarFacetOption,
   SidebarFilterPopover,
@@ -102,8 +101,6 @@ export interface CrewsExplorerProps {
   agents: AgentData[]
   selectedCrewId: string | null
   selectedAgentId: string | null
-  collapsed: boolean
-  onToggleCollapse: () => void
   onCrewSelect: (crewId: string) => void
   onAgentSelect: (agentId: string) => void
   /** "Add agent" on a crew row; opens New agent with that crew picked. */
@@ -201,8 +198,6 @@ export function CrewsExplorer({
   agents,
   selectedCrewId,
   selectedAgentId,
-  collapsed,
-  onToggleCollapse,
   onCrewSelect,
   onAgentSelect,
   onAddAgent,
@@ -324,38 +319,6 @@ export function CrewsExplorer({
   const nothingMatches =
     narrowed && (view.group === "crew" ? grouped.matchedCrews === 0 && grouped.unassigned.length === 0 : flat.length === 0)
   const clearAll = () => { setSearch(""); setFilters(EMPTY_FILTERS) }
-
-  if (collapsed) {
-    // The rail keeps the crews in reach, with a dot on the ones that need a
-    // person — an empty strip told nothing.
-    const rows = grouped.groups.flatMap((g) => g.rows)
-    return (
-      <div className="flex h-full flex-col items-center gap-1.5 overflow-y-auto border-r border-foreground/[0.1] bg-card py-2">
-        <SidebarCollapseButton collapsed onToggle={onToggleCollapse} />
-        {rows.map((r) => (
-          <button
-            key={r.crew.id}
-            type="button"
-            title={r.pill ? `${r.crew.name} · ${r.pill.label}` : r.crew.name}
-            aria-label={r.pill ? `${r.crew.name}, ${r.pill.label}` : r.crew.name}
-            onClick={() => { onCrewSelect(r.crew.id); onToggleCollapse() }}
-            className={cn("kit-tap relative rounded-lg", selectedCrewId === r.crew.id && "ring-2 ring-primary/50")}
-          >
-            <CrewIcon icon={r.crew.icon || "briefcase"} color={r.crew.color} size="sm" />
-            {r.pill && (
-              <span
-                aria-hidden
-                className={cn(
-                  "absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ring-2 ring-card",
-                  r.pill.tone === "danger" ? "bg-destructive" : r.pill.tone === "warn" ? "bg-warn" : "bg-primary",
-                )}
-              />
-            )}
-          </button>
-        ))}
-      </div>
-    )
-  }
 
   const renderAgent = (
     agent: AgentData,
@@ -537,7 +500,7 @@ export function CrewsExplorer({
         })()
 
   return (
-    <div className="flex flex-col h-full bg-card border-r border-foreground/[0.1] overflow-hidden">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden">
       <div className="flex-1 min-h-0 flex flex-col">
         <SidebarToolbar>
           <div data-crews-search className="min-w-0 flex-1">
@@ -601,7 +564,6 @@ export function CrewsExplorer({
               </SidebarFacet>
             ))}
           </SidebarFilterPopover>
-          <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
         </SidebarToolbar>
 
         {/* The count is the server's total, not the page: "100 crews" on a

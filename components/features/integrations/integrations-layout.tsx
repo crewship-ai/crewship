@@ -22,12 +22,10 @@ import {
 import { toast } from "sonner"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { Switch } from "@/components/ui/switch"
-import { cn } from "@/lib/utils"
 import { invalidate } from "@/lib/stale-cache"
 import { useAbilities } from "@/hooks/use-abilities"
-import { useIsMobile } from "@/hooks/use-mobile"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { useSession } from "@/hooks/use-auth"
 import { useNotificationChannels } from "@/hooks/use-notification-channels"
@@ -229,8 +227,9 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   const [selectedConnectionId, setSelectedConnectionId] = React.useState<string | null>(null)
   const [selectedAccountId, setSelectedAccountId] = React.useState<string | null>(null)
   const [search, setSearch] = React.useState("")
+  // On a phone the panel is a sheet; a pick that opens something closes it.
+  const closePanelSheet = useCloseSecondaryPanelSheet()
   const [filters, setFilters] = React.useState<ConnectionFilters>(EMPTY_FILTERS)
-  const [collapsed, setCollapsed] = React.useState(false)
   const [addTarget, setAddTarget] = React.useState<AddChannelTarget | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
   const [incomingSection, setIncomingSection] = React.useState<IncomingSection>("endpoints")
@@ -244,7 +243,7 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   }, [incoming.targets, incomingSection, incomingTarget])
   const selectIncoming = (target: IncomingTarget) => {
     setIncomingSection(target.kind); setIncomingTarget(target.id)
-    if (isMobile) setCollapsed(true)
+    closePanelSheet()
   }
 
   // Tools tab: which of Composio's six views is showing, and the facets that
@@ -276,15 +275,6 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     setIncomingSection(r.incomingSection)
     setIncomingTarget(r.target)
   }, [])
-
-  // On a phone the rail is 280px of a 390px screen: it does not sit beside the
-  // content, it replaces it, and the KPI cards beside it rendered one word per
-  // line. Collapse it when the viewport narrows and open it as an overlay
-  // instead — the same treatment /credentials gives its rail.
-  const isMobile = useIsMobile()
-  React.useEffect(() => {
-    if (isMobile) setCollapsed(true)
-  }, [isMobile])
 
   // Keep the URL naming what is on screen, so any view here can be linked to —
   // by /settings' retired tabs, by the docs, by a colleague pasting "look at
@@ -689,42 +679,19 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
       />
 
       <div className="relative flex flex-1 overflow-hidden">
-        {/* Tapping away closes the overlay; without it the only way back to
-            the content on a phone is a collapse button the rail is covering. */}
-        {isMobile && !collapsed && (
-          <button
-            type="button"
-            aria-label="Close the integrations list"
-            onClick={() => setCollapsed(true)}
-            className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
-          />
-        )}
-        <aside
-          className={cn(
-            "shrink-0 border-r border-foreground/[0.06] bg-card transition-all",
-            isMobile && !collapsed && "fixed inset-y-0 left-0 z-50 pt-[env(safe-area-inset-top)] shadow-2xl",
-            // `overflow-hidden` only while collapsing, where it is what keeps
-            // the content from spilling out of a 36px rail. Leaving it on when
-            // expanded clipped the Filter popover at the panel's edge — the
-            // menu opened and was sliced off, which reads as a broken control.
-            // The inner list keeps its own scroller, so nothing else needs it.
-            collapsed ? "w-9 overflow-hidden" : "w-[280px] overflow-visible",
-          )}
-        >
-          {collapsed ? (
-            <div className="flex h-full flex-col items-center pt-1.5">
-              <SidebarCollapseButton collapsed onToggle={() => setCollapsed(false)} />
-            </div>
-          ) : tab === "incoming" ? (
+        {/* The one SecondaryPanel (Harbor 2): 272 px, collapse remembered per
+            user; on a phone a sheet from the top bar. The explorer's own
+            toolbar becomes the panel toolbar. */}
+        <SecondaryPanel id="integrations" label="Integrations">
+          {tab === "incoming" ? (
             <IntegrationsExplorer<IncomingSection>
               sectionsLabel="Incoming" sections={incomingRail.sections} section={incomingSection}
-              onSectionChange={next=>{setIncomingSection(next);setIncomingTarget(null);if(isMobile)setCollapsed(true)}}
+              onSectionChange={next=>{setIncomingSection(next);setIncomingTarget(null);closePanelSheet()}}
               search={search} onSearchChange={setSearch} searchPlaceholder="Search targets…" searchAriaLabel="Search incoming targets"
               facets={[]} onClearFilters={()=>setSearch("")} items={incomingRail.items} itemsLabel="Targets"
               selectedItemId={incomingTarget ? `${incomingSection}:${incomingTarget}` : null}
               onItemSelect={id=>{if(!id){setIncomingTarget(null);return}const target=incoming.targets.find(t=>`${t.kind}:${t.id}`===id);if(target)selectIncoming(target)}}
               itemsEmpty={<p className="px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">{incoming.loading ? "Loading targets…" : incoming.error ? "Targets unavailable. Use Refresh to retry." : "No matching targets. Create a routine, agent or Page first."}</p>}
-              onToggleCollapse={()=>setCollapsed(true)}
               footer={<p className="px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">Page endpoints are listed per Page. Gray means no known enabled endpoint, not a delivery failure.</p>}
             />
           ) : tab === "tools" ? (
@@ -739,7 +706,7 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                 if (next === "crew-tools" || composioStatus.configured) {
                   setMcpSection(next)
                   setSelectedAccountId(null)
-                  if (isMobile) setCollapsed(true)
+                  closePanelSheet()
                 } else {
                   setApiKeyOpen(true)
                 }
@@ -753,7 +720,10 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
               items={composioStatus.configured ? accountItems : []}
               itemsLabel="Connected accounts"
               selectedItemId={selectedAccountId}
-              onItemSelect={setSelectedAccountId}
+              onItemSelect={(id) => {
+                setSelectedAccountId(id)
+                if (id) closePanelSheet()
+              }}
               itemsEmpty={
                 <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
                   {composioStatus.configured
@@ -761,7 +731,6 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                     : "The sections and accounts appear once an API key is saved."}
                 </p>
               }
-              onToggleCollapse={() => setCollapsed(true)}
               footer={
                 /* The API key configures the instance; it is not something you
                    reach for beside "Add integration". It sits at the foot of
@@ -802,7 +771,10 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                 // A connection's detail belongs to the Connections view; picking
                 // one while the preference matrix is showing should take you to
                 // the thing you picked.
-                if (id) setNotifySection("connections")
+                if (id) {
+                  setNotifySection("connections")
+                  closePanelSheet()
+                }
               }}
               itemsEmpty={
                 <p className="px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">
@@ -811,10 +783,9 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                     : "Nothing matches the current search and filters."}
                 </p>
               }
-              onToggleCollapse={() => setCollapsed(true)}
             />
           )}
-        </aside>
+        </SecondaryPanel>
 
         <div className="relative flex-1 overflow-y-auto bg-background">
           <AnimatePresence mode="wait">

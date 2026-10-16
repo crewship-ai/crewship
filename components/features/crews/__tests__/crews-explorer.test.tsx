@@ -26,8 +26,6 @@ function renderExplorer(overrides: Partial<React.ComponentProps<typeof CrewsExpl
     agents: [agent("morgan", "ops", "ERROR"), agent("alex", "eng"), agent("jordan", "qa", "RUNNING")],
     selectedCrewId: null,
     selectedAgentId: null,
-    collapsed: false,
-    onToggleCollapse: () => {},
     onCrewSelect: () => {},
     onAgentSelect: () => {},
     ...overrides,
@@ -98,16 +96,6 @@ describe("CrewsExplorer", () => {
     expect(screen.getAllByText("Needs you")).toHaveLength(2)
     const names = screen.getAllByRole("button", { name: /^(morgan|alex|jordan)$/ }).map((r) => r.getAttribute("aria-label"))
     expect(names).toEqual(["morgan", "jordan", "alex"])
-  })
-
-  it("keeps the crews in the collapsed rail, with a dot on the one that needs a person", () => {
-    const onCrewSelect = vi.fn()
-    const onToggleCollapse = vi.fn()
-    renderExplorer({ collapsed: true, onCrewSelect, onToggleCollapse })
-    fireEvent.click(screen.getByRole("button", { name: "Ops, 1 error" }))
-    expect(onCrewSelect).toHaveBeenCalledWith("ops")
-    expect(onToggleCollapse).toHaveBeenCalled()
-    expect(screen.getByRole("button", { name: "Engineering" })).toBeInTheDocument()
   })
 
   it("adds an agent to a crew from its row", () => {
