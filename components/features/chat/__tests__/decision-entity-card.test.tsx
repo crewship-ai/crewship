@@ -56,3 +56,12 @@ it("requires explicit review when the source changes while a person is drafting"
   await waitFor(() => expect(onAnswer).toHaveBeenCalled())
   expect(onAnswer.mock.calls[0][0]).toMatchObject({ expected_version: "2", values: { timing: "later" } })
 })
+it("restores an uncertain reply without auto-submitting and retries its captured key", async () => {
+  const onAnswer = vi.fn().mockResolvedValue("saved")
+  const recovery = { answer: { source_id: "source-1", expected_version: "1", action: "answer" as const, action_id: "ship", values: { timing: "later" } }, key: "restored-key" }
+  render(<DecisionEntityCard reference={DecisionRefSchema.parse(pending)} recovery={recovery} onAnswer={onAnswer} onRecheck={vi.fn()} />)
+  expect(onAnswer).not.toHaveBeenCalled()
+  expect(screen.getByLabelText(/Run now/)).toBeDisabled()
+  fireEvent.click(screen.getByRole("button", { name: "Retry the same response" }))
+  await waitFor(() => expect(onAnswer).toHaveBeenCalledWith(recovery.answer, recovery.key))
+})

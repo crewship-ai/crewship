@@ -6,12 +6,15 @@ import { E2CommandSchemas, type DecisionRef } from "@/lib/chat-e2-cards"
 import { EntityCardFrame } from "./issue-entity-card"
 
 type Answer = ReturnType<typeof E2CommandSchemas.decision_answer.parse>
-export type DecisionSubmitResult = "saved" | "conflict" | "unknown" | "refused"
+export type DecisionSubmitResult = "saved" | "conflict" | "unknown" | "refused" | "invalid"
 type Props = {
   reference: DecisionRef
   rechecking?: boolean
   onAnswer: (answer: Answer, operationKey: string) => Promise<DecisionSubmitResult>
   onRecheck: () => void
+  recovery?: { answer: Answer; key: string } | null
+  onReviewConflict?: () => void
+  feedback?: string
 }
 
 /** Source-authorized actions only; transport owns fresh access and durable replay. */
@@ -20,16 +23,16 @@ export function DecisionEntityCard(props: Props) {
   return <DecisionCardForm key={JSON.stringify([props.reference.entity.workspace_id, source.type, source.id])} {...props} />
 }
 
-function DecisionCardForm({ reference, rechecking = false, onAnswer, onRecheck }: Props) {
+function DecisionCardForm({ reference, rechecking = false, onAnswer, onRecheck, recovery, onReviewConflict, feedback }: Props) {
   const card = reference.decision
   const prefix = useId()
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [reviewedVersion, setReviewedVersion] = useState(card.source.version)
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(recovery?.answer.values ?? {}).map(([key, value]) => [key, String(value)])))
+  const [reviewedVersion, setReviewedVersion] = useState(recovery?.answer.expected_version ?? card.source.version)
   const sourceChanged = reviewedVersion !== card.source.version
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<DecisionSubmitResult | null>(null)
-  const operation = useRef<{ answer: Answer; key: string } | null>(null)
+  const [result, setResult] = useState<DecisionSubmitResult | null>(recovery ? "unknown" : null)
+  const operation = useRef<{ answer: Answer; key: string } | null>(recovery ?? null)
   const sending = useRef(false)
   const terminal = card.status !== "pending"
   const blocked = sourceChanged || rechecking || busy || result === "unknown" || result === "conflict" || result === "saved" || result === "refused"
@@ -98,10 +101,11 @@ function DecisionCardForm({ reference, rechecking = false, onAnswer, onRecheck }
       })}
       <div className="flex flex-wrap gap-2">{card.workflow_actions ? card.workflow_actions.filter(action => (card.allowed_actions.includes("answer") || card.allowed_actions.includes(action.approved ? "approve" : "reject"))).map(action => <Button type="button" key={action.id} className="coarse:min-h-12" variant={action.approved ? "default" : "outline"} onClick={() => decide(card.allowed_actions.includes("answer") ? "answer" : action.approved ? "approve" : "reject", action.id)}>{action.label}</Button>) : card.allowed_actions.filter(action => action !== "view").map(action => <Button type="button" key={action} className="coarse:min-h-12" onClick={() => decide(action as Answer["action"])}>{action === "answer" ? "Send answer" : action === "approve" ? "Approve run" : "Reject run"}</Button>)}</div>
     </fieldset>}
+    {result === "invalid" && <p role="alert">{feedback || "Response was not accepted. Review the fields and try again."}</p>}
     {error && <p role="alert">{error}</p>}
     {busy && <p role="status">Sending…</p>}
     {result === "unknown" && !terminal && <div role="alert"><p>The outcome is unknown. Your response is kept.</p><Button type="button" disabled={busy || rechecking} className="coarse:min-h-12" onClick={() => operation.current && void send(operation.current)}>Retry the same response</Button></div>}
-    {(result === "conflict" || sourceChanged) && !terminal && <div role="alert"><p>This decision changed. Review its current version before answering again.</p><Button type="button" className="coarse:min-h-12" onClick={onRecheck}>Review current decision</Button>{reviewedVersion !== card.source.version && <Button type="button" className="coarse:min-h-12" onClick={() => { operation.current = null; setReviewedVersion(card.source.version); setResult(null) }}>Use reviewed version; keep my response</Button>}</div>}
+    {(result === "conflict" || sourceChanged) && !terminal && <div role="alert"><p>This decision changed. Review its current version before answering again.</p><Button type="button" className="coarse:min-h-12" onClick={onRecheck}>Review current decision</Button>{reviewedVersion !== card.source.version && <Button type="button" className="coarse:min-h-12" onClick={() => { onReviewConflict?.(); operation.current = null; setReviewedVersion(card.source.version); setResult(null) }}>Use reviewed version; keep my response</Button>}</div>}
     {result === "refused" && <p role="alert">This response is no longer permitted. Checking current access…</p>}
   </EntityCardFrame>
 }
