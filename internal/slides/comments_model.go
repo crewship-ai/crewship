@@ -148,27 +148,41 @@ func DecodeCreateComment(raw []byte) (CreateCommentRequest, error) {
 	if err != nil {
 		return request, err
 	}
-	if err = validCommentMutation(request.SchemaVersion, request.BaseRev, request.MutationID, request.PageID); err != nil {
-		return request, err
+	return request, validateCreateComment(request)
+}
+
+// Typed validation applies semantic field budgets without serializing text back
+// through JSON. The public decoder separately enforces the original wire budget.
+func validateCreateComment(request CreateCommentRequest) error {
+	if err := validCommentMutation(request.SchemaVersion, request.BaseRev, request.MutationID, request.PageID); err != nil {
+		return err
+	}
+	if err := ValidateCommentAnchor(request.Anchor); err != nil {
+		return err
 	}
 	if request.BaseRev < 1 || request.Anchor.Revision != request.BaseRev || !commentBodyValid(request.Body) {
-		return request, errors.New("invalid Slides comment body or original revision")
+		return errors.New("invalid Slides comment body or original revision")
 	}
-	return request, nil
+	return nil
 }
+
 func DecodeReplyComment(raw []byte) (ReplyCommentRequest, error) {
 	var request ReplyCommentRequest
 	if err := commentRequest(raw, &request, nil, "page_id", "schema_version", "mutation_id", "if_version", "body"); err != nil {
 		return request, err
 	}
+	return request, validateReplyComment(request)
+}
+func validateReplyComment(request ReplyCommentRequest) error {
 	if err := validCommentMutation(request.SchemaVersion, 1, request.MutationID, request.PageID); err != nil {
-		return request, err
+		return err
 	}
 	if request.IfVersion < 1 || !commentBodyValid(request.Body) {
-		return request, errors.New("invalid Slides reply body or version")
+		return errors.New("invalid Slides reply body or version")
 	}
-	return request, nil
+	return nil
 }
+
 func DecodeResolveComment(raw []byte) (ResolveCommentRequest, error) {
 	var request ResolveCommentRequest
 	if err := commentRequest(raw, &request, func(object map[string]json.RawMessage) error {
@@ -180,11 +194,14 @@ func DecodeResolveComment(raw []byte) (ResolveCommentRequest, error) {
 	}, "page_id", "schema_version", "mutation_id", "if_version", "resolved"); err != nil {
 		return request, err
 	}
+	return request, validateResolveComment(request)
+}
+func validateResolveComment(request ResolveCommentRequest) error {
 	if err := validCommentMutation(request.SchemaVersion, 1, request.MutationID, request.PageID); err != nil {
-		return request, err
+		return err
 	}
 	if request.IfVersion < 1 {
-		return request, errors.New("invalid Slides comment version")
+		return errors.New("invalid Slides comment version")
 	}
-	return request, nil
+	return nil
 }

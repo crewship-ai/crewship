@@ -283,12 +283,7 @@ func writeCommentEvent(ctx context.Context, tx *sql.Tx, key Key, thread, id, act
 	return result, err
 }
 func (s *Store) CreateComment(ctx context.Context, key Key, request CreateCommentRequest, authorize Authorize) (result CommentReceipt, err error) {
-	raw, err := json.Marshal(request)
-	if err != nil {
-		return result, err
-	}
-	request, err = DecodeCreateComment(raw)
-	if err != nil {
+	if err = validateCreateComment(request); err != nil {
 		return result, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	hash, err := requestHash(key, "comment/create", request)
@@ -337,12 +332,7 @@ func (s *Store) ReplyComment(ctx context.Context, key Key, threadID string, requ
 	if !identifier.MatchString(threadID) {
 		return result, fmt.Errorf("%w: invalid thread ID", ErrInvalid)
 	}
-	raw, err := json.Marshal(request)
-	if err != nil {
-		return result, err
-	}
-	request, err = DecodeReplyComment(raw)
-	if err != nil {
+	if err = validateReplyComment(request); err != nil {
 		return result, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	hash, err := requestHash(key, "comment/reply/"+threadID, request)
@@ -387,12 +377,7 @@ func (s *Store) ResolveComment(ctx context.Context, key Key, threadID string, re
 	if !identifier.MatchString(threadID) {
 		return result, fmt.Errorf("%w: invalid thread ID", ErrInvalid)
 	}
-	raw, err := json.Marshal(request)
-	if err != nil {
-		return result, err
-	}
-	request, err = DecodeResolveComment(raw)
-	if err != nil {
+	if err = validateResolveComment(request); err != nil {
 		return result, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	hash, err := requestHash(key, "comment/resolve/"+threadID, request)
