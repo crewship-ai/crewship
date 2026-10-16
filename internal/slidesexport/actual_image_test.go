@@ -32,7 +32,13 @@ func TestActualExportImageCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &Runner{Image: image, OwnerID: "actual_ci", JournalDir: t.TempDir()}
+	parent := t.TempDir()
+	if info, err := os.Stat(parent); err == nil {
+		t.Logf("test temporary parent permissions: %04o", info.Mode().Perm())
+	}
+	// The journal is a private child created by the production runner, rather
+	// than relying on permissions chosen by the testing framework for its root.
+	r := &Runner{Image: image, OwnerID: "actual_ci", JournalDir: filepath.Join(parent, "journal")}
 	defer r.Close()
 	lease, err := r.Acquire(t.Context())
 	if err != nil {

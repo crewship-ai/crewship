@@ -74,11 +74,11 @@ func (j *cleanupJournal) verify() error {
 		return ErrCleanup
 	}
 	pinned, err := j.root.Stat(".")
-	if err != nil || !pinned.IsDir() || !os.SameFile(j.identity, pinned) {
+	if err != nil || !pinned.IsDir() || pinned.Mode().Perm()&0077 != 0 || !os.SameFile(j.identity, pinned) {
 		return ErrCleanup
 	}
 	named, err := os.Lstat(j.directory)
-	if err != nil || !named.IsDir() || !os.SameFile(pinned, named) {
+	if err != nil || !named.IsDir() || named.Mode().Perm()&0077 != 0 || !os.SameFile(pinned, named) {
 		return ErrCleanup
 	}
 	return nil
@@ -158,7 +158,7 @@ func (j *cleanupJournal) read(name string) (cleanupIntent, error) {
 	}
 	defer f.Close()
 	current, err := f.Stat()
-	if err != nil || !os.SameFile(info, current) {
+	if err != nil || !current.Mode().IsRegular() || current.Mode().Perm()&0077 != 0 || !os.SameFile(info, current) {
 		return v, ErrCleanup
 	}
 	data, err := io.ReadAll(io.LimitReader(f, maxIntentBytes+1))
@@ -244,7 +244,7 @@ func (j *cleanupJournal) audit(v cleanupIntent, reference string) error {
 	}
 	defer f.Close()
 	current, err := f.Stat()
-	if err != nil || !current.Mode().IsRegular() || (statErr == nil && !os.SameFile(before, current)) || current.Size() > maxCleanupAuditBytes-int64(len(data)) {
+	if err != nil || !current.Mode().IsRegular() || current.Mode().Perm()&0077 != 0 || (statErr == nil && !os.SameFile(before, current)) || current.Size() > maxCleanupAuditBytes-int64(len(data)) {
 		return ErrCleanup
 	}
 	if _, err = f.Write(data); err != nil {

@@ -156,3 +156,14 @@ func TestCleanupJournalRefusesDifferentPinnedRoot(t *testing.T) {
 		t.Fatal("different pinned directory root accepted")
 	}
 }
+
+func TestCleanupJournalRefusesPermissionsWidenedAfterOpen(t *testing.T) {
+	j := fixtureJournal(t)
+	if err := os.Chmod(j.directory, 0755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(j.directory, 0700)
+	if !errors.Is(j.verify(), ErrCleanup) {
+		t.Fatal("journal remained usable after private directory permissions widened")
+	}
+}
