@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Docs can return one current text block with its saved identity and hash (#3241).** `crewship doc read --block ID` and the existing document read API return bounded complete plaintext while rechecking current access and the original source after materialization. Conflicts, oversized blocks and unavailable full read envelopes return explicit errors. Existing sidecar run reads retain their authority; arbitrary history and structural editing remain separate.
+
 - **Pages can search supported native Docs and Slides body text (#3228).** Human read authority is checked before materialization and again with current source revisions before pagination. Hidden matches do not affect result counts or cursors; incomplete coverage returns a retry/unsupported error. The UI opens stable workspace/Page identities and expires local result batches after 15 seconds. API and `crewship page search` support explicit opaque continuation. Other Page types, backlinks and delegated agent search remain separate.
 
 - **Page identities resolve to their current authorized address (#3224).** The new read-only API and `crewship page resolve` retain original Page identity across rename and address reuse while checking current credentials, workspace and Page reach. Hidden identities reveal no address or metadata. The Page header copies explicit workspace/ID links; opening them retains identity through canonical address changes and refuses reused-slug bodies before rendering.

@@ -22,7 +22,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 
 	"github.com/spf13/cobra"
 )
@@ -39,7 +41,15 @@ func newDocCommand() *cobra.Command {
 			var response *http.Response
 			switch operation {
 			case "read", "outline":
-				response, err = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/document")
+				path := "/api/v1/pages/" + pagePathEscape(args[0]) + "/document"
+				if operation == "read" && cmd.Flags().Changed("block") {
+					block, _ := cmd.Flags().GetString("block")
+					if !regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`).MatchString(block) {
+						return fmt.Errorf("--block requires a stable text block ID (1–80 ASCII letters, digits, underscore or hyphen)")
+					}
+					path += "?" + url.Values{"block_id": {block}}.Encode()
+				}
+				response, err = client.Get(path)
 			case "status":
 				response, err = client.Get("/api/v1/documents/status")
 			case "checkpoints":
@@ -135,6 +145,9 @@ func newDocCommand() *cobra.Command {
 			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(outline)
 		}}
+		if operation == "read" {
+			cmd.Flags().String("block", "", "Read one current paragraph, heading or code block with its original Page/revision/hash fences; no history lookup")
+		}
 		if operation == "status" {
 			cmd.Use = "status"
 			cmd.Args = cobra.NoArgs

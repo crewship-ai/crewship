@@ -87,8 +87,17 @@ func (h *PageHandler) MutateDocument(w http.ResponseWriter, r *http.Request) {
 	h.serveDocument(w, r, true)
 }
 func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, mutate bool) {
+	target, selected, selectorErr := documentBlockSelector(r)
+	if selectorErr != nil {
+		replyError(w, 400, selectorErr.Error())
+		return
+	}
 	rec, ok := h.documentPage(w, r)
 	if !ok {
+		return
+	}
+	if selected {
+		h.readDocumentBlock(w, r, rec, target)
 		return
 	}
 	operation := "read"

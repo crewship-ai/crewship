@@ -85,7 +85,7 @@ revoked credentials return401, missing scope or workspace membership returns403.
 Hidden, missing, deleted and other-workspace IDs share the same404 body. The
 no-store response exposes no title, folder, ancestor, payload or counts.
 Page IDs contain1–128 ASCII letters, digits, underscores or hyphens; malformed
-identifiers return400. This endpoint adds no sharing grant or public-token access.
+identifiers return 400. This endpoint adds no sharing grant or public-token access.
 
 ## Derived content format metadata
 
@@ -127,8 +127,8 @@ nosniff and same-origin resource policy. Missing or corrupt blobs return503.
 
 Hard limits:5MiB input,8MiB canonical output,2048/dimension,4,194,304pixels,
 2 concurrent decodes and4reads;64assets/64MiB per Page. Only actual decoded
-PNG/JPEG is reencoded. EXIF orientations2–8 explicitly return422; unsupported
-SVG/animation/malformed images return422, excessive input413. Quota refusal409
+PNG/JPEG is reencoded. EXIF orientations2–8 explicitly return 422; unsupported
+SVG/animation/malformed images return 422, excessive input413. Quota refusal409
 does not publish bytes. Asset rows pin shared attachment blobs and participate
 in workspace backup/fork with Page ownership. Staging expiry stays absolute.
 This foundation provides no Docs/Slides image insertion or revision restore;
@@ -3152,6 +3152,13 @@ identity references may be omitted. Existing Page read authorization still appli
 
 The opt-in Docs API, CLI and service lifecycle are described in the
 [Docs contract](../specs/documents.md). It preserves Page identity and grants.
+For one current text block, `GET /api/v1/pages/{slug}/document?block_id=ID`
+(or `crewship doc read <slug> --block ID`) returns the original Page/schema/revision,
+generation/epoch and complete block ID/type/parent/hash/text. It rechecks live
+caller authority and the entire source after materialization. Text over 256 KiB
+returns422 without truncation; an oversized complete managed envelope returns 502.
+This selector does not expose arbitrary revision history or grant new agent rights.
+
 Use `crewship doc read <slug>` or `crewship doc outline <slug>` to obtain the
 current durable revision, opaque epoch and target hash. Submit an exact JSON
 operation with `crewship doc patch <slug> --file patch.json`. Conflicts require

@@ -22,6 +22,14 @@ Edit only the approved quotation ranges; preserve text outside each selection
 when forming a full-block semantic replacement. Never choose fresh targets from a changed outline,
 extend the selected quotation or substitute the latest revision as the request
 base. A mismatch stops the request for explicit human reselection.
+For a known text block, GET `/api/v1/pages/{slug}/document?block_id=ID`
+returns only its complete plaintext and canonical block hash with the current
+Page/schema/revision/generation/epoch. It supports paragraph, heading and code
+block reads, not new writable targets. The full text must fit 256 KiB UTF-8;
+422 is never a truncated success. A full engine envelope over 4 MiB returns 502,
+and a source change while reading returns 409. Keep the trusted original selection
+preconditions; current block reads never authorize a fresh base or wider edits.
+This selector is not history lookup, quote disambiguation or an agent grant.
 For generic work without an explicit selection-bound request, select actual
 outline block IDs and hashes. POST `/patch` with JSON
 `{id,schema,page_id,epoch,target,text,ifRev,ifHash}` replaces the chosen block's text.

@@ -126,3 +126,52 @@ func TestDocumentCLIUpgradeAcceptsFileAndPreservesOriginalFences(t *testing.T) {
 		})
 	}
 }
+
+func TestDocumentCLIBlockReadPreservesSelectorAndSourceEnvelope(t *testing.T) {
+	stub := pageStub(t)
+	resetDocCommand(t)
+	const path = "/api/v1/pages/report/document"
+	stub.OnGet(path, func(r *http.Request, _ []byte) (int, []byte, string) {
+		if r.URL.Query().Get("block_id") != "stable_1" || r.URL.Query().Get("workspace_id") != covWSCli3 || len(r.URL.Query()) != 2 {
+			t.Errorf("selector lost: %s", r.URL)
+		}
+		return 200, []byte(`{"page_id":"original-page","schema":3,"rev":7,"generation":2,"epoch":"original","block":{"id":"stable_1","type":"paragraph","parent":null,"hash":"original-hash","text":"Original plaintext"}}`), "application/json"
+	})
+	output, err := runPageCLI(t, "", "doc", "read", "report", "--block", "stable_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got DocumentBlockReadResponseForCLI
+	if json.Unmarshal([]byte(output), &got) != nil || got.PageID != "original-page" || got.Rev != 7 || got.Block.ID != "stable_1" || got.Block.Hash != "original-hash" {
+		t.Fatalf("lost source envelope: %s", output)
+	}
+	if len(stub.CallsFor("GET", path)) != 1 {
+		t.Fatal("block read did not call current document once")
+	}
+}
+
+// Decode the exact CLI output without importing API implementation details.
+type DocumentBlockReadResponseForCLI struct {
+	PageID string `json:"page_id"`
+	Rev    int64  `json:"rev"`
+	Block  struct {
+		ID   string `json:"id"`
+		Hash string `json:"hash"`
+	} `json:"block"`
+}
+
+func TestDocumentCLIBlockReadRejectsInvalidSelectorBeforeHTTP(t *testing.T) {
+	for _, selector := range []string{"", "../other", strings.Repeat("a", 81)} {
+		t.Run(selector, func(t *testing.T) {
+			stub := pageStub(t)
+			resetDocCommand(t)
+			_, err := runPageCLI(t, "", "doc", "read", "report", "--block", selector)
+			if err == nil || !strings.Contains(err.Error(), "--block requires") {
+				t.Fatalf("invalid selector accepted: %v", err)
+			}
+			if len(stub.CallsFor("GET", "/api/v1/pages/report/document")) != 0 {
+				t.Fatal("invalid selector reached HTTP")
+			}
+		})
+	}
+}

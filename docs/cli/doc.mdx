@@ -30,6 +30,17 @@ reports server configuration; it does not certify a container image or model.
 revision, opaque epoch, binary snapshot/replay, JSON content, semantic outline
 and current permission flags.
 
+`--block ID` requests one current paragraph, heading or code block instead of the
+whole read envelope. It preserves the original Page/schema/revision/epoch and
+block hash; text is complete up to 256 KiB UTF8, never a truncated summary. Missing
+blocks return 404, unsupported or oversized blocks return 422, changed sources
+return 409, and a full managed envelope exceeding 4 MiB returns 502. No automatic
+retry, history lookup or fresh-base substitution occurs. Example:
+
+```bash
+crewship doc read report --block introduction
+```
+
 ## crewship doc outline
 
 `crewship doc outline report` calls the same read endpoint and prints only its
