@@ -87,6 +87,10 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
+	if !h.streamAuthorityCurrent(r, workspaceID) {
+		replyError(w, http.StatusForbidden, "Journal stream unavailable with your access")
+		return
+	}
 	q, err := h.journalQuery(r, workspaceID)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
@@ -219,6 +223,9 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
+		if !h.streamAuthorityCurrent(r, workspaceID) {
+			return
+		}
 		writeSSEEvent(w, "entry", e)
 		lastSeenTime = ts
 		lastSeenID = e.ID
@@ -261,7 +268,10 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
-	poll := func() {
+	poll := func() bool {
+		if !h.streamAuthorityCurrent(r, workspaceID) {
+			return false
+		}
 		pq := q
 		pq.Since = lastSeenTime
 		pq.Cursor = ""
@@ -269,7 +279,7 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		rows, _, err := journal.List(r.Context(), h.db, pq)
 		if err != nil {
 			h.logger.Warn("journal stream poll failed", "err", err)
-			return
+			return true
 		}
 		// Emit oldest first so the client timeline appends in order.
 		for i := len(rows) - 1; i >= 0; i-- {
@@ -285,11 +295,15 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if ts.Before(lastSeenTime) || (ts.Equal(lastSeenTime) && e.ID <= lastSeenID) {
 				continue
 			}
+			if !h.streamAuthorityCurrent(r, workspaceID) {
+				return false
+			}
 			writeSSEEvent(w, "entry", e)
 			lastSeenTime = ts
 			lastSeenID = e.ID
 		}
 		flusher.Flush()
+		return true
 	}
 
 	for {
@@ -297,15 +311,22 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-heartbeat.C:
+			if !h.streamAuthorityCurrent(r, workspaceID) {
+				return
+			}
 			_, _ = fmt.Fprintf(w, ": heartbeat\n\n")
 			flusher.Flush()
 		case <-notifyCh:
-			poll()
+			if !poll() {
+				return
+			}
 			if n, ok := h.journal.(flushNotifier); ok {
 				notifyCh = n.Notify() // single-use channel — re-subscribe
 			}
 		case <-fallback.C:
-			poll()
+			if !poll() {
+				return
+			}
 		}
 	}
 }
@@ -943,4 +964,21 @@ func writeSSEEvent(w http.ResponseWriter, eventType string, e journal.Entry) {
 	payload := serializeEntries([]journal.Entry{e})[0]
 	data, _ := json.Marshal(payload)
 	_, _ = fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", e.ID, eventType, data)
+}
+
+// The opening middleware authenticates the credential; every emitted batch and
+// entry still needs current account, workspace and account-wide Guest authority.
+func (h *JournalHandler) streamAuthorityCurrent(r *http.Request, workspace string) bool {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		return false
+	}
+	var allowed bool
+	err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS(
+ SELECT 1 FROM workspace_members m
+ JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL
+ JOIN workspaces w ON w.id=m.workspace_id AND w.deleted_at IS NULL
+ WHERE m.workspace_id=? AND m.user_id=? AND m.access_mode='trusted'
+ AND NOT EXISTS(SELECT 1 FROM workspace_members other WHERE other.user_id=m.user_id AND other.access_mode='restricted'))`, workspace, user.ID).Scan(&allowed)
+	return err == nil && allowed
 }
