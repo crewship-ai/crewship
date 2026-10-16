@@ -418,6 +418,9 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	if err := remapWaitpointSources(dump, idMap); err != nil {
 		return err
 	}
+	if err := remapApprovalSources(dump, idMap); err != nil {
+		return err
+	}
 	remapChatEntityHistory(dump, idMap)
 	return nil
 }

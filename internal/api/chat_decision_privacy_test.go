@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -299,5 +301,116 @@ func TestVerifiedTextOriginalGenerationCannotRebindToRecreatedChat(t *testing.T)
 	inboxHandler.List(rr, d.request("GET", "", "", ""))
 	if rr.Code != 200 || strings.Contains(rr.Body.String(), d.id) || strings.Contains(rr.Body.String(), "Original answer") {
 		t.Fatalf("old source leaked via Inbox%d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestVerifiedTextMissingOriginalProofNeverBecomesLegacy(t *testing.T) {
+	for _, recreate := range []bool{false, true} {
+		t.Run(fmt.Sprint("recreated-", recreate), func(t *testing.T) {
+			d := newDecisionTestRig(t)
+			original := d.get(t)
+			if recreate {
+				if rr := d.answer(original.Decision.Source.Version, "pruned-proof-key", "Private terminal answer"); rr.Code != 200 {
+					t.Fatalf("answer%d %s", rr.Code, rr.Body.String())
+				}
+			}
+			if err := d.router.queryHandler.journal.(*journal.Writer).Flush(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			var inboxID, journalID string
+			if err := d.f.h.db.QueryRow(`SELECT id FROM inbox_items WHERE source_id=? AND kind='escalation'`, d.id).Scan(&inboxID); err != nil {
+				t.Fatal(err)
+			}
+			if err := d.f.h.db.QueryRow(`SELECT id FROM journal_entries WHERE json_extract(refs,'$.escalation_id')=? LIMIT 1`, d.id).Scan(&journalID); err != nil {
+				t.Fatal(err)
+			}
+			execOrFatal(t, d.f.h.db, `DELETE FROM journal_entries WHERE workspace_id=? AND trace_id=? AND entry_type='run.started'`, d.f.workspace, d.f.run)
+			if recreate {
+				execOrFatal(t, d.f.h.db, `DELETE FROM chats WHERE id=?`, d.f.chat)
+				execOrFatal(t, d.f.h.db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES(?,?,?,?,'private')`, d.f.chat, d.f.workspace, d.f.agent, d.f.user)
+			}
+			for _, tc := range []struct {
+				handler http.HandlerFunc
+				key, id string
+			}{{d.router.chatDecisionGet, "sourceId", d.id}, {NewInboxHandler(d.f.h.db, newTestLogger(), nil).Get, "id", inboxID}, {NewJournalHandler(d.f.h.db, newTestLogger(), nil).Get, "id", journalID}} {
+				req := d.request("GET", "", "", "")
+				req.SetPathValue(tc.key, tc.id)
+				rr := httptest.NewRecorder()
+				tc.handler(rr, req)
+				if rr.Code != 404 {
+					t.Fatalf("proof removal declassified source%d %s", rr.Code, rr.Body.String())
+				}
+			}
+			rr := httptest.NewRecorder()
+			d.router.queryHandler.PendingEscalationCount(rr, d.request("GET", "", "", ""))
+			if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"count":0`) {
+				t.Fatalf("pruned proof count%d %s", rr.Code, rr.Body.String())
+			}
+			if recreate {
+				if retry := d.answer(original.Decision.Source.Version, "pruned-proof-key", "Private terminal answer"); retry.Code != 404 {
+					t.Fatalf("pruned proof retry%d %s", retry.Code, retry.Body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestAutonomousTextRunKeepsLegacyInboxWithoutCardCorrelation(t *testing.T) {
+	d := newDecisionTestRig(t)
+	execOrFatal(t, d.f.h.db, `UPDATE journal_entries SET payload=json_remove(json_set(payload,'$.trigger_type','CRON'),'$.human_authority','$.trigger_message_id') WHERE workspace_id=? AND trace_id=? AND entry_type='run.started'`, d.f.workspace, d.f.run)
+	rrOld := httptest.NewRecorder()
+	d.router.chatDecisionGet(rrOld, d.request("GET", "", "", ""))
+	if rrOld.Code != 404 {
+		t.Fatalf("autonomous source became card%d %s", rrOld.Code, rrOld.Body.String())
+	}
+	req := httptest.NewRequest("POST", "/", jsonBody(map[string]string{"workspace_id": d.f.workspace, "crew_id": d.f.crew, "chat_id": d.f.chat, "actor_agent_id": d.f.agent, "source_run_id": d.f.run, "reason": "Legacy autonomous question"}))
+	h := d.router.queryHandler
+	req.Header.Set("X-Crewship-Run-Token", internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.internalToken, d.f.workspace, d.f.crew), d.f.workspace, d.f.agent, d.f.run))
+	rr := httptest.NewRecorder()
+	h.CreateEscalation(rr, req)
+	if rr.Code != 201 {
+		t.Fatalf("legacy autonomous execution%d %s", rr.Code, rr.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	id := created["escalation_id"].(string)
+	var correlation string
+	if err := d.f.h.db.QueryRow(`SELECT COALESCE(source_run_id,'') FROM escalations WHERE id=?`, id).Scan(&correlation); err != nil || correlation != "" {
+		t.Fatalf("autonomous correlation%s %v", correlation, err)
+	}
+	req = d.request("PATCH", "", "", "")
+	req.SetPathValue("escalationId", id)
+	req.Body = io.NopCloser(strings.NewReader(`{"action":"approve","resolution":"Legacy answer"}`))
+	rr = httptest.NewRecorder()
+	h.ResolveEscalation(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("legacy autonomous Inbox blocked%d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestMalformedHumanTextSourceCannotDowngradeToLegacy(t *testing.T) {
+	for _, change := range []string{"json_remove(payload,'$.human_authority')", "json_set(payload,'$.human_authority.chat_generation','foreign-generation')", "json_set(payload,'$.chat_origin_id','inherited')"} {
+		t.Run(change, func(t *testing.T) {
+			d := newDecisionTestRig(t)
+			execOrFatal(t, d.f.h.db, `UPDATE journal_entries SET payload=`+change+` WHERE workspace_id=? AND trace_id=? AND entry_type='run.started'`, d.f.workspace, d.f.run)
+			var before int
+			if err := d.f.h.db.QueryRow(`SELECT COUNT(*) FROM escalations`).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest("POST", "/", jsonBody(map[string]string{"workspace_id": d.f.workspace, "crew_id": d.f.crew, "chat_id": d.f.chat, "actor_agent_id": d.f.agent, "source_run_id": d.f.run, "reason": "Must not become public legacy"}))
+			h := d.router.queryHandler
+			req.Header.Set("X-Crewship-Run-Token", internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.internalToken, d.f.workspace, d.f.crew), d.f.workspace, d.f.agent, d.f.run))
+			rr := httptest.NewRecorder()
+			h.CreateEscalation(rr, req)
+			var after int
+			if err := d.f.h.db.QueryRow(`SELECT COUNT(*) FROM escalations`).Scan(&after); err != nil {
+				t.Fatal(err)
+			}
+			if rr.Code != 403 || after != before {
+				t.Fatalf("malformed USER downgraded%d sourcecount%d->%d %s", rr.Code, before, after, rr.Body.String())
+			}
+		})
 	}
 }

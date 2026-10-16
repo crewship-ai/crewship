@@ -43,6 +43,16 @@ var (
 // workspace they resolved from auth context, not one derived from the row.
 
 func List(ctx context.Context, db *sql.DB, workspaceID string, statusFilter Status, limit int, offsets ...int) ([]Request, error) {
+	return listFiltered(ctx, db, workspaceID, statusFilter, limit, "", nil, offsets...)
+}
+
+// ListFiltered applies a host-owned visibility predicate before pagination.
+// The predicate must reference approvals_queue as aq; never accept client SQL.
+func ListFiltered(ctx context.Context, db *sql.DB, workspaceID string, statusFilter Status, limit int, predicate string, predicateArgs []any, offsets ...int) ([]Request, error) {
+	return listFiltered(ctx, db, workspaceID, statusFilter, limit, predicate, predicateArgs, offsets...)
+}
+
+func listFiltered(ctx context.Context, db *sql.DB, workspaceID string, statusFilter Status, limit int, predicate string, predicateArgs []any, offsets ...int) ([]Request, error) {
 	if workspaceID == "" {
 		return nil, errors.New("harbormaster: workspace_id required")
 	}
@@ -56,22 +66,20 @@ func List(ctx context.Context, db *sql.DB, workspaceID string, statusFilter Stat
 	if offset < 0 {
 		offset = 0
 	}
-	var (
-		q    string
-		args []any
-	)
-	if statusFilter == "" {
-		q = `SELECT id, workspace_id, crew_id, agent_id, mission_id, requested_by, kind, reason,
-				payload, status, decided_by, decided_at, decision_comment, timeout_at, created_at, routine_version
-			FROM approvals_queue WHERE workspace_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
-		args = []any{workspaceID, limit, offset}
-	} else {
-		q = `SELECT id, workspace_id, crew_id, agent_id, mission_id, requested_by, kind, reason,
-				payload, status, decided_by, decided_at, decision_comment, timeout_at, created_at, routine_version
-			FROM approvals_queue WHERE workspace_id = ? AND status = ?
-			ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
-		args = []any{workspaceID, string(statusFilter), limit, offset}
+	q := `SELECT id, workspace_id, crew_id, agent_id, mission_id, requested_by, kind, reason,
+	 payload, status, decided_by, decided_at, decision_comment, timeout_at, created_at, routine_version
+	 FROM approvals_queue aq WHERE workspace_id=?`
+	args := []any{workspaceID}
+	if statusFilter != "" {
+		q += ` AND status=?`
+		args = append(args, string(statusFilter))
 	}
+	if predicate != "" {
+		q += ` AND (` + predicate + `)`
+		args = append(args, predicateArgs...)
+	}
+	q += ` ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
 
 	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {

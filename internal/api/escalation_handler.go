@@ -115,6 +115,19 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		body.FromSlug = slug
+		if body.Type == "" || body.Type == "TEXT" {
+			// Autonomous runs keep their legacy question path. A claimed USER
+			// source with malformed original proof must not downgrade to it.
+			eligible, sourceErr := escalationHasHumanSource(r.Context(), h.db, body.SourceRunID, agent, ws, chat)
+			if sourceErr != nil {
+				writeChatIssueError(w, sourceErr)
+				return
+			}
+			if !eligible {
+				body.SourceRunID = ""
+			}
+		}
+
 	}
 	if body.FromSlug == "" || body.Reason == "" || body.CrewID == "" || body.WorkspaceID == "" || body.ChatID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -308,10 +321,10 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		metadataVal = body.Metadata
 	}
 
-	_, err = h.db.ExecContext(r.Context(), `
+	err = h.insertEscalationSource(r.Context(), body.WorkspaceID, escalationID, escalationType == "TEXT" && body.SourceRunID != "", `
 		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, credential_id, status, created_at, deadline_at, answer_deadline_at, source_run_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, NULLIF(?, ''))
-	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now, deadlineAt, answerDeadlineAt, body.SourceRunID)
+	`, []any{escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now, deadlineAt, answerDeadlineAt, body.SourceRunID})
 	if err != nil {
 		h.logger.Error("create escalation", "error", err)
 		// Don't leave an orphaned PENDING_APPROVAL credential with no escalation
