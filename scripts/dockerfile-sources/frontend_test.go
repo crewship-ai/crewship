@@ -109,7 +109,6 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jsonImports := regexp.MustCompile(`(?:from\s+|import\s*\(\s*)["']((?:@/|\.{1,2}/)[^"'\s]+\.json)["']`)
 	for _, file := range strings.Split(string(output), "\x00") {
 		if !strings.HasSuffix(file, ".ts") && !strings.HasSuffix(file, ".tsx") {
 			continue
@@ -121,13 +120,7 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, match := range jsonImports.FindAllSubmatch(content, -1) {
-			dependency := string(match[1])
-			if strings.HasPrefix(dependency, "@/") {
-				dependency = strings.TrimPrefix(dependency, "@/")
-			} else {
-				dependency = filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(file), dependency)))
-			}
+		for _, dependency := range frontendJSONDependencies(file, content) {
 			if !copiedBy(sources, dependency) {
 				t.Errorf("frontend COPY omits JSON contract %s referenced by %s", dependency, file)
 			}
@@ -162,5 +155,41 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 		if copiedBy(sources, file) {
 			t.Errorf("backend/unrelated input %s invalidates frontend source cache", file)
 		}
+	}
+}
+
+// Keep the original broad alias check, including require/side-effect references,
+// while resolving ordinary relative JSON imports from their actual TS file.
+var frontendJSONImports = regexp.MustCompile(`@/([^"'\s]+\.json)|(?:from\s+|(?:import|require)\s*(?:\(\s*)?)["']((?:\.{1,2}/)[^"'\s]+\.json)["']`)
+
+func frontendJSONDependencies(file string, source []byte) []string {
+	var dependencies []string
+	for _, match := range frontendJSONImports.FindAllSubmatch(source, -1) {
+		dependency := string(match[1])
+		if dependency == "" {
+			dependency = filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(file), string(match[2]))))
+		}
+		dependencies = append(dependencies, dependency)
+	}
+	return dependencies
+}
+
+func TestFrontendJSONDependencyForms(t *testing.T) {
+	for _, item := range []struct{ name, source, want string }{
+		{"alias from", `import value from '@/testdata/a.json'`, "testdata/a.json"},
+		{"alias side effect", `import '@/testdata/a.json'`, "testdata/a.json"},
+		{"alias require", `require('@/testdata/a.json')`, "testdata/a.json"},
+		{"existing alias string", `const path = '@/testdata/a.json'`, "testdata/a.json"},
+		{"relative from", `import value from '../../testdata/a.json'`, "testdata/a.json"},
+		{"relative side effect", `import '../../testdata/a.json'`, "testdata/a.json"},
+		{"relative dynamic", `import('../../testdata/a.json')`, "testdata/a.json"},
+		{"relative require", `require('../../testdata/a.json')`, "testdata/a.json"},
+	} {
+		t.Run(item.name, func(t *testing.T) {
+			got := frontendJSONDependencies("e2e/native/fixture.tsx", []byte(item.source))
+			if len(got) != 1 || got[0] != item.want {
+				t.Fatalf("dependencies=%v, want [%s]", got, item.want)
+			}
+		})
 	}
 }
