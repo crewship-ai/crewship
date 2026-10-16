@@ -113,6 +113,10 @@ func newApprovalGateAdapter(db *sql.DB, j journal.Emitter) *approvalGateAdapter 
 }
 
 func (a *approvalGateAdapter) Check(ctx context.Context, in orchestrator.ApprovalCheckInput) (orchestrator.ApprovalDecision, error) {
+	correlation, origin, err := a.approvalOrigin(ctx, in)
+	if err != nil {
+		return orchestrator.ApprovalDecision{}, err
+	}
 	mode := harbormaster.ModeNone
 	switch in.Mode {
 	case "async":
@@ -129,11 +133,16 @@ func (a *approvalGateAdapter) Check(ctx context.Context, in orchestrator.Approva
 		Tool:        in.Tool,
 		Args:        in.Args,
 		Review:      in.Review,
-		Correlation: in.Correlation,
+		Correlation: correlation,
 		Mode:        mode,
 	})
 	if err != nil {
 		return orchestrator.ApprovalDecision{}, err
+	}
+	if dec.Approved || (dec.Pending && dec.EffectiveMode == harbormaster.ModeAsync) {
+		if err := a.recheckApprovalOrigin(ctx, origin); err != nil {
+			return orchestrator.ApprovalDecision{}, err
+		}
 	}
 	return orchestrator.ApprovalDecision{
 		// Required=true means the gate matched at least one rule and an
