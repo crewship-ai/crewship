@@ -82,7 +82,9 @@ func staticArtifactStatus(t *testing.T, status int, raw []byte, want int) {
 func TestStaticArtifactHTTPRevisionsIdentityAndReadCeiling(t *testing.T) {
 	f := newStaticArtifactHTTPFixture(t)
 	path := "/api/v1/pages/report/artifact"
-	status, raw := f.call(t, "GET", path+"?page_id="+f.pageID, f.token, "")
+	status, raw := f.call(t, "GET", path, f.token, "")
+	staticArtifactStatus(t, status, raw, 400)
+	status, raw = f.call(t, "GET", path+"?page_id="+f.pageID, f.token, "")
 	staticArtifactStatus(t, status, raw, 200)
 	first := f.mutation("<h1>Žluťoučký kůň</h1>", "first", 0, 0)
 	status, raw = f.call(t, "POST", path+"/revisions", f.token, first)

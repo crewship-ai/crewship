@@ -1822,3 +1822,61 @@ for a retained version) or `crewship page project publish`.
 After a transport timeout the outcome can be unknown; inspect the current
 revision and build status before retrying. Data producers keep pushing through
 the existing panel API/`page.write` path independently of source edits.
+
+## `crewship page artifact create <slug>`
+
+Create an empty human-owned Page for static HTML. Required `--name` sets its
+name; the JSON response contains its immutable `id`. This uses the ordinary
+human profile and current Page creation permission. It does not create an agent
+job or activate JavaScript.
+
+```bash
+crewship page artifact create report --name 'Report' --format json
+```
+
+## `crewship page artifact show <slug>`
+
+Required `--page-id` binds the original immutable Page ID returned by create
+or get. Optional `--revision` reads one retained positive revision; omission
+reads the current head. The response includes source text, history, manifest
+and advisory `can_write`. `--format json` emits the server document as JSON;
+HTML and terminal control characters remain escaped text.
+
+```bash
+crewship page artifact show report --page-id PAGE_ID --revision 1 --format json
+```
+
+## `crewship page artifact publish <slug>`
+
+Required `--page-id` binds the original Page. Required `--base-rev` is its
+original head, including 0 for first publication. Required `--file` reads UTF-8
+HTML from a file; `--file -` reads stdin, bounded to 10 MiB. Optional
+`--mutation-id` identifies an exact retry; a new ID is generated once per
+invocation when omitted. For recoverable scripted writes, supply an explicit
+ID before the first attempt and retain the exact file, Page ID and base.
+
+```bash
+crewship page artifact publish report --page-id PAGE_ID --base-rev 0 --mutation-id report-first --file report.html
+```
+
+A lost acknowledgement may have committed. Explicitly repeat these same
+arguments and source. The CLI never reads a new base or Page ID automatically;
+a conflict stops with a nonzero exit. A recreated slug cannot receive the old
+Page's change.
+
+## `crewship page artifact restore <slug>`
+
+Required `--page-id` binds the original Page, `--base-rev` is the current head
+acknowledged by the caller, and `--revision` names the retained historical
+source. Optional `--mutation-id` works as in publish: supply and preserve an
+explicit value for retrying the same attempt. Restore creates a new immutable
+revision and records `restored_from`; it does not rewind or overwrite history.
+A retry still requires its original source revision to remain retained.
+
+```bash
+crewship page artifact restore report --page-id PAGE_ID --base-rev 1 --revision 1 --mutation-id report-restore
+```
+
+These commands need live human credentials and Page access; publishing and
+restoring additionally need current edit permission and `pages:write` token
+scope. There is no agent authority or human-profile fallback for a run.
