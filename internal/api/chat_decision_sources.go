@@ -32,9 +32,14 @@ type decisionSourceAdapter struct {
 var errDecisionInput = errors.New("invalid decision answer")
 var errDecisionDenied = errTextDecisionDenied
 
+func (r *Router) decisionSourceAdapters() []decisionSourceAdapter {
+	return []decisionSourceAdapter{r.escalationDecisionAdapter(), r.waitpointDecisionAdapter(), r.runApprovalDecisionAdapter()}
+}
 func (r *Router) decisionSourceAdapterFor(kind string) (decisionSourceAdapter, bool) {
-	if kind == "escalation" {
-		return decisionSourceAdapter{SourceType: kind, Read: r.escalationDecision}, true
+	for _, adapter := range r.decisionSourceAdapters() {
+		if adapter.SourceType == kind {
+			return adapter, true
+		}
 	}
 	return decisionSourceAdapter{}, false
 }

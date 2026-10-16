@@ -17,7 +17,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
@@ -151,6 +153,60 @@ func TestAcceptance_ChatDecisions_RealSourceAndCLI(t *testing.T) {
 	var actor, value string
 	if err = db.QueryRow(`SELECT resolved_by_user_id,resolution FROM escalations WHERE id=?`, source).Scan(&actor, &value); err != nil || actor != "decision-user" || value != "Tomorrow" {
 		t.Fatalf("source actor=%s value=%s err=%v", actor, value, err)
+	}
+	approvalID, enqueueErr := harbormaster.Enqueue(t.Context(), db, writer, harbormaster.Request{WorkspaceID: workspace, CrewID: "decision-crew", AgentID: "decision-agent", RequestedBy: "decision-agent", Kind: harbormaster.KindCustom, Reason: "Review this exact whole run", Payload: map[string]any{"tool": "agent_run", "args": map[string]any{}, "gate_mode": "sync", "correlation": map[string]any{"run_id": "decision-run", "chat_id": "decision-chat", "trigger_message_id": "decision-trigger", "trigger_type": "human_chat"}}})
+	if enqueueErr != nil {
+		t.Fatal(enqueueErr)
+	}
+	out, err = runFeedbackCLI(t, cfg, "chat", "decision", "show", "decision-chat", "run_approval", approvalID)
+	var approvalCard api.ChatCardResponse
+	if err != nil || json.Unmarshal([]byte(out), &approvalCard) != nil || approvalCard.Decision == nil {
+		t.Fatalf("whole-run CLI show %v %s", err, out)
+	}
+	approvalArgs := []string{"chat", "decision", "answer", "decision-chat", "run_approval", approvalID, "--expected-version", approvalCard.Decision.Source.Version, "--idempotency-key", "whole-run-key", "--action", "approve"}
+	badArgs := append(append([]string{}, approvalArgs...), "--text", "unrelated information")
+	if bad, modeErr := runFeedbackCLI(t, cfg, badArgs...); modeErr == nil {
+		t.Fatalf("mixed source modes accepted: %s", bad)
+	}
+	for i := 0; i < 2; i++ {
+		out, err = runFeedbackCLI(t, cfg, approvalArgs...)
+		if err != nil || !strings.Contains(out, `"status": "approved"`) {
+			t.Fatalf("whole-run CLI answer/replay %v %s", err, out)
+		}
+	}
+	var wholeStatus, wholeActor string
+	if err = db.QueryRow(`SELECT status,decided_by FROM approvals_queue WHERE id=?`, approvalID).Scan(&wholeStatus, &wholeActor); err != nil || wholeStatus != "approved" || wholeActor != "decision-user" {
+		t.Fatalf("whole source status%s actor%s %v", wholeStatus, wholeActor, err)
+	}
+
+	exec(`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,head_version,created_at,updated_at) VALUES('decision-recipe',?,'decision-recipe','Decision recipe','{}','hash',1,'2026-10-16T08:00:00Z','2026-10-16T08:00:00Z')`, workspace)
+	exec(`INSERT INTO pipeline_runs(id,workspace_id,pipeline_id,pipeline_slug,status,started_at,invocation_source_run_id,invoking_agent_id) VALUES('decision-pipeline-run',?,'decision-recipe','decision-recipe','running','2026-10-16T08:00:00Z','decision-run','decision-agent')`, workspace)
+	waitpoints := pipeline.NewSQLWaitpointStore(db)
+	t.Cleanup(waitpoints.Close)
+	router.PipelinesHandler.SetWaitpointStore(waitpoints)
+	bearer, createErr := waitpoints.CreateApproval(t.Context(), pipeline.WaitpointApprovalRequest{WorkspaceID: workspace, PipelineRunID: "decision-pipeline-run", StepID: "review", Prompt: "Choose a workflow action", TimeoutSec: 3600, InvokingCrewID: "decision-crew", DecisionForm: &pipeline.DecisionForm{Fields: []pipeline.InputSpec{{Name: "timing", Type: "string", Required: true}}, Actions: []pipeline.DecisionAction{{ID: "ship", Label: "Ship", Approved: true}, {ID: "stop", Label: "Stop"}}}})
+	if createErr != nil {
+		t.Fatal(createErr)
+	}
+	var workflowID string
+	if err = db.QueryRow(`SELECT chat_source_id FROM pipeline_waitpoints WHERE token=?`, bearer).Scan(&workflowID); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runFeedbackCLI(t, cfg, "chat", "decision", "show", "decision-chat", "waitpoint", workflowID)
+	var workflowCard api.ChatCardResponse
+	if err != nil || json.Unmarshal([]byte(out), &workflowCard) != nil || workflowCard.Decision == nil || strings.Contains(out, bearer) {
+		t.Fatalf("workflow CLI show %v %s", err, out)
+	}
+	workflowArgs := []string{"chat", "decision", "answer", "decision-chat", "waitpoint", workflowID, "--expected-version", workflowCard.Decision.Source.Version, "--idempotency-key", "workflow-cli-key", "--action-id", "ship", "--values-json", `{"timing":"now"}`}
+	for i := 0; i < 2; i++ {
+		out, err = runFeedbackCLI(t, cfg, workflowArgs...)
+		if err != nil || !strings.Contains(out, `"status": "approved"`) || strings.Contains(out, bearer) {
+			t.Fatalf("workflow CLI answer/replay %v %s", err, out)
+		}
+	}
+	var workflowStatus, workflowPayload string
+	if err = db.QueryRow(`SELECT status,decision_payload FROM pipeline_waitpoints WHERE token=?`, bearer).Scan(&workflowStatus, &workflowPayload); err != nil || workflowStatus != "approved" || !strings.Contains(workflowPayload, `"action_id":"ship"`) {
+		t.Fatalf("workflow actual source%s %s %v", workflowStatus, workflowPayload, err)
 	}
 	exec(`UPDATE workspace_members SET role='VIEWER' WHERE id='decision-member'`)
 	out, err = runFeedbackCLI(t, cfg, args...)

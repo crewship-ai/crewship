@@ -65,9 +65,14 @@ func chatDecisionSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	components["ChatDecisionVersionConflict"] = conflict
 	ref := func(name string) map[string]any { return map[string]any{"$ref": "#/components/schemas/" + name} }
 	routes := map[string]DomainSchema{
-		"GET /api/v1/chats/{chatId}/decisions":                                 {Response: ref("ChatDecisionReferencePage"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"404", "503"}},
+		"GET /api/v1/chats/{chatId}/decisions":                                 {Response: ref("ChatDecisionReferencePage"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "404", "503"}},
 		"GET /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}":         {Response: ref("ChatDecisionReference"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"404", "500", "503"}},
 		"POST /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer": {Request: ref("ChatDecisionAnswer"), RequestRequired: true, Response: ref("ChatDecisionReference"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "403", "404", "409", "500"}, Parameters: []map[string]any{{"name": "Idempotency-Key", "in": "header", "required": true, "schema": map[string]any{"type": "string", "minLength": 1, "maxLength": 200}, "description": "Stable key scoped to this source and authenticated human. Reuse with different intent returns409 without a receipt."}}},
+	}
+	for _, key := range []string{"GET /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}", "POST /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer"} {
+		route := routes[key]
+		route.Parameters = append(route.Parameters, map[string]any{"name": "sourceType", "in": "path", "required": true, "schema": map[string]any{"type": "string", "enum": []string{"escalation", "waitpoint", "run_approval"}}, "description": "Exact authoritative source scope; workflow and whole-run decisions are not interchangeable."})
+		routes[key] = route
 	}
 	answer := routes["POST /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer"]
 	answer.ErrorMedia = []string{"application/json"}

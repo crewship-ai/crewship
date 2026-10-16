@@ -30,10 +30,9 @@ func newChatDecisionCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path := "/api/v1/chats/" + url.PathEscape(args[0]) + "/decisions"
-			if name != "list" {
-				path += "/" + url.PathEscape(args[1]) + "/" + url.PathEscape(args[2])
-			} else {
+
+			var result map[string]any
+			if name == "list" {
 				limit, _ := cmd.Flags().GetInt("limit")
 				if limit < 1 || limit > 100 {
 					return fmt.Errorf("--limit must be between1 and100")
@@ -43,21 +42,46 @@ func newChatDecisionCommand() *cobra.Command {
 				if cursor != "" {
 					params.Set("cursor", cursor)
 				}
-				path += "?" + params.Encode()
-			}
-			var result map[string]any
-			if name == "answer" {
+				err = getJSON(client, chatDecisionListPath(args[0])+"?"+params.Encode(), &result)
+			} else if name == "answer" {
 				version, _ := cmd.Flags().GetString("expected-version")
 				key, _ := cmd.Flags().GetString("idempotency-key")
 				text, _ := cmd.Flags().GetString("text")
-				if strings.TrimSpace(key) == "" || len(key) > 200 || strings.TrimSpace(version) == "" || text == "" {
-					return fmt.Errorf("--expected-version, --idempotency-key and --text are required")
+				action, _ := cmd.Flags().GetString("action")
+				actionID, _ := cmd.Flags().GetString("action-id")
+				valuesJSON, _ := cmd.Flags().GetString("values-json")
+				if strings.TrimSpace(key) == "" || len(key) > 200 || strings.TrimSpace(version) == "" {
+					return fmt.Errorf("--expected-version and --idempotency-key are required")
 				}
-				raw, _ := json.Marshal(text)
-				body := chatentities.DecisionAnswer{SourceID: args[2], ExpectedVersion: version, Action: "answer", Values: map[string]json.RawMessage{"answer": raw}}
-				err = postJSON(client.WithHeader("Idempotency-Key", key), path+"/answer", body, &result)
+				body := chatentities.DecisionAnswer{SourceID: args[2], ExpectedVersion: version, Values: map[string]json.RawMessage{}}
+				switch args[1] {
+				case "escalation":
+					if text == "" || action != "" || actionID != "" || cmd.Flags().Changed("values-json") {
+						return fmt.Errorf("TEXT escalation requires only --text")
+					}
+					raw, _ := json.Marshal(text)
+					body.Action = "answer"
+					body.Values["answer"] = raw
+				case "waitpoint":
+					if actionID == "" || text != "" || action != "" {
+						return fmt.Errorf("waitpoint requires --action-id and optional --values-json")
+					}
+					if err = json.Unmarshal([]byte(valuesJSON), &body.Values); err != nil || body.Values == nil {
+						return fmt.Errorf("--values-json must be a JSON object of typed field values")
+					}
+					body.Action = "answer"
+					body.ActionID = actionID
+				case "run_approval":
+					if (action != "approve" && action != "reject") || text != "" || actionID != "" || cmd.Flags().Changed("values-json") {
+						return fmt.Errorf("whole-run approval requires only --action approve or reject")
+					}
+					body.Action = action
+				default:
+					return fmt.Errorf("unsupported decision source type")
+				}
+				err = postJSON(client.WithHeader("Idempotency-Key", key), chatDecisionSourcePath(args[0], args[1], args[2])+"/answer", body, &result)
 			} else {
-				err = getJSON(client, path, &result)
+				err = getJSON(client, chatDecisionSourcePath(args[0], args[1], args[2]), &result)
 			}
 			if err != nil {
 				return err
@@ -72,9 +96,19 @@ func newChatDecisionCommand() *cobra.Command {
 			cmd.Flags().String("expected-version", "", "Opaque reviewed source version")
 			cmd.Flags().String("idempotency-key", "", "Stable operation key; reuse on uncertain retry")
 			cmd.Flags().String("text", "", "Information answer (TEXT escalations only)")
+			cmd.Flags().String("action", "", "Whole-run decision: approve or reject (run_approval only)")
+			cmd.Flags().String("action-id", "", "Declared frozen workflow action (waitpoint only)")
+			cmd.Flags().String("values-json", "{}", "JSON object of typed workflow field values (waitpoint only)")
 		}
 		group.AddCommand(cmd)
 	}
 	return group
 }
 func init() { chatCmd.AddCommand(newChatDecisionCommand()) }
+
+func chatDecisionListPath(chat string) string {
+	return "/api/v1/chats/" + url.PathEscape(chat) + "/decisions"
+}
+func chatDecisionSourcePath(chat, source, id string) string {
+	return "/api/v1/chats/" + url.PathEscape(chat) + "/decisions/" + url.PathEscape(source) + "/" + url.PathEscape(id)
+}

@@ -1,19 +1,28 @@
 ---
 title: Chat decisions
-description: Source-backed information requests in chat
+description: Source-backed information, workflow and run decisions in chat
+stability: experimental
+tag: Experimental
 ---
 
 Chat decision cards are projections of existing escalation records. They do not
 create another approval queue or grant authority to agents. This integration
-supports run-authenticated TEXT escalations with persisted chat, agent-run and
-trigger correlation. Credential escalations and sources without verified origin
+supports run-authenticated TEXT escalations, bounded scalar workflow waitpoints,
+and actual synchronous whole-run agent approvals with persisted chat, agent-run
+and trigger correlation. Credential escalations and sources without verified origin
 remain available on their existing Inbox surfaces.
 
 - `GET /api/v1/chats/{chatId}/decisions` returns a replacement `ChatCardPage`.
 - `GET /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}` returns a `ChatCardResponse`.
 - `POST /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer` answers the existing source.
 
-`sourceType` is currently `escalation`. Reads require current trusted chat access;
+`sourceType` is `escalation`, `waitpoint`, or `run_approval`. Each source retains
+its existing scope: information answers supply data; workflow answers select a
+stored `action_id` and preserve its declared approved/denied effect; whole-run
+approvals apply only to the exact referenced synchronous agent run. Async run
+reviews are not blocking decisions and stay on the existing approval surface.
+Unsupported historical forms (arrays/objects, defaults, custom choices or more
+than20 fields) remain on the existing Inbox surface. Reads require current trusted chat access;
 Guests and restricted memberships receive no source information. The response
 contains only current viewer-authorized source snapshots. Pages contain at most 100 visible cards. Follow `next_cursor` until
 `snapshot_complete` is true, replacing accumulated cards whenever `reset` is true.
@@ -40,3 +49,25 @@ Terminal cards are read-only and use the authoritative outcome, human actor and
 time. Old terminal records without an attributable actor are not fabricated into
 new chat receipts. No workflow answer or whole-run approval is accepted by this
 information-only adapter.
+
+
+For a workflow waitpoint, send `action: "answer"`, the exact stored `action_id`,
+and typed `values`. A denial may omit required fields, while supplied fields
+must retain their declared types. For a whole-run source, send `action: "approve"`
+or `"reject"` with `values: {}` and no `action_id`. Neither request can change a
+source ID into a different scope or approve an unrelated run. A changed source
+version returns409 with the fresh authorized source snapshot; review it before
+starting a new operation key.
+
+Canonical mutations require the existing `workspace:admin` CLI scope. Source
+roles remain source specific: TEXT answers use the existing create capability,
+workflow waitpoints require update capability, whole-run gates require OWNER or
+ADMIN. A same-key completed receipt may be reread after role demotion while
+current trusted chat read access remains valid; scope checks still apply.
+
+Ordinary restarts preserve exact retries with an unchanged chat generation.
+A true workspace restore or same-ID chat recreation rotates that generation;
+old invocation-backed sources fail closed with 404 in E2 even for current
+readers, while source aliases, outcomes and receipts remain persisted. Canonical
+Inbox behavior is preserved. Forks without verified original invocation are
+also omitted; history is not rebound to new authority.

@@ -57577,10 +57577,16 @@
             }
           },
           {
+            "description": "Exact authoritative source scope; workflow and whole-run decisions are not interchangeable.",
             "in": "path",
             "name": "sourceType",
             "required": true,
             "schema": {
+              "enum": [
+                "escalation",
+                "waitpoint",
+                "run_approval"
+              ],
               "type": "string"
             }
           },
@@ -57754,10 +57760,16 @@
             }
           },
           {
+            "description": "Exact authoritative source scope; workflow and whole-run decisions are not interchangeable.",
             "in": "path",
             "name": "sourceType",
             "required": true,
             "schema": {
+              "enum": [
+                "escalation",
+                "waitpoint",
+                "run_approval"
+              ],
               "type": "string"
             }
           },

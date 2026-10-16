@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -13,7 +14,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"time"
 
@@ -230,109 +230,7 @@ func (r *Router) chatDecisionGet(w http.ResponseWriter, req *http.Request) {
 	}
 	writeJSON(w, 200, card)
 }
-func (r *Router) chatDecisionList(w http.ResponseWriter, req *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	a, err := r.entityRefAudience(req, req.PathValue("chatId"))
-	if err != nil || a == nil {
-		replyError(w, 404, "Card not found")
-		return
-	}
-	var eligible bool
-	if err = r.db.QueryRowContext(req.Context(), `SELECT EXISTS(SELECT 1 FROM workspace_members WHERE id=? AND access_mode='trusted')`, a.MemberID).Scan(&eligible); err != nil {
-		replyError(w, 503, "Could not read cards")
-		return
-	}
-	if !eligible {
-		replyError(w, 404, "Card not found")
-		return
-	}
-	if r.queryHandler != nil {
-		r.queryHandler.sweepExpiredEscalationsBestEffort(req.Context(), a.WorkspaceID)
-	}
-
-	limit := 100
-	if raw := req.URL.Query().Get("limit"); raw != "" {
-		limit, err = strconv.Atoi(raw)
-		if err != nil || limit < 1 || limit > 100 {
-			replyError(w, 400, "Invalid limit")
-			return
-		}
-	}
-	cursor := decisionPageCursor{Audience: *a, Snapshot: generateCUID(), Expires: time.Now().Add(15 * time.Minute).Unix()}
-	reset := true
-	if raw := req.URL.Query().Get("cursor"); raw != "" {
-		cursor, err = r.decodeDecisionCursor(raw)
-		if err != nil || cursor.Audience != *a {
-			replyError(w, 400, "cursor_invalid")
-			return
-		}
-		reset = false
-	} else {
-		err = r.db.QueryRowContext(req.Context(), `SELECT COALESCE(MAX(e.rowid),0) FROM escalations e WHERE `+textDecisionVisibilitySQL, a.WorkspaceID, a.ChatID, a.AgentID).Scan(&cursor.Upper)
-		if err != nil {
-			replyError(w, 503, "Could not read cards")
-			return
-		}
-	}
-	rows, err := r.db.QueryContext(req.Context(), `SELECT e.id,e.rowid FROM escalations e WHERE `+textDecisionVisibilitySQL+` AND e.rowid>? AND e.rowid<=? ORDER BY e.rowid LIMIT ?`, a.WorkspaceID, a.ChatID, a.AgentID, cursor.After, cursor.Upper, limit+1)
-	if err != nil {
-		replyError(w, 503, "Could not read cards")
-		return
-	}
-	type selected struct {
-		id       string
-		position int64
-	}
-	ids := []selected{}
-	for rows.Next() {
-		var item selected
-		if err = rows.Scan(&item.id, &item.position); err != nil {
-			break
-		}
-		ids = append(ids, item)
-	}
-	if err == nil {
-		err = rows.Err()
-	}
-	rows.Close()
-	if err != nil {
-		replyError(w, 503, "Could not read cards")
-		return
-	}
-	hasMore := len(ids) > limit
-	if hasMore {
-		ids = ids[:limit]
-	}
-	refs := []ChatCardResponse{}
-	for _, item := range ids {
-		p, e := r.escalationDecision(req.Context(), *a, item.id)
-		if errors.Is(e, sql.ErrNoRows) {
-			continue
-		}
-		if e != nil {
-			replyError(w, 503, "Could not read cards")
-			return
-		}
-		refs = append(refs, p.Ref)
-	}
-	current, err := r.entityRefAudience(req, a.ChatID)
-	if err != nil || current == nil || *current != *a {
-		replyError(w, 404, "Card not found")
-		return
-	}
-	next := ""
-	if hasMore {
-		cursor.After = ids[len(ids)-1].position
-		next, err = r.encodeDecisionCursor(cursor)
-		if err != nil {
-			replyError(w, 503, "Could not read cards")
-			return
-		}
-	}
-	writeJSON(w, 200, ChatCardPage{ContractVersion: 1, Reset: reset, SnapshotID: cursor.Snapshot, SnapshotComplete: !hasMore, HasMore: hasMore, NextCursor: next, Refs: refs})
-
-}
-func (r *Router) chatDecisionAnswer(w http.ResponseWriter, req *http.Request) {
+func (r *Router) chatEscalationDecisionAnswer(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if req.PathValue("sourceType") != "escalation" || r.queryHandler == nil {
 		replyError(w, 404, "Card not found")
@@ -423,12 +321,17 @@ const textDecisionVisibilitySQL = `e.workspace_id=? AND e.chat_id=? AND e.from_a
  AND (SELECT COUNT(*) FROM journal_entries j WHERE j.workspace_id=e.workspace_id AND j.trace_id=e.source_run_id AND j.agent_id=e.from_agent_id AND j.entry_type='run.started')=1
  AND EXISTS(SELECT 1 FROM journal_entries j WHERE j.workspace_id=e.workspace_id AND j.trace_id=e.source_run_id AND j.agent_id=e.from_agent_id AND j.entry_type='run.started' AND json_valid(j.payload) AND json_extract(j.payload,'$.chat_id')=e.chat_id AND json_type(j.payload,'$.trigger_message_id')='text' AND length(json_extract(j.payload,'$.trigger_message_id')) BETWEEN 1 AND 200)`
 
+type decisionSourcePageCursor struct {
+	Type  string `json:"t"`
+	After int64  `json:"p"`
+	Upper int64  `json:"u"`
+}
 type decisionPageCursor struct {
-	Audience chataudience.Receipt `json:"a"`
-	After    int64                `json:"p"`
-	Upper    int64                `json:"u"`
-	Snapshot string               `json:"s"`
-	Expires  int64                `json:"e"`
+	Audience chataudience.Receipt       `json:"a"`
+	Sources  []decisionSourcePageCursor `json:"q"`
+	Index    int                        `json:"i"`
+	Snapshot string                     `json:"s"`
+	Expires  int64                      `json:"e"`
 }
 
 func (r *Router) encodeDecisionCursor(cursor decisionPageCursor) (string, error) {
@@ -440,11 +343,17 @@ func (r *Router) encodeDecisionCursor(cursor decisionPageCursor) (string, error)
 	if err != nil {
 		return "", err
 	}
+	// Keep encrypted cursor length independent of hidden candidate positions.
+	const cursorPlaintextSize = 2048
+	if len(raw) > cursorPlaintextSize {
+		return "", errors.New("cursor_invalid")
+	}
+	raw = append(raw, bytes.Repeat([]byte{' '}, cursorPlaintextSize-len(raw))...)
 	nonce := make([]byte, cipher.NonceSize())
 	if _, err = rand.Read(nonce); err != nil {
 		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(cipher.Seal(nonce, nonce, raw, []byte("chat-decisions:v1"))), nil
+	return base64.RawURLEncoding.EncodeToString(cipher.Seal(nonce, nonce, raw, []byte("chat-decisions:v2"))), nil
 }
 func (r *Router) decodeDecisionCursor(raw string) (decisionPageCursor, error) {
 	var cursor decisionPageCursor
@@ -459,13 +368,18 @@ func (r *Router) decodeDecisionCursor(raw string) (decisionPageCursor, error) {
 	if err != nil || len(data) < cipher.NonceSize() {
 		return cursor, errors.New("cursor_invalid")
 	}
-	data, err = cipher.Open(nil, data[:cipher.NonceSize()], data[cipher.NonceSize():], []byte("chat-decisions:v1"))
+	data, err = cipher.Open(nil, data[:cipher.NonceSize()], data[cipher.NonceSize():], []byte("chat-decisions:v2"))
 	if err != nil {
 		return cursor, errors.New("cursor_invalid")
 	}
 	err = json.Unmarshal(data, &cursor)
-	if err != nil || cursor.After < 0 || cursor.Upper < cursor.After || cursor.Snapshot == "" || cursor.Expires < time.Now().Unix() {
+	if err != nil || cursor.Index < 0 || cursor.Index > len(cursor.Sources) || len(cursor.Sources) == 0 || cursor.Snapshot == "" || cursor.Expires < time.Now().Unix() {
 		return cursor, errors.New("cursor_invalid")
+	}
+	for _, source := range cursor.Sources {
+		if source.Type == "" || source.After < 0 || source.Upper < source.After {
+			return cursor, errors.New("cursor_invalid")
+		}
 	}
 	return cursor, nil
 }

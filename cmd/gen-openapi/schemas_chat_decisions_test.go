@@ -10,8 +10,12 @@ func TestChatDecisionCatalogUsesFrozenSourceContracts(t *testing.T) {
 		}
 	}
 	answer := routes["POST /api/v1/chats/{chatId}/decisions/{sourceType}/{sourceId}/answer"]
-	if !answer.RequestRequired || len(answer.Parameters) != 1 || answer.Parameters[0]["name"] != "Idempotency-Key" || answer.Parameters[0]["required"] != true {
+	if !answer.RequestRequired || len(answer.Parameters) != 2 || answer.Parameters[0]["name"] != "Idempotency-Key" || answer.Parameters[0]["required"] != true {
 		t.Fatal("missing required operation key/body")
+	}
+	source := answer.Parameters[1]
+	if source["name"] != "sourceType" || source["in"] != "path" || source["required"] != true {
+		t.Fatal("missing closed source scope")
 	}
 	response := components["ChatDecisionReference"].(map[string]any)
 	if response["properties"].(map[string]any)["decision"] == nil || response["properties"].(map[string]any)["proposal"] != nil {
