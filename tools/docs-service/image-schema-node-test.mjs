@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Y from 'yjs';
-import {create,validate,snapshot,load,find,hash,imageReferences,markdown} from './schema.mjs';
+import {create,validate,snapshot,load,find,hash,imageReferences,markdown,anchor,resolve} from './schema.mjs';
 const sha='a'.repeat(64),ref='logical-image-one';
 const paragraph={type:'paragraph',attrs:{id:'text'},content:[{type:'text',text:'Original linked text',marks:[{type:'link',attrs:{href:'https://example.invalid/'}}]}]};
 const image=(id='image',asset_ref=ref,expected_sha256=sha)=>({type:'image',attrs:{id,asset_ref,expected_sha256,alt:'Private diagram',width:640,height:480}});
@@ -40,4 +40,12 @@ test('raw retained image children/foreign parent and unknown attrs fail closed',
 });
 test('private images have no implicit Markdown byte or authenticated-URL export',()=>{
  assert.throws(()=>markdown(body(image())),error=>error.code==='unsupported_markdown'&&/private image/.test(error.message));
+});
+
+test('actual image deletion undo and redo retain sources across new CRDT struct identities',async()=>{
+ const doc=create(body(image()),4),fragment=doc.getXmlFragment('default'),original=find(doc,'image'),before=await hash(validate(doc,4)),comment=anchor(doc,'text',0,8,'original-text-comment',0,4),undo=new Y.UndoManager(fragment,{captureTimeout:0});
+ fragment.delete(1,1);assert.deepEqual(imageReferences(doc),[{asset_ref:ref,expected_sha256:sha}]);assert.equal(validate(doc,4).content.length,1);
+ undo.undo();const restored=find(doc,'image');assert.notEqual(restored._item,original._item,'Yjs undo creates a distinct retained image struct');assert.equal(await hash(validate(doc,4)),before);assert.deepEqual(imageReferences(doc),[{asset_ref:ref,expected_sha256:sha}]);
+ undo.redo();assert.equal(validate(doc,4).content.length,1);assert.deepEqual(imageReferences(doc),[{asset_ref:ref,expected_sha256:sha}]);
+ undo.undo();assert.equal(await hash(validate(doc,4)),before);const bytes=snapshot(doc),copy=load(bytes);assert.equal(await hash(validate(copy,4)),before);assert.deepEqual(imageReferences(copy),[{asset_ref:ref,expected_sha256:sha}]);assert.equal(snapshot(copy),bytes);assert.equal(resolve(copy,comment,4).status,'attached');assert.equal(resolve(copy,comment,4).quote,'Original');copy.destroy();undo.destroy();doc.destroy();
 });
