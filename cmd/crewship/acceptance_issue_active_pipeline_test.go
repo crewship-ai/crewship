@@ -33,7 +33,7 @@ func TestAcceptanceGuestActivePipelineConflictCLI(t *testing.T) {
 				_, _ = io.WriteString(w, `{"error":"This issue has active routine work"}`)
 			}))
 			defer server.Close()
-			args := []string{"issue", "move", "CLIENT-1", "--status", "TODO"}
+			args := []string{"issue", "shared", "move", "CLIENT-1", "--status", "TODO"}
 			if operation == "delete" {
 				args = []string{"issue", "shared-delete", "CLIENT-1", "--project", "p1", "--version", strings.Repeat("a", 64), "--confirm"}
 			}
