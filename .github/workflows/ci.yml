@@ -1308,6 +1308,19 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
+      - name: Verify the pinned Document engine
+        timeout-minutes: 3
+        run: |
+          pnpm --dir tools/docs-service install --frozen-lockfile
+          pnpm --dir tools/docs-service test
+
+      - name: Verify the Document service image and lifecycle
+        timeout-minutes: 8
+        run: |
+          image="crewship-docs-ci:${GITHUB_SHA}"
+          docker build --tag "$image" tools/docs-service
+          DOCS_IMAGE="$image" node tools/docs-service/image-smoke.mjs
+
       # Cache Next.js incremental build artifacts. actions/checkout cleans
       # the workspace each run (clean: true is the default), so .next/cache
       # would otherwise be cold every time and Turbopack would re-parse the
