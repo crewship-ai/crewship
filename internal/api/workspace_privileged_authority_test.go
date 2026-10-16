@@ -37,6 +37,7 @@ func TestWorkspaceOwnerCannotSelfAuthorizeHostPrivileges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(router.Shutdown)
 	for _, tc := range []struct{ method, path, body string }{
 		{"PATCH", "/api/v1/workspaces/" + workspace, `{"allow_privileged_credentials":true}`},
 		{"POST", "/api/v1/crews", `{"name":"Runtime boundary fixture","slug":"runtime-boundary-fixture","devcontainer_config":"{\"image\":\"debian:bookworm-slim\",\"privileged\":true}"}`},
@@ -51,6 +52,19 @@ func TestWorkspaceOwnerCannotSelfAuthorizeHostPrivileges(t *testing.T) {
 			t.Errorf("non-instance-admin %s %s: got %d, want 403", tc.method, tc.path, w.Code)
 		}
 	}
+	var enabled, crews int
+	if err := db.QueryRow(`SELECT allow_privileged_credentials FROM workspaces WHERE id=?`, workspace).Scan(&enabled); err != nil {
+		t.Fatal(err)
+	}
+	if enabled != 0 {
+		t.Errorf("rejected enable changed workspace flag to %d", enabled)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM crews WHERE workspace_id=?`, workspace).Scan(&crews); err != nil {
+		t.Fatal(err)
+	}
+	if crews != 0 {
+		t.Errorf("rejected privileged configuration created %d crews", crews)
+	}
 	// Positive control: the same workspace role can authorize the operation
 	// only after receiving explicit instance authority from the fixture.
 	execOrFatal(t, db, `UPDATE users SET instance_role='ADMIN' WHERE id=?`, user)
@@ -62,6 +76,15 @@ func TestWorkspaceOwnerCannotSelfAuthorizeHostPrivileges(t *testing.T) {
 	router.ServeHTTP(w, r)
 	if w.Code != 200 {
 		t.Fatalf("instance admin cannot enable: %d %s", w.Code, w.Body.String())
+	}
+	r = httptest.NewRequest("POST", "/api/v1/crews", strings.NewReader(`{"name":"Approved runtime fixture","slug":"approved-runtime-fixture","devcontainer_config":"{\"image\":\"debian:bookworm-slim\",\"privileged\":true}"}`))
+	r.Header.Set("Authorization", "Bearer "+token)
+	r.Header.Set("X-Workspace-ID", workspace)
+	r.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, r)
+	if w.Code != 201 {
+		t.Fatalf("instance admin cannot save approved privileged configuration: %d %s", w.Code, w.Body.String())
 	}
 	for _, tc := range []struct {
 		name, scopes string
