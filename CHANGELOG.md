@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Issue editor links and images use a URL dialog instead of the browser prompt.** Inserting or editing a link, and inserting an image from the toolbar or the `/image` command, opens a dialog that pre-fills the current link, accepts only `http://` and `https://` URLs (an empty value removes a link), shows the error under the field and returns focus to the same place in the editor. Cancel and Esc change nothing.
+
 - ⚠️ **Behaviour change: enabling privileged runtime access requires an instance administrator.** Workspace OWNER/ADMIN rights alone no longer enable `allow_privileged_credentials`. Scoped CLI tokens also need `instance:admin`. Workspace administrators may still disable the opt-in; existing privileged containers require separate review and recreation.
 
 - **Guest CLI pairing accepts verified browser sessions.** Pairing start and poll now pass the restricted route gate only for interactive sessions. CLI bearer callers remain forbidden; redemption retains the same current Guest grants as browser CLI token creation and rejects logout, revocation or suspension.

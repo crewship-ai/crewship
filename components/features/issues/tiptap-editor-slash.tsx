@@ -30,11 +30,18 @@ import { cn } from "@/lib/utils"
 // SlashCommandList component itself stays unexported — only the
 // extension factory is consumed elsewhere.
 
+interface SlashCommandContext {
+  editor: Editor
+  range: Range
+  /** Opens the editor's image URL dialog. Absent = the Image item is hidden. */
+  requestImageUrl?: (editor: Editor) => void
+}
+
 interface SlashCommandItem {
   title: string
   description: string
   icon: ComponentType<{ className?: string }>
-  command: (opts: { editor: Editor; range: Range }) => void
+  command: (opts: SlashCommandContext) => void
 }
 
 const SLASH_ITEMS: SlashCommandItem[] = [
@@ -132,12 +139,11 @@ const SLASH_ITEMS: SlashCommandItem[] = [
     title: "Image",
     description: "Insert image from URL",
     icon: ImagePlus,
-    command: ({ editor, range }) => {
+    // The "/image" query is consumed here; the URL is collected by the
+    // editor's dialog, which inserts at the caret this leaves behind.
+    command: ({ editor, range, requestImageUrl }) => {
       editor.chain().focus().deleteRange(range).run()
-      const url = window.prompt("Image URL:")
-      if (!url) return
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(editor.chain().focus() as any).setImage({ src: url }).run()
+      requestImageUrl?.(editor)
     },
   },
 ]
@@ -235,7 +241,12 @@ const SlashCommandList = forwardRef<
 // ---------------------------------------------------------------------------
 // Slash commands extension
 // ---------------------------------------------------------------------------
-function createSlashCommandsExtension() {
+interface SlashCommandsOptions {
+  /** See SlashCommandContext.requestImageUrl. */
+  requestImageUrl?: (editor: Editor) => void
+}
+
+function createSlashCommandsExtension({ requestImageUrl }: SlashCommandsOptions = {}) {
   return Extension.create({
     name: "slashCommands",
 
@@ -252,11 +263,13 @@ function createSlashCommandsExtension() {
             range: Range
             props: SlashCommandItem
           }) => {
-            props.command({ editor, range })
+            props.command({ editor, range, requestImageUrl })
           },
           items: ({ query }: { query: string }) => {
-            return SLASH_ITEMS.filter((item) =>
-              item.title.toLowerCase().includes(query.toLowerCase()),
+            return SLASH_ITEMS.filter(
+              (item) =>
+                (item.title !== "Image" || requestImageUrl) &&
+                item.title.toLowerCase().includes(query.toLowerCase()),
             )
           },
           render: () => {
@@ -361,5 +374,5 @@ function createSlashCommandsExtension() {
   })
 }
 
-export type { SlashCommandItem }
+export type { SlashCommandContext, SlashCommandItem, SlashCommandsOptions }
 export { createSlashCommandsExtension }
