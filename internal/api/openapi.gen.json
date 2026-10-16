@@ -110221,6 +110221,42 @@
                       "description": "The pages in this folder the caller reaches, as index rows.",
                       "items": {
                         "properties": {
+                          "artifact_summary": {
+                            "properties": {
+                              "author_agent_id": {
+                                "type": "string"
+                              },
+                              "author_agent_name": {
+                                "type": "string"
+                              },
+                              "author_name": {
+                                "type": "string"
+                              },
+                              "author_run_id": {
+                                "type": "string"
+                              },
+                              "author_user_id": {
+                                "type": "string"
+                              },
+                              "head_rev": {
+                                "type": "integer"
+                              },
+                              "last_activity_at": {
+                                "type": "string"
+                              },
+                              "published_at": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "head_rev",
+                              "author_user_id",
+                              "author_name",
+                              "published_at",
+                              "last_activity_at"
+                            ],
+                            "type": "object"
+                          },
                           "can_move": {
                             "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
                             "type": "boolean"
@@ -110268,6 +110304,12 @@
                             ]
                           },
                           "has_application": {
+                            "type": "boolean"
+                          },
+                          "has_artifact": {
+                            "type": "boolean"
+                          },
+                          "has_board": {
                             "type": "boolean"
                           },
                           "has_project": {
@@ -111523,6 +111565,42 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "artifact_summary": {
+                          "properties": {
+                            "author_agent_id": {
+                              "type": "string"
+                            },
+                            "author_agent_name": {
+                              "type": "string"
+                            },
+                            "author_name": {
+                              "type": "string"
+                            },
+                            "author_run_id": {
+                              "type": "string"
+                            },
+                            "author_user_id": {
+                              "type": "string"
+                            },
+                            "head_rev": {
+                              "type": "integer"
+                            },
+                            "last_activity_at": {
+                              "type": "string"
+                            },
+                            "published_at": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "head_rev",
+                            "author_user_id",
+                            "author_name",
+                            "published_at",
+                            "last_activity_at"
+                          ],
+                          "type": "object"
+                        },
                         "can_move": {
                           "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
                           "type": "boolean"
@@ -111570,6 +111648,12 @@
                           ]
                         },
                         "has_application": {
+                          "type": "boolean"
+                        },
+                        "has_artifact": {
+                          "type": "boolean"
+                        },
+                        "has_board": {
                           "type": "boolean"
                         },
                         "has_project": {
@@ -111853,6 +111937,42 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "artifact_summary": {
+                          "properties": {
+                            "author_agent_id": {
+                              "type": "string"
+                            },
+                            "author_agent_name": {
+                              "type": "string"
+                            },
+                            "author_name": {
+                              "type": "string"
+                            },
+                            "author_run_id": {
+                              "type": "string"
+                            },
+                            "author_user_id": {
+                              "type": "string"
+                            },
+                            "head_rev": {
+                              "type": "integer"
+                            },
+                            "last_activity_at": {
+                              "type": "string"
+                            },
+                            "published_at": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "head_rev",
+                            "author_user_id",
+                            "author_name",
+                            "published_at",
+                            "last_activity_at"
+                          ],
+                          "type": "object"
+                        },
                         "can_move": {
                           "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
                           "type": "boolean"
@@ -111900,6 +112020,12 @@
                           ]
                         },
                         "has_application": {
+                          "type": "boolean"
+                        },
+                        "has_artifact": {
+                          "type": "boolean"
+                        },
+                        "has_board": {
                           "type": "boolean"
                         },
                         "has_project": {
@@ -112195,6 +112321,42 @@
                     "pages": {
                       "items": {
                         "properties": {
+                          "artifact_summary": {
+                            "properties": {
+                              "author_agent_id": {
+                                "type": "string"
+                              },
+                              "author_agent_name": {
+                                "type": "string"
+                              },
+                              "author_name": {
+                                "type": "string"
+                              },
+                              "author_run_id": {
+                                "type": "string"
+                              },
+                              "author_user_id": {
+                                "type": "string"
+                              },
+                              "head_rev": {
+                                "type": "integer"
+                              },
+                              "last_activity_at": {
+                                "type": "string"
+                              },
+                              "published_at": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "head_rev",
+                              "author_user_id",
+                              "author_name",
+                              "published_at",
+                              "last_activity_at"
+                            ],
+                            "type": "object"
+                          },
                           "can_move": {
                             "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
                             "type": "boolean"
@@ -112242,6 +112404,12 @@
                             ]
                           },
                           "has_application": {
+                            "type": "boolean"
+                          },
+                          "has_artifact": {
+                            "type": "boolean"
+                          },
+                          "has_board": {
                             "type": "boolean"
                           },
                           "has_project": {
@@ -112621,6 +112789,42 @@
                 "schema": {
                   "items": {
                     "properties": {
+                      "artifact_summary": {
+                        "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
+                          "author_agent_name": {
+                            "type": "string"
+                          },
+                          "author_name": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
+                            "type": "string"
+                          },
+                          "author_user_id": {
+                            "type": "string"
+                          },
+                          "head_rev": {
+                            "type": "integer"
+                          },
+                          "last_activity_at": {
+                            "type": "string"
+                          },
+                          "published_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "head_rev",
+                          "author_user_id",
+                          "author_name",
+                          "published_at",
+                          "last_activity_at"
+                        ],
+                        "type": "object"
+                      },
                       "can_move": {
                         "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
                         "type": "boolean"
@@ -112668,6 +112872,12 @@
                         ]
                       },
                       "has_application": {
+                        "type": "boolean"
+                      },
+                      "has_artifact": {
+                        "type": "boolean"
+                      },
+                      "has_board": {
                         "type": "boolean"
                       },
                       "has_project": {
@@ -112854,6 +113064,9 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "allow_empty": {
+                    "type": "boolean"
+                  },
                   "color": {
                     "description": "The page's colour, a crew palette key. Same pointer rule as icon; a value outside the palette is refused by name (400).",
                     "type": "string"
@@ -113034,6 +113247,12 @@
                       ]
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_artifact": {
+                      "type": "boolean"
+                    },
+                    "has_board": {
                       "type": "boolean"
                     },
                     "has_project": {
@@ -113250,6 +113469,12 @@
                       ]
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_artifact": {
+                      "type": "boolean"
+                    },
+                    "has_board": {
                       "type": "boolean"
                     },
                     "has_project": {
@@ -114097,6 +114322,12 @@
                     "has_application": {
                       "type": "boolean"
                     },
+                    "has_artifact": {
+                      "type": "boolean"
+                    },
+                    "has_board": {
+                      "type": "boolean"
+                    },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
@@ -114311,6 +114542,12 @@
                       ]
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_artifact": {
+                      "type": "boolean"
+                    },
+                    "has_board": {
                       "type": "boolean"
                     },
                     "has_project": {
@@ -115012,6 +115249,12 @@
                     "has_application": {
                       "type": "boolean"
                     },
+                    "has_artifact": {
+                      "type": "boolean"
+                    },
+                    "has_board": {
+                      "type": "boolean"
+                    },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
@@ -115308,6 +115551,9 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "allow_empty": {
+                    "type": "boolean"
+                  },
                   "color": {
                     "description": "The page's colour, a crew palette key. Same pointer rule as icon; a value outside the palette is refused by name (400).",
                     "type": "string"
@@ -115488,6 +115734,12 @@
                       ]
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_artifact": {
+                      "type": "boolean"
+                    },
+                    "has_board": {
                       "type": "boolean"
                     },
                     "has_project": {
@@ -117126,6 +117378,956 @@
           "pages"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/artifact": {
+      "get": {
+        "description": "Get page artifact (GET /api/v1/pages/{slug}/artifact).",
+        "operationId": "get_api_v1_pages_slug_artifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "can_write": {
+                      "type": "boolean"
+                    },
+                    "head_rev": {
+                      "type": "integer"
+                    },
+                    "html": {
+                      "type": "string"
+                    },
+                    "manifest": {
+                      "additionalProperties": false,
+                      "nullable": true,
+                      "properties": {
+                        "entrypoint": {
+                          "type": "string"
+                        },
+                        "files": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "mime": {
+                                "type": "string"
+                              },
+                              "path": {
+                                "type": "string"
+                              },
+                              "sha256": {
+                                "type": "string"
+                              },
+                              "size_bytes": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "mime",
+                              "size_bytes",
+                              "sha256"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "format_version": {
+                          "type": "integer"
+                        },
+                        "runtime_profile": {
+                          "type": "string"
+                        },
+                        "source": {
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "format_version",
+                        "runtime_profile",
+                        "entrypoint",
+                        "files",
+                        "source"
+                      ],
+                      "type": "object"
+                    },
+                    "manifest_status": {
+                      "type": "string"
+                    },
+                    "page_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    },
+                    "revisions": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "author_agent_id": {
+                            "type": "string"
+                          },
+                          "author_run_id": {
+                            "type": "string"
+                          },
+                          "author_user_id": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "restored_from": {
+                            "type": "integer"
+                          },
+                          "revision": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "revision",
+                          "created_at",
+                          "author_user_id"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "page_id",
+                    "head_rev",
+                    "revision",
+                    "html",
+                    "manifest",
+                    "manifest_status",
+                    "revisions",
+                    "can_write"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page artifact",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/restore": {
+      "post": {
+        "description": "Restore page artifact (POST /api/v1/pages/{slug}/artifact/restore).",
+        "operationId": "post_api_v1_pages_slug_artifact_restore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_rev": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "format_version": {
+                    "enum": [
+                      1
+                    ],
+                    "type": "integer"
+                  },
+                  "html": {
+                    "enum": [
+                      ""
+                    ],
+                    "type": "string"
+                  },
+                  "mutation_id": {
+                    "type": "string"
+                  },
+                  "page_id": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9_-]+$",
+                    "type": "string"
+                  },
+                  "revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "runtime_profile": {
+                    "enum": [
+                      "static-html-v1"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "page_id",
+                  "base_rev",
+                  "mutation_id",
+                  "revision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "head_rev": {
+                      "type": "integer"
+                    },
+                    "page_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "page_id",
+                    "revision",
+                    "head_rev"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "head_rev": {
+                      "type": "integer"
+                    },
+                    "page_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "page_id",
+                    "revision",
+                    "head_rev"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Restore page artifact",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/revisions": {
+      "post": {
+        "description": "Create page artifact revisions (POST /api/v1/pages/{slug}/artifact/revisions).",
+        "operationId": "post_api_v1_pages_slug_artifact_revisions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_rev": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "format_version": {
+                    "enum": [
+                      1
+                    ],
+                    "type": "integer"
+                  },
+                  "html": {
+                    "type": "string"
+                  },
+                  "mutation_id": {
+                    "type": "string"
+                  },
+                  "page_id": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9_-]+$",
+                    "type": "string"
+                  },
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "runtime_profile": {
+                    "enum": [
+                      "static-html-v1"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "page_id",
+                  "base_rev",
+                  "mutation_id",
+                  "html"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "head_rev": {
+                      "type": "integer"
+                    },
+                    "page_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "page_id",
+                    "revision",
+                    "head_rev"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "head_rev": {
+                      "type": "integer"
+                    },
+                    "page_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "page_id",
+                    "revision",
+                    "head_rev"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create page artifact revisions",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/pages/{slug}/export": {
@@ -123523,6 +124725,12 @@
                           ]
                         },
                         "has_application": {
+                          "type": "boolean"
+                        },
+                        "has_artifact": {
+                          "type": "boolean"
+                        },
+                        "has_board": {
                           "type": "boolean"
                         },
                         "has_project": {

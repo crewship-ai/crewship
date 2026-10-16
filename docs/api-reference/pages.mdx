@@ -2342,3 +2342,84 @@ archived source digest, without the archived panel definition.
 authority, `404` Page or revision missing, `409` unsupported legacy revision,
 `500` archive/integrity error, `503` project storage unavailable.
 The response is `no-store`.
+
+## Read static HTML artifact
+
+```http
+GET /api/v1/pages/{slug}/artifact
+```
+
+**Authentication:** live human session or CLI token with `pages:read`, active
+trusted workspace membership and current Page/folder access. Private source
+and retained history are reauthorized after blob IO. Agent authority is refused.
+
+**Request:** required immutable `page_id` and workspace context; optional positive
+`revision` selects a retained historical revision. Query fields are closed;
+a recreated slug does not replace the original Page identity.
+
+**Response 200:** JSON with `page_id`, `head_rev`, selected `revision`, escaped
+`html`, `manifest`, `manifest_status`, `revisions` and caller-specific `can_write`.
+An unpublished Page has zero head/revision, empty source/history and null manifest.
+Published manifests bind the single HTML file's MIME, length and SHA256. History
+is at most 200 retained revisions, descending, with optional `restored_from`.
+Responses are `Cache-Control: no-store`, never executable HTML.
+
+**Statuses:** 200 success; 400 invalid query; 401 invalid authentication;
+403 revoked credential/scope or untrusted membership; 404 unavailable Page or
+revision; 409 changed immutable identity or no longer retained source; 500 storage
+query failure; 503 missing/corrupt/unsupported source or storage configuration.
+
+## Publish static HTML revision
+
+```http
+POST /api/v1/pages/{slug}/artifact/revisions
+```
+
+**Authentication:** live human session/CLI token with `pages:write`, trusted
+membership and current edit permission on a human-owned Page. Exact credentials,
+scopes, grants and Page identity are checked after IO and inside the writer fence.
+Agent authority is refused.
+
+**Request:** JSON object with required `page_id`, nonnegative original `base_rev`,
+`mutation_id` and nonempty UTF-8 `html` (at most 10 MiB). Optional `format_version`
+is 1 and `runtime_profile` is `static-html-v1`; omission selects those values.
+Common `revision` is accepted but does not select source on publication.
+Unknown/duplicate/case-aliased/null fields and trailing JSON are refused. A Page
+with panels, project source or a Board cannot initialize an artifact.
+
+**Response 201:** JSON `page_id`, new `revision`, `head_rev`. **Response 200:**
+the same shape for exact original-actor/payload receipt replay. Receipt identity
+never grants authority or refreshes the caller's preconditions. Publication
+uses two upload slots, 30 writes/Page/hour and 200 writes/workspace/hour.
+
+**Statuses:** 200 replay; 201 committed new revision; 400 malformed request;
+401 invalid authentication; 403 denied live authority; 404 unavailable Page;
+409 changed identity/base, conflicting receipt, incompatible content or pinned
+retention; 413 oversized wire/source; 422 unsupported format/invalid source;
+429 rolling rate limit; 500 storage failure; 503 unconfigured storage.
+
+## Restore static HTML revision
+
+```http
+POST /api/v1/pages/{slug}/artifact/restore
+```
+
+**Authentication:** live human session/CLI token with `pages:write`, trusted
+membership and current edit permission on the human-owned Page. Exact credential
+and ACL checks match publication; agents cannot use this route.
+
+**Request:** JSON `page_id`, original nonnegative `base_rev`, `mutation_id` and
+positive retained `revision`. Optional `html` must be empty; format/profile
+fields select the sole static format. Unknown, duplicate and null fields are
+refused. The original source must remain retained even for retry; receipts do
+not themselves pin that source. The same upload, rate and retention limits apply.
+
+**Response 201:** JSON `page_id`, new `revision`, `head_rev`; the new source is
+immutable and history records `restored_from`. **Response 200:** exact receipt
+replay after fresh authority checks. A stale head is never silently rebased.
+
+**Statuses:** 200 replay; 201 restored as a new revision; 400 invalid request;
+401 invalid authentication; 403 denied authority; 404 unavailable Page/source;
+409 identity/base/receipt/content/retention conflict; 413 oversized input;
+422 unsupported source format; 429 rate limit; 500 storage failure; 503 missing
+or corrupt source/storage configuration.

@@ -610,6 +610,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range hookSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range staticArtifactsSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	for key, schema := range pagesSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}

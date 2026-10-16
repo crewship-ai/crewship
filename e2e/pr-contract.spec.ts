@@ -1,6 +1,7 @@
 import { devices } from "@playwright/test"
 
 import { test, expect } from "./fixtures/auth"
+import { staticArtifactHumanFlow } from "./static-artifact-human-flow"
 import { incomingWebhookFlow } from "./incoming-webhook-flow"
 
 // One browser context is intentional. NextAuth rotates the session cookie on
@@ -202,6 +203,10 @@ test("PR browser contract subset", async ({ page }) => {
     const actedRow = rows.find((event: { action?: string }) => event.action === "inbox_acted")
     expect(actedRow, JSON.stringify(rows)).toBeTruthy()
     expect(actedRow.seq).toBe(receipt.seq)
+  })
+
+  await test.step("Human static HTML: create, upload, lost ACK retry, preview and restore (real HTTP)", async () => {
+    await staticArtifactHumanFlow(page)
   })
 
   await test.step("Incoming: create GitHub endpoint, reveal, overview, detail, disable and refresh (real HTTP)", async () => {

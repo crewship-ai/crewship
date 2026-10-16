@@ -308,6 +308,8 @@ var requiredQueryParametersInSpec = []string{
 	// TestPageSubjectAccess_AnswersAdminsAboutAnyoneAndMembersAboutThemselves.
 
 	"GET /api/v1/pages/access ?subject",
+	// Verified by TestStaticArtifactHTTPRevisionsIdentityAndReadCeiling: absent immutable ID is 400.
+	"GET /api/v1/pages/{slug}/artifact ?page_id",
 	"GET /api/v1/admin/backups/download ?path",
 	"GET /api/v1/admin/backups/inspect ?path",
 	"GET /api/v1/admin/backups/verify ?path",
