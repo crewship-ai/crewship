@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/chatentities"
 	"github.com/crewship-ai/crewship/internal/conversation"
@@ -477,5 +478,92 @@ func TestChatProposalResponseDoesNotReviveSourceSettledBeforeProjection(t *testi
 	}
 	if result.Proposal.Status != "discarded" || result.Proposal.Version != 3 || len(result.Proposal.AllowedActions) != 1 {
 		t.Fatalf("response revived old draft: %s", rr.Body)
+	}
+}
+
+func TestChatProposalWorkspaceBundleRestoreAndFork(t *testing.T) {
+	f, r, c := proposalFixture(t)
+	body := chatentities.ProposalConfirm{ProposalID: c.Entity.ID, ReviewedVersion: 1}
+	first := proposalMutate(t, f, r, c.Entity.ID, "confirm", "bundle-confirm", body, 200)
+	dump, err := backup.DumpWorkspace(t.Context(), r.db, f.workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dump.Tables["chat_issue_proposals"]) != 1 || len(dump.Tables["chat_proposal_operations"]) != 2 {
+		t.Fatal("bundle lost source receipts")
+	}
+	target := newChatIssueFixture(t)
+	for i := 0; i < 2; i++ {
+		if err = backup.RestoreDump(t.Context(), target.h.db, dump); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restored := &Router{db: target.h.db, logger: newTestLogger()}
+	retry := proposalMutate(t, target, restored, c.Entity.ID, "confirm", "bundle-confirm", body, 200)
+	if retry.Body.String() != first.Body.String() {
+		t.Fatal("bundle retry changed committed outcome")
+	}
+	for _, table := range []string{"missions", "mission_activity", "issue_mutation_outbox", "agent_operations", "chat_entity_refs"} {
+		var n int
+		if err = target.h.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil || n != 2 {
+			t.Fatalf("restored %s effects=%d %v", table, n, err)
+		}
+	}
+	if err = backup.RemapIDs(t.Context(), r.db, dump); err != nil {
+		t.Fatal(err)
+	}
+	dump.Tables["workspaces"][0]["slug"] = "proposal-bundle-fork"
+	if err = backup.RestoreDump(t.Context(), r.db, dump); err != nil {
+		t.Fatal(err)
+	}
+	row := dump.Tables["chat_issue_proposals"][0]
+	fork := f
+	fork.workspace = row["workspace_id"].(string)
+	fork.chat = row["chat_id"].(string)
+	fork.agent = row["agent_id"].(string)
+	id := row["id"].(string)
+	if fork.workspace == f.workspace || fork.chat == f.chat || fork.agent == f.agent || id == c.Entity.ID {
+		t.Fatal("fork retained source object IDs")
+	}
+	if row["run_id"] != f.run || row["trigger_message_id"] != c.Anchor.TriggerMessageID {
+		t.Fatal("fork rewrote historical run/trigger")
+	}
+	var card chatentities.ProposalCard
+	if err = json.Unmarshal([]byte(row["items"].(string)), &card.Items); err != nil {
+		t.Fatal(err)
+	}
+	if card.Items[0].CrewID == f.crew {
+		t.Fatal("fork item references source crew")
+	}
+	if err = json.Unmarshal([]byte(row["outcome"].(string)), &card.Outcome); err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range card.Outcome.Issues {
+		var ws string
+		if err = r.db.QueryRow(`SELECT workspace_id FROM missions WHERE id=?`, issue.ID).Scan(&ws); err != nil || ws != fork.workspace {
+			t.Fatalf("fork outcome not remapped: %s %v", ws, err)
+		}
+	}
+	for _, op := range dump.Tables["chat_proposal_operations"] {
+		if op["workspace_id"] != fork.workspace || op["proposal_id"] != id {
+			t.Fatal("fork receipt scope not remapped")
+		}
+		if op["actor_type"] == "agent" && op["actor_id"] != fork.agent {
+			t.Fatal("fork agent receipt points to original agent")
+		}
+		var result ChatCardResponse
+		if err = json.Unmarshal([]byte(op["result"].(string)), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Entity.ID != id || result.Entity.WorkspaceID != fork.workspace || result.Provenance.Actor.ID != fork.agent {
+			t.Fatal("fork receipt envelope points to source")
+		}
+	}
+	// New fork IDs change request intent; immutable source hashes fail closed.
+	proposalMutate(t, fork, r, id, "confirm", "bundle-confirm", chatentities.ProposalConfirm{ProposalID: id, ReviewedVersion: 1}, 409)
+	proposalMutate(t, fork, r, id, "confirm", "fork-new-key", chatentities.ProposalConfirm{ProposalID: id, ReviewedVersion: 1}, 409)
+	var n int
+	if err = r.db.QueryRow(`SELECT COUNT(*) FROM missions`).Scan(&n); err != nil || n != 4 {
+		t.Fatalf("fork retries created effects: %d %v", n, err)
 	}
 }

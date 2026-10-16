@@ -890,3 +890,11 @@ accepted outcome, Issue card receipts and existing durable audit outbox entries
 commit together. Any failure rolls all of them back. Concurrency has one winner;
 other reviewed versions get 409. The proposing run may already have finished.
 No work starts implicitly: proposals contain no dispatch intent.
+
+Workspace bundle restores preserve source and operation receipts, so a same-key
+confirmation retry returns its original accepted outcome without repeating effects.
+A workspace fork remaps proposal/chat/agent/workspace and typed item/outcome
+references while retaining historical run/trigger IDs. Imported receipts grant
+no execution authority. Because fork IDs change request intent, an original
+source key may return 409; terminal sources remain terminal and never create
+issues again.
