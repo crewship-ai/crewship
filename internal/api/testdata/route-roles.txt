@@ -365,6 +365,7 @@ POST /api/v1/pages/{slug}/document/initialize roleSelf
 POST /api/v1/pages/{slug}/document/patch roleSelf
 POST /api/v1/pages/{slug}/document/requests roleSelf
 POST /api/v1/pages/{slug}/document/restore roleSelf
+POST /api/v1/pages/{slug}/document/upgrade roleSelf
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
 POST /api/v1/pages/{slug}/project/build roleSelf
 POST /api/v1/pages/{slug}/project/check roleSelf
