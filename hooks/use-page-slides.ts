@@ -43,7 +43,8 @@ export function usePageSlides(workspace: string, slug: string, pageID: string) {
   // the endpoint closures; they must never reopen over a retained candidate.
   const reopenLatest = useRef(reopen)
   reopenLatest.current = reopen
-  useEffect(() => { live.current = true; void reopenLatest.current(); return () => { live.current = false; ++generation.current } }, [workspace, pageID])
+  const invalidate = useCallback(() => { live.current = false; ++generation.current }, [])
+  useEffect(() => { live.current = true; void reopenLatest.current(); return invalidate }, [workspace, pageID, invalidate])
   const change = (next: SlideDeck) => {
     if (!base || !draft || !canWrite || busy || blocked || attempt.current) return
     if (orderOnly) { setError("Save or discard the pending reorder before editing content."); return }

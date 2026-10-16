@@ -323,6 +323,7 @@ export function PageView({
   // which a module-level counter is not.
   const tabIdScope = React.useId()
 
+  const nativeDocument = page?.hasDocument === true || page?.hasSlides === true
   const ownerHref = refHref(page?.ownerRef)
   // Distinct producers behind panels that have never been produced.
   const silentProducers = React.useMemo(() => {
@@ -384,7 +385,7 @@ export function PageView({
               <span className="type-page-meta shrink-0 text-muted-foreground-soft">{page.ownerLabel}</span>
             )
           )}
-          <LiveIndicator liveness={live} />
+          {!nativeDocument && <LiveIndicator liveness={live} />}
         </div>
       </div>
 
@@ -483,7 +484,7 @@ function PageBody({
   // click in front of it. `page.state` and `panels.length` come off the record
   // as the server sent it, so switching tabs cannot move either, and there is a
   // test that says so in those terms.
-  const meta = page.state ? PAGE_STATE_META[page.state] : null
+  const meta = !page.hasDocument && !page.hasSlides && page.state ? PAGE_STATE_META[page.state] : null
 
   return (
     <>
@@ -516,7 +517,7 @@ function PageBody({
             {page.name}
           </h1>
           <p className="text-xs text-muted-foreground">
-            {page.hasDocument ? "Doc" : page.hasBoard ? "Board" : page.hasArtifact ? "HTML artifact" : `${panels.length} ${panels.length === 1 ? "panel" : "panels"}`}
+            {page.hasSlides ? "Slides" : page.hasDocument ? "Doc" : page.hasBoard ? "Board" : page.hasArtifact ? "HTML artifact" : `${panels.length} ${panels.length === 1 ? "panel" : "panels"}`}
             {page.description ? ` · ${page.description}` : ""}
           </p>
         </div>
