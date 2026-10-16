@@ -150,6 +150,8 @@ func openTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("open: %v", err)
 	}
 	schema := `
+        CREATE TABLE users (id TEXT PRIMARY KEY, suspended_at TEXT);
+        INSERT INTO users (id) VALUES ('u1'), ('member');
 		CREATE TABLE workspace_members (
             id TEXT,
             access_mode TEXT NOT NULL DEFAULT 'trusted',
