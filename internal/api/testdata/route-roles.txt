@@ -330,6 +330,7 @@ POST /api/v1/onboarding/proposals/{id}/apply roleCreate
 POST /api/v1/onboarding/setup roleSelf
 POST /api/v1/onboarding/setup-agent/start roleSelf
 POST /api/v1/page-folders roleCreate
+POST /api/v1/page-folders/{slug}/parent roleCreate
 POST /api/v1/page-folders/{slug}/pages roleSelf
 POST /api/v1/page-folders/{slug}/pages:batch roleSelf
 POST /api/v1/pages roleInline

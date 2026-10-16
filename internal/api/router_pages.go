@@ -235,6 +235,8 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("POST", "/api/v1/page-folders", roleCreate, p.CreateFolder)
 	// openapi: responses 200,400,401,403,404,413,500
 	r.authedMut("PATCH", "/api/v1/page-folders/{slug}", roleSelf, p.UpdateFolder)
+	// openapi: responses 200,400,401,403,404,409,413,500
+	r.authedMut("POST", "/api/v1/page-folders/{slug}/parent", roleCreate, p.ReparentFolder)
 	// openapi: responses 204,401,403,404,409,500
 	r.authedMut("DELETE", "/api/v1/page-folders/{slug}", roleCreate, p.DeleteFolder)
 	// openapi: responses 200,400,401,403,404,409,413,500

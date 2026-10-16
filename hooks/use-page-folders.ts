@@ -4,7 +4,7 @@
  * Page folders — the data half of collections analysis F1 (#2527).
  *
  * A folder is a named group of pages owned by one crew, with an icon from the
- * crew icon set and an optional colour. One level, a page in at most one
+ * crew icon set and an optional colour. Folders may nest; a page is in at most one
  * folder, and every page outside one is "Unfiled". Nothing here decides who
  * may see a page: the server's list already contains only what the caller
  * reaches, and a folder's `page_count` is that same reach counted, so the
@@ -61,6 +61,10 @@ import {
 // ── The wire ───────────────────────────────────────────────────────────────
 
 export interface WirePageFolder {
+  parent_id?: string | null
+  tree_version?: number | null
+  can_reparent?: boolean
+  can_accept_folders?: boolean
   id?: string | null
   slug?: string | null
   name?: string | null
@@ -88,6 +92,10 @@ export interface WirePageFolder {
 /** A folder as the rail and the dialogs consume it. */
 export interface PageFolderView extends PageFolderLike {
   id: string
+  parentId?: string | null
+  treeVersion?: number | null
+  canReparent?: boolean
+  canAcceptFolders?: boolean
   ownerRef: string | null
   ownerLabel: string | null
   aclVersion: number | null
@@ -127,6 +135,10 @@ export function toPageFolderView(raw: WirePageFolder): PageFolderView | null {
     name: trimmed(raw.name) ?? slug,
     icon: trimmed(raw.icon),
     color: trimmed(raw.color),
+    parentId: trimmed(raw.parent_id),
+    treeVersion: finiteOrNull(raw.tree_version),
+    canReparent: raw.can_reparent === true,
+    canAcceptFolders: raw.can_accept_folders === true,
     ownerRef,
     ownerLabel:
       trimmed(raw.owner_crew_name) ?? (ownerRef ? (cut >= 0 ? ownerRef.slice(cut + 1) || ownerRef : ownerRef) : null),
@@ -484,6 +496,9 @@ export function useFolderOwnerChoices(workspaceId: string | null | undefined, en
 // ── Writing ────────────────────────────────────────────────────────────────
 
 export interface CreateFolderInput {
+  parent?: string
+  treeVersion?: number
+  aclVersion?: number
   name: string
   icon?: string | null
   color?: string | null
@@ -517,7 +532,15 @@ export interface RemovePageInput {
   pagesVersion: number | null
 }
 
+export interface ReparentFolderInput {
+  slug: string
+  parent: string | null
+  treeVersion: number
+  aclVersion?: number
+}
+
 export interface PageFolderMutations {
+  reparent: UseMutationResult<void, Error, ReparentFolderInput>
   create: UseMutationResult<PageFolderView | null, Error, CreateFolderInput>
   update: UseMutationResult<PageFolderView | null, Error, UpdateFolderInput>
   /** 204 on success; a 409 says the folder is not empty, in the server's words. */
@@ -546,6 +569,11 @@ export function usePageFolderMutations(workspaceId: string | null | undefined): 
         method: "POST",
         headers: JSON_HEADERS,
         body: JSON.stringify({
+          ...(input.parent !== undefined ? {
+            parent: input.parent,
+            tree_version: input.treeVersion,
+            acl_version: input.aclVersion,
+          } : {}),
           name: input.name,
           owner: input.owner,
           ...(input.icon !== undefined ? { icon: input.icon } : {}),
@@ -642,7 +670,23 @@ export function usePageFolderMutations(workspaceId: string | null | undefined): 
     onSettled: settle,
   })
 
-  return { create, update, remove, addPage, addPages, removePage }
+  const reparent = useMutation<void, Error, ReparentFolderInput>({
+    retry: false,
+    mutationFn: async (input) => {
+      const res = await apiFetch(`${folderRoute(workspaceId!, input.slug)}/parent`, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          parent: input.parent,
+          tree_version: input.treeVersion,
+          ...(input.parent !== null ? { acl_version: input.aclVersion } : {}),
+        }),
+      })
+      await judge(res, "move folder")
+    },
+    onSettled: settle,
+  })
+  return { create, update, remove, addPage, addPages, removePage, reparent }
 }
 
 // ── The ACL (#2533) ────────────────────────────────────────────────────────

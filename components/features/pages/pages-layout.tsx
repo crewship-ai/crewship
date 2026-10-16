@@ -73,7 +73,7 @@ import { usePageCapabilities } from "@/components/features/pages/editor/use-page
 import { usePageGrants } from "@/hooks/use-page-grants"
 import { PageEditorShell, UnsavedWorkDialog } from "@/components/features/pages/editor/page-editor-shell"
 import { usePageFolderMutations, usePageFolders } from "@/hooks/use-page-folders"
-import { FolderDeleteDialog, FolderEditDialog, MoveToFolderDialog } from "@/components/features/pages/folder-dialogs"
+import { FolderDeleteDialog, FolderEditDialog, MoveToFolderDialog, ReparentFolderDialog } from "@/components/features/pages/folder-dialogs"
 import { FolderSharingDialog } from "@/components/features/pages/folder-sharing-dialog"
 import { PageChatHandoff } from "@/components/features/pages/page-chat-handoff"
 import { toast } from "sonner"
@@ -138,6 +138,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const [folderDialog, setFolderDialog] = React.useState<
     | { kind: "create" }
     | { kind: "edit"; slug: string }
+    | { kind: "reparent"; slug: string }
     | { kind: "delete"; slug: string }
     | { kind: "share"; slug: string }
     | { kind: "move"; slug: string }
@@ -431,6 +432,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onCreateFolder={canCreateFolder ? () => setFolderDialog({ kind: "create" }) : undefined}
               onEditFolder={(slug) => setFolderDialog({ kind: "edit", slug })}
               onShareFolder={(slug) => setFolderDialog({ kind: "share", slug })}
+              onReparentFolder={(slug) => setFolderDialog({ kind: "reparent", slug })}
               onDeleteFolder={(slug) => setFolderDialog({ kind: "delete", slug })}
               onMovePages={(list) => setFolderDialog({ kind: "move-many", slugs: list.map((p) => p.slug) })}
             />
@@ -547,6 +549,14 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           onOpenChange={(open) => !open && closeFolderDialog()}
           folder={folderDialog.kind === "edit" ? folderOf(folderDialog.slug) : null}
           defaultOwner={suggestedOwner}
+        />
+      )}
+      {folderDialog?.kind === "reparent" && (
+        <ReparentFolderDialog
+          key={folderDialog.slug}
+          workspaceId={workspaceId}
+          folder={folderOf(folderDialog.slug)}
+          onOpenChange={(open) => { if (!open) closeFolderDialog() }}
         />
       )}
       {folderDialog?.kind === "delete" && (

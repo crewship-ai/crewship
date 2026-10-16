@@ -243,7 +243,7 @@ var TableCategory = map[string]string{
 	"credential_audit": CategoryCreds, "credential_rotations": CategoryCreds, "composio_settings": CategoryCreds,
 
 	// Pages and their files.
-	"page_folders": CategoryPages, "page_folder_acl": CategoryPages, "pages": CategoryPages,
+	"page_folder_structure": CategoryPages, "page_folders": CategoryPages, "page_folder_acl": CategoryPages, "pages": CategoryPages,
 	"page_board_source_history":   CategoryPages,
 	"page_board_write_audit":      CategoryPages,
 	"page_board_request_previews": CategoryPages,

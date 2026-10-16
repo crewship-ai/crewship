@@ -57,7 +57,7 @@ func newFoldersFixture(t *testing.T) *foldersFixture {
 // call routes a request to the folder handler the method and path name.
 func (f *foldersFixture) call(t *testing.T, method, path, userID, role, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := pagesRequest(t, method, path, f.wsID, userID, role, body)
+	req := pagesGrantRequest(t, method, path, f.wsID, userID, role, body)
 	rest := strings.TrimPrefix(path, "/api/v1/page-folders")
 	rest = strings.TrimPrefix(rest, "/")
 	parts := strings.Split(rest, "/")

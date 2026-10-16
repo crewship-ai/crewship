@@ -109,6 +109,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	}
 	folder := obj(map[string]any{
 		"id": str(), "slug": str(), "name": str(),
+		"parent_id":       map[string]any{"type": []string{"string", "null"}, "description": "Direct parent ID only when visible to this caller; otherwise null. Nesting does not inherit permissions."},
+		"tree_version":    map[string]any{"type": "integer", "minimum": 0, "description": "Workspace structure fence for nested create and reparent."},
 		"icon":            map[string]any{"type": "string", "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty."},
 		"color":           map[string]any{"type": "string", "description": "A crew palette key, or empty."},
 		"owner":           map[string]any{"type": "string", "description": "`crew/<slug>` — a folder is owned by a crew, always."},
@@ -121,11 +123,11 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale."},
 		"created_at": timeString(), "updated_at": timeString(),
 	})
-	for _, field := range []string{"can_rename", "can_share", "can_delete", "can_accept_pages"} {
+	for _, field := range []string{"can_rename", "can_share", "can_delete", "can_accept_pages", "can_reparent", "can_accept_folders"} {
 		folder["properties"].(map[string]any)[field] = map[string]any{"type": "boolean", "description": "The caller's current authority for this operation; mutation checks and version/empty-folder constraints still apply."}
 	}
 	folder["required"] = []string{"id", "slug", "name", "icon", "color", "owner", "owner_crew_name",
-		"page_count", "shared", "acl_version", "created_at", "updated_at", "can_rename", "can_share", "can_delete", "can_accept_pages"}
+		"page_count", "shared", "acl_version", "created_at", "updated_at", "can_rename", "can_share", "can_delete", "can_accept_pages", "parent_id", "tree_version", "can_reparent", "can_accept_folders"}
 
 	// Inherited permissions (#2533, pages_folder_acl.go).
 	folderACLEntry := obj(map[string]any{
@@ -639,11 +641,14 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"GET /api/v1/page-folders": {Response: folderList},
 		"POST /api/v1/page-folders": {
 			Request: obj(map[string]any{
-				"name":  str(),
-				"slug":  map[string]any{"type": "string", "description": "Optional; derived from the name when omitted."},
-				"icon":  map[string]any{"type": "string", "description": "Optional. A crew icon name; anything outside the crew icon set is refused."},
-				"color": map[string]any{"type": "string", "description": "Optional. A crew palette key; anything else is refused."},
-				"owner": map[string]any{"type": "string", "description": "`crew/<slug>`, required. The creator must be a workspace admin, or a MANAGER (or higher) who belongs to that crew."},
+				"parent":       map[string]any{"type": "string", "minLength": 1, "description": "Optional parent slug; requires tree_version and parent acl_version. Root create stays compatible without fences."},
+				"tree_version": map[string]any{"type": "integer", "minimum": 0},
+				"acl_version":  map[string]any{"type": "integer", "minimum": 0},
+				"name":         str(),
+				"slug":         map[string]any{"type": "string", "description": "Optional; derived from the name when omitted."},
+				"icon":         map[string]any{"type": "string", "description": "Optional. A crew icon name; anything outside the crew icon set is refused."},
+				"color":        map[string]any{"type": "string", "description": "Optional. A crew palette key; anything else is refused."},
+				"owner":        map[string]any{"type": "string", "description": "`crew/<slug>`, required. The creator must be a workspace admin, or a MANAGER (or higher) who belongs to that crew."},
 			}),
 			RequestRequired: true,
 			Response:        folder,
@@ -662,6 +667,17 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			// 204, no body. Refused with 409 while any page — reachable by
 			// the caller or not — is in the folder.
 			Response: obj(map[string]any{}),
+		},
+		"POST /api/v1/page-folders/{slug}/parent": {
+			Request: map[string]any{"type": "object", "additionalProperties": false,
+				"required": []string{"parent", "tree_version"},
+				"properties": map[string]any{
+					"parent":       map[string]any{"type": []string{"string", "null"}, "minLength": 1, "description": "New parent slug, or null for workspace root. No ancestor permission inheritance."},
+					"tree_version": map[string]any{"type": "integer", "minimum": 0},
+					"acl_version":  map[string]any{"type": "integer", "minimum": 0, "description": "Required when parent is a slug."},
+				}},
+			RequestRequired: true,
+			Response:        map[string]any{"type": "object", "required": []string{"tree_version"}, "properties": map[string]any{"tree_version": map[string]any{"type": "integer", "minimum": 0}}},
 		},
 		"POST /api/v1/page-folders/{slug}/pages": {
 			Request: obj(map[string]any{

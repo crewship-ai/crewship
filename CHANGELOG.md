@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Page folders can nest and move without changing sharing (#3202).** The rail follows caller-visible folder structure, hides inaccessible ancestors, and asks for a fresh confirmation when organization or target permissions change. Folder moves preserve Page identities and leaf membership; folders with children must be emptied before deletion. API and CLI tree writes use explicit version fences.
+
 - **Local PNG/JPEG images now survive static previews in chat, Pages and Board pins.** All HTML/Markdown preview surfaces use one bounded raster validator and native decode check; remote images, SVG, srcset and network-bearing CSS remain unavailable. Original source downloads are preserved.
 
 

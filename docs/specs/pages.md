@@ -382,6 +382,39 @@ not sharing or deletion; VIEWER page owners retain their own move controls. Move
 destinations require `can_accept_pages`. Existing server checks, version fences
 and empty-folder requirements remain authoritative.
 
+## Nested folder organization
+
+Folders may nest to eight levels, counting the root folder. Nesting changes
+organization only: access still comes from each leaf folder's existing live
+permissions and Page grants. Reparenting keeps Page IDs, slugs, leaf membership
+and Page membership versions unchanged. A visible child whose parent is hidden
+is presented as a root; responses never include hidden parent IDs or labels.
+
+`POST /api/v1/page-folders` accepts an optional parent slug plus `tree_version`
+and parent `acl_version`. Existing root creation requires neither fence.
+`POST /api/v1/page-folders/{slug}/parent` accepts `parent` (slug or null), a
+nonnegative `tree_version`, and parent `acl_version` when nesting. The live
+source crew manager or workspace administrator may reparent; the target must
+allow arrangement. Responses expose `can_reparent`, `can_accept_folders`,
+`tree_version` and a caller-filtered nullable `parent_id`.
+
+Writes serialize structure and recheck live authority in the same transaction.
+Stale structure or target permissions return 409 without an automatic retry.
+The dialog freezes reviewed identities and fences; background changes require
+an explicit review followed by a separate confirmation. Cycles, cross-workspace
+parents and moves exceeding eight levels (including hidden descendants) are
+refused. A move inspects at most 256 subtree nodes. Deleting a folder with any
+child returns 409; deletion never cascades content or sharing. Reparent realtime
+and activity notifications contain generic organization invalidation only.
+Existing create/delete event payloads are unchanged by this addition.
+
+CLI: `crewship page folder create child --owner ops --parent parent
+--tree-version 3 --acl-version 2`; `crewship page folder reparent child
+--parent other --tree-version 4 --acl-version 2`, or `--root --tree-version 4`.
+The CLI sends explicit fences without refreshing or retrying them. Workspace
+backup/fork preserves topology and remaps parent identities through the existing
+foreign-key identity map. Full-text indexing and backlinks are separate work.
+
 ## 1. What a Page is
 
 A **Page** is a workspace-scoped, slug-addressable record holding an ordered list of **panels**.
