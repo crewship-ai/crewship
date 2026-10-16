@@ -89,6 +89,20 @@ func TestSlidesAgentCLIRedirectDeniedAndBearerScrubbed(t *testing.T) {
 	}
 }
 
+func TestSlidesAgentCLIMalformedReplacementNeverEchoesBearer(t *testing.T) {
+	token := internaltoken.DeriveAgentRunToken("synthetic-run-key", "workspace", "agent", "run")
+	t.Setenv("CREWSHIP_AGENT_TOKEN", token)
+	transport := selectedAgentRoundTrip(func(*http.Request) (*http.Response, error) {
+		t.Fatal("malformed input reached network")
+		return nil, nil
+	})
+	body := `{"page_id":"page","request_schema_version":1,"request_id":"request","replacement":"ok","` + token + `":"untrusted"}`
+	output, err := executeSelectedAgentCLI(t, transport, body, "replace", "report", "request", "--file", "-")
+	if err == nil || strings.Contains(err.Error(), token) || strings.Contains(output, token) {
+		t.Fatal("malformed input echoed original bearer")
+	}
+}
+
 func TestSlidesAgentCLIActualSidecarPreservesWireAndStopsOnConflict(t *testing.T) {
 	const key = "synthetic-selected-cli-run-key"
 	token := internaltoken.DeriveAgentRunToken(key, "ws", "agent", "run")
