@@ -7,7 +7,7 @@ import (
 )
 
 func (r *Router) registerSlideRoutes() {
-	h := &slideHTTP{pages: r.pages, store: slides.New(r.db, slides.Options{})}
+	h := &slideHTTP{pages: r.pages, store: slides.New(r.db, slides.Options{OnRevision: r.pages.pinSlideAssets})}
 	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
 	r.mux.Handle("GET /api/v1/pages/{slug}/slides", authed(wsCtx(http.HandlerFunc(h.Read))))
 	r.mux.Handle("GET /api/v1/pages/{slug}/slides/outline", authed(wsCtx(http.HandlerFunc(h.Outline))))

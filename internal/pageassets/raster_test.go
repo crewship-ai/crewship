@@ -98,3 +98,61 @@ func TestPageAssetRasterRejects(t *testing.T) {
 		t.Fatal("output expansion unbounded")
 	}
 }
+
+func TestValidateCanonicalPreservesBytesAndOutputBudget(t *testing.T) {
+	for _, format := range []string{"png", "jpeg"} {
+		t.Run(format, func(t *testing.T) {
+			im := image.NewRGBA(image.Rect(0, 0, 2, 3))
+			var raw bytes.Buffer
+			if format == "png" {
+				if err := png.Encode(&raw, im); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := jpeg.Encode(&raw, im, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := ValidateCanonical(raw.Bytes())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.MIME != "image/"+format || got.Width != 2 || got.Height != 3 || !bytes.Equal(got.Bytes, raw.Bytes()) {
+				t.Fatal("validation rewrote bytes or metadata")
+			}
+			if _, err := ValidateCanonical(raw.Bytes()[:20]); err == nil {
+				t.Fatal("truncated pixels admitted")
+			}
+		})
+	}
+	if _, err := ValidateCanonical(make([]byte, MaxOutput+1)); err == nil {
+		t.Fatal("output ceiling bypassed")
+	}
+	// A valid static PNG larger than the upload ceiling must use the canonical
+	// output ceiling on read/restore, without reencoding or accepting more pixels.
+	im := image.NewNRGBA(image.Rect(0, 0, 2048, 1400))
+	seed := uint32(1)
+	for i := 0; i < len(im.Pix); i += 4 {
+		seed ^= seed << 13
+		seed ^= seed >> 17
+		seed ^= seed << 5
+		im.Pix[i] = byte(seed)
+		im.Pix[i+1] = byte(seed >> 8)
+		im.Pix[i+2] = 0
+		im.Pix[i+3] = 255
+	}
+	var raw bytes.Buffer
+	if err := png.Encode(&raw, im); err != nil {
+		t.Fatal(err)
+	}
+	if raw.Len() <= MaxInput || raw.Len() > MaxOutput {
+		t.Fatalf("fixture budget %d", raw.Len())
+	}
+	got, err := ValidateCanonical(raw.Bytes())
+	if err != nil || got.Width != 2048 || got.Height != 1400 || !bytes.Equal(got.Bytes, raw.Bytes()) {
+		t.Fatalf("canonical output-sized validation: %v", err)
+	}
+	if _, err := Canonical(raw.Bytes()); err == nil {
+		t.Fatal("upload ceiling was widened")
+	}
+}
