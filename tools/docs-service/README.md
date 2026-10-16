@@ -37,6 +37,15 @@ recovered its writer state. Draining rejects new work, finishes accepted queues
 and releases held leases. The container packaging uses no network and mounts no
 database; persistence and authorization remain with Go.
 
+Admission is bounded to 32 active scheduler keys, 128 total operations and 32 per key.
+An incoming key evicts the least recently used idle scheduler tail if necessary;
+busy keys are never evicted. Idle reads therefore do not impose a lifetime
+32-document capacity. Writer leases remain independently fenced.
+Idle keys unload after 30 seconds. Every operation reloads the Go snapshot and
+update log into an isolated Y.Doc, validates it and destroys it afterward.
+Bodies are capped at 2 MiB, authority replies at 4 MiB; each authority call has
+a 10-second timeout. No content, bearer or service secret is logged.
+
 The Go listener checks socket inode custody during cleanup. Node removes its
 configured socket path when it closes, so do not replace or unlink that path
 while the Node service is alive. Dedicated private directories are part of this
