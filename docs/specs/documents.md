@@ -73,7 +73,7 @@ Capability hints never grant authority. Go rechecks live membership, exact
 session or CLI token/scopes, Page ACL and run delegation under the SQL fence.
 Scoped CLI access uses `pages:read` and `pages:write`. Sidecar document reads,
 semantic patches and checkpoints additionally require the original admitted run
-bearer; raw-agent updates and agent restores are denied.
+bearer. The host compares the original authenticated sidecar workspace and crew with the run principal before dispatch; a valid run capability cannot replace that transport identity. Raw-agent updates and agent restores are denied.
 
 The first editor uses bounded polling of authorized durable state, rather than
 speculative peer broadcast. Local Yjs updates are coalesced; once attempted a
