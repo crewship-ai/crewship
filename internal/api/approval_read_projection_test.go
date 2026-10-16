@@ -9,15 +9,10 @@ import (
 )
 
 func TestApprovalsLegacyReadsHideNewHostCorrelationWithoutChangingStore(t *testing.T) {
-	h, user, workspace := approvalsHandlerRig(t)
-	t.Cleanup(func() { h.db.Close() })
-	id, err := harbormaster.Enqueue(t.Context(), h.db, h.journal, harbormaster.Request{WorkspaceID: workspace, RequestedBy: user, Kind: harbormaster.KindToolCall, Reason: "Whole-run review", Payload: map[string]any{
-		"tool": "agent_run", "args": map[string]any{"agent_slug": "visible"}, "gate_mode": "sync", "review": map[string]any{"user_prompt": "existing-review"},
-		"correlation": map[string]any{"run_id": "private-run-reference", "chat_id": "private-chat-reference", "trigger_message_id": "private-trigger-reference", "trigger_type": "human_chat"},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := newApprovalDecisionRig(t)
+	h := NewApprovalsHandler(d.f.h.db, newTestLogger(), d.r.Journal())
+	user, workspace, id := d.f.user, d.f.workspace, d.id
+	execOrFatal(t, h.db, `UPDATE approvals_queue SET payload=json_set(payload,'$.args.agent_slug','visible','$.review.user_prompt','existing-review') WHERE id=?`, id)
 	for _, role := range []string{"OWNER", "ADMIN", "MEMBER"} {
 		for _, detail := range []bool{false, true} {
 			req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/approvals", nil), user, workspace, role)
@@ -46,7 +41,7 @@ func TestApprovalsLegacyReadsHideNewHostCorrelationWithoutChangingStore(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Payload["correlation"].(map[string]any)["chat_id"] != "private-chat-reference" {
+	if stored.Payload["correlation"].(map[string]any)["chat_id"] != d.f.chat {
 		t.Fatal("read mutated authoritative source")
 	}
 	// Normal legacy approval still resolves through the unchanged authority.

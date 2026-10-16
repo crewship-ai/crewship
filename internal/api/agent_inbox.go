@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // AgentInboxHandler serves GET /api/v1/agents/{agentId}/inbox — a
@@ -78,9 +80,14 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	resp := agentInboxResponse{PeerMessages: []peerMessageRow{}}
 
 	// Approvals pending
+	approvalViewer := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		approvalViewer = user.ID
+	}
+	approvalArgs := append([]any{workspaceID, agentID}, chataudience.VerifiedRunApprovalReadArgs(approvalViewer)...)
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM approvals_queue WHERE workspace_id = ? AND agent_id = ? AND status = 'pending'`,
-		workspaceID, agentID).Scan(&resp.ApprovalsPending); err != nil {
+		`SELECT COUNT(*) FROM approvals_queue aq WHERE workspace_id=? AND agent_id=? AND status='pending' AND (`+chataudience.RunApprovalVisibilitySQL+`)`,
+		approvalArgs...).Scan(&resp.ApprovalsPending); err != nil {
 		h.logger.Warn("inbox: approvals count", "err", err, "agent_id", agentID)
 		resp.Unavailable = append(resp.Unavailable, "approvals")
 	}

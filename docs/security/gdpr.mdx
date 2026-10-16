@@ -226,6 +226,12 @@ them so a green sweep cannot be mistaken for coverage:
 | `workspace_members`, and the instance-scoped tables (`users`, `accounts`, `sessions`, `cli_tokens`, `skills`, `skill_reviews`, `rate_limit_overrides`, `keeper_runtime_settings`, `keeper_aux_settings`, …) | Membership is a separate operation; instance-scoped rows belong to an account-deletion path that does not exist yet. A workspace erasure cannot speak for a person's other workspaces. |
 
 <Note>
+For verified private synchronous whole-run sources, hard deletion also appends
+an atomic, content-free `approval.source_retired` journal marker (workspace and
+approval ID only). It retains no request, answer, user or chat/run metadata;
+its purpose is to keep existing immutable source history private after erasure.
+A failed marker append prevents deletion of that source.
+
 `approvals_queue` is erased on Article 17 but is **not** part of the Article
 15 export bundle above — it lacks a `data_subject_id` column, so it doesn't
 fit the export's "every table keyed by data_subject_id" shape, and adding a
