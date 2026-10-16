@@ -1,15 +1,20 @@
-// Emits actual Go schema-1 canonical/hash output for the TS contract check.
+// Emits actual Go versioned canonical/hash output for the TS contract check.
 package main
 
 import (
 	"encoding/json"
 	"os"
 
+	"github.com/crewship-ai/crewship/internal/pageassets"
 	"github.com/crewship-ai/crewship/internal/slides"
 )
 
 func main() {
-	raw, err := os.ReadFile("testdata/slides-schema-v1.json")
+	path := "testdata/slides-schema-v1.json"
+	if len(os.Args) == 2 {
+		path = os.Args[1]
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		panic(err)
 	}
@@ -41,7 +46,7 @@ func main() {
 			elements[element.ID] = h
 		}
 	}
-	if err = json.NewEncoder(os.Stdout).Encode(map[string]any{"canonical_json": string(canonical), "hash": hash, "elements": elements, "table_cell_limits": map[string]int{"deck": slides.MaxTableCellsPerDeck, "slide": slides.MaxTableCellsPerSlide}}); err != nil {
+	if err = json.NewEncoder(os.Stdout).Encode(map[string]any{"canonical_json": string(canonical), "hash": hash, "elements": elements, "raster_limits": map[string]int{"dimension": pageassets.MaxDimension, "pixels": pageassets.MaxPixels, "upload_bytes": pageassets.MaxInput, "stored_bytes": pageassets.MaxOutput}, "table_cell_limits": map[string]int{"deck": slides.MaxTableCellsPerDeck, "slide": slides.MaxTableCellsPerSlide}}); err != nil {
 		panic(err)
 	}
 }

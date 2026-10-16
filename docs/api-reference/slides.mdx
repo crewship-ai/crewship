@@ -11,7 +11,7 @@ tag: Experimental
 Schema 1 admits bounded text, rectangle/ellipse shapes and rectangular tables.
 The [storage contract](../specs/slides.md) and generated OpenAPI describe the
 closed nested schema, canonical hashing, aggregate table-cell bounds and exact
-operation union. Images, author HTML/JavaScript, external resources, native UI,
+operation union. Schema2 adds private PNG/JPEG references described below. Author HTML/JavaScript, external resources, native UI,
 selected-edit agent admission are separate cuts. Human stable comments are
 described below. The Page descriptor
 remains unsupported with `viewer-unavailable`. No internal Slides agent route is
@@ -141,9 +141,9 @@ snapshot. Original identities may revive; current authorization remains unchange
 429 retained quota, 500 storage failure.
 
 
-The native Pages viewer/editor uses the canonical schema1 model, not HTML. `GET /api/v1/pages/{slug}` adds advisory `can_edit_slides`: true only for supported, exclusive, human-owned Slides with current human Page write standing. Missing or false disables Slides editing; it says nothing about Docs/Board capability. Metadata and Slides state are separate reads, so this flag is advisory; every mutation reauthorizes live credentials/ACL under the durable writer fence.
+The native Pages viewer/editor uses canonical schema1/2 models, not HTML. `GET /api/v1/pages/{slug}` adds advisory `can_edit_slides`: true only for supported, exclusive, human-owned Slides with current human Page write standing. Missing or false disables Slides editing; it says nothing about Docs/Board capability. Metadata and Slides state are separate reads, so this flag is advisory; every mutation reauthorizes live credentials/ACL under the durable writer fence.
 
-Manual editing holds the original Page ID, base revision and order version until save or explicit discard. Conflict or access loss retains the candidate; no automatic rebase. An uncertain request retries the exact mutation ID/body. A receipt confirms its specific revision even if a newer head exists; the UI never presents that receipt as proof of the latest head. Saved revision previews render the actual native Slides snapshot. Reordering is a separate atomic endpoint: save/discard content changes before reordering, and save/discard a pending reorder before editing content. The native comments panel uses this document’s human slide/element anchor protocol. Images/PPTX/export remain unavailable.
+Manual editing holds the original Page ID, base revision and order version until save or explicit discard. Conflict or access loss retains the candidate; no automatic rebase. An uncertain request retries the exact mutation ID/body. A receipt confirms its specific revision even if a newer head exists; the UI never presents that receipt as proof of the latest head. Saved revision previews render the actual native Slides snapshot. Reordering is a separate atomic endpoint: save/discard content changes before reordering, and save/discard a pending reorder before editing content. The native comments panel uses this document’s human slide/element anchor protocol. The native image control stages private PNG/JPEG assets, validates Page identity and expected digest, and adds an unsaved candidate. Only the Slides save receipt confirms persistence. PPTX/export remain unavailable.
 ## `GET /api/v1/pages/{slug}/slides/comments`
 
 **Request:** `limit` defaults to25, maximum100; optional opaque `cursor` at most1024
@@ -229,3 +229,25 @@ human history event; it does not mutate the deck revision or original anchor.
 
 **Errors:** 400, 401, 403, 404, 409 stale version/Page or unchanged resolution,
 429 retained-history quota. Exact session/token and ACL are checked even on retry.
+
+## Schema2 image requests
+
+The canonical image element is `{id,type:"image",x,y,width,height,image:{asset_id,
+expected_sha256,alt}}`. `asset_id` must name a live same-Page private raster; no
+URL input is accepted. At most32 unique asset IDs/32MiB canonical image bytes per
+revision plus33,554,432 decoded pixels across unique asset IDs and the existing
+Page staging/history quota apply. Repeated placement of one ID counts once. SHA mismatch, missing
+or expired assets and corrupt bytes reject the entire revision with400; storage
+write failures return500. Promotion, exact immutable revision pins and request
+receipt commit atomically. Retried successful requests retain their own revision.
+
+`POST /initialize` explicitly accepts schema1 or schema2 matching the deck. First
+image insertion into an existing schema1 head uses `POST /patch` with original
+`schema_version:1`, `base_rev`, operation `if_hash` and both
+`target_schema_version:2`/`if_content_hash` naming the original whole head.
+The upgrade must attach an image; missing/stale fences do not auto-rebase. Ordinary
+patch/reorder/restore envelopes name the current head schema. Restore appends the
+selected immutable source version, retaining mixed1/2 history. Comments keep
+their independent `schema_version:1` and `anchor_schema_version:1`, including image
+element anchors; schema2 does not admit comment protocol2 or image text ranges.
+See the [raster storage/recovery contract](../specs/slides.md).

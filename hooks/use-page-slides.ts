@@ -47,6 +47,8 @@ export function usePageSlides(workspace: string, slug: string, pageID: string) {
   useEffect(() => { live.current = true; void reopenLatest.current(); return invalidate }, [workspace, pageID, invalidate])
   const change = (next: SlideDeck) => {
     if (!base || !draft || !canWrite || busy || blocked || attempt.current) return
+    // Removing an unsaved first image also undoes its uncommitted upgrade.
+    if (base.schema_version === 1 && next.schema_version === 2 && !next.slides.some(slide => slide.elements.some(element => element.type === "image"))) next = { ...next, schema_version: 1 }
     if (orderOnly) { setError("Save or discard the pending reorder before editing content."); return }
     if (dirty && isOrderOnly(draft, next)) { setError("Save or discard content changes before reordering slides."); return }
     setDraft(next); setError(undefined); setStatus("Unsaved changes")
@@ -82,6 +84,6 @@ export function usePageSlides(workspace: string, slug: string, pageID: string) {
       setError(cause instanceof Error ? cause.message : "Could not save Slides.")
     } finally { if (current()) setBusy(false) }
   }
-  const restore = (revision: number) => base && !dirty && !attempt.current ? send({ path: "/restore", body: { page_id: base.deck.deck_id, schema_version: 1, base_rev: base.revision, if_order_version: base.order_version, mutation_id: crypto.randomUUID(), revision } }) : Promise.resolve()
+  const restore = (revision: number) => base && !dirty && !attempt.current ? send({ path: "/restore", body: { page_id: base.deck.deck_id, schema_version: base.schema_version, base_rev: base.revision, if_order_version: base.order_version, mutation_id: crypto.randomUUID(), revision } }) : Promise.resolve()
   return { base, draft, canWrite, busy, blocked, dirty, orderOnly, status, error, change, save: () => send(), restore, reopen, retry: Boolean(attempt.current), read }
 }

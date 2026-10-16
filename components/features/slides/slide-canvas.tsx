@@ -2,9 +2,11 @@
 
 import * as React from "react"
 import type { Slide, SlideElement } from "@/lib/slides/model"
+import { NativeSlideImage } from "./slide-images"
 import { isNativeSlideDeck } from "./native-model"
 
 function ElementContent({ element }: { element: SlideElement }) {
+  if (element.type === "image") return <NativeSlideImage image={element.image} width={element.width} height={element.height} />
   if (element.type === "shape") {
     const style = { fill: element.shape.fill, stroke: element.shape.stroke, strokeWidth: element.shape.stroke_width }
     return element.shape.kind === "ellipse"

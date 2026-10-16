@@ -12,7 +12,7 @@ import (
 // integration must remap image references HERE before this one hash pass.
 // Object IDs and tombstones are stable within the newly namespaced Page.
 func remapSlides(dump *DBDump, idMap map[string]map[string]string) error {
-	for _, table := range []string{"slides_heads", "slides_revisions", "slides_receipts", "slides_object_ids", "slides_comment_threads", "slides_comment_events", "slides_comment_receipts"} {
+	for _, table := range []string{"slides_heads", "slides_revisions", "slides_revision_assets", "slides_receipts", "slides_object_ids", "slides_comment_threads", "slides_comment_events", "slides_comment_receipts"} {
 		for _, row := range dump.Tables[table] {
 			for column, anchor := range map[string]string{"workspace_id": "workspaces", "page_id": "pages"} {
 				if old, ok := row[column].(string); ok {
@@ -42,6 +42,18 @@ func remapSlides(dump *DBDump, idMap map[string]map[string]string) error {
 			mapped := idMap["pages"][deck.DeckID]
 			if mapped == "" || mapped != row["page_id"] {
 				return fmt.Errorf("backup: %s Slides Page identity mismatch", table)
+			}
+			for i := range deck.Slides {
+				for j := range deck.Slides[i].Elements {
+					element := &deck.Slides[i].Elements[j]
+					if element.Type == "image" && element.Image != nil {
+						asset := idMap["page_assets"][element.Image.AssetID]
+						if asset == "" {
+							return fmt.Errorf("backup: missing fork image asset mapping")
+						}
+						element.Image.AssetID = asset
+					}
+				}
 			}
 			deck.DeckID = mapped
 			encoded, err := slides.Canonical(deck)

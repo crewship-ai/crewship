@@ -19,14 +19,15 @@ export interface SlidesEditorProps {
   reorderDisabled?: boolean
   persistenceStatus?: string
   commentsAvailable?: boolean
+  imagesAvailable?: boolean
 }
 
-export function SlidesEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus, commentsAvailable }: SlidesEditorProps) {
+export function SlidesEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus, commentsAvailable, imagesAvailable }: SlidesEditorProps) {
   if (!isNativeSlideDeck(deck)) return <p role="alert">This Slides format is unavailable. Its content cannot be edited.</p>
-  return <NativeEditor deck={deck} onChange={onChange} readOnly={readOnly || !onChange} reorderDisabled={reorderDisabled} persistenceStatus={persistenceStatus} commentsAvailable={commentsAvailable} />
+  return <NativeEditor deck={deck} onChange={onChange} readOnly={readOnly || !onChange} reorderDisabled={reorderDisabled} persistenceStatus={persistenceStatus} commentsAvailable={commentsAvailable} imagesAvailable={imagesAvailable} />
 }
 
-function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus, commentsAvailable }: SlidesEditorProps & { deck: SlideDeck; readOnly: boolean }) {
+function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceStatus, commentsAvailable, imagesAvailable }: SlidesEditorProps & { deck: SlideDeck; readOnly: boolean }) {
   const [slideId, setSlideId] = React.useState(deck.slide_order[0])
   const [elementId, setElementId] = React.useState<string>()
   const [present, setPresent] = React.useState(false)
@@ -50,7 +51,7 @@ function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceSt
   })
   const position = deck.slide_order.indexOf(slideId)
   return <section aria-label="Slides editor" className="space-y-3">
-    <p role="status" className="text-sm text-muted-foreground">{persistenceStatus ?? "Changes in this preview are not saved."} {commentsAvailable ? "Images are not available." : "Images and comments are not available."}</p>
+    <p role="status" className="text-sm text-muted-foreground">{persistenceStatus ?? "Changes in this preview are not saved."} {imagesAvailable ? (commentsAvailable ? "" : "Comments are not available in this view.") : commentsAvailable ? "Images are not available." : "Images and comments are not available."}</p>
     {error && <p role="alert">{error}</p>}
     <div className="flex flex-wrap gap-2" aria-label="Slide actions">
       <button className={control} disabled={readOnly || !slide || deck.slides.length >= 100} onClick={() => { const next = insertSlide(deck, slideId); if (changed(next.deck)) { setSlideId(next.slideId); setElementId(undefined) } }}>New slide</button>
@@ -84,16 +85,17 @@ function NativeEditor({ deck, onChange, readOnly, reorderDisabled, persistenceSt
             <label className="block">Text<textarea className={`${input} min-h-24`} value={element.text.value} onChange={event => editElement(value => { if (value.type === "text") value.text.value = event.target.value })} /></label>
             <label className="block">Alignment<select className={input} value={element.text.align} onChange={event => editElement(value => { if (value.type === "text") value.text.align = event.target.value as "left" | "center" | "right" })}>{["left", "center", "right"].map(value => <option key={value}>{value}</option>)}</select></label>
           </>}
-          {element.type !== "shape" && <>
+          {(element.type === "text" || element.type === "table") && <>
             <label className="block">Font family<input className={input} value={fontProperties(element)!.font_family} onChange={event => editElement(value => { const style = fontProperties(value); if (style) style.font_family = event.target.value })} /></label>
             <label className="block">Font size<input className={input} type="number" min={1} max={160} step={1} value={fontProperties(element)!.font_size} onChange={event => editElement(value => { const style = fontProperties(value); if (style) style.font_size = Number(event.target.value) })} /></label>
             <label className="block">Text color<input className={input} type="color" value={fontProperties(element)!.color} onChange={event => editElement(value => { const style = fontProperties(value); if (style) style.color = event.target.value })} /></label>
           </>}
+          {element.type === "image" && <label className="block">Image alternative text<textarea className={`${input} min-h-24`} value={element.image.alt} onChange={event => editElement(value => { if (value.type === "image") value.image.alt = event.target.value })} /></label>}
           {element.type === "shape" && <>
             <label className="block">Shape<select className={input} value={element.shape.kind} onChange={event => editElement(value => { if (value.type === "shape") value.shape.kind = event.target.value as "rectangle" | "ellipse" })}><option>rectangle</option><option>ellipse</option></select></label>
             <label className="block">Stroke width<input className={input} type="number" min={0} max={16} step={1} value={element.shape.stroke_width} onChange={event => editElement(value => { if (value.type === "shape") value.shape.stroke_width = Number(event.target.value) })} /></label>
           </>}
-          {element.type !== "text" && <label className="block">Fill<input className={input} type="color" value={fillProperties(element)!.fill} onChange={event => editElement(value => { const style = fillProperties(value); if (style) style.fill = event.target.value })} /></label>}
+          {(element.type === "shape" || element.type === "table") && <label className="block">Fill<input className={input} type="color" value={fillProperties(element)!.fill} onChange={event => editElement(value => { const style = fillProperties(value); if (style) style.fill = event.target.value })} /></label>}
           {element.type === "shape" && <label className="block">Stroke color<input className={input} type="color" value={element.shape.stroke} onChange={event => editElement(value => { if (value.type === "shape") value.shape.stroke = event.target.value })} /></label>}
           {element.type === "table" && <>
             <label className="block">Border color<input className={input} type="color" value={element.table.border} onChange={event => editElement(value => { if (value.type === "table") value.table.border = event.target.value })} /></label>

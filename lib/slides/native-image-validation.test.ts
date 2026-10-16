@@ -1,0 +1,11 @@
+import { describe, expect, it } from "vitest"
+import fixture from "@/testdata/slides-schema-v2.json"
+import { isNativeSlideDeck } from "@/components/features/slides/native-model"
+import type { SlideDeck } from "./model"
+function deck():SlideDeck { const value:unknown=structuredClone(fixture.deck);if(!isNativeSlideDeck(value))throw new Error("fixture");return value }
+describe("closed native schema2 image boundary",()=>{
+ it("accepts exact schema2 but refuses unknown version and image in schema1",()=>{const value=deck();expect(isNativeSlideDeck(value)).toBe(true);expect(isNativeSlideDeck({...value,schema_version:3})).toBe(false);expect(isNativeSlideDeck({...value,schema_version:1})).toBe(false)})
+ it("rejects URL/markup, wrong digest and non-scalar alternative text",()=>{for(const patch of [{url:"https://external.invalid/a.png"},{expected_sha256:"not-a-digest"},{alt:["text"]}]){const value=deck(),image=value.slides.flatMap(slide=>slide.elements).find(element=>element.type==="image")!;if(image.type!=="image")throw new Error("image");Object.assign(image.image,patch);expect(isNativeSlideDeck(value)).toBe(false)}})
+ it("accepts repeated same asset but rejects conflicting digest for that ID",()=>{const value=deck(),image=value.slides.flatMap(slide=>slide.elements).find(element=>element.type==="image")!;if(image.type!=="image")throw new Error("image");value.slides[0].elements.push({...structuredClone(image),id:"image_copy"});expect(isNativeSlideDeck(value)).toBe(true);const copy=value.slides[0].elements.at(-1)!;if(copy.type!=="image")throw new Error("copy");copy.image.expected_sha256="b".repeat(64);expect(isNativeSlideDeck(value)).toBe(false)})
+ it("counts unique assets and UTF8 alternative text rather than placements",()=>{const value=deck(),image=value.slides.flatMap(slide=>slide.elements).find(element=>element.type==="image")!;if(image.type!=="image")throw new Error("image");image.image.alt="é".repeat(1024);expect(isNativeSlideDeck(value)).toBe(true);image.image.alt+="é";expect(isNativeSlideDeck(value)).toBe(false);image.image.alt="";for(let i=1;i<33;i++)value.slides[0].elements.push({...structuredClone(image),id:`image_${i}`,image:{...image.image,asset_id:`asset_${i}`}});expect(isNativeSlideDeck(value)).toBe(false)})
+})

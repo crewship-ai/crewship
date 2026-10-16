@@ -328,5 +328,38 @@
       },
       "can_initialize_content": false
     }
+  },
+  {
+    "name": "slides-native-schema-2",
+    "facts": {
+      "has_slides": true,
+      "slides_schema": 2,
+      "human_owned": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "slides",
+        "schema_version": 2,
+        "supported": true
+      },
+      "can_initialize_content": false
+    }
+  },
+  {
+    "name": "slides-native-schema-3",
+    "facts": {
+      "has_slides": true,
+      "slides_schema": 3,
+      "human_owned": true
+    },
+    "expected": {
+      "content_descriptor": {
+        "type_id": "slides",
+        "schema_version": 3,
+        "supported": false,
+        "reason": "unsupported-version"
+      },
+      "can_initialize_content": false
+    }
   }
 ]

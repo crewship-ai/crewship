@@ -30,21 +30,29 @@ func slideSchemaComponents() map[string]any {
 	shape := obj(map[string]any{"kind": enum("rectangle", "ellipse"), "fill": color(), "stroke": color(), "stroke_width": integer(0, 16)}, "kind", "fill", "stroke", "stroke_width")
 	table := obj(map[string]any{"cells": arr(arr(text(4096), 1, 20), 1, 30), "font_family": font(), "font_size": integer(1, 160), "color": color(), "fill": color(), "border": color()}, "cells", "font_family", "font_size", "color", "fill", "border")
 	table["description"] = "Rectangular cells; aggregate across ALL tables (including empty cells) at most2000/slide and10000/deck."
+	image := obj(map[string]any{"asset_id": id(), "expected_sha256": hash(), "alt": text(2048)}, "asset_id", "expected_sha256", "alt")
 	var variants []any
-	for _, kind := range []string{"text", "shape", "table"} {
+	for _, kind := range []string{"text", "shape", "table", "image"} {
 		props := map[string]any{"id": id(), "type": enum(kind), "x": integer(0, 4096), "y": integer(0, 4096), "width": integer(1, 4096), "height": integer(1, 4096)}
-		props[kind] = map[string]map[string]any{"text": textElement, "shape": shape, "table": table}[kind]
+		props[kind] = map[string]map[string]any{"text": textElement, "shape": shape, "table": table, "image": image}[kind]
 		variants = append(variants, obj(props, "id", "type", "x", "y", "width", "height", kind))
 	}
 	element := map[string]any{"oneOf": variants, "description": "Integer geometry must fit the deck frame; each element admits exactly one matching payload. IDs unique across slides/elements."}
 	slide := obj(map[string]any{"id": id(), "notes": text(16384), "elements": arr(ref("SlideElement"), 0, 1000)}, "id", "notes", "elements")
 	theme := obj(map[string]any{"background": color(), "color": color(), "font_family": font(), "font_size": integer(1, 160)}, "background", "color", "font_family", "font_size")
-	deck := obj(map[string]any{"schema_version": integer(1, 1), "deck_id": id(), "width": integer(64, 4096), "height": integer(64, 4096), "theme": theme, "slide_order": arr(id(), 1, 100), "slides": arr(ref("Slide"), 1, 100)}, "schema_version", "deck_id", "width", "height", "theme", "slide_order", "slides")
+	deck := obj(map[string]any{"schema_version": integer(1, 2), "deck_id": id(), "width": integer(64, 4096), "height": integer(64, 4096), "theme": theme, "slide_order": arr(id(), 1, 100), "slides": arr(ref("Slide"), 1, 100)}, "schema_version", "deck_id", "width", "height", "theme", "slide_order", "slides")
+
+	v1element := map[string]any{"oneOf": variants[:3]}
+	v1slide := obj(map[string]any{"id": id(), "notes": text(16384), "elements": arr(ref("SlideElementV1"), 0, 1000)}, "id", "notes", "elements")
+	deck["oneOf"] = []any{
+		map[string]any{"properties": map[string]any{"schema_version": integer(1, 1), "slides": arr(ref("SlideV1"), 1, 100)}},
+		map[string]any{"properties": map[string]any{"schema_version": integer(2, 2)}},
+	}
 	deck["description"] = "At most2MiB canonical UTF-8 JSON and1000 total elements. slides array sorted by ID in canonical encoding; slide_order owns presentation order and must contain every slide exactly once. deck_id equals immutable Page ID."
-	state := obj(map[string]any{"schema_version": integer(1, 1), "revision": integer(1, 9007199254740991), "order_version": integer(1, 9007199254740991), "content_hash": hash(), "deck": ref("SlideDeck")}, "schema_version", "revision", "order_version", "content_hash", "deck")
+	state := obj(map[string]any{"schema_version": integer(1, 2), "revision": integer(1, 9007199254740991), "order_version": integer(1, 9007199254740991), "content_hash": hash(), "deck": ref("SlideDeck")}, "schema_version", "revision", "order_version", "content_hash", "deck")
 	receipt := obj(map[string]any{"mutation_id": id(), "revision": integer(1, 9007199254740991), "order_version": integer(1, 9007199254740991), "content_hash": hash(), "duplicate": map[string]any{"type": "boolean"}}, "mutation_id", "revision", "order_version", "content_hash", "duplicate")
-	revision := obj(map[string]any{"revision": integer(1, 9007199254740991), "parent_revision": integer(0, 9007199254740991), "order_version": integer(1, 9007199254740991), "schema_version": integer(1, 1), "content_hash": hash(), "actor": str(), "kind": enum("initialize", "patch", "reorder", "restore"), "mutation_id": id(), "created_at": str()}, "revision", "parent_revision", "order_version", "schema_version", "content_hash", "actor", "kind", "mutation_id", "created_at")
-	outlineElement := obj(map[string]any{"id": id(), "type": enum("text", "shape", "table"), "hash": hash()}, "id", "type", "hash")
+	revision := obj(map[string]any{"revision": integer(1, 9007199254740991), "parent_revision": integer(0, 9007199254740991), "order_version": integer(1, 9007199254740991), "schema_version": integer(1, 2), "content_hash": hash(), "actor": str(), "kind": enum("initialize", "patch", "reorder", "restore"), "mutation_id": id(), "created_at": str()}, "revision", "parent_revision", "order_version", "schema_version", "content_hash", "actor", "kind", "mutation_id", "created_at")
+	outlineElement := obj(map[string]any{"id": id(), "type": enum("text", "shape", "table", "image"), "hash": hash()}, "id", "type", "hash")
 	outlineEntry := obj(map[string]any{"id": id(), "hash": hash(), "elements": arr(outlineElement, 0, 1000)}, "id", "hash", "elements")
 	outline := obj(map[string]any{"page_id": id(), "revision": integer(1, 9007199254740991), "order_version": integer(1, 9007199254740991), "content_hash": hash(), "slides": arr(outlineEntry, 1, 100)}, "page_id", "revision", "order_version", "content_hash", "slides")
 	var operations []any
@@ -58,7 +66,7 @@ func slideSchemaComponents() map[string]any {
 	add("set_notes", map[string]any{"slide_id": id(), "if_hash": hash(), "notes": text(16384)}, "slide_id", "if_hash", "notes")
 	add("insert_slide", map[string]any{"slide": ref("Slide"), "position": integer(0, 100)}, "slide", "position")
 	add("delete_slide", map[string]any{"slide_id": id(), "if_hash": hash()}, "slide_id", "if_hash")
-	return map[string]any{"SlideElement": element, "Slide": slide, "SlideDeck": deck, "SlideState": state, "SlideReceipt": receipt, "SlideRevision": revision, "SlideOutline": outline, "SlideOperation": map[string]any{"oneOf": operations}}
+	return map[string]any{"SlideElementV1": v1element, "SlideV1": v1slide, "SlideElement": element, "Slide": slide, "SlideDeck": deck, "SlideState": state, "SlideReceipt": receipt, "SlideRevision": revision, "SlideOutline": outline, "SlideOperation": map[string]any{"oneOf": operations}}
 }
 func slideSchemaCatalog() map[string]DomainSchema {
 	integer := func(min int) map[string]any {
@@ -67,7 +75,7 @@ func slideSchemaCatalog() map[string]DomainSchema {
 	id := func() map[string]any { return map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,128}$"} }
 	request := func(props map[string]any, required ...string) map[string]any {
 		props["page_id"] = id()
-		props["schema_version"] = map[string]any{"type": "integer", "enum": []int{1}}
+		props["schema_version"] = map[string]any{"type": "integer", "enum": []int{1, 2}}
 		props["base_rev"] = integer(1)
 		props["mutation_id"] = id()
 		return map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": append([]string{"page_id", "schema_version", "base_rev", "mutation_id"}, required...), "description": "Exact case-sensitive keys, no duplicates, one JSON object at most2MiB; immutable Page binding and whole-revision CAS. No automatic rebase."}
@@ -87,8 +95,14 @@ func slideSchemaCatalog() map[string]DomainSchema {
 	initialize := request(map[string]any{"deck": ref("SlideDeck")}, "deck")
 	initialize["properties"].(map[string]any)["base_rev"] = map[string]any{"type": "integer", "enum": []int{0}}
 	post("/initialize", initialize)
-	patch := request(map[string]any{"operations": map[string]any{"type": "array", "minItems": 1, "maxItems": 100, "items": ref("SlideOperation")}, "if_order_version": integer(1)}, "operations")
+	patch := request(map[string]any{"operations": map[string]any{"type": "array", "minItems": 1, "maxItems": 100, "items": ref("SlideOperation")}, "if_order_version": integer(1), "target_schema_version": map[string]any{"type": "integer", "enum": []int{2}}, "if_content_hash": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}}, "operations")
 	patch["description"] = "Progressive candidate semantics: each if_hash sees earlier operations in this atomic batch. if_hash is element hash for set/delete_element, full slide hash for insert_element/set_notes/delete_slide. insert/delete_slide also require if_order_version. Aggregate final deck limits enforced."
+
+	patch["oneOf"] = []any{
+		map[string]any{"not": map[string]any{"anyOf": []any{map[string]any{"required": []string{"target_schema_version"}}, map[string]any{"required": []string{"if_content_hash"}}}}},
+		map[string]any{"required": []string{"target_schema_version", "if_content_hash"}, "properties": map[string]any{"schema_version": map[string]any{"type": "integer", "enum": []int{1}}}},
+	}
+	patch["description"] = patch["description"].(string) + " Explicit first-image upgrade requires original schema1, target_schema_version2 and original whole-head if_content_hash together. Schema1 remains closed without images. Image asset ID/SHA must match live owning Page assets; promotion and exact immutable revision pins commit atomically. At most32 unique assets,32MiB unique asset bytes and33554432 unique asset decoded pixels/revision. Restore appends the selected immutable source schema, including explicit mixed1/2 history."
 	post("/patch", patch)
 	post("/reorder", request(map[string]any{"if_order_version": integer(1), "slide_order": map[string]any{"type": "array", "minItems": 1, "maxItems": 100, "items": id()}}, "if_order_version", "slide_order"))
 	post("/restore", request(map[string]any{"if_order_version": integer(1), "revision": integer(1)}, "if_order_version", "revision"))

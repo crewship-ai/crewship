@@ -61,7 +61,7 @@ func TestModelRejectsUnsupportedAndAmbiguousInput(t *testing.T) {
 		"null table cell":    strings.Replace(source, `"Položka"`, `null`, 1),
 		"unknown":            strings.Replace(source, `"schema_version":1`, `"schema_version":1,"script":"alert(1)"`, 1),
 		"duplicate key":      strings.Replace(source, `"schema_version":1`, `"schema_version":1,"schema_version":1`, 1),
-		"schema":             strings.Replace(source, `"schema_version":1`, `"schema_version":2`, 1),
+		"schema":             strings.Replace(source, `"schema_version":1`, `"schema_version":3`, 1),
 		"missing coordinate": strings.Replace(source, `"x":24,`, ``, 1),
 		"fraction":           strings.Replace(source, `"x":24`, `"x":24.0`, 1),
 		"trailing":           source + ` {}`,

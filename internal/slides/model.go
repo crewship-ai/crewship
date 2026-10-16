@@ -19,6 +19,12 @@ import (
 
 const (
 	SchemaVersion         = 1
+	ImageSchemaVersion    = 2
+	MaxImageAltBytes      = 2048
+	MaxImageAssets        = 32
+	MaxImageAssetBytes    = 32 << 20
+	MaxImageAssetPixels   = 32 * 1024 * 1024
+	ImageHashDomain       = "crewship-slides-canonical-json/v2\n"
 	MaxDeckBytes          = 2 << 20
 	MaxSlides             = 100
 	MaxElements           = 1000
@@ -64,7 +70,18 @@ type Element struct {
 	Text   *Text  `json:"text,omitempty"`
 	Shape  *Shape `json:"shape,omitempty"`
 	Table  *Table `json:"table,omitempty"`
+	Image  *Image `json:"image,omitempty"`
 }
+type Image struct {
+	AssetID        string `json:"asset_id"`
+	ExpectedSHA256 string `json:"expected_sha256"`
+	Alt            string `json:"alt"`
+}
+
+func SupportedSchema(version int) bool {
+	return version == SchemaVersion || version == ImageSchemaVersion
+}
+
 type Text struct {
 	Value      string `json:"value"`
 	FontFamily string `json:"font_family"`
@@ -180,7 +197,7 @@ func validFont(family string, size int) bool {
 	return validText(family, 128) && strings.TrimSpace(family) != "" && !strings.ContainsAny(family, "\n\t") && size >= 1 && size <= 160
 }
 func Validate(deck Deck) error {
-	if deck.SchemaVersion != SchemaVersion {
+	if !SupportedSchema(deck.SchemaVersion) {
 		return ErrSchema
 	}
 	if !identifier.MatchString(deck.DeckID) || deck.Width < 64 || deck.Width > 4096 || deck.Height < 64 || deck.Height > 4096 || deck.Slides == nil || deck.SlideOrder == nil || len(deck.Slides) < 1 || len(deck.Slides) > MaxSlides || len(deck.SlideOrder) != len(deck.Slides) {
@@ -193,6 +210,7 @@ func Validate(deck Deck) error {
 	slides := map[string]bool{}
 	count := 0
 	tableCells := 0
+	images := map[string]string{}
 	for _, slide := range deck.Slides {
 		slideCells := 0
 		if !identifier.MatchString(slide.ID) || ids[slide.ID] || slide.Elements == nil || !validText(slide.Notes, MaxNotesBytes) {
@@ -212,17 +230,17 @@ func Validate(deck Deck) error {
 			switch element.Type {
 			case "text":
 				v := element.Text
-				if v == nil || element.Shape != nil || element.Table != nil || !validText(v.Value, MaxTextBytes) || !validFont(v.FontFamily, v.FontSize) || !color.MatchString(v.Color) || (v.Align != "left" && v.Align != "center" && v.Align != "right") {
+				if v == nil || element.Shape != nil || element.Table != nil || element.Image != nil || !validText(v.Value, MaxTextBytes) || !validFont(v.FontFamily, v.FontSize) || !color.MatchString(v.Color) || (v.Align != "left" && v.Align != "center" && v.Align != "right") {
 					return errors.New("invalid text element")
 				}
 			case "shape":
 				v := element.Shape
-				if v == nil || element.Text != nil || element.Table != nil || (v.Kind != "rectangle" && v.Kind != "ellipse") || !color.MatchString(v.Fill) || !color.MatchString(v.Stroke) || v.StrokeWidth < 0 || v.StrokeWidth > 16 {
+				if v == nil || element.Text != nil || element.Table != nil || element.Image != nil || (v.Kind != "rectangle" && v.Kind != "ellipse") || !color.MatchString(v.Fill) || !color.MatchString(v.Stroke) || v.StrokeWidth < 0 || v.StrokeWidth > 16 {
 					return errors.New("invalid shape element")
 				}
 			case "table":
 				v := element.Table
-				if v == nil || element.Text != nil || element.Shape != nil || len(v.Cells) < 1 || len(v.Cells) > 30 || len(v.Cells[0]) < 1 || len(v.Cells[0]) > 20 || !validFont(v.FontFamily, v.FontSize) || !color.MatchString(v.Color) || !color.MatchString(v.Fill) || !color.MatchString(v.Border) {
+				if v == nil || element.Text != nil || element.Shape != nil || element.Image != nil || len(v.Cells) < 1 || len(v.Cells) > 30 || len(v.Cells[0]) < 1 || len(v.Cells[0]) > 20 || !validFont(v.FontFamily, v.FontSize) || !color.MatchString(v.Color) || !color.MatchString(v.Fill) || !color.MatchString(v.Border) {
 					return errors.New("invalid table element")
 				}
 				for _, row := range v.Cells {
@@ -243,8 +261,20 @@ func Validate(deck Deck) error {
 						}
 					}
 				}
+			case "image":
+				v := element.Image
+				if deck.SchemaVersion != ImageSchemaVersion || v == nil || element.Text != nil || element.Shape != nil || element.Table != nil || !identifier.MatchString(v.AssetID) || !hashPattern.MatchString(v.ExpectedSHA256) || !validText(v.Alt, MaxImageAltBytes) {
+					return errors.New("invalid schema-2 image element")
+				}
+				if sha, exists := images[v.AssetID]; exists && sha != v.ExpectedSHA256 {
+					return errors.New("conflicting image asset identity")
+				}
+				images[v.AssetID] = v.ExpectedSHA256
+				if len(images) > MaxImageAssets {
+					return errors.New("too many unique image assets")
+				}
 			default:
-				return errors.New("unsupported element type; images require the separate asset contract")
+				return errors.New("unsupported element type")
 			}
 		}
 	}
@@ -294,14 +324,19 @@ func canonicalValue(value any) ([]byte, error) {
 	data := bytes.TrimSuffix(buffer.Bytes(), []byte("\n"))
 	return data, nil
 }
-func hashBytes(data []byte) string {
-	hash := sha256.Sum256(append([]byte(HashDomain), data...))
+func hashDomainBytes(domain string, data []byte) string {
+	hash := sha256.Sum256(append([]byte(domain), data...))
 	return hex.EncodeToString(hash[:])
 }
+func hashBytes(data []byte) string { return hashDomainBytes(HashDomain, data) }
+
 func DeckHash(deck Deck) (string, error) {
 	data, err := Canonical(deck)
 	if err != nil {
 		return "", err
+	}
+	if deck.SchemaVersion == ImageSchemaVersion {
+		return hashDomainBytes(ImageHashDomain, data), nil
 	}
 	return hashBytes(data), nil
 }
@@ -309,6 +344,9 @@ func ElementHash(element Element) (string, error) {
 	data, err := canonicalValue(element)
 	if err != nil {
 		return "", err
+	}
+	if element.Type == "image" {
+		return hashDomainBytes(ImageHashDomain, data), nil
 	}
 	return hashBytes(data), nil
 }
@@ -407,7 +445,7 @@ func requiredModelFields(raw []byte) error {
 			if err = json.Unmarshal(element["type"], &kind); err != nil {
 				return err
 			}
-			fields := map[string][]string{"text": {"value", "font_family", "font_size", "color", "align"}, "shape": {"kind", "fill", "stroke", "stroke_width"}, "table": {"cells", "font_family", "font_size", "color", "fill", "border"}}[kind]
+			fields := map[string][]string{"text": {"value", "font_family", "font_size", "color", "align"}, "shape": {"kind", "fill", "stroke", "stroke_width"}, "table": {"cells", "font_family", "font_size", "color", "fill", "border"}, "image": {"asset_id", "expected_sha256", "alt"}}[kind]
 			if fields == nil {
 				return errors.New("unsupported element type")
 			}
@@ -435,4 +473,18 @@ func requiredModelFields(raw []byte) error {
 		}
 	}
 	return nil
+}
+
+// ImageReferences returns unique asset identities from an already validated deck.
+// The transaction hook must still authorize every reference and verify bytes.
+func ImageReferences(deck Deck) map[string]string {
+	refs := map[string]string{}
+	for _, slide := range deck.Slides {
+		for _, element := range slide.Elements {
+			if element.Type == "image" && element.Image != nil {
+				refs[element.Image.AssetID] = element.Image.ExpectedSHA256
+			}
+		}
+	}
+	return refs
 }

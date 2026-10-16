@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Typed Slides API supports private PNG/JPEG revision attachments (#3213).** Explicit schema2 upgrades preserve schema1 history and hashes; exact image pins, credential checks and recovery validation commit with the revision. Removing an image preserves historic bytes and comments detach/restore by stable identity. Native image UI and export qualification remain separate.
+
 - Native Slides Pages now support explicit durable human save/retry, history/restore and presentation with immutable Page/revision preconditions, retained conflicts and live type-specific edit capability; image/comments/export and agent work remain pending.
 
 - **Native Slides UI primitives support typed text, shapes, tables and keyboard Present (#3201).** This component delivery emits unsaved drafts; Pages persistence, images, comments and export remain pending.
