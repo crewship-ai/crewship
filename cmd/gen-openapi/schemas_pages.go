@@ -169,6 +169,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	}
 
 	page := obj(map[string]any{
+		"has_document": boolean(),
 		"has_project": map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": map[string]any{"type": "string",
@@ -182,6 +183,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	pageRow := obj(map[string]any{
+		"has_document": boolean(),
 		"can_move":               map[string]any{"type": "boolean", "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them."},
 		"can_remove_from_folder": map[string]any{"type": "boolean", "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer."},
 		"has_project":            map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
@@ -260,6 +262,10 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"icon":  map[string]any{"type": "string", "description": "The page's icon, a crew icon name. On PATCH an omitted field keeps the stored one and \"\" clears it; a name outside the crew icon registry is refused by name (400)."},
 		"color": map[string]any{"type": "string", "description": "The page's colour, a crew palette key. Same pointer rule as icon; a value outside the palette is refused by name (400)."},
 	})
+
+	createBody := obj(mergeProps(writeBody["properties"].(map[string]any), map[string]any{
+		"allow_empty": map[string]any{"type": "boolean", "description": "Explicitly stage an empty Page owned by the current human for a Document. Panels are refused in this mode."},
+	}))
 
 	// ── Grants (§7.1, §7.1b) ────────────────────────────────────────────────
 	//
@@ -645,7 +651,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			Response: page,
 		},
 		"POST /api/v1/pages": {
-			Request: writeBody, Response: page,
+			Request: createBody, Response: page,
 		},
 		"PATCH /api/v1/pages/{slug}": {
 			Request: writeBody, Response: page,

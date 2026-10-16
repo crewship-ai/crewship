@@ -218,6 +218,7 @@ func (r pageListRowJSON) panelCount() int {
 // the document verbatim as a string would leave the server holding an opaque
 // blob it is required by §10b.1 to validate.
 type pageWriteJSON struct {
+	AllowEmpty  bool                 `json:"allow_empty,omitempty" yaml:"allow_empty,omitempty"`
 	Slug        string               `json:"slug" yaml:"slug"`
 	Name        string               `json:"name" yaml:"name"`
 	Description string               `json:"description,omitempty" yaml:"description,omitempty"`
@@ -510,11 +511,16 @@ var pageCreateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		allowEmpty, _ := cmd.Flags().GetBool("allow-empty")
+		if allowEmpty && (len(doc.Spec.Panels) != 0 || owner != "") {
+			return cli.WithExitCode(errors.New("--allow-empty requires no panels and the default human owner"), cli.ExitValidation)
+		}
 		client, err := pageClient()
 		if err != nil {
 			return err
 		}
 		body := pageWriteFrom(doc)
+		body.AllowEmpty = allowEmpty
 		body.Owner = owner
 		body.Icon, body.Color = pageAvatarFromFlags(cmd)
 		resp, err := client.Post("/api/v1/pages", body)
@@ -625,7 +631,13 @@ func pageDocumentFromFlag(cmd *cobra.Command) (*pages.Document, error) {
 	if err != nil {
 		return nil, cli.WithExitCode(fmt.Errorf("read %s: %w", path, err), cli.ExitValidation)
 	}
-	doc, err := pages.ParseDocument(raw)
+	var doc *pages.Document
+	allowEmpty, _ := cmd.Flags().GetBool("allow-empty")
+	if allowEmpty {
+		doc, err = pages.ParseDocumentAllowEmpty(raw)
+	} else {
+		doc, err = pages.ParseDocument(raw)
+	}
 	if err != nil {
 		return nil, cli.WithExitCode(err, cli.ExitValidation)
 	}
@@ -931,6 +943,7 @@ func pageDash(s string) string {
 }
 
 func init() {
+	pageCreateCmd.Flags().Bool("allow-empty", false, "Create an empty human-owned Page before document initialization; no panels or crew owner")
 	pageCreateCmd.Flags().String("file", "", "Page document to author from (YAML or JSON; - for stdin)")
 	// Create only. `update` re-applies a spec, and ownership is not part of the
 	// spec — see pageWriteJSON.Owner.
