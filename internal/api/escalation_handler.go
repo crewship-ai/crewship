@@ -304,9 +304,9 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, credential_id, status, created_at, deadline_at, answer_deadline_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
-	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now, deadlineAt, answerDeadlineAt)
+		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, credential_id, status, created_at, deadline_at, answer_deadline_at, source_run_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, NULLIF(?, ''))
+	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now, deadlineAt, answerDeadlineAt, body.SourceRunID)
 	if err != nil {
 		h.logger.Error("create escalation", "error", err)
 		// Don't leave an orphaned PENDING_APPROVAL credential with no escalation
