@@ -54,6 +54,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Issues created in chat stay with their conversation turn (#3068).** Viewer-authorized cards survive reload and failed runs, open an existing Issue detail panel, and support permitted field edits and comments with conflict and uncertain-write recovery. Access loss hides protected card and panel data; phone and keyboard flows use the same controls. Direct work execution remains on the canonical Issue page.
 
 - **Chat issue cards can refresh sooner after successful writes.** Authorized chat sessions now receive content-free reference/revision invalidation hints; reference snapshots include `contract_version: 1`. Queued session delivery also rejects suspended users and deleted chat agents/workspaces.
+- **Suspended accounts stop receiving realtime updates.** Channel subscriptions and queued WebSocket delivery now recheck the active account, including global and identity feeds and protocol control messages.
 - Issue cards in chat can show linked pull requests on demand, using authorized stored provider metadata. Cards distinguish failed or missing synchronization and explicitly mark CI as unknown; no private source or diff is fetched.
 
 - Guests with explicit routine View and Edit draft shares can change collaborative drafts through UI and CLI with revision/base conflicts and atomic audit. Published recipes, execution authority and trusted testing/review gates remain intact; direct Guest publication is still separate work.
