@@ -167,7 +167,7 @@ test.describe("Skills desktop", () => {
     await seed(page)
     const { skills } = await api(page)
     await page.goto(`/skills?skill=${skills[0].id}`)
-    await page.getByRole("button", { name: "Activity" }).click()
+    await page.getByRole("button", { name: "Skill activity" }).click()
     await expect(page).toHaveURL(/tab=used/)
     await expect(page.getByText("Recent uses")).toBeVisible()
   })
