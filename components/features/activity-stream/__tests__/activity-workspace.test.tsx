@@ -154,7 +154,7 @@ it("keeps an agent picked on the Work queue removable on Deliveries, where it ha
   view.rerender(<ActivityWorkspace workspaceId="ws-a" />)
   expect(screen.getByRole("heading", { name: /Webhook deliveries · Casey/ })).toBeInTheDocument()
   expect(screen.getByLabelText(/^Casey, none here/)).toBeInTheDocument()
-  fireEvent.click(screen.getByRole("button", { name: "Remove filter" }))
+  fireEvent.click(screen.getByRole("button", { name: /^Remove filter/ }))
   expect(screen.getByRole("heading", { name: "Webhook deliveries" })).toBeInTheDocument()
 })
 
