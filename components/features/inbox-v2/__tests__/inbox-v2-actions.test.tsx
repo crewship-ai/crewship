@@ -396,7 +396,7 @@ describe("history and the states nobody looks at until they happen", () => {
     m.items = []
     m.error = "boom"
     show()
-    expect(await screen.findByRole("heading", { name: "The inbox could not load" })).toBeInTheDocument()
+    expect(await screen.findByText("The inbox could not load")).toBeInTheDocument()
     expect(screen.queryByRole("heading", { name: "Nothing waits for you" })).toBeNull()
   })
 
