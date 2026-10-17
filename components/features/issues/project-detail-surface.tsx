@@ -229,6 +229,7 @@ function ProjectDetailDraft({
         workspaceId={workspaceId}
         onOpenIssue={onOpenIssue}
         onNewIssue={onNewIssue}
+        canWriteFiles={editable}
         milestones={<ProjectMilestonesCard key={project.id} projectId={project.id} workspaceId={workspaceId} editable={editable} />}
         share={<ResourceShareDialog workspaceId={workspaceId} resource={{ kind: "project", id: project.id, name: project.name }} />}
         onRequestDelete={canDelete ? () => setConfirmDelete(true) : undefined}

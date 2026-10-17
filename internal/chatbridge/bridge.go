@@ -1236,9 +1236,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		costCancel()
 	}
 	if runErr != nil {
-		if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) || (errors.Is(runErr, orchestrator.ErrDetachedExecStopped) && ctx.Err() != context.Canceled) {
-			// Preserve partial replies for both detached outcomes. Only an
-			// unconfirmed stop remains nonterminal; a confirmed stop falls
+		if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) || errors.Is(runErr, orchestrator.ErrDetachedStillRunning) || (errors.Is(runErr, orchestrator.ErrDetachedExecStopped) && ctx.Err() != context.Canceled) {
+			// Preserve partial replies when the observer or execution detaches. An
+			// unconfirmed outcome remains nonterminal; a confirmed stop falls
 			// through to normal failure/cancellation bookkeeping below.
 			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
 			defer cleanCancel()
@@ -1258,11 +1258,16 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			} else {
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
 			}
-			if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
-				b.logger.Warn("chat turn's exec detached after RunAgent's stop attempt; leaving the run nonterminal",
+			if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) || errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
+				reason := "detached_still_running"
+				if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) {
+					reason = "host_capture_unconfirmed"
+				}
+				b.logger.Warn("chat observer ended without a confirmed execution outcome; leaving the run nonterminal",
 					"chat_id", chatID, "run_id", runID, "error", runErr)
-				// End this WebSocket stream, not the still-running execution.
-				streamFn(ws.ChatEvent{Type: "done", Metadata: map[string]any{"reason": "detached_still_running"}})
+				// End only this observer stream. Protected retained output owns
+				// later settlement even if the observer context was cancelled.
+				streamFn(ws.ChatEvent{Type: "done", Metadata: map[string]any{"reason": reason}})
 				return nil
 			}
 		}

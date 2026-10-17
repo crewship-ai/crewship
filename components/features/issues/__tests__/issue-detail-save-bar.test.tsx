@@ -83,6 +83,41 @@ const pick = (picker: string, option: string) => {
   fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${option}`) }))
 }
 
+function withMembers() {
+  const base = global.fetch
+  global.fetch = vi.fn((url: string, init?: RequestInit) => {
+    if (/\/workspaces\/ws1\/members/.test(String(url))) {
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([{ user_id: "u2", user: { full_name: "Jana Nováková" } }]) } as unknown as Response)
+    }
+    return base(url, init)
+  }) as unknown as typeof fetch
+}
+
+describe("Owner on the issue page (ISS-06)", () => {
+  it("is editable: picking a person stages it, and Save writes the owner through the user assignee", async () => {
+    withMembers()
+    await show()
+    pick("Change owner", "Jana Nováková")
+    expect(bar()).toHaveTextContent("1 unsaved change")
+    expect(patches).toEqual([])
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    // PATCH routes assignee_type "user" to owner_user_id and leaves the
+    // delegate column alone (issue_handler.go setOwnerOrDelegate).
+    await waitFor(() => expect(patches).toEqual([{ assignee_type: "user", assignee_id: "u2" }]))
+  })
+
+  it("an owner staged with other fields goes as its own write, after them", async () => {
+    withMembers()
+    await show()
+    pick("Change priority", "High")
+    pick("Change owner", "Jana Nováková")
+    expect(bar()).toHaveTextContent("2 unsaved changes")
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(patches).toHaveLength(2))
+    expect(patches).toEqual([{ priority: "high" }, { assignee_type: "user", assignee_id: "u2" }])
+  })
+})
+
 describe("issue edits on the page Save bar", () => {
   it("stages status and priority as two unsaved changes, sending nothing", async () => {
     await show()

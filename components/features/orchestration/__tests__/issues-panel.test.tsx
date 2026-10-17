@@ -44,6 +44,11 @@ function setup(over: Partial<IssuesPanelProps> = {}) {
 }
 const openFilters = () => fireEvent.click(screen.getByRole("button", { name: /^filter/i }))
 const panel = () => within(screen.getByRole("group", { name: "Filter issues" }))
+/** Facets fold (COM-01); a facet with a value starts open. */
+const unfold = (facet: string) => {
+  const header = panel().getByRole("button", { name: new RegExp(`^${facet}`) })
+  if (header.getAttribute("aria-expanded") !== "true") fireEvent.click(header)
+}
 
 describe("IssuesPanel", () => {
   beforeEach(() => vi.clearAllMocks())
@@ -60,12 +65,38 @@ describe("IssuesPanel", () => {
     expect(screen.getByText("Launch blockers")).toBeInTheDocument()
   })
 
+  it("Filter opens the facets inline in the panel (COM-01), not in a floating popover", () => {
+    setup()
+    const trigger = screen.getByRole("button", { name: /^filter/i })
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByRole("group", { name: "Filter issues" })).toBeNull()
+    openFilters()
+    const block = screen.getByRole("group", { name: "Filter issues" })
+    expect(block).toHaveAttribute("data-slot", "facet-block")
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    expect(trigger.getAttribute("aria-controls")).toBe(block.id)
+    expect(screen.queryByRole("dialog")).toBeNull()
+    // In the panel's flow, above the views.
+    expect(block.compareDocumentPosition(screen.getByText("My work")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("a facet lists at most six values and the rest under All N…", () => {
+    setup()
+    openFilters()
+    unfold("Status")
+    const status = within(panel().getByRole("group", { name: "Status" }))
+    expect(status.getAllByRole("button", { pressed: false })).toHaveLength(6)
+    expect(status.getByRole("button", { name: "All 7…" })).toBeInTheDocument()
+  })
+
   it("offers the six v67 facets plus Crew, with counts from the loaded issues", () => {
     setup()
     openFilters()
     for (const f of ["Status", "Priority", "Delegate", "Owner", "Who holds the work", "Labels", "Crew"]) {
       expect(panel().getByText(f)).toBeInTheDocument()
     }
+    unfold("Delegate")
+    unfold("Who holds the work")
     expect(panel().getByRole("button", { name: /Scout/ })).toHaveTextContent("1")
     expect(panel().getByRole("button", { name: /A person/ })).toHaveTextContent("1")
   })
@@ -73,8 +104,10 @@ describe("IssuesPanel", () => {
   it("a pick patches only its own facet and keeps the panel open", () => {
     const p = setup({ filters: { ...NO_FILTERS, crewId: "c1" } })
     openFilters()
+    unfold("Priority")
     fireEvent.click(panel().getByRole("button", { name: /^High/ }))
     expect(p.onFilters).toHaveBeenLastCalledWith({ priority: "high" })
+    unfold("Owner")
     fireEvent.click(panel().getByRole("button", { name: /Pavel Srba/ }))
     expect(p.onFilters).toHaveBeenLastCalledWith({ ownerId: "u1" })
     expect(screen.getByRole("group", { name: "Filter issues" })).toBeInTheDocument()
@@ -90,6 +123,7 @@ describe("IssuesPanel", () => {
   it("adds a status to the multi-select without dropping the others", () => {
     const p = setup({ filters: { ...NO_FILTERS, statuses: ["TODO"] } })
     openFilters()
+    unfold("Status")
     fireEvent.click(panel().getByRole("button", { name: /^In review/ }))
     expect(p.onFilters).toHaveBeenLastCalledWith({ statuses: ["TODO", "REVIEW"] })
   })

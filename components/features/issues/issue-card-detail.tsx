@@ -49,6 +49,7 @@ import {
   Link2,
   ListChecks,
   MessageSquare,
+  Play,
   Milestone as MilestoneIcon,
   Tag,
   UserCircle2,
@@ -86,6 +87,7 @@ import {
   EstimatePicker,
   LabelsPicker,
   MilestonePicker,
+  OwnerPicker,
   PriorityPicker,
   ProjectPicker,
   RemoveRelationButton,
@@ -102,7 +104,7 @@ import {
 import { getCrewIconDef } from "@/lib/entities"
 import { RELATION_TYPE_LABELS } from "@/components/features/issues/issue-constants"
 import { entityHref } from "@/lib/entity-links"
-import { IssueRunsCard, issueRunLinks, issueRunStatus, type IssueRun } from "@/components/features/issues/issue-runs-card"
+import { IssueRunsList, issueRunLinks, issueRunStatus, runTitle, type IssueRun } from "@/components/features/issues/issue-runs-card"
 import { issueFacts, issuePriorityTone } from "@/lib/issue-facts"
 import { automationsForIssue, type Automation } from "@/lib/automations"
 import { runProvenance } from "@/lib/run-provenance"
@@ -202,7 +204,7 @@ interface Props {
   routineRuns?: PipelineRunRecord[]
 }
 
-type FootTab = "all" | "comments" | "history"
+type FootTab = "all" | "comments" | "history" | "runs"
 
 export function IssueCardDetail({
   issue,
@@ -257,10 +259,15 @@ export function IssueCardDetail({
     // Comments and history in one stream, newest first, whichever order the
     // server listed them in (the API answers history oldest-first since the
     // seq-cursored resync).
-    type Item = { kind: "comment"; at: string; c: IssueComment } | { kind: "activity"; at: string; seq?: number; a: IssueActivity }
+    type Item =
+      | { kind: "comment"; at: string; c: IssueComment }
+      | { kind: "activity"; at: string; seq?: number; a: IssueActivity }
+      | { kind: "run"; at: string; r: IssueRun }
     const items: Item[] = [
       ...comments.map((c) => ({ kind: "comment" as const, at: String(c.created_at ?? ""), c })),
       ...activities.map((a) => ({ kind: "activity" as const, at: String(a.created_at ?? ""), seq: (a as { seq?: number }).seq, a })),
+      // A run is one line in All; the Runs segment shows its full row.
+      ...runs.map((r) => ({ kind: "run" as const, at: String(r.started_at ?? r.ended_at ?? ""), r })),
     ]
     const byTime = (x: Item, y: Item) => y.at.localeCompare(x.at)
     const history = items.filter((i) => i.kind === "activity").sort((x, y) => {
@@ -270,15 +277,39 @@ export function IssueCardDetail({
       return byTime(x, y)
     })
     return { all: [...items].sort(byTime), history }
-  }, [comments, activities])
+  }, [comments, activities, runs])
 
   const editable = (action: string) => Boolean(edit && allowsEdit(edit, action))
   const sub = subIssues
   const subDone = sub.filter((s) => ["DONE", "COMPLETED"].includes(String(s.status))).length
   const subOpen = sub.length - subDone
 
+  const runLine = (r: IssueRun) => {
+    const result = issueRunStatus(r)
+    const href = issueRunLinks(issue, r).run
+    return (
+      <li key={`r-${r.id}`} data-testid="timeline-run" className="flex items-start gap-3 text-label">
+        <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-surface-subtle text-muted-foreground">
+          <Play className="size-3.5" aria-hidden />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-body font-medium text-foreground">{r.agent_name || r.agent_slug || "Agent"}</span>
+          <span className="min-w-0 truncate text-muted-foreground">{runTitle(issue, r)}</span>
+          <StatusPill label={result.label} tone={result.tone} live={r.status === "RUNNING"} />
+          {r.started_at && <span className="text-muted-foreground">{timeAgo(r.started_at)}</span>}
+          {href && (
+            <Link href={href} className="inline-flex items-center gap-1 text-primary hover:underline">
+              Open run
+              <ArrowUpRight className="size-3" aria-hidden />
+            </Link>
+          )}
+        </div>
+      </li>
+    )
+  }
+
   const comment = (c: IssueComment) => (
-    <li key={`c-${c.id}`} className="flex gap-3">
+    <li key={`c-${c.id}`} data-testid="timeline-comment" className="flex gap-3">
       {c.author_type === "agent" ? (
         <AgentAvatar seed={c.author_id} className="mt-0.5 size-7 shrink-0 rounded-full" alt="" />
       ) : (
@@ -428,16 +459,20 @@ export function IssueCardDetail({
         {/* Live agent work while the issue is running; nothing when quiet. */}
         {runActivity && <Appear order={6}>{runActivity}</Appear>}
 
-        <Appear order={7}>
-          <IssueRunsCard issue={issue} runs={runs} unavailable={unavailable.includes("runs")} />
-        </Appear>
-
         <span id="issue-conversation" className="scroll-mt-16" />
         <Appear order={8}>
           <DetailCard
             title="Timeline"
             icon={MessageSquare}
-            subtitle={String(footTab === "comments" ? comments.length : footTab === "history" ? activities.length : comments.length + activities.length)}
+            subtitle={String(
+              footTab === "comments"
+                ? comments.length
+                : footTab === "history"
+                  ? activities.length
+                  : footTab === "runs"
+                    ? runs.length
+                    : comments.length + activities.length + runs.length,
+            )}
             action={
               <div role="radiogroup" aria-label="Show" className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
                 {(
@@ -445,6 +480,7 @@ export function IssueCardDetail({
                     ["all", "All"],
                     ["comments", "Comments"],
                     ["history", "Activity"],
+                    ["runs", "Runs"],
                   ] as const
                 ).map(([t, label]) => (
                   <button
@@ -465,8 +501,18 @@ export function IssueCardDetail({
             }
           >
             <div className="space-y-4">
-              {footTab !== "history" && olderComments}
-              {footTab === "comments" ? (
+              {(footTab === "all" || footTab === "comments") && olderComments}
+              {footTab === "runs" ? (
+                <div className="flex flex-col gap-2">
+                  <IssueRunsList issue={issue} runs={runs} unavailable={unavailable.includes("runs")} />
+                  {runs.length > 0 && (
+                    <Link href={issueRunLinks(issue).activity} className="inline-flex w-fit items-center gap-1 text-label text-primary hover:underline">
+                      All runs in Activity
+                      <ArrowUpRight className="size-3" aria-hidden />
+                    </Link>
+                  )}
+                </div>
+              ) : footTab === "comments" ? (
                 comments.length === 0 ? (
                   <p className="text-label text-muted-foreground">
                     {unavailable.includes("comments") ? "Could not load the comments — try again above." : "Nobody has said anything about this issue yet."}
@@ -490,13 +536,15 @@ export function IssueCardDetail({
                 </p>
               ) : (
                 <ul className="space-y-3">
-                  {timeline.all.map((i) => (i.kind === "comment" ? comment(i.c) : <ActivityRow key={`a-${i.a.id}`} activity={i.a} mentions={mentions} />))}
+                  {timeline.all.map((i) =>
+                    i.kind === "comment" ? comment(i.c) : i.kind === "run" ? runLine(i.r) : <ActivityRow key={`a-${i.a.id}`} activity={i.a} mentions={mentions} />,
+                  )}
                 </ul>
               )}
 
               {/* The composer is how an agent becomes a participant: it is
                   @mentioned here. */}
-              {onSubmitComment && footTab !== "history" && (
+              {onSubmitComment && (footTab === "all" || footTab === "comments") && (
                 <div className="border-t border-border pt-4">
                   <CommentComposer
                     agents={agents ?? []}
@@ -552,7 +600,9 @@ export function IssueCardDetail({
               {issue.owner || issue.delegate || !issue.assignee_name || edit ? (
                 <>
                   <EditRow icon={UserCircle2} label="Owner" hint="accountable person">
-                    {issue.owner ? (
+                    {editable("assign") && edit?.people ? (
+                      <OwnerPicker issue={issue} edit={edit} />
+                    ) : issue.owner ? (
                       <span className="inline-flex items-center gap-1.5 text-body">
                         <UserAvatar name={issue.owner.name} email="" className="size-4" />
                         {issue.owner.name ?? "Owner"}

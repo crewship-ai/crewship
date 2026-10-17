@@ -9,6 +9,10 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { EMPTY_CREDENTIAL_FILTERS, type CredentialFilters } from "@/lib/credentials/facets"
 import { CredentialsSidebar } from "../credentials-sidebar"
+import { SecondaryPanel } from "@/components/layout/secondary-panel"
+
+// The panel remembers its collapse through the preferences API.
+vi.mock("@/lib/api-fetch", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/api-fetch")>()), apiFetch: vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })) }))
 
 function renderSidebar(
   overrides: {
@@ -57,7 +61,6 @@ function renderSidebar(
       tags={(overrides.tags ?? []).map((t) => ({ value: t, label: t, count: 1 }))}
       credentials={overrides.credentials ?? []}
       onSelectCredential={overrides.onSelectCredential}
-      onToggleCollapse={() => {}}
     />,
   )
   return { onFiltersChange }
@@ -196,7 +199,6 @@ describe("the shared filter panel", () => {
         brands={BRANDS}
         scopes={SCOPES}
         tags={[]}
-        onToggleCollapse={() => {}}
       />
     )
   }
@@ -307,21 +309,26 @@ describe("clearing", () => {
 })
 
 describe("collapse", () => {
-  it("hands the collapse toggle to the caller", () => {
-    const onToggleCollapse = vi.fn()
+  // The rail no longer owns a collapse button: inside the SecondaryPanel its
+  // toolbar becomes the panel toolbar and carries the panel's own one.
+  it("leaves collapse to the SecondaryPanel it sits in", () => {
     render(
-      <CredentialsSidebar
-        filters={EMPTY_CREDENTIAL_FILTERS}
-        onFiltersChange={() => {}}
-        counts={{ all: 1, attention: 0, missingTool: 0 }}
-        brands={[]}
-        scopes={[]}
-        tags={[]}
-        onToggleCollapse={onToggleCollapse}
-      />,
+      <SecondaryPanel id="vault-test" label="Vault">
+        <CredentialsSidebar
+          filters={EMPTY_CREDENTIAL_FILTERS}
+          onFiltersChange={() => {}}
+          counts={{ all: 1, attention: 0, missingTool: 0 }}
+          brands={[]}
+          scopes={[]}
+          tags={[]}
+        />
+      </SecondaryPanel>,
     )
-    fireEvent.click(screen.getByRole("button", { name: /collapse sidebar/i }))
-    expect(onToggleCollapse).toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: /collapse sidebar/i })).not.toBeInTheDocument()
+    const toggle = screen.getByRole("button", { name: "Hide Vault" })
+    expect(toggle.closest(".secondary-panel-toolbar")).not.toBeNull()
+    fireEvent.click(toggle)
+    expect(screen.getByRole("complementary", { name: "Vault" })).toHaveAttribute("data-collapsed", "true")
   })
 })
 
@@ -641,7 +648,6 @@ describe("sorting the rail", () => {
         credentials={CREDS}
         sort="last_used"
         onSortChange={onSortChange}
-        onToggleCollapse={() => {}}
       />,
     )
     fireEvent.click(screen.getByRole("button", { name: /sort credentials — last used/i }))
@@ -676,7 +682,6 @@ describe("bulk selection", () => {
         onToggleSelected={onToggleSelected}
         onSelectModeChange={onSelectModeChange}
         onSelectCredential={onSelectCredential}
-        onToggleCollapse={() => {}}
         {...over}
       />,
     )

@@ -23,7 +23,6 @@ import * as React from "react"
 import { AlertTriangle, Check, Clock, CreditCard, KeyRound, LogIn, UserRound, Users } from "lucide-react"
 
 import {
-  SidebarCollapseButton,
   SidebarRow,
   SidebarSearch,
   SidebarSection,
@@ -46,11 +45,10 @@ export interface ProviderLoginsSidebarProps {
   providers: LoginFacetOption[]
   modes: LoginFacetOption[]
   owners: LoginFacetOption[]
-  onToggleCollapse: () => void
 }
 
 export function ProviderLoginsSidebar({
-  filters, onFiltersChange, counts, providers, modes, owners, onToggleCollapse,
+  filters, onFiltersChange, counts, providers, modes, owners,
 }: ProviderLoginsSidebarProps) {
   const set = (patch: Partial<LoginFilters>) => onFiltersChange({ ...filters, ...patch })
   const toggle = (list: string[], value: string) =>
@@ -81,7 +79,6 @@ export function ProviderLoginsSidebar({
             aria-label="Search provider logins"
           />
         </div>
-        <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
       </SidebarToolbar>
 
       {/* Every status row is printed, zeroes included, the way the secrets

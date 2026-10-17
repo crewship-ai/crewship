@@ -27,7 +27,6 @@ import {
   SidebarFilterButton,
   SidebarSection,
   SidebarRow,
-  SidebarCollapseButton,
 } from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
 import { matchesRoutineFilters, routineFilterInput } from "@/lib/routine-filters"
@@ -54,8 +53,6 @@ interface RoutinesExplorerProps {
   onSelectRoutine: (slug: string) => void
   filters: RoutineFilters
   onChange: (next: RoutineFilters) => void
-  /** Collapse toggle — rendered in the toolbar next to search. */
-  onToggleCollapse?: () => void
 }
 
 const dropdownAnim = {
@@ -91,7 +88,6 @@ export function RoutinesExplorer({
   onSelectRoutine,
   filters,
   onChange,
-  onToggleCollapse,
 }: RoutinesExplorerProps) {
   const [statusOpen, setStatusOpen] = useState(true)
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false)
@@ -335,9 +331,6 @@ export function RoutinesExplorer({
             )}
           </AnimatePresence>
         </div>
-        {onToggleCollapse && (
-          <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
-        )}
       </SidebarToolbar>
 
       {/* ── Status ── (single-select bucket) */}

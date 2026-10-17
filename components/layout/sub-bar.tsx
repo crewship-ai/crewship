@@ -78,6 +78,12 @@ export interface SubBarProps<T extends string = string> {
   tools?: React.ReactNode
 
   ariaLabel?: string
+  /**
+   * The title is the page's h1 (default). A page that shows its own visible
+   * h1 (Dashboard greeting, Activity view title) passes false so the page
+   * keeps exactly one.
+   */
+  heading?: boolean
   className?: string
 }
 
@@ -97,9 +103,11 @@ export function SubBar<T extends string = string>({
   onTabChange,
   tools,
   ariaLabel,
+  heading = true,
   className,
 }: SubBarProps<T>) {
   const hasRow2 = (tabs != null && tabs.length > 0) || tools != null
+  const Heading = heading ? "h1" : "div"
   const slot = useAppStore((s) => s.pageBarSlot)
   const isMobile = useIsMobile()
 
@@ -115,7 +123,7 @@ export function SubBar<T extends string = string>({
         {createPortal(
           <div className="flex min-w-0 flex-1 items-center gap-2" aria-label={ariaLabel} data-slot="sub-bar">
             {leading && <div className="flex shrink-0 items-center">{leading}</div>}
-            <h1 className={cn("flex min-w-0 items-center gap-1.5 whitespace-nowrap text-sm", repeatsArea && section == null && "sr-only")}>
+            <Heading className={cn("flex min-w-0 items-center gap-1.5 whitespace-nowrap text-sm", repeatsArea && section == null && "sr-only")}>
               {!repeatsArea && (
                 <>
                   <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
@@ -130,7 +138,7 @@ export function SubBar<T extends string = string>({
                   <span className="font-semibold text-foreground">{section}</span>
                 </>
               )}
-            </h1>
+            </Heading>
             {description != null && (
               <span className="hidden min-w-0 truncate text-label text-muted-foreground lg:block">{description}</span>
             )}
@@ -143,6 +151,17 @@ export function SubBar<T extends string = string>({
         )}
         {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} className={className} />}
       </>
+    )
+  }
+
+  // On a phone a row whose only content is the hidden title would be an
+  // empty 36 px strip; keep just the heading for assistive technology.
+  if (isMobile && repeatsArea && section == null && !leading && !actions && meta == null) {
+    return (
+      <div className={cn("shrink-0", className)}>
+        {heading && <h1 className="sr-only">{title}</h1>}
+        {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} />}
+      </div>
     )
   }
 
@@ -160,7 +179,7 @@ export function SubBar<T extends string = string>({
           {/* One <h1> spanning the whole path, so the accessible name of the
               page is "Admin Console / Users" rather than a bare section label
               floating next to an unrelated heading. */}
-          <h1 className={cn("text-body whitespace-nowrap shrink-0", repeatsArea && section == null && "sr-only")}>
+          <Heading className={cn("text-body whitespace-nowrap shrink-0", repeatsArea && section == null && "sr-only")}>
             <span className={section != null ? "font-normal text-muted-foreground" : "font-semibold tracking-[-0.01em] text-foreground"}>
               {title}
             </span>
@@ -173,7 +192,7 @@ export function SubBar<T extends string = string>({
                 <span className="font-medium text-foreground">{section}</span>
               </>
             )}
-          </h1>
+          </Heading>
           {description != null && (
             <>
               <span className="text-muted-foreground-soft shrink-0 hidden sm:inline">·</span>

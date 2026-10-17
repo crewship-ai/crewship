@@ -4,11 +4,12 @@
 // partial-failure reporting.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { toast } from "sonner"
 import { defineAbilitiesFor } from "@/lib/permissions/abilities"
 import type { OrgRole } from "@/lib/generated/prisma/client"
 import { _resetWorkspaceStoreForTests, useWorkspace } from "@/hooks/use-workspace"
+import { useAppStore } from "@/lib/store"
 import CredentialsPage from "../page"
 
 /** The rail lists the same credential names as the table, so an unscoped
@@ -45,7 +46,10 @@ const h = vi.hoisted(() => ({
   role: "OWNER" as string,
   capabilities: [] as string[],
   apiFetch: vi.fn(),
+  mobile: false,
 }))
+
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => h.mobile }))
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -148,7 +152,9 @@ function routeApi(credentials: unknown[]) {
 beforeEach(() => {
   h.role = "OWNER"
   h.capabilities = []
+  h.mobile = false
   h.apiFetch.mockReset()
+  act(() => useAppStore.getState().setSecondaryPanelOpen(false))
   // The workspace store is a module singleton with a localStorage-backed
   // selection — reset both so each test starts from a clean slate (#1033).
   _resetWorkspaceStoreForTests()
@@ -564,5 +570,42 @@ describe("transient refresh failure (C-refresh)", () => {
     })
     // The full-page error card must NOT appear on a background refresh failure.
     expect(screen.queryByText("Couldn't load credentials")).not.toBeInTheDocument()
+  })
+})
+
+describe("the rail is the shared SecondaryPanel (Harbor 2 M3)", () => {
+  it("renders inside the vault panel, which collapses to a rail", async () => {
+    routeApi([makeCredential()])
+    render(<CredentialsPage />)
+    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
+    const panel = document.querySelector('[data-slot="secondary-panel"]')
+    expect(panel).toHaveAttribute("data-panel-id", "vault")
+    expect(panel).toContainElement(screen.getByRole("region", { name: /credential list/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Hide Vault" }))
+    expect(panel).toHaveAttribute("data-collapsed", "true")
+    expect(screen.queryByRole("region", { name: /credential list/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Show Vault" }))
+    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
+  })
+
+  it("puts the bulk bar in the panel footer while rows are ticked", async () => {
+    routeApi([makeCredential()])
+    render(<CredentialsPage />)
+    await enterSelectMode()
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select STRIPE_API_KEY" }))
+    const bar = screen.getByRole("toolbar", { name: "Change the selected credentials" })
+    expect(bar.closest(".secondary-panel-footer")).not.toBeNull()
+  })
+
+  it("on a phone the rail is the panel sheet, closed again by a pick", async () => {
+    h.mobile = true
+    routeApi([makeCredential()])
+    render(<CredentialsPage />)
+    await waitFor(() => expect(useAppStore.getState().secondaryPanel).toEqual({ id: "vault", label: "Vault" }))
+    expect(document.querySelector('[data-slot="secondary-panel"]')).toBeNull()
+    act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+    const sheet = await screen.findByRole("dialog", { name: "Vault" })
+    fireEvent.click(await within(sheet).findByText("STRIPE_API_KEY"))
+    expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
   })
 })

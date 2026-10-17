@@ -40,15 +40,23 @@ describe("Harbor 2 fonts", () => {
 })
 
 describe("Harbor 2 shape", () => {
-  it("cards are 10 px (0.625rem) and controls keep the 6/8/10/14 scale", () => {
+  it("cards are 10 px at every text size and controls keep the 6/8/10/14 scale", () => {
     const css = read("app/globals.css")
-    expect(css).toMatch(/--radius-card:\s*0\.625rem;/)
+    // A radius is drawn, not read: it does not grow with the text size
+    // (0.625rem measured 9.29 px at Small, found by the Settings e2e).
+    expect(css).toMatch(/--radius-card:\s*10px;/)
     expect(css).toMatch(/--radius:\s*0\.625rem;/)
   })
 })
 
 describe("Harbor 2 type scale", () => {
   const css = read("app/globals.css")
+  it("the phone page title is 18 px at Small and scales with the text size (owner decision 2026-10-17)", () => {
+    // 18 / 14.857 (the Small root) = 1.2115rem; at Standard that is ~19.4 px.
+    expect(css).toMatch(/--typo-title-phone:\s*1\.2115rem;/)
+    expect(css).toMatch(/--text-title-phone:\s*var\(--typo-title-phone\);/)
+  })
+
   it("the page title is 21 px at Compact (1.4rem on a 13/14 root)", () => {
     expect(css).toMatch(/--typo-title:\s*1\.4rem;/)
   })

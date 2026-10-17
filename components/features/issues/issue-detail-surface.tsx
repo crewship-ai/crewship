@@ -36,6 +36,7 @@ import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { useIssueEventGapResync } from "@/hooks/use-issue-event-gap-resync"
 import { usePipelines } from "@/hooks/use-pipelines"
+import { useIssuePeople } from "@/hooks/use-issue-people"
 import { useAutomations } from "@/hooks/use-automations"
 import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { RoutineRunInputsDialog } from "@/components/features/routines/routine-run-inputs-dialog"
@@ -101,6 +102,10 @@ interface Props {
   onChanged?: () => void
   /** Called once when the identifier resolves to nothing. */
   onNotFound?: () => void
+  /** A change made outside the surface (the page's ⋯ menu): reload on change. */
+  reloadKey?: number
+  /** The issue as loaded, for the page's ⋯ menu. */
+  onLoaded?: (issue: Mission | null) => void
 }
 
 /** The workspace lists the pickers choose from. Fetched once per workspace. */
@@ -121,6 +126,8 @@ export function IssueDetailSurface({
   viewerId = null,
   onChanged,
   onNotFound,
+  reloadKey,
+  onLoaded,
 }: Props) {
   const [issue, setIssue] = React.useState<Mission | null>(null)
   const [loading, setLoading] = React.useState(true)
@@ -170,6 +177,9 @@ export function IssueDetailSurface({
   const routineRunRequest = React.useRef(0)
 
   const { pipelines } = usePipelines(workspaceId)
+  // Owner picker (ISS-06): the issue page only — an embed with its own
+  // write contract (chat) keeps Owner as text.
+  const { people } = useIssuePeople(workspaceId, editable && !write)
   // The workspace's rules, narrowed to this issue inside the card — the
   // predicate belongs next to the type it reads, not here.
   const { automations } = useAutomations(workspaceId)
@@ -449,6 +459,10 @@ export function IssueDetailSurface({
     ),
   })
 
+  React.useEffect(() => {
+    onLoaded?.(issue)
+  }, [issue, onLoaded])
+
   /* ---------------------------------------------------------------- *
    *  Writes                                                           *
    * ---------------------------------------------------------------- */
@@ -458,6 +472,13 @@ export function IssueDetailSurface({
     await fetchSubResources()
     onChanged?.()
   }, [fetchIssue, fetchSubResources, onChanged])
+
+  React.useEffect(() => {
+    if (!reloadKey) return
+    void refresh()
+    // Only a new key from the host reloads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey])
 
   const loadOlderComments = async () => {
     if (!base || olderBusy || !comments[0]) return
@@ -543,16 +564,27 @@ export function IssueDetailSurface({
       if (!await patch(body)) throw new Error("The change has not been saved. Your draft is kept.")
       return
     }
+    // The owner is not a PATCH field of its own: assignee_type "user" routes
+    // to owner_user_id and leaves the delegate alone, but one PATCH carries
+    // one assignee pair. So a staged owner goes as its own write, after the
+    // rest (which may carry the delegate).
+    const { owner_user_id: ownerId, owner_name: _ownerName, ...rest } = body
+    void _ownerName
+    const writes: Record<string, unknown>[] = []
+    if (Object.keys(rest).length > 0) writes.push(rest)
+    if (typeof ownerId === "string" && ownerId) writes.push({ assignee_type: "user", assignee_id: ownerId })
     setBusy(true)
     try {
-      const res = await apiFetch(`${base}?${qs}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const b = await res.json().catch(() => null)
-        throw new Error(b?.detail ?? "The server refused the change.")
+      for (const w of writes) {
+        const res = await apiFetch(`${base}?${qs}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(w),
+        })
+        if (!res.ok) {
+          const b = await res.json().catch(() => null)
+          throw new Error(b?.detail ?? "The server refused the change.")
+        }
       }
       setDraft({})
       await refresh()
@@ -577,7 +609,7 @@ export function IssueDetailSurface({
   const confirmRun = React.useRef<(() => Promise<void>) | null>(null)
 
   const canSaveDraft = Object.keys(draft).every((key) => can(issueFieldAction(key)))
-  const draftCount = Object.keys(draft).filter((k) => k !== "assignee_type").length
+  const draftCount = Object.keys(draft).filter((k) => k !== "assignee_type" && k !== "owner_name").length
   const inPage = usePageSave({
     label: `Issue ${identifier}`,
     count: write ? 0 : draftCount,
@@ -673,6 +705,19 @@ export function IssueDetailSurface({
       }
     },
     [base, qs, fetchSubResources],
+  )
+
+  // Add relation's issue picker: the workspace search, minus this issue.
+  const searchIssues = React.useCallback(
+    async (q: string) => {
+      const res = await apiFetch(`/api/v1/issues?${qs}&limit=8&q=${encodeURIComponent(q)}`)
+      if (!res.ok) return []
+      const rows = (await res.json()) as Mission[]
+      return rows
+        .filter((r) => r.id !== issue?.id && r.identifier)
+        .map((r) => ({ identifier: r.identifier as string, title: r.title, status: r.status }))
+    },
+    [qs, issue?.id],
   )
 
   const removeRelation = React.useCallback(
@@ -912,6 +957,8 @@ export function IssueDetailSurface({
       onTitleDraft: write ? (title) => { void stage({ title }) } : undefined,
       createLabel: can("edit_fields") ? createLabel : undefined,
       addRelation,
+      searchIssues,
+      people: !write && people.length > 0 ? people : undefined,
       removeRelation,
       runRoutine: executionActions && can("start_work") && issue.routine_slug ? runRoutine : undefined,
       busy: busy || routineRunBusy,
@@ -931,6 +978,8 @@ export function IssueDetailSurface({
     write,
     createLabel,
     addRelation,
+    searchIssues,
+    people,
     removeRelation,
     runRoutine,
     busy,
@@ -1131,6 +1180,10 @@ function withoutUnchanged(body: Record<string, unknown>, issue: Mission): Record
     delete out.assignee_id
     delete out.assignee_type
   }
+  if ("owner_user_id" in out && out.owner_user_id === (issue.owner?.id ?? null)) {
+    delete out.owner_user_id
+    delete out.owner_name
+  }
   return out
 }
 
@@ -1155,6 +1208,9 @@ function withDraft(
     next.assignee_id = id
     next.assignee_type = id ? (draft.assignee_type as "agent" | "user") : null
     next.assignee_name = id ? roster.agents.find((a) => a.id === id)?.name ?? issue.assignee_name ?? null : null
+  }
+  if (typeof draft.owner_user_id === "string" && draft.owner_user_id) {
+    next.owner = { id: draft.owner_user_id, name: (draft.owner_name as string | undefined) ?? undefined }
   }
   if ("labels" in draft) {
     const byId = new Map([...roster.labels, ...(issue.labels ?? [])].map((l) => [l.id, l]))
@@ -1198,7 +1254,7 @@ function consequencesOf(
 }
 
 function issueFieldAction(key: string): IssueAction {
-  return key === "status" ? "change_status" : key.startsWith("assignee_") ? "assign" : key.startsWith("routine_") ? "change_workflow" : "edit_fields"
+  return key === "status" ? "change_status" : key.startsWith("assignee_") || key.startsWith("owner_") ? "assign" : key.startsWith("routine_") ? "change_workflow" : "edit_fields"
 }
 
 /**

@@ -133,7 +133,7 @@
 
   --border: #E4E6EA;
   --input: #E4E6EA;
-  --control-border: #8792AB;
+  --control-border: #7C879F;
   --ring: var(--brand);
 
   /* Chart palette — light-ground tuning, deliberately distinct from the
@@ -252,6 +252,8 @@
   --typo-heading-lh: 1.75rem;
   --typo-title: 1.4rem;             /* 21px at Compact, 22px at Standard – page titles (Harbor 2) */
   --typo-title-lh: 2rem;
+  --typo-title-phone: 1.2115rem;    /* 18px at Small – page titles on a phone (owner decision 2026-10-17) */
+  --typo-title-phone-lh: 1.6rem;
   --typo-display: 1.875rem;         /* 30px – hero/stat numbers */
   --typo-display-lh: 2.25rem;
 
@@ -580,8 +582,9 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  /* rounded-card: every card, panel and dialog surface. */
-  --radius-card: 0.625rem;
+  /* rounded-card: every card, panel and dialog surface. In px: a radius is
+     drawn, not read, so it stays 10 px at every text size. */
+  --radius-card: 10px;
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);
@@ -634,6 +637,8 @@
   --text-heading--line-height: var(--typo-heading-lh);
   --text-title: var(--typo-title);
   --text-title--line-height: var(--typo-title-lh);
+  --text-title-phone: var(--typo-title-phone);
+  --text-title-phone--line-height: var(--typo-title-phone-lh);
   --text-display: var(--typo-display);
   --text-display--line-height: var(--typo-display-lh);
 }
@@ -1737,8 +1742,11 @@ body {
      any width (#3333). Zero-specificity :where() so a component that already
      sizes itself for touch is not fought; min-height/min-width only ever
      grow a box. Checkboxes, radios and switches keep their drawn size and
-     get an invisible 44px hit area instead (switch: components/ui/switch). */
+     get an invisible 44px hit area instead (switch: components/ui/switch).
+     Links count too: min-height has no effect on an inline text link, so only
+     links laid out as boxes — card links, list rows — grow. */
   :where(
+    a[href],
     button,
     [role="button"],
     [role="tab"],

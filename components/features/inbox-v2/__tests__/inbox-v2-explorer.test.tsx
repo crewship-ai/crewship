@@ -36,8 +36,6 @@ function renderExplorer(over: Partial<React.ComponentProps<typeof InboxV2Explore
     onFilters,
     selectedKey: null,
     onOpen: vi.fn(),
-    collapsed: false,
-    onToggleCollapse: vi.fn(),
     ...over,
   }
   render(<InboxV2Explorer {...props} />)

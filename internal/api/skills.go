@@ -490,13 +490,23 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 
 	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
+	user := UserFromContext(r.Context())
+	wsID := WorkspaceIDFromContext(r.Context())
+	if user == nil {
+		writeProblem(http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	allowed, err := roleOrCapability(r.Context(), h.db, wsID, user.ID, role, CapabilitySkillCreate, "create")
+	if err != nil {
+		h.logger.Error("skill import capability lookup failed", "user_id", user.ID, "workspace_id", wsID, "error", err)
+		writeProblem(http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !allowed {
+		h.logger.Warn("rbac: denied", "user_id", user.ID, "role", role, "action", "skill.create", "resource", "workspace:"+wsID)
 		writeProblem(http.StatusForbidden, "Forbidden")
 		return
 	}
-
-	user := UserFromContext(r.Context())
-	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
 		URL                string `json:"url"`

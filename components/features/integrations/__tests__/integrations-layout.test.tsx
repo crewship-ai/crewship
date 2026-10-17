@@ -26,16 +26,20 @@ vi.mock("../views/incoming-webhooks-view", () => ({ IncomingWebhooksView: (props
 vi.mock("../views/incoming-credentials", () => ({ IncomingCreateDialog: (props: ComponentProps<typeof import("../views/incoming-credentials").IncomingCreateDialog>) => <div role="dialog" aria-label="Incoming creation"><button onClick={props.onClose}>Close incoming creation</button><button onClick={() => props.onCreated(props.data.targets[0])}>Finish incoming creation</button></div> }))
 vi.mock("../views/crew-tools-view", () => ({ CrewToolsView: (props: ComponentProps<typeof import("../views/crew-tools-view").CrewToolsView>) => <div><p>Crew tools for {props.workspaceId}</p><p>Linked server: {props.initialServerId ?? "none"}</p><button onClick={props.onServerConsumed}>Consume linked server</button></div> }))
 import { apiFetch } from "@/lib/api-fetch"
+import { useAppStore } from "@/lib/store"
 import { IntegrationsLayout } from "../integrations-layout"
 const ok = (body: unknown) => new Response(JSON.stringify(body))
 const channel = (overrides: Partial<NotificationChannel> = {}): NotificationChannel => ({ id: "email", workspace_id: "ws", type: "email", to: "team@example.test", enabled: true, events: [], scope: "workspace", ...overrides })
 beforeEach(() => {
   window.history.replaceState({}, "", "/integrations")
+  try { window.localStorage.removeItem("crewship.pref.panel.integrations.collapsed") } catch { /* no storage */ }
+  act(() => useAppStore.getState().setSecondaryPanelOpen(false))
   mocks.admin = true; mocks.mobile = false; mocks.configured = false; mocks.accounts = []; mocks.targets = []; mocks.incomingError = null; mocks.incomingLoading = false; mocks.success.mockReset(); mocks.error.mockReset(); mocks.refreshIncoming.mockReset(); mocks.invalidate.mockReset()
   mocks.channels = [channel()]; mocks.providers = [{ provider: "slack", label: "Slack", blurb: "Team messaging", category: "chat", enabled: true, fields: [] }]; mocks.deliveries = []
   vi.mocked(apiFetch).mockReset().mockImplementation(async (input, init) => {
     const url = new URL(String(input), "http://localhost")
     if (url.pathname.endsWith("/test")) return ok({})
+    if (url.pathname.startsWith("/api/v1/me/preferences")) return ok({})
     if (init?.method === "DELETE") { mocks.channels = []; return new Response(null, { status: 204 }) }
     if (init?.method === "PATCH") { mocks.channels = mocks.channels.map(c => ({ ...c, ...JSON.parse(String(init.body)) })); return ok({}) }
     if (url.pathname === "/api/v1/notification-channels") return ok({ channels: mocks.channels })
@@ -120,13 +124,27 @@ describe("Integrations workspace layout", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Include everyone's personal connections" }))
     await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.some(([input]) => String(input).includes("scope=all"))).toBe(true))
   })
-  it("opens the mobile rail as an overlay and closes it when tapping outside", async () => {
+  it("puts the explorer in the integrations SecondaryPanel, which collapses to a rail", async () => {
+    render(<IntegrationsLayout workspaceId="ws" />)
+    await screen.findByTitle("Open team@example.test")
+    const panel = document.querySelector<HTMLElement>("[data-slot=secondary-panel]")!
+    expect(panel).toHaveAttribute("data-panel-id", "integrations")
+    expect(within(panel).getByRole("textbox", { name: "Search connections and deliveries" })).toBeInTheDocument()
+    expect(within(panel).getAllByRole("button", { name: "Hide Integrations" })).toHaveLength(1)
+    fireEvent.click(within(panel).getByRole("button", { name: "Hide Integrations" }))
+    expect(panel).toHaveAttribute("data-collapsed", "true")
+    expect(screen.queryByRole("textbox", { name: "Search connections and deliveries" })).not.toBeInTheDocument()
+    fireEvent.click(within(panel).getByRole("button", { name: "Show Integrations" }))
+    expect(panel).toHaveAttribute("data-collapsed", "false")
+  })
+  it("on a phone opens the explorer as the panel sheet from the top bar", async () => {
     mocks.mobile = true; render(<IntegrationsLayout workspaceId="ws" />)
     await screen.findByTitle("Open team@example.test")
-    fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }))
-    fireEvent.click(screen.getByRole("button", { name: "Close the integrations list" }))
-    expect(screen.queryByRole("button", { name: "Close the integrations list" })).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument()
+    expect(document.querySelector("[data-slot=secondary-panel]")).toBeNull()
+    expect(screen.queryByRole("textbox", { name: "Search connections and deliveries" })).not.toBeInTheDocument()
+    act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+    const sheet = screen.getByRole("dialog", { name: "Integrations" })
+    expect(within(sheet).getByRole("textbox", { name: "Search connections and deliveries" })).toBeInTheDocument()
   })
   it("opens unconfigured tools setup and the API-key editor from its rail", async () => {
     window.history.replaceState({}, "", "/integrations?tab=tools")
@@ -249,17 +267,18 @@ describe("Integrations workspace layout", () => {
     render(<IntegrationsLayout workspaceId="ws" />)
     expect(await screen.findByText(state === "loading" ? "Loading targets…" : state === "error" ? "Targets unavailable. Use Refresh to retry." : "No matching targets. Create a routine, agent or Page first.")).toBeInTheDocument()
   })
-  it("resolves an incoming target slug to its id and closes the mobile rail on selection", async () => {
+  it("resolves an incoming target slug to its id and closes the phone panel sheet on selection", async () => {
     mocks.mobile = true; mocks.targets = [{ id: "a", name: "Worker", slug: "worker", kind: "agent" }]
     window.history.replaceState({}, "", "/integrations?tab=incoming&section=agent&target=worker")
     render(<IntegrationsLayout workspaceId="ws" />)
     expect(await screen.findByText("Selected incoming: a")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }))
-    fireEvent.click(screen.getByRole("button", { name: /Endpoints/ }))
-    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }))
-    fireEvent.click(within(document.querySelector("aside")!).getByRole("button", { name: /Worker/ }))
-    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument()
+    act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Integrations" })).getByRole("button", { name: /Endpoints/ }))
+    expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
+    act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Integrations" })).getByRole("button", { name: /Worker/ }))
+    expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
+    expect(screen.getByText("Selected incoming: a")).toBeInTheDocument()
   })
 
 })

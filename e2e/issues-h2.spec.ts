@@ -239,3 +239,110 @@ test.describe("S05/S06 follow-up desktop", () => {
     await expect(page.getByRole("dialog")).toContainText("Todo")
   })
 })
+
+// Finish (#3484): the issue page top bar and panel, the timeline Runs
+// segment, the Relations / Attach PR popovers, the Owner picker, project
+// file upload and the peek's initial focus. To run after the branch is
+// deployed (dev1 runs the merge candidate).
+test.describe("#3484 finish desktop", () => {
+  test.use({ viewport: { width: 1440, height: 1000 } })
+
+  async function firstIssueId(page: Page) {
+    await seed(page, PINNED)
+    await listView(page)
+    await page.goto("/issues")
+    return (await firstRow(page).getAttribute("data-issue"))!
+  }
+
+  test("ISS-07 the peek opens with focus on its content, so Enter opens the full page", async ({ page }) => {
+    await firstIssueId(page)
+    await firstRow(page).locator("button").last().click()
+    const peek = page.locator("[data-slot=peek]")
+    await expect(peek).toBeFocused()
+    await page.keyboard.press("Enter")
+    await expect(page).toHaveURL(/\/issues\/[^/?]+\?from=/)
+  })
+
+  test("ISS-02 /issues/<id> shows the Issues panel; a project row opens it on /issues", async ({ page }) => {
+    const id = await firstIssueId(page)
+    await page.goto(`/issues/${id}`)
+    await expect(panel(page)).toBeVisible()
+    await expect(panel(page).getByText("All issues")).toBeVisible()
+    await panel(page).getByText("My work").click()
+    await expect(page).toHaveURL(/\/issues(\?|$)/)
+    await expect(page).not.toHaveURL(/view=mine/)
+  })
+
+  test("ISS-01 top bar: ↑/↓ step, ⋯ lists Move to project / Cancel / Delete, ✕ goes back to the list", async ({ page }) => {
+    const id = await firstIssueId(page)
+    await page.goto(`/issues/${id}?from=/issues&fromLabel=Issues`)
+    const next = page.getByRole("button", { name: "Next issue" })
+    test.skip(await next.isDisabled(), "only one issue in the seed")
+    await next.click()
+    await expect(page).not.toHaveURL(new RegExp(`/issues/${id}\\?`))
+    await expect(page).toHaveURL(/fromLabel=Issues/)
+    await page.getByRole("button", { name: "Previous issue" }).click()
+    await expect(page).toHaveURL(new RegExp(`/issues/${id}\\?`))
+    await page.getByRole("button", { name: "Issue options" }).click()
+    const menu = page.getByRole("menu")
+    for (const name of ["Copy link", "Move to project…", "Delete issue…"]) await expect(menu.getByRole("menuitem", { name })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await page.getByRole("button", { name: "Back to list" }).click()
+    await expect(page).toHaveURL(/\/issues(\?|$)/)
+  })
+
+  test("ISS-04 Runs is a segment of the timeline, not a card", async ({ page }) => {
+    const id = await firstIssueId(page)
+    await page.goto(`/issues/${id}`)
+    const show = page.getByRole("radiogroup", { name: "Show" })
+    await expect(show.getByRole("radio")).toHaveText(["All", "Comments", "Activity", "Runs"])
+    await show.getByRole("radio", { name: "Runs" }).click()
+    await expect(show.getByRole("radio", { name: "Runs" })).toHaveAttribute("aria-checked", "true")
+  })
+
+  test("ISS-03 Add relation and Attach PR open titled popovers at their field", async ({ page }) => {
+    const id = await firstIssueId(page)
+    await page.goto(`/issues/${id}`)
+    await page.getByRole("button", { name: "Add relation" }).click()
+    const rel = page.getByRole("dialog")
+    await expect(rel.getByRole("heading", { name: "Add relation" })).toBeVisible()
+    await expect(rel.getByRole("radiogroup", { name: "Relation" }).getByRole("radio")).toHaveCount(4)
+    await rel.getByRole("button", { name: "Cancel" }).click()
+    await page.getByRole("button", { name: "Attach a pull request" }).click()
+    await expect(page.getByRole("dialog").getByRole("heading", { name: "Attach a pull request" })).toBeVisible()
+    await page.keyboard.press("Escape")
+  })
+
+  test("ISS-06 Owner is a picker of workspace people", async ({ page }) => {
+    const id = await firstIssueId(page)
+    await page.goto(`/issues/${id}`)
+    await page.getByRole("button", { name: "Change owner" }).click()
+    await expect(page.getByRole("dialog").getByRole("searchbox", { name: "Search people" })).toBeVisible()
+    await page.keyboard.press("Escape")
+  })
+
+  test("ISS-05 project Files offers Upload file", async ({ page }) => {
+    await seed(page, PINNED)
+    const projects = await (await page.request.get("/api/v1/projects")).json()
+    test.skip(!Array.isArray(projects) || projects.length === 0, "no projects in the seed")
+    await page.goto(`/issues?project=${projects[0].id}&tab=files`)
+    await expect(page.getByRole("button", { name: "Upload file" })).toBeVisible()
+  })
+
+  test("ISS-15 Filter opens the facets inside the panel; a facet lists six values and All N…", async ({ page }) => {
+    await seed(page, PINNED)
+    await listView(page)
+    await page.goto("/issues")
+    await expect(firstRow(page)).toBeVisible()
+    await panel(page).getByRole("button", { name: "Filter issues" }).click()
+    const block = panel(page).locator("[data-slot=facet-block]")
+    await expect(block).toBeVisible()
+    await block.getByRole("button", { name: /^Status/ }).click()
+    const status = block.getByRole("group", { name: "Status" })
+    await expect(status.getByRole("button", { pressed: false })).toHaveCount(6)
+    await expect(status.getByRole("button", { name: /^All [0-9]+…$/ })).toBeVisible()
+    await status.getByRole("button", { name: /^Todo/ }).click()
+    await expect(page).toHaveURL(/status=TODO/)
+    await expect(block).toBeVisible()
+  })
+})

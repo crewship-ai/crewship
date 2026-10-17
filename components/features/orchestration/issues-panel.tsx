@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { Bot, Copy, ExternalLink, Layers, MoreHorizontal, Plus, Star, User, UserRound } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -18,14 +18,13 @@ import {
 import {
   SidebarActiveChip,
   SidebarActiveChips,
-  SidebarFacet,
-  SidebarFacetOption,
-  SidebarFilterPopover,
+  SidebarFilterButton,
   SidebarRow,
   SidebarSearch,
   SidebarSection,
   SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
+import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
 import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { PRIORITY_TEXT, QUICK_VIEWS, STATUS_TEXT, normalStatus, type QuickView } from "@/components/features/issues/issues-view-model"
@@ -79,7 +78,8 @@ export interface IssuesPanelProps {
   filters: IssueFilters
   onFilters: (patch: Partial<IssueFilters>) => void
   onClearFilters: () => void
-  selection: IssuesPanelSelection
+  /** Null on the issue page, which shows an issue rather than a view. */
+  selection: IssuesPanelSelection | null
   onSelect: (s: IssuesPanelSelection) => void
   onNewProject: () => void
   /** Save the current filters as a view. Hidden when absent. */
@@ -107,9 +107,9 @@ export function IssuesPanel({
   onNewProject,
   onSaveView,
 }: IssuesPanelProps) {
-  const [filterOpen, setFilterOpen] = useState(false)
+  const facets = useSidebarFacets()
 
-  const facets = useMemo(() => {
+  const facets_ = useMemo(() => {
     const delegates = new Map<string, { name: string; n: number }>()
     const people = new Map<string, { name: string; n: number }>()
     const owners = new Map<string, { name: string; n: number }>()
@@ -147,8 +147,8 @@ export function IssuesPanel({
 
   const nameOf = {
     crew: (id: string) => crews.find((c) => c.id === id)?.name ?? "Crew",
-    worker: (id: string) => facets.delegates.find(([k]) => k === id)?.[1].name ?? issues.map(getIssueWorker).find((w) => w.id === id)?.name ?? "Delegate",
-    owner: (id: string) => facets.owners.find(([k]) => k === id)?.[1].name ?? "Owner",
+    worker: (id: string) => facets_.delegates.find(([k]) => k === id)?.[1].name ?? issues.map(getIssueWorker).find((w) => w.id === id)?.name ?? "Delegate",
+    owner: (id: string) => facets_.owners.find(([k]) => k === id)?.[1].name ?? "Owner",
   }
 
   const n = activeFilterCount(filters)
@@ -156,7 +156,7 @@ export function IssuesPanel({
     onFilters({ statuses: filters.statuses.includes(s) ? filters.statuses.filter((x) => x !== s) : [...filters.statuses, s] })
   const meta = (k: number | undefined) => <span className="font-mono text-label tabular-nums text-muted-foreground-soft">{k ?? 0}</span>
 
-  const isOn = (s: IssuesPanelSelection) => selection.kind === s.kind && selection.id === s.id
+  const isOn = (s: IssuesPanelSelection) => selection !== null && selection.kind === s.kind && selection.id === s.id
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -165,97 +165,88 @@ export function IssuesPanel({
         <div data-issues-search className="min-w-0 flex-1">
           <SidebarSearch value={search} onValueChange={onSearchChange} placeholder="Search issues, agents…" />
         </div>
-        <SidebarFilterPopover
-          label="Filter issues"
-          activeCount={n}
-          onClear={onClearFilters}
-          open={filterOpen}
-          onOpenChange={setFilterOpen}
-          panelClassName="w-64 max-h-[min(480px,70dvh)]"
-        >
-          <SidebarFacet label="Status" resetLabel="Any status" resetActive={filters.statuses.length === 0} onReset={() => onFilters({ statuses: [] })} first>
-            {STATUS_FACET.map((s) => (
-              <SidebarFacetOption key={s} active={filters.statuses.includes(s)} onToggle={() => toggleStatus(s)}>
-                <StatusIcon status={s} className="size-3.5 shrink-0" />
-                {STATUS_TEXT[s]}
-                <span className="ml-auto">{meta(facets.status.get(s))}</span>
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-          <SidebarFacet label="Priority" resetLabel="Any priority" resetActive={!filters.priority} onReset={() => onFilters({ priority: null })}>
-            {PRIORITIES.map((p) => (
-              <SidebarFacetOption key={p} active={filters.priority === p} onToggle={() => onFilters({ priority: filters.priority === p ? null : p })}>
-                <PriorityIcon priority={p} className="size-3.5 shrink-0" />
-                {PRIORITY_TEXT[p]}
-                <span className="ml-auto">{meta(facets.priority.get(p))}</span>
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-          {facets.delegates.length > 0 && (
-            <SidebarFacet label="Delegate" resetLabel="Any delegate" resetActive={!filters.agentId} onReset={() => onFilters({ agentId: null })}>
-              {facets.delegates.map(([id, d]) => (
-                <SidebarFacetOption key={id} active={filters.agentId === id} onToggle={() => onFilters({ agentId: filters.agentId === id ? null : id })}>
-                  <AgentAvatar seed={id} className="size-4 shrink-0 rounded-full" />
-                  <span className="truncate">{d.name}</span>
-                  <span className="ml-auto">{meta(d.n)}</span>
-                </SidebarFacetOption>
-              ))}
-            </SidebarFacet>
-          )}
-          {facets.owners.length > 0 && (
-            <SidebarFacet label="Owner" resetLabel="Any owner" resetActive={!filters.ownerId} onReset={() => onFilters({ ownerId: null })}>
-              {facets.owners.map(([id, o]) => (
-                <SidebarFacetOption key={id} active={filters.ownerId === id} onToggle={() => onFilters({ ownerId: filters.ownerId === id ? null : id })}>
-                  <UserRound className="size-3.5 shrink-0" />
-                  <span className="truncate">{o.name}</span>
-                  <span className="ml-auto">{meta(o.n)}</span>
-                </SidebarFacetOption>
-              ))}
-            </SidebarFacet>
-          )}
-          <SidebarFacet label="Who holds the work" resetLabel="Anyone" resetActive={!filters.holder} onReset={() => onFilters({ holder: null })}>
-            <SidebarFacetOption active={filters.holder === "agent"} onToggle={() => onFilters({ holder: filters.holder === "agent" ? null : "agent" })}>
-              <Bot className="size-3.5 shrink-0" />
-              An agent
-              <span className="ml-auto">{meta(facets.holders.agent)}</span>
-            </SidebarFacetOption>
-            <SidebarFacetOption active={filters.holder === "person"} onToggle={() => onFilters({ holder: filters.holder === "person" ? null : "person" })}>
-              <UserRound className="size-3.5 shrink-0" />
-              A person
-              <span className="ml-auto">{meta(facets.holders.person)}</span>
-            </SidebarFacetOption>
-          </SidebarFacet>
-          {facets.labels.length > 0 && (
-            <SidebarFacet label="Labels" resetLabel="Any label" resetActive={!filters.label} onReset={() => onFilters({ label: null })}>
-              {facets.labels.map(([name, l]) => (
-                <SidebarFacetOption key={name} active={filters.label === name} onToggle={() => onFilters({ label: filters.label === name ? null : name })}>
-                  <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: l.color || "var(--muted-foreground)" }} />
-                  <span className="truncate">{name}</span>
-                  <span className="ml-auto">{meta(l.n)}</span>
-                </SidebarFacetOption>
-              ))}
-            </SidebarFacet>
-          )}
-          {crews.length > 0 && (
-            <SidebarFacet label="Crew" resetLabel="All crews" resetActive={!filters.crewId} onReset={() => onFilters({ crewId: null })}>
-              {crews.map((c) => {
-                const Icon = getCrewIconDef(c.icon || "users").icon
-                const color = iconColorProps(c.color)
-                return (
-                  <SidebarFacetOption key={c.id} active={filters.crewId === c.id} onToggle={() => onFilters({ crewId: filters.crewId === c.id ? null : c.id })}>
-                    <Icon className={cn("size-3.5 shrink-0", color.className)} style={color.style} />
-                    <span className="truncate">{c.name}</span>
-                    <span className="ml-auto">{meta(facets.crew.get(c.id))}</span>
-                  </SidebarFacetOption>
-                )
-              })}
-            </SidebarFacet>
-          )}
-        </SidebarFilterPopover>
+        <SidebarFilterButton activeCount={n} aria-label="Filter issues" {...facets.triggerProps}>
+          Filter
+        </SidebarFilterButton>
       </SidebarToolbar>
 
+      {/* COM-01: the facets open INSIDE the panel, under the toolbar (v67
+          panel() → pk-fx), so two facets combine in one visit. */}
+      <SidebarFacetBlock {...facets.blockProps} label="Filter issues" activeCount={n} onClear={onClearFilters}>
+        <SidebarInlineFacet
+          label="Status"
+          values={STATUS_FACET.map((st) => ({ value: st, label: STATUS_TEXT[st], text: STATUS_TEXT[st], count: facets_.status.get(st) ?? 0, icon: <StatusIcon status={st} className="size-3.5 shrink-0" /> }))}
+          selected={filters.statuses}
+          onToggle={(v) => toggleStatus(v as MissionStatus)}
+          onClear={() => onFilters({ statuses: [] })}
+        />
+        <SidebarInlineFacet
+          label="Priority"
+          values={PRIORITIES.map((pr) => ({ value: pr, label: PRIORITY_TEXT[pr], text: PRIORITY_TEXT[pr], count: facets_.priority.get(pr) ?? 0, icon: <PriorityIcon priority={pr} className="size-3.5 shrink-0" /> }))}
+          selected={filters.priority}
+          onToggle={(v) => onFilters({ priority: filters.priority === v ? null : (v as IssuePriority) })}
+          onClear={() => onFilters({ priority: null })}
+        />
+        {facets_.delegates.length > 0 && (
+          <SidebarInlineFacet
+            label="Delegate"
+            values={facets_.delegates.map(([id, d]) => ({ value: id, label: d.name, text: d.name, count: d.n, icon: <AgentAvatar seed={id} className="size-4 shrink-0 rounded-full" /> }))}
+            selected={filters.agentId}
+            onToggle={(v) => onFilters({ agentId: filters.agentId === v ? null : v })}
+            onClear={() => onFilters({ agentId: null })}
+          />
+        )}
+        {facets_.owners.length > 0 && (
+          <SidebarInlineFacet
+            label="Owner"
+            values={facets_.owners.map(([id, o]) => ({ value: id, label: o.name, text: o.name, count: o.n, icon: <UserRound className="size-3.5 shrink-0" /> }))}
+            selected={filters.ownerId}
+            onToggle={(v) => onFilters({ ownerId: filters.ownerId === v ? null : v })}
+            onClear={() => onFilters({ ownerId: null })}
+          />
+        )}
+        <SidebarInlineFacet
+          label="Who holds the work"
+          values={[
+            { value: "agent", label: "An agent", text: "An agent", count: facets_.holders.agent, icon: <Bot className="size-3.5 shrink-0" /> },
+            { value: "person", label: "A person", text: "A person", count: facets_.holders.person, icon: <UserRound className="size-3.5 shrink-0" /> },
+          ]}
+          selected={filters.holder}
+          onToggle={(v) => onFilters({ holder: filters.holder === v ? null : (v as "agent" | "person") })}
+          onClear={() => onFilters({ holder: null })}
+        />
+        {facets_.labels.length > 0 && (
+          <SidebarInlineFacet
+            label="Labels"
+            values={facets_.labels.map(([name, l]) => ({
+              value: name,
+              label: name,
+              text: name,
+              count: l.n,
+              icon: <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: l.color || "var(--muted-foreground)" }} />,
+            }))}
+            selected={filters.label}
+            onToggle={(v) => onFilters({ label: filters.label === v ? null : v })}
+            onClear={() => onFilters({ label: null })}
+          />
+        )}
+        {crews.length > 0 && (
+          <SidebarInlineFacet
+            label="Crew"
+            values={crews.map((c) => {
+              const Icon = getCrewIconDef(c.icon || "users").icon
+              const color = iconColorProps(c.color)
+              return { value: c.id, label: c.name, text: c.name, count: facets_.crew.get(c.id) ?? 0, icon: <Icon className={cn("size-3.5 shrink-0", color.className)} style={color.style} /> }
+            })}
+            selected={filters.crewId}
+            onToggle={(v) => onFilters({ crewId: filters.crewId === v ? null : v })}
+            onClear={() => onFilters({ crewId: null })}
+          />
+        )}
+      </SidebarFacetBlock>
+
       <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-        <SidebarActiveChips className="pt-1">
+        {!facets.open && <SidebarActiveChips className="pt-1">
           {filters.statuses.map((s) => (
             <SidebarActiveChip key={s} onRemove={() => toggleStatus(s)}>Status: {STATUS_TEXT[s] ?? s}</SidebarActiveChip>
           ))}
@@ -265,7 +256,7 @@ export function IssuesPanel({
           {filters.holder && <SidebarActiveChip onRemove={() => onFilters({ holder: null })}>Held by {filters.holder === "agent" ? "an agent" : "a person"}</SidebarActiveChip>}
           {filters.label && <SidebarActiveChip onRemove={() => onFilters({ label: null })}>Label: {filters.label}</SidebarActiveChip>}
           {filters.crewId && <SidebarActiveChip onRemove={() => onFilters({ crewId: null })}>Crew: {nameOf.crew(filters.crewId)}</SidebarActiveChip>}
-        </SidebarActiveChips>
+        </SidebarActiveChips>}
 
         <SidebarSection label="Views" />
         {QUICK_VIEWS.map((v) => {
