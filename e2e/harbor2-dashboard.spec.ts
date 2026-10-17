@@ -76,12 +76,12 @@ test.describe("window", () => {
     await seed(page)
     await page.goto("/")
     const header = page.locator("header").first()
-    const seg = header.getByRole("group", { name: "Dashboard time window" })
+    const seg = header.getByRole("radiogroup", { name: "Dashboard time window" })
     await expect(seg).toBeVisible()
     const insights = page.waitForRequest(/\/api\/v1\/runs\/insights\?.*window=7d/)
-    await seg.getByRole("button", { name: "7d" }).click()
+    await seg.getByRole("radio", { name: "7d" }).click()
     await insights
-    await expect(seg.getByRole("button", { name: "7d" })).toHaveAttribute("aria-pressed", "true")
+    await expect(seg.getByRole("radio", { name: "7d" })).toHaveAttribute("aria-checked", "true")
     await expect(page.getByRole("region", { name: "Run volume · 7d · by crew" })).toBeVisible()
   })
 
@@ -90,7 +90,7 @@ test.describe("window", () => {
     await seed(page)
     await page.goto("/")
     await expect(page.getByTestId("dashboard-greeting")).toBeVisible()
-    await expect(page.getByRole("group", { name: "Dashboard time window" })).toBeHidden()
+    await expect(page.getByRole("radiogroup", { name: "Dashboard time window" })).toBeHidden()
   })
 })
 
@@ -126,7 +126,7 @@ test.describe("states", () => {
     })
     await page.goto("/")
     await expect(page.locator("[data-state=loading]")).toBeVisible()
-    await expect(page.locator("header").first().getByRole("group", { name: "Dashboard time window" })).toBeVisible()
+    await expect(page.locator("header").first().getByRole("radiogroup", { name: "Dashboard time window" })).toBeVisible()
     // The skeleton carries the first seconds without a note.
     await page.clock.runFor(2_000)
     await expect(page.getByText("Still loading…")).toBeHidden()
@@ -184,5 +184,52 @@ test.describe("touch", () => {
           .filter((b) => b.h < 44),
       )
     expect(small).toEqual([])
+  })
+})
+
+// DSH-01 (#3483): v67 Offline state — one "Reconnecting…" banner with the
+// time the data is from, and the data under it dimmed and not clickable.
+// The realtime socket is cut in the browser (routeWebSocket), not the server.
+test.describe("offline", () => {
+  test.use({ viewport: { width: 1440, height: 900 } })
+
+  test("lost live updates dim the dashboard under one Reconnecting banner; reconnect lifts it", async ({ page }) => {
+    await seed(page)
+    await routeAttention(page)
+    let cut = false
+    const open: { close: () => Promise<void> }[] = []
+    await page.routeWebSocket(
+      (url) => !url.pathname.includes("_next") && !url.pathname.includes("webpack"),
+      (ws) => {
+        if (cut) {
+          void ws.close()
+          return
+        }
+        ws.connectToServer()
+        open.push(ws)
+      },
+    )
+    await page.goto("/")
+    await expect(tiles(page)).toHaveCount(4)
+    await expect(page.locator('[data-state="offline"]')).toHaveCount(0)
+
+    cut = true
+    for (const ws of open.splice(0)) await ws.close()
+
+    const banner = page.locator('[data-state="offline"]')
+    await expect(banner).toHaveCount(1, { timeout: 10_000 })
+    await expect(banner).toContainText("Reconnecting…")
+    await expect(banner).toContainText(/You see data from \d{1,2}:\d{2}/)
+    const stale = page.locator(".page-stale")
+    await expect(stale).toHaveCount(1)
+    await expect(stale).toHaveAttribute("inert", "")
+    await expect(stale.getByTestId("dashboard-greeting")).toBeVisible()
+    await expect(stale.locator("[data-slot=attention-tile]")).toHaveCount(4)
+    const opacity = await stale.evaluate((el) => parseFloat(getComputedStyle(el).opacity))
+    expect(opacity).toBeLessThan(1)
+
+    cut = false
+    await expect(banner).toHaveCount(0, { timeout: 30_000 })
+    await expect(page.locator(".page-stale")).toHaveCount(0)
   })
 })

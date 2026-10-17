@@ -38,7 +38,7 @@ describe("client dashboard results", () => {
     }]} />)
     expect(within(screen.getByRole("region", { name: "Running now" })).getByText("Prepare release")).toBeTruthy()
     expect(within(screen.getByRole("region", { name: "In progress" })).getByText("Prepare release")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: /^For review/ }))
+    fireEvent.click(screen.getByRole("radio", { name: "For review" }))
     expect(screen.queryByRole("region", { name: "In progress" })).toBeNull()
     expect(screen.queryByRole("region", { name: "Running now" })).toBeNull()
   })
@@ -48,9 +48,13 @@ describe("client dashboard results", () => {
     render(<DashboardResults {...base} inProgress={[issue]} completed={[done]} activeAgentRuns={[{
       id: "run-1", kind: "agent", status: "RUNNING", agent_id: "agent-1", agent_name: "Builder", created_at: new Date().toISOString(),
     }]} />)
-    const filters = within(screen.getByRole("group", { name: "Filter dashboard work" })).getAllByRole("button")
+    // The kit Segmented (COM-02): a radio group; the count is not part of the name.
+    const group = screen.getByRole("radiogroup", { name: "Filter dashboard work" })
+    expect(group).toHaveAttribute("data-slot", "segmented")
+    const filters = within(group).getAllByRole("radio")
     expect(filters.map((b) => b.textContent)).toEqual(["All3", "For review0", "In progress2", "Finished1"])
-    fireEvent.click(screen.getByRole("button", { name: /^In progress/ }))
+    fireEvent.click(screen.getByRole("radio", { name: "In progress" }))
+    expect(screen.getByRole("radio", { name: "In progress" })).toHaveAttribute("aria-checked", "true")
     expect(screen.getByRole("region", { name: "Running now" })).toBeTruthy()
     expect(screen.getByRole("region", { name: "In progress" })).toBeTruthy()
     expect(screen.queryByRole("region", { name: "Finished recently" })).toBeNull()
