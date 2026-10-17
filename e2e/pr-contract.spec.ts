@@ -255,7 +255,8 @@ test.describe("PR browser contract subset — phone", () => {
 
     const tabs = page.getByRole("navigation", { name: "Primary" })
     await expect(tabs).toBeVisible()
-    for (const label of ["Dashboard", "Inbox", "Chat", "More"]) {
+    // Harbor 2 tab bar (lib/nav-sections.ts phoneTabs): the Dashboard reads "Home".
+    for (const label of ["Home", "Inbox", "Chat", "Issues", "More"]) {
       await expect(tabs.getByText(label, { exact: true })).toBeVisible()
     }
 
