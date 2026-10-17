@@ -1,0 +1,2 @@
+# Optional developer PDF inspection/rasterization only; no application dependency.
+PyMuPDF==1.26.7
