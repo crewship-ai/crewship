@@ -119,7 +119,7 @@ function InlineBody({ children, className }: { children: React.ReactNode; classN
  *  sets `--spacing: 0.23rem` — see the header comment on create-surface.tsx.
  *  `h-11` would land at 40.5px and look fine while missing the target. */
 const INPUT_CLASS =
-  "w-full bg-background border border-foreground/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15 coarse:min-h-12 coarse:text-sm"
+  "w-full bg-background border border-foreground/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15 coarse:min-h-[44px] coarse:text-sm"
 
 const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
 

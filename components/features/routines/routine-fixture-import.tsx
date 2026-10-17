@@ -66,7 +66,7 @@ export function RoutineFixtureImport({
           disabled={loading || disabled}
           onChange={(e) => setRunId(e.target.value)}
           placeholder="Run ID"
-          className="min-w-0 flex-1 rounded-md border bg-card p-2 text-sm coarse:min-h-12"
+          className="min-w-0 flex-1 rounded-md border bg-card p-2 text-sm coarse:min-h-[44px]"
         />
         <Button
           type="button"

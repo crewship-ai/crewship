@@ -504,7 +504,7 @@ export function InputsForm({
                 <button
                   type="button"
                   disabled={submitting}
-                  className="min-h-8 coarse:min-h-12 text-primary underline"
+                  className="min-h-8 coarse:min-h-[44px] text-primary underline"
                   onClick={() => {
                     const next = { ...values, [f.name]: f.default ?? "" }
                     setValues(next)

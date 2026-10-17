@@ -428,12 +428,12 @@ export function PageSaveBar({
           </span>
           <kbd className="hidden rounded border border-[var(--save-bar-border)] px-1.5 font-mono text-micro sm:inline">⌘S</kbd>
           <Button type="button" variant="ghost" size="sm"
-            className="h-7 text-xs text-[var(--save-bar-fg)] opacity-85 hover:bg-[color-mix(in_oklab,var(--save-bar-fg)_10%,transparent)] hover:text-[var(--save-bar-fg)] hover:opacity-100 coarse:h-[2.75rem]"
+            className="h-7 text-xs text-[var(--save-bar-fg)] opacity-85 hover:bg-[color-mix(in_oklab,var(--save-bar-fg)_10%,transparent)] hover:text-[var(--save-bar-fg)] hover:opacity-100 coarse:h-[44px]"
             disabled={s.saving} onClick={s.discardAll}>
             Discard
           </Button>
           <Button type="button" size="sm"
-            className="h-7 gap-1.5 bg-[var(--save-bar-action)] text-xs font-semibold text-[var(--save-bar-action-fg)] hover:bg-[var(--save-bar-action)] hover:brightness-110 coarse:h-[2.75rem]"
+            className="h-7 gap-1.5 bg-[var(--save-bar-action)] text-xs font-semibold text-[var(--save-bar-action-fg)] hover:bg-[var(--save-bar-action)] hover:brightness-110 coarse:h-[44px]"
             disabled={s.saving || !s.canSave} onClick={s.saveAll}>
             {s.saving && <Loader2 className="h-3 w-3 animate-spin" />}
             {s.saving ? "Saving…" : saveLabel}

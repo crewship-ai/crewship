@@ -333,6 +333,12 @@ func TestRefresh_NoRefreshCookie(t *testing.T) {
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("no cookie status = %d, want 401", rr.Code)
 	}
+	// No refresh cookie is a visitor who never signed in (or cleared the
+	// cookies), not an expired session: the frontend must not tell them
+	// their session expired.
+	if !strings.Contains(rr.Body.String(), `"no_credentials"`) {
+		t.Errorf("no cookie reason = %s, want no_credentials", rr.Body.String())
+	}
 }
 
 func TestRefresh_GarbageRefreshTokenClearsCookies(t *testing.T) {

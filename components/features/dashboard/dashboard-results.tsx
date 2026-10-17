@@ -69,7 +69,7 @@ function Lead({ children, live }: { children: React.ReactNode; live?: boolean })
  *  On a phone only review actions stay — the rest are the row's own link. */
 function RowAction({ href, label, variant }: { href: string; label: string; variant: "default" | "outline" | "ghost" }) {
   return (
-    <Button asChild size="sm" variant={variant} className={cn("coarse:min-h-11", variant !== "default" && label !== "Review work" && "max-md:hidden")}>
+    <Button asChild size="sm" variant={variant} className={cn("coarse:min-h-[44px]", variant !== "default" && label !== "Review work" && "max-md:hidden")}>
       <Link href={href} tabIndex={-1} aria-hidden>{label}</Link>
     </Button>
   )
@@ -146,7 +146,7 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
       }
     >
       {(error || routineError) && (
-        <DashNote tone="error" action={<Button size="xs" variant="outline" onClick={onRetry} className="coarse:min-h-11">Retry</Button>}>
+        <DashNote tone="error" action={<Button size="xs" variant="outline" onClick={onRetry} className="coarse:min-h-[44px]">Retry</Button>}>
           Some work could not refresh. Showing available results.
         </DashNote>
       )}

@@ -158,7 +158,7 @@ export function RuntimeSecurityConfig({
           icon={ShieldAlert}
           accent="red"
           label={
-            <label htmlFor="rc-privileged" className="flex cursor-pointer flex-wrap items-center gap-2 coarse:min-h-12">
+            <label htmlFor="rc-privileged" className="flex cursor-pointer flex-wrap items-center gap-2 coarse:min-h-[44px]">
               Privileged mode
               {value.privileged && (
                 <Badge variant="destructive" className="gap-1 text-[10px]">
@@ -172,7 +172,7 @@ export function RuntimeSecurityConfig({
           control={
             <label
               htmlFor="rc-privileged"
-              className="flex cursor-pointer items-center justify-center coarse:min-h-12 coarse:min-w-12"
+              className="flex cursor-pointer items-center justify-center coarse:min-h-[44px] coarse:min-w-[44px]"
             >
               <Switch
                 id="rc-privileged"
@@ -206,7 +206,7 @@ export function RuntimeSecurityConfig({
           icon={HeartPulse}
           accent="slate"
           label={
-            <label htmlFor="rc-init" className="flex cursor-pointer items-center coarse:min-h-12">
+            <label htmlFor="rc-init" className="flex cursor-pointer items-center coarse:min-h-[44px]">
               Init process (PID 1)
             </label>
           }
@@ -214,7 +214,7 @@ export function RuntimeSecurityConfig({
           control={
             <label
               htmlFor="rc-init"
-              className="flex cursor-pointer items-center justify-center coarse:min-h-12 coarse:min-w-12"
+              className="flex cursor-pointer items-center justify-center coarse:min-h-[44px] coarse:min-w-[44px]"
             >
               <Switch
                 id="rc-init"

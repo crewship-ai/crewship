@@ -88,7 +88,7 @@ function Segmented({ field, value, onPick, name }: { field: Field; value: unknow
           aria-checked={value === o.value}
           onClick={() => onPick(o.value)}
           className={cn(
-            "rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground coarse:min-h-[2.75rem] coarse:px-3.5",
+            "rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground coarse:min-h-[44px] coarse:px-3.5",
             value === o.value && "bg-accent font-medium text-foreground",
           )}
         >
@@ -263,7 +263,7 @@ export function BulkGovernanceForm({
           {rows.map((r, i) => (
             <React.Fragment key={r.workspace_id}>
               {i > 0 && " · "}
-              <button type="button" onClick={() => onEditOne(r.workspace_id)} className="text-primary-hover underline-offset-2 hover:underline coarse:min-h-[2.75rem]"
+              <button type="button" onClick={() => onEditOne(r.workspace_id)} className="text-primary-hover underline-offset-2 hover:underline coarse:min-h-[44px]"
                 aria-label={`Edit ${r.workspace_name} on its own`}>
                 {r.workspace_name}
               </button>

@@ -634,7 +634,7 @@ function Matrix({ crews, dirs, dups, onEdit }: { crews: Crew[]; dirs: Map<string
                   const label = d ? `${directionSentence(row.name, col.name, d.files)}. Edit` : `${row.name} cannot hand work to ${col.name}. Edit`
                   return (
                     <td key={col.id} className={cn("h-11 border-b border-border/40 text-center", on && "bg-[var(--row-hover-bg)]")} onMouseEnter={() => setHover({ r: i, c: j })}>
-                        <button type="button" aria-label={label} title={label} onClick={() => onEdit(row, col)} className={cn("inline-grid h-8 w-11 place-items-center rounded-md transition-colors coarse:h-11", tone)}>
+                        <button type="button" aria-label={label} title={label} onClick={() => onEdit(row, col)} className={cn("inline-grid h-8 w-11 place-items-center rounded-md transition-colors coarse:h-[44px]", tone)}>
                           {d ? <span className="inline-flex items-center gap-0.5"><ArrowRight className="h-3 w-3" />{d.files ? FILE_ICON[d.files] : null}</span> : "·"}
                         </button>
                     </td>

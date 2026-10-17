@@ -147,7 +147,7 @@ export default function JoinPage() {
                 </li>
               </ul>
             </div>
-            <label htmlFor={ackId} className="flex items-center gap-2 text-body coarse:min-h-12">
+            <label htmlFor={ackId} className="flex items-center gap-2 text-body coarse:min-h-[44px]">
               {/* Native: touch-form grows every <button> to 44 px under a coarse
                   pointer, and the kit Checkbox is one. The label row carries
                   the touch target instead. */}

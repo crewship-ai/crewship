@@ -55,8 +55,8 @@ export function CrewServiceLifecycle({ crewId, workspaceId, canManage }: { crewI
         {service.last_error && <p role="status" className="text-sm">{service.last_error === "configuration_or_credentials_unavailable" ? "Check the service configuration and its assigned credentials." : "The container runtime could not apply this change. Crewship will retry."}</p>}
       </div>
       {canManage && snapshot.supported && <div className="flex gap-2">
-        <Button size="sm" className="coarse:h-12" disabled={error || pending !== null || service.desired_state === "running"} aria-label={`${service.name}: Keep running`} onClick={() => void change(service, "running")}>Keep running</Button>
-        <Button size="sm" variant="outline" className="coarse:h-12" disabled={error || pending !== null || service.desired_state === "stopped"} aria-label={`${service.name}: Stop`} onClick={() => void change(service, "stopped")}>Stop</Button>
+        <Button size="sm" className="coarse:h-[44px]" disabled={error || pending !== null || service.desired_state === "running"} aria-label={`${service.name}: Keep running`} onClick={() => void change(service, "running")}>Keep running</Button>
+        <Button size="sm" variant="outline" className="coarse:h-[44px]" disabled={error || pending !== null || service.desired_state === "stopped"} aria-label={`${service.name}: Stop`} onClick={() => void change(service, "stopped")}>Stop</Button>
       </div>}
     </div>)}
   </section>

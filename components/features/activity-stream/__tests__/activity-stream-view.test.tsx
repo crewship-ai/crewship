@@ -304,6 +304,25 @@ describe("ActivityStreamView", () => {
     })
   })
 
+  // ACT-01 (#3486): the real journal hook starts "not loading, no entries"
+  // and only then sends its first request. A ?entry= link must wait for that
+  // answer instead of giving up on the empty first render.
+  it("?entry=<id> opens the change's Peek when the journal answers after the first render", async () => {
+    let state = listState({ entries: [], loading: false })
+    mock.list.mockImplementation(() => state)
+    window.history.replaceState(null, "", "/activity?entry=e1")
+    const { rerender } = show()
+    await act(async () => {})
+    state = listState({ entries: [], loading: true })
+    rerender(<ActivityStreamView workspaceId="ws" />)
+    await act(async () => {})
+    state = listState({ entries: [change], loading: false })
+    rerender(<ActivityStreamView workspaceId="ws" />)
+    expect(await screen.findByTestId("activity-peek-change")).toHaveTextContent("In progress")
+    expect(screen.getByRole("button", { name: "Open full record" })).toBeInTheDocument()
+    expect(window.location.search).toBe("?entry=e1")
+  })
+
   it("keys 1–4 switch views and the view is written to the URL", async () => {
     show()
     await screen.findByTestId("activity-summary")

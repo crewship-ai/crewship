@@ -339,7 +339,8 @@ test.describe("#3484 finish desktop", () => {
     await expect(block).toBeVisible()
     await block.getByRole("button", { name: /^Status/ }).click()
     const status = block.getByRole("group", { name: "Status" })
-    await expect(status.getByRole("button", { pressed: false })).toHaveCount(6)
+    // Six values; "All N…" is a toggle button of its own, not a value.
+    await expect(status.getByRole("button", { pressed: false, name: /^(?!All )/ })).toHaveCount(6)
     await expect(status.getByRole("button", { name: /^All [0-9]+…$/ })).toBeVisible()
     await status.getByRole("button", { name: /^Todo/ }).click()
     await expect(page).toHaveURL(/status=TODO/)

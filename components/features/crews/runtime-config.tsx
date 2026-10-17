@@ -889,7 +889,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
               aria-pressed={active}
               onClick={() => setFeatureCategoryFilter(active ? "all" : cat)}
               className={cn(
-                "h-8 rounded-full border px-3 text-xs transition-colors coarse:h-12 group-data-[mobile=true]/surface:h-12",
+                "h-8 rounded-full border px-3 text-xs transition-colors coarse:h-[44px] group-data-[mobile=true]/surface:h-12",
                 active
                   ? "border-primary/40 bg-primary/15 text-primary-hover"
                   : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:text-foreground",
@@ -908,7 +908,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search features — ansible, terraform, docker, aws-cli…"
           aria-label="Search features"
-          className="h-8 pl-8 text-xs coarse:h-12 coarse:text-sm"
+          className="h-8 pl-8 text-xs coarse:h-[44px] coarse:text-sm"
         />
       </div>
 
@@ -1192,7 +1192,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
               aria-pressed={active}
               onClick={() => setRuntimeCategoryFilter(active ? "all" : cat)}
               className={cn(
-                "h-8 rounded-full border px-3 text-xs transition-colors coarse:h-12 group-data-[mobile=true]/surface:h-12",
+                "h-8 rounded-full border px-3 text-xs transition-colors coarse:h-[44px] group-data-[mobile=true]/surface:h-12",
                 active
                   ? "border-primary/40 bg-primary/15 text-primary-hover"
                   : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:text-foreground",
@@ -1211,7 +1211,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
           onChange={(e) => setRuntimeSearchQuery(e.target.value)}
           placeholder="Search runtimes — node, python, go, terraform, kubectl…"
           aria-label="Search runtimes"
-          className="h-8 pl-8 text-xs coarse:h-12 coarse:text-sm"
+          className="h-8 pl-8 text-xs coarse:h-[44px] coarse:text-sm"
         />
       </div>
 

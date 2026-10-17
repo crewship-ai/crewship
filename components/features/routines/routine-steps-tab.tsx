@@ -102,13 +102,13 @@ export function RoutineStepsTab({
         <span className="flex-1" />
         <span className="hidden text-xs text-muted-foreground md:inline">Edits are saved as changes; nothing goes live until you publish</span>
         {canEdit && effectiveMode === "list" && (
-          <Button type="button" variant={editing ? "default" : "outline"} size="sm" className="gap-1.5 coarse:h-11" aria-pressed={editing} onClick={() => setEditing((v) => !v)}>
+          <Button type="button" variant={editing ? "default" : "outline"} size="sm" className="gap-1.5 coarse:h-[44px]" aria-pressed={editing} onClick={() => setEditing((v) => !v)}>
             <Pencil className="h-3.5 w-3.5" aria-hidden />
             {editing ? "Done editing" : "Edit steps"}
           </Button>
         )}
         {onTest && (
-          <Button type="button" variant="outline" size="sm" className="gap-1.5 coarse:h-11" onClick={onTest}>
+          <Button type="button" variant="outline" size="sm" className="gap-1.5 coarse:h-[44px]" onClick={onTest}>
             <Eye className="h-3.5 w-3.5" aria-hidden />
             Test the whole routine
           </Button>

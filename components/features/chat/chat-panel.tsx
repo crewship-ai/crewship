@@ -840,7 +840,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         {pageContextError ? "This Page is no longer accessible; it will not be included" :
           pageContext ? `Page: ${pageContext.name} · access rechecked when sent` : "Checking Page…"}
       </span>
-      <button type="button" className="rounded px-2 py-1 text-muted-foreground hover:text-foreground coarse:min-h-11" onClick={() => { pendingPageSendRef.current = null; setPageContextRemoved(true) }} aria-label="Remove Page context">Remove</button>
+      <button type="button" className="rounded px-2 py-1 text-muted-foreground hover:text-foreground coarse:min-h-[44px]" onClick={() => { pendingPageSendRef.current = null; setPageContextRemoved(true) }} aria-label="Remove Page context">Remove</button>
     </div>
   ) : null
 
@@ -1149,10 +1149,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     </div>
   }
   const proposalPanel = selectedProposal && proposals.state !== "unavailable" ? <section aria-label="Proposal detail" className="min-w-0 space-y-3 p-3">
-    <Button ref={proposalPanelStart} variant="outline" className="coarse:min-h-12" onClick={closeProposal}>Back to Work</Button>{renderProposal(selectedProposal, "panel")}
+    <Button ref={proposalPanelStart} variant="outline" className="coarse:min-h-[44px]" onClick={closeProposal}>Back to Work</Button>{renderProposal(selectedProposal, "panel")}
   </section> : null
   const decisionPanel = selectedDecision && !decisions.unavailable ? <section aria-label="Decision detail" className="min-w-0 space-y-3 p-3">
-    <Button ref={decisionPanelStart} variant="outline" className="coarse:min-h-12" onClick={closeDecision}>Back to Work</Button>{renderDecision(selectedDecision, "panel")}
+    <Button ref={decisionPanelStart} variant="outline" className="coarse:min-h-[44px]" onClick={closeDecision}>Back to Work</Button>{renderDecision(selectedDecision, "panel")}
   </section> : null
   const actionableDecisions = decisionRefs.filter(ref => ref.decision.status === "pending" && ref.decision.allowed_actions.some(action => action !== "view"))
   const waitingForYou = actionableDecisions.length
@@ -1268,7 +1268,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   const prepareProjectInputs = executionProfile === "pending" && sessionKind === "direct" && currentUserId && sessionId && workspaceId ? (
     <div className="px-4 pb-2">
-      <Button variant="outline" size="sm" className="coarse:min-h-12" disabled={preparingProjectInputs || isStreaming} onClick={async () => {
+      <Button variant="outline" size="sm" className="coarse:min-h-[44px]" disabled={preparingProjectInputs || isStreaming} onClick={async () => {
         setPreparingProjectInputs(true)
         try { await ensureSessionForSend() } finally { setPreparingProjectInputs(false) }
       }}>
@@ -1607,7 +1607,7 @@ function MobileChatAction({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className="inline-flex h-8 w-8 coarse:h-12 coarse:w-12 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+      className="inline-flex h-8 w-8 coarse:h-[44px] coarse:w-[44px] items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
     >
       {children}
     </button>

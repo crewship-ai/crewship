@@ -187,7 +187,7 @@ export function CrewOverview({
                     key={a.id}
                     type="button"
                     onClick={() => onSelectAgent(a.slug)}
-                    className="flex min-w-0 items-start gap-2.5 rounded-lg border border-border p-2.5 text-left transition-colors hover:bg-foreground/[0.03] coarse:min-h-11"
+                    className="flex min-w-0 items-start gap-2.5 rounded-lg border border-border p-2.5 text-left transition-colors hover:bg-foreground/[0.03] coarse:min-h-[44px]"
                   >
                     <AgentAvatar seed={a.avatar_seed || a.name} style={a.avatar_style} avatarUrl={a.avatar_url} className="size-9 shrink-0 rounded-lg" />
                     <span className="min-w-0 flex-1">

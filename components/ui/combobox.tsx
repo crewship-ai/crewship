@@ -104,7 +104,7 @@ export function Combobox({
                       onChange(o.value)
                       setOpen(false)
                     }}
-                    className="min-h-10 gap-2 coarse:min-h-12"
+                    className="min-h-10 gap-2 coarse:min-h-[44px]"
                   >
                     {o.icon}
                     <span className="min-w-0 flex-1">

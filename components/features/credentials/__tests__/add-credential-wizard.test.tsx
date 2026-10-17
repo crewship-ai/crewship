@@ -205,7 +205,7 @@ describe("layout on a touch device", () => {
     renderWizard()
     pickShape(/^token/i)
     const cont = screen.getByRole("button", { name: /^continue$/i })
-    expect(cont.className).toContain("coarse:h-12")
+    expect(cont.className).toContain("coarse:h-[44px]")
     expect(cont.className).toContain("max-sm:flex-[2]")
     expect(screen.getByRole("button", { name: /^cancel$/i }).className).toContain("max-sm:flex-1")
   })

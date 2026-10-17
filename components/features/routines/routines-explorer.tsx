@@ -213,7 +213,7 @@ function RoutineRunsPanel({ routineName, runs, current, onPeek, onBack }: NonNul
   return (
     <div className="flex h-full flex-col">
       <div className="flex flex-col gap-1 border-b border-hairline px-2 py-2">
-        <Button type="button" variant="ghost" size="sm" className="w-fit gap-1 coarse:h-11" onClick={onBack}>
+        <Button type="button" variant="ghost" size="sm" className="w-fit gap-1 coarse:h-[44px]" onClick={onBack}>
           <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
           All routines
         </Button>
@@ -254,7 +254,7 @@ function RoutineRunsPanel({ routineName, runs, current, onPeek, onBack }: NonNul
                       aria-label={`Peek at run ${r.id.slice(0, 8)} · ${label}`}
                       onClick={() => onPeek(r.id)}
                       className={cn(
-                        "mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.04] coarse:min-h-11",
+                        "mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.04] coarse:min-h-[44px]",
                         r.id === current && "bg-foreground/[0.06]",
                       )}
                     >
@@ -540,7 +540,7 @@ function RoutinesList({
                       aria-label={`Select ${routine.name || routine.slug}`}
                       onClick={() => toggle(routine.slug)}
                       className={cn(
-                        "mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors hover:bg-foreground/[0.04] coarse:min-h-11",
+                        "mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left text-body transition-colors hover:bg-foreground/[0.04] coarse:min-h-[44px]",
                         checked && "bg-primary/10",
                       )}
                     >
@@ -579,7 +579,7 @@ function RoutinesList({
         <div role="toolbar" aria-label="Selected routines" className="flex shrink-0 items-center gap-1 border-t border-hairline bg-card px-2 py-1.5">
           <span className="min-w-0 flex-1 truncate px-1 text-label text-muted-foreground">{picked.size ? `${picked.size} selected` : "Pick routines"}</span>
           {bulk.canTurnOff && (
-            <Button type="button" variant="ghost" size="sm" className="gap-1 coarse:h-11" disabled={!picked.size || busy} onClick={() => setConfirmOff(true)}>
+            <Button type="button" variant="ghost" size="sm" className="gap-1 coarse:h-[44px]" disabled={!picked.size || busy} onClick={() => setConfirmOff(true)}>
               <Pause className="h-3 w-3" aria-hidden />
               Turn off
             </Button>
@@ -588,7 +588,7 @@ function RoutinesList({
             type="button"
             variant="ghost"
             size="sm"
-            className="gap-1 coarse:h-11"
+            className="gap-1 coarse:h-[44px]"
             disabled={!picked.size || busy}
             title="Starts the selected routines that need no answer; a routine with a required input is skipped"
             onClick={() => void runBulk(() => bulk.onRunNow(pickedSlugs()))}

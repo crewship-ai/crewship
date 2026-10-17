@@ -142,7 +142,7 @@ export function CrewTools({ workspaceId, crewSlug, agents, integrations }: {
         link={{ label: "Vault", href: entityHref({ kind: "credentials", crewSlug }) }}
       >
         <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2.5">
-          <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 coarse:h-11">
+          <label className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 coarse:h-[44px]">
             <Search className="size-3.5 text-muted-foreground-soft" aria-hidden />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search skills, credentials and integrations" aria-label="Search tools and access" className="min-w-0 flex-1 bg-transparent text-body outline-none" />
           </label>

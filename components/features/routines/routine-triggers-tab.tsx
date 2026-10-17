@@ -295,7 +295,7 @@ export function RoutineTriggersTab({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="shrink-0 coarse:h-11"
+                  className="shrink-0 coarse:h-[44px]"
                   disabled={!permissions.manage}
                   title={permissions.manage ? undefined : MANAGE_REASON}
                   aria-label={`Edit ${row.kindLabel.toLowerCase()} ${row.title}`}
@@ -305,19 +305,19 @@ export function RoutineTriggersTab({
                 </Button>
               )}
               {row.kind === "chat" && (
-                <Button type="button" variant="ghost" size="sm" className="shrink-0 coarse:h-11" aria-label={`Edit chat command ${row.title}`} onClick={onSettings}>
+                <Button type="button" variant="ghost" size="sm" className="shrink-0 coarse:h-[44px]" aria-label={`Edit chat command ${row.title}`} onClick={onSettings}>
                   Edit
                 </Button>
               )}
               {row.kind === "once" && row.cancellable && row.id && (
-                <Button type="button" variant="ghost" size="sm" className="shrink-0 coarse:h-11" aria-label={`Cancel this start ${row.title}`} onClick={() => void cancelStart(row.id!)}>
+                <Button type="button" variant="ghost" size="sm" className="shrink-0 coarse:h-[44px]" aria-label={`Cancel this start ${row.title}`} onClick={() => void cancelStart(row.id!)}>
                   Cancel
                 </Button>
               )}
               {(schedule || hook) && permissions.manage && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button type="button" variant="ghost" size="icon-sm" className="shrink-0 coarse:h-11 coarse:w-11" aria-label={`Options for ${label}`}>
+                    <Button type="button" variant="ghost" size="icon-sm" className="shrink-0 coarse:h-[44px] coarse:w-[44px]" aria-label={`Options for ${label}`}>
                       <MoreHorizontal className="h-3.5 w-3.5" aria-hidden />
                     </Button>
                   </DropdownMenuTrigger>
@@ -352,7 +352,7 @@ export function RoutineTriggersTab({
           type="button"
           variant="outline"
           size="sm"
-          className="gap-1.5 coarse:h-11"
+          className="gap-1.5 coarse:h-[44px]"
           disabled={!permissions.createSchedule && !permissions.run}
           title={permissions.createSchedule || permissions.run ? undefined : "Adding a trigger needs Manager or above, or permission to create or run routines"}
           onClick={() => setAdding(permissions.createSchedule ? "schedule" : "once")}

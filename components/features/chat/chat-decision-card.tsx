@@ -13,7 +13,7 @@ export function ChatDecisionCard({ reference, chatId, userId, rechecking, onChan
   const reply = useChatDecisionAnswer({ workspaceId: reference.entity.workspace_id,
     userId, chatId, reference, onChanged, onUnauthorized: onAccessLost })
   return <div className="min-w-0 space-y-2">
-    {onOpen && <Button variant="outline" size="sm" className="coarse:min-h-12" onClick={onOpen}>Open on right</Button>}
+    {onOpen && <Button variant="outline" size="sm" className="coarse:min-h-[44px]" onClick={onOpen}>Open on right</Button>}
     <DecisionEntityCard reference={reference} rechecking={rechecking}
       onAnswer={reply.answer} onRecheck={onChanged} recovery={reply.recovery}
       onReviewConflict={reply.reviewConflict} feedback={reply.message} />

@@ -39,7 +39,7 @@ export function ChoiceTile({
       disabled={disabled}
       data-slot="choice-tile"
       className={cn(
-        "flex w-full min-w-0 items-start gap-3 rounded-lg border p-3 text-left transition-colors coarse:min-h-12 disabled:cursor-not-allowed disabled:opacity-50",
+        "flex w-full min-w-0 items-start gap-3 rounded-lg border p-3 text-left transition-colors coarse:min-h-[44px] disabled:cursor-not-allowed disabled:opacity-50",
         active ? "border-primary bg-primary/5 ring-2 ring-primary/15" : "border-border bg-card hover:border-line-strong",
         className,
       )}

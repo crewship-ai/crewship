@@ -70,7 +70,7 @@ function VisibleRunImages({ agentId, workspaceId, chatId, runId }: { agentId: st
   useRealtimeEventSafe("realtime.reconnected", refresh)
   if (!viewer) return null
   // Never retain cached bytes/titles after a failed permission recheck.
-  if (query.isError) return <div role="alert" className="text-xs text-muted-foreground">Images unavailable. <button type="button" className="underline coarse:min-h-12" onClick={refresh}>Refresh images</button></div>
+  if (query.isError) return <div role="alert" className="text-xs text-muted-foreground">Images unavailable. <button type="button" className="underline coarse:min-h-[44px]" onClick={refresh}>Refresh images</button></div>
   if (query.isPending) return <p role="status" className="text-xs text-muted-foreground">Checking run images…</p>
   return <div className="min-w-0 space-y-3">{query.data?.map(image => <figure key={`${image.path}:${image.fingerprint}`} className="w-full max-w-lg overflow-hidden rounded-lg border">
     <div className="h-72 max-h-[50vh]"><FilePreview url={`${artifactDownloadUrl(agentId, workspaceId, image.path)}&revision=${image.fingerprint}`} name={image.name} bytes={image.bytes} showHeader={false} onClose={() => {}} /></div>
@@ -107,7 +107,7 @@ function RunImagesBoundary(props: InlineRunImagesProps) {
     return () => observer.disconnect()
   }, [])
   return <div ref={boundary} style={{ minHeight: height }}>
-    {manual && <button type="button" className="text-xs underline coarse:min-h-12" onClick={() => {
+    {manual && <button type="button" className="text-xs underline coarse:min-h-[44px]" onClick={() => {
       if (visible && boundary.current) setHeight(Math.max(1, boundary.current.getBoundingClientRect().height))
       setVisible(value => !value)
     }}>{visible ? "Hide run images" : "Load run images"}</button>}

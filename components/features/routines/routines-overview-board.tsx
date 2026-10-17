@@ -107,7 +107,7 @@ export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
             ) : (
               <ul className="flex flex-col">
                 {needs.map((n) => (
-                  <li key={n.key} className="flex flex-wrap items-center gap-2.5 border-b border-hairline px-2 py-2 last:border-0 coarse:min-h-12">
+                  <li key={n.key} className="flex flex-wrap items-center gap-2.5 border-b border-hairline px-2 py-2 last:border-0 coarse:min-h-[44px]">
                     {glyph(n.slug)}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-body font-medium text-foreground">{n.title}</span>
@@ -119,14 +119,14 @@ export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
                     <StatusPill tone={TONE[n.kind].tone} label={TONE[n.kind].label} />
                     {n.kind === "decision" && n.runId ? (
                       <>
-                        <Button type="button" size="sm" variant="outline" className="coarse:h-11" onClick={() => p.onOpenRun(n.slug, n.runId!)}>
+                        <Button type="button" size="sm" variant="outline" className="coarse:h-[44px]" onClick={() => p.onOpenRun(n.slug, n.runId!)}>
                           Open run
                         </Button>
                         {n.approvable && mayDecide && (
                           <Button
                             type="button"
                             size="sm"
-                            className="coarse:h-11"
+                            className="coarse:h-[44px]"
                             disabled={deciding === n.runId}
                             onClick={async () => {
                               setDeciding(n.runId!)
@@ -142,7 +142,7 @@ export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
                         )}
                       </>
                     ) : (
-                      <Button type="button" size="sm" variant="outline" className="coarse:h-11" onClick={() => p.onSelect(n.slug)}>
+                      <Button type="button" size="sm" variant="outline" className="coarse:h-[44px]" onClick={() => p.onSelect(n.slug)}>
                         {n.kind === "proposed" ? "Review" : "Open"}
                       </Button>
                     )}
@@ -170,11 +170,11 @@ export function RoutinesOverviewBoard(p: RoutinesOverviewBoardProps) {
                           {r.current_step_id ? ` · ${r.current_step_id.replaceAll("_", " ")}` : ""}
                         </span>
                       </span>
-                      <Button type="button" size="sm" variant="outline" className="coarse:h-11" onClick={() => p.onOpenRun(r.pipeline_slug, r.id)}>
+                      <Button type="button" size="sm" variant="outline" className="coarse:h-[44px]" onClick={() => p.onOpenRun(r.pipeline_slug, r.id)}>
                         Open run
                       </Button>
                       {mayStop && (
-                        <Button type="button" size="sm" variant="ghost" className="gap-1 coarse:h-11" onClick={() => setStopping(r)}>
+                        <Button type="button" size="sm" variant="ghost" className="gap-1 coarse:h-[44px]" onClick={() => setStopping(r)}>
                           <Square className="h-3 w-3" aria-hidden />
                           Stop
                         </Button>

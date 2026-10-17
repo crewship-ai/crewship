@@ -17,7 +17,7 @@ export function DecisionWaitingSection({ references, rechecking, onOpen }: {
   return <section aria-label="Waiting for you" className="space-y-2">
     <h3 className="text-sm font-medium">Waiting for you</h3>
     <ul className="space-y-2">{pending.map(reference => <li key={JSON.stringify([reference.decision.source.type, reference.decision.source.id])}>
-      <Button type="button" variant="outline" disabled={rechecking} className="h-auto min-h-9 w-full justify-start whitespace-normal text-left coarse:min-h-12 [overflow-wrap:anywhere]" onClick={() => onOpen(reference)}>{reference.decision.title}</Button>
+      <Button type="button" variant="outline" disabled={rechecking} className="h-auto min-h-9 w-full justify-start whitespace-normal text-left coarse:min-h-[44px] [overflow-wrap:anywhere]" onClick={() => onOpen(reference)}>{reference.decision.title}</Button>
     </li>)}</ul>
   </section>
 }

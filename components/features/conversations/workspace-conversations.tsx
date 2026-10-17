@@ -280,13 +280,13 @@ function ConversationMembers({ workspaceId, userId, conversation, participants, 
         <ConversationIdentity id={person.user_id} name={person.name || "Workspace member"} avatarUrl={person.avatar_url} className="size-7 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{person.name || "Workspace member"}</span>
         <span className="text-[10px] text-muted-foreground">{person.role}</span>
-        {canManage && person.user_id !== conversation.created_by && <Button type="button" size="icon" variant="ghost" className="size-7 coarse:size-12 text-muted-foreground" aria-label={`Remove ${person.name || "member"}`} title="Remove member" disabled={busy} onClick={() => { if (window.confirm(`Remove ${person.name} from this conversation?`)) void change(person.user_id) }}><UserMinus className="size-3.5" /></Button>}
+        {canManage && person.user_id !== conversation.created_by && <Button type="button" size="icon" variant="ghost" className="size-7 coarse:size-[44px] text-muted-foreground" aria-label={`Remove ${person.name || "member"}`} title="Remove member" disabled={busy} onClick={() => { if (window.confirm(`Remove ${person.name} from this conversation?`)) void change(person.user_id) }}><UserMinus className="size-3.5" /></Button>}
       </li>)}
     </ul>
     {canManage && <>
       <div className="flex items-center gap-2">
         <Select value={adding} onValueChange={setAdding} disabled={busy || people.isPending}>
-          <SelectTrigger aria-label="Person to add" size="sm" className="min-w-0 flex-1 text-xs coarse:min-h-12"><SelectValue placeholder="Add a member…" /></SelectTrigger>
+          <SelectTrigger aria-label="Person to add" size="sm" className="min-w-0 flex-1 text-xs coarse:min-h-[44px]"><SelectValue placeholder="Add a member…" /></SelectTrigger>
           <SelectContent>{people.data?.filter(({ user }) => !participants.some((person) => person.user_id === user.id)).map(({ user }) => <SelectItem key={user.id} value={user.id} className="text-xs"><span className="flex items-center gap-2"><ConversationIdentity id={user.id} name={user.full_name || user.email} avatarUrl={user.avatar_url} className="size-6 shrink-0" /><span className="truncate">{user.full_name || user.email}</span></span></SelectItem>)}</SelectContent>
         </Select>
         <Button type="button" size="sm" variant="outline" disabled={!adding || busy} onClick={() => { void change() }}><UserPlus className="size-3.5" />Add</Button>

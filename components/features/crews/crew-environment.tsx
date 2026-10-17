@@ -466,7 +466,7 @@ export function RebuildDialog({ open, onOpenChange, workspaceId, crewId, crewNam
               role="radio"
               aria-checked={mode === o.id}
               onClick={() => setMode(o.id)}
-              className={cn("block w-full rounded-md border p-3 text-left coarse:min-h-11", mode === o.id ? "border-primary bg-primary/10" : "border-border hover:bg-muted")}
+              className={cn("block w-full rounded-md border p-3 text-left coarse:min-h-[44px]", mode === o.id ? "border-primary bg-primary/10" : "border-border hover:bg-muted")}
             >
               <b className="block text-body font-medium text-foreground">{o.title}</b>
               <span className="text-label text-muted-foreground">{o.hint}</span>

@@ -106,7 +106,7 @@ export function UserMenu({ placement = "toolbar" }: {
             </button>
           ) : (
             <button
-              className="flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-1.5 coarse:min-h-12 hover:bg-accent data-[state=open]:bg-accent transition-colors"
+              className="flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-1.5 coarse:min-h-[44px] hover:bg-accent data-[state=open]:bg-accent transition-colors"
               aria-label="User menu"
             >
               <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-7 w-7" textClassName="text-micro" />

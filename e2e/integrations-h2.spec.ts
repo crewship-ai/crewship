@@ -66,6 +66,8 @@ for (const [label, width, height] of [["1440", 1440, 1000], ["1024", 1024, 800],
       await page.goto("/integrations?space=channels")
       await expect(h1(page)).toHaveText("Channels")
       // A table on desktop and tablet, rows on a phone; never a sideways scroll.
+      // COM-05: below 1280 the panel starts closed; the top bar's panel button opens it.
+      if (width >= 768 && width < 1280) await page.getByTestId("secondary-panel-button").click()
       if (width >= 768) await expect(panel(page)).toBeVisible()
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
       expect(overflow).toBeLessThanOrEqual(0)

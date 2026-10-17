@@ -55,7 +55,7 @@ Rotates the session token. The browser calls this when its short-lived access to
 | Status | Condition |
 |---|---|
 | `200` | New access + refresh cookies set. |
-| `401` | Missing/expired/invalid refresh cookie, session not found, revoked, or inactive (cookies cleared). |
+| `401` | `{"error":"no_credentials"}` when there is no refresh cookie at all (a visitor who never signed in; the web app then sends them to sign in without saying the session expired). `{"error":"session_expired"}` / `session_revoked` / `session_invalid` for an expired or invalid refresh cookie, a session that is not found, revoked or inactive (cookies cleared). |
 | `403` | Cross-origin request (`Origin`/`Referer` check failed). |
 | `405` | Non-POST method. |
 | `500` | Sessions store unreachable or token-mint failure (cookies preserved so the client can retry). |

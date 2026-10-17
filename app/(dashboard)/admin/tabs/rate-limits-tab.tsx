@@ -208,7 +208,7 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
                       disabled={saving || busyKey === l.key}
                       onChange={(e) => setDrafts((prev) => ({ ...prev, [l.key]: e.target.value }))}
                       className={cn(
-                        "h-[var(--control-md)] w-24 rounded-md border border-control-border bg-surface-subtle px-2.5 text-right font-mono text-control tabular-nums outline-none hover:border-line-strong focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 coarse:h-[2.75rem]",
+                        "h-[var(--control-md)] w-24 rounded-md border border-control-border bg-surface-subtle px-2.5 text-right font-mono text-control tabular-nums outline-none hover:border-line-strong focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 coarse:h-[44px]",
                         !inRange && "border-destructive",
                       )}
                     />

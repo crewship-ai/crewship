@@ -245,7 +245,7 @@ function ApplicationPageContent(props: EditorSectionProps) {
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="coarse:min-h-11"
+                  className="coarse:min-h-[44px]"
                   disabled={review.snapshot.isFetching}
                   onClick={() => {
                     void review.snapshot.refetch()
@@ -585,7 +585,7 @@ function PageIdentityCard({
           {SAVE_EFFECT_NOTE["live-definition"]}
         </p>
         {!inPage && (
-          <Button type="submit" size="sm" className="coarse:min-h-11" disabled={!submittable}>
+          <Button type="submit" size="sm" className="coarse:min-h-[44px]" disabled={!submittable}>
             {save.isPending && <Spinner className="h-3.5 w-3.5" />}
             Save changes
           </Button>
@@ -645,7 +645,7 @@ function PanelListCard({
           type="button"
           variant="outline"
           size="xs"
-          className="coarse:min-h-11"
+          className="coarse:min-h-[44px]"
           disabled={!mayEditDocument}
           onClick={() => setEditing(true)}
         >
@@ -779,7 +779,7 @@ function PanelRow({
           type="button"
           variant="ghost"
           size="xs"
-          className="coarse:min-h-11"
+          className="coarse:min-h-[44px]"
           disabled={!mayEditDocument}
           onClick={onEdit}
         >
@@ -864,7 +864,7 @@ function AddApplicationOffer({ workspaceId, slug }: { workspaceId: string; slug:
           type="button"
           variant="ghost"
           size="sm"
-          className="coarse:min-h-11"
+          className="coarse:min-h-[44px]"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
         >

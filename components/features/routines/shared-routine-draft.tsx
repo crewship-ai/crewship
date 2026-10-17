@@ -66,7 +66,7 @@ function DraftForm({ draft, url, queryKey }: { draft: Draft; url: string; queryK
   })
   return <form className="space-y-3" onSubmit={event => { event.preventDefault(); setError(""); mutation.mutate() }}>
     <p className="text-xs text-muted-foreground">Draft revision {draft.revision} · Based on publication {draft.base_revision}</p>
-    <label className="block space-y-1"><span>Draft name</span><input aria-label="Draft name" className="min-h-10 w-full rounded border bg-background p-2 coarse:min-h-12" maxLength={4096} value={name} disabled={mutation.isPending} onChange={event => setName(event.target.value)} /></label>
+    <label className="block space-y-1"><span>Draft name</span><input aria-label="Draft name" className="min-h-10 w-full rounded border bg-background p-2 coarse:min-h-[44px]" maxLength={4096} value={name} disabled={mutation.isPending} onChange={event => setName(event.target.value)} /></label>
     <label className="block space-y-1"><span>Draft description</span><textarea aria-label="Draft description" className="min-h-24 w-full rounded border bg-background p-2" maxLength={65536} value={description} disabled={mutation.isPending} onChange={event => setDescription(event.target.value)} /></label>
     <label className="block space-y-1"><span>Draft definition JSON</span><textarea aria-label="Draft definition JSON" className="min-h-64 w-full rounded border bg-background p-2 font-mono text-xs" value={definition} disabled={mutation.isPending} onChange={event => setDefinition(event.target.value)} /></label>
     {error && <p role="alert">{error}</p>}

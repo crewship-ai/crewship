@@ -65,7 +65,7 @@ export function CrewToolchainStatus({ crewId, workspaceId, refreshKey = "" }: { 
     <section className="rounded-lg border p-3 space-y-3" aria-label="Built AI tools">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium">AI tools in selected build</h3>
-        <Button type="button" variant="ghost" size="sm" className="h-8 coarse:h-12 coarse:min-w-12" onClick={() => void refresh()} disabled={current.loading} aria-label="Refresh built tool versions">
+        <Button type="button" variant="ghost" size="sm" className="h-8 coarse:h-[44px] coarse:min-w-[44px]" onClick={() => void refresh()} disabled={current.loading} aria-label="Refresh built tool versions">
           <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
         </Button>
       </div>

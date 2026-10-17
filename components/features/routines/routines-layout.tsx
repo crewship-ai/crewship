@@ -372,7 +372,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           {/* On a phone the panel is a sheet; this chip is the way to it. */}
           {isMobile && (
             <div className="flex shrink-0 items-center gap-2 border-b border-hairline px-3 py-1.5">
-              <Button type="button" variant="outline" size="sm" onClick={() => openPanelSheet(true)} className="h-8 gap-1.5 text-xs coarse:h-12">
+              <Button type="button" variant="outline" size="sm" onClick={() => openPanelSheet(true)} className="h-8 gap-1.5 text-xs coarse:h-[44px]">
                 <List className="h-3.5 w-3.5" />
                 {crewName && selectedSlug ? crewName : "All routines"}
               </Button>

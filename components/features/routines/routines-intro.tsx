@@ -52,7 +52,7 @@ export function RoutinesIntro({ onNew, compact = false }: { onNew?: () => void; 
           </p>
           {onNew && (
             <div>
-              <Button type="button" onClick={onNew} className="gap-1.5 coarse:h-11">
+              <Button type="button" onClick={onNew} className="gap-1.5 coarse:h-[44px]">
                 <Plus className="h-3.5 w-3.5" aria-hidden /> New routine
               </Button>
             </div>

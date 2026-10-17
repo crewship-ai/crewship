@@ -299,7 +299,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   aria-pressed={!showPanels}
                   onClick={() => setShowPanels(false)}
                   className={cn(
-                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
+                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-[44px]",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     !showPanels ? "bg-foreground/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
                   )}
@@ -313,7 +313,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   onClick={() => setShowPanels(true)}
                   title="Show this Page's panels instead; the application is closed in this tab and keeps running for everyone else"
                   className={cn(
-                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
+                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-[44px]",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     showPanels ? "bg-foreground/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
                   )}

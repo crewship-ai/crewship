@@ -86,7 +86,10 @@ async function firstRow(page: Page, hrefPattern: RegExp) {
     for (const row of await page.locator("[cmdk-item][data-href]").all()) {
       const href = await row.getAttribute("data-href")
       if (href && hrefPattern.test(href)) {
-        return { row, href, text: (await row.innerText()).trim() }
+        // The row's own name (the `type-row` label), without the crew,
+        // role or provider the row carries on its right.
+        const name = (await row.locator(".type-row").first().innerText()).trim()
+        return { row, href, text: (await row.innerText()).trim(), name }
       }
     }
     await page.waitForTimeout(250)
@@ -105,8 +108,13 @@ test.describe("⌘K — every row opens the thing it names", () => {
     await expect(page).toHaveURL(/\/crews\?agent=/, { timeout: TIMEOUT })
     // The canvas, not an empty shell: /crews/agents/<id> answered 200 and
     // rendered only the sidebar, so "the URL changed" proves nothing. The
-    // agent has to be ON it.
-    await expect(page.locator("main")).toContainText(slug, { timeout: TIMEOUT })
+    // agent has to be ON it. The Harbor 2 agent header (crews K08) names the
+    // agent and no longer prints the slug, so the slug is proven through the
+    // header's own Chat action, which links to that agent's chat.
+    const header = page.getByTestId("agent-header")
+    await expect(header.getByRole("heading", { level: 1 })).toContainText(hit!.name, { timeout: TIMEOUT })
+    await expect(page.getByRole("link", { name: `Chat with ${hit!.name}`, exact: true }))
+      .toHaveAttribute("href", `/chat/${encodeURIComponent(slug)}`, { timeout: TIMEOUT })
     await expect(page.getByText("Current work", { exact: true })).toBeVisible({ timeout: TIMEOUT })
     await expect(page.getByText("Recent outcomes", { exact: true })).toBeVisible({ timeout: TIMEOUT })
   })
@@ -117,10 +125,13 @@ test.describe("⌘K — every row opens the thing it names", () => {
     expect(hit, "seeded palette is missing crews").not.toBeNull()
     await hit!.row.click()
 
-    await expect(page).toHaveURL(/\/crews\?crew=/, { timeout: TIMEOUT })
+    const slug = decodeURIComponent(/crew=([^&]+)/.exec(hit!.href)![1])
+    await expect(page).toHaveURL(new RegExp(`/crews\\?crew=${slug}(?:&|$)`), { timeout: TIMEOUT })
     // /crews/<id> answered 200 and rendered nothing but the sidebar. A crew
-    // that is really selected names itself in the sub-bar.
-    await expect(page.getByText(/Crews & Agents/)).toBeVisible({ timeout: TIMEOUT })
+    // that is really selected names itself: in Harbor 2 that is the crew
+    // page's own header (crews K03), not the old "Crews & Agents" sub-bar.
+    await expect(page.getByTestId("crew-header").getByRole("heading", { level: 1 }))
+      .toHaveText(hit!.name, { timeout: TIMEOUT })
   })
 
   test("a routine opens that routine", async ({ page }) => {
@@ -250,8 +261,14 @@ test.describe("⌘K — every row opens the thing it names", () => {
     // during a client-side transition), and the roster then gave no sign of
     // which person had been picked. Members is its own page now; the link
     // must still land on it with that person open.
-    await expect(page).toHaveURL(/\/settings\/members\?member=/, { timeout: TIMEOUT })
-    await expect(page.getByRole("region", { name: /^Member details:/ })).toBeVisible({ timeout: TIMEOUT })
+    //
+    // The page reads ?member= once and drops it (settings T12, kept since
+    // #3056): the Peek keeps its own history entry, and leaving the param in
+    // the URL made Back reopen the person. So the URL proves the page, and
+    // the open Peek proves the person — the one the row named.
+    await expect(page).toHaveURL(/\/settings\/members(?:\?|$)/, { timeout: TIMEOUT })
+    await expect(page.getByRole("region", { name: `Member details: ${hit!.name}`, exact: true }))
+      .toBeVisible({ timeout: TIMEOUT })
   })
 
   test("a credential opens that credential, not the vault", async ({ page }) => {
@@ -261,7 +278,11 @@ test.describe("⌘K — every row opens the thing it names", () => {
     await hit!.row.click()
 
     await expect(page).toHaveURL(/\/credentials\?id=/, { timeout: TIMEOUT })
-    await expect(page.getByRole("button", { name: /Back to credentials/i })).toBeVisible({ timeout: TIMEOUT })
+    // The secret's own page (vault Q03), not the list: its name is the page
+    // heading and its sections are open. The Harbor 2 back control is
+    // "‹ <space>" (Secrets / AI providers), not "Back to credentials".
+    await expect(page.getByRole("heading", { level: 1, name: hit!.name, exact: true })).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByRole("tablist", { name: "Secret sections" })).toBeVisible({ timeout: TIMEOUT })
   })
 })
 

@@ -67,7 +67,7 @@ export function AppFrame({
           <span className="page-sk app-frame-crumb" aria-hidden />
           <span className="flex-1" />
           {onSignOut && (
-            <Button variant="ghost" size="sm" onClick={onSignOut} className="coarse:h-11">
+            <Button variant="ghost" size="sm" onClick={onSignOut} className="coarse:h-[44px]">
               <LogOut className="size-3.5" aria-hidden />
               Log out
             </Button>

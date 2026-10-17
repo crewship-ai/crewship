@@ -21,7 +21,7 @@ export function SharedProjectDetails({ workspaceId, projects }: { workspaceId: s
   const id = useId()
   const visible = projects.some(project => project.id === selected)
   return <details className="rounded-lg border bg-card p-4"><summary className="cursor-pointer font-medium">Project details</summary>
-    <div className="mt-3 space-y-3"><label htmlFor={id} className="block text-sm">Shared project</label><select id={id} className="min-h-10 w-full rounded border bg-background p-2 coarse:min-h-12" value={visible ? selected : ""} onChange={event => setSelected(event.target.value)}><option value="">Choose a project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
+    <div className="mt-3 space-y-3"><label htmlFor={id} className="block text-sm">Shared project</label><select id={id} className="min-h-10 w-full rounded border bg-background p-2 coarse:min-h-[44px]" value={visible ? selected : ""} onChange={event => setSelected(event.target.value)}><option value="">Choose a project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
       {visible && session?.user.id && <ProjectDetails key={`${session.user.id}:${workspaceId}:${selected}`} workspaceId={workspaceId} projectId={selected} userId={session.user.id} />}
     </div>
   </details>

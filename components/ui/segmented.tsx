@@ -108,7 +108,7 @@ export function Segmented<T extends string>({
             onKeyDown={(e) => onKeyDown(e, i)}
             data-state={on ? "on" : "off"}
             className={cn(
-              "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 transition-colors coarse:h-11",
+              "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 transition-colors coarse:h-[44px]",
               // A disabled segment keeps pointer events, so its title (the
               // reason) still shows on hover.
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45",

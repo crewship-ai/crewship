@@ -565,7 +565,7 @@ function ScopedOAuthForm({
           />
         </div>
       ) : (
-        /* Provider shortcuts. `coarse:h-12`: this form is also used
+        /* Provider shortcuts. `coarse:h-[44px]`: this form is also used
            un-migrated inline in the MCP credential picker, so unlike the rest
            of the create surfaces these pills never picked up a phone size —
            measured at 24.15px tall (`h-6`) on an iPhone 13, well short of the
@@ -577,7 +577,7 @@ function ScopedOAuthForm({
               type="button"
               variant={selectedProvider === p.key ? "default" : "outline"}
               size="sm"
-              className="h-6 text-[10px] px-2 coarse:h-12 coarse:px-3 coarse:text-sm"
+              className="h-6 text-[10px] px-2 coarse:h-[44px] coarse:px-3 coarse:text-sm"
               onClick={() => handleProviderSelect(p.key)}
               disabled={!providersFetched || authorizing || (providersFetched && !providers[p.key])}
             >
@@ -588,7 +588,7 @@ function ScopedOAuthForm({
             type="button"
             variant={selectedProvider === "custom" ? "default" : "outline"}
             size="sm"
-            className="h-6 text-[10px] px-2 coarse:h-12 coarse:px-3 coarse:text-sm"
+            className="h-6 text-[10px] px-2 coarse:h-[44px] coarse:px-3 coarse:text-sm"
             onClick={handleCustom}
             disabled={authorizing}
           >
@@ -670,7 +670,7 @@ function ScopedOAuthForm({
               <Button
                 type="button"
                 size="sm"
-                className="h-7 text-xs gap-1.5 flex-1 coarse:h-12 coarse:text-sm"
+                className="h-7 text-xs gap-1.5 flex-1 coarse:h-[44px] coarse:text-sm"
                 disabled={!canAuthorize}
                 onClick={handleAuthorize}
               >
@@ -685,7 +685,7 @@ function ScopedOAuthForm({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-7 text-xs coarse:h-12 coarse:text-sm"
+                className="h-7 text-xs coarse:h-[44px] coarse:text-sm"
                 onClick={onCancel}
                 disabled={authorizing}
               >
@@ -712,7 +712,7 @@ function ScopedOAuthForm({
                 <Button
                   type="button"
                   size="sm"
-                  className="h-7 text-xs coarse:h-12 coarse:text-sm"
+                  className="h-7 text-xs coarse:h-[44px] coarse:text-sm"
                   disabled={!manualCode.trim() || !pendingCredId}
                   onClick={handleManualCodeExchange}
                 >

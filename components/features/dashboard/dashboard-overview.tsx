@@ -244,7 +244,7 @@ export function AttentionTiles({
         {kind === "clear" ? (
           <DashNote tone="ok">Nothing needs you right now</DashNote>
         ) : inboxError ? (
-          <DashNote tone="error" action={onRetry && <Button size="xs" variant="outline" onClick={onRetry} className="coarse:min-h-11">Retry</Button>}>
+          <DashNote tone="error" action={onRetry && <Button size="xs" variant="outline" onClick={onRetry} className="coarse:min-h-[44px]">Retry</Button>}>
             Could not check the inbox
           </DashNote>
         ) : (

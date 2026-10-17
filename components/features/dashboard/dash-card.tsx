@@ -64,7 +64,7 @@ export function DashCard({
         {link && (
           <Link
             href={link.href}
-            className="inline-flex shrink-0 items-center gap-0.5 text-control font-medium text-muted-foreground transition-colors hover:text-foreground coarse:min-h-11"
+            className="inline-flex shrink-0 items-center gap-0.5 text-control font-medium text-muted-foreground transition-colors hover:text-foreground coarse:min-h-[44px]"
           >
             {link.label}
             <ChevronRight className="size-3.5" aria-hidden />
@@ -80,7 +80,7 @@ export function DashCard({
 
 /** An inline text link in a card line: grey-on-foreground, underlined on
  *  hover, and a 44 px target under a coarse pointer. */
-export const TEXT_LINK = "text-foreground underline-offset-2 hover:underline coarse:inline-flex coarse:min-h-11 coarse:items-center"
+export const TEXT_LINK = "text-foreground underline-offset-2 hover:underline coarse:inline-flex coarse:min-h-[44px] coarse:items-center"
 
 /** A group heading inside a card: "Running now 2". */
 export function DashSubHead({ title, count }: { title: string; count?: number }) {
@@ -127,7 +127,7 @@ export function DashLine({
     >
       {lead}
       {href ? (
-        <Link href={href} className="min-w-0 flex-1 rounded-sm hover:[&>b]:underline focus-visible:outline-2 focus-visible:outline-primary coarse:min-h-11">
+        <Link href={href} className="min-w-0 flex-1 rounded-sm hover:[&>b]:underline focus-visible:outline-2 focus-visible:outline-primary coarse:min-h-[44px]">
           {text}
         </Link>
       ) : (
