@@ -22,7 +22,56 @@ export interface SubmitResult {
 // 400 "workspace_id is required" otherwise.
 export async function submitCrew(workspaceId: string, state: WizardState): Promise<SubmitResult> {
   if (state.mode === "browse") return submitFromTemplate(workspaceId, state)
+  if (state.mode === "suggest") return submitSuggested(workspaceId, state)
   return submitBlank(workspaceId, state)
+}
+
+/**
+ * The suggested lineup: the crew first, then one POST /agents per proposed
+ * agent (the same call as `crewship agent create`). Not atomic — when an agent
+ * is refused the crew stays, the toast says how many were not created, and
+ * the crew opens so they can be added there.
+ */
+async function submitSuggested(workspaceId: string, state: WizardState): Promise<SubmitResult> {
+  if (!state.provider) throw new Error("Choose a provider for the agents")
+  const crew = await submitBlank(workspaceId, state)
+  const provider = state.provider
+  // A crew has one lead: the first the lineup names, the rest are agents.
+  let leadSeen = false
+  let failed = 0
+  for (const a of state.suggested) {
+    const lead = a.agent_role === "LEAD" && !leadSeen
+    if (lead) leadSeen = true
+    try {
+      const res = await apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: a.name.trim(),
+          slug: a.slug.trim(),
+          agent_role: lead ? "LEAD" : "AGENT",
+          crew_id: crew.id,
+          role_title: a.role_title?.trim() || null,
+          system_prompt: a.system_prompt || null,
+          llm_provider: provider,
+          cli_adapter: DEFAULT_RUNNER[provider],
+          llm_model: defaultModelForProvider(provider),
+        }),
+      })
+      if (!res.ok) failed += 1
+    } catch {
+      failed += 1
+    }
+  }
+  await backfillAgentAvatars(workspaceId, { crewId: crew.id }).catch(() => undefined)
+  if (failed > 0) {
+    const made = state.suggested.length - failed
+    toast.warning(`${crew.name} created · ${made} of ${state.suggested.length} agents`, {
+      description: "Add the missing agents from the crew's Team tab.",
+    })
+    return { ...crew, partial: true }
+  }
+  return crew
 }
 
 function runtimeBody(state: WizardState): Record<string, unknown> {

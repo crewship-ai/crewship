@@ -78,7 +78,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     const onCreated = vi.fn()
     const onOpenChange = vi.fn()
     const r = render(
-      <CreateCrewDialog
+      <CreateCrewDialog initialStart="template"
         workspaceId="ws_test"
         open={true}
         onOpenChange={onOpenChange}
@@ -374,7 +374,6 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       expect(screen.getByRole("button", { name: /Continue/ })).not.toBeDisabled()
     })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ })) // Step 2 → 3
-    fireEvent.click(screen.getByRole("button", { name: /Environment and runtime/ }))
     await waitFor(() => {
       expect(screen.getByText("Base image")).toBeInTheDocument()
     })
@@ -419,14 +418,14 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     // Step 2 button is "ahead" of step 1 — disabled.
     // CreateSurfaceSteps names its chips by their visible label ("2 Lineup");
     // the old hand-rolled strip carried an aria-label ("Step 2: Lineup").
-    const step2Btn = screen.getByRole("button", { name: /Lineup/ })
+    const step2Btn = screen.getByRole("button", { name: /Step 2: Template/ })
     expect(step2Btn).toBeDisabled()
 
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
     // After advancing, Step 1 button is now "completed" → clickable
     await waitFor(() => {
-      const s1 = screen.getByRole("button", { name: /Identity/ })
+      const s1 = screen.getByRole("button", { name: /Step 1: Name/ })
       expect(s1).not.toBeDisabled()
     })
   })
@@ -449,8 +448,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       await waitFor(() => screen.getByRole("button", { name: /^Start empty/ }))
       fireEvent.click(screen.getByRole("button", { name: /^Start empty/ }))
       fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-      fireEvent.click(screen.getByRole("button", { name: /Environment and runtime/ }))
-      await waitFor(() => screen.getByText("Base image"))
+        await waitFor(() => screen.getByText("Base image"))
     }
 
     it("swaps the surface for the picker, and says where you are", async () => {
@@ -460,7 +458,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       await waitFor(() => expect(screen.getByText("Base image — new crew")).toBeInTheDocument())
       // A step strip reading "3 of 3" over a picker is a lie about where you
       // are: the panel is not a step.
-      expect(screen.queryByRole("button", { name: /Step 3: Review/ })).toBeNull()
+      expect(screen.queryByRole("button", { name: /Step 3: Environment/ })).toBeNull()
       // And the primary is the panel's, not the wizard's.
       expect(screen.getByRole("button", { name: /Use this image/ })).toBeInTheDocument()
       expect(screen.queryByRole("button", { name: /^Continue$/ })).toBeNull()
@@ -493,7 +491,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       setupFetch([])
       renderDialog()
 
-      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+      fireEvent.click(screen.getByRole("button", { name: /more icons/i }))
 
       await waitFor(() => expect(screen.getByText("Icon — new crew")).toBeInTheDocument())
       expect(screen.getByPlaceholderText(/search icons/i)).toBeInTheDocument()
@@ -509,29 +507,29 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     it("hides the step strip while the panel is up", async () => {
       setupFetch([])
       renderDialog()
-      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+      fireEvent.click(screen.getByRole("button", { name: /more icons/i }))
 
       await screen.findByText("Icon — new crew")
-      expect(screen.queryByRole("button", { name: /Step 2: Lineup/ })).toBeNull()
+      expect(screen.queryByRole("button", { name: /Step 2: Template/ })).toBeNull()
     })
 
     it("applies the pick and returns to the step", async () => {
       setupFetch([])
       renderDialog()
-      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+      fireEvent.click(screen.getByRole("button", { name: /more icons/i }))
       await screen.findByText("Icon — new crew")
 
       fireEvent.click(screen.getByRole("radio", { name: "Rocket" }))
       fireEvent.click(screen.getByRole("button", { name: /Use this icon/ }))
 
       await waitFor(() => expect(screen.getByPlaceholderText("Engineering")).toBeInTheDocument())
-      expect(screen.getByText(/Rocket ·/)).toBeInTheDocument()
+      expect(screen.getByRole("radio", { name: "Rocket" })).toHaveAttribute("aria-checked", "true")
     })
 
     it("searches the set instead of making you scroll it", async () => {
       setupFetch([])
       renderDialog()
-      fireEvent.click(screen.getByRole("button", { name: /pick icon and color/i }))
+      fireEvent.click(screen.getByRole("button", { name: /more icons/i }))
       await screen.findByText("Icon — new crew")
 
       const before = screen.getAllByRole("radio").length

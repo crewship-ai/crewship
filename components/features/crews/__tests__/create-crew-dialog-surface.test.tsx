@@ -73,7 +73,7 @@ function renderDialog() {
   const onCreated = vi.fn()
   const onOpenChange = vi.fn()
   const r = render(
-    <CreateCrewDialog workspaceId="ws_test" open onOpenChange={onOpenChange} onCreated={onCreated} />,
+    <CreateCrewDialog initialStart="template" workspaceId="ws_test" open onOpenChange={onOpenChange} onCreated={onCreated} />,
   )
   return { ...r, onCreated, onOpenChange }
 }
@@ -102,13 +102,13 @@ describe("<CreateCrewDialog> — CreateSurface shell", () => {
     expect(el.className).toContain("overflow-hidden")
   })
 
-  it("is size lg and stays that width from Step 1 into Step 2", async () => {
+  it("is size md (640) and stays that width from Step 1 into Step 2", async () => {
     setupFetch([
       (c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null,
     ])
     renderDialog()
 
-    expect(surface().className).toContain("sm:max-w-[800px]")
+    expect(surface().className).toContain("sm:max-w-[640px]")
 
     fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Engineering" } })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
@@ -118,7 +118,7 @@ describe("<CreateCrewDialog> — CreateSurface shell", () => {
     })
 
     // Step 2 used to jump to 940px.
-    expect(surface().className).toContain("sm:max-w-[800px]")
+    expect(surface().className).toContain("sm:max-w-[640px]")
     expect(surface().className).not.toContain("sm:max-w-[940px]")
     expect(surface().className).not.toContain("sm:max-w-[680px]")
   })

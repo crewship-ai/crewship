@@ -26,11 +26,14 @@ test.describe("Crew image freshness card", () => {
   test("a crew's settings report an image-freshness verdict, never silence", async ({ page }) => {
     await page.goto("/crews")
 
-    const crewRow = page.locator("aside button").filter({ hasText: /\w/ }).first()
+    // A crew row of the Crews panel (the page also opens a crew by itself).
+    const crewRow = page.locator("[data-crew-row] [role=button]").first()
     await expect(crewRow).toBeVisible({ timeout: QUICK })
     await crewRow.click()
     await expect(page).toHaveURL(/[?&]crew=/, { timeout: QUICK })
 
+    // The card is still in the crew's Settings tab (with the other container
+    // controls) until the Environment tab gets its own image card.
     // CanvasTabs is a real tablist now, so select by role — narrower than the
     // old button-by-name match, which would have taken any button reading
     // "Settings" anywhere on the screen. `.first()` stays: other surfaces on

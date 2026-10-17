@@ -45,7 +45,11 @@ Every agent has one of two roles that determines their capabilities:
   </Step>
 
   <Step title="Create a new crew">
-    Click **New Crew** and fill in the details:
+    Click **New › New crew** (or press **C**) and fill in the details — name,
+    slug, icon and colour, what the crew should do — then choose how it starts:
+    **Suggest a team** (the lead proposes agents from your description; you can
+    rename or remove any before anything is created), **From a template**,
+    **Import crewship.yaml** or **Empty crew**. The fields map to the API:
     - **Name:** A human-readable name (e.g., "Engineering")
     - **Slug:** URL-friendly identifier (e.g., `engineering`)
     - **Icon:** A lucide icon name (`terminal`, `rocket`, `clipboard`, etc.) -- not emoji
@@ -80,55 +84,41 @@ Every agent has one of two roles that determines their capabilities:
 
 ## The Crews screen
 
-`/crews` is the fleet: crews on the left, the selected crew or agent on the
-right.
+`/crews` is the fleet: crews in the side panel, the open crew or agent beside
+it. On a desktop it opens straight on a crew (the last one you looked at, or
+the first in the panel); on a phone it opens the list.
 
-- **The explorer** works like the Routines and Skills sidebars. Under the
-  search, **Status** counts agents: *All*, *Needs you* (an agent in error or
-  waiting on your decision), *Working*, *Idle* and *Expired hires*; pick one to
-  list only those agents. **Filter** narrows by role (lead or member), model,
-  runtime, hire type, activity (active in the last 24 h, this week, quiet for
-  7+ days, never ran) and crew health (needs a rebuild, credential gaps); a
-  facet where every agent is alike is not offered. Each pick shows as a chip
-  you can remove, and Status, filters and view are kept in the URL, so a link
-  opens the same list. `/` jumps to the search.
-- **View** groups the list by crew (the default), by status, or not at all
-  (A–Z), and sorts by crew size, name or last active. By crew, the crews that
-  need a person come first (an agent in error, a failed or pending container
-  build, a credential whose CLI is missing from the image, an agent waiting
-  on a decision), then the running ones, then the idle majority, which folds
-  after six behind "N more crews · Show all". A crew's lead is listed first,
-  with a crown. Under each name is a line about the crew (missions running,
-  or when it last worked) and, under each agent, its role; **Show roles and
-  activity** in View turns both off for a denser list. Hover an agent for
-  **Chat**, a crew for **Add agent**. Collapsed, the sidebar keeps the crew
-  icons, with a dot on the ones that need a person.
-- The line under the search is the workspace's real size (`103 crews · 308
-  agents`, from the API's `X-Total-Count`), or "N crews · M agents match"
-  while a search or filter is on; when nothing matches it says so and offers
-  Clear.
-- **Needs you** sits above a crew's tabs and only when there is something to
-  do. Each row carries its verb: *Build now* / *Retry build* (rebuild the
-  container image), *Install gh* (adds the devcontainer feature the readiness
-  check named and rebuilds), *Connect* (a crew tool without a credential —
-  opens it on Integrations), *Inspect* (an agent in error), *Review* (an agent
-  waiting on a decision, in the inbox). A healthy crew shows no strip.
-- **Settings → Integrations** shows each crew tool's transport, bound agents
-  and auth state, with Connect beside a gap.
-- **The roster** (no selection) is a table on a desktop and a one-column list
-  on a phone; the onboarding guide agent is never listed.
-- **A selected crew** opens on four tabs: **Overview** (the crew at a
-  glance — its team, health and what needs a person; settings and delete live
-  behind **Crew administration**), **Team** (its agents, and the people
-  assigned to it), **Work** (the crew's issues, missions and shared routines) and **Memory** — the
-  knowledge the crew and its agents have retained, by scope (*Agent knowledge*,
-  *Shared with crew*, *Shared with workspace*), with **Refresh**, an export for
-  the agent and crew scopes, a link to the pending **Knowledge proposals** in
-  the inbox, and an **About me** view of what agents have saved about *you*
-  (saved preferences and per-agent notes, each with a **Forget**). See
-  [Agent memory](/guides/agent-memory).
+- **The panel** starts with **Views** — *All crews*, *Needs you*, *Working*,
+  *Idle* and *Temporary hires* (keys 1–5) — then the crews, grouped by status
+  (*Needs you*, *Working*, *Idle*) or **A–Z**. A crew row shows how many things
+  wait for a person, or a live dot while it works. The open crew's agents are
+  listed under it: the lead with a star, a temporary hire with its time left
+  (or *hire* while it waits for approval, *expired* after). Agents without a
+  crew are listed at the end. The view and the grouping are kept in the URL
+  (`?status=`, `?group=`), and `/` jumps to the search.
+- **The top bar** names where you are (`Crews › Research`) and carries
+  **Activity** (the crew's activity), **Terminal** (opens the dock),
+  **Chat with** the lead, the crew menu (*Restart agents*, *Copy CLI command*,
+  *Copy link*, *Delete crew…*) and **New** (*New crew*, *Crew from a
+  template*, *Import crewship.yaml*, and for the open crew *New agent* and
+  *Hire a temporary agent*). **C** opens New crew and **A** New agent.
+- **A crew page** has one head — status, lead, number of agents, autonomy,
+  image and container — and six tabs: **Overview** (what needs you, each row
+  with its verb: *Build now*, *Install gh*, *Connect*, *Inspect*, *Review*;
+  what the crew is doing, Health, the Team and what it works on), **Team** (the
+  agents, temporary hires with *Approve*, the time left or *Rehire*, and how the
+  team works), **Tools and access** (which agent has which skill and
+  credential), **Environment** (container, tools, network and resources, saved
+  through the page's one save bar), **Memory** and **Settings** (profile,
+  autonomy, people, the command line and, for admins, the danger zone).
+- **An agent page** links back to its crew and has the tabs **Overview**,
+  **Instructions**, **Model and limits**, **Tools and access**, **Memory** and
+  **Settings**. Edits save through the same save bar.
+- The tab is part of the link (`?tab=`); older links such as `?tab=work`,
+  `?tab=skills` or `?tab=credentials` land on the tab that holds that content.
+  See [Agent memory](/guides/agent-memory) for the Memory tab.
 
-Lists are windowed at 500 rows; when a fleet is larger the explorer says how
+Lists are windowed at 500 rows; when a fleet is larger the panel says how
 many rows are not loaded and loads them on ask.
 
 ## Running Your First Mission

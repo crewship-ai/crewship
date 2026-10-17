@@ -38,7 +38,8 @@ export interface SettingsTabProps {
   integrations: CrewIntegration[] | null
   patch: (body: Record<string, unknown>) => Promise<void>
   applyAvatarStyle: (resetOverrides: boolean) => void
-  onDelete: () => void
+  /** Absent for anyone who may not delete the crew (ADMIN+): no Danger zone. */
+  onDelete?: () => void
 }
 
 export function SettingsTab({
@@ -328,7 +329,7 @@ export function SettingsTab({
       <CrewServiceLifecycle key={crew.id} crewId={crew.id} workspaceId={workspaceId} canManage={canEditRuntime} />
 
       {/* Danger */}
-      <section className="space-y-3">
+      {onDelete && <section className="space-y-3">
         <h2 className="text-lg font-semibold text-destructive">Danger zone</h2>
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 flex items-center justify-between">
           <div>
@@ -346,7 +347,7 @@ export function SettingsTab({
             Delete {crew.name}
           </button>
         </div>
-      </section>
+      </section>}
     </div>
   )
 }
