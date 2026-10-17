@@ -16,6 +16,9 @@ export interface CalendarEntry {
   status?: string
   outcome?: string
   pinned_version?: number | null
+  /** Planned starts only: the schedule they come from and its time zone. */
+  schedule_id?: string
+  timezone?: string
 }
 
 export type CalendarOutcome = "planned" | "completed" | "failed" | "waiting" | "running" | "stopped"

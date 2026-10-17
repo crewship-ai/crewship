@@ -228,7 +228,7 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
       title="Up next"
       icon={CalendarClock}
       hint={upcoming.length > 0 ? `${upcoming.length} upcoming` : "none queued"}
-      action={<Link href="/routines?tab=calendar" className="text-primary-hover hover:underline">Calendar →</Link>}
+      action={<Link href="/calendar" className="text-primary-hover hover:underline">Calendar →</Link>}
       className="h-full"
     >
       {upcoming.length === 0 ? (

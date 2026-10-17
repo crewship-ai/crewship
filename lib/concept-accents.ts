@@ -114,6 +114,8 @@ export const CONCEPT_ACCENT = {
   // lib/__tests__/concept-accents.test.ts exists to catch.
   missions: "indigo",
   routines: "purple",
+  // A routine's starts laid out by date: same family as routines.
+  calendar: "purple",
   pages: "green",
 
   // ── Run ──

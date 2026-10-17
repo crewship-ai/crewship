@@ -173,7 +173,7 @@ const ENTRIES: Entry[] = [
   { id: "journal:timeline", title: "Technical log", trail: "Activity", href: "/activity?section=log", icon: BookOpen, keywords: ["journal", "timeline", "events", "audit", "log", "trace"], visible: (ctx) => isAdminTier(ctx.role) },
   { id: "journal:runs", title: "Fleet runs", trail: "Activity", href: "/activity?section=runs", icon: BookOpen, keywords: ["journal", "runs", "executions", "run history"], visible: (ctx) => isAdminTier(ctx.role) },
   { id: "journal:spend", title: "Spend", trail: "Activity", href: "/activity?mode=spend", icon: Coins, keywords: ["journal", "cost", "usage", "tokens", "billing", "budget"], visible: (ctx) => isAdminTier(ctx.role) },
-  { id: "routines:calendar", title: "Routine calendar", trail: "Routines", href: "/routines?tab=calendar", icon: CalendarDays, keywords: ["schedule", "calendar", "cron"] },
+  { id: "calendar", title: "Calendar", trail: "Work", href: "/calendar", icon: CalendarDays, keywords: ["schedule", "calendar", "cron", "dates", "routine calendar"] },
   { id: "issues:missions", title: "Missions", trail: "Issues", href: "/issues?mission_type=mission", icon: CircleDot, keywords: ["mission list"] },
   { id: "credentials:providers", title: "Model providers", trail: "Credentials", href: "/credentials?tab=providers", icon: KeyRound, keywords: ["providers", "pays with", "anthropic", "openai", "subscription"] },
 

@@ -99,6 +99,7 @@
                 "expanded": false,
                 "pages": [
                   "guides/routines",
+                  "guides/calendar",
                   "guides/routines-cookbook",
                   "guides/demo-packs",
                   "guides/routines-migration",
