@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { LayoutDashboard } from "lucide-react"
 
 import { SubBar } from "@/components/layout/sub-bar"
-import { PageLoading } from "@/components/layout/page-state"
+import { OfflineBanner, PageLoading, StaleData } from "@/components/layout/page-state"
 import { Button } from "@/components/ui/button"
 import {
   AttentionTiles,
@@ -25,6 +25,7 @@ import { FleetBoard, deriveFleetBoard } from "@/components/features/dashboard/fl
 import { DashboardResults } from "@/components/features/dashboard/dashboard-results"
 import { PagesStrip } from "@/components/features/dashboard/pages-strip"
 import { WelcomeChecklist } from "@/components/features/dashboard/welcome-checklist"
+import { useDashboardOffline } from "@/components/features/dashboard/use-dashboard-offline"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsInstanceAdmin, useSessionSafe } from "@/hooks/use-auth"
 import { dashboardLanding } from "@/lib/dashboard-landing"
@@ -143,6 +144,7 @@ export default function DashboardPage() {
   const inbox = useInbox(workspaceId, "active")
 
   const invalidateDashboard = useInvalidateDashboard(workspaceId)
+  const offline = useDashboardOffline()
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const debouncedRefresh = useCallback(() => {
     clearTimeout(debounceRef.current)
@@ -304,63 +306,68 @@ export default function DashboardPage() {
     <>
       {bar}
       <main className={BODY}>
-        <DashboardHead
-          title={greeting(now, session.data?.user.name)}
-          meta={dashboardMeta({ now, attentionCount: attentionItems.length, attentionKnown: attention.inboxKnown, runningAgents, nextRunAt })}
-        />
-        <WelcomeChecklist firstAgentId={firstAgentId} />
-
-        {/* The first visible content is the work needing a person. */}
-        <AttentionTiles items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} onRetry={inbox.refresh} />
-
-        <div className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-3">
-          <DashboardResults key={workspaceId} review={reviewQ.data ?? []} inProgress={inProgressQ.data ?? []} completed={completedQ.data ?? []} activeAgentRuns={agentRunsQ.data ?? []} activeRoutineRuns={activeRuns.runs} recentRoutineRuns={activeRuns.recentDashboardRuns} agents={agents} crews={crews} loading={reviewQ.isPending || inProgressQ.isPending || completedQ.isPending || agentRunsQ.isPending} error={reviewQ.isError || inProgressQ.isError || completedQ.isError || agentRunsQ.isError} routineError={activeRuns.error} routineLoading={activeRuns.loading} onRetry={() => { void reviewQ.refetch(); void inProgressQ.refetch(); void completedQ.refetch(); void agentRunsQ.refetch(); activeRuns.refresh() }} />
-          <div className="grid min-w-0 gap-4">
-            <DashboardUpNext schedules={schedules.schedules} />
-            <FleetBoard cards={fleetCards} />
-          </div>
-        </div>
-
-        {insightsFailed ? (
-          <div data-testid="dashboard-kpis" className="mt-4 overflow-hidden rounded-card border border-border bg-card [&>*]:border-t-0">
-            <DashNote tone="error" action={<Button size="xs" variant="outline" onClick={() => { void insightsQ.refetch() }} className="coarse:min-h-11">Retry</Button>}>
-              Could not load the run summary
-            </DashNote>
-          </div>
-        ) : (
-          <DashboardKpis
-            data={kpis}
-            window={reportWindow}
-            spendUsd={spendTotal}
-            spendPerRun={typeof spendTotal === "number" && kpis.successTotal > 0 ? spendTotal / kpis.successTotal : null}
-            completedSeries={volumeFailed ? undefined : runsPerBucket}
-            completedSeriesLabel={`Runs started per ${reportWindow === "24h" ? "hour" : "day"}`}
+        {/* DSH-01, v67 Offline state: one banner, the data under it dimmed
+            and not clickable until live updates are back. */}
+        {offline.offline && <OfflineBanner since={offline.since} onRetry={invalidateDashboard} className="mb-4" />}
+        <StaleData stale={offline.offline}>
+          <DashboardHead
+            title={greeting(now, session.data?.user.name)}
+            meta={dashboardMeta({ now, attentionCount: attentionItems.length, attentionKnown: attention.inboxKnown, runningAgents, nextRunAt })}
           />
-        )}
+          <WelcomeChecklist firstAgentId={firstAgentId} />
 
-        <div className="mt-4 grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-3">
-          <DashCard
-            title={`Run volume · ${reportWindow} · by crew`}
-            concept="activity"
-            meta={volumeQ.data ? `${runVolumeTotal} runs` : undefined}
-            link={{ label: "Report", href: "/activity" }}
-            className="xl:col-span-2"
-          >
-            {volumeFailed ? (
-              <DashNote tone="error" action={<Button size="xs" variant="outline" onClick={retryVolume} className="coarse:min-h-11">Retry</Button>}>
-                Could not load run volume
+          {/* The first visible content is the work needing a person. */}
+          <AttentionTiles items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} onRetry={inbox.refresh} />
+
+          <div className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-3">
+            <DashboardResults key={workspaceId} review={reviewQ.data ?? []} inProgress={inProgressQ.data ?? []} completed={completedQ.data ?? []} activeAgentRuns={agentRunsQ.data ?? []} activeRoutineRuns={activeRuns.runs} recentRoutineRuns={activeRuns.recentDashboardRuns} agents={agents} crews={crews} loading={reviewQ.isPending || inProgressQ.isPending || completedQ.isPending || agentRunsQ.isPending} error={reviewQ.isError || inProgressQ.isError || completedQ.isError || agentRunsQ.isError} routineError={activeRuns.error} routineLoading={activeRuns.loading} onRetry={() => { void reviewQ.refetch(); void inProgressQ.refetch(); void completedQ.refetch(); void agentRunsQ.refetch(); activeRuns.refresh() }} />
+            <div className="grid min-w-0 gap-4">
+              <DashboardUpNext schedules={schedules.schedules} />
+              <FleetBoard cards={fleetCards} />
+            </div>
+          </div>
+
+          {insightsFailed ? (
+            <div data-testid="dashboard-kpis" className="mt-4 overflow-hidden rounded-card border border-border bg-card [&>*]:border-t-0">
+              <DashNote tone="error" action={<Button size="xs" variant="outline" onClick={() => { void insightsQ.refetch() }} className="coarse:min-h-11">Retry</Button>}>
+                Could not load the run summary
               </DashNote>
-            ) : (
-              // A phone scrolls the chart sideways rather than squeezing it.
-              <div className="overflow-x-auto px-4 pb-3.5 pt-1">
-                <div className="max-md:min-w-[480px]">
-                  <RunVolumeChart buckets={runVolume.buckets} series={runVolume.series} window={reportWindow} />
+            </div>
+          ) : (
+            <DashboardKpis
+              data={kpis}
+              window={reportWindow}
+              spendUsd={spendTotal}
+              spendPerRun={typeof spendTotal === "number" && kpis.successTotal > 0 ? spendTotal / kpis.successTotal : null}
+              completedSeries={volumeFailed ? undefined : runsPerBucket}
+              completedSeriesLabel={`Runs started per ${reportWindow === "24h" ? "hour" : "day"}`}
+            />
+          )}
+
+          <div className="mt-4 grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-3">
+            <DashCard
+              title={`Run volume · ${reportWindow} · by crew`}
+              concept="activity"
+              meta={volumeQ.data ? `${runVolumeTotal} runs` : undefined}
+              link={{ label: "Report", href: "/activity" }}
+              className="xl:col-span-2"
+            >
+              {volumeFailed ? (
+                <DashNote tone="error" action={<Button size="xs" variant="outline" onClick={retryVolume} className="coarse:min-h-11">Retry</Button>}>
+                  Could not load run volume
+                </DashNote>
+              ) : (
+                // A phone scrolls the chart sideways rather than squeezing it.
+                <div className="overflow-x-auto px-4 pb-3.5 pt-1">
+                  <div className="max-md:min-w-[480px]">
+                    <RunVolumeChart buckets={runVolume.buckets} series={runVolume.series} window={reportWindow} />
+                  </div>
                 </div>
-              </div>
-            )}
-          </DashCard>
-          <PagesStrip />
-        </div>
+              )}
+            </DashCard>
+            <PagesStrip />
+          </div>
+        </StaleData>
       </main>
     </>
   )
