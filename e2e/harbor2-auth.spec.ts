@@ -125,6 +125,20 @@ test("deep link → login → back to the same URL incl. query", async ({ page }
   expect(new URL(page.url()).search).toBe("?view=mine")
 })
 
+// AUTH-01 (A06): the card names the page a valid redirect returns to, by its
+// navigation name, and says nothing for a target the sign-in would refuse.
+test("A06 a valid redirect names the page under the title; a refused one says nothing", async ({ page }) => {
+  await page.goto(`/login?redirect=${encodeURIComponent("/issues/ISS-1?tab=activity")}`)
+  const c = await card(page)
+  await expect(c.locator("[data-slot=auth-return-to]")).toHaveText("You'll return to Issues.")
+  await expect(c).not.toContainText("ISS-1")
+
+  await page.goto(`/login?redirect=${encodeURIComponent("https://example.com/issues")}`)
+  await card(page)
+  await expect(page.getByRole("heading", { name: "Sign in to Crewship" })).toBeVisible()
+  await expect(page.locator("[data-slot=auth-return-to]")).toHaveCount(0)
+})
+
 for (const path of ["/forgot-password", "/reset-password?token=synthetic", "/join"]) {
   test(`${path} renders in the auth card`, async ({ page }) => {
     await page.goto(path)

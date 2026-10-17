@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { safeRedirectPath } from "./safe-redirect"
+import { returnPageName } from "./return-to"
 import { serverFetch } from "@/lib/server-base"
 
 export default function LoginPage() {
@@ -46,6 +47,8 @@ function LoginForm() {
   // account) lands here; like a wrong password, it does not say why.
   const refused = searchParams.get("error") === "signin"
   const redirectTarget = safeRedirectPath(searchParams.get("redirect"))
+  // Display only: where the person lands is still redirectTarget.
+  const returnTo = returnPageName(searchParams.get("redirect"))
   const { signIn } = useAuth()
   // First-run gate: on an empty Crewship install the visitor should
   // never see the login form — they should land on /bootstrap to
@@ -133,7 +136,16 @@ function LoginForm() {
       <AuthCard
         icon={User}
         title="Sign in to Crewship"
-        description="Sign in to manage your AI workforce."
+        description={
+          returnTo ? (
+            <>
+              Sign in to manage your AI workforce.{" "}
+              <span data-slot="auth-return-to">You&apos;ll return to {returnTo}.</span>
+            </>
+          ) : (
+            "Sign in to manage your AI workforce."
+          )
+        }
         onSubmit={handleSubmit}
         banner={banner}
         refusal={refusal}
