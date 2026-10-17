@@ -147,6 +147,51 @@ describe("IssuesBoardView drag and drop", () => {
   })
 })
 
+// Drag and drop has no keyboard path, so each card carries a "Move to"
+// menu that goes through the same PATCH and the same confirmation.
+describe("IssuesBoardView Move to (keyboard)", () => {
+  beforeEach(() => {
+    apiFetch.mockReset()
+    toastError.mockReset()
+  })
+  const card = { ...issue(1, "TODO"), crew_id: "c1" } as Mission
+  const openMenu = () => {
+    const trigger = screen.getByRole("button", { name: "Move ENG-1 to…" })
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: "Enter" })
+    return screen.getByRole("menu")
+  }
+
+  it("moves a card from the keyboard with the same PATCH a drop sends", async () => {
+    apiFetch.mockResolvedValue(new Response("{}", { status: 200 }))
+    const moved = vi.fn()
+    render(<IssuesBoardView issues={[card]} onIssueClick={() => {}} workspaceId="ws" onMoved={moved} />)
+    const menu = openMenu()
+    // The column it is already in is not offered.
+    expect(within(menu).queryByRole("menuitem", { name: "Todo" })).toBeNull()
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "In progress" }))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/v1/crews/c1/issues/ENG-1?workspace_id=ws",
+        expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "IN_PROGRESS" }) }),
+      ),
+    )
+    await waitFor(() => expect(moved).toHaveBeenCalled())
+  })
+
+  it("asks before Done, like a drop", () => {
+    render(<IssuesBoardView issues={[card]} onIssueClick={() => {}} workspaceId="ws" />)
+    fireEvent.click(within(openMenu()).getByRole("menuitem", { name: "Done" }))
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Move ENG-1 to Done?")
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+
+  it("has no Move to menu when the board cannot move cards", () => {
+    render(<IssuesBoardView issues={[card]} onIssueClick={() => {}} />)
+    expect(screen.queryByRole("button", { name: "Move ENG-1 to…" })).toBeNull()
+  })
+})
+
 // Empty columns narrow to a rail on wide screens, so the populated ones get
 // the width: 33 backlog cards next to three empty 1fr columns was a board
 // that was mostly "No issues".
