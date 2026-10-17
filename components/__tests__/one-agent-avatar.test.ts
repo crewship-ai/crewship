@@ -43,13 +43,16 @@ function stripComments(source: string): string {
 /** Lines that build an agent avatar URL rather than rendering <AgentAvatar>. */
 function avatarUrlBuilds(source: string): string[] {
   const hits: string[] = []
-  const patterns = [
-    /\bgetAgentAvatarUrl\s*\(/, // the shared builder, called outside the component
-    /\bcreateAvatar\s*\(/, // DiceBear core, called directly
-    /api\.dicebear\.com/, // the hosted DiceBear HTTP API
+  const patterns: Array<(line: string) => boolean> = [
+    (line) => /\bgetAgentAvatarUrl\s*\(/.test(line), // the shared builder, called outside the component
+    (line) => /\bcreateAvatar\s*\(/.test(line), // DiceBear core, called directly
+    // The hosted DiceBear HTTP API. A plain substring search, not a regex:
+    // this scans source text for the host anywhere on a line, it never
+    // decides whether a URL is trusted.
+    (line) => line.includes("api.dicebear.com"),
   ]
   for (const line of stripComments(source).split("\n")) {
-    if (patterns.some((p) => p.test(line))) hits.push(line.trim())
+    if (patterns.some((matches) => matches(line))) hits.push(line.trim())
   }
   return hits
 }
