@@ -7,12 +7,12 @@ import { Activity } from "lucide-react"
 import { SubBar } from "@/components/layout/sub-bar"
 import { LedgerView } from "@/components/features/work/ledger-view"
 import { JournalLedger } from "@/components/features/journal/journal-ledger"
-import { JournalSpendView } from "@/components/features/journal/journal-spend-view"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useJournalLookup } from "@/hooks/use-journal-lookup"
 import { canSeeJournalViews, journalViewOf, lookupResolvers, memberActivityUrl } from "@/lib/journal-redirect"
 import { cn } from "@/lib/utils"
 import { ActivityModeSegment } from "./activity-mode-segment"
+import { ActivitySpendView } from "./activity-spend"
 import { ActivityStreamView } from "./activity-stream-view"
 
 export type ActivitySection = "overview" | "work" | "deliveries" | "log" | "runs"
@@ -84,9 +84,10 @@ export function ActivityWorkspace({ workspaceId }: { workspaceId: string }) {
   if (journalView === "spend") {
     return (
       <div className={cn(height, "flex min-h-0 flex-col bg-background")}>
-        <SubBar icon={Activity} title="Activity" section="Spend" ariaLabel="Activity" actions={segment} />
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden" aria-label="Spend">
-          <JournalSpendView workspaceId={workspaceId} workspaceLoading={false} />
+        {/* The page draws "Spend" as its h1; the top bar's path stays plain text. */}
+        <SubBar icon={Activity} title="Activity" section="Spend" ariaLabel="Activity" actions={segment} heading={false} />
+        <main className="min-h-0 flex-1 overflow-y-auto" aria-label="Spend">
+          <ActivitySpendView workspaceId={workspaceId} />
         </main>
       </div>
     )
