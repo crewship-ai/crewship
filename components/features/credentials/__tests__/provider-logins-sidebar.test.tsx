@@ -25,7 +25,6 @@ function renderRail(filters = EMPTY_LOGIN_FILTERS) {
         { value: "pavel@unify.cz", label: "pavel@unify.cz", count: 3 },
         { value: UNOWNED, label: "Workspace (no owner)", count: 2 },
       ]}
-      onToggleCollapse={() => {}}
     />,
   )
   return { onFiltersChange }
@@ -55,7 +54,7 @@ describe("provider, mode and owner", () => {
       providers={[
         { value: "ZAI", label: "Z.AI", count: 1 },
         { value: "GEMINI", label: "Gemini / Google", count: 0 },
-      ]} modes={[]} owners={[]} onToggleCollapse={() => {}} />)
+      ]} modes={[]} owners={[]} />)
     fireEvent.click(screen.getByText("Z.AI"))
     expect(change).toHaveBeenCalledWith({ ...EMPTY_LOGIN_FILTERS, provider: ["ZAI"] })
     expect(screen.getByLabelText("1 connected accounts")).toBeVisible()
@@ -66,7 +65,7 @@ describe("provider, mode and owner", () => {
   it("does not invent provider filters for an empty workspace", () => {
     render(<ProviderLoginsSidebar filters={EMPTY_LOGIN_FILTERS} onFiltersChange={vi.fn()}
       counts={{ all: 0, at_limit: 0, expiring: 0, needs_relogin: 0, unassigned: 0 }}
-      providers={[]} modes={[]} owners={[]} onToggleCollapse={() => {}} />)
+      providers={[]} modes={[]} owners={[]} />)
     expect(screen.getByText("All providers")).toBeVisible()
     expect(screen.queryByLabelText(/connected accounts/)).not.toBeInTheDocument()
   })

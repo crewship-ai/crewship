@@ -5,7 +5,6 @@ import { motion, useReducedMotion } from "motion/react"
 import { AlertTriangle, ChevronRight, CircleDashed, Library, Sparkles, Users, type LucideIcon } from "lucide-react"
 
 import {
-  SidebarCollapseButton,
   SidebarFacet,
   SidebarFacetOption,
   SidebarFilterPopover,
@@ -83,9 +82,8 @@ export interface SkillsExplorerProps {
   proposedCount: number
   filters: SkillFilters
   onChange: (patch: Partial<SkillFilters>) => void
-  /** Called after a pick, so a phone can close the drawer. */
+  /** Called after a pick, so a phone can close the panel sheet. */
   onPicked?: () => void
-  onToggleCollapse?: () => void
 }
 
 export function SkillsExplorer({
@@ -96,7 +94,6 @@ export function SkillsExplorer({
   filters,
   onChange,
   onPicked,
-  onToggleCollapse,
 }: SkillsExplorerProps) {
   const [open, setOpen] = useState({ view: true, holders: true, domain: true })
   // Few crews start open; many start folded so the domains stay in reach.
@@ -188,7 +185,6 @@ export function SkillsExplorer({
             </SidebarFacetOption>
           </SidebarFacet>
         </SidebarFilterPopover>
-        {onToggleCollapse && <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />}
       </SidebarToolbar>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
