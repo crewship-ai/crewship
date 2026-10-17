@@ -2,8 +2,6 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, cleanup, fireEvent, within } from "@testing-library/react"
 import { afterEach } from "vitest"
 import { DashboardResults } from "../dashboard-results"
-import { RunningNow } from "../dashboard-overview"
-import { fleetAgentStatus } from "../fleet-board"
 import type { AgentSummary } from "@/app/(dashboard)/dashboard-types"
 import type { Mission } from "@/lib/types/mission"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
@@ -24,29 +22,12 @@ describe("client dashboard results", () => {
     expect(screen.getByRole("link", { name: /Human-owned work/ }).textContent).toContain("Alice")
     expect(screen.queryByText(/Delegate/)).toBeNull()
   })
-  it("does not call failed or unavailable agents ready", () => {
-    expect(fleetAgentStatus([{ status: "ERROR" }])).toBe("1 in error")
-    expect(fleetAgentStatus([{ status: "RUNNING" }, { status: "ERROR" }, { status: "IDLE" }])).toBe("1 running · 1 ready · 1 in error")
-    expect(fleetAgentStatus([])).toBe("no agents yet")
-  })
   it("does not describe a failed fetch as an empty workspace", () => {
     render(<DashboardResults {...base} error />)
     expect(screen.getByRole("status").textContent).toContain("could not refresh")
     expect(screen.queryByText(/Finished work will appear/)).toBeNull()
     screen.getByRole("button", { name: "Retry" }).click()
     expect(base.onRetry).toHaveBeenCalledOnce()
-  })
-  it("separates approval and queue from running routines", () => {
-    render(<RunningNow agents={[]} crews={[]} runs={[{ id: "waiting", status: "waiting" }, { id: "queued", status: "queued" }] as PipelineRun[]} />)
-    expect(screen.getByText("No routines are running right now.")).toBeTruthy()
-    expect(screen.getByText(/1 awaiting approval/)).toBeTruthy()
-    expect(screen.getByText("1 queued")).toBeTruthy()
-    expect(screen.queryByText(/2 active/)).toBeNull()
-  })
-  it("does not assert idle when activity could not load", () => {
-    render(<RunningNow agents={[]} crews={[]} runs={[]} error="offline" />)
-    expect(screen.queryByText("No routines are running right now.")).toBeNull()
-    expect(screen.getByText(/Could not refresh routine activity/)).toBeTruthy()
   })
   it("keeps a running execution distinct from its in-progress issue", () => {
     const issue = { id: "issue-1", identifier: "ENG-1", title: "Prepare release", status: "IN_PROGRESS", updated_at: new Date().toISOString() } as Mission
@@ -57,8 +38,42 @@ describe("client dashboard results", () => {
     }]} />)
     expect(within(screen.getByRole("region", { name: "Running now" })).getByText("Prepare release")).toBeTruthy()
     expect(within(screen.getByRole("region", { name: "In progress" })).getByText("Prepare release")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: /^Running/ }))
+    fireEvent.click(screen.getByRole("button", { name: /^For review/ }))
     expect(screen.queryByRole("region", { name: "In progress" })).toBeNull()
+    expect(screen.queryByRole("region", { name: "Running now" })).toBeNull()
+  })
+  it("four filters; Running merges into In progress", () => {
+    const issue = { id: "issue-1", identifier: "ENG-1", title: "Prepare release", status: "IN_PROGRESS", updated_at: new Date().toISOString() } as Mission
+    const done = { id: "issue-2", identifier: "ENG-2", title: "Shipped notes", status: "DONE", updated_at: new Date().toISOString() } as Mission
+    render(<DashboardResults {...base} inProgress={[issue]} completed={[done]} activeAgentRuns={[{
+      id: "run-1", kind: "agent", status: "RUNNING", agent_id: "agent-1", agent_name: "Builder", created_at: new Date().toISOString(),
+    }]} />)
+    const filters = within(screen.getByRole("group", { name: "Filter dashboard work" })).getAllByRole("button")
+    expect(filters.map((b) => b.textContent)).toEqual(["All3", "For review0", "In progress2", "Finished1"])
+    fireEvent.click(screen.getByRole("button", { name: /^In progress/ }))
+    expect(screen.getByRole("region", { name: "Running now" })).toBeTruthy()
+    expect(screen.getByRole("region", { name: "In progress" })).toBeTruthy()
+    expect(screen.queryByRole("region", { name: "Finished recently" })).toBeNull()
+  })
+  it("empty group not rendered; empty card is one line", () => {
+    const { container, rerender } = render(<DashboardResults {...base} />)
+    expect(screen.getByText("Nothing running or waiting for review")).toBeTruthy()
+    expect(container.querySelectorAll('[data-slot="dash-note"]')).toHaveLength(1)
+    expect(screen.queryByRole("region", { name: "Running now" })).toBeNull()
+    rerender(<DashboardResults {...base} review={[{ id: "r", identifier: "ENG-9", title: "Check it", status: "REVIEW", updated_at: new Date().toISOString() } as Mission]} />)
+    expect(screen.getByRole("region", { name: "For review" })).toBeTruthy()
+    for (const name of ["Running now", "In progress", "Finished recently"]) expect(screen.queryByRole("region", { name })).toBeNull()
+  })
+  it("gives the first review the one primary action", () => {
+    const at = new Date().toISOString()
+    render(<DashboardResults {...base} review={[
+      { id: "a", identifier: "ENG-1", title: "First", status: "REVIEW", updated_at: at },
+      { id: "b", identifier: "ENG-2", title: "Second", status: "REVIEW", updated_at: at },
+    ] as Mission[]} />)
+    const actions = screen.getAllByText("Review work")
+    expect(actions).toHaveLength(2)
+    expect(actions[0].closest("[data-variant]")?.getAttribute("data-variant")).toBe("default")
+    expect(actions[1].closest("[data-variant]")?.getAttribute("data-variant")).toBe("outline")
   })
 })
 

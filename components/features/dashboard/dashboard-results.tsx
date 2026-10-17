@@ -2,26 +2,30 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ArrowUpRight, Bot, CheckCheck, CircleDot, ScrollText, UserRound } from "lucide-react"
+import { Bot, CircleDot, UserRound } from "lucide-react"
 import type { AgentSummary, CrewSummary } from "@/app/(dashboard)/dashboard-types"
 import type { Mission } from "@/lib/types/mission"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { DashboardActiveRun } from "@/hooks/use-dashboard-data"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { Button } from "@/components/ui/button"
+import { ConceptIcon } from "@/components/ui/concept-icon"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { StatusPill } from "@/components/ui/status-pill"
 import { Skeleton } from "@/components/ui/skeleton"
-import { DashboardCard } from "./dashboard-card"
-import { ListScrollControls, useListScroll } from "./list-scroll-controls"
+import { DashCard, DashLine, DashNote, DashSubHead } from "./dash-card"
+import { DashSegment } from "./dash-segment"
 import { entityHref } from "@/lib/entity-links"
 import { formatRelativeTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
-type Filter = "all" | "running" | "progress" | "review" | "finished"
-const FILTERS: { key: Filter; label: string }[] = [
-  { key: "all", label: "All" }, { key: "running", label: "Running" },
-  { key: "progress", label: "In progress" }, { key: "review", label: "For review" },
-  { key: "finished", label: "Finished" },
+/** Four views: running work is a group inside In progress, not a fifth view. */
+export type ResultsFilter = "all" | "review" | "progress" | "done"
+export const RESULTS_FILTERS: { key: ResultsFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "review", label: "For review" },
+  { key: "progress", label: "In progress" },
+  { key: "done", label: "Finished" },
 ]
 
 /** Failed routines belong in Activity and Inbox; a result exists after success. */
@@ -49,34 +53,26 @@ export function groupRoutineResults(runs: PipelineRun[], limit = 8): RoutineResu
   return [...groups.values()].slice(0, limit)
 }
 
-function WorkRow({ href, icon, kind, status, title, repeat, meta, action }: {
-  href: string; icon: React.ReactNode; kind: string; status: React.ReactNode
-  title: string; repeat?: number; meta: string; action: string
-}) {
-  return <Link href={href} className="group flex min-w-0 items-center gap-2.5 rounded-md px-2 py-2 transition-colors hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-primary coarse:min-h-12">
-    {icon}
-    <span className="hidden w-16 shrink-0 font-mono text-micro text-muted-foreground sm:block">{kind}</span>
-    <span className="hidden w-24 shrink-0 sm:block">{status}</span>
-    <span className="flex min-w-0 flex-1 items-center gap-2">
-      <span className="truncate text-body font-medium">{title}</span>
-      {repeat != null && repeat > 1 && (
-        <span className="shrink-0 rounded-md bg-accent px-1.5 font-mono text-micro font-semibold tabular-nums text-muted-foreground" title={`${repeat} completed runs`}>×{repeat}</span>
+/** An agent's face with the live dot when it is running right now. */
+function Lead({ children, live }: { children: React.ReactNode; live?: boolean }) {
+  return (
+    <span className="relative flex h-7 w-7 shrink-0 items-center justify-center">
+      {children}
+      {live && (
+        <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-primary motion-safe:animate-pulse" aria-hidden />
       )}
     </span>
-    <span className="hidden max-w-[180px] shrink-0 truncate text-label text-muted-foreground md:block">{meta}</span>
-    <span className="hidden shrink-0 text-label font-medium text-muted-foreground transition-colors group-hover:text-primary-hover lg:block">{action}</span>
-    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-primary-hover" aria-hidden />
-  </Link>
+  )
 }
 
-function WorkSection({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
-  if (!count) return null
-  return <section aria-label={title}>
-    <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-border/60 bg-card px-2 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground first:border-t-0">
-      {title}<span className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums">{count}</span>
-    </div>
-    <div className="divide-y divide-border/40">{children}</div>
-  </section>
+/** The row's action: blue only for the first review, quiet everywhere else.
+ *  On a phone only review actions stay — the rest are the row's own link. */
+function RowAction({ href, label, variant }: { href: string; label: string; variant: "default" | "outline" | "ghost" }) {
+  return (
+    <Button asChild size="sm" variant={variant} className={cn("coarse:min-h-11", variant !== "default" && label !== "Review work" && "max-md:hidden")}>
+      <Link href={href} tabIndex={-1} aria-hidden>{label}</Link>
+    </Button>
+  )
 }
 
 export function DashboardResults({ review, inProgress, completed, activeAgentRuns, activeRoutineRuns, recentRoutineRuns, agents, crews, loading, error, routineError, routineLoading, onRetry }: {
@@ -85,57 +81,157 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
   agents: AgentSummary[]; crews: CrewSummary[]
   loading: boolean; error: boolean; routineError: string | null; routineLoading: boolean; onRetry: () => void
 }) {
-  const [filter, setFilter] = useState<Filter>("all")
-  const listScroll = useListScroll()
+  const [filter, setFilter] = useState<ResultsFilter>("all")
   const routineResults = groupRoutineResults(recentRoutineRuns)
   const liveRoutines = activeRoutineRuns.filter((run) => run.status === "running" || run.status === "queued" || run.status === "waiting")
   const runningCount = activeAgentRuns.length + liveRoutines.length
-  const counts: Record<Filter, number> = {
-    all: runningCount + inProgress.length + review.length + completed.length + routineResults.length,
-    running: runningCount, progress: inProgress.length, review: review.length,
-    finished: completed.length + routineResults.length,
+  const finishedCount = completed.length + routineResults.length
+  const counts: Record<ResultsFilter, number> = {
+    all: runningCount + inProgress.length + review.length + finishedCount,
+    review: review.length,
+    progress: runningCount + inProgress.length,
+    done: finishedCount,
   }
-  const show = (section: Filter) => filter === "all" || filter === section
+  const show = (group: "running" | "progress" | "review" | "done") =>
+    filter === "all" || filter === group || (filter === "progress" && group === "running")
 
-  function issueRow(issue: Mission, finished = false) {
+  function issueLead(issue: Mission) {
     const humanOwned = Boolean(issue.owner) || issue.assignee_type === "user"
     const agent = humanOwned ? undefined : agents.find((a) => a.id === (issue.assignee_type === "agent" ? issue.assignee_id : issue.lead_agent_id))
     const crew = crews.find((c) => c.id === issue.crew_id)
     const owner = issue.owner ? issue.owner.name || "Issue owner" : humanOwned ? issue.assignee_name || "Issue owner" : agent?.name || issue.assignee_name || issue.lead_agent_name || crew?.name || "Workspace"
-    const icon = humanOwned ? <UserRound className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden /> : agent ? <AgentAvatar seed={agent.slug} alt={agent.name} className="h-6 w-6 shrink-0 rounded-md bg-muted" /> : crew ? <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="shrink-0" /> : <CircleDot className="h-6 w-6 shrink-0 text-primary-hover" aria-hidden />
-    return <WorkRow key={`issue-${issue.id}`} href={issue.identifier ? entityHref({ kind: "issue", identifier: issue.identifier }) : entityHref({ kind: "issues" })} icon={icon} kind={issue.identifier || "Issue"} status={<StatusPill status={issue.status} tone={finished ? "success" : undefined} />} title={issue.title} meta={`${owner} · ${formatRelativeTime(issue.updated_at)}`} action={issue.status === "REVIEW" ? "Review work" : "Open issue"} />
+    const lead = humanOwned
+      ? <UserRound className="h-6 w-6 text-muted-foreground" aria-hidden />
+      : agent
+        ? <AgentAvatar seed={agent.slug} alt={agent.name} className="h-7 w-7 rounded-md bg-muted" />
+        : crew
+          ? <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" />
+          : <CircleDot className="h-6 w-6 text-primary-hover" aria-hidden />
+    return { lead, owner, crew }
   }
 
-  return <DashboardCard title="Results & review" icon={CheckCheck} hint={<span className="hidden sm:inline">{runningCount > 0 ? `${runningCount} live now` : "Live work and outcomes"}</span>} action={<span className="flex items-center gap-2"><ListScrollControls label="work list" controller={listScroll} /><Link href={entityHref({ kind: "issues" })} className="text-primary-hover hover:underline">All issues →</Link></span>} className="flex h-full min-h-0 flex-col border-primary/20">
-    <div className="mb-3 flex flex-wrap gap-1" role="group" aria-label="Filter dashboard work">
-      {FILTERS.map(({ key, label }) => <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)} className={cn("rounded-md px-2.5 py-1.5 text-label transition-colors coarse:min-h-12", filter === key ? "bg-primary/15 font-medium text-primary-hover" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>{label}<span className="ml-1.5 font-mono text-micro tabular-nums opacity-70">{counts[key]}</span></button>)}
-    </div>
-    {(error || routineError) && <p role="status" className="mb-3 rounded-lg border border-warn/25 bg-warn/10 p-3 text-label text-warn">Some work could not refresh. Showing available results. <button type="button" onClick={onRetry} className="underline">Retry</button></p>}
-    {loading && counts.all === 0 ? <div className="space-y-3" aria-label="Loading results"><Skeleton className="h-9 rounded-md" /><Skeleton className="h-9 rounded-md" /><Skeleton className="h-9 rounded-md" /></div> : <div ref={listScroll.listRef} className="max-h-[440px] min-h-[210px] overflow-y-auto overscroll-contain pr-1 xl:flex xl:min-h-0 xl:max-h-none xl:flex-1 xl:flex-col" tabIndex={0} aria-label="Work list">
-      {counts[filter] === 0 && <p className="px-2 py-8 text-center text-body text-muted-foreground">{routineLoading && filter === "running" ? "Checking live routines…" : filter === "all" ? "No work yet. Assign an issue or start a routine to see it here." : `No ${FILTERS.find((item) => item.key === filter)?.label.toLowerCase()} work right now.`}</p>}
-      {show("running") && <WorkSection title="Running now" count={runningCount}>
-        {activeAgentRuns.map((run) => {
-          const agent = agents.find((item) => item.id === run.agent_id)
-          const issue = inProgress.find((item) => item.id === run.mission_id)
-          const name = run.agent_name || agent?.name || "Agent"
-          return <WorkRow key={`agent-${run.id}`} href={run.mission_identifier ? entityHref({ kind: "issue", identifier: run.mission_identifier }) : run.agent_slug ? entityHref({ kind: "chat", agentSlug: run.agent_slug }) : "/activity"} icon={agent ? <AgentAvatar seed={agent.slug} alt={agent.name} className="h-6 w-6 shrink-0 rounded-md bg-muted" /> : <Bot className="h-6 w-6 shrink-0 text-primary-hover" aria-hidden />} kind="Agent" status={<StatusPill status="RUNNING" live />} title={issue?.title || `${name} is working`} meta={`${name} · ${formatRelativeTime(run.started_at || run.created_at)}`} action="Follow run" />
-        })}
-        {liveRoutines.map((run) => <WorkRow key={`routine-live-${run.id}`} href={entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })} icon={<ScrollText className="h-6 w-6 shrink-0 text-primary-hover" aria-hidden />} kind="Routine" status={<StatusPill status={run.status.toUpperCase()} live />} title={run.pipeline_name || run.pipeline_slug} meta={formatRelativeTime(run.started_at)} action="Follow run" />)}
-      </WorkSection>}
-      {show("progress") && <WorkSection title="In progress" count={inProgress.length}>{inProgress.map((issue) => issueRow(issue))}</WorkSection>}
-      {show("review") && <WorkSection title="For review" count={review.length}>{review.map((issue) => issueRow(issue))}</WorkSection>}
-      {show("finished") && <WorkSection title="Finished recently" count={completed.length + routineResults.length}>
-        {completed.map((issue) => issueRow(issue, true))}
-        {routineResults.map(({ latest: run, count }) => <WorkRow key={`routine-done-${run.id}`} href={entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })} icon={<ScrollText className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden />} kind="Routine" status={<StatusPill status="COMPLETED" />} title={run.pipeline_name || run.pipeline_slug} repeat={count} meta={count > 1 ? `last ${formatRelativeTime(run.ended_at || run.started_at)}` : formatRelativeTime(run.ended_at || run.started_at)} action="Open result" />)}
-      </WorkSection>}
-      {/* A short list sits in a card sized to its neighbours. Say what the
-          empty part is for instead of leaving a blank pane. */}
-      {filter === "all" && counts.all > 0 && counts.all < 4 && (
-        <div data-slot="results-quiet" className="hidden flex-1 flex-col items-center justify-center gap-2 px-6 py-8 text-center xl:flex">
-          <span className="icon-tile inline-flex h-10 w-10 items-center justify-center rounded-xl" aria-hidden><CheckCheck className="h-4.5 w-4.5" /></span>
-          <p className="max-w-xs text-label text-muted-foreground">That is everything for now. Running work and issues waiting for your review appear here as they start.</p>
+  function issueRow(issue: Mission, kind: "progress" | "review" | "done", index: number) {
+    const { lead, owner, crew } = issueLead(issue)
+    const href = issue.identifier ? entityHref({ kind: "issue", identifier: issue.identifier }) : entityHref({ kind: "issues" })
+    const sub = [owner !== crew?.name ? crew?.name : null, owner, issue.identifier, formatRelativeTime(issue.updated_at)].filter(Boolean).join(" · ")
+    const pill = kind === "review"
+      ? <StatusPill tone="purple" label="For review" />
+      : kind === "done"
+        ? <StatusPill tone="success" label="Done" />
+        : <StatusPill status={issue.status} />
+    const action = kind === "review"
+      ? <RowAction href={href} label="Review work" variant={index === 0 ? "default" : "outline"} />
+      : kind === "done"
+        ? <RowAction href={href} label="Open result" variant="ghost" />
+        : null
+    return <DashLine key={`issue-${issue.id}`} lead={<Lead>{lead}</Lead>} title={issue.title} sub={sub} href={href} right={<>{pill}{action}</>} />
+  }
+
+  const empty = counts[filter] === 0
+
+  return (
+    <DashCard
+      title="Results & review"
+      concept="issues"
+      link={{ label: "All issues", href: entityHref({ kind: "issues" }) }}
+      className="xl:col-span-2"
+      tools={
+        <DashSegment
+          label="Filter dashboard work"
+          value={filter}
+          onChange={setFilter}
+          options={RESULTS_FILTERS.map(({ key, label }) => ({ value: key, label, count: counts[key] }))}
+        />
+      }
+    >
+      {(error || routineError) && (
+        <DashNote tone="error" action={<Button size="xs" variant="outline" onClick={onRetry} className="coarse:min-h-11">Retry</Button>}>
+          Some work could not refresh. Showing available results.
+        </DashNote>
+      )}
+      {loading && counts.all === 0 ? (
+        <div className="space-y-2 border-t border-border px-4 py-3" aria-label="Loading results">
+          <Skeleton className="h-9 rounded-md" /><Skeleton className="h-9 rounded-md" /><Skeleton className="h-9 rounded-md" />
+        </div>
+      ) : empty ? (
+        <DashNote>
+          {routineLoading && filter === "progress"
+            ? "Checking live routines…"
+            : filter === "all"
+              ? "Nothing running or waiting for review"
+              : `No ${RESULTS_FILTERS.find((item) => item.key === filter)?.label.toLowerCase()} work right now`}
+        </DashNote>
+      ) : (
+        <div className="max-h-[560px] overflow-y-auto overscroll-contain" aria-label="Work list">
+          {show("running") && runningCount > 0 && (
+            <section aria-label="Running now">
+              <DashSubHead title="Running now" count={runningCount} />
+              {activeAgentRuns.map((run) => {
+                const agent = agents.find((item) => item.id === run.agent_id)
+                const issue = inProgress.find((item) => item.id === run.mission_id)
+                const name = run.agent_name || agent?.name || "Agent"
+                const href = run.mission_identifier ? entityHref({ kind: "issue", identifier: run.mission_identifier }) : run.agent_slug ? entityHref({ kind: "chat", agentSlug: run.agent_slug }) : "/activity"
+                const sub = [run.crew_name, name, run.mission_identifier, formatRelativeTime(run.started_at || run.created_at)].filter(Boolean).join(" · ")
+                return (
+                  <DashLine
+                    key={`agent-${run.id}`}
+                    lead={<Lead live>{agent ? <AgentAvatar seed={agent.slug} alt={agent.name} className="h-7 w-7 rounded-md bg-muted" /> : <Bot className="h-6 w-6 text-primary-hover" aria-hidden />}</Lead>}
+                    title={issue?.title || `${name} is working`}
+                    sub={sub}
+                    href={href}
+                    right={<><StatusPill tone="blue" label="Running" live /><RowAction href={href} label="Follow run" variant="outline" /></>}
+                  />
+                )
+              })}
+              {liveRoutines.map((run) => {
+                const href = entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })
+                return (
+                  <DashLine
+                    key={`routine-live-${run.id}`}
+                    lead={<Lead live><ConceptIcon concept="routines" variant="chip" className="h-7 w-7 rounded-md" /></Lead>}
+                    title={run.pipeline_name || run.pipeline_slug}
+                    sub={["Routine", formatRelativeTime(run.started_at)].join(" · ")}
+                    href={href}
+                    right={<><StatusPill status={run.status.toUpperCase()} live /><RowAction href={href} label="Follow run" variant="outline" /></>}
+                  />
+                )
+              })}
+            </section>
+          )}
+          {show("review") && review.length > 0 && (
+            <section aria-label="For review">
+              <DashSubHead title="For review" count={review.length} />
+              {review.map((issue, i) => issueRow(issue, "review", i))}
+            </section>
+          )}
+          {show("progress") && inProgress.length > 0 && (
+            <section aria-label="In progress">
+              <DashSubHead title="In progress" count={inProgress.length} />
+              {inProgress.map((issue, i) => issueRow(issue, "progress", i))}
+            </section>
+          )}
+          {show("done") && finishedCount > 0 && (
+            <section aria-label="Finished recently">
+              <DashSubHead title="Finished recently" count={finishedCount} />
+              {completed.map((issue, i) => issueRow(issue, "done", i))}
+              {routineResults.map(({ latest: run, count }) => {
+                const href = entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })
+                const when = formatRelativeTime(run.ended_at || run.started_at)
+                return (
+                  <DashLine
+                    key={`routine-done-${run.id}`}
+                    lead={<Lead><ConceptIcon concept="routines" variant="chip" className="h-7 w-7 rounded-md" /></Lead>}
+                    title={<>{run.pipeline_name || run.pipeline_slug}{count > 1 && <span className="ml-1.5 font-mono text-label font-normal tabular-nums text-muted-foreground" title={`${count} completed runs`}>×{count}</span>}</>}
+                    sub={["Routine", count > 1 ? `last ${when}` : when].join(" · ")}
+                    href={href}
+                    right={<><StatusPill tone="success" label="Done" /><RowAction href={href} label="Open result" variant="ghost" /></>}
+                  />
+                )
+              })}
+            </section>
+          )}
         </div>
       )}
-    </div>}
-  </DashboardCard>
+    </DashCard>
+  )
 }
