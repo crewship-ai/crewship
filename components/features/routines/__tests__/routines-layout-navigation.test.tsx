@@ -38,6 +38,20 @@ vi.mock("../routines-views", () => ({ needsYou: () => [], RoutinesViewPane: ({ v
 vi.mock("../routines-detail-panel", () => ({ RoutinesDetailPanel: (p: { slug: string; onClose: () => void; onChanged: () => void; onRunStarted: (s: string) => void }) => <section aria-label={`Detail ${p.slug}`}><button onClick={p.onClose}>Close detail</button><button onClick={p.onChanged}>Refresh detail</button><button onClick={() => p.onRunStarted("run-1")}>Start historical run</button></section> }))
 vi.mock("../routine-run-detail", () => ({ RoutineRunDetail: ({ runId }: { runId: string }) => <div>Run {runId}</div> }))
 vi.mock("../routine-new-wizard", () => ({ RoutineNewWizard: (p: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: () => void; onOpenRoutine: (s: string) => void }) => p.open ? <section aria-label="New routine dialog"><button onClick={() => p.onOpenChange(false)}>Close creation</button><button onClick={() => { p.onCreated(); p.onOpenRoutine("created"); p.onOpenChange(false) }}>Open created routine</button></section> : null }))
+// A desktop window: at tablet width the kit's SecondaryPanel starts closed
+// and floats (COM-05), which the phone/desktop cases here do not exercise.
+beforeEach(() => {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia
+})
 beforeEach(() => {
   window.history.replaceState(null, "", "/routines"); h.mobile = false; h.role = "MANAGER"; h.refresh.mockClear()
   window.localStorage.removeItem("crewship.pref.panel.routines.collapsed")

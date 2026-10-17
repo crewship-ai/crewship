@@ -10,15 +10,14 @@ import type { LucideIcon } from "lucide-react"
 import {
   SidebarActiveChip,
   SidebarActiveChips,
-  SidebarFacet,
-  SidebarFacetOption,
-  SidebarFilterPopover,
+  SidebarFilterButton,
   SidebarRow,
   SidebarSearch,
   SidebarSection,
   SidebarToolbar,
   SidebarViewButton,
 } from "@/components/layout/sidebar-kit"
+import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +45,7 @@ import {
   groupRoutines,
   sortRoutines,
   type RoutineGroupBy,
+  type RoutineTriggerKind,
   type RoutinePanelIndex,
   type RoutineSort,
 } from "@/lib/routine-panel-index"
@@ -366,6 +366,7 @@ function RoutinesList({
   const activeCount =
     (active.lifecycle ? 1 : 0) + (active.status ? 1 : 0) + (active.trigger ? 1 : 0) + (active.crewId ? 1 : 0) + (filters.showTestRoutines ? 1 : 0) + (filters.showEphemeral ? 1 : 0)
   const clear = () => onChange({ ...filters, status: "all", lifecycle: "all", crewId: null, trigger: null, showTestRoutines: false, showEphemeral: false })
+  const facets = useSidebarFacets()
   const viewCount = (id: RoutinesView) => (id === "needs" ? counts.needs : id === "live" ? counts.live : id === "drafts" ? counts.drafts : null)
 
   return (
@@ -375,52 +376,9 @@ function RoutinesList({
         <div data-routines-search className="min-w-0 flex-1">
           <SidebarSearch value={search} onValueChange={onSearchChange} placeholder="Search routines, agents…" />
         </div>
-        <SidebarFilterPopover label="Filter routines" activeCount={activeCount} onClear={clear}>
-          <SidebarFacet first label="Status" resetLabel="Any status" resetActive={!active.lifecycle} onReset={() => onChange({ ...filters, lifecycle: "all" })}>
-            {LIFECYCLE.map((o) => (
-              <SidebarFacetOption key={o.id} active={active.lifecycle === o.id} onToggle={() => onChange({ ...filters, lifecycle: active.lifecycle === o.id ? "all" : o.id })}>
-                <span className="flex-1">{o.label}</span>
-                <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{facetCounts.lifecycle[o.id]}</span>
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-          <SidebarFacet label="Last run" resetLabel="Any result" resetActive={!active.status} onReset={() => onChange({ ...filters, status: "all" })}>
-            {LAST_RUN.map((o) => (
-              <SidebarFacetOption key={o.id} active={active.status === o.id} onToggle={() => onChange({ ...filters, status: active.status === o.id ? "all" : o.id })}>
-                <span className="flex-1">{o.label}</span>
-                <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{facetCounts.lastRun[o.id]}</span>
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-          <SidebarFacet label="Trigger" resetLabel="Any trigger" resetActive={!active.trigger} onReset={() => onChange({ ...filters, trigger: null })}>
-            {ROUTINE_TRIGGER_KINDS.map((o) => (
-              <SidebarFacetOption key={o.id} active={active.trigger === o.id} onToggle={() => onChange({ ...filters, trigger: active.trigger === o.id ? null : o.id })}>
-                <span className="flex-1">{o.label}</span>
-                <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{facetCounts.trigger[o.id]}</span>
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-          {crews.size > 0 && (
-            <SidebarFacet label="Crew" resetLabel="Every crew" resetActive={!active.crewId} onReset={() => onChange({ ...filters, crewId: null })}>
-              {[...crews.values()]
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map((c) => (
-                  <SidebarFacetOption key={c.id} active={active.crewId === c.id} onToggle={() => onChange({ ...filters, crewId: active.crewId === c.id ? null : c.id })}>
-                    <span className="flex-1 truncate">{c.name}</span>
-                    <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{facetCounts.crew[c.id]}</span>
-                  </SidebarFacetOption>
-                ))}
-            </SidebarFacet>
-          )}
-          <SidebarFacet label="Visibility" resetLabel="Workspace routines only" resetActive={!filters.showTestRoutines && !filters.showEphemeral} onReset={() => onChange({ ...filters, showTestRoutines: false, showEphemeral: false })}>
-            <SidebarFacetOption active={!!filters.showTestRoutines} onToggle={() => onChange({ ...filters, showTestRoutines: !filters.showTestRoutines })}>
-              Show test recipes
-            </SidebarFacetOption>
-            <SidebarFacetOption active={filters.showEphemeral} onToggle={() => onChange({ ...filters, showEphemeral: !filters.showEphemeral })}>
-              Show one-off routines
-            </SidebarFacetOption>
-          </SidebarFacet>
-        </SidebarFilterPopover>
+        <SidebarFilterButton activeCount={activeCount} {...facets.triggerProps}>
+          Filter
+        </SidebarFilterButton>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarViewButton aria-label="View: group and sort">
@@ -459,6 +417,7 @@ function RoutinesList({
         )}
       </SidebarToolbar>
 
+      {!facets.open && (
       <SidebarActiveChips>
         {active.lifecycle && (
           <SidebarActiveChip label={LIFECYCLE.find((o) => o.id === active.lifecycle)!.label} onRemove={() => onChange({ ...filters, lifecycle: "all" })}>
@@ -481,6 +440,58 @@ function RoutinesList({
           </SidebarActiveChip>
         )}
       </SidebarActiveChips>
+      )}
+
+      {/* RT-01 (kit COM-01): the facets open inside the panel, under the
+          toolbar — never a floating popover — at most six values each. */}
+      <SidebarFacetBlock {...facets.blockProps} label="Filter routines" activeCount={activeCount} onClear={clear}>
+        <SidebarInlineFacet
+          label="Status"
+          defaultOpen
+          values={LIFECYCLE.map((o) => ({ value: o.id, label: o.label, count: facetCounts.lifecycle[o.id] }))}
+          selected={active.lifecycle}
+          onToggle={(v) => onChange({ ...filters, lifecycle: active.lifecycle === v ? "all" : (v as RoutineLifecycleFilter) })}
+          onClear={() => onChange({ ...filters, lifecycle: "all" })}
+        />
+        <SidebarInlineFacet
+          label="Last run"
+          defaultOpen
+          values={LAST_RUN.map((o) => ({ value: o.id, label: o.label, count: facetCounts.lastRun[o.id] }))}
+          selected={active.status}
+          onToggle={(v) => onChange({ ...filters, status: active.status === v ? "all" : (v as RoutineStatusFilter) })}
+          onClear={() => onChange({ ...filters, status: "all" })}
+        />
+        <SidebarInlineFacet
+          label="Trigger"
+          defaultOpen
+          values={ROUTINE_TRIGGER_KINDS.map((o) => ({ value: o.id, label: o.label, count: facetCounts.trigger[o.id] }))}
+          selected={active.trigger}
+          onToggle={(v) => onChange({ ...filters, trigger: active.trigger === v ? null : (v as RoutineTriggerKind) })}
+          onClear={() => onChange({ ...filters, trigger: null })}
+        />
+        {crews.size > 0 && (
+          <SidebarInlineFacet
+            label="Crew"
+            defaultOpen
+            values={[...crews.values()]
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((c) => ({ value: c.id, label: c.name, count: facetCounts.crew[c.id] }))}
+            selected={active.crewId}
+            onToggle={(v) => onChange({ ...filters, crewId: active.crewId === v ? null : v })}
+            onClear={() => onChange({ ...filters, crewId: null })}
+          />
+        )}
+        <SidebarInlineFacet
+          label="Visibility"
+          values={[
+            { value: "test", label: "Show test recipes" },
+            { value: "ephemeral", label: "Show one-off routines" },
+          ]}
+          selected={[...(filters.showTestRoutines ? ["test"] : []), ...(filters.showEphemeral ? ["ephemeral"] : [])]}
+          onToggle={(v) => onChange(v === "test" ? { ...filters, showTestRoutines: !filters.showTestRoutines } : { ...filters, showEphemeral: !filters.showEphemeral })}
+          onClear={() => onChange({ ...filters, showTestRoutines: false, showEphemeral: false })}
+        />
+      </SidebarFacetBlock>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-1">
         <SidebarSection label="Views">
