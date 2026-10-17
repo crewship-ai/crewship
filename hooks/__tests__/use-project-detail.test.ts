@@ -73,7 +73,9 @@ describe("useProjectDetail", () => {
     expect(result.current.selectedProject?.name).toBe("Bravo")
   })
 
-  it("clears the selection when the project disappears from the list", () => {
+  // It used to clear the selection silently, which left a reader who followed
+  // a link to a deleted project on the plain list, wondering what happened.
+  it("says the project is not found when it disappears from the list", () => {
     const { result, rerender } = renderHook(
       ({ projects }: { projects: Project[] }) => useProjectDetail({ projects }),
       { initialProps: { projects: [project("a"), project("b")] } },
@@ -81,12 +83,13 @@ describe("useProjectDetail", () => {
 
     act(() => result.current.setSelectedProjectId("b"))
     expect(result.current.selectedProjectId).toBe("b")
+    expect(result.current.projectNotFound).toBe(false)
 
     // Project "b" deleted by another user — the refreshed list drops it.
     rerender({ projects: [project("a")] })
-    expect(result.current.selectedProjectId).toBeNull()
+    expect(result.current.selectedProjectId).toBe("b")
     expect(result.current.selectedProject).toBeNull()
-    expect(window.location.search).not.toContain("project=")
+    expect(result.current.projectNotFound).toBe(true)
   })
 
   it("handleProjectClose clears the selection", () => {
@@ -119,35 +122,40 @@ describe("useProjectDetail — arriving on a link", () => {
     expect(result.current.selectedProject?.id).toBe("b")
   })
 
-  it("drops an id no project has, once the list can say so", () => {
+  it("reports an id no project has as not found, once the list can say so", () => {
     arriveAt("/issues?project=ghost")
     const { result, rerender } = renderHook(
-      ({ projects }: { projects: Project[] }) => useProjectDetail({ projects }),
-      { initialProps: { projects: [] as Project[] } },
+      ({ projects, loaded }: { projects: Project[]; loaded: boolean }) => useProjectDetail({ projects, loaded }),
+      { initialProps: { projects: [] as Project[], loaded: false } },
     )
-    rerender({ projects: [project("a")] })
-    expect(result.current.selectedProjectId).toBeNull()
+    // Still loading: not a verdict yet.
+    expect(result.current.projectNotFound).toBe(false)
+    rerender({ projects: [project("a")], loaded: true })
+    expect(result.current.selectedProjectId).toBe("ghost")
+    expect(result.current.projectNotFound).toBe(true)
   })
 
-  it("corrects a dead id in place rather than pushing over it", () => {
-    // Pushed, the dead URL would sit behind the clean one: Back returns to
-    // ?project=ghost, this effect fires again, and the reader is thrown
-    // forward every time they try to leave the page.
-    //
-    // Asserted on the History call rather than on a Back, because both
-    // outcomes settle on "/issues" and only the number of entries between
-    // them differs — which jsdom/happy-dom will not let a test observe. Push
-    // versus replace IS the behaviour here, so it is what gets asserted.
+  it("a workspace with no projects at all can still say not found", () => {
+    arriveAt("/issues?project=ghost")
+    const { result } = renderHook(() => useProjectDetail({ projects: [], loaded: true }))
+    expect(result.current.projectNotFound).toBe(true)
+  })
+
+  it("leaves a dead link in place, and Back to issues replaces it rather than pushing over it", () => {
+    // Pushed, the dead URL would sit behind the clean one and Back would
+    // return to the not-found page. Asserted on the History call, because
+    // only the number of entries differs between the two.
     const push = vi.spyOn(window.history, "pushState")
     const replace = vi.spyOn(window.history, "replaceState")
-    arriveAt("/issues?project=ghost")
+    arriveAt("/issues?project=ghost&tab=files")
     push.mockClear()
     replace.mockClear()
 
-    renderHook(() => useProjectDetail({ projects: [project("a")] }))
+    const { result } = renderHook(() => useProjectDetail({ projects: [project("a")], loaded: true }))
+    expect(window.location.search).toBe("?project=ghost&tab=files")
+    act(() => result.current.handleProjectClose())
 
     expect(window.location.search).toBe("")
-    expect(replace).toHaveBeenCalledWith(null, "", "/issues")
     expect(push).not.toHaveBeenCalled()
     push.mockRestore()
     replace.mockRestore()
@@ -203,5 +211,43 @@ describe("useProjectDetail — a changed link on a mounted page", () => {
     arriveAt("/issues?project=b")
     rerender()
     expect(result.current.selectedProjectId).toBe("b")
+  })
+})
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+//
+// The project page's tab is in the URL (`?tab=`), so a link can open
+// Settings and a refresh keeps Files. Switching tabs is not a navigation.
+describe("useProjectDetail — tabs", () => {
+  it("reads ?tab= and falls back to Overview for an unknown one", () => {
+    arriveAt("/issues?project=a&tab=files")
+    const { result } = renderHook(() => useProjectDetail({ projects: [project("a")] }))
+    expect(result.current.projectTab).toBe("files")
+
+    arriveAt("/issues?project=a&tab=updates")
+    const second = renderHook(() => useProjectDetail({ projects: [project("a")] }))
+    expect(second.result.current.projectTab).toBe("overview")
+  })
+
+  it("writes the tab with replaceState and keeps ?project=", () => {
+    arriveAt("/issues?project=a")
+    const push = vi.spyOn(window.history, "pushState")
+    push.mockClear()
+    const { result } = renderHook(() => useProjectDetail({ projects: [project("a")] }))
+    act(() => result.current.setProjectTab("settings"))
+    expect(window.location.search).toBe("?project=a&tab=settings")
+    expect(result.current.projectTab).toBe("settings")
+    expect(push).not.toHaveBeenCalled()
+    // Overview is the default; it is not spelled out.
+    act(() => result.current.setProjectTab("overview"))
+    expect(window.location.search).toBe("?project=a")
+    push.mockRestore()
+  })
+
+  it("closing the project drops its tab", () => {
+    arriveAt("/issues?project=a&tab=files")
+    const { result } = renderHook(() => useProjectDetail({ projects: [project("a")] }))
+    act(() => result.current.handleProjectClose())
+    expect(window.location.search).toBe("")
   })
 })

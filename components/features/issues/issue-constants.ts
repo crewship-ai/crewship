@@ -8,6 +8,17 @@ export const ISSUE_STATUSES: MissionStatus[] = [
   "BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "DONE", "CANCELLED",
 ]
 
+/**
+ * The statuses a new issue can start in: POST /crews/{c}/issues takes
+ * BACKLOG or one step from it (issue_handler_create.go), and New issue only
+ * offers the ones that are work, not a way to file something away.
+ */
+export const CREATABLE_STATUSES: readonly MissionStatus[] = ["BACKLOG", "TODO", "IN_PROGRESS"]
+
+export function isCreatableStatus(s: string | null | undefined): s is MissionStatus {
+  return !!s && (CREATABLE_STATUSES as readonly string[]).includes(s)
+}
+
 export const ALL_PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
 
 export const RELATION_TYPE_LABELS: Record<RelationType, string> = {

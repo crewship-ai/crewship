@@ -306,6 +306,12 @@ describe("IssuesListView groups", () => {
     expect(onCreate).toHaveBeenCalledWith("TODO")
   })
 
+  it("a Done group has no +, since a new issue cannot start there", () => {
+    const rows = [{ ...issues[0], status: "DONE" as const }]
+    render(<IssuesListView issues={rows} onIssueClick={() => {}} onCreate={vi.fn()} />)
+    expect(screen.queryByRole("button", { name: "New issue in Done" })).toBeNull()
+  })
+
   it("a row opens the issue", () => {
     const onOpen = vi.fn()
     render(<IssuesListView issues={issues} onIssueClick={onOpen} />)

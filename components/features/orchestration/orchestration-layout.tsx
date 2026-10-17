@@ -11,7 +11,7 @@ import { buildReturnTo } from "@/lib/return-to"
 import { Button } from "@/components/ui/button"
 import { SubBar, SubBarIconButton, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
-import { OfflineBanner, PageEmpty, PageError, PageLoading, PageNoResults, StaleData } from "@/components/layout/page-state"
+import { OfflineBanner, PageEmpty, PageError, PageLoading, PageNoResults, PageNotFound, StaleData } from "@/components/layout/page-state"
 import {
   CreateSurface,
   CreateSurfaceBody,
@@ -34,6 +34,8 @@ import { useProjectDetail } from "@/hooks/use-project-detail"
 import { useIssueFilters, activeFilterCount, filtersFromSavedView, savedViewPayload, NO_FILTERS } from "@/hooks/use-issue-filters"
 import { useRealtimeStatusSafe } from "@/hooks/use-realtime"
 import { useSessionSafe } from "@/hooks/use-auth"
+import { useWorkspace } from "@/hooks/use-workspace"
+import { isAdminTier } from "@/lib/permissions/tiers"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { parseSavedViews, issueViews } from "@/lib/saved-views"
 import { IssuesListView } from "@/components/features/issues/issues-list-view"
@@ -53,7 +55,7 @@ import {
   type QuickView,
   type RowFields,
 } from "@/components/features/issues/issues-view-model"
-import { ProjectDetailSurface } from "@/components/features/issues/project-detail-surface"
+import { ProjectDetailSkeleton, ProjectDetailSurface } from "@/components/features/issues/project-detail-surface"
 import { CreateIssueModal } from "@/components/features/orchestration/create-issue-modal"
 import { CreateProjectModal } from "@/components/features/orchestration/create-project-modal"
 import { IssuesPanel, panelKeyOrder, selectionLabel, type IssuesPanelSelection } from "@/components/features/orchestration/issues-panel"
@@ -92,6 +94,8 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   const params = useSearchParams()
   const missionType = params.get("mission_type") ?? "issue"
   const me = useSessionSafe().data?.user.id ?? null
+  // DELETE /projects/{id} is ADMIN+ (roleManage); others never see the button.
+  const canDeleteProject = isAdminTier(useWorkspace().role)
 
   /* ------------------------------------------------------------ display */
   const [viewMode, setViewMode] = useUserPreference<"board" | "list">("orchestration.issues.viewMode", "list")
@@ -131,6 +135,8 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   /* ------------------------------------------------- workspace lookups */
   const [labels, setLabels] = useState<IssueLabel[]>([])
   const [projects, setProjects] = useState<Project[]>([])
+  /** Whether the project list has answered: a project link is only "not found" once it has. */
+  const [projectsLoad, setProjectsLoad] = useState<"loading" | "ready" | "error">("loading")
   const [savedViews, setSavedViews] = useState<SavedView[]>([])
   const { pipelines } = usePipelines(workspaceId)
 
@@ -143,8 +149,14 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   const fetchProjects = useCallback(async () => {
     try {
       const res = await apiFetch(`/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`)
-      if (res.ok) setProjects(await res.json())
-    } catch { /* the Projects section stays as it was */ }
+      if (res.ok) {
+        setProjects(await res.json())
+        setProjectsLoad("ready")
+      } else setProjectsLoad((l) => (l === "ready" ? l : "error"))
+    } catch {
+      // The Projects section stays as it was.
+      setProjectsLoad((l) => (l === "ready" ? l : "error"))
+    }
   }, [workspaceId])
   const fetchSavedViews = useCallback(async () => {
     try {
@@ -162,7 +174,8 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   /* ----------------------------------------------------------- selection */
   const issueDetail = useIssueDetail({ issues })
   const { selectedIdentifier, selectedIssue, handleIssueSelect, handleIssueClose } = issueDetail
-  const { selectedProjectId, setSelectedProjectId, selectedProject, handleProjectClose } = useProjectDetail({ projects })
+  const { selectedProjectId, setSelectedProjectId, selectedProject, projectNotFound, projectTab, setProjectTab, handleProjectClose } =
+    useProjectDetail({ projects, loaded: projectsLoad === "ready" })
 
   const selection: IssuesPanelSelection = selectedProjectId
     ? { kind: "project", id: selectedProjectId }
@@ -229,6 +242,13 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
 
   /* ------------------------------------------------------------ actions */
   const [showCreateIssue, setShowCreateIssue] = useState(false)
+  /** The status a group's / column's + opened New issue with; cleared on close. */
+  const [createStatus, setCreateStatus] = useState<string | null>(null)
+  const openCreate = useCallback((status?: string) => {
+    setCreateStatus(status ?? null)
+    setShowCreateIssue(true)
+  }, [])
+  const openCreatePlain = useCallback(() => openCreate(), [openCreate])
   const [showCreateProject, setShowCreateProject] = useState(false)
   const [saveViewOpen, setSaveViewOpen] = useState(false)
 
@@ -339,7 +359,9 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   /* ------------------------------------------------------------- render */
   const sectionTitle = selectedProject
     ? selectedProject.name
-    : missionType === "mission"
+    : projectNotFound
+      ? "Project not found"
+      : missionType === "mission"
       ? "Missions"
       : selectionLabel(selection, projects, savedViews)
   const nFilters = activeFilterCount(filters)
@@ -362,7 +384,7 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
 
   const actions = isMobile ? (
     <SubBarIconButton icon={Plus} aria-label="New issue" onClick={() => setShowCreateIssue(true)} />
-  ) : selectedProject ? (
+  ) : selectedProjectId ? (
     <>
       <SubBarPrimary icon={Plus} title="C" aria-keyshortcuts="c" onClick={() => setShowCreateIssue(true)}>New issue</SubBarPrimary>
       <SubBarIconButton icon={X} aria-label="Close project" onClick={handleProjectClose} />
@@ -398,9 +420,39 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
   if (selectedProject) {
     body = (
       <div className="h-full overflow-y-auto">
-        <ProjectDetailSurface workspaceId={workspaceId} project={selectedProject} issues={issues} onChanged={fetchProjects} />
+        <ProjectDetailSurface
+          workspaceId={workspaceId}
+          project={selectedProject}
+          issues={issues}
+          onChanged={fetchProjects}
+          tab={projectTab}
+          onTabChange={setProjectTab}
+          onOpenIssue={openIssue}
+          onNewIssue={openCreatePlain}
+          canDelete={canDeleteProject}
+          onDeleted={handleProjectClose}
+        />
       </div>
     )
+  } else if (selectedProjectId && projectNotFound) {
+    body = (
+      <PageNotFound
+        what="project"
+        description="It may have been deleted, or the link is wrong. Its issues, if it had any, are still in Issues."
+        back={{ label: "Back to issues", onClick: handleProjectClose }}
+      />
+    )
+  } else if (selectedProjectId && projectsLoad === "error") {
+    body = (
+      <PageError
+        title="The project could not load"
+        description="The project list did not answer. The link is kept."
+        onRetry={() => void fetchProjects()}
+        detail={<span className="font-mono">GET /api/v1/projects</span>}
+      />
+    )
+  } else if (selectedProjectId) {
+    body = <ProjectDetailSkeleton />
   } else if (issuesLoading && issues.length === 0) {
     body = <PageLoading variant="list" />
   } else if (issuesError && issues.length === 0) {
@@ -468,7 +520,7 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
                 issues={visible}
                 onIssueClick={openIssue}
                 selectedIssueId={selectedIssue?.id}
-                onCreateClick={() => setShowCreateIssue(true)}
+                onCreateClick={openCreate}
                 workspaceId={workspaceId}
                 onMoved={() => void fetchIssues()}
               />
@@ -481,7 +533,7 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
                 groupBy={groupBy}
                 fields={fields}
                 projects={projects}
-                onCreate={() => setShowCreateIssue(true)}
+                onCreate={openCreate}
                 onBulkApplied={() => void fetchIssues()}
               />
             )}
@@ -520,7 +572,7 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
 
       {!isMobile && (
         <IssuePeek
-          open={selectedIdentifier !== null && !selectedProject}
+          open={selectedIdentifier !== null}
           onOpenChange={(o) => {
             if (!o) handleIssueClose()
           }}
@@ -535,7 +587,10 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
 
       <CreateIssueModal
         open={showCreateIssue}
-        onOpenChange={setShowCreateIssue}
+        onOpenChange={(o) => {
+          setShowCreateIssue(o)
+          if (!o) setCreateStatus(null)
+        }}
         crews={crews}
         labels={labels}
         projects={projects}
@@ -546,6 +601,8 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
           void fetchProjects()
         }}
         onLabelsChanged={fetchLabels}
+        initialStatus={createStatus}
+        initialProjectId={selectedProject?.id ?? null}
       />
       <CreateProjectModal
         open={showCreateProject}

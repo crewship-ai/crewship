@@ -38,6 +38,8 @@ import * as React from "react"
 import Link from "next/link"
 import {
   ArrowUpRight,
+  Bot,
+  ChevronRight,
   CircleDot,
   Clock,
   Flag,
@@ -45,6 +47,7 @@ import {
   GitBranch,
   Hash,
   Link2,
+  ListChecks,
   MessageSquare,
   Milestone as MilestoneIcon,
   Tag,
@@ -55,7 +58,7 @@ import {
 
 import { cn } from "@/lib/utils"
 import { formatDate, relTime, timeAgo } from "@/lib/time"
-import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
+import { Appear, DetailCard, EntityChip, StatStrip } from "@/components/ui/detail"
 import { Badge } from "@/components/ui/badge"
 import { StatusPill } from "@/components/ui/status-pill"
 import { formatStatus } from "@/lib/format-status"
@@ -97,9 +100,10 @@ import {
   type CodeLinkEdit,
 } from "@/components/features/issues/issue-code-links-card"
 import { getCrewIconDef } from "@/lib/entities"
+import { RELATION_TYPE_LABELS } from "@/components/features/issues/issue-constants"
 import { entityHref } from "@/lib/entity-links"
 import { IssueRunsCard, issueRunLinks, issueRunStatus, type IssueRun } from "@/components/features/issues/issue-runs-card"
-import { issueFacts, issuePriorityTone, issueStatusTone } from "@/lib/issue-facts"
+import { issueFacts, issuePriorityTone } from "@/lib/issue-facts"
 import { automationsForIssue, type Automation } from "@/lib/automations"
 import { runProvenance } from "@/lib/run-provenance"
 import { AutomationList } from "@/components/features/automations/automation-list"
@@ -138,6 +142,9 @@ interface Props {
    * that wiring is a second thing to keep correct.
    */
   actions?: React.ReactNode
+  /** Who is working on it and what to do next (issue-session-card.tsx). */
+  session?: React.ReactNode
+  /** Work & control (issue-work-card.tsx), first in the aside. */
   workPanel?: React.ReactNode
   filesPanel?: React.ReactNode
   /**
@@ -195,7 +202,7 @@ interface Props {
   routineRuns?: PipelineRunRecord[]
 }
 
-type FootTab = "comments" | "history"
+type FootTab = "all" | "comments" | "history"
 
 export function IssueCardDetail({
   issue,
@@ -216,12 +223,13 @@ export function IssueCardDetail({
   codeLinks = [],
   codeLinkEdit,
   runActivity,
+  session,
   workPanel,
   filesPanel,
   automations = [],
   routineRuns = [],
 }: Props) {
-  const [footTab, setFootTab] = React.useState<FootTab>("comments")
+  const [footTab, setFootTab] = React.useState<FootTab>("all")
 
   const mentions = React.useMemo(() => mentionDirectory(agents ?? []), [agents])
 
@@ -245,658 +253,479 @@ export function IssueCardDetail({
     [issue, comments.length],
   )
 
+  const timeline = React.useMemo(() => {
+    // Comments and history in one stream, newest first, whichever order the
+    // server listed them in (the API answers history oldest-first since the
+    // seq-cursored resync).
+    type Item = { kind: "comment"; at: string; c: IssueComment } | { kind: "activity"; at: string; seq?: number; a: IssueActivity }
+    const items: Item[] = [
+      ...comments.map((c) => ({ kind: "comment" as const, at: String(c.created_at ?? ""), c })),
+      ...activities.map((a) => ({ kind: "activity" as const, at: String(a.created_at ?? ""), seq: (a as { seq?: number }).seq, a })),
+    ]
+    const byTime = (x: Item, y: Item) => y.at.localeCompare(x.at)
+    const history = items.filter((i) => i.kind === "activity").sort((x, y) => {
+      const sx = x.kind === "activity" ? x.seq : undefined
+      const sy = y.kind === "activity" ? y.seq : undefined
+      if (typeof sx === "number" && typeof sy === "number" && sx !== sy) return sy - sx
+      return byTime(x, y)
+    })
+    return { all: [...items].sort(byTime), history }
+  }, [comments, activities])
+
+  const editable = (action: string) => Boolean(edit && allowsEdit(edit, action))
+  const sub = subIssues
+  const subDone = sub.filter((s) => ["DONE", "COMPLETED"].includes(String(s.status))).length
+  const subOpen = sub.length - subDone
+
+  const comment = (c: IssueComment) => (
+    <li key={`c-${c.id}`} className="flex gap-3">
+      {c.author_type === "agent" ? (
+        <AgentAvatar seed={c.author_id} className="mt-0.5 size-7 shrink-0 rounded-full" alt="" />
+      ) : (
+        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-label font-semibold text-primary">
+          {(c.author_name ?? "?").charAt(0).toUpperCase()}
+        </span>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="text-body font-medium text-foreground">{c.author_name ?? c.author_type}</span>
+          <span className="text-label text-muted-foreground">{timeAgo(c.created_at)}</span>
+          {c.guest_visible && <span className="text-label text-muted-foreground">Shared with Guests</span>}
+        </div>
+        <div className="mt-1 text-body leading-relaxed text-foreground/85">
+          <MarkdownContent compact mentions={mentions}>
+            {c.body}
+          </MarkdownContent>
+        </div>
+      </div>
+    </li>
+  )
+
   return (
-    <div className="flex flex-col gap-4 p-4">
-      {/* Identity, as a card that scrolls with the page rather than a fixed
-          header band. The title is the first thing on the page — it used to
-          sit under a row of status chrome and a breadcrumb saying the same
-          words. */}
-      <Appear order={0}>
-        <DetailCard>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-3">
-                <div
-                  className="icon-tile flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
-                  style={{ "--ic": "var(--primary)" } as React.CSSProperties}
-                >
-                  <StatusIcon status={issue.status} className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  {edit && allowsEdit(edit, "edit_fields") ? (
-                    <TitleEditor
-                      title={issue.title}
-                      onDraftChange={edit.onTitleDraft}
-                      onSave={(next) => void edit.patch({ title: next })}
-                    />
-                  ) : (
-                    <h1 className="break-words text-lg font-semibold tracking-tight">{issue.title}</h1>
-                  )}
-                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                    <span className="font-mono">{issue.identifier ?? issue.id.slice(0, 8)}</span>
-                    {issue.crew_name && (
-                      <>
-                        <span aria-hidden>·</span>
-                        <CrewLink issue={issue} />
-                      </>
-                    )}
-                    {/* Owner and delegate render as two separate chips — an
-                        agent delegate is never shown in the owner's place
-                        (I5: delegating to an agent never changes the human
-                        owner). Legacy assignee_name is the fallback only
-                        when NEITHER typed field is present, for a row this
-                        client fetched before the A10 backfill reached it. */}
-                    {issue.owner && (
-                      <>
-                        <span aria-hidden>·</span>
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2">
-                          <UserAvatar name={issue.owner.name} email="" className="h-4 w-4" />
-                          <span className="font-medium">{issue.owner.name ?? "Owner"}</span>
-                        </span>
-                      </>
-                    )}
-                    {issue.delegate && (
-                      <>
-                        <span aria-hidden>·</span>
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2">
-                          <AgentAvatar
-                            seed={issue.delegate.id}
-                            className="h-4 w-4"
-                            alt=""
-                          />
-                          <span className="font-medium">{issue.delegate.name ?? "Delegate"}</span>
-                        </span>
-                      </>
-                    )}
-                    {!issue.owner && !issue.delegate && issue.assignee_name && (
-                      <>
-                        <span aria-hidden>·</span>
-                        <AssigneeLink issue={issue} />
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-              {actions && <div className="flex shrink-0 flex-col items-end gap-1.5">{actions}</div>}
-            </div>
-
-
-
-            <div className="flex flex-wrap items-center gap-1.5">
-              <StatusPill
-                size="md"
-                tone={issueStatusTone(issue.status)}
-                icon={<StatusIcon status={issue.status} className="h-3 w-3" />}
-                label={statusLabel[issue.status] ?? formatStatus(issue.status).label}
-              />
+    <div className="mx-auto grid w-full max-w-[1280px] grid-cols-1 gap-5 px-4 py-5 sm:px-6 xl:grid-cols-[minmax(0,1fr)_320px]" data-slot="issue-full">
+      {/* ── Main column: what the issue is and what is happening on it ── */}
+      <div className="flex min-w-0 flex-col gap-4">
+        <Appear order={0}>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-label text-muted-foreground">
+              <span className="font-mono">{issue.identifier ?? issue.id.slice(0, 8)}</span>
+              <StatusIcon status={issue.status} className="size-3.5" />
+              <span>{statusLabel[issue.status] ?? formatStatus(issue.status).label}</span>
               {issue.priority && issue.priority !== "none" && (
                 <StatusPill
-                  size="md"
                   tone={issuePriorityTone(issue.priority)}
-                  icon={<PriorityIcon priority={issue.priority} className="h-3 w-3" />}
+                  icon={<PriorityIcon priority={issue.priority} className="size-3" />}
                   label={priorityLabel[issue.priority]}
                 />
               )}
-              {/* The full name. The old KPI tile cut it to 14 characters, which
-                  turned "File Operations" into a project that does not exist. */}
               {project && (
-                <Pill tone="default">
-                  <FolderKanban className="h-3 w-3" />
-                  {project.name}
-                </Pill>
+                <>
+                  <span aria-hidden>·</span>
+                  <Link href={`/issues?project=${encodeURIComponent(project.id)}`} className="inline-flex items-center gap-1 hover:text-foreground hover:underline">
+                    <FolderKanban className="size-3" aria-hidden />
+                    {project.name}
+                  </Link>
+                </>
               )}
-              {issue.routine_name && (
-                <Pill tone="purple">
-                  <GitBranch className="h-3 w-3" />
-                  {issue.routine_name}
-                </Pill>
+              {issue.crew_name && (
+                <>
+                  <span aria-hidden>·</span>
+                  <CrewLink issue={issue} />
+                </>
               )}
               {(issue.sub_issues_count ?? 0) > 0 && (
                 <Badge variant="secondary">
                   {issue.sub_issues_count} sub-{issue.sub_issues_count === 1 ? "issue" : "issues"}
                 </Badge>
               )}
+              {actions && <span className="ml-auto flex items-center gap-1.5">{actions}</span>}
             </div>
-          </div>
-        </DetailCard>
-      </Appear>
-
-      <Appear order={1}>
-        {workPanel}
-        <details className="mt-3"><summary className="cursor-pointer text-xs text-muted-foreground">Dates and issue details</summary><StatStrip items={facts} /></details>
-      </Appear>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
-        <div className="flex flex-col gap-4 xl:col-span-2 2xl:col-span-3">
-          <Appear order={2}>
-            <DetailCard title="Description" subtitle={issue.description ? undefined : "empty"}>
-              {edit && allowsEdit(edit, "edit_fields") ? (
-                <DescriptionEditor
-                  key={issue.id}
-                  description={issue.description ?? ""}
-                  onChange={(md) => void edit.patch({ description: md })}
-                />
-              ) : issue.description ? (
-                <MarkdownContent>{issue.description}</MarkdownContent>
-              ) : (
-                <p className="text-[12px] text-muted-foreground">
-                  No description. The issue is whatever its title says.
-                </p>
-              )}
-            </DetailCard>
-          </Appear>
-
-          {/* Live agent work — exec, files, network, llm — while the issue is
-              running. Rendered by the host; nothing here when it is quiet. */}
-          {runActivity && <Appear order={5}>{runActivity}</Appear>}
-
-          {/* Every run on the issue — the first leg of the one timeline. It sat
-              in the rail as `runs[0]` alone; the rest were fetched and dropped. */}
-          <Appear order={6}>
-            <IssueRunsCard issue={issue} runs={runs} unavailable={unavailable.includes("runs")} />
-          </Appear>
-      <span id="issue-conversation" className="scroll-mt-16" />
-      {/* Comments and history behind one switch, at the foot, full width —
-          the same arrangement Triggers/Versions uses on the routine card.
-          Both used to be cards here AND tabs in a drawer underneath. */}
-      <Appear order={9}>
-        <DetailCard
-          title={footTab === "comments" ? "Comments" : "History"}
-          icon={MessageSquare}
-          subtitle={String(footTab === "comments" ? comments.length : activities.length)}
-          action={
-            <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
-              {(["comments", "history"] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setFootTab(t)}
-                  aria-pressed={footTab === t}
-                  className={cn(
-                    "rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition-colors",
-                    footTab === t
-                      ? "bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          }
-        >
-          {footTab === "comments" ? (
-            <div className="space-y-4">
-            {olderComments}
-            {comments.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground">
-                {unavailable.includes("comments") ? "Could not load the comments — try again above." : "Nobody has said anything about this issue yet."}
-              </p>
+            {editable("edit_fields") && edit ? (
+              <TitleEditor title={issue.title} onDraftChange={edit.onTitleDraft} onSave={(next) => void edit.patch({ title: next })} />
             ) : (
-              <ul className="space-y-4">
-                {comments.map((c) => (
-                  <li key={c.id} className="flex gap-3">
-                    {c.author_type === "agent" ? (
-                      <AgentAvatar
-                        seed={c.author_id}
-                        className="mt-0.5 h-7 w-7 shrink-0 rounded-full"
-                        alt=""
-                      />
-                    ) : (
-                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[11px] font-semibold text-primary">
-                        {(c.author_name ?? "?").charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-[13px] font-medium text-foreground/90">
-                          {c.author_name ?? c.author_type}
-                        </span>
-                        <span className="text-[11px] text-muted-foreground">
-                          {timeAgo(c.created_at)}
-                        </span>
-                        {c.guest_visible && <span className="text-[11px] text-muted-foreground">Shared with Guests</span>}
-                      </div>
-                      <div className="mt-1 text-[13px] leading-relaxed text-foreground/85">
-                        <MarkdownContent compact mentions={mentions}>
-                          {c.body}
-                        </MarkdownContent>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <h1 className="break-words text-title font-semibold tracking-tight">{issue.title}</h1>
             )}
+          </div>
+        </Appear>
 
-            {/* The composer is the whole point of the next step: an agent
-                becomes a participant when it is @mentioned here. */}
-            {onSubmitComment && (
-              <div className="border-t border-border/60 pt-4">
-                <CommentComposer
-                  agents={agents ?? []}
-                  onSubmit={onSubmitComment}
-                  draftValue={commentDraft}
-                  onDraftChange={onCommentDraft}
-                  allowGuestSharing={Boolean(project)}
-                  guestProject={project}
-                  authorInitial={viewerInitial ?? "U"}
-                />
-              </div>
+        {session && <Appear order={1}>{session}</Appear>}
+
+        <Appear order={2}>
+          <DetailCard title="Brief" subtitle={issue.description ? "what the agent works from" : "empty"}>
+            {editable("edit_fields") && edit ? (
+              <DescriptionEditor key={issue.id} description={issue.description ?? ""} onChange={(md) => void edit.patch({ description: md })} />
+            ) : issue.description ? (
+              <MarkdownContent>{issue.description}</MarkdownContent>
+            ) : (
+              <p className="text-label text-muted-foreground">No description. The issue is whatever its title says.</p>
             )}
-            </div>
-          ) : activities.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
-              {unavailable.includes("history") ? "Could not load the history — try again above." : "No recorded changes since this issue was opened."}
-            </p>
-          ) : (
-            <ul className="space-y-2 text-[12px]">
-              {[...activities]
-                .sort((x, y) => {
-                  // Newest first, whichever order the server listed them in
-                  // (the API answers oldest-first since seq-cursored resync).
-                  const sx = (x as { seq?: number }).seq
-                  const sy = (y as { seq?: number }).seq
-                  if (typeof sx === "number" && typeof sy === "number" && sx !== sy) return sy - sx
-                  return String(y.created_at ?? "").localeCompare(String(x.created_at ?? ""))
-                })
-                .map((a) => (
-                <ActivityRow key={a.id} activity={a} mentions={mentions} />
-              ))}
-            </ul>
-          )}
-        </DetailCard>
-      </Appear>
+          </DetailCard>
+        </Appear>
 
-          {filesPanel}
-          {/* Links covers both directions an issue points: the relations a
-              human drew, and the sub-issues that hang off it. They were two
-              panels in two different screens, one of which could only read. */}
-          <Appear order={3}>
-            <DetailCard
-              title="Links"
-              icon={Link2}
-              subtitle={
-                relations.length + subIssues.length > 0
-                  ? String(relations.length + subIssues.length)
-                  : undefined
-              }
-              action={edit && allowsEdit(edit, "link") ? <AddRelationPicker edit={edit} /> : undefined}
-            >
-              {relations.length === 0 && subIssues.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground">
-                  Nothing blocks this and nothing hangs off it.
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {relations.map((rel) => (
-                    <li key={rel.id} className="group flex items-center gap-2.5 text-[12px]">
-                      <span className="w-[86px] shrink-0 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground-soft">
-                        {rel.relation_type.replace(/_/g, " ")}
-                      </span>
-                      <Link
-                        href={`/issues/${encodeURIComponent(rel.target_identifier ?? rel.target_id)}`}
-                        className="inline-flex min-w-0 flex-1 items-center gap-1.5 hover:underline"
-                      >
-                        <span className="font-mono text-[10px] text-muted-foreground">
-                          {rel.target_identifier ?? rel.target_id.slice(0, 8)}
-                        </span>
-                        <span className="truncate text-foreground/85">
-                          {rel.target_title ?? "Untitled"}
-                        </span>
-                      </Link>
-                      {edit && allowsEdit(edit, "link") && (
-                        <RemoveRelationButton
-                          identifier={rel.target_identifier ?? rel.target_id.slice(0, 8)}
-                          onRemove={() => void edit.removeRelation(rel.id)}
-                        />
-                      )}
-                    </li>
-                  ))}
-                  {subIssues.map((sub) => (
-                    <li key={sub.id} className="flex items-center gap-2.5 text-[12px]">
-                      <span className="w-[86px] shrink-0 font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground-soft">
-                        sub-issue
-                      </span>
-                      <Link
-                        href={`/issues/${encodeURIComponent(sub.identifier ?? sub.id)}`}
-                        className="inline-flex min-w-0 flex-1 items-center gap-1.5 hover:underline"
-                      >
-                        <StatusIcon status={sub.status} className="h-3 w-3 shrink-0" />
-                        <span className="font-mono text-[10px] text-muted-foreground">
-                          {sub.identifier ?? sub.id.slice(0, 8)}
-                        </span>
-                        <span className="truncate text-foreground/85">{sub.title}</span>
+        <Appear order={3}>
+          <DetailCard title="Sub-issues" icon={ListChecks} subtitle={sub.length > 0 ? `${subDone}/${sub.length}` : undefined}>
+            {sub.length === 0 ? (
+              <p className="text-label text-muted-foreground">Break bigger work into sub-issues. A parent can’t move to Done while a sub-issue is open.</p>
+            ) : (
+              <>
+                <ul className="flex flex-col">
+                  {sub.map((s) => (
+                    <li key={s.id}>
+                      <Link href={`/issues/${encodeURIComponent(s.identifier ?? s.id)}`} className="row-hover flex items-center gap-2 rounded-md px-1 py-1.5 text-body">
+                        <StatusIcon status={s.status} className="size-3.5 shrink-0" />
+                        <span className="shrink-0 font-mono text-label text-muted-foreground">{s.identifier ?? s.id.slice(0, 8)}</span>
+                        <span className="truncate text-foreground/85">{s.title}</span>
                       </Link>
                     </li>
                   ))}
                 </ul>
-              )}
-            </DetailCard>
-          </Appear>
-
-          {/* What code resolves this. Below Links because a pull request is
-              the answer to the issue, not another issue — and in the main
-              column rather than the rail because a row is a state, a title,
-              a ref, an author and a branch pair, and the 280px rail turns
-              every one of those into an ellipsis. */}
-          <Appear order={4}>
-            <IssueCodeLinksCard
-              links={codeLinks}
-              // Gated on `edit` as well: a read-only card must not carry a
-              // live delete just because the host handed one over.
-              edit={edit && allowsEdit(edit, "link") ? codeLinkEdit : undefined}
-            />
-          </Appear>
-
-
-        </div>
-
-        {/* The rail follows the reader. A description longer than the rail
-            used to end the rail halfway down the page and leave a black
-            column beside it for the rest of the scroll; the reverse case —
-            a rail longer than the body — was already handled by moving the
-            short cards to the full-width foot row.
-
-            Three parts, all of them load-bearing:
-              xl:      below it the columns stack, and a sticky column in a
-                       single-column layout fights the page scroll.
-              self-start  grid children stretch by default, and a stretched
-                       item is as tall as the row: it can never stick.
-              max-h + overflow  a rail taller than the viewport would pin its
-                       head and park its tail permanently below the fold.
-                       The 9rem allowance covers the tallest chrome above a
-                       scroll container that renders this card (top bar +
-                       two sub-bar rows + the detail's back-bar); overshoot
-                       costs a little unused height, undershoot costs
-                       reachability. */}
-        <div
-          data-testid="issue-detail-rail"
-          className={cn(
-            "flex flex-col gap-4",
-            "xl:sticky xl:top-4 xl:self-start xl:max-h-[calc(100dvh-9rem)] xl:overflow-y-auto",
-          )}
-        >
-          {/* The one tinted card on the page. An issue that has run is
-              first of all a thing that either worked or did not, and the
-              wash says which before a word of it is read. */}
-          <Appear order={4}>
-            <details><summary className="cursor-pointer text-xs text-muted-foreground">Execution links</summary><RelatedCard issue={issue} runs={runs} /></details>
-          </Appear>
-
-          {/* One header, not two. The old rail wrapped a panel that drew its
-              own PROPERTIES header inside a card titled PROPERTIES. */}
-          <Appear order={5}>
-            {/* Read-only, this card carries only what the figures band above
-                does not — repeating Due and Estimate there would be the
-                duplication the redesign removed.
-                Editable, they come back: the band is where you READ a due
-                date, the row is the only place you can CHANGE one, and a
-                figure you cannot act on is not a substitute for a control. */}
-            <DetailCard title="Properties">
-              <dl className="space-y-0.5">
-                {edit ? (
-                  <>
-                    <EditRow icon={CircleDot} label="Status">
-                      {allowsEdit(edit, "change_status") ? <StatusPicker issue={issue} edit={edit} /> : <span className="text-xs">{statusLabel[issue.status] ?? issue.status}</span>}
-                    </EditRow>
-                    <EditRow icon={Flag} label="Priority">
-                      {allowsEdit(edit, "edit_fields") ? <PriorityPicker issue={issue} edit={edit} /> : <span className="text-xs">{priorityLabel[issue.priority ?? "none"]}</span>}
-                    </EditRow>
-                    <EditRow icon={UserCircle2} label="Assignee">
-                      {allowsEdit(edit, "assign") ? <AssigneePicker issue={issue} edit={edit} /> : <span className="text-xs">{issue.assignee_name ?? "Unassigned"}</span>}
-                    </EditRow>
-                    <EditRow icon={Clock} label="Due">
-                      {allowsEdit(edit, "edit_fields") ? <DueDatePicker issue={issue} edit={edit} /> : <span className="text-xs">{issue.due_date ?? "Not set"}</span>}
-                    </EditRow>
-                    <EditRow icon={Hash} label="Estimate">
-                      {allowsEdit(edit, "edit_fields") ? <EstimatePicker issue={issue} edit={edit} /> : <span className="text-xs">{issue.estimate ?? "Not set"}</span>}
-                    </EditRow>
-                    <EditRow icon={MilestoneIcon} label="Milestone">
-                      {allowsEdit(edit, "edit_fields") ? <MilestonePicker issue={issue} edit={edit} /> : <span className="text-xs">{issue.milestone_id ?? "Not set"}</span>}
-                    </EditRow>
-                    <EditRow icon={Users} label="Crew">
-                      {issue.crew_name ? <CrewLink issue={issue} /> : <Muted>Unassigned</Muted>}
-                    </EditRow>
-                  </>
-                ) : (
-                  <>
-                    <Row icon={CircleDot} label="Status">
-                      <span className="inline-flex items-center gap-1.5">
-                        <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-                        {statusLabel[issue.status] ?? issue.status}
-                      </span>
-                    </Row>
-                    <Row icon={Flag} label="Priority">
-                      <span className="inline-flex items-center gap-1.5">
-                        <PriorityIcon priority={issue.priority ?? "none"} className="h-3.5 w-3.5" />
-                        {priorityLabel[issue.priority ?? "none"]}
-                      </span>
-                    </Row>
-                    {issue.owner || issue.delegate ? (
-                      <>
-                        <Row icon={UserCircle2} label="Owner">
-                          {issue.owner ? (
-                            <span className="inline-flex items-center gap-1.5">
-                              <UserAvatar name={issue.owner.name} email="" className="h-4 w-4" />
-                              {issue.owner.name ?? "Owner"}
-                            </span>
-                          ) : (
-                            <Muted>No human owner</Muted>
-                          )}
-                        </Row>
-                        <Row icon={UserCircle2} label="Delegate">
-                          {issue.delegate ? (
-                            <span className="inline-flex items-center gap-1.5">
-                              <AgentAvatar seed={issue.delegate.id} className="h-4 w-4" alt="" />
-                              {issue.delegate.name ?? "Delegate"}
-                            </span>
-                          ) : (
-                            <Muted>Not delegated</Muted>
-                          )}
-                        </Row>
-                      </>
-                    ) : (
-                      // Fallback for a row this client fetched before the A10
-                      // backfill reached it — neither typed field is present.
-                      <Row icon={UserCircle2} label="Assignee">
-                        {issue.assignee_name ? <AssigneeLink issue={issue} /> : <Muted>Unassigned</Muted>}
-                      </Row>
-                    )}
-                    <Row icon={Users} label="Crew">
-                      {issue.crew_name ? <CrewLink issue={issue} /> : <Muted>Unassigned</Muted>}
-                    </Row>
-                  </>
+                {subOpen > 0 && (
+                  <p className="mt-2 text-label text-muted-foreground">
+                    The parent can’t move to Done or In review while {subOpen} sub-issue{subOpen === 1 ? " is" : "s are"} open.
+                  </p>
                 )}
-              </dl>
-            </DetailCard>
-          </Appear>
+              </>
+            )}
+          </DetailCard>
+        </Appear>
 
-          <details open={Boolean(issue.routine_id || project || labels.length || myAutomations.length)} className="space-y-3">
-            <summary className="cursor-pointer text-xs text-muted-foreground">Project, routine and labels</summary>
-          <Appear order={6}>
-            <DetailCard
-              title="Routine"
-              icon={GitBranch}
-              tone="purple"
-              action={
-                edit?.runRoutine && issue.routine_slug && issue.work_mode !== "human" ? (
-                  <RunRoutineButton onRun={() => void edit.runRoutine!()} busy={edit.busy} />
-                ) : undefined
-              }
-            >
-              <div className="space-y-2">
-                {edit && allowsEdit(edit, "change_workflow") ? (
-                  <RoutinePicker issue={issue} edit={edit}>
-                    <GitBranch className="h-3.5 w-3.5 shrink-0 text-purple" />
-                    <span className="truncate text-[12px]">
-                      {issue.routine_name ?? <Muted>No routine bound</Muted>}
+        <Appear order={4}>
+          <DetailCard
+            title="Relations"
+            icon={Link2}
+            subtitle={relations.length > 0 ? String(relations.length) : undefined}
+            action={editable("link") && edit ? <AddRelationPicker edit={edit} /> : undefined}
+          >
+            {relations.length === 0 ? (
+              <p className="text-label text-muted-foreground">Nothing blocks this and nothing hangs off it.</p>
+            ) : (
+              <ul className="space-y-2">
+                {relations.map((rel) => (
+                  <li key={rel.id} className="group flex items-center gap-2.5 text-body">
+                    <span className="w-[6.5rem] shrink-0 text-label text-muted-foreground">
+                      {RELATION_TYPE_LABELS[rel.relation_type as keyof typeof RELATION_TYPE_LABELS] ?? rel.relation_type.replace(/_/g, " ")}
                     </span>
-                  </RoutinePicker>
-                ) : issue.routine_name ? (
-                  <EntityChip
-                    icon={GitBranch}
-                    label={issue.routine_name}
-                    note={issue.routine_slug ?? undefined}
-                    tone="purple"
-                    href={issue.routine_slug ? entityHref({ kind: "routine", slug: issue.routine_slug }) : undefined}
-                  />
-                ) : null}
-                {issue.work_mode === "human" ? <p className="text-xs text-muted-foreground">Agent execution is paused while a person handles this issue.</p> : issue.routine_name ? (
-                  <p className="text-[11px] text-muted-foreground">
-                    Starting this issue runs that routine.
+                    <Link href={`/issues/${encodeURIComponent(rel.target_identifier ?? rel.target_id)}`} className="inline-flex min-w-0 flex-1 items-center gap-1.5 hover:underline">
+                      <span className="font-mono text-label text-muted-foreground">{rel.target_identifier ?? rel.target_id.slice(0, 8)}</span>
+                      <span className="truncate text-foreground/85">{rel.target_title ?? "Untitled"}</span>
+                    </Link>
+                    {editable("link") && edit && (
+                      <RemoveRelationButton identifier={rel.target_identifier ?? rel.target_id.slice(0, 8)} onRemove={() => void edit.removeRelation(rel.id)} />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </DetailCard>
+        </Appear>
+
+        {/* What code resolves this: a pull request is the answer to the
+            issue, not another issue. */}
+        <Appear order={5}>
+          <IssueCodeLinksCard links={codeLinks} edit={editable("link") ? codeLinkEdit : undefined} />
+        </Appear>
+
+        {/* Live agent work while the issue is running; nothing when quiet. */}
+        {runActivity && <Appear order={6}>{runActivity}</Appear>}
+
+        <Appear order={7}>
+          <IssueRunsCard issue={issue} runs={runs} unavailable={unavailable.includes("runs")} />
+        </Appear>
+
+        <span id="issue-conversation" className="scroll-mt-16" />
+        <Appear order={8}>
+          <DetailCard
+            title="Timeline"
+            icon={MessageSquare}
+            subtitle={String(footTab === "comments" ? comments.length : footTab === "history" ? activities.length : comments.length + activities.length)}
+            action={
+              <div role="radiogroup" aria-label="Show" className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
+                {(
+                  [
+                    ["all", "All"],
+                    ["comments", "Comments"],
+                    ["history", "Activity"],
+                  ] as const
+                ).map(([t, label]) => (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    onClick={() => setFootTab(t)}
+                    aria-checked={footTab === t}
+                    className={cn(
+                      "kit-tap rounded-sm px-2 py-0.5 text-label font-medium transition-colors",
+                      footTab === t ? "bg-primary/15 text-primary-hover" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            }
+          >
+            <div className="space-y-4">
+              {footTab !== "history" && olderComments}
+              {footTab === "comments" ? (
+                comments.length === 0 ? (
+                  <p className="text-label text-muted-foreground">
+                    {unavailable.includes("comments") ? "Could not load the comments — try again above." : "Nobody has said anything about this issue yet."}
                   </p>
                 ) : (
-                  <p className="text-[12px] text-muted-foreground">
-                    No routine bound. Starting this issue hands it to{" "}
-                    {issue.delegate?.name ?? issue.assignee_name ?? "whoever is delegated"} directly.
+                  <ul className="space-y-4">{comments.map(comment)}</ul>
+                )
+              ) : footTab === "history" ? (
+                timeline.history.length === 0 ? (
+                  <p className="text-label text-muted-foreground">
+                    {unavailable.includes("history") ? "Could not load the history — try again above." : "No recorded changes since this issue was opened."}
                   </p>
-                )}
-                {/* …and who else starts it. "Starting this issue runs that
-                    routine" is true and incomplete: the same routine also runs
-                    on a clock and on rules, and an operator wondering why it
-                    ran at 03:00 has nowhere else on this page to look. */}
-                <RunSourceBreakdown sources={runSources} />
-              </div>
-            </DetailCard>
-          </Appear>
+                ) : (
+                  <ul className="space-y-2 text-label">
+                    {timeline.history.map((i) => (i.kind === "activity" ? <ActivityRow key={`a-${i.a.id}`} activity={i.a} mentions={mentions} /> : null))}
+                  </ul>
+                )
+              ) : timeline.all.length === 0 ? (
+                <p className="text-label text-muted-foreground">
+                  {unavailable.includes("comments") || unavailable.includes("history") ? "Could not load the timeline — try again above." : "Nothing yet."}
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {timeline.all.map((i) => (i.kind === "comment" ? comment(i.c) : <ActivityRow key={`a-${i.a.id}`} activity={i.a} mentions={mentions} />))}
+                </ul>
+              )}
 
-          {/* What is watching this issue.
-
-              Its own card rather than a line in Routine, because these rules
-              do not have to target the bound routine — an issue's status
-              change can start something else entirely, and filing that under
-              "Routine" would say the opposite. Absent when nothing is in
-              scope: most issues have no rule watching them and must not carry
-              a card saying so. */}
-          {myAutomations.length > 0 && (
-            <Appear order={7}>
-              <DetailCard
-                title="Automations"
-                icon={Zap}
-                subtitle={String(myAutomations.length)}
-              >
-                <div data-testid="issue-automations" className="space-y-2.5">
-                  <AutomationList
-                    automations={myAutomations}
-                    note={
-                      // Deliberately hedged. The matcher's agent_ids,
-                      // severities and payload_equals narrow further and none
-                      // of them can be decided before the event happens, so
-                      // "will fire" would be a promise this page cannot keep.
-                      <p className="text-[11px] text-muted-foreground">
-                        These could fire on a change to this issue. A rule may
-                        narrow further on the agent, severity or payload of the
-                        event itself.
-                      </p>
-                    }
+              {/* The composer is how an agent becomes a participant: it is
+                  @mentioned here. */}
+              {onSubmitComment && footTab !== "history" && (
+                <div className="border-t border-border pt-4">
+                  <CommentComposer
+                    agents={agents ?? []}
+                    onSubmit={onSubmitComment}
+                    draftValue={commentDraft}
+                    onDraftChange={onCommentDraft}
+                    allowGuestSharing={Boolean(project)}
+                    guestProject={project}
+                    authorInitial={viewerInitial ?? "U"}
                   />
                 </div>
-              </DetailCard>
-            </Appear>
-          )}
+              )}
+            </div>
+          </DetailCard>
+        </Appear>
+      </div>
 
-          <Appear order={8}>
-            <DetailCard title="Project" icon={FolderKanban}>
-              <div className="space-y-2.5">
-                {edit && allowsEdit(edit, "edit_fields") ? (
+      {/* ── Aside: who holds it and its properties ──
+          It follows the reader on wide screens. Three parts, all load-bearing:
+          xl: (below, the columns stack and a sticky column fights the scroll),
+          self-start (a stretched grid item can never stick), and max-h +
+          overflow (a taller rail would park its tail below the fold). */}
+      <aside
+        data-testid="issue-detail-rail"
+        aria-label="Issue details"
+        className={cn("flex min-w-0 flex-col gap-4", "xl:sticky xl:top-4 xl:self-start xl:max-h-[calc(100dvh-9rem)] xl:overflow-y-auto")}
+      >
+        {workPanel && <Appear order={1}>{workPanel}</Appear>}
+
+        <Appear order={2}>
+          <DetailCard title="Properties">
+            <dl className="space-y-0.5">
+              <EditRow icon={CircleDot} label="Status">
+                {editable("change_status") && edit ? (
+                  <StatusPicker issue={issue} edit={edit} />
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-body">
+                    <StatusIcon status={issue.status} className="size-3.5" />
+                    {statusLabel[issue.status] ?? issue.status}
+                  </span>
+                )}
+              </EditRow>
+              <EditRow icon={Flag} label="Priority">
+                {editable("edit_fields") && edit ? (
+                  <PriorityPicker issue={issue} edit={edit} />
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-body">
+                    <PriorityIcon priority={issue.priority ?? "none"} className="size-3.5" />
+                    {priorityLabel[issue.priority ?? "none"]}
+                  </span>
+                )}
+              </EditRow>
+              {issue.owner || issue.delegate || !issue.assignee_name || edit ? (
+                <>
+                  <EditRow icon={UserCircle2} label="Owner" hint="accountable person">
+                    {issue.owner ? (
+                      <span className="inline-flex items-center gap-1.5 text-body">
+                        <UserAvatar name={issue.owner.name} email="" className="size-4" />
+                        {issue.owner.name ?? "Owner"}
+                      </span>
+                    ) : (
+                      <Muted>No human owner</Muted>
+                    )}
+                  </EditRow>
+                  <EditRow icon={Bot} label="Delegate" hint={`agent doing the work${issue.crew_name ? ` · ${issue.crew_name} crew` : ""}`}>
+                    {editable("assign") && edit ? (
+                      <AssigneePicker issue={issue} edit={edit} />
+                    ) : issue.delegate ? (
+                      <span className="inline-flex items-center gap-1.5 text-body">
+                        <AgentAvatar seed={issue.delegate.id} className="size-4" alt="" />
+                        {issue.delegate.name ?? "Delegate"}
+                      </span>
+                    ) : (
+                      <Muted>Not delegated</Muted>
+                    )}
+                  </EditRow>
+                </>
+              ) : (
+                // A row this client fetched before the owner/delegate
+                // backfill reached it: neither typed field is present.
+                <EditRow icon={UserCircle2} label="Assignee">
+                  <AssigneeLink issue={issue} />
+                </EditRow>
+              )}
+              <EditRow icon={FolderKanban} label="Project">
+                {editable("edit_fields") && edit ? (
                   <ProjectPicker issue={issue} edit={edit}>
-                    <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
-                    <span className="truncate text-[12px]">
-                      {project?.name ?? <Muted>Not filed under a project</Muted>}
-                    </span>
+                    <FolderKanban className="size-3.5 shrink-0 text-muted-foreground-soft" />
+                    <span className="truncate text-body">{project?.name ?? <Muted>Add to project</Muted>}</span>
                   </ProjectPicker>
                 ) : project ? (
-                  <EntityChip
-                    icon={getCrewIconDef(project.icon || "folder").icon}
-                    label={project.name}
-                    href={`/issues?project=${encodeURIComponent(project.id)}`}
-                  />
+                  <EntityChip icon={getCrewIconDef(project.icon || "folder").icon} label={project.name} href={`/issues?project=${encodeURIComponent(project.id)}`} />
                 ) : (
-                  <p className="text-[12px] text-muted-foreground">Not filed under a project.</p>
+                  <Muted>Not filed under a project</Muted>
                 )}
-                {project && (
-                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-foreground/[0.06]">
-                      <div
-                        className="h-full rounded-full bg-primary/60"
-                        style={{ width: `${Math.min(project.progress, 100)}%` }}
-                      />
-                    </div>
-                    <span className="tabular-nums">
-                      {project.done_count}/{project.issue_count}
-                    </span>
-                    {edit && allowsEdit(edit, "edit_fields") && (
-                      <Link
-                        href={`/issues?project=${encodeURIComponent(project.id)}`}
-                        className="shrink-0 text-primary hover:underline"
-                      >
-                        open
-                      </Link>
-                    )}
-                  </div>
-                )}
-              </div>
-            </DetailCard>
-          </Appear>
-
-          <Appear order={9}>
-            <DetailCard
-              title="Labels"
-              icon={Tag}
-              subtitle={labels.length > 0 ? String(labels.length) : undefined}
-              action={edit && allowsEdit(edit, "edit_fields") ? <LabelsPicker issue={issue} edit={edit} /> : undefined}
-            >
-              {labels.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
+              </EditRow>
+              {(edit || issue.milestone_id) && (
+                <EditRow icon={MilestoneIcon} label="Milestone">
+                  {editable("edit_fields") && edit ? <MilestonePicker issue={issue} edit={edit} /> : <span className="text-body">{issue.milestone_id ?? "Not set"}</span>}
+                </EditRow>
+              )}
+              <EditRow icon={Tag} label="Labels">
+                <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                   {labels.map((l) => (
                     <LabelBadge key={l.id} label={l} />
                   ))}
-                </div>
-              ) : (
-                <p className="text-[12px] text-muted-foreground">No labels.</p>
+                  {labels.length === 0 && !editable("edit_fields") && <Muted>No labels</Muted>}
+                  {editable("edit_fields") && edit && <LabelsPicker issue={issue} edit={edit} />}
+                </span>
+              </EditRow>
+              {edit && (
+                <EditRow icon={Clock} label="Due">
+                  {editable("edit_fields") && edit ? <DueDatePicker issue={issue} edit={edit} /> : <span className="font-mono text-body">{issue.due_date ?? "Not set"}</span>}
+                </EditRow>
               )}
-            </DetailCard>
-          </Appear>
-          </details>
+              {edit && (
+                <EditRow icon={Hash} label="Estimate">
+                  {editable("edit_fields") && edit ? <EstimatePicker issue={issue} edit={edit} /> : <span className="font-mono text-body">{issue.estimate ?? "Not set"}</span>}
+                </EditRow>
+              )}
+              <EditRow icon={Users} label="Crew">
+                {issue.crew_name ? <CrewLink issue={issue} /> : <Muted>Unassigned</Muted>}
+              </EditRow>
+            </dl>
+          </DetailCard>
+        </Appear>
 
-        </div>
-      </div>
+        {filesPanel}
 
-      {/* Metadata spans the width rather than sitting at the bottom of the
-          rail: a rail taller than the main column leaves dead space beside it
-          that a two-column grid has nothing to put in. */}
-      <Appear order={10}>
-        <details><summary className="cursor-pointer text-xs text-muted-foreground">Technical details</summary><DetailCard title="Metadata">
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] sm:grid-cols-3 xl:grid-cols-6">
-            <Fact label="created" value={formatDate(issue.created_at)} />
-            <Fact label="updated" value={relTime(issue.updated_at)} />
-            {/* Who opened this, and whether it was a person. An agent filing
-                its own issues is the thing a reader most wants flagged, so
-                the badge stays even though the rest is a plain fact grid. */}
-            {issue.created_by && (
-              <div className="min-w-0" data-testid="issue-created-by">
-                <dt className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground-soft">
-                  author
-                </dt>
-                <dd className="truncate text-foreground/85">
-                  Created by {issue.created_by.name || issue.created_by.id}
-                  {issue.created_by.type === "agent" && (
-                    <span
-                      data-testid="issue-creator-agent-badge"
-                      className="ml-1.5 inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-primary"
-                    >
-                      agent
-                    </span>
+        <Appear order={3}>
+          <RelatedCard issue={issue} runs={runs} />
+        </Appear>
+
+        {/* What the rail does not need every day: the routine's detail, the
+            rules watching this issue, and the raw facts. */}
+        <Appear order={4}>
+          <details className="group/tech rounded-card border border-border bg-card" data-slot="issue-technical">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-label font-semibold text-muted-foreground">
+              <ChevronRight className="size-3.5 transition-transform group-open/tech:rotate-90" aria-hidden />
+              Technical details
+            </summary>
+            <div className="flex flex-col gap-4 border-t border-border p-3">
+              <DetailCard
+                title="Routine"
+                icon={GitBranch}
+                tone="purple"
+                action={
+                  edit?.runRoutine && issue.routine_slug && issue.work_mode !== "human" ? (
+                    <RunRoutineButton onRun={() => void edit.runRoutine!()} busy={edit.busy} />
+                  ) : undefined
+                }
+              >
+                <div className="space-y-2">
+                  {editable("change_workflow") && edit && (
+                    <RoutinePicker issue={issue} edit={edit}>
+                      <GitBranch className="size-3.5 shrink-0 text-purple" />
+                      <span className="truncate text-body">{issue.routine_name ?? <Muted>No routine bound</Muted>}</span>
+                    </RoutinePicker>
                   )}
-                </dd>
-              </div>
-            )}
-            <Fact label="via" value={issue.authored_via ?? "ui"} />
-            <Fact label="crew" value={issue.crew_slug ?? issue.crew_name ?? "—"} />
-            <Fact label="id" value={issue.id} mono />
-          </dl>
-        </DetailCard></details>
-      </Appear>
+                  {issue.routine_name && !editable("change_workflow") && (
+                    <EntityChip
+                      icon={GitBranch}
+                      label={issue.routine_name}
+                      note={issue.routine_slug ?? undefined}
+                      tone="purple"
+                      href={issue.routine_slug ? entityHref({ kind: "routine", slug: issue.routine_slug }) : undefined}
+                    />
+                  )}
+                  {issue.work_mode === "human" ? (
+                    <p className="text-label text-muted-foreground">Agent execution is paused while a person handles this issue.</p>
+                  ) : issue.routine_name ? (
+                    <p className="text-label text-muted-foreground">Starting this issue runs that routine.</p>
+                  ) : (
+                    <p className="text-label text-muted-foreground">
+                      No routine bound. Starting this issue hands it to {issue.delegate?.name ?? issue.assignee_name ?? "whoever is delegated"} directly.
+                    </p>
+                  )}
+                  <RunSourceBreakdown sources={runSources} />
+                </div>
+              </DetailCard>
+
+              {myAutomations.length > 0 && (
+                <DetailCard title="Automations" icon={Zap} subtitle={String(myAutomations.length)}>
+                  <div data-testid="issue-automations" className="space-y-2.5">
+                    <AutomationList
+                      automations={myAutomations}
+                      note={
+                        // Hedged: the matcher narrows further on things that
+                        // are only known when the event happens.
+                        <p className="text-label text-muted-foreground">
+                          These could fire on a change to this issue. A rule may narrow further on the agent, severity or payload of the event itself.
+                        </p>
+                      }
+                    />
+                  </div>
+                </DetailCard>
+              )}
+
+              <StatStrip items={facts} />
+
+              <DetailCard title="Metadata">
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-label">
+                  <Fact label="created" value={formatDate(issue.created_at)} />
+                  <Fact label="updated" value={relTime(issue.updated_at)} />
+                  {issue.created_by && (
+                    <div className="min-w-0" data-testid="issue-created-by">
+                      <dt className="font-mono text-micro uppercase tracking-[0.08em] text-muted-foreground-soft">author</dt>
+                      <dd className="truncate text-foreground/85">
+                        Created by {issue.created_by.name || issue.created_by.id}
+                        {issue.created_by.type === "agent" && (
+                          <span
+                            data-testid="issue-creator-agent-badge"
+                            className="ml-1.5 inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1 py-px text-micro font-medium uppercase tracking-wide text-primary"
+                          >
+                            agent
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                  )}
+                  <Fact label="via" value={issue.authored_via ?? "ui"} />
+                  <Fact label="crew" value={issue.crew_slug ?? issue.crew_name ?? "—"} />
+                  <Fact label="id" value={issue.id} mono />
+                </dl>
+              </DetailCard>
+            </div>
+          </details>
+        </Appear>
+      </aside>
     </div>
   )
 }

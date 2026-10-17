@@ -255,7 +255,7 @@ export function OverviewTab({
           ]}
           items={issueItems}
           footerLabel={`Open filtered by ${agent.slug}`}
-          footerHref={entityHref({ kind: "issues", assigneeSlug: agent.slug })}
+          footerHref={entityHref({ kind: "issues", assigneeId: agent.id })}
         />
         <DetailCell
           order={1}
