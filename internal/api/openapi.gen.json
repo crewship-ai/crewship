@@ -5070,22 +5070,34 @@
       },
       "CrewPolicyResponseV1": {
         "properties": {
-          "approval_required": {
-            "type": "boolean"
+          "autonomy_level": {
+            "type": "string"
           },
-          "autonomy": {
+          "behavior_mode": {
             "type": "string"
           },
           "crew_id": {
             "type": "string"
           },
-          "execution": {
+          "reason": {
             "type": "string"
           },
-          "updated_at": {
+          "set_at": {
             "type": "string"
+          },
+          "set_by_user_id": {
+            "type": "string"
+          },
+          "whole_run_approval": {
+            "type": "boolean"
           }
         },
+        "required": [
+          "crew_id",
+          "autonomy_level",
+          "behavior_mode",
+          "whole_run_approval"
+        ],
         "type": "object"
       },
       "CrewPortExposeResponseV1": {
@@ -12444,16 +12456,25 @@
       },
       "RemainingCrewPolicyRequestV1": {
         "properties": {
-          "approval_required": {
+          "autonomy_level": {
+            "type": "string"
+          },
+          "behavior_mode": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "whole_run_approval": {
+            "description": "Omitted or null preserves the current whole-run approval setting.",
+            "nullable": true,
             "type": "boolean"
-          },
-          "autonomy": {
-            "type": "string"
-          },
-          "execution": {
-            "type": "string"
           }
         },
+        "required": [
+          "autonomy_level",
+          "behavior_mode"
+        ],
         "type": "object"
       },
       "RemainingCrewPolicyUpdatedV1": {
@@ -128337,8 +128358,17 @@
                       },
                       "set_by_user_id": {
                         "type": "string"
+                      },
+                      "whole_run_approval": {
+                        "type": "boolean"
                       }
                     },
+                    "required": [
+                      "crew_id",
+                      "autonomy_level",
+                      "behavior_mode",
+                      "whole_run_approval"
+                    ],
                     "type": "object"
                   },
                   "type": "array"

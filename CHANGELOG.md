@@ -26,10 +26,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **The setup wizard splits into form and preview from 1280px, matching the rest of the app.** Layout now reads one breakpoint scale — phone < 768, tablet 768–1279, desktop ≥ 1280, wide ≥ 1536 (Tailwind `md`/`xl`/`2xl`) — through `useLayoutBreakpoint()` beside `useIsMobile()`. Between 1024 and 1279px onboarding now stacks the preview under the form instead of splitting at a separate 1024px edge; other widths are unchanged. A guard test rejects new hand-written layout media queries.
 
 - ⚠️ **Behaviour change: enabling privileged runtime access requires an instance administrator.** Workspace OWNER/ADMIN rights alone no longer enable `allow_privileged_credentials`. Scoped CLI tokens also need `instance:admin`. Workspace administrators may still disable the opt-in; existing privileged containers require separate review and recreation.
+- **Participants can start a conversation in an empty shared chat.** A current authorized execution profile confirms the existing chat without a creator-only create request; every send still rechecks access and refused sends keep the draft.
+
+- **Proposal comments address the chat agent explicitly.** “Send comment to agent” now includes its canonical mention so shared chats trigger the requested reply; rejected sends keep the comment draft.
+
+- **Guests can connect their CLI from the account menu.** Connect CLI now opens the existing browser pairing dialog for Guest accounts after access loads, retaining their current grants. Guest menus also avoid an unavailable system-version request.
+- ⚠️ **Behaviour change: enabling privileged runtime access requires an instance administrator.** Workspace OWNER/ADMIN rights alone no longer enable `allow_privileged_credentials`. Scoped CLI tokens also need `instance:admin`. Workspace administrators may still disable the opt-in; existing privileged containers require separate review and recreation.
+
+- **Protected chat runs wait for confirmed execution results after their observer disconnects.** Chat preserves partial replies and leaves the run admitted for retained-output reconciliation instead of recording a false failure or cancellation.
 
 - **Guest CLI pairing accepts verified browser sessions.** Pairing start and poll now pass the restricted route gate only for interactive sessions. CLI bearer callers remain forbidden; redemption retains the same current Guest grants as browser CLI token creation and rejects logout, revocation or suspension.
 
 - Chat shows advisory configured-model payer, budget and gate details above the composer after a current viewer/chat profile check.
+- **Crews can opt into whole-run approval before agent execution.** The existing policy API and `crewship policy set --whole-run-approval` enable a real `agent_run` rule. Chat preflight and runtime use the same crew-scoped rule, while default behavior and autonomy modes remain unchanged.
 - **Decision drafts retain focus during access rechecks.** Typing and caret position survive temporary verification outages; sending waits for verified access and explicit source-version review, while uncertain submitted responses remain locked for exact retry.
 - **Withdrawn chat approval sources cannot be rejected through a stale Inbox ID.** Canonical decisions now retain the original chat generation and current operator audience; authorized refusal still works when only the original requester loses access.
 
@@ -876,6 +885,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Keep daily-compaction, run-count and wake-scheduler test fixtures valid across clock boundaries, and avoid a false CI error annotation in route-parity diagnostics.
 - Rotation grace reconciliation checks exact active rotation IDs, including overlapping rotations. Operator-model evidence is shown only when it matches the current value; the provenance user foreign key has its own index.
+- **Credential isolation documentation now states the runtime boundary accurately.** Directory ownership permits the intended agent to read its secrets; it does not isolate processes sharing UID 1001. Authenticated RBAC and ten-workspace acceptance tests verify API authority, with filesystem and mount isolation requiring separate runtime evidence.
+
 - **Keeper documentation matches the code.** `docs/guides/keeper.mdx`, `architecture.mdx` and four sibling pages no longer claim more containment than exists: Keeper is off by default, gates two sidecar routes for `SECRET` credentials only, replies with a decision (never a value), L4's human step is the default profile rather than a law (`--escalate-from`), the behaviour watchdog is sampled detection that cannot undo a call, and a ruled escalation does not run anything. Two product defects the audit surfaced are filed as #2574 and #2575. (#2242)
 - OpenAPI: the 53 component schemas no operation referenced are removed (547 → 494) behind a reachability gate, and ten routes now reference the accurate schema that had been orphaned (`SkillDetail`, `HireResponse`, `AgentCredentialList`, `LabelList`, `CredentialPage`, `RunResult`, `BulkReplayResult`, `DryRunResult`); DELETE routes that read a body now document it. (#1849)
 - The `@sentry/nextjs` test-load crash is fixed upstream in 10.74.0 (getsentry/sentry-javascript#23789); the ceiling had already left `pnpm.overrides`, and the `vitest.config.ts` alias's docs now say it stays on its own merits. (#2235)
