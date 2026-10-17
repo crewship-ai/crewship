@@ -135,7 +135,7 @@ export function HookEditor({
                   </span>
                   <span className="font-mono text-micro text-muted-foreground">{info.id}</span>
                 </span>
-                <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setPickEvent(true)}>Change</Button>
+                <Button type="button" variant="outline" size="sm" className="px-2.5 text-xs" onClick={() => setPickEvent(true)}>Change</Button>
               </div>
             ) : (
             <div className="mt-3 space-y-3">
