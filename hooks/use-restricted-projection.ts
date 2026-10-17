@@ -9,7 +9,11 @@ export function useRestrictedProjection<T>(scope: string) {
   const lease = useRef({ scope: "", verified: false })
   // A scope switch must not resurrect a held snapshot when returning to a
   // cached key before its new read. React discards this stale render.
-  if (held.scope !== scope) setHeld({ scope, value: null })
+  if (held.scope !== scope) {
+    sequence.current++
+    lease.current = { scope, verified: false }
+    setHeld({ scope, value: null })
+  }
   return {
     value: held.scope === scope ? held.value : null,
     read(signal: AbortSignal) {

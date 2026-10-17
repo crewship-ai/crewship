@@ -9,6 +9,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Invalidate protected editor reads and pending saves when switching members or resources, so returning to a cached scope requires a fresh read.
+
+- Clear reviewed member preset consent on access loss and ignore late mutation responses from an older verified policy read.
+
+- Settings resource access offers explicit immutable presets for existing Guest resources, with exact previews and confirmation. Saved intent stays separate from live grant authority; conflicts and uncertain writes require reloading before new consent.
+
 - The CLI can apply an explicitly confirmed resource-preset selection with one write, exact JSON/YAML field names and no automatic consent refresh or retry.
 
 - Transactional audit appends reject ignored journal inserts and withhold notifications so the owning business transaction can roll back.

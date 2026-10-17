@@ -8,7 +8,7 @@ import { storageFilePath } from "./e2e/global-setup"
 // coverage.
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["pr-contract.spec.ts", "shared-issue-search-retry.spec.ts", "known-project-manage.spec.ts"],
+  testMatch: ["pr-contract.spec.ts", "shared-issue-search-retry.spec.ts", "known-project-manage.spec.ts", "resource-presets.spec.ts"],
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
@@ -25,5 +25,5 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  grep: /PR browser contract subset/,
+  grep: /PR browser contract subset|explicit preset consent and stale recovery/,
 })
