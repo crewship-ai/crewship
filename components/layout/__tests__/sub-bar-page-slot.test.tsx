@@ -75,4 +75,28 @@ describe("SubBar in the top bar", () => {
     render(<SubBar title="Members" />)
     expect(screen.getByRole("heading", { level: 1, name: "Members" }).className).not.toMatch(/sr-only/)
   })
+
+  it("on a phone leaves no empty row when nothing visible is left in it", () => {
+    withSlot("Dashboard")
+    mobile = true
+    const { container } = render(<SubBar title="Dashboard" />)
+    const h1 = screen.getByRole("heading", { level: 1, name: "Dashboard" })
+    expect(h1.className).toMatch(/sr-only/)
+    // The heading stays for assistive technology, but the 36 px row is gone.
+    expect(container.querySelector(".min-h-9")).toBeNull()
+  })
+
+  it("leaves the page's one h1 to a page that shows its own heading", () => {
+    withSlot("Activity")
+    render(<SubBar title="Activity" section="Could not finish" heading={false} />)
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
+    expect(screen.getByText("Could not finish")).toBeVisible()
+  })
+
+  it("on a phone a page with its own heading gets no extra h1 either", () => {
+    withSlot("Dashboard")
+    mobile = true
+    render(<SubBar title="Dashboard" heading={false} />)
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
+  })
 })

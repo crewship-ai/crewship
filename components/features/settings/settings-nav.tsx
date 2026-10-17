@@ -14,8 +14,8 @@ import {
   SidebarSearch,
   SidebarSection,
   SidebarRow,
-  SIDEBAR_WIDTH,
 } from "@/components/layout/sidebar-kit"
+import { SecondaryPanel } from "@/components/layout/secondary-panel"
 import { usePageSaveGuard } from "@/components/ui/page-save-bar"
 
 interface NavItem {
@@ -197,7 +197,9 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
   const firstMatch = filtered[0]?.items[0]?.key
 
   return (
-    <aside className={cn(SIDEBAR_WIDTH, "shrink-0 bg-card border-r border-foreground/[0.06] flex flex-col")}>
+    // The one secondary panel (Harbor 2): a 272 px column with a remembered
+    // collapse, and a bottom sheet from the top bar's panel button on a phone.
+    <SecondaryPanel id="settings" label="Settings navigation">
       <SidebarToolbar>
         <SidebarSearch
           value={query}
@@ -211,7 +213,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
         />
       </SidebarToolbar>
 
-      <nav className="flex-1 overflow-y-auto pb-4" aria-label="Settings sections">
+      <nav className="min-h-0 flex-1 overflow-y-auto pb-4" aria-label="Settings sections">
         {filtered.map((section) => (
           <SidebarSection
             key={section.label}
@@ -248,6 +250,6 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
           </SidebarSection>
         ))}
       </nav>
-    </aside>
+    </SecondaryPanel>
   )
 }
