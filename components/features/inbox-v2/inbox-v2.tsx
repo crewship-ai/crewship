@@ -30,10 +30,10 @@ import {
   groupAdvisories, inboxEntry, missionEntries, selectEntry, suppressedApprovalIDs,
   type InboxSort, type InboxV2Filters,
 } from "./inbox-v2-derive"
-import { useInboxV2DeepLink } from "./inbox-v2-deeplink"
+import { requestedAgentOf, useInboxV2DeepLink } from "./inbox-v2-deeplink"
 import { ATTENTION_LABELS, matchesInboxAttention, parseInboxAttention } from "./inbox-v2-attention"
 import { entryIdentity, filterInboxEntries } from "./inbox-entry-identity"
-import { DetailRail } from "./inbox-detail-frame"
+import { DetailRail, RailSlotProvider, useWideDetail } from "./inbox-detail-frame"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
 import { useInboxLookup } from "@/components/features/inbox/use-inbox-lookup"
@@ -48,7 +48,10 @@ export function InboxV2() {
   const requestedKind = params?.get("kind") ?? null
   const attention = parseInboxAttention(params?.get("attention") ?? null)
   const requestedID = params?.get("item") ?? null
-  const requestedSearch = params?.get("agent") ?? params?.get("filter") ?? ""
+  // ?filter= (Z30) is search text; ?agent_id= / ?agent= name ONE agent and
+  // become the Agent facet (INB-01) — see useInboxV2DeepLink.
+  const requestedSearch = params?.get("filter") ?? ""
+  const requestedAgent = requestedAgentOf(params)
   const [chosenView, setView] = useState<InboxV2View | null>(null)
   // `request:<id>` rather than `inbox:<id>`: the caller of ?item= knows an id,
   // not which source owns it, and an approval-queue deep link keyed
@@ -57,8 +60,10 @@ export function InboxV2() {
   // the URL after mount.
   const [selectedKey, setSelectedKey] = useState<string | null>(requestedID ? `request:${requestedID}` : null)
   const [confirmation, setConfirmation] = useState<InboxV2Confirmation | null>(null)
-  const [filters, setFilters] = useState<InboxV2Filters>({ ...EMPTY_INBOX_V2_FILTERS, search: requestedSearch })
+  const [filters, setFilters] = useState<InboxV2Filters>({ ...EMPTY_INBOX_V2_FILTERS, search: requestedSearch, agent: requestedAgent })
   const isMobile = useIsMobile()
+  const wide = useWideDetail()
+  const [railSlot, setRailSlot] = useState<HTMLElement | null>(null)
   // View › Sort, remembered per user (PNL-04).
   const [storedSort, setSort] = useUserPreference<InboxSort>("inbox.sort", "urgency")
   const sort: InboxSort = INBOX_SORTS.some((s) => s.key === storedSort) ? storedSort : "urgency"
@@ -71,7 +76,7 @@ export function InboxV2() {
   const wsStatus = useRealtimeStatusSafe()
   const live = wsStatus === "connected"
 
-  useInboxV2DeepLink(requestedID, requestedSearch, setSelectedKey, setFilters)
+  useInboxV2DeepLink(requestedID, requestedSearch, setSelectedKey, setFilters, requestedAgent)
 
   // B10 (#2364): ONE `state=all` fetch instead of two (`active` + `resolved`
   // used to each hit GET /api/v1/inbox separately, for the same workspace,
@@ -239,6 +244,27 @@ export function InboxV2() {
     if (isMobile) setPhoneOverview(true)
     const query = new URLSearchParams(params?.toString())
     query.delete("item")
+    router.push(query.size ? `/inbox?${query.toString()}` : "/inbox")
+  }
+  /**
+   * A facet change narrows the list, so an open row may no longer be in it:
+   * close it. Clearing the agent also takes it out of the URL — otherwise the
+   * link that set it would bring the filter back on the next reload.
+   */
+  function changeFilters(next: InboxV2Filters) {
+    setFilters(next)
+    const dropAgent = next.agent !== filters.agent && !next.agent && Boolean(params?.get("agent_id") || params?.get("agent"))
+    if (!selectedKey && !dropAgent) return
+    if (selectedKey) {
+      setSelectedKey(null)
+      setConfirmation(null)
+    }
+    const query = new URLSearchParams(params?.toString())
+    query.delete("item")
+    if (dropAgent) {
+      query.delete("agent_id")
+      query.delete("agent")
+    }
     router.push(query.size ? `/inbox?${query.toString()}` : "/inbox")
   }
   function closeEntry() {
@@ -592,7 +618,7 @@ export function InboxV2() {
             attention={attention}
             onClearAttention={() => router.push("/inbox")}
             filters={filters}
-            onFilters={(next) => { setFilters(next); if (selectedKey) closeEntry() }}
+            onFilters={changeFilters}
             selectedKey={displayed?.key ?? null}
             onOpen={openEntry}
             overviewSelected={!displayed && !confirmation && !isMobile}
@@ -633,6 +659,8 @@ export function InboxV2() {
             />
           ) : (
             <div className={cn(displayed && !confirmation && "2xl:grid 2xl:grid-cols-[minmax(0,860px)_minmax(260px,300px)] 2xl:items-start 2xl:justify-center 2xl:gap-6 2xl:px-6")}>
+            {/* Wide desktop: context chips and run steps render into the rail (INB-02). */}
+            <RailSlotProvider value={wide && displayed && !confirmation ? railSlot : null}>
             <InboxV2Detail
               key={displayed?.key || "overview"}
               entry={displayed}
@@ -673,7 +701,8 @@ export function InboxV2() {
               lookup={lookup}
               onDenyHire={hireTwin ? denyHire : undefined}
             />
-            {displayed && !confirmation && <DetailRail entry={displayed} lookup={lookup} earlier={earlier} onOpen={openEntry} />}
+            </RailSlotProvider>
+            {displayed && !confirmation && <DetailRail entry={displayed} lookup={lookup} earlier={earlier} onOpen={openEntry} slotRef={setRailSlot} />}
             </div>
           )}
         </main>}

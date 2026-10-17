@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test"
+import { test, expect, request as plwRequest, type Page } from "@playwright/test"
 
 // Harbor 2 Inbox acceptance (#3385): the panel beside the detail on desktop
 // and tablet, list → detail → back on a phone, the Overview when nothing is
@@ -168,5 +168,182 @@ test.describe("empty", () => {
     await page.goto("/inbox")
     await expect(page.getByRole("heading", { name: "Nothing waits for you" })).toBeVisible()
     await expect(page.getByText("crewship inbox")).toBeVisible()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #3485 (INB-01 … INB-05). The seed has no pending approval and no API that
+// creates one (approvals are enqueued by the harbormaster inside a run), so
+// the checks that need a specific decision serve the feed through
+// page.route. Sessions, roles and the RBAC gate on the page stay real.
+
+const NOW = Date.now()
+const minutesAgo = (n: number) => new Date(NOW - n * 60_000).toISOString()
+
+function inboxRow(o: Record<string, unknown>) {
+  return {
+    workspace_id: "ws", source_id: `src-${o.id}`, state: "read", priority: "medium", blocking: false,
+    created_at: minutesAgo(10), updated_at: minutesAgo(10), ...o,
+  }
+}
+
+/** Serve the Inbox's sources: inbox rows (list and detail), the approvals queue, no missions. */
+async function serveFeed(page: Page, feed: { inbox?: Record<string, unknown>[]; approvals?: Record<string, unknown>[] }) {
+  const inbox = feed.inbox ?? []
+  await page.route(/\/api\/v1\/inbox\?/, (route) => route.fulfill({ json: { rows: inbox, count: inbox.length, unread_count: 0, has_more: false } }))
+  await page.route(/\/api\/v1\/inbox\/(?!count)[^/?]+\?/, (route) => {
+    const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/").pop() ?? "")
+    const row = inbox.find((r) => r.id === id)
+    return row ? route.fulfill({ json: row }) : route.fulfill({ status: 404, json: { detail: "not found" } })
+  })
+  await page.route(/\/api\/v1\/missions\?/, (route) => route.fulfill({ json: [] }))
+  if (feed.approvals) {
+    const rows = feed.approvals
+    await page.route(/\/api\/v1\/approvals\?/, (route) => route.fulfill({ json: { rows, status: "all", count: rows.length, has_more: false } }))
+  }
+}
+
+test.describe("Agent facet (INB-01)", () => {
+  test.use({ viewport: { width: 1440, height: 900 } })
+
+  test("/inbox?agent_id=<unknown> → Agent: unknown and Nothing matches · Clear filters", async ({ page }) => {
+    await seed(page)
+    await page.goto("/inbox?attention=approvals&agent_id=ag_does_not_exist")
+    await expect(panel(page).getByRole("button", { name: "Remove filter Agent: unknown" })).toBeVisible()
+    await expect(panel(page).getByText("Nothing matches these filters.")).toBeVisible()
+    await expect(rows(page)).toHaveCount(0)
+    await panel(page).getByRole("button", { name: "Clear filters" }).click()
+    await expect(panel(page).getByText(/^Agent:/)).toHaveCount(0)
+  })
+
+  test("?agent=<slug> from an agent page shows only that agent's rows under Agent: {name}", async ({ page }) => {
+    await seed(page)
+    await serveFeed(page, {
+      inbox: [
+        inboxRow({ id: "e-scout", kind: "escalation", blocking: true, title: "Scout needs a Linear token", sender_type: "agent", sender_name: "scout", payload: { escalation_type: "GENERAL" } }),
+        inboxRow({ id: "e-riley", kind: "escalation", blocking: true, title: "Riley needs a GitHub token", sender_type: "agent", sender_name: "riley", payload: { escalation_type: "GENERAL" } }),
+      ],
+    })
+    await page.goto("/inbox?agent=scout")
+    // The roster may not know the mocked senders; the chip then names the slug.
+    await expect(panel(page).getByRole("button", { name: /^Remove filter Agent: / })).toBeVisible()
+    await expect(rows(page)).toHaveCount(1)
+    await expect(rows(page).first()).toContainText("Scout needs a Linear token")
+  })
+})
+
+test.describe("wide-desktop rail (INB-02)", () => {
+  const RUN_WAITPOINT = inboxRow({
+    id: "wp-rail", kind: "waitpoint", blocking: true, state: "read", source_id: "tok-rail",
+    title: "Approve publishing the weekly scan", sender_type: "pipeline", sender_name: "weekly-scan",
+    payload: { pipeline_run_id: "run_rail", pipeline_slug: "weekly-scan", sites: 14 },
+  })
+
+  test.describe("1600", () => {
+    test.use({ viewport: { width: 1600, height: 900 } })
+    test("context chips and run steps sit in the rail, opened", async ({ page }) => {
+      await seed(page)
+      await serveFeed(page, { inbox: [RUN_WAITPOINT] })
+      await page.goto("/inbox?item=wp-rail")
+      const rail = page.getByTestId("inbox-rail")
+      await expect(rail.getByRole("navigation", { name: "Where this came from" })).toBeVisible()
+      await expect(rail.locator("details", { hasText: "How the run got here" })).toHaveAttribute("open", "")
+      await expect(page.getByTestId("inbox-detail-frame").getByRole("navigation", { name: "Where this came from" })).toHaveCount(0)
+    })
+  })
+
+  test.describe("1440", () => {
+    test.use({ viewport: { width: 1440, height: 900 } })
+    test("below 1536 they stay in the column and there is no rail", async ({ page }) => {
+      await seed(page)
+      await serveFeed(page, { inbox: [RUN_WAITPOINT] })
+      await page.goto("/inbox?item=wp-rail")
+      await expect(page.getByTestId("inbox-detail-frame").getByRole("navigation", { name: "Where this came from" })).toBeVisible()
+      await expect(page.getByTestId("inbox-rail")).toBeHidden()
+    })
+  })
+})
+
+test.describe("decision dock (INB-04)", () => {
+  test.use({ viewport: { width: 1440, height: 900 } })
+
+  test("Deny is the secondary button left of a primary Approve", async ({ page }) => {
+    await seed(page)
+    await serveFeed(page, { inbox: [inboxRow({ id: "wp-dock", kind: "waitpoint", blocking: true, title: "Approve the promote step", sender_type: "pipeline", sender_name: "docs-publish" })] })
+    await page.goto("/inbox?item=wp-dock")
+    const dock = page.getByTestId("decision-dock")
+    await expect(dock.getByRole("button", { name: "Deny" })).toHaveAttribute("data-variant", "outline")
+    await expect(dock.getByRole("button", { name: "Approve" })).toHaveAttribute("data-variant", "default")
+    const deny = (await dock.getByRole("button", { name: "Deny" }).boundingBox())!
+    const approve = (await dock.getByRole("button", { name: "Approve" }).boundingBox())!
+    expect(deny.x).toBeLessThan(approve.x)
+  })
+})
+
+// INB-05: who decides an approval. Logs in as the seeded RBAC baseline users
+// (cmd/crewship/cmd_seed_data_users.go; password E2E_RBAC_PASSWORD, default
+// rbac-demo-1234). The same pending approval is served to both; only the
+// admin tier may load the queue (GET /api/v1/approvals is roleManage) and
+// decide it.
+test.describe("approval decisions by role (INB-05)", () => {
+  test.use({ storageState: { cookies: [], origins: [] }, viewport: { width: 1440, height: 900 } })
+
+  const PENDING = {
+    id: "ap_e2e_merge", workspace_id: "ws", kind: "tool_call", status: "pending",
+    reason: "Reviewer wants to merge acme/web#812 into main.", requested_by: "", created_at: minutesAgo(5),
+    timeout_at: new Date(NOW + 45 * 60_000).toISOString(), payload: { tool: "github.merge_pr", target: "production" },
+  }
+
+  async function loginAs(page: Page, email: string) {
+    const base = test.info().project.use.baseURL ?? process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3001"
+    const ctx = await plwRequest.newContext({ baseURL: base })
+    const { csrfToken } = (await (await ctx.get("/api/auth/csrf")).json()) as { csrfToken: string }
+    const res = await ctx.post("/api/auth/callback/credentials", {
+      form: { csrfToken, email, password: process.env.E2E_RBAC_PASSWORD || "rbac-demo-1234", callbackUrl: "/", json: "true" },
+    })
+    test.skip(!res.ok(), `cannot log in as ${email} (seed without RBAC baseline users?)`)
+    await page.context().addCookies((await ctx.storageState()).cookies)
+    await ctx.dispose()
+  }
+
+  test("ADMIN decides: Approve sends the comment to the decide endpoint and shows the receipt", async ({ page }) => {
+    await loginAs(page, "admin-baseline@crewship.local")
+    await seed(page)
+    await serveFeed(page, { inbox: [], approvals: [PENDING] })
+    let decided: unknown = null
+    await page.route(/\/api\/v1\/approvals\/ap_e2e_merge\/decide/, async (route) => {
+      decided = route.request().postDataJSON()
+      await route.fulfill({ json: { status: "approved", decided_by: "admin-baseline" } })
+    })
+    await page.goto("/inbox?item=ap_e2e_merge")
+    const dock = page.getByTestId("decision-dock")
+    await expect(dock.getByRole("button", { name: "Approve" })).toBeEnabled()
+    await expect(dock.getByRole("button", { name: "Deny" })).toBeEnabled()
+    await expect(page.getByTestId("inbox-role-note")).toHaveCount(0)
+    await page.getByRole("textbox", { name: "Decision comment" }).fill("Checked the diff; merge.")
+    await dock.getByRole("button", { name: "Approve" }).click()
+    await expect(page.getByTestId("inbox-receipt")).toContainText("Approved")
+    expect(decided).toEqual({ status: "approved", comment: "Checked the diff; merge." })
+  })
+
+  test("MEMBER never loads the queue and gets no Approve or Deny for it", async ({ page }) => {
+    await loginAs(page, "member-baseline@crewship.local")
+    await seed(page)
+    const queueCalls: string[] = []
+    const decideCalls: string[] = []
+    page.on("request", (r) => {
+      if (/\/api\/v1\/approvals(\?|$)/.test(r.url())) queueCalls.push(r.url())
+      if (/\/api\/v1\/approvals\/[^/]+\/decide/.test(r.url())) decideCalls.push(r.url())
+    })
+    // The same pending approval is there to be served — the gate, not an
+    // empty fixture, is what keeps it off a member's screen.
+    await serveFeed(page, { inbox: [], approvals: [PENDING] })
+    await page.goto("/inbox?attention=approvals")
+    await expect(panel(page)).toBeVisible()
+    await page.goto("/inbox?item=ap_e2e_merge")
+    await expect(page.getByRole("heading", { name: "No longer in your inbox" })).toBeVisible()
+    await expect(page.getByRole("button", { name: /^(Approve|Deny)$/ })).toHaveCount(0)
+    expect(queueCalls).toEqual([])
+    expect(decideCalls).toEqual([])
   })
 })

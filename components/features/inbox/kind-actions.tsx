@@ -326,7 +326,7 @@ export function KindActions({
         <div className={DOCK_ROW}>
           <Button
             size="sm"
-            variant="ghost"
+            variant="outline"
             disabled={disabled || busy !== null}
             onClick={() =>
               wrap("denied", async () => {
@@ -429,7 +429,7 @@ export function KindActions({
           <div className={DOCK_ROW}>
             <Button
               size="sm"
-              variant="ghost"
+              variant="outline"
               disabled={disabled || busy !== null}
               onClick={() => resolveSkill("reject")}
               className="gap-1.5"
@@ -505,7 +505,7 @@ export function KindActions({
           <div className={DOCK_ROW}>
             <Button
               size="sm"
-              variant="ghost"
+              variant="outline"
               disabled={disabled || busy !== null}
               onClick={() => resolveRoutine("reject")}
               className="gap-1.5"
@@ -593,7 +593,7 @@ export function KindActions({
           <div className={DOCK_ROW}>
             <Button
               size="sm"
-              variant="soft"
+              variant="outline"
               disabled={disabled || busy !== null}
               onClick={() => void resolveKeeper("reject")}
             >
@@ -601,7 +601,6 @@ export function KindActions({
             </Button>
             <Button
               size="sm"
-              variant="soft"
               disabled={disabled || busy !== null}
               onClick={() => void resolveKeeper("approve")}
             >
@@ -660,7 +659,7 @@ export function KindActions({
             <div className={DOCK_ROW}>
               <Button
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 disabled={disabled || busy !== null}
                 onClick={() => resolveEsc("reject")}
                 className="gap-1.5"
@@ -689,7 +688,7 @@ export function KindActions({
             </span>
             <Button
               size="sm"
-              variant="ghost"
+              variant="outline"
               disabled={disabled || busy !== null}
               onClick={() => resolveEsc("reject")}
               className="gap-1.5"
@@ -706,7 +705,7 @@ export function KindActions({
           <div className={DOCK_ROW}>
             <Button
               size="sm"
-              variant="ghost"
+              variant="outline"
               disabled={disabled || busy !== null}
               onClick={() => resolveEsc("reject")}
               className="gap-1.5"
@@ -864,7 +863,7 @@ export function KindActions({
         <div className={DOCK_ROW}>
           <Button
             size="sm"
-            variant="ghost"
+            variant="outline"
             disabled={disabled || busy !== null}
             onClick={() => decide("reject")}
             className="gap-1.5"
