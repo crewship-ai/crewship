@@ -54,6 +54,8 @@ var responseShapeContracts = []struct {
 	{name: "DocumentMutationResponse", pointer: "/components/schemas/DocumentReceipt", value: DocumentMutationResponse{}},
 	{name: "DocumentInitializationState", pointer: "/components/schemas/DocumentInitializationState", value: DocumentInitializationState{}},
 	{name: "DocumentInitializeResponse", pointer: "/components/schemas/DocumentInitializeReceipt", value: DocumentInitializeResponse{}},
+	{name: "WorkspaceArtifactCreationPolicyResponse", pointer: "/components/schemas/WorkspaceArtifactCreationPolicyResponse", value: WorkspaceArtifactCreationPolicyResponse{}},
+	{name: "WorkspaceArtifactCreationPolicyError", pointer: "/components/schemas/WorkspaceArtifactCreationPolicyError", value: WorkspaceArtifactCreationPolicyError{}},
 	{name: "WorkspacePageOwnershipListResponse", pointer: "/components/schemas/WorkspacePageOwnershipListResponse", value: WorkspacePageOwnershipListResponse{}},
 	{name: "WorkspacePageOwnershipSummary", pointer: "/components/schemas/WorkspacePageOwnershipSummary", value: WorkspacePageOwnershipSummary{}},
 	{name: "CrewPolicyResponseV1", pointer: "/components/schemas/CrewPolicyResponseV1", value: crewPolicyResponse{}},

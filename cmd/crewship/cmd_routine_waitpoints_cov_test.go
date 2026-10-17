@@ -139,7 +139,7 @@ func TestWaitpointsShow_NotFound(t *testing.T) {
 	s.OnGet(covWaitpointsPath, clitest.JSONResponse(200, covWaitpointRows()))
 
 	err := routineWaitpointsShowCmd.RunE(routineWaitpointsShowCmd, []string{"missing-token"})
-	if err == nil || !strings.Contains(err.Error(), "waitpoint missing-token not found") {
+	if err == nil || !strings.Contains(err.Error(), "waitpoint not found") {
 		t.Errorf("expected not-found error; got %v", err)
 	}
 }

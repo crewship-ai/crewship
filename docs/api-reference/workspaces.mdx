@@ -2642,3 +2642,33 @@ CLI: `crewship workspace page-ownership list` and
 Scoped CLI credentials need `workspace:admin` for both listing and transfer.
 `workspace:*` and unrestricted tokens also carry this authority. Session callers
 need a current trusted workspace OWNER or ADMIN session.
+
+## Artifact creation policy
+
+Workspace administrators can configure which crews may participate in agent
+artifact creation. The policy starts disabled with an empty crew allowlist and
+version `0`. This administrative ceiling does not itself authorize an agent run;
+creation also requires the run's human consent and content permissions.
+
+`GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy` returns
+`enabled`, sorted `crew_ids`, and `version`.
+`PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy` accepts a request
+body of at most 64 KiB and requires all
+three request fields: `enabled`, the complete `crew_ids` allowlist, and
+`base_version` from the last read. A stale version returns `409` with
+`code: "stale_policy"`; read the latest policy before deciding on a replacement.
+Only active crews from the selected workspace are accepted. Responses use
+`Cache-Control: no-store`. CLI access requires `workspace:admin`.
+
+Use `crewship workspace artifact-policy show`, then explicitly replace the
+policy with `crewship workspace artifact-policy set --base-version <version>
+--enabled=true --crew-id <crew-id>`. To disable creation and empty the allowlist,
+use `--enabled=false --clear-crews` with the reviewed `--base-version`.
+Workspace backups preserve this configuration and remap the allowed crews when
+restoring into a new workspace; live run principals require fresh admission.
+
+Authentication: a current trusted workspace OWNER or ADMIN session, or a CLI
+credential carrying `workspace:admin`. Statuses: 200 saved/read policy; 400 invalid
+request or crews; 401 invalid human credential; 403 insufficient current role or
+scope; 404 wrong workspace; 409 stale policy version; 413 body exceeds 64 KiB;
+500 unavailable storage.

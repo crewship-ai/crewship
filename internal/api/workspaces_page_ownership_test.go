@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -17,7 +18,7 @@ import (
 )
 
 // Adapted from the private-output custody regressions: handlers use migrated
-// SQLite, installed Document persistence and otherwise synthetic extensions,
+// SQLite, installed Document/Slides persistence and otherwise synthetic extensions,
 // without publishing content or agents.
 func ownershipFixture(t *testing.T, table string) (*pagesTransferRig, *WorkspaceHandler) {
 	t.Helper()
@@ -41,22 +42,27 @@ func seedOwnershipOutput(t *testing.T, db *sql.DB, workspace, pageID, table stri
 	if !installed {
 		mustExec(t, db, `CREATE TABLE `+table+`(page_id TEXT PRIMARY KEY REFERENCES pages(id), private_content TEXT)`)
 	}
-	if ownershipContentColumn(t, db, table) == "snapshot" {
+	switch ownershipContentColumn(t, db, table) {
+	case "snapshot":
 		mustExec(t, db, `INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES(?,?,1,?,?)`, workspace, pageID, []byte("NEVER_EXPOSE_THIS"), []byte("[]"))
-	} else {
+	case "canonical_json":
+		content := []byte("NEVER_EXPOSE_THIS")
+		mustExec(t, db, `INSERT INTO slides_heads(workspace_id,page_id,schema_version,head_rev,order_version,canonical_json,content_hash) VALUES(?,?,1,1,1,?,?)`, workspace, pageID, content, fmt.Sprintf("%x", sha256.Sum256(content)))
+	default:
 		mustExec(t, db, `INSERT INTO `+table+`(page_id,private_content) VALUES(?,?)`, pageID, "NEVER_EXPOSE_THIS")
 	}
 }
 
 func ownershipContentColumn(t *testing.T, db *sql.DB, table string) string {
 	t.Helper()
-	if table == "documents" {
-		var snapshot bool
-		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name='snapshot')`, table).Scan(&snapshot); err != nil {
+	column := map[string]string{"documents": "snapshot", "slides_heads": "canonical_json"}[table]
+	if column != "" {
+		var installed bool
+		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name=?)`, table, column).Scan(&installed); err != nil {
 			t.Fatal(err)
 		}
-		if snapshot {
-			return "snapshot"
+		if installed {
+			return column
 		}
 	}
 	return "private_content"
