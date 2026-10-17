@@ -135,4 +135,9 @@ describe("sidebar-kit", () => {
     expect(row).toHaveAttribute("title", "Quarterly research digest for Ops")
     expect(row).toHaveAttribute("aria-current", "page")
   })
+
+  it("SidebarRow centres its icon and text, so a 44 px touch row does not leave the icon at the top", () => {
+    render(<SidebarRow onSelect={vi.fn()}><span>Needs you</span></SidebarRow>)
+    expect(screen.getByRole("button", { name: "Needs you" }).className).toMatch(/\bitems-center\b/)
+  })
 })
