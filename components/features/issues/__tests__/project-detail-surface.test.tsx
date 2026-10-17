@@ -44,7 +44,7 @@ afterEach(() => cleanup())
 
 describe("ProjectDetailSurface on the page save bar", () => {
   it("holds picker changes as a draft: nothing is sent, the bar counts them", async () => {
-    render(<ProjectDetailSurface workspaceId="ws1" project={PROJECT} issues={[]} />)
+    render(<ProjectDetailSurface workspaceId="ws1" project={PROJECT} issues={[]} tab="settings" />)
     pick(/change project status/i, /^completed$/i)
     pick(/change project priority/i, /^urgent$/i)
     expect(patches()).toHaveLength(0)
@@ -54,7 +54,7 @@ describe("ProjectDetailSurface on the page save bar", () => {
   })
 
   it("Save sends one PATCH carrying every changed field", async () => {
-    render(<ProjectDetailSurface workspaceId="ws1" project={PROJECT} issues={[]} />)
+    render(<ProjectDetailSurface workspaceId="ws1" project={PROJECT} issues={[]} tab="settings" />)
     pick(/change project status/i, /^completed$/i)
     pick(/change health/i, /off track/i)
     fireEvent.click(within(bar()!).getByRole("button", { name: "Save" }))
@@ -65,7 +65,7 @@ describe("ProjectDetailSurface on the page save bar", () => {
   })
 
   it("Discard puts the card back", async () => {
-    render(<ProjectDetailSurface workspaceId="ws1" project={PROJECT} issues={[]} />)
+    render(<ProjectDetailSurface workspaceId="ws1" project={PROJECT} issues={[]} tab="settings" />)
     pick(/change project status/i, /^completed$/i)
     fireEvent.click(within(bar()!).getByRole("button", { name: "Discard" }))
     expect(bar()).toBeNull()
@@ -73,7 +73,7 @@ describe("ProjectDetailSurface on the page save bar", () => {
   })
 
   it("a rename survives clicking away and waits for Save", async () => {
-    render(<ProjectDetailSurface workspaceId="ws1" project={PROJECT} issues={[]} />)
+    render(<ProjectDetailSurface workspaceId="ws1" project={PROJECT} issues={[]} tab="settings" />)
     fireEvent.click(screen.getByRole("button", { name: /edit project name/i }))
     const box = screen.getByRole("textbox", { name: /project name/i })
     fireEvent.change(box, { target: { value: "Disk I/O" } })
@@ -84,7 +84,7 @@ describe("ProjectDetailSurface on the page save bar", () => {
   })
 
   it("picking dates does not write each day stepped through", async () => {
-    render(<ProjectDetailSurface workspaceId="ws1" project={PROJECT} issues={[]} />)
+    render(<ProjectDetailSurface workspaceId="ws1" project={PROJECT} issues={[]} tab="settings" />)
     fireEvent.click(screen.getByRole("button", { name: /change dates/i }))
     const start = within(screen.getByRole("dialog")).getByLabelText(/start date/i)
     fireEvent.change(start, { target: { value: "2026-09-01" } })

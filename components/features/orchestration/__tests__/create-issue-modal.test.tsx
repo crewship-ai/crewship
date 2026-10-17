@@ -131,6 +131,20 @@ describe("CreateIssueModal", () => {
     })
   })
 
+  it("opened from a project, files the issue under it", async () => {
+    const mockFetch = vi.fn<FetchStub>().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
+    global.fetch = mockFetch as unknown as typeof fetch
+    render(<CreateIssueModal {...defaultProps} initialProjectId="proj-1" />)
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "In a project" } })
+    fireEvent.click(screen.getByText("Create issue"))
+    await waitFor(() => {
+      const post = mockFetch.mock.calls.find((c) => c[1]?.method === "POST")
+      expect(post).toBeDefined()
+      expect(JSON.parse(post![1]!.body as string).project_id).toBe("proj-1")
+    })
+  })
+
   it("shows No priority pill by default", () => {
     render(<CreateIssueModal {...defaultProps} />)
     expect(screen.getByText("No priority")).toBeInTheDocument()
