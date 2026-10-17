@@ -44,6 +44,7 @@ import { isImeComposing } from "@/lib/ime"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { ISSUE_STATUSES, ALL_PRIORITIES } from "@/components/features/issues/issue-constants"
@@ -104,6 +105,12 @@ export interface IssueCardEdit {
   /** Creates a workspace label and attaches it in one gesture. */
   createLabel?: (name: string) => Promise<void>
   addRelation: (targetIdentifier: string, type: RelationType) => Promise<boolean>
+  /**
+   * Workspace people the Owner can be. Absent, Owner renders as text: the
+   * owner write (PATCH assignee_type "user") is only offered where the host
+   * can stage and send it (the issue page), not in embeds.
+   */
+  people?: { id: string; name: string }[]
   /** Finds issues for the Add relation picker. Absent, the identifier is typed. */
   searchIssues?: (query: string) => Promise<PickableIssue[]>
   removeRelation: (relationId: string) => Promise<void>
@@ -359,6 +366,54 @@ export function AssigneePicker({ issue, edit }: { issue: Mission; edit: IssueCar
         </>
       ) : (
         <Muted>Unassigned</Muted>
+      )}
+    </Picker>
+  )
+}
+
+/**
+ * Owner — the accountable person (v67 props: "Owner · accountable person").
+ * Stages `owner_user_id` (+ the name, for the draft's display); the host
+ * sends it as its own PATCH with assignee_type "user", which the server
+ * routes to owner_user_id without touching the delegate. There is no
+ * "Nobody": an empty assignee_id clears the delegate too.
+ */
+export function OwnerPicker({ issue, edit }: { issue: Mission; edit: IssueCardEdit }) {
+  const [q, setQ] = React.useState("")
+  const people = edit.people ?? []
+  const shown = people.filter((p) => matches(p.name, q))
+  return (
+    <Picker
+      label="Change owner"
+      menu={(close) => (
+        <>
+          <PickerSearch value={q} onChange={setQ} placeholder="Search people" />
+          <div className="max-h-56 overflow-y-auto pt-1">
+            {shown.map((p) => (
+              <Option
+                key={p.id}
+                current={issue.owner?.id === p.id}
+                onSelect={() => {
+                  void edit.patch({ owner_user_id: p.id, owner_name: p.name })
+                  close()
+                }}
+              >
+                <span aria-hidden className="contents"><UserAvatar name={p.name} email="" className="size-4" /></span>
+                <span className="truncate">{p.name}</span>
+              </Option>
+            ))}
+            {shown.length === 0 && <p className="px-2 py-2 text-label text-muted-foreground-soft">No people match.</p>}
+          </div>
+        </>
+      )}
+    >
+      {issue.owner ? (
+        <>
+          <UserAvatar name={issue.owner.name} email="" className="size-4" />
+          <span className="truncate">{issue.owner.name ?? "Owner"}</span>
+        </>
+      ) : (
+        <Muted>No human owner</Muted>
       )}
     </Picker>
   )

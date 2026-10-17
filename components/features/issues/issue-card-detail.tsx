@@ -87,6 +87,7 @@ import {
   EstimatePicker,
   LabelsPicker,
   MilestonePicker,
+  OwnerPicker,
   PriorityPicker,
   ProjectPicker,
   RemoveRelationButton,
@@ -599,7 +600,9 @@ export function IssueCardDetail({
               {issue.owner || issue.delegate || !issue.assignee_name || edit ? (
                 <>
                   <EditRow icon={UserCircle2} label="Owner" hint="accountable person">
-                    {issue.owner ? (
+                    {editable("assign") && edit?.people ? (
+                      <OwnerPicker issue={issue} edit={edit} />
+                    ) : issue.owner ? (
                       <span className="inline-flex items-center gap-1.5 text-body">
                         <UserAvatar name={issue.owner.name} email="" className="size-4" />
                         {issue.owner.name ?? "Owner"}
