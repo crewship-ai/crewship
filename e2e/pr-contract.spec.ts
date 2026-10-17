@@ -61,7 +61,7 @@ test("PR browser contract subset", async ({ page }) => {
   await test.step("create issue and remove the fixture", async () => {
     const title = `E2E issue ${Date.now()}`
     await page.goto("/issues")
-    await page.getByRole("button", { name: "New Issue", exact: true }).click()
+    await page.getByRole("button", { name: "New issue", exact: true }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
     // Selecting explicitly avoids relying on the modal's asynchronous
     // auto-select when the workspace roster is still loading. The crew this

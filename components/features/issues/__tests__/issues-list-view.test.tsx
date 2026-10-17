@@ -67,14 +67,24 @@ function json(status: number, body: unknown): Response {
   })
 }
 
+/** Tick both rows (there is no header row: the bar offers "Select all"). */
+function selectBoth() {
+  const boxes = screen.getAllByRole("checkbox")
+  fireEvent.click(boxes[0])
+  fireEvent.click(boxes[1])
+}
+
+/** Open one of the bulk bar's menus and pick an item. */
+function pick(menu: string, item: string) {
+  fireEvent.pointerDown(within(screen.getByRole("toolbar", { name: "Bulk actions" })).getByRole("button", { name: menu }), { button: 0, ctrlKey: false })
+  fireEvent.click(screen.getByRole("menuitem", { name: item }))
+}
+
 /** Select both rows and ask for a bulk status change to Done. */
 function bulkSetDone() {
-  const boxes = screen.getAllByRole("checkbox")
-  // boxes[0] is the header select-all.
-  fireEvent.click(boxes[0])
+  selectBoth()
   expect(screen.getByText("2 selected")).toBeTruthy()
-  fireEvent.click(screen.getByRole("button", { name: "Status" }))
-  fireEvent.click(screen.getByRole("button", { name: "Done" }))
+  pick("Status", "Done")
   confirmBulk()
 }
 
@@ -94,9 +104,8 @@ describe("IssuesListView bulk changes ask first", () => {
 
   it("names the change and the issues, and sends nothing until confirmed", async () => {
     render(<IssuesListView issues={issues} onIssueClick={vi.fn()} workspaceId="ws-1" />)
-    fireEvent.click(screen.getAllByRole("checkbox")[0])
-    fireEvent.click(screen.getByRole("button", { name: "Status" }))
-    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    selectBoth()
+    pick("Status", "Done")
     const dialog = screen.getByRole("alertdialog")
     expect(dialog).toHaveTextContent("Set 2 issues to Done?")
     expect(dialog).toHaveTextContent(/automations/i)
@@ -105,9 +114,8 @@ describe("IssuesListView bulk changes ask first", () => {
 
   it("Cancel leaves the issues and the selection alone", async () => {
     render(<IssuesListView issues={issues} onIssueClick={vi.fn()} workspaceId="ws-1" />)
-    fireEvent.click(screen.getAllByRole("checkbox")[0])
-    fireEvent.click(screen.getByRole("button", { name: "Status" }))
-    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    selectBoth()
+    pick("Status", "Done")
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }))
     expect(apiFetch.mock.calls.filter((c) => String(c[0]).includes("/issues/bulk"))).toHaveLength(0)
     expect(screen.getByText("2 selected")).toBeTruthy()
@@ -115,9 +123,8 @@ describe("IssuesListView bulk changes ask first", () => {
 
   it("asks before a bulk priority change too", async () => {
     render(<IssuesListView issues={issues} onIssueClick={vi.fn()} workspaceId="ws-1" />)
-    fireEvent.click(screen.getAllByRole("checkbox")[0])
-    fireEvent.click(screen.getByRole("button", { name: "Priority" }))
-    fireEvent.click(screen.getByRole("button", { name: "Urgent" }))
+    selectBoth()
+    pick("Priority", "Urgent")
     expect(screen.getByRole("alertdialog")).toHaveTextContent("Set 2 issues to Urgent?")
     confirmBulk()
     await waitFor(() =>
@@ -148,7 +155,7 @@ describe("IssuesListView bulk update", () => {
         "/api/v1/issues/bulk?workspace_id=ws-1",
         expect.objectContaining({
           method: "PATCH",
-          body: JSON.stringify({ ids: ["i1", "i2"], updates: { status: "COMPLETED" } }),
+          body: JSON.stringify({ ids: ["i1", "i2"], updates: { status: "DONE" } }),
         }),
       ),
     )
@@ -186,9 +193,9 @@ describe("IssuesListView bulk update", () => {
     // 3. The selection survives — retrying is one click, not a re-selection.
     expect(screen.getByText("2 selected")).toBeTruthy()
 
-    // 4. …and the dropdown that fired the request is closed, so the bar is
+    // 4. …and the menu that fired the request is closed, so the bar is
     //    not covering its own error message.
-    expect(screen.queryByRole("button", { name: "Done" })).toBeNull()
+    expect(screen.queryByRole("menuitem", { name: "Done" })).toBeNull()
   })
 
   it("keeps the selection when the request never reaches the server", async () => {
@@ -235,8 +242,8 @@ describe("IssuesListView bulk update", () => {
     bulkSetDone()
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy())
 
-    fireEvent.click(screen.getAllByRole("checkbox")[0]) // deselect all
-    fireEvent.click(screen.getAllByRole("checkbox")[0]) // and select all again
+    fireEvent.click(screen.getAllByRole("checkbox")[0]) // deselect one
+    fireEvent.click(screen.getByRole("button", { name: "Select all 2" })) // and select all again
 
     expect(screen.getByText("2 selected")).toBeTruthy()
     expect(screen.queryByRole("alert")).toBeNull()
@@ -250,8 +257,7 @@ describe("IssuesListView bulk update", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy())
 
     apiFetch.mockResolvedValueOnce(json(200, { updated: 2 }))
-    fireEvent.click(screen.getByRole("button", { name: "Status" }))
-    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    pick("Status", "Done")
     confirmBulk()
 
     await waitFor(() => expect(screen.queryByText("2 selected")).toBeNull())
@@ -260,13 +266,50 @@ describe("IssuesListView bulk update", () => {
 })
 
 it("shows the human currently doing the work in list view", () => {
-  const { container } = render(<IssuesListView issues={[{ ...issue("held", 1), assignee_id: "agent", assignee_name: "Jordan", work_mode: "human", worker_name: "Petra", worker_user_id: "person" }]} onIssueClick={() => {}} />)
-  // Scoped to the table: the same rows also render as cards below the
-  // container's `md`, so a document-wide query now matches twice. Who is doing
-  // the work is what this pins, and it must hold in the form under test.
-  const table = within(container.querySelector("table")!)
-  expect(table.getByText("Petra")).toBeInTheDocument()
-  expect(table.queryByText("Jordan")).not.toBeInTheDocument()
-  // and nowhere else either — the card form must not disagree about it
-  expect(screen.queryByText("Jordan")).not.toBeInTheDocument()
+  render(<IssuesListView issues={[{ ...issue("held", 1), assignee_id: "agent", assignee_name: "Jordan", work_mode: "human", worker_name: "Petra", worker_user_id: "person" }]} onIssueClick={() => {}} />)
+  expect(screen.getByTitle("Petra holds the work")).toBeInTheDocument()
+  expect(screen.queryByTitle(/Jordan/)).not.toBeInTheDocument()
+})
+
+it("keeps the selection and says so when the server changed only some of them", async () => {
+  cleanup()
+  apiFetch.mockReset()
+  toastError.mockReset()
+  apiFetch.mockResolvedValue(json(200, { updated: 1 }))
+  const applied = vi.fn()
+  render(<IssuesListView issues={issues} onIssueClick={vi.fn()} workspaceId="ws-1" onBulkApplied={applied} />)
+  bulkSetDone()
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("1 of 2 issues were not changed"))
+  expect(screen.getByText("2 selected")).toBeTruthy()
+  // What did change is refreshed.
+  expect(applied).toHaveBeenCalled()
+})
+
+describe("IssuesListView groups", () => {
+  beforeEach(() => cleanup())
+
+  it("puts the work in motion first and counts each group", () => {
+    const rows = [
+      { ...issue("a", 1), status: "BACKLOG" as const },
+      { ...issue("b", 2), status: "IN_PROGRESS" as const },
+      { ...issue("c", 3), status: "IN_PROGRESS" as const },
+    ]
+    render(<IssuesListView issues={rows} onIssueClick={() => {}} />)
+    const groups = screen.getAllByRole("region")
+    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual(["In progress: 2 issues", "Backlog: 1 issue"])
+  })
+
+  it("a group's + opens New issue with that group's status", () => {
+    const onCreate = vi.fn()
+    render(<IssuesListView issues={issues} onIssueClick={() => {}} onCreate={onCreate} />)
+    fireEvent.click(screen.getByRole("button", { name: "New issue in Todo" }))
+    expect(onCreate).toHaveBeenCalledWith("TODO")
+  })
+
+  it("a row opens the issue", () => {
+    const onOpen = vi.fn()
+    render(<IssuesListView issues={issues} onIssueClick={onOpen} />)
+    fireEvent.click(screen.getByText("Issue 2"))
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "i2" }))
+  })
 })

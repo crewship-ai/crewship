@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
+import { vi, beforeEach } from "vitest"
+
+const apiFetch = vi.fn()
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a) }))
+const toastError = vi.fn()
+vi.mock("@/lib/toast", () => ({ toast: { error: (...a: unknown[]) => toastError(...a), success: vi.fn() } }))
 
 import { BOARD_COLUMN_CAP, IssuesBoardView, boardColumnTemplate, foldColumns } from "@/components/features/issues/issues-board-view"
 import type { Mission, MissionStatus } from "@/lib/types/mission"
@@ -62,19 +68,74 @@ describe("IssuesBoardView", () => {
     expect(container.querySelector(".w-\\[280px\\]")).toBeNull()
   })
 
-  it("keeps an empty column to one line instead of a dashed box", () => {
+  it("shows the six columns, an empty one as a drop target", () => {
     render(<IssuesBoardView issues={[issue(1, "TODO")]} onIssueClick={() => {}} />)
+    expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"))).toEqual(["Backlog", "Todo", "In progress", "In review", "Done", "Failed"])
     const done = screen.getByRole("region", { name: "Done" })
     expect(done).toHaveAttribute("data-empty", "true")
-    expect(within(done).getByText("Nothing here")).toBeInTheDocument()
-    expect(done.querySelector(".border-dashed")).toBeNull()
+    expect(within(done).getByText("Drop issues here")).toBeInTheDocument()
     expect(screen.getByRole("region", { name: "Todo" })).toHaveAttribute("data-empty", "false")
   })
 
-  it("names the CLI action when there are no issues at all", () => {
-    render(<IssuesBoardView issues={[]} onIssueClick={() => {}} onCreateClick={() => {}} />)
-    expect(screen.getByText(/crewship issue create/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /new issue/i })).toBeInTheDocument()
+  it("puts DONE issues (and the retired COMPLETED) in Done, Planning in Todo", () => {
+    render(<IssuesBoardView issues={[issue(1, "DONE"), issue(2, "COMPLETED"), issue(3, "PLANNING")]} onIssueClick={() => {}} />)
+    expect(within(screen.getByRole("region", { name: "Done" })).getAllByRole("button", { name: /^Issue / })).toHaveLength(2)
+    expect(within(screen.getByRole("region", { name: "Todo" })).getAllByRole("button", { name: /^Issue / })).toHaveLength(1)
+  })
+
+  it("a column's + opens New issue with its status", () => {
+    const create = vi.fn()
+    render(<IssuesBoardView issues={[]} onIssueClick={() => {}} onCreateClick={create} />)
+    fireEvent.click(screen.getByRole("button", { name: "New issue in In review" }))
+    expect(create).toHaveBeenCalledWith("REVIEW")
+  })
+})
+
+describe("IssuesBoardView drag and drop", () => {
+  beforeEach(() => {
+    apiFetch.mockReset()
+    toastError.mockReset()
+  })
+  const card = { ...issue(1, "TODO"), crew_id: "c1" } as Mission
+  const drop = (status: string) => {
+    const data = new Map<string, string>()
+    const dataTransfer = { setData: (k: string, v: string) => data.set(k, v), getData: (k: string) => data.get(k) ?? "", effectAllowed: "" }
+    fireEvent.dragStart(screen.getByRole("button", { name: /^Issue ENG-1/ }), { dataTransfer })
+    fireEvent.drop(screen.getByRole("region", { name: status }), { dataTransfer })
+  }
+
+  it("a drop PATCHes the issue's status", async () => {
+    apiFetch.mockResolvedValue(new Response("{}", { status: 200 }))
+    const moved = vi.fn()
+    render(<IssuesBoardView issues={[card]} onIssueClick={() => {}} workspaceId="ws" onMoved={moved} />)
+    drop("In progress")
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/v1/crews/c1/issues/ENG-1?workspace_id=ws",
+        expect.objectContaining({ method: "PATCH", body: JSON.stringify({ status: "IN_PROGRESS" }) }),
+      ),
+    )
+    await waitFor(() => expect(moved).toHaveBeenCalled())
+  })
+
+  it("a drop on Done asks first, as the issue page does", async () => {
+    apiFetch.mockResolvedValue(new Response("{}", { status: 200 }))
+    render(<IssuesBoardView issues={[card]} onIssueClick={() => {}} workspaceId="ws" />)
+    drop("Done")
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Move ENG-1 to Done?")
+    expect(apiFetch).not.toHaveBeenCalled()
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Move to Done" }))
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled())
+  })
+
+  it("a refused move leaves the card and says why", async () => {
+    apiFetch.mockResolvedValue(new Response(JSON.stringify({ detail: "2 sub-issues are still open" }), { status: 409 }))
+    const moved = vi.fn()
+    render(<IssuesBoardView issues={[card]} onIssueClick={() => {}} workspaceId="ws" onMoved={moved} />)
+    drop("In progress")
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("ENG-1 stays in Todo: 2 sub-issues are still open"))
+    expect(moved).not.toHaveBeenCalled()
+    expect(within(screen.getByRole("region", { name: "Todo" })).getByRole("button", { name: /^Issue ENG-1/ })).toBeInTheDocument()
   })
 })
 
@@ -83,7 +144,7 @@ describe("IssuesBoardView", () => {
 // that was mostly "No issues".
 describe("boardColumnTemplate", () => {
   it.each([
-    [[3, 1, 0, 0, 0], "minmax(0,1fr) minmax(0,1fr) minmax(0,9rem) minmax(0,9rem) minmax(0,9rem)"],
+    [[3, 1, 0, 0, 0, 0], "minmax(0,1fr) minmax(0,1fr) minmax(0,9rem) minmax(0,9rem) minmax(0,9rem) minmax(0,9rem)"],
     [[1, 1, 1, 1, 1], "repeat(5,minmax(0,1fr))"],
     [[0, 0, 0, 0, 2], "minmax(0,9rem) minmax(0,9rem) minmax(0,9rem) minmax(0,9rem) minmax(0,1fr)"],
     [[0, 0, 0, 0, 0], "repeat(5,minmax(0,1fr))"],
