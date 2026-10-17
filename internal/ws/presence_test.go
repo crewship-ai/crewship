@@ -30,6 +30,9 @@ func TestPresenceValidationAndIdentityCannotBeSpoofed(t *testing.T) {
 func TestPresenceContentAuthorizationAndRevocation(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO users(id) VALUES ('reader')`); err != nil {
+		t.Fatal(err)
+	}
 	auth := NewDBChannelAuthorizer(db)
 	if ok, _ := auth.CanSubscribe(t.Context(), "reader", "artifact:allowed"); ok {
 		t.Fatal("missing content resolver allowed room")
@@ -150,6 +153,9 @@ func TestPresenceResolverSurvivesBothStartupConstructionOrders(t *testing.T) {
 		t.Run(fmt.Sprint(routerFirst), func(t *testing.T) {
 			db := openTestDB(t)
 			defer db.Close()
+			if _, err := db.Exec(`INSERT INTO users(id) VALUES ('human')`); err != nil {
+				t.Fatal(err)
+			}
 			h := NewHub(testLogger(), nil, NopValidatorForTests, NopSessionsForTests)
 			a := NewDBChannelAuthorizer(db)
 			resolver := func(_ context.Context, user, kind, id string) (bool, error) {
