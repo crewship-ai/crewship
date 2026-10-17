@@ -7,9 +7,14 @@ package api
 
 import (
 	"context"
+	"time"
+
+	dockerclient "github.com/moby/moby/client"
+
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
@@ -22,10 +27,15 @@ import (
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/ws"
-	dockerclient "github.com/moby/moby/client"
 )
 
 type RouterOption func(*Router)
+
+// WithDocumentAuthority enables only the private persistence socket, never a
+// public document editor or API. Empty paths leave the foundation disabled.
+func WithDocumentAuthority(socket, secretFile string) RouterOption {
+	return func(r *Router) { r.documentsSocket = socket; r.documentsSecretFile = secretFile }
+}
 
 // WithSocketPath sets the Unix socket path used for IPC with the sidecar.
 func WithSocketPath(path string) RouterOption {
@@ -481,4 +491,11 @@ func WithTranscriptLock(lock func(context.Context) (func(), error)) RouterOption
 // WithTranscriptLock remains the restore fence and create compatibility fallback.
 func WithTranscriptSnapshotLock(lock func(context.Context) (func(), error)) RouterOption {
 	return func(r *Router) { r.transcriptSnapshotLock = lock }
+}
+
+// WithDocumentLimits configures workspace capacity and temporary operation admission.
+func WithDocumentLimits(c config.DocumentsConfig) RouterOption {
+	return func(r *Router) {
+		r.documentStoreOptions = documents.Options{MaxDocuments: c.MaxDocumentsPerWorkspace, MaxCommits: c.MaxOperationsPerWindow, ReceiptWindow: time.Duration(c.OperationWindowSeconds) * time.Second}
+	}
 }

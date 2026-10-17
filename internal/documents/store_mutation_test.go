@@ -119,11 +119,11 @@ func TestLeaseExpiryAndUnknownSchema(t *testing.T) {
 	if _, e := s.Commit(ctx, key, commit(old, "expired", 0), allow); !errors.Is(e, ErrFence) {
 		t.Fatal(e)
 	}
-	if _, e := db.Exec("UPDATE documents SET schema_version=2,writer='',lease_until=0 WHERE workspace_id=? AND page_id=?", key.WorkspaceID, key.PageID); e != nil {
+	if _, e := db.Exec("UPDATE documents SET schema_version=?,writer='',lease_until=0 WHERE workspace_id=? AND page_id=?", LatestSchema+1, key.WorkspaceID, key.PageID); e != nil {
 		t.Fatal(e)
 	}
 	v, e := s.Read(ctx, key, allow)
-	if e != nil || v.Schema != 2 || string(v.Snapshot) != "baseline" {
+	if e != nil || v.Schema != LatestSchema+1 || string(v.Snapshot) != "baseline" {
 		t.Fatal(v, e)
 	}
 	if _, e := s.Acquire(ctx, key, "future-reader", allow); !errors.Is(e, ErrSchema) {

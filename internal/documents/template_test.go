@@ -246,7 +246,7 @@ func TestDocumentsFixtureMatchesFreshMigrationAndReopens(t *testing.T) {
 	}
 }
 
-func TestDocumentsFixtureIsolatesRowsReceiptsAndWriters(t *testing.T) {
+func TestDocumentsFixtureIsolatesRowsReceiptsAndEngineBoot(t *testing.T) {
 	a, dbA, pathA := fixture(t, Options{})
 	b, dbB, pathB := fixture(t, Options{})
 	if pathA == pathB {
@@ -256,6 +256,19 @@ func TestDocumentsFixtureIsolatesRowsReceiptsAndWriters(t *testing.T) {
 	if leaseA.Writer == leaseB.Writer {
 		t.Fatal("fixture copied a live writer identity")
 	}
+	if err := a.RecoverEngine(ctx, "synthetic-template-first-boot"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Renew(ctx, key, leaseA, allow); !errors.Is(err, ErrFence) {
+		t.Fatalf("own previous writer survived boot replacement: %v", err)
+	}
+	if _, err := b.Renew(ctx, key, leaseB, allow); err != nil {
+		t.Fatalf("another fixture's boot fenced this writer: %v", err)
+	}
+	var boot string
+	if err := dbB.QueryRow(`SELECT boot_id FROM document_writer_fence WHERE id=1`).Scan(&boot); err != nil || boot != "" {
+		t.Fatalf("boot leaked to another fixture: %q %v", boot, err)
+	}
 	if _, err := dbA.Exec(`UPDATE users SET email='copy-a@example.test' WHERE id='document-owner'`); err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +276,7 @@ func TestDocumentsFixtureIsolatesRowsReceiptsAndWriters(t *testing.T) {
 	if err := dbB.QueryRow(`SELECT email FROM users WHERE id='document-owner'`).Scan(&email); err != nil || email != "document-owner@example.test" {
 		t.Fatalf("user rows not isolated: %q %v", email, err)
 	}
-	if _, err := a.Commit(ctx, key, commit(leaseA, "fixture-copy-mutation", 0), allow); err != nil {
+	if _, err := a.Commit(ctx, key, commit(acquire(t, a), "fixture-copy-mutation", 0), allow); err != nil {
 		t.Fatal(err)
 	}
 	state, err := b.Read(ctx, key, allow)
@@ -321,8 +334,10 @@ func TestDocumentsTemplateSnapshotIsReadOnlyAndCopiesAreExclusive(t *testing.T) 
 	if err := copied.QueryRow(`SELECT boot_id,seq FROM document_writer_fence WHERE id=1`).Scan(&boot, &seq); err != nil || boot != "" || seq != 0 {
 		t.Fatalf("template contains engine boot/fence state: boot=%q seq=%d %v", boot, seq, err)
 	}
-	// Initialization writes only the live fixture copy at this storage stage.
-	fixture(t, Options{})
+	store, _, _ := fixture(t, Options{})
+	if err := store.RecoverEngine(ctx, "synthetic-template-owned-boot"); err != nil {
+		t.Fatal(err)
+	}
 	after, err := os.ReadFile(src)
 	if err != nil {
 		t.Fatal(err)
