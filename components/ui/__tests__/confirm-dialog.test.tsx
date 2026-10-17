@@ -76,7 +76,7 @@ describe("ConfirmDialog destructive", () => {
     function WithReason() {
       const [reason, setReason] = React.useState("")
       return (
-        <ConfirmDialog open onOpenChange={() => {}} title="Reject?" confirmLabel="Reject" onConfirm={() => seen.push(reason)}>
+        <ConfirmDialog open onOpenChange={() => {}} title="Reject?" confirmLabel="Reject" onConfirm={() => { seen.push(reason) }}>
           <label>Reason<input aria-label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} /></label>
         </ConfirmDialog>
       )
