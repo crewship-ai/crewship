@@ -94,12 +94,9 @@ func (s *Store) Commit(ctx context.Context, k Key, c Commit, a Authorize) (r Rec
 		if err = hashes(v.Projection, c.IfHashes); err != nil {
 			return err
 		}
-		var count, logCount, logBytes int
-		if err = t.QueryRowContext(ctx, "SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&count); err != nil {
+		var logCount, logBytes int
+		if err = s.admitNewReceipt(ctx, t, k); err != nil {
 			return err
-		}
-		if count >= s.opts.MaxCommits {
-			return ErrQuota
 		}
 		if err = t.QueryRowContext(ctx, "SELECT count(*),coalesce(sum(length(payload)),0) FROM document_updates WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&logCount, &logBytes); err != nil {
 			return err
