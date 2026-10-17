@@ -181,6 +181,9 @@ func scopeForRoute(pattern string) string {
 		// would make it mean something.
 		return "workspace:admin"
 	case "chats":
+		if has("document-results") {
+			return "pages:read"
+		}
 		// Source proposals and decisions keep their canonical mutation scope.
 		// Their handlers enforce live source authority and replay eligibility.
 		if has("proposals") {

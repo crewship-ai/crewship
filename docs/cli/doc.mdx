@@ -92,3 +92,13 @@ You remain the document's owner. This request does not grant the run permission
 to edit another Page or to keep accessing the document after creation. For an
 uncertain tool confirmation, retry the original input and mutation ID; sending
 a new chat message is a separate request.
+
+## `crewship doc chat-results <chat-id>`
+
+List saved documents linked to an accessible chat. This command requires your
+current human credential, `pages:read` for scoped CLI tokens, access to the chat
+and access to each document. Unavailable documents are omitted. Results contain
+saved links and provenance, without document contents or transcript text.
+
+A completed or recovered run does not erase its saved result. The command
+rechecks your current access; the original run does not regain permission.

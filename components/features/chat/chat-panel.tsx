@@ -65,6 +65,8 @@ import type { SlashActionSchema as ServerSlashCommand } from "@/hooks/use-slash-
 import { type CrewMember } from "./composer/mention-autocomplete"
 import { ChatComposer } from "./composer/chat-composer"
 import { RunPreflight } from "./run-preflight"
+import { DocumentResultCards } from "./document-result-cards"
+import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
@@ -319,6 +321,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   const session = useSession()
   const currentUserId = session.data?.user?.id ?? null
+  const documentsAvailability = useDocumentsAvailability(currentUserId ? workspaceId ?? "" : "")
   const artifactScope = JSON.stringify([currentUserId, workspaceId, agentId, sessionId])
   const artifactContextNonce = useRef(0)
   const [artifactContext, setArtifactContext] = useState<{ id: number; text: string; scope: string } | null>(null)
@@ -1188,6 +1191,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   // One conversation surface, rendered by both the mobile-chat and desktop
   // branches — the two copies had already drifted once; don't re-fork them.
+  const documentResultCards = currentUserId && workspaceId && sessionId && documentsAvailability.data === true
+    ? <DocumentResultCards key={chatReadScope} workspaceId={workspaceId} chatId={sessionId} currentUserId={currentUserId} isStreaming={isStreaming} documentsEnabled />
+    : null
   const conversationEl = useVirtualChat ? (
     <VirtualConversation
       turns={turns}
@@ -1206,7 +1212,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       onEditUserMessage={canChat && !isStreaming ? editAndResendWithPin : undefined}
       resolveAuthorName={resolveAuthorName}
       resolveAskProvenance={resolveAskProvenance}
-      footer={<>{entityStatus}<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} /></>}
+      footer={<>{entityStatus}{documentResultCards}<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} /></>}
     />
   ) : (
     <Conversation>
@@ -1259,6 +1265,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           ))}
         </AnimatePresence>
         {entityStatus}
+        {documentResultCards}
         <StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />
         <PinToTopSpacer pinNonce={pinNonce} pinTurnId={lastUserTurnId} sessionId={sessionId} />
       </ConversationContent>
