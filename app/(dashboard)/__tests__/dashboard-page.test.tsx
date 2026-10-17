@@ -16,12 +16,16 @@ const state = vi.hoisted(() => {
     gaps: new Map<string, { crewId: string }[]>(),
     inbox: { items: [] as unknown[], loading: false, error: null as string | null, activeByKind: {} as Record<string, number>, decisionCount: 0, refresh: vi.fn() },
     schedules: [] as unknown[],
+    realtime: "connected" as "connecting" | "connected" | "disconnected" | "error" | "unavailable",
   }
 })
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => state.workspace }))
 vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => state.admin, useSessionSafe: () => state.session }))
 vi.mock("@/lib/server-base", () => ({ serverFetch: (...args: unknown[]) => state.fetch(...args) }))
-vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: (event: string, callback: () => void) => { state.events.set(event, callback) } }))
+vi.mock("@/hooks/use-realtime", () => ({
+  useRealtimeEvent: (event: string, callback: () => void) => { state.events.set(event, callback) },
+  useRealtime: () => ({ status: state.realtime, subscribe: () => () => {}, subscribeChannel: () => () => {} }),
+}))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 vi.mock("@/hooks/use-dashboard-data", () => ({
   useAgentSummaries: (...args: unknown[]) => { state.agentCalls(...args); return state.agents },
@@ -66,6 +70,7 @@ beforeEach(() => {
   state.session = { data: { user: { name: "Pavel Srba" } }, status: "authenticated" }
   state.inbox = { items: [], loading: false, error: null, activeByKind: {}, decisionCount: 0, refresh: vi.fn() }
   state.schedules = []
+  state.realtime = "connected"
   for (const key of ["agents", "crews", "review", "progress", "completed", "runs", "insights", "capacity", "spend", "volume"] as const) {
     state[key].data = undefined; state[key].isPending = false; state[key].isError = false; state[key].refetch.mockReset()
   }
@@ -321,4 +326,57 @@ it.each(["admin", "onboarding"])("redirects the %s landing without enabling dash
   expect(state.agentCalls).toHaveBeenLastCalledWith(state.workspace.workspaceId, { enabled: false })
   // Nothing of the dashboard flashes before the redirect.
   expect(view.container.querySelector('[data-testid="attention"]')).toBeNull()
+})
+
+// DSH-01 (#3483): offline = one "Reconnecting…" banner (kit OfflineBanner)
+// and the data under it dimmed and not clickable (kit StaleData), as v67
+// states.js draws the Offline state. A blip under 3 s is not offline — the
+// shell's realtime banner waits the same 3 s.
+it.each(["disconnected", "error"] as const)("offline (%s) for 3 s shows one Reconnecting banner and dims the data", async (status) => {
+  const view = render(<DashboardPage />)
+  await loaded()
+  vi.useFakeTimers({ now: new Date(2026, 9, 15, 14, 2) })
+  state.realtime = status
+  view.rerender(<DashboardPage />)
+  act(() => vi.advanceTimersByTime(2_999))
+  expect(view.container.querySelector('[data-state="offline"]')).toBeNull()
+  expect(view.container.querySelector(".page-stale")).toBeNull()
+  act(() => vi.advanceTimersByTime(1))
+  const banners = view.container.querySelectorAll('[data-state="offline"]')
+  expect(banners).toHaveLength(1)
+  expect(banners[0]).toHaveTextContent("Reconnecting… Live updates are paused. You see data from 14:02.")
+  const stale = view.container.querySelector(".page-stale")!
+  expect(stale).not.toBeNull()
+  expect(stale).toHaveAttribute("inert")
+  // The whole data state is under it: head, attention, results, cards.
+  for (const id of ["dashboard-greeting", "attention", "fleet"]) expect(stale.contains(screen.getByTestId(id))).toBe(true)
+  expect(stale.contains(screen.getByRole("button", { name: "Retry results", hidden: true }))).toBe(true)
+  expect(stale.contains(screen.getByText("Workspace pages"))).toBe(true)
+  // The banner itself is not dimmed.
+  expect(stale.contains(banners[0])).toBe(false)
+})
+
+it("Retry now reads the dashboard again; reconnecting lifts the dimming", async () => {
+  const view = render(<DashboardPage />)
+  await loaded()
+  vi.useFakeTimers()
+  state.realtime = "disconnected"
+  view.rerender(<DashboardPage />)
+  act(() => vi.advanceTimersByTime(3_000))
+  fireEvent.click(screen.getByRole("button", { name: "Retry now" }))
+  expect(state.invalidateA).toHaveBeenCalledTimes(1)
+  state.realtime = "connected"
+  view.rerender(<DashboardPage />)
+  expect(view.container.querySelector('[data-state="offline"]')).toBeNull()
+  expect(view.container.querySelector(".page-stale")).toBeNull()
+})
+
+it.each(["connecting", "unavailable"] as const)("%s realtime never dims the dashboard", async (status) => {
+  state.realtime = status
+  const view = render(<DashboardPage />)
+  await loaded()
+  vi.useFakeTimers()
+  act(() => vi.advanceTimersByTime(10_000))
+  expect(view.container.querySelector('[data-state="offline"]')).toBeNull()
+  expect(view.container.querySelector(".page-stale")).toBeNull()
 })
