@@ -323,6 +323,22 @@ describe("ActivityStreamView", () => {
     expect(window.location.search).toBe("?entry=e1")
   })
 
+  // ACT-01: while the journal loads, the address keeps ?entry=. Writing the
+  // filters-only address first left a Back (the Peek's overlay entry, or the
+  // user) landing on /activity, which dropped the link before it resolved.
+  it("?entry=<id> stays in the address while the journal is still loading", async () => {
+    let state = listState({ entries: [], loading: true })
+    mock.list.mockImplementation(() => state)
+    window.history.replaceState(null, "", "/activity?entry=e1")
+    const { rerender } = show()
+    await act(async () => {})
+    expect(window.location.search).toBe("?entry=e1")
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")) })
+    state = listState({ entries: [change], loading: false })
+    rerender(<ActivityStreamView workspaceId="ws" />)
+    expect(await screen.findByTestId("activity-peek-change")).toHaveTextContent("In progress")
+  })
+
   it("keys 1–4 switch views and the view is written to the URL", async () => {
     show()
     await screen.findByTestId("activity-summary")
