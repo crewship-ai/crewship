@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronRight, CheckCircle2, XCircle, AlertTriangle, HelpCircle, Eye, Play, Square } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Spinner } from "@/components/ui/spinner"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
 import { usePipelineRunRecords, isActiveRunStatus, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"

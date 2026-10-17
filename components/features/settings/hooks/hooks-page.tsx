@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useReducedMotion } from "motion/react"
 import { useSearchParams } from "next/navigation"
 import { ArrowRight, Bot, Globe, List, Map as MapIcon, Pencil, Plus, Search, Settings as SettingsIcon, ShieldAlert, Terminal, Trash2, Webhook, X } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { FileText, KeyRound, Palette, Sparkles } from "lucide-react"
 
 import {

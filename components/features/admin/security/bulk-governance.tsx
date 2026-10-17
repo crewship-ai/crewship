@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { AlertTriangle } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"

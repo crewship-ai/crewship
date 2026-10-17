@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Check, Cpu, Users, HardDrive, Package, Boxes, Network } from "lucide-react"
 
 import {

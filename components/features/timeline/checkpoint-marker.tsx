@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Flag, GitBranch, MoreHorizontal, RotateCcw } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { Eye, Palette, Plus, RotateCcw } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { SettingsCard, controlHeight } from "@/components/features/settings/shared"
 import { Input } from "@/components/ui/input"

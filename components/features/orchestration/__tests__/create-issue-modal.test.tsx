@@ -210,7 +210,7 @@ describe("CreateIssueModal", () => {
     fireEvent.click(screen.getByText("Create issue"))
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Server error")
+      expect(toast.error).toHaveBeenCalledWith("Server error", { duration: Infinity })
     })
   })
 
@@ -361,7 +361,7 @@ describe("CreateIssueModal", () => {
     fireEvent.click(screen.getByText("Create issue"))
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Title is already taken")
+      expect(toast.error).toHaveBeenCalledWith("Title is already taken", { duration: Infinity })
     })
 
     const alert = await screen.findByRole("alert")

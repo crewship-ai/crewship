@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Files, Pencil, Settings2 } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { Button } from "@/components/ui/button"

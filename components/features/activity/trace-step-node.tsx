@@ -24,7 +24,7 @@ import {
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import type {
   StepKind,
   StepStatus,

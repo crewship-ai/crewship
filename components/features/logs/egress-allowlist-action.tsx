@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react"
 import { ShieldCheck, ShieldX } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAbilities } from "@/hooks/use-abilities"
 import type { JournalEntry } from "@/lib/types/journal"

@@ -1144,7 +1144,7 @@ describe("deleting the credential", () => {
     )
     await clickDelete()
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Couldn't delete")))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Couldn't delete"), { duration: Infinity }))
     expect(onRefresh).not.toHaveBeenCalled()
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
   })

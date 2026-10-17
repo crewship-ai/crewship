@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { KeyRound, Users } from "lucide-react"
 
 import { AgentAvatar } from "@/components/ui/agent-avatar"

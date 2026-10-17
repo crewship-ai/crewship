@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils"
 import { isImeComposing } from "@/lib/ime"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import type { IssueLabel } from "@/lib/types/mission"
 
 interface LabelsDialogProps {

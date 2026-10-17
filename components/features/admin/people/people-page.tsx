@@ -27,7 +27,7 @@ import { PersonProfile } from "./person-profile"
 import { WorkspaceProfile } from "./workspace-profile"
 import { AddPersonDialog, NewWorkspaceDialog } from "./people-dialogs"
 import { usePeople } from "./use-people"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 /** "accounts" is the personal accounts, under People: it has no tab of its own. */
 type View = "people" | "accounts" | "workspaces" | "access"

@@ -2,7 +2,7 @@
 
 import { CalendarClock, ClipboardList, MessageSquareText, Sparkles, Webhook } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { AgentLearningToggle, type LearningDraft } from "@/components/features/agents/agent-learning-toggle"
 

@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { CheckCircle2, Hand, MessageSquare, Send, XCircle } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"

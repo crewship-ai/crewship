@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { Bell, BellOff, Check, Globe, Mail, MessageSquare, Send, VolumeX } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"

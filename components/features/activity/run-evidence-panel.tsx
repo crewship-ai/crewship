@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import Link from "next/link"
 import { Copy, FileSearch } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
 import { DetailCard } from "@/components/ui/detail"
 import { useJournalList } from "@/hooks/use-journal-list"

@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useRef } from "react"
 import { Camera } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import {
   Attachments,

@@ -76,7 +76,7 @@ describe("save feedback", () => {
     fireEvent.change(input, { target: { value: "morgan" } })
     fireEvent.blur(input)
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("slug already taken"))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("slug already taken", { duration: Infinity }))
     expect(toast.success).not.toHaveBeenCalled()
     await waitFor(() => expect(input.value).toBe("alex"))
   })

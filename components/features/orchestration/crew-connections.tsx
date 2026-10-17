@@ -19,7 +19,7 @@ import { EmptyState } from "@/components/layout/empty-state"
 import { cn } from "@/lib/utils"
 import { resolveCrewColor } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 interface Crew {
   id: string

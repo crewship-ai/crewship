@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Copy, Check, Building2, User } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAuth } from "@/hooks/use-auth"

@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { Bot, KeyRound, Plug, RefreshCw, Wrench } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { OAuthAutoConnect } from "@/components/features/integrations/oauth-auto-connect"
 import { Button } from "@/components/ui/button"

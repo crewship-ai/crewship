@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Error toasts stay until you close them.** Success and info toasts still leave after 4 s and at most three show at once; an error now waits for its close button so the message cannot vanish before it is read. Chat and Pages keep the old timing in five places until their teams switch over.
+
 - **Harbor 2 look, first step.** New light and dark palette (white content on a grey sidebar ground, corrected text greys that meet WCAG AA everywhere, opaque accent selection), Inter bundled with the app, 10 px cards and flat primary buttons. ⚠️ **Behaviour change:** a new device starts at Small text (13 px) and the System theme; devices and accounts that already have a text size or theme keep it, and Text size now reads Small / Standard / Large. On touch screens every control is at least 44 px. Appearance gains a separate `appearance.style` preference (only Harbor today) and shows **Not synced · Retry** if the server refuses a write.
 
 - **Guest CLI pairing accepts verified browser sessions.** Pairing start and poll now pass the restricted route gate only for interactive sessions. CLI bearer callers remain forbidden; redemption retains the same current Guest grants as browser CLI token creation and rejects logout, revocation or suspension.

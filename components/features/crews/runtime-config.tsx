@@ -22,7 +22,7 @@ import {
 } from "@/components/layout/create-surface"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { useCatalog } from "@/hooks/use-catalog"
 
 // ---- Types ----------------------------------------------------------------
