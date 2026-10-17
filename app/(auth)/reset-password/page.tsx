@@ -1,14 +1,13 @@
 "use client"
 
 import { Suspense, useEffect, useState, type FormEvent } from "react"
-import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
-import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
+import { ArrowLeft, KeyRound } from "lucide-react"
+import { AUTH_BUTTON, AUTH_INPUT, AuthCard, AuthLink, AuthReceipt, AuthScreen } from "@/components/branding/auth-card"
+import { CreateSurfaceField } from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { serverFetch } from "@/lib/server-base"
 
 export default function ResetPasswordPage() {
@@ -27,22 +26,25 @@ function ResetForm() {
   const [password, setPassword] = useState("")
   const [confirm, setConfirm] = useState("")
   const [error, setError] = useState<string | null>(null)
+  // A wrong value belongs under its field; `error` is the link or the server.
+  const [fieldError, setFieldError] = useState<{ field: "password" | "confirm"; message: string } | null>(null)
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
+    setFieldError(null)
     if (!token) {
       setError("Missing or invalid reset link. Request a new one from the login page.")
       return
     }
     if (password.length < 8) {
-      setError("Password must be at least 8 characters.")
+      setFieldError({ field: "password", message: "Password must be at least 8 characters." })
       return
     }
     if (password !== confirm) {
-      setError("Passwords don't match.")
+      setFieldError({ field: "confirm", message: "Passwords don't match." })
       return
     }
     setLoading(true)
@@ -76,78 +78,84 @@ function ResetForm() {
     return () => window.clearTimeout(timer)
   }, [done, router])
 
+  const passwordError = fieldError?.field === "password" ? fieldError.message : null
+  const confirmError = fieldError?.field === "confirm" ? fieldError.message : null
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <CrewshipLogoTile />
-          </div>
-          <CardTitle className="text-xl">Choose a new password</CardTitle>
-          <CardDescription>
-            Pick something strong — at least 8 characters.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {done ? (
-            <div className="space-y-4">
-              <div
-                className="rounded-md border border-success/40 bg-success/10 p-4 text-sm"
-                role="status"
-                aria-live="polite"
-              >
-                <p className="font-medium text-success">Password updated.</p>
-                <p className="mt-1 text-muted-foreground">
-                  All existing sessions have been signed out. Redirecting to sign in…
-                </p>
-              </div>
-            </div>
+    <AuthScreen>
+      <AuthCard
+        icon={KeyRound}
+        title="Choose a new password"
+        description="Pick something strong — at least 8 characters."
+        onSubmit={done ? undefined : handleSubmit}
+        refusal={done ? null : error}
+        links={
+          done ? undefined : (
+            <AuthLink href="/login" className="gap-1.5">
+              <ArrowLeft aria-hidden className="size-3.5" />
+              Back to sign in
+            </AuthLink>
+          )
+        }
+        actions={
+          done ? (
+            // The redirect still fires after 2 s; this is for whoever does not
+            // want to wait for it.
+            <Button asChild className={AUTH_BUTTON}>
+              <a href="/login">Sign in now</a>
+            </Button>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {error && (
-                <div
-                  className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
-                  role="alert"
-                  aria-live="assertive"
-                >
-                  {error}
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label htmlFor="password">New password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  autoFocus
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm">Confirm new password</Label>
-                <Input
-                  id="confirm"
-                  type="password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  required
-                />
-              </div>
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Updating..." : "Update password"}
-              </Button>
-              <Link
-                href="/login"
-                className="flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back to sign in
-              </Link>
-            </form>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+            <Button type="submit" disabled={loading} className={AUTH_BUTTON}>
+              {loading && <Spinner className="size-3.5" />}
+              {loading ? "Updating…" : "Update password"}
+            </Button>
+          )
+        }
+      >
+        {done ? (
+          <div role="status" aria-live="polite">
+            <AuthReceipt title="Password updated">
+              All existing sessions have been signed out. Taking you to sign in…
+            </AuthReceipt>
+          </div>
+        ) : (
+          <>
+            <CreateSurfaceField label="New password" htmlFor="password" error={passwordError}>
+              <Input
+                id="password"
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value)
+                  if (fieldError?.field === "password") setFieldError(null)
+                }}
+                required
+                autoFocus
+                aria-invalid={passwordError ? true : undefined}
+                aria-describedby={passwordError ? "password-error" : undefined}
+                className={AUTH_INPUT}
+              />
+            </CreateSurfaceField>
+            <CreateSurfaceField label="Confirm new password" htmlFor="confirm" error={confirmError}>
+              <Input
+                id="confirm"
+                type="password"
+                autoComplete="new-password"
+                value={confirm}
+                onChange={(e) => {
+                  setConfirm(e.target.value)
+                  if (fieldError?.field === "confirm") setFieldError(null)
+                }}
+                required
+                aria-invalid={confirmError ? true : undefined}
+                aria-describedby={confirmError ? "confirm-error" : undefined}
+                className={AUTH_INPUT}
+              />
+            </CreateSurfaceField>
+          </>
+        )}
+      </AuthCard>
+    </AuthScreen>
   )
 }

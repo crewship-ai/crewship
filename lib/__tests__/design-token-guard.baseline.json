@@ -90,9 +90,6 @@
   "components/ui/tooltip.tsx": 1
  },
  "raw-text-size": {
-  "app/(auth)/bootstrap/page.tsx": 1,
-  "app/(auth)/login/page.tsx": 1,
-  "app/(auth)/signup/page.tsx": 1,
   "app/(dashboard)/approvals/page.tsx": 8,
   "app/(dashboard)/crews/page.tsx": 1,
   "app/(dashboard)/integrations/page.tsx": 8,
@@ -104,7 +101,6 @@
   "components/admin/member-capabilities.tsx": 11,
   "components/ai-elements/attachments.tsx": 4,
   "components/ai-elements/model-selector.tsx": 1,
-  "components/branding/auth-split-shell.tsx": 1,
   "components/command-palette.tsx": 2,
   "components/features/activity-stream/activity-detail.tsx": 13,
   "components/features/activity-stream/activity-home.tsx": 11,
