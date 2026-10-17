@@ -8,11 +8,11 @@ interface DocumentChatResults { results: DocumentChatResult[] }
 export class DocumentChatResultsError extends Error { constructor(message: string, public status: number) { super(message) } }
 /** Only server-verified publication links. Never parse model text or infer a
  * result from an agent run finishing or an artifact's current head. */
-export function useDocumentChatResults(workspaceId: string, chatId: string, streaming: boolean, enabled = false) {
+export function useDocumentChatResults(workspaceId: string, chatId: string, currentUserId: string | null | undefined, streaming: boolean, enabled = false) {
   const client = useQueryClient()
-  const available = enabled === true && Boolean(workspaceId && chatId)
-  const key = ["document-chat-results", workspaceId, chatId] as const
-  const invalidate = useCallback(() => { void client.invalidateQueries({ queryKey: ["document-chat-results", workspaceId, chatId] }) }, [client, workspaceId, chatId])
+  const available = enabled === true && Boolean(workspaceId && chatId && currentUserId)
+  const key = ["document-chat-results", workspaceId, chatId, currentUserId ?? ""] as const
+  const invalidate = useCallback(() => { void client.invalidateQueries({ queryKey: ["document-chat-results", workspaceId, chatId, currentUserId ?? ""] }) }, [client, workspaceId, chatId, currentUserId])
   useRealtimeEventSafe("page.updated", invalidate)
   useRealtimeEventSafe("conversation.updated", invalidate)
   useRealtimeEventSafe("run.completed", invalidate)
