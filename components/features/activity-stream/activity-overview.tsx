@@ -436,8 +436,8 @@ export function ActivityOverview({
                 : undefined
             }
             action={
-              <a href="/journal" className="text-primary-hover hover:underline">
-                Full journal →
+              <a href="/activity?section=log" className="text-primary-hover hover:underline">
+                Full log →
               </a>
             }
           >

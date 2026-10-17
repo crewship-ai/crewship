@@ -156,8 +156,8 @@ function ScopedCrewJournal({ crewId, workspaceId }: CrewJournalProps) {
             Generate Summary
           </Button>
           <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" asChild>
-            <Link href={`/journal?crew_id=${encodeURIComponent(crewId)}`}>
-              View full journal <ExternalLink className="h-3 w-3 ml-1" />
+            <Link href={`/activity?crew=${encodeURIComponent(crewId)}`}>
+              Open in Activity <ExternalLink className="h-3 w-3 ml-1" />
             </Link>
           </Button>
         </div>

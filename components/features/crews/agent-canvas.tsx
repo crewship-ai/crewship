@@ -507,10 +507,10 @@ export function AgentCanvas({
       <div className="flex items-center gap-4 border-b border-border">
         <CanvasTabs<AgentTab> tabs={TABS} active={tab} onChange={setTab} idPrefix="agent-canvas" label="Agent sections" />
         <Link
-          href={`/journal?agent=${encodeURIComponent(agent.slug)}`}
+          href={`/activity?agent=${encodeURIComponent(agent.id)}`}
           className="ml-auto inline-flex shrink-0 items-center gap-1 pb-2 text-label text-muted-foreground transition-colors hover:text-primary"
         >
-          Journal
+          Activity
           <ArrowUpRight className="h-3 w-3" />
         </Link>
       </div>

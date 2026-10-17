@@ -105,7 +105,7 @@ export function OverviewTab({
             agentId={activityFilter === "all" ? undefined : activityFilter}
           />
         </div>
-        <Link className="text-sm text-primary-hover hover:underline" href={`/journal?crew_id=${encodeURIComponent(crewId)}`}>View all activity ↗</Link>
+        <Link className="text-sm text-primary-hover hover:underline" href={`/activity?crew=${encodeURIComponent(crewId)}`}>View all activity ↗</Link>
       </section>
       <AssignedConnected workspaceId={workspaceId} crewId={crewId} slug={crewSlug} name={crewName} />
     </div>
