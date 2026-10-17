@@ -122,6 +122,20 @@ describe("Schedules on the nested page", () => {
     await waitFor(() => expect(reload).toHaveBeenCalled())
   })
 
+  it("delete keeps dialog open on error", async () => {
+    h.apiFetch.mockImplementation(async (_u: string, init?: RequestInit) =>
+      init?.method === "DELETE" ? new Response(JSON.stringify({ error: "the plan is running" }), { status: 409 }) : new Response("{}", { status: 404 }))
+    const { reload } = show(ctxOf())
+    fireEvent.click(screen.getByRole("button", { name: "Delete…" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete plan" }))
+    await waitFor(() => expect(calls("DELETE", "/backups/plans/plan-complete")).toHaveLength(1))
+    await waitFor(() => expect(h.toast.error).toHaveBeenCalled())
+    // Refused: the person stays where they were, and nothing reloads.
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(reload).not.toHaveBeenCalled()
+  })
+
   it("marks each calendar entry with an icon and a word", () => {
     show(ctxOf())
     for (const l of ["✓ done", "✕ failed", "↻ catch-up / skipped", "○ planned", "◇ environments"]) expect(screen.getByText(l)).toBeInTheDocument()

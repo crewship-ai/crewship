@@ -18,7 +18,7 @@ vi.mock("../use-data-retention", () => ({
   putRetentionDefaults: (...a: unknown[]) => h.putDefaults(...a),
   useRetentionDefaults: () => ({ status: "ready", data: { defaults: { inbox_days: null }, configured: [] }, reload: vi.fn() }),
 }))
-import { RetentionBody } from "../data-retention"
+import { NEW_PREVIEW, NOTHING_TO_CHANGE, RetentionBody } from "../data-retention"
 import type { SectionCtx } from "../backups-console"
 
 const rows = [{ key: "inbox_days", label: "Inbox items", days: null, foreverAllowed: true }]
@@ -105,15 +105,32 @@ it("every workspace ticked previews and confirms as null, not the ids on screen"
   expect(applies()[0][3]).toBe("p-all")
 })
 
-it("a 409 says something changed and writes nothing", async () => {
+it("no-op change shows Close only: no dialog, no Apply, it says there is nothing to change", async () => {
+  h.put.mockResolvedValueOnce({ ok: true, data: { dry_run: true, preview_id: "p0", changes: [] } })
+  render(<RetentionBody rows={rows} ctx={ctx("a")} />)
+  pickInbox("30 d")
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await waitFor(() => expect(h.toast.info).toHaveBeenCalledWith(NOTHING_TO_CHANGE))
+  expect(screen.queryByRole("alertdialog")).toBeNull()
+  expect(applies()).toHaveLength(0)
+})
+
+it("409 keeps dialog: nothing is written and the dialog shows the new preview", async () => {
   render(<RetentionBody rows={rows} ctx={ctx("a")} />)
   pickInbox("30 d")
   fireEvent.click(screen.getByRole("button", { name: "Save" }))
   await screen.findByRole("alertdialog")
   h.put.mockResolvedValueOnce({ ok: false, unavailable: false, status: 409, error: "the windows or the workspaces changed since the preview" })
+  h.put.mockResolvedValueOnce(previewOf("a", "p-a2"))
   fireEvent.click(screen.getByRole("button", { name: "Apply" }))
-  expect(await screen.findByText("Something changed since the preview — review again")).toBeInTheDocument()
+  expect(await screen.findByText(NEW_PREVIEW)).toBeInTheDocument()
+  expect(screen.getByRole("alertdialog")).toBeInTheDocument()
   expect(h.toast.success).not.toHaveBeenCalled()
+  // Confirming again sends the NEW preview's id.
+  h.put.mockResolvedValueOnce({ ok: true, data: { dry_run: false, changes: [] } })
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+  await waitFor(() => expect(applies()).toHaveLength(2))
+  expect(applies()[1][3]).toBe("p-a2")
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
 })
 
@@ -125,8 +142,10 @@ it("defaults confirm the snapshot they previewed with expect_preview", async () 
   fireEvent.click(screen.getByRole("button", { name: "Save" }))
   await screen.findByRole("alertdialog")
   h.putDefaults.mockResolvedValueOnce({ ok: false, unavailable: false, status: 409, error: "the defaults changed since the preview" })
+  h.putDefaults.mockResolvedValueOnce({ ok: true, data: { applied: false, dry_run: true, preview_id: "d2", changes: [{ key: "inbox_days", from: 7, to: 30 }] } })
   fireEvent.click(screen.getByRole("button", { name: "Save defaults for new workspaces" }))
-  expect(await screen.findByText("Something changed since the preview — review again")).toBeInTheDocument()
+  expect(await screen.findByText(/This is the new preview; nothing was written/)).toBeInTheDocument()
+  expect(screen.getByRole("alertdialog")).toBeInTheDocument()
   expect(h.putDefaults.mock.calls[1]).toEqual([{ inbox_days: 30 }, false, "d1"])
   expect(h.toast.success).not.toHaveBeenCalled()
 })

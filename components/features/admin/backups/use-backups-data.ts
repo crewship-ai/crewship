@@ -144,6 +144,27 @@ export async function perform<T>(demo: boolean, fn: () => Promise<SendResult<T>>
 }
 
 /**
+ * perform() for a ConfirmDialog's onConfirm: true when it went through (the
+ * dialog closes), false in demo (nothing was sent, the dialog closes), and a
+ * rejection after the error toast when the server refused — ConfirmDialog
+ * then stays open, so the person is where they were (POP-02).
+ */
+export async function performConfirm<T>(demo: boolean, fn: () => Promise<SendResult<T>>, done: string, fallback: string): Promise<boolean> {
+  if (demo) {
+    toast.message("Demo data · nothing was sent")
+    return false
+  }
+  const r = await fn()
+  if (r.ok) {
+    if (done) toast.success(done)
+    return true
+  }
+  if (r.unavailable) toast.message(`${fallback}: not available on this server yet`)
+  else toast.error(`${fallback}: ${r.error}`)
+  throw new Error(r.unavailable ? fallback : r.error)
+}
+
+/**
  * perform() for the page's Save bar: a failure rejects, so the bar reports it
  * the one way Settings and Admin report a failed save (a corner toast that
  * stays, with Retry) and keeps the draft. Success is the bar's "Saved".

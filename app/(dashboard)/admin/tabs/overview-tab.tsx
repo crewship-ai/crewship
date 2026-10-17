@@ -2,8 +2,8 @@ import Link from "next/link"
 import React, { type CSSProperties } from "react"
 import { motion, useReducedMotion } from "motion/react"
 import {
-  Activity, AlertTriangle, Archive, BadgeCheck, Boxes, Bot, Check, ChevronRight, Container, Cpu, Database,
-  HardDrive, Info, KeyRound, Loader2, Plug, Radio, ScrollText, ShieldCheck, Sparkles, Users,
+  Activity, AlertTriangle, Archive, BadgeCheck, Boxes, Bot, CalendarDays, Check, ChevronRight, CircleDollarSign, Container, Cpu, Database,
+  HardDrive, Info, KeyRound, Loader2, Play, Plug, Radio, ScrollText, ShieldCheck, Sparkles, Users,
   type LucideIcon,
 } from "lucide-react"
 
@@ -229,96 +229,99 @@ export const OverviewTab = React.memo(function OverviewTab({
   const bad = checks.filter((c) => c.state === "bad").length
   const findings = warnings.filter((w) => w.severity === "high" || w.severity === "medium").length
 
+  const runTotal = runs ? runs.reduce((a, p) => a + p.value, 0) : null
+  const busiest = runs && runs.length ? runs.reduce((a, p) => (p.value > a.value ? p : a), runs[0]) : null
+
   return (
     <div className="space-y-4">
       <AppearStack>
-        {/* ── Identity + verdict ── */}
-        <section aria-label="Instance status" className="hero-surface overflow-hidden rounded-card" data-slot="admin-hero">
-          <div className="flex flex-wrap items-center gap-4 px-5 py-4">
-            <span className="icon-tile grid h-12 w-12 shrink-0 place-items-center rounded-xl" aria-hidden>
-              <CrewshipLogo tight className="h-6 w-auto" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-semibold tracking-[-0.02em]">Crewship</h2>
-                {license ? (
-                  <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-micro font-medium text-primary-hover">{editionLabel(license.edition)}</span>
-                ) : (
-                  <Skeleton className="h-5 w-32 rounded-full" />
-                )}
-                {version?.newer && version.latest && (
-                  <a href={version.url ?? undefined} target="_blank" rel="noopener noreferrer" className="rounded-full border border-info/40 bg-info/10 px-2 py-0.5 font-mono text-micro text-info">
-                    {version.latest} available
-                  </a>
-                )}
-              </div>
-              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-micro text-muted-foreground [&>span]:whitespace-nowrap">
-                {version ? (
-                  <>
-                    <span className="text-foreground/85">{version.current}</span>
-                    {version.commit && <span title={version.commit}>· {version.commit.slice(0, 9)}{version.dirty ? "+dirty" : ""}</span>}
-                    {version.build_time && <span>· built {new Date(version.build_time).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</span>}
-                    {version.os && <span>· {version.os}/{version.arch}</span>}
-                    {version.go_version && <span className="hidden sm:inline">· {version.go_version}</span>}
-                  </>
-                ) : (
-                  <Skeleton className="h-3.5 w-64" />
-                )}
-              </p>
-            </div>
-            <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:flex-col sm:items-end sm:gap-1">
-              {health === null || posture === null ? (
-                <Skeleton className="h-6 w-36 rounded-full" />
-              ) : bad > 0 ? (
-                <StatusPill tone="danger" label={`${bad} check${bad === 1 ? "" : "s"} failing`} />
-              ) : findings > 0 ? (
-                <StatusPill tone="warn" label={`${findings} finding${findings === 1 ? "" : "s"} to review`} />
+        {/* ── Identity + verdict (Harbor 2 status): the logo, the build, and
+            the one-line verdict on the right. */}
+        <section aria-label="Instance status" className="flex flex-wrap items-center gap-3" data-slot="admin-hero">
+          <span className="icon-tile grid h-12 w-12 shrink-0 place-items-center rounded-xl" aria-hidden>
+            <CrewshipLogo tight className="h-6 w-auto" />
+          </span>
+          <div className="min-w-0 flex-[1_1_16rem]">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-title font-semibold leading-tight tracking-tight">
+                Crewship {version ? <span className="font-mono">{version.current}</span> : null}
+              </h2>
+              {license ? (
+                <StatusPill tone="blue" label={editionLabel(license.edition)} />
               ) : (
-                <StatusPill tone="success" label="All systems healthy" />
+                <Skeleton className="h-5 w-32 rounded-full" />
               )}
-              <span className="font-mono text-micro text-muted-foreground">{health ? `up ${formatUptime(health.uptime_seconds)}` : ""}</span>
+              {version?.newer && version.latest && (
+                <a href={version.url ?? undefined} target="_blank" rel="noopener noreferrer" className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+                  <StatusPill tone="blue" label={`${version.latest} available`} />
+                </a>
+              )}
             </div>
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-label text-muted-foreground [&>span]:whitespace-nowrap">
+              {version ? (
+                <>
+                  {version.commit && <span title={version.commit}>{version.commit.slice(0, 9)}{version.dirty ? "+dirty" : ""}</span>}
+                  {version.build_time && <span>· built {new Date(version.build_time).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</span>}
+                  {version.os && <span>· {version.os}/{version.arch}</span>}
+                  {version.go_version && <span className="hidden sm:inline">· {version.go_version}</span>}
+                </>
+              ) : (
+                <Skeleton className="h-3.5 w-64" />
+              )}
+            </p>
           </div>
-          <ul className="grid grid-cols-2 border-t border-border sm:grid-cols-3 lg:grid-cols-6" aria-label="Health checks">
-            {checks.map((c) => (
-              <li key={c.key} data-check={c.key} data-state={c.state}
-                className="flex min-w-0 items-center gap-2 border-b border-r border-border/60 px-4 py-2.5 lg:border-b-0 [&:nth-child(6)]:border-r-0">
-                <c.icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-label font-medium">{c.label}</span>
-                  <span className={cn("flex items-center gap-1.5 truncate text-label", c.state === "bad" ? "text-destructive" : c.state === "warn" ? "text-warn" : "text-muted-foreground")}>
-                    {c.state === "pending" ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <StatusDot status={STATE_DOT[c.state]} />}
-                    <span className="truncate">{c.detail}</span>
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="flex items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
+            {health === null || posture === null ? (
+              <Skeleton className="h-6 w-36 rounded-full" />
+            ) : bad > 0 ? (
+              <StatusPill tone="danger" label={`${bad} check${bad === 1 ? "" : "s"} failing`} />
+            ) : findings > 0 ? (
+              <StatusPill tone="warn" label={`${findings} finding${findings === 1 ? "" : "s"} to review`} />
+            ) : (
+              <StatusPill tone="success" label="All systems healthy" />
+            )}
+            <span className="font-mono text-micro text-muted-foreground">{health ? `up ${formatUptime(health.uptime_seconds)}` : ""}</span>
+          </div>
         </section>
 
-        {/* ── Capacity against the licence ── */}
-        <section aria-label="Capacity" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Meter icon={Boxes} tint="var(--primary)" label="Crews" used={stats?.crews} limit={license?.max_crews} testId="admin-capacity-crews"
+        {/* ── Six checks, each its own tile: icon, name, a dot and one line. */}
+        <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6" aria-label="Health checks">
+          {checks.map((c) => (
+            <li key={c.key} data-check={c.key} data-state={c.state}
+              className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-0.5 rounded-card border border-border bg-card px-3 py-2.5">
+              <span className="row-span-2 grid size-[var(--control-md)] place-items-center rounded-lg bg-surface-subtle text-muted-foreground" aria-hidden>
+                <c.icon className="h-4 w-4" />
+              </span>
+              <b className="truncate text-control font-semibold">{c.label}</b>
+              {c.state === "pending" ? <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" aria-hidden /> : <StatusDot status={STATE_DOT[c.state]} />}
+              <span className={cn("col-span-2 truncate text-label", c.state === "bad" ? "text-destructive" : c.state === "warn" ? "text-warn" : "text-muted-foreground")}>
+                {c.detail}
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        {/* ── Capacity against the licence: four figures in one strip. */}
+        <section aria-label="Capacity" className="grid grid-cols-2 overflow-hidden rounded-card border border-border bg-card lg:grid-cols-4">
+          <Kpi icon={Boxes} label="Crews" used={stats?.crews} limit={license?.max_crews} testId="admin-capacity-crews"
             note={overLimit(stats?.crews ?? 0, license?.max_crews) ? "Over the licensed limit — new crews are refused" : undefined} />
-          <Meter icon={Users} tint="var(--purple)" label="Members" used={stats?.users} limit={license?.max_members}
+          <Kpi icon={Users} label="Members" used={stats?.users} limit={license?.max_members}
             note={overLimit(stats?.users ?? 0, license?.max_members) ? "Over the licensed seats — invitations are refused" : undefined} />
-          <Meter icon={Bot} tint="var(--info)" label="Agents" used={stats?.agents}
-            note={agents ? `${agents.running} running · ${agents.queued} queued${agents.error ? ` · ${agents.error} in error` : ""}` : license?.max_agents_per_crew ? `Up to ${license.max_agents_per_crew} per crew` : undefined}
+          <Kpi icon={Bot} label="Agents" used={stats?.agents}
+            note={agents ? `${agents.running} running · ${agents.queued} queued${agents.error ? ` · ${agents.error} in error` : ""}` : license?.max_agents_per_crew ? `≤ ${license.max_agents_per_crew} per crew` : undefined}
             tone={agents?.error ? "bad" : undefined} />
-          <Meter icon={Activity} tint="var(--success)" label="Running now" used={stats?.running} tone={stats && stats.running > 0 ? "live" : undefined}
-            note={runs ? `${runs.reduce((s, p) => s + p.value, 0)} runs in 7 days` : undefined} />
+          <Kpi icon={Activity} label="Running now" used={stats?.running} tone={stats && stats.running > 0 ? "live" : undefined} />
         </section>
 
-        <div className="grid items-stretch gap-4 lg:grid-cols-5">
-          {/* ── Needs attention ── First among the cards and present even
-              when empty: an absent block reads as "not checked", an explicit
-              all-clear is a different claim. It appears when the posture was
-              READ, not when it was bad. Findings are one line each (the
-              message's first sentence) and open for the rest; a long list
-              scrolls inside the card instead of stretching the page. */}
-          <div className="flex min-w-0 lg:col-span-3">
+        {/* ── The cards, three to a row on a wide screen. */}
+        <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3" data-slot="admin-dash-grid">
+          {/* Needs attention: first and present even when empty — an absent
+              block reads as "not checked", an explicit all-clear is a
+              different claim. It appears when the posture was READ, not when
+              it was bad. Findings are one line each and open for the rest. */}
+          <div className="min-w-0 md:col-span-2">
             {posture ? (
-              <SettingsCard icon={AlertTriangle} tint={warnings.length ? "var(--warn)" : "var(--success)"} className="flex w-full flex-col"
+              <SettingsCard icon={AlertTriangle} tint={warnings.length ? "var(--warn)" : "var(--success)"}
                 title="Needs attention"
                 description={warnings.length === 0 ? "The instance's own read of its security posture" : `${warnings.length} finding${warnings.length === 1 ? "" : "s"} from the instance's own read of its security posture`}>
                 {warnings.length === 0 ? (
@@ -327,7 +330,7 @@ export const OverviewTab = React.memo(function OverviewTab({
                     Nothing needs attention — no posture warnings on this instance.
                   </div>
                 ) : (
-                  <div className="max-h-[288px] overflow-y-auto" data-slot="admin-findings">
+                  <div className="max-h-72 overflow-y-auto" data-slot="admin-findings">
                     {warnings.map((wn) => <Finding key={wn.key} finding={wn} />)}
                   </div>
                 )}
@@ -337,19 +340,33 @@ export const OverviewTab = React.memo(function OverviewTab({
             )}
           </div>
 
-          {/* ── The week's runs ── */}
-          <div className="flex min-w-0 lg:col-span-2">
-            <SettingsCard icon={Activity} tint="var(--success)" title="Runs this week" className="flex w-full flex-col" bodyClassName="flex flex-1 flex-col"
-              description={cost ? `${formatUsd(cost.reduce((s, p) => s + p.value, 0))} spent in 7 days` : "Agent and routine runs per day"}>
-              <RunBars runs={runs} noWorkspace={noWorkspace} />
-            </SettingsCard>
-          </div>
-        </div>
+          {/* ── The week's runs, as figures. */}
+          <SettingsCard icon={Activity} tint="var(--success)" title="Runs this week" description="Agent and routine runs, last 7 days">
+            {runs === null && noWorkspace ? (
+              <p className="px-4 py-4 text-label text-muted-foreground">Runs are counted per workspace — open one to see its week.</p>
+            ) : runs === null ? (
+              <div className="space-y-2 p-4"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/5" /></div>
+            ) : (
+              <div data-slot="admin-runs">
+                <Row icon={Play} label="Runs" description="runs in the last 7 days">
+                  <span className="font-mono tabular-nums text-foreground">{(runTotal ?? 0).toLocaleString()}</span>
+                </Row>
+                {busiest && busiest.value > 0 && (
+                  <Row icon={CalendarDays} label="Busiest day">
+                    <span className="font-mono tabular-nums">{WEEKDAY[new Date(busiest.ts).getUTCDay()]} · {busiest.value}</span>
+                  </Row>
+                )}
+                {cost && (
+                  <Row icon={CircleDollarSign} label="Cost (7 d)">
+                    <span className="font-mono tabular-nums text-foreground">{formatUsd(cost.reduce((a, p) => a + p.value, 0))}</span>
+                  </Row>
+                )}
+              </div>
+            )}
+          </SettingsCard>
 
-        {/* ── Platform and integrity ── Five rows each, so the pair lines up;
-            every row is icon · name · status on the right. */}
-        <div className="grid items-stretch gap-4 lg:grid-cols-2">
-          <SettingsCard icon={Cpu} tint="var(--purple)" title="Platform" description="What is running, and what it is running on" className="h-full">
+          {/* ── Platform: what is running, and what it is running on. */}
+          <SettingsCard icon={Cpu} tint="var(--purple)" title="Platform" description="What is running, and what it is running on">
             <Row icon={Cpu} label="Engine" description={health?.log_level?.level ? `Log level ${health.log_level.level}${health.log_level.expires_at ? " (temporary)" : ""}` : undefined}>
               {health ? <><StatusDot status="COMPLETED" /> Up {formatUptime(health.uptime_seconds)}</> : "Checking…"}
             </Row>
@@ -363,7 +380,7 @@ export const OverviewTab = React.memo(function OverviewTab({
             <Row icon={Plug} label="Host daemon" description="How agents reach the host">
               {daemon ? <><StatusDot status={daemon.status === "ok" ? "COMPLETED" : "FAILED"} /> {daemon.connections} conn.{daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}</> : noWorkspace ? "Read in a workspace" : "Checking…"}
             </Row>
-            <SettingsRow label={<Label icon={HardDrive}>Disk</Label>} description={health?.disk?.path} border={false}>
+            <SettingsRow lead={HardDrive} label="Disk" description={health?.disk?.path}>
               {/* The data volume is the one that fills in practice. A missing
                   measurement stays missing: "0 B free" would invent an emergency. */}
               {!health?.disk ? (
@@ -371,8 +388,7 @@ export const OverviewTab = React.memo(function OverviewTab({
               ) : health.disk.error ? (
                 <span className="text-label text-muted-foreground">Unavailable — {health.disk.error}</span>
               ) : (
-                <span className="flex items-center gap-2 text-label text-muted-foreground">
-                  <Bar pct={health.disk.used_pct ?? 0} className="hidden w-20 sm:block" />
+                <span className="flex flex-wrap items-center justify-end gap-x-2 text-label text-muted-foreground">
                   <span className="font-mono tabular-nums text-foreground/80">{Math.round(health.disk.used_pct ?? 0)}%</span>
                   <span>{formatBytes(health.disk.free_bytes ?? 0)} free of {formatBytes(health.disk.total_bytes ?? 0)}</span>
                 </span>
@@ -380,8 +396,8 @@ export const OverviewTab = React.memo(function OverviewTab({
             </SettingsRow>
           </SettingsCard>
 
-          {/* ── Integrity ── The instance's tamper-evidence and key custody. */}
-          <SettingsCard icon={ShieldCheck} tint="var(--success)" title="Integrity" description="Tamper-evidence, key custody and the credential judge" className="h-full">
+          {/* ── Integrity: the instance's tamper-evidence and key custody. */}
+          <SettingsCard icon={ShieldCheck} tint="var(--success)" title="Integrity" description="Tamper-evidence, key custody and the credential judge">
             <Row icon={ScrollText} label="Journal chain" description={journal?.checkpoints ? `${journal.checkpoints} checkpoints` : undefined}>
               {journalPending ? (
                 <><Loader2 className="h-3 w-3 animate-spin" /> Verifying…</>
@@ -403,38 +419,14 @@ export const OverviewTab = React.memo(function OverviewTab({
             <Row icon={ShieldCheck} label="Keeper" description={keeperHealth && keeperHealth.samples > 0 ? `p95 ${keeperHealth.p95_latency_ms} ms · ${keeperHealth.judge_failures} judge failures` : "Judges every credential read"}>
               {keeper === null ? "Checking…" : keeper.enabled ? <><StatusDot status="COMPLETED" /> On · {keeper.deny_count} denied of {keeper.total_requests}</> : <><StatusDot status="BLOCKED" /> Off</>}
             </Row>
-            <SettingsRow label={<Label icon={Radio}>Telemetry</Label>} description="crewship telemetry on|off" border={false}>
-              <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
-                <StatusDot status={telemetry?.enabled ? "COMPLETED" : "PENDING"} />
-                {telemetry === null ? "Unknown" : telemetry.enabled ? "Enabled" : "Disabled"}
-              </span>
-            </SettingsRow>
-          </SettingsCard>
-        </div>
-
-        <div className="grid items-stretch gap-4 lg:grid-cols-2">
-          {/* ── AI helpers ── The models behind the judge, the curator and the
-              monitors, and whether each one answers. */}
-          <SettingsCard icon={Bot} tint="var(--info)" title="AI helpers" description="The models behind the judge, reviews and monitors" className="h-full">
-            {aux === null ? (
-              <div className="space-y-2 p-4"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /></div>
-            ) : aux.subsystems.length === 0 ? (
-              <p className="px-4 py-4 text-label text-muted-foreground">No helper models are configured.</p>
-            ) : (
-              aux.subsystems.map((s) => (
-                <div key={s.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0" data-slot="admin-aux">
-                  <StatusDot status={s.healthy === false || s.reachable === false ? "FAILED" : s.reachable ? "COMPLETED" : "PENDING"} />
-                  <span className="min-w-0 flex-1 truncate text-xs" title={s.label}>{s.label}</span>
-                  <span className="max-w-[55%] shrink-0 truncate rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-micro text-muted-foreground" title={[s.provider, s.model].filter(Boolean).join(" · ")}>
-                    {[s.provider, s.model].filter(Boolean).join(" · ") || "not set"}
-                  </span>
-                </div>
-              ))
-            )}
+            <Row icon={Radio} label="Telemetry" description="crewship telemetry on|off">
+              <StatusDot status={telemetry?.enabled ? "COMPLETED" : "PENDING"} />
+              {telemetry === null ? "Unknown" : telemetry.enabled ? "Enabled" : "Disabled"}
+            </Row>
           </SettingsCard>
 
           {/* ── Licence ── */}
-          <SettingsCard icon={BadgeCheck} title="License" description="Current edition and resource capacity" className="h-full">
+          <SettingsCard icon={BadgeCheck} title="License" description="Current edition and resource capacity">
             {license ? (
               <>
                 <Row icon={BadgeCheck} label="Edition" description={license.licensee_org || undefined}>
@@ -443,7 +435,7 @@ export const OverviewTab = React.memo(function OverviewTab({
                 <Row icon={Boxes} label="Crews"><Limit used={stats?.crews} limit={license.max_crews} /></Row>
                 <Row icon={Users} label="Members"><Limit used={stats?.users} limit={license.max_members} /></Row>
                 <Row icon={Bot} label="Agents per crew"><span className="font-mono">{license.max_agents_per_crew > 0 ? `up to ${license.max_agents_per_crew}` : "Unlimited"}</span></Row>
-                <SettingsRow label={<Label icon={Sparkles}>Features</Label>} border={false}>
+                <SettingsRow lead={Sparkles} label="Features">
                   {license.features?.length ? (
                     <span className="flex flex-wrap justify-end gap-1">
                       {license.features.map((f) => (
@@ -455,13 +447,34 @@ export const OverviewTab = React.memo(function OverviewTab({
                   )}
                 </SettingsRow>
                 {license.max_crews === 0 && license.max_members === 0 && license.max_agents_per_crew === 0 && (
-                  <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+                  <p className="border-t border-border px-4 py-3 text-label text-muted-foreground">
                     Crews, members and agents are currently unlimited under the open-source edition. Resource licensing may change in future releases.
                   </p>
                 )}
               </>
             ) : (
               <div className="space-y-2 p-4"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/5" /></div>
+            )}
+          </SettingsCard>
+
+          {/* ── AI helpers: the models behind the judge, the curator and the
+              monitors, and whether each one answers. Not in the v67 drawing;
+              kept as a product card. */}
+          <SettingsCard icon={Bot} tint="var(--info)" title="AI helpers" description="The models behind the judge, reviews and monitors">
+            {aux === null ? (
+              <div className="space-y-2 p-4"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /></div>
+            ) : aux.subsystems.length === 0 ? (
+              <p className="px-4 py-4 text-label text-muted-foreground">No helper models are configured.</p>
+            ) : (
+              aux.subsystems.map((sub) => (
+                <div key={sub.id} className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0" data-slot="admin-aux">
+                  <StatusDot status={sub.healthy === false || sub.reachable === false ? "FAILED" : sub.reachable ? "COMPLETED" : "PENDING"} />
+                  <span className="min-w-0 flex-1 truncate text-control" title={sub.label}>{sub.label}</span>
+                  <span className="max-w-[55%] shrink-0 truncate rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-micro text-muted-foreground" title={[sub.provider, sub.model].filter(Boolean).join(" · ")}>
+                    {[sub.provider, sub.model].filter(Boolean).join(" · ") || "not set"}
+                  </span>
+                </div>
+              ))
             )}
           </SettingsCard>
         </div>
@@ -472,18 +485,9 @@ export const OverviewTab = React.memo(function OverviewTab({
 
 // ── pieces ───────────────────────────────────────────────────────────────
 
-function Label({ icon: Icon, children }: { icon: LucideIcon; children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      <Icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-      {children}
-    </span>
-  )
-}
-
 function Row({ icon, label, description, children }: { icon: LucideIcon; label: string; description?: string; children: React.ReactNode }) {
   return (
-    <SettingsRow label={<Label icon={icon}>{label}</Label>} description={description}>
+    <SettingsRow lead={icon} label={label} description={description}>
       <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">{children}</span>
     </SettingsRow>
   )
@@ -515,36 +519,29 @@ function Limit({ used, limit }: { used?: number; limit?: number }) {
   )
 }
 
-/** One capacity figure: an icon tile, the count against its ceiling, a bar. */
-function Meter({ icon: Icon, tint, label, used, limit, note, tone, testId }: {
-  icon: LucideIcon; tint: string; label: string; used?: number; limit?: number; note?: string; tone?: "bad" | "live"; testId?: string
+/** One capacity figure in the strip: a small icon and label, the count
+ *  against its ceiling, and a muted note beside it. */
+function Kpi({ icon: Icon, label, used, limit, note, tone, testId }: {
+  icon: LucideIcon; label: string; used?: number; limit?: number; note?: string; tone?: "bad" | "live"; testId?: string
 }) {
   const over = overLimit(used ?? 0, limit)
+  const text = note ?? (limit ? `${Math.max(0, limit - (used ?? 0))} left on this licence` : limit === 0 ? "of ∞" : undefined)
   return (
-    <div className="flex flex-col rounded-card border border-border bg-card px-4 py-3.5" data-slot="admin-meter">
-      <div className="flex items-center gap-3">
-        <span className="icon-tile grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ "--ic": over || tone === "bad" ? "var(--destructive)" : tint } as CSSProperties} aria-hidden>
-          <Icon className="h-4 w-4" />
-        </span>
-        <div className="min-w-0">
-          <div className="eyebrow text-muted-foreground">{label}</div>
-          {used === undefined ? (
-            <Skeleton className="mt-1 h-6 w-16" />
-          ) : (
-            <div className={cn("font-mono text-xl font-semibold leading-7 tabular-nums", over || tone === "bad" ? "text-destructive" : tone === "live" ? "text-success" : "text-foreground")} data-testid={testId}>
-              {against(used, limit)}
-            </div>
-          )}
+    <div className="min-w-0 border-border px-4 py-3.5 [&:nth-child(n+3)]:border-t lg:[&:nth-child(n+3)]:border-t-0 [&:not(:first-child)]:border-l [&:nth-child(3)]:border-l-0 lg:[&:nth-child(3)]:border-l" data-slot="admin-meter">
+      <small className="flex items-center gap-1.5 text-label text-muted-foreground">
+        <Icon className="h-3 w-3" aria-hidden />
+        {label}
+      </small>
+      {used === undefined ? (
+        <Skeleton className="mt-1 h-7 w-16" />
+      ) : (
+        <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5">
+          <b className={cn("font-mono text-display font-semibold tabular-nums", over || tone === "bad" ? "text-destructive" : tone === "live" ? "text-success" : "text-foreground")} data-testid={testId}>
+            {against(used, limit)}
+          </b>
+          {text && <em className={cn("truncate text-label not-italic", over ? "text-destructive" : "text-muted-foreground")} title={text}>{text}</em>}
         </div>
-      </div>
-      {/* The bar row stays (empty without a ceiling) so every tile's note
-          sits on the same line. */}
-      <div className="mt-3 flex h-4 items-center">
-        {limit ? <Bar pct={((used ?? 0) / limit) * 100} className="w-full" /> : null}
-      </div>
-      <p className={cn("mt-1 truncate text-label", over ? "text-destructive" : "text-muted-foreground")} title={note}>
-        {note ?? (limit ? `${Math.max(0, limit - (used ?? 0))} left on this licence` : "\u00a0")}
-      </p>
+      )}
     </div>
   )
 }
@@ -593,42 +590,3 @@ function formatUsd(v: number): string {
 }
 
 const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-
-/** Seven days of runs as bars, today on the right; fills the card's height. */
-function RunBars({ runs, noWorkspace }: { runs: TimeseriesPoint[] | null; noWorkspace: boolean }) {
-  const reduce = useReducedMotion()
-  if (runs === null && noWorkspace) {
-    return <p className="flex flex-1 items-center justify-center p-4 text-center text-label text-muted-foreground">Runs are counted per workspace — open one to see its week.</p>
-  }
-  if (runs === null) return <div className="flex-1 p-4"><Skeleton className="h-full min-h-24 w-full" /></div>
-  const max = Math.max(1, ...runs.map((r) => r.value))
-  const total = runs.reduce((s, p) => s + p.value, 0)
-  const cols = { gridTemplateColumns: `repeat(${Math.max(1, runs.length)}, minmax(0, 1fr))` }
-  return (
-    <div className="flex flex-1 flex-col px-4 pb-3 pt-4" data-slot="admin-run-bars">
-      <div className="flex items-baseline gap-2">
-        <span className="font-mono text-2xl font-semibold tabular-nums">{total}</span>
-        <span className="text-label text-muted-foreground">runs in the last 7 days</span>
-      </div>
-      <div className="relative mt-3 min-h-28 flex-1">
-        <div className="absolute inset-0 grid items-end gap-2" style={cols}>
-          {runs.map((r, i) => (
-            <div key={r.ts} className="flex h-full flex-col justify-end" title={`${WEEKDAY[new Date(r.ts).getUTCDay()]} ${new Date(r.ts).getUTCDate()}: ${r.value} runs`}>
-              {r.value > 0 && <span className="mb-1 text-center font-mono text-micro text-muted-foreground">{r.value}</span>}
-              <motion.span
-                className={cn("block rounded-[4px]", r.value ? "bg-primary/70" : "bg-border/70")}
-                style={{ height: r.value ? `${Math.max(6, (r.value / max) * 80)}%` : 3, transformOrigin: "bottom" }}
-                initial={reduce ? false : { scaleY: 0 }}
-                animate={{ scaleY: 1 }}
-                transition={{ duration: 0.45, delay: i * 0.04, ease: [0.2, 0.7, 0.2, 1] }}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="mt-1.5 grid gap-2 text-center font-mono text-micro text-muted-foreground-soft" style={cols} aria-hidden>
-        {runs.map((r) => <span key={r.ts}>{WEEKDAY[new Date(r.ts).getUTCDay()]}</span>)}
-      </div>
-    </div>
-  )
-}
