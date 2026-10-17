@@ -312,6 +312,10 @@ var BackupTables = []string{
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
 	"documents",
+	"slides_heads",
+	"slides_revisions",
+	"slides_receipts",
+	"slides_object_ids",
 	"document_updates",
 	"document_receipts",
 	"document_checkpoints",
@@ -1219,6 +1223,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				if _, err := tx.ExecContext(ctx, `UPDATE documents SET epoch=MAX(epoch+1,?),generation=generation+1,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?`, row["epoch"], row["workspace_id"], row["page_id"]); err != nil {
 					return stats, fmt.Errorf("backup: fence existing document writer: %w", err)
 				}
+			}
+			if err := validateSlidesRestoreRow(table, row); err != nil {
+				return stats, err
 			}
 			// Restoring a held issue must not restart work that was still stopping
 			// at backup time. Preserve historical terminal runs and their brief

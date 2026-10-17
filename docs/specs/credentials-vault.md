@@ -126,8 +126,11 @@ credential it:
 5. Writes `/secrets/<agent>/.env` mapping each env var name to its file
    path — **the raw value never goes into an env var**, so nothing
    sensitive lands in `/proc/<pid>/environ`.
-6. `chown 1001:1001 /secrets/<agent>` (non-recursive) so sibling agents
-   sharing UID 1001 can't list each other's secret directories.
+6. `chown 1001:1001 /secrets/<agent>` (non-recursive) so the intended
+   agent can access its secret directory. Ownership and mode bits do not
+   isolate processes that share UID 1001 and can reach the same directory;
+   that boundary must come from the runtime's filesystem/mount isolation.
+   API authorization tests alone do not verify that runtime boundary.
 
 ## What this is NOT
 

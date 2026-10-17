@@ -56,6 +56,7 @@ var responseShapeContracts = []struct {
 	{name: "DocumentInitializeResponse", pointer: "/components/schemas/DocumentInitializeReceipt", value: DocumentInitializeResponse{}},
 	{name: "WorkspacePageOwnershipListResponse", pointer: "/components/schemas/WorkspacePageOwnershipListResponse", value: WorkspacePageOwnershipListResponse{}},
 	{name: "WorkspacePageOwnershipSummary", pointer: "/components/schemas/WorkspacePageOwnershipSummary", value: WorkspacePageOwnershipSummary{}},
+	{name: "CrewPolicyResponseV1", pointer: "/components/schemas/CrewPolicyResponseV1", value: crewPolicyResponse{}},
 	{name: "ChatProposalResponse", pointer: "/components/schemas/ChatProposalResponse", value: proposalResponse{}},
 	{name: "ChatProposalPage", pointer: "/components/schemas/ChatProposalPage", value: proposalPage{}},
 	{name: "RoutineOriginBinding", pointer: "/components/schemas/RoutineOriginBinding", value: routineOriginBindingResponse{}},

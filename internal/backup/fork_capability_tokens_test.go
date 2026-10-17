@@ -146,10 +146,10 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 	workspaceID := seedWorkspace(t, source)
 	seedLiveMission(t, source, workspaceID)
 	seedRowPerBackupTable(t, source, workspaceID)
-	// The Docs exclusive-content constraint requires separate Page parents.
+	// Docs and Slides exclusive-content constraints require separate Page parents.
 	// Assert source coverage before restore so fixture omissions cannot look
 	// like lost capabilities on the fork.
-	for _, table := range []string{"documents", "page_panels", "page_webhooks"} {
+	for _, table := range []string{"documents", "slides_heads", "slides_revisions", "slides_receipts", "slides_object_ids", "page_panels", "page_webhooks"} {
 		var count int
 		if err := source.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil || count == 0 {
 			t.Fatalf("source fixture missing %s: count=%d err=%v", table, count, err)
@@ -184,6 +184,7 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 	}
 
 	assertNoFKViolations(t, source, "after capability-token fork")
+	assertForkedSlidesFixture(t, source, workspaceID, forkID)
 
 	// --- workspace_invitations: row lands with a digest requiring explicit reissue.
 	forkInviteToken := queryStringValue(t, source,

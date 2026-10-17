@@ -15,6 +15,10 @@ import (
 // seedPreflight runs before bootstrap, nuke, or any other server mutation.
 // Seed deliberately does not load cwd dotenv files or infer a target from cwd.
 func seedPreflight(cmd *cobra.Command) error {
+	return seedPreflightMode(cmd, false)
+}
+
+func seedPreflightMode(cmd *cobra.Command, accountsOnly bool) error {
 	server := strings.TrimSpace(flagServer)
 	if server == "" {
 		return fmt.Errorf("seed requires an explicit --server URL; profiles, CREWSHIP_SERVER and the working directory cannot select a seed target")
@@ -24,24 +28,26 @@ func seedPreflight(cmd *cobra.Command) error {
 		return fmt.Errorf("--server must be an absolute HTTP(S) URL without credentials, query or fragment")
 	}
 	flagServer = strings.TrimRight(server, "/")
-	offline, _ := cmd.Flags().GetBool("offline-demo")
-	if offline {
-		for _, name := range []string{"smoke-test", "test-backup"} {
-			if value, _ := cmd.Flags().GetBool(name); value {
-				return fmt.Errorf("--offline-demo cannot be combined with --%s", name)
+	if !accountsOnly {
+		offline, _ := cmd.Flags().GetBool("offline-demo")
+		if offline {
+			for _, name := range []string{"smoke-test", "test-backup"} {
+				if value, _ := cmd.Flags().GetBool(name); value {
+					return fmt.Errorf("--offline-demo cannot be combined with --%s", name)
+				}
 			}
 		}
-	}
-	applySeedCodexAuthFlag(cmd)
-	if offline && seedCodexEnabled() {
-		return fmt.Errorf("--offline-demo cannot be combined with a Codex login")
-	}
-	login, err := resolveSeedCodexLogin()
-	if err != nil {
-		return err
-	}
-	if !offline && login == nil && strings.TrimSpace(os.Getenv("SEED_ANTHROPIC_API_KEY")) == "" {
-		return fmt.Errorf("seed requires SEED_ANTHROPIC_API_KEY (API key or Claude OAuth token), or a renewable Codex login via --codex-auth-file / SEED_CODEX_AUTH_FILE; no data was created")
+		applySeedCodexAuthFlag(cmd)
+		if offline && seedCodexEnabled() {
+			return fmt.Errorf("--offline-demo cannot be combined with a Codex login")
+		}
+		login, err := resolveSeedCodexLogin()
+		if err != nil {
+			return err
+		}
+		if !offline && login == nil && strings.TrimSpace(os.Getenv("SEED_ANTHROPIC_API_KEY")) == "" {
+			return fmt.Errorf("seed requires SEED_ANTHROPIC_API_KEY (API key or Claude OAuth token), or a renewable Codex login via --codex-auth-file / SEED_CODEX_AUTH_FILE; no data was created")
+		}
 	}
 	// Only credentials belonging to the explicit URL may supply the seed scope.
 	// In particular, a directory-selected profile must never supply its workspace
