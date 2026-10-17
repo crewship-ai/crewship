@@ -1,5 +1,6 @@
 "use client"
 
+import { PublicBar } from "@/components/branding/public-bar"
 import { useUrlSegment } from "@/lib/use-url-segment"
 import { usePublicPage } from "@/components/features/pages/public/use-public-page"
 import { PublicPageView } from "@/components/features/pages/public/public-page-view"
@@ -21,13 +22,18 @@ export function PublicPageClient() {
   const token = useUrlSegment(PUBLIC_PAGE_PATH_RE)
   const { status, page, message, submitting, submit } = usePublicPage(token)
 
+  // The public bar is the only chrome (Harbor 2): no session, no workspace,
+  // nothing that would ask the API for an account this reader does not have.
   return (
-    <PublicPageView
-      status={token === null ? "loading" : status}
-      page={page}
-      message={message}
-      submitting={submitting}
-      onSubmitPassword={submit}
-    />
+    <div className="flex min-h-dvh flex-col bg-background">
+      <PublicBar crumb="Shared artifact" />
+      <PublicPageView
+        status={token === null ? "loading" : status}
+        page={page}
+        message={message}
+        submitting={submitting}
+        onSubmitPassword={submit}
+      />
+    </div>
   )
 }
