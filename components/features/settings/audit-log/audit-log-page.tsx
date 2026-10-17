@@ -1,13 +1,16 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Activity, Bot, Building2, ChevronRight, Cpu, KeyRound, Link2, Settings as SettingsIcon, Shield, SlidersHorizontal, UserRound, X, type LucideIcon } from "lucide-react"
+import { Activity, Bot, Building2, ChevronRight, Cpu, KeyRound, Link2, Shield, UserRound, X, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { isAdminTier } from "@/lib/permissions/tiers"
-import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
-import { SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
+import { DrillNavItem, DrillNavSection } from "@/components/layout/drill-page"
+import { SettingsDrillPage } from "@/components/features/settings/settings-drill-page"
+import { SidebarSearch } from "@/components/layout/sidebar-kit"
+import { Switch } from "@/components/ui/switch"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { CrewAuditSection } from "@/components/features/settings/sections/crew-audit-section"
 import { LogsHistogram, type BucketRange } from "@/components/features/logs/logs-histogram"
@@ -28,11 +31,10 @@ import {
   type AuditSource,
 } from "./audit-filters"
 import { addDays, auditSeverity, facetCounts, tallyByDay, utcDay } from "./audit-activity"
-import { AuditTimePicker } from "./audit-time"
+import { AuditRangeBar, AuditTimePicker } from "./audit-time"
 import { useAuditActivity } from "./use-audit-activity"
 import { useAuditFilters } from "./use-audit-filters"
 import { JournalVerifyBanner } from "./journal-verify-banner"
-import { SettingsPageHead } from "@/components/features/settings/shared"
 import { PageNoAccess } from "@/components/layout/page-state"
 import { formatStatus } from "@/lib/format-status"
 import { useWorkspacePeople } from "./use-workspace-people"
@@ -64,6 +66,7 @@ const RECENT_DAYS = 35
  */
 export function AuditLogPage() {
   const { workspaceId, role, loading } = useWorkspace()
+  const isMobile = useIsMobile()
   // GET /api/v1/audit is ADMIN+; the Settings row is hidden below that, and a
   // typed-in URL gets a sentence instead of a 403.
   const allowed = loading || isAdminTier(role)
@@ -122,7 +125,6 @@ export function AuditLogPage() {
   const avatarById = useMemo(() => Object.fromEntries(people.map((p) => [p.id, p.avatarUrl])), [people])
   const chips = activeFilterChips(filters, personName)
   const filterCount = chips.filter((c) => c.key !== "range").length
-  const viewChanges = Number(!groupRepeats) + Number(!highlightAccess)
 
   const toolbar = (
     <>
@@ -133,11 +135,6 @@ export function AuditLogPage() {
         aria-label="Search the audit log"
         className={cn(!supports.search && "pointer-events-none opacity-50")}
       />
-      <SidebarFilterPopover label="View options" icon={SlidersHorizontal} triggerLabel="View" activeCount={viewChanges}
-        onClear={() => { setGroupRepeats(true); setHighlightAccess(true) }}>
-        <SidebarFacetOption active={groupRepeats} onToggle={() => setGroupRepeats(!groupRepeats)}>Group repeated events</SidebarFacetOption>
-        <SidebarFacetOption active={highlightAccess} onToggle={() => setHighlightAccess(!highlightAccess)}>Mark access changes</SidebarFacetOption>
-      </SidebarFilterPopover>
     </>
   )
 
@@ -220,17 +217,19 @@ export function AuditLogPage() {
   )
 
   return (
-    <DrillPage
-      parent={{ href: "/settings", label: "Settings", icon: SettingsIcon }}
+    <SettingsDrillPage
       panelId="drill-audit"
       title="Audit log"
       icon={Activity}
-      description="Every state-changing action, immutably recorded"
+      description="Every state-changing action, immutably recorded."
+      note="Admins and the owner"
+      headless={!allowed}
       toolbar={allowed ? toolbar : undefined}
-      actions={allowed ? <AuditTimePicker filters={filters} onChange={setFilters} bounds={win} tally={tally} now={now} /> : undefined}
+      actions={!allowed ? undefined : isMobile
+        ? <AuditTimePicker filters={filters} onChange={setFilters} bounds={win} tally={tally} now={now} />
+        : <AuditRangeBar filters={filters} onChange={setFilters} bounds={win} tally={tally} now={now} />}
       nav={allowed ? nav : null}
       mobileNav={mobileNav}
-      filterCount={filterCount}
     >
       <div className="flex flex-col gap-3 p-4 md:p-6">
         {!allowed ? (
@@ -242,7 +241,6 @@ export function AuditLogPage() {
           />
         ) : workspaceId && (
           <>
-            <SettingsPageHead icon={Activity} title="Audit log" description="Every state-changing action, immutably recorded. Readable by Admins and the Owner." className="mb-1" />
             <JournalVerifyBanner workspaceId={workspaceId} />
             {chips.length > 0 && <div className="flex flex-wrap items-center gap-1.5" data-slot="audit-chips">
               {chips.map((c) => (
@@ -266,6 +264,17 @@ export function AuditLogPage() {
               <LogsHistogram entries={chartEntries} timeRange={customWindow ? "custom" : filters.range as TimeRange} customRange={customWindow}
                 selected={slice} onSelect={pickSlice} height={72} />
             </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-0.5" data-slot="audit-display">
+              <span className="min-w-0 flex-1 text-label text-muted-foreground">{AUDIT_SOURCES.find((s) => s.value === filters.source)?.hint}</span>
+              <label className="inline-flex items-center gap-2 text-label">
+                <Switch checked={groupRepeats} onCheckedChange={setGroupRepeats} aria-label="Group repeated events" />
+                <span aria-hidden>Group repeated events</span>
+              </label>
+              <label className="inline-flex items-center gap-2 text-label">
+                <Switch checked={highlightAccess} onCheckedChange={setHighlightAccess} aria-label="Mark access changes" />
+                <span aria-hidden>Mark access changes</span>
+              </label>
+            </div>
             <CrewAuditSection
               workspaceId={workspaceId}
               filters={filters}
@@ -281,7 +290,7 @@ export function AuditLogPage() {
           </>
         )}
       </div>
-    </DrillPage>
+    </SettingsDrillPage>
   )
 }
 

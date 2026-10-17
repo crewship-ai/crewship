@@ -7,7 +7,7 @@ import { settingsCardId } from "./shared"
 const WAIT_MS = 4000
 const POLL_MS = 100
 /** How long the card stays marked after the scroll. */
-const MARK_MS = 2000
+const MARK_MS = 1500
 
 /**
  * Scrolls to the card a `?card=<slug>` deep link names, once the pane has

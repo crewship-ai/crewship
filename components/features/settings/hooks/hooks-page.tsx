@@ -190,7 +190,7 @@ export function HooksPage() {
   const failing = all.filter((h) => outcomeTone(runs[h.id]?.[0]?.outcome) === "bad").length
 
   const newButton = canWrite && (
-    <Button size="sm" className="h-7 gap-1.5 px-3 text-xs" onClick={() => openNew()}><Plus className="h-3.5 w-3.5" />New hook</Button>
+    <Button size="sm" className="gap-1.5 px-3 text-xs" onClick={() => openNew()}><Plus className="h-3.5 w-3.5" />New hook</Button>
   )
   const slotProps = { inSlot, runs, canWrite, filtering, onOpen: (h: HookRow) => setOpenId(h.id), onAdd: openNew }
 
@@ -565,7 +565,7 @@ function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isOwner, pendi
             {hook.enabled ? "On" : "Off"}
           </label>
           {blockingLive && <span className="rounded bg-warn/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-warn">STOPS THE ACTION</span>}
-          {canChange && <Button variant="outline" size="sm" className="ml-auto h-7 gap-1.5 px-2.5 text-xs" onClick={onEdit}><Pencil className="h-3 w-3" />Edit</Button>}
+          {canChange && <Button variant="outline" size="sm" className="ml-auto gap-1.5 px-2.5 text-xs" onClick={onEdit}><Pencil className="h-3 w-3" />Edit</Button>}
         </div>
       </section>
 
