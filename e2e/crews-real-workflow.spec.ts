@@ -94,8 +94,10 @@ test.describe("Chat session workflow", () => {
     await page.getByRole("link", { name: /^Chat with / }).click()
     await expect(page).toHaveURL(new RegExp(`/chat/${slug}`), { timeout: TIMEOUT })
 
-    // Assert chat-specific UI (not the dashboard's "AGENTS" stat card).
-    await expect(page.getByPlaceholder(/Search sessions/)).toBeVisible({ timeout: TIMEOUT })
+    // Assert chat-specific UI (not the dashboard's "AGENTS" stat card). Since
+    // the chat rewrite (#2069) the shell's sidebar is the unified
+    // conversations list; its search was "Search sessions" before that.
+    await expect(page.getByRole("textbox", { name: "Search conversations" })).toBeVisible({ timeout: TIMEOUT })
     await expect(page.getByText(/^AGENTS$/, { exact: true })).toHaveCount(0)
     await expect(page.getByText(/^ACTIVE MISSIONS$/, { exact: true })).toHaveCount(0)
   })
@@ -105,8 +107,14 @@ test.describe("Chat session workflow", () => {
     await page.getByRole("link", { name: /^Chat with / }).click()
     await expect(page).toHaveURL(new RegExp(`/chat/${slug}`), { timeout: TIMEOUT })
 
-    await page.getByTitle("Back to agent canvas").click()
+    // The way back is the top bar's path Crews / <crew> / <agent> / Chat
+    // (chat-breadcrumbs.ts, #2069), which replaced the "Back to agent canvas"
+    // arrow. The agent's crumb is the link back to its canvas.
+    const back = page.locator("header").locator(`a[href="/crews?agent=${encodeURIComponent(slug)}"]`)
+    await expect(back).toBeVisible({ timeout: TIMEOUT })
+    await back.click()
     await expect(page).toHaveURL(new RegExp(`agent=${slug}`), { timeout: TIMEOUT })
+    await expect(page.getByTestId("agent-header")).toBeVisible({ timeout: TIMEOUT })
   })
 })
 
