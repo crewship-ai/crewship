@@ -7,7 +7,6 @@ import {
   CREATE_SURFACE_INPUT,
   CreateSurface,
   CreateSurfaceBody,
-  CreateSurfaceChoice,
   CreateSurfaceField,
   CreateSurfaceFooter,
   CreateSurfaceHeader,
@@ -15,6 +14,7 @@ import {
 } from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Segmented } from "@/components/ui/segmented"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { FormField } from "@/components/features/chat/asks/form-field"
 import {
@@ -221,8 +221,9 @@ function OpenRunInputsDialog({
           </ul>
         )}
         {segmented && modes!.length > 1 && (
-          <CreateSurfaceChoice<RunMode>
+          <Segmented<RunMode>
             ariaLabel="How to run"
+            fill
             value={current}
             onChange={(m) => {
               setMode(m)

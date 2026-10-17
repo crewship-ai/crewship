@@ -16,6 +16,7 @@ import * as React from "react"
 import { CalendarClock, Clock, Globe, Hand, MessageSquare, MoreHorizontal, Plus, Webhook, Zap } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Segmented } from "@/components/ui/segmented"
 import { DetailCard } from "@/components/ui/detail"
 import { StatusPill } from "@/components/ui/status-pill"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -25,7 +26,6 @@ import {
   CREATE_SURFACE_INPUT,
   CreateSurface,
   CreateSurfaceBody,
-  CreateSurfaceChoice,
   CreateSurfaceField,
   CreateSurfaceFooter,
   CreateSurfaceHeader,
@@ -657,8 +657,9 @@ function AddTrigger({
     >
       <CreateSurfaceHeader concept="routines" context={`Routines › ${routine.name || routine.slug}`} title="Add trigger" description="What starts this routine, besides the Run button." onClose={onClose} />
       <CreateSurfaceBody className="flex flex-col gap-4">
-        <CreateSurfaceChoice<AddKind>
+        <Segmented<AddKind>
           ariaLabel="Kind of trigger"
+          fill
           value={kind}
           onChange={onKind}
           options={[

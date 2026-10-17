@@ -6,6 +6,7 @@ import { describeStep } from "@/lib/routine-step-describe"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { RoutineRunSteps } from "./routine-run-steps"
+import { Segmented } from "@/components/ui/segmented"
 import { createPortal } from "react-dom"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -759,12 +760,16 @@ export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, o
         definition={dsl}
       />
       {dsl && (executions.rows?.length ?? 0) > 0 && (
-        <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Show steps as">
-          {(["list", "time"] as const).map((v) => (
-            <Button key={v} type="button" size="sm" variant={stepView === v ? "default" : "outline"} role="radio" aria-checked={stepView === v} onClick={() => setStepView(v)}>
-              {v === "list" ? "Steps" : "Timeline"}
-            </Button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <Segmented<"list" | "time">
+            ariaLabel="Show steps as"
+            value={stepView}
+            onChange={setStepView}
+            options={[
+              { value: "list", label: "Steps" },
+              { value: "time", label: "Timeline" },
+            ]}
+          />
           {stepView === "time" && <span className="text-xs text-muted-foreground">Bars show when each step ran, on this run's clock.</span>}
         </div>
       )}

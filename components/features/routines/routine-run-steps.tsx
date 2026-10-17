@@ -15,7 +15,7 @@ import * as React from "react"
 import { ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
-import { CreateSurfaceChoice } from "@/components/layout/create-surface"
+import { Segmented } from "@/components/ui/segmented"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import { formatDurationMs } from "@/lib/activity-stream"
@@ -183,7 +183,7 @@ export function RoutineRunSteps({ workspaceId, runId, steps, executions, outputs
           </p>
         </div>
       </header>
-      <CreateSurfaceChoice<Tab> ariaLabel="Inspect" value={tab} onChange={setTab} options={TABS} />
+      <Segmented<Tab> ariaLabel="Inspect" fill size="xs" value={tab} onChange={setTab} options={TABS} />
       <div className="min-w-0 text-label">
         {tab === "out" &&
           (outputs && Object.hasOwn(outputs, step.id) ? (

@@ -15,7 +15,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { DetailCard } from "@/components/ui/detail"
-import { CreateSurfaceChoice, CreateSurfaceField } from "@/components/layout/create-surface"
+import { CreateSurfaceField } from "@/components/layout/create-surface"
+import { Segmented } from "@/components/ui/segmented"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
 import type { Pipeline } from "@/hooks/use-pipelines"
@@ -88,7 +89,7 @@ export function RoutineStepsTab({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <CreateSurfaceChoice<Mode>
+        <Segmented<Mode>
           ariaLabel="Show steps as"
           value={effectiveMode}
           onChange={setMode}
