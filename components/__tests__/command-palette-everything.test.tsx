@@ -81,7 +81,7 @@ describe("CommandPalette — every place in the app", () => {
   it("finds a section by what is in it, not just its name", async () => {
     openPalette()
     type("slack")
-    expect(hrefOf(/Notification connections/)).toBe("/integrations?tab=notifications&section=connections")
+    expect(hrefOf(/^Channels/)).toBe("/integrations?space=channels")
   })
 
   it("offers a member only what a member can open", async () => {
