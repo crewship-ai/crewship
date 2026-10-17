@@ -8,10 +8,11 @@ import { usePipelineWebhooks, type PipelineWebhook, type WebhookUpdateBody } fro
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
-import { Card, EmptyState, Pill, FieldLabel } from "./_shared"
+import { Card, EmptyState, FieldLabel } from "./_shared"
+import { StatusPill } from "@/components/ui/status-pill"
 import { RoutineWebhookEditorDialog } from "./routine-webhook-editor-dialog"
 
 // RoutineWebhooksTab — event-driven trigger CRUD restyled for the
@@ -180,11 +181,9 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-semibold">{w.name}</span>
-                    <Pill tone={w.enabled ? "blue" : "default"}>
-                      {w.enabled ? "enabled" : "disabled"}
-                    </Pill>
+                    <StatusPill size="md" status={w.enabled ? "enabled" : "disabled"} label={w.enabled ? "enabled" : "disabled"} />
                     {w.signing_secret_set && (
-                      <Pill tone="success">Signing configured</Pill>
+                      <StatusPill size="md" tone="success" label="Signing configured" />
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">{w.ingress_profile === "github" ? "GitHub pull requests" : "Crewship signature"} · Receiving URL shown once when created</p>

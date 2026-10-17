@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/status-tone"
 import { KindBadge } from "./kind-badge"
 import { formatRelativeTime } from "@/lib/time"
 import type { ApprovalRow } from "@/lib/types/approvals"
@@ -13,11 +15,14 @@ interface ApprovalCardProps {
   onSelect: () => void
 }
 
-const STATUS_CLASS: Record<string, string> = {
-  pending: "bg-warn/15 text-warn border-warn/40",
-  approved: "bg-success/15 text-success border-success/40",
-  denied: "bg-destructive/15 text-destructive border-destructive/40",
-  timeout: "bg-muted-foreground/15 text-muted-foreground border-border/40",
+// A pending approval is waiting on a person, so it reads as "look at this"
+// (warn) rather than formatStatus's quiet PENDING. The words come from
+// lib/format-status; only the tone is local.
+const STATUS_TONE: Record<string, StatusTone> = {
+  pending: "warn",
+  approved: "success",
+  denied: "danger",
+  timeout: "muted",
 }
 
 /**
@@ -38,7 +43,7 @@ function toolOf(row: ApprovalRow): string | null {
  * sheet. Pending rows show a live countdown to `timeout_at`.
  */
 export function ApprovalCard({ row, active, onSelect }: ApprovalCardProps) {
-  const statusCls = STATUS_CLASS[row.status.toLowerCase()] ?? "bg-muted text-muted-foreground border-border"
+  const statusTone = STATUS_TONE[row.status.toLowerCase()] ?? "muted"
   return (
     <button
       type="button"
@@ -50,9 +55,7 @@ export function ApprovalCard({ row, active, onSelect }: ApprovalCardProps) {
     >
       <div className="flex items-center gap-2 flex-wrap">
         <KindBadge kind={row.kind} />
-        <Badge variant="outline" className={cn("text-[10px] border", statusCls)}>
-          {row.status}
-        </Badge>
+        <StatusPill status={row.status} tone={statusTone} />
         {row.status === "pending" && row.timeout_at && (
           <TimeoutCountdown iso={row.timeout_at} />
         )}

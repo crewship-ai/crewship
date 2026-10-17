@@ -8,12 +8,11 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { invalidate, readThrough } from "@/lib/stale-cache"
@@ -727,59 +726,64 @@ function ApiKeyModal({
   }
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-w-md rounded-xl border-foreground/10 bg-card shadow-2xl sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-base">Composio API key</DialogTitle>
-          <DialogDescription className="text-xs leading-relaxed">
+    <CreateSurface
+      open
+      onOpenChange={(o) => !o && onClose()}
+      size="sm"
+      onSubmit={() => {
+        if (!saving && apiKey.trim()) void save()
+      }}
+    >
+      <CreateSurfaceHeader
+        icon={KeyRound}
+        title="Composio API key"
+        description={
+          <>
             Stored encrypted for this workspace. We validate it against Composio before saving.
             From app.composio.dev → your project → Settings → API keys.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="mt-4 space-y-3">
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">Project API key</label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="ak_…"
-              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-sm focus:border-primary/50 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-muted-foreground">Label (optional)</label>
-            <input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Crewship_dev_1"
-              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
-            />
-          </div>
+          </>
+        }
+        onClose={onClose}
+      />
+      <CreateSurfaceBody className="space-y-3">
+        <div>
+          <label htmlFor="composio-api-key" className="mb-1 block text-xs text-muted-foreground">Project API key</label>
+          <input
+            id="composio-api-key"
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="ak_…"
+            className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-sm focus:border-primary/50 focus:outline-none"
+          />
         </div>
-
-        {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
-
-        <div className="mt-5 flex items-center justify-between gap-2">
-          <div>
-            {current?.source === "workspace" && (
-              <Button variant="ghost" size="sm" onClick={remove} disabled={saving}>
-                Remove key
-              </Button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={save} disabled={saving || !apiKey.trim()}>
-              {saving ? "Validating…" : "Validate & save"}
-            </Button>
-          </div>
+        <div>
+          <label htmlFor="composio-api-key-label" className="mb-1 block text-xs text-muted-foreground">Label (optional)</label>
+          <input
+            id="composio-api-key-label"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Crewship_dev_1"
+            className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
+          />
         </div>
-      </DialogContent>
-    </Dialog>
+        {err && <div className="text-xs text-destructive">{err}</div>}
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        lead={
+          current?.source === "workspace" ? (
+            <Button variant="ghost" size="sm" onClick={remove} disabled={saving} className="h-8 text-xs">
+              Remove key
+            </Button>
+          ) : undefined
+        }
+        onCancel={onClose}
+        primaryLabel={saving ? "Validating…" : "Validate & save"}
+        onPrimary={save}
+        primaryDisabled={!apiKey.trim()}
+        busy={saving}
+      />
+    </CreateSurface>
   )
 }
 
@@ -806,6 +810,7 @@ function ConnectModal({
   const [err, setErr] = React.useState<string | null>(null)
 
   const title = toolkit ? `Connect ${toolkit.name}` : "Connect an app"
+  const connectDisabled = busy || !userId.trim() || (!toolkit && !toolkitSlug.trim())
 
   const connect = async () => {
     const uid = userId.trim()
@@ -850,72 +855,76 @@ function ConnectModal({
   }
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-w-md rounded-xl border-foreground/10 bg-card shadow-2xl sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-base">{title}</DialogTitle>
-          <DialogDescription className="text-xs leading-relaxed">
+    <CreateSurface
+      open
+      onOpenChange={(o) => !o && onClose()}
+      size="sm"
+      onSubmit={() => {
+        if (!connectDisabled) void connect()
+      }}
+    >
+      <CreateSurfaceHeader
+        icon={Plug}
+        title={title}
+        description={
+          <>
             Authorize the app via OAuth. Pick the Composio user (the person/mailbox) this account
             belongs to — agents bound to that user will be able to use it.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="mt-4 space-y-3">
-          {!toolkit && (
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">App (toolkit slug)</label>
-              <input
-                value={toolkitSlug}
-                onChange={(e) => setToolkitSlug(e.target.value)}
-                placeholder="e.g. gmail, github, slack"
-                className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
-              />
-            </div>
-          )}
-          {users.length > 0 && (
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">Existing user</label>
-              <select
-                value={users.includes(userId) ? userId : ""}
-                onChange={(e) => setUserId(e.target.value)}
-                className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
-              >
-                <option value="">— new user —</option>
-                {users.map((u) => (
-                  <option key={u} value={u}>
-                    {u}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          </>
+        }
+        onClose={onClose}
+      />
+      <CreateSurfaceBody className="space-y-3">
+        {!toolkit && (
           <div>
-            <label className="mb-1 block text-xs text-muted-foreground">User id</label>
+            <label htmlFor="composio-connect-toolkit" className="mb-1 block text-xs text-muted-foreground">App (toolkit slug)</label>
             <input
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              placeholder="e.g. alice@acme.com or a stable user id"
-              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
+              id="composio-connect-toolkit"
+              value={toolkitSlug}
+              onChange={(e) => setToolkitSlug(e.target.value)}
+              placeholder="e.g. gmail, github, slack"
+              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
             />
           </div>
+        )}
+        {users.length > 0 && (
+          <div>
+            <label htmlFor="composio-connect-existing" className="mb-1 block text-xs text-muted-foreground">Existing user</label>
+            <select
+              id="composio-connect-existing"
+              value={users.includes(userId) ? userId : ""}
+              onChange={(e) => setUserId(e.target.value)}
+              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
+            >
+              <option value="">— new user —</option>
+              {users.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div>
+          <label htmlFor="composio-connect-user" className="mb-1 block text-xs text-muted-foreground">User id</label>
+          <input
+            id="composio-connect-user"
+            value={userId}
+            onChange={(e) => setUserId(e.target.value)}
+            placeholder="e.g. alice@acme.com or a stable user id"
+            className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
+          />
         </div>
-
-        {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            onClick={connect}
-            disabled={busy || !userId.trim() || (!toolkit && !toolkitSlug.trim())}
-          >
-            {busy ? "Starting…" : "Connect with OAuth"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+        {err && <div className="text-xs text-destructive">{err}</div>}
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        onCancel={onClose}
+        primaryLabel={busy ? "Starting…" : "Connect with OAuth"}
+        onPrimary={connect}
+        primaryDisabled={connectDisabled}
+        busy={busy}
+      />
+    </CreateSurface>
   )
 }
 

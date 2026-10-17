@@ -106,7 +106,7 @@ it.each(["message", "object", "null", "malformed", "network"])("preserves creati
   else state.fetch.mockResolvedValueOnce(reply(kind === "message" ? { error: "Refused" } : kind === "null" ? null : { error: { code: "no" } }, 403))
   const p = props(); render(<CredentialPicker {...p} />); await createForm()
   fireEvent.click(screen.getByRole("button", { name: "Save" }))
-  await waitFor(() => expect(state.error).toHaveBeenCalledWith(kind === "network" ? "Network error creating credential" : kind === "message" ? "Refused" : "Failed to create credential"))
+  await waitFor(() => expect(state.error).toHaveBeenCalledWith(kind === "network" ? "Network error creating credential" : kind === "message" ? "Refused" : "Failed to create credential", { duration: Infinity }))
   expect(screen.getByPlaceholderText("ghp_xxxxxxxxxxxx")).toHaveValue(" fixture-value ")
   expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
   expect(p.onAddCredential).not.toHaveBeenCalled()

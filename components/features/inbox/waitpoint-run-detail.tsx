@@ -351,7 +351,7 @@ function StepRow({
           status === "paused" && "bg-warn/5",
         )}
       >
-        <StatusBadge status={status} />
+        <StepMarker status={status} />
         <span className="font-mono text-[10px] text-muted-foreground/60">{index}.</span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -388,7 +388,9 @@ function StepRow({
   )
 }
 
-function StatusBadge({ status }: { status: "done" | "paused" | "pending" }) {
+// A step-progress glyph (check, clock, empty ring) with no word: a marker in
+// a list of steps, not a status pill.
+function StepMarker({ status }: { status: "done" | "paused" | "pending" }) {
   if (status === "done") {
     return (
       <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-success/20 text-success">

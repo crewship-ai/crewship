@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import {
   AlertTriangle, Check, Circle, Loader2, Package, Play, RotateCcw, Terminal, X,
 } from "lucide-react"

@@ -3,11 +3,11 @@
 import * as React from "react"
 import { Download, History, Pin, PinOff, X } from "lucide-react"
 
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
   SettingsSegmented, SettingsSummary, SummaryItem, nativeSelect, selectionBar, selectionBarAction, selectionBarButton,
@@ -326,16 +326,24 @@ function CheckDialog({ run, legacy, onClose, onCheck }: {
   const [passphrase, setPassphrase] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   React.useEffect(() => { if (!run) { setIdentity(""); setPassphrase(""); setBusy(false) } }, [run])
+  const close = () => { if (!busy) onClose() }
+  const canCheck = !busy && (legacy || !!identity.trim() || !!passphrase)
+  const check = async () => {
+    if (!canCheck) return
+    setBusy(true)
+    await onCheck(legacy ? {} : { identity: identity.trim() || undefined, passphrase: passphrase || undefined })
+  }
   return (
-    <Dialog open={!!run} onOpenChange={(o) => { if (!o && !busy) onClose() }}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Check contents</DialogTitle>
-          <DialogDescription>
+    <CreateSurface open={!!run} onOpenChange={(o) => { if (!o) close() }} size="sm" onSubmit={() => void check()}>
+        <CreateSurfaceHeader
+          title="Check contents"
+          description={<>
             Decrypts the backup and reads every section, comparing row counts and hashes with what it recorded. Nothing is restored.
             The key is used for this check only and never stored.
-          </DialogDescription>
-        </DialogHeader>
+          </>}
+          onClose={close}
+        />
+        <CreateSurfaceBody>
         {legacy ? (
           <p className="text-xs text-muted-foreground">This server can only verify the checksum for now, which needs no key.</p>
         ) : (
@@ -352,14 +360,14 @@ function CheckDialog({ run, legacy, onClose, onCheck }: {
             </label>
           </div>
         )}
-        <DialogFooter>
-          <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button type="button" size="sm" className="h-7 text-xs" disabled={busy || (!legacy && !identity.trim() && !passphrase)}
-            onClick={async () => { setBusy(true); await onCheck(legacy ? {} : { identity: identity.trim() || undefined, passphrase: passphrase || undefined }) }}>
-            {busy ? "Checking…" : "Check"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </CreateSurfaceBody>
+        <CreateSurfaceFooter
+          onCancel={close}
+          primaryLabel={busy ? "Checking…" : "Check"}
+          onPrimary={() => void check()}
+          primaryDisabled={!canCheck}
+          busy={busy}
+        />
+    </CreateSurface>
   )
 }

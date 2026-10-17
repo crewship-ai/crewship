@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Lock, ArrowRight, SlidersHorizontal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -17,13 +17,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { apiFetch } from "@/lib/api-fetch"
 import { devWarn } from "@/lib/client-log"
 import { cn } from "@/lib/utils"
@@ -503,21 +501,29 @@ function PresetDiffDialog({
   const noChange = eligible.length > 0 && diffs.length === 0
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-2xl max-h-[80dvh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
-            Apply preset &quot;{preset}&quot; ({CAPABILITY_BUNDLES[preset].length} cap
-            {CAPABILITY_BUNDLES[preset].length === 1 ? "" : "s"})
-          </DialogTitle>
-          <DialogDescription>
-            {eligible.length === 0
+    <CreateSurface
+      open
+      onOpenChange={(open) => !open && onCancel()}
+      size="md"
+      onSubmit={() => { if (eligible.length > 0 && !noChange) onConfirm() }}
+    >
+        <CreateSurfaceHeader
+          title={
+            <>
+              Apply preset &quot;{preset}&quot; ({CAPABILITY_BUNDLES[preset].length} cap
+              {CAPABILITY_BUNDLES[preset].length === 1 ? "" : "s"})
+            </>
+          }
+          description={
+            eligible.length === 0
               ? "No eligible members (all OWNER or self)."
               : noChange
                 ? `All ${eligible.length} eligible member(s) already match this preset — nothing to change.`
-                : `${diffs.length} of ${eligible.length} eligible member(s) will be modified. Review below.`}
-          </DialogDescription>
-        </DialogHeader>
+                : `${diffs.length} of ${eligible.length} eligible member(s) will be modified. Review below.`
+          }
+          onClose={onCancel}
+        />
+        <CreateSurfaceBody>
 
         {diffs.length > 0 && (
           <div className="space-y-3">
@@ -566,20 +572,14 @@ function PresetDiffDialog({
           </div>
         )}
 
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            disabled={eligible.length === 0 || noChange}
-            onClick={onConfirm}
-          >
-            Apply to {diffs.length} member{diffs.length === 1 ? "" : "s"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </CreateSurfaceBody>
+        <CreateSurfaceFooter
+          onCancel={onCancel}
+          primaryLabel={<>Apply to {diffs.length} member{diffs.length === 1 ? "" : "s"}</>}
+          onPrimary={onConfirm}
+          primaryDisabled={eligible.length === 0 || noChange}
+        />
+    </CreateSurface>
   )
 }
 

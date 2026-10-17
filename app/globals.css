@@ -1244,6 +1244,117 @@ body {
   }
   .secondary-panel-toggle:hover { background: var(--row-hover-bg); color: var(--foreground); }
   .secondary-panel-toggle > svg { width: 16px; height: 16px; }
+  /* Page states (Harbor 2 kit, components/layout/page-state.tsx). */
+  .page-state { width: 100%; max-width: 640px; margin: 0 auto; padding: 32px 16px; }
+  .page-state-wide { max-width: none; padding: 20px 24px; }
+  .page-tile {
+    display: inline-grid; place-items: center; flex: none;
+    width: 48px; height: 48px; border-radius: 28%;
+    color: var(--brand-ink);
+    background: color-mix(in srgb, var(--brand) 13%, transparent);
+    border: 1px solid color-mix(in srgb, var(--brand) 26%, transparent);
+  }
+  .page-tile > svg { width: 22px; height: 22px; }
+  .page-tile-40 { width: 40px; height: 40px; }
+  .page-tile-40 > svg { width: 18px; height: 18px; }
+  .page-tile-danger {
+    color: var(--destructive);
+    background: color-mix(in srgb, var(--destructive) 12%, transparent);
+    border-color: color-mix(in srgb, var(--destructive) 26%, transparent);
+  }
+  .page-es {
+    display: grid; justify-items: center; gap: 10px; text-align: center;
+    padding: 48px 20px; border: 1px dashed var(--line-strong); border-radius: 16px; background: var(--card);
+  }
+  .page-es h2 { margin: 4px 0 0; font-size: var(--typo-heading); font-weight: 650; letter-spacing: -0.01em; color: var(--foreground); }
+  .page-es p { margin: 0; max-width: 46ch; color: var(--muted-foreground); }
+  .page-es-filtered { border-style: solid; padding: 32px 20px; }
+  .page-es-glyph { width: 22px; height: 22px; color: var(--muted-foreground-soft); }
+  .page-es-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 6px; }
+  .page-es-cli { font-size: var(--typo-label); color: var(--muted-foreground-soft); }
+  .page-es-cli code { font-family: var(--font-mono); color: var(--muted-foreground); }
+  .page-ee {
+    border: 1px solid color-mix(in srgb, var(--destructive) 35%, var(--border));
+    border-radius: 14px; background: var(--card); overflow: hidden;
+  }
+  .page-ee header { display: flex; align-items: center; gap: 12px; padding: 16px; }
+  .page-ee b { display: block; font-weight: 600; color: var(--foreground); }
+  .page-ee p { margin: 4px 0 0; color: var(--muted-foreground); }
+  .page-ee footer {
+    display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+    border-top: 1px solid var(--border); background: var(--muted);
+    font-size: var(--typo-label); color: var(--muted-foreground);
+  }
+  .page-banner {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    padding: 8px 14px; border-radius: 10px; font-size: var(--typo-body); color: var(--foreground);
+  }
+  .page-banner-warn { background: var(--chip-warn-bg); }
+  .page-banner-warn > svg { color: var(--chip-warn-fg); }
+  .page-stale { opacity: 0.55; filter: saturate(0.6); pointer-events: none; }
+  .page-cf {
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+    border-radius: 14px; background: var(--card); overflow: hidden;
+  }
+  .page-cf header { display: flex; gap: 10px; padding: 14px 16px; }
+  .page-cf b { display: block; font-weight: 600; color: var(--foreground); }
+  .page-cf p { margin: 3px 0 0; color: var(--muted-foreground); }
+  .page-cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); border-block: 1px solid var(--border); }
+  .page-cf-grid > div { padding: 12px 16px; background: var(--card); font-size: var(--typo-body); }
+  .page-cf-grid small { display: block; margin-bottom: 4px; font-size: var(--typo-micro); font-weight: 600; color: var(--muted-foreground-soft); }
+  .page-cf footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; }
+  @media (max-width: 767px) { .page-cf-grid { grid-template-columns: 1fr; } }
+  .page-sk {
+    display: block; border-radius: 6px;
+    background: linear-gradient(90deg, var(--muted), color-mix(in srgb, var(--foreground) 7%, var(--muted)), var(--muted));
+    background-size: 200% 100%;
+    animation: page-sk 1.4s linear infinite;
+  }
+  @keyframes page-sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .page-sk-h { width: 220px; height: 20px; margin-bottom: 8px; }
+  .page-sk-p { width: 360px; max-width: 80%; height: 12px; margin-bottom: 18px; }
+  .page-sk-list { border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+  .page-sk-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .page-sk-row:last-child { border-bottom: 0; }
+  .page-sk-av { width: 22px; height: 22px; border-radius: 999px; flex: none; }
+  .page-sk-t { display: grid; flex: 1; gap: 6px; }
+  .page-sk-l { height: 10px; }
+  .page-sk-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .page-sk-card { height: 120px; border-radius: 10px; }
+  .page-sk-note { display: flex; align-items: center; gap: 6px; min-height: 20px; margin-top: 10px; font-size: var(--typo-label); color: var(--muted-foreground-soft); }
+  @media (prefers-reduced-motion: reduce) { .page-sk { animation: none; } }
+  :root[data-motion="reduce"] .page-sk { animation: none; }
+  /* Wizard step bar (components/ui/wizard-steps.tsx). */
+  .wizard-steps {
+    display: flex; align-items: center; gap: 6px; padding: 10px 20px;
+    border-bottom: 1px solid var(--border); background: var(--muted); overflow-x: auto; scrollbar-width: none;
+  }
+  .wizard-steps ol { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .wizard-steps li { display: flex; align-items: center; gap: 6px; flex: none; }
+  .wizard-steps-rule { width: 18px; height: 1.5px; background: var(--line-strong); }
+  .wizard-steps li[data-state="done"] + li .wizard-steps-rule,
+  .wizard-steps li[data-state="done"] .wizard-steps-rule { background: var(--success); }
+  .wizard-steps-item {
+    display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 999px;
+    font-size: var(--typo-body); color: var(--muted-foreground-soft); white-space: nowrap;
+  }
+  button.wizard-steps-item:hover { background: var(--row-hover-bg); color: var(--foreground); }
+  .wizard-steps-n {
+    display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px;
+    border: 1.5px solid var(--line-strong); background: var(--card);
+    font-size: var(--typo-micro); font-weight: 650; color: var(--muted-foreground);
+  }
+  .wizard-steps-n > svg { width: 12px; height: 12px; }
+  li[data-state="done"] .wizard-steps-item { color: var(--muted-foreground); }
+  li[data-state="done"] .wizard-steps-n { background: var(--success); border-color: var(--success); color: #fff; }
+  li[data-state="current"] .wizard-steps-item { color: var(--foreground); font-weight: 600; background: var(--card); box-shadow: var(--shadow-sel); }
+  li[data-state="current"] .wizard-steps-n { background: var(--primary-strong); border-color: var(--primary-strong); color: #fff; }
+  .wizard-steps-count { display: none; margin-left: auto; font-size: var(--typo-body); color: var(--muted-foreground); }
+  @media (max-width: 767px) {
+    .wizard-steps li:not([data-state="current"]) { display: none; }
+    .wizard-steps li[data-state="current"] .wizard-steps-rule { display: none; }
+    .wizard-steps-count { display: block; }
+  }
   /* The area's tile at the start of the top bar's breadcrumbs. */
   .area-tile {
     display: inline-grid;
@@ -1631,8 +1742,11 @@ body {
      any width (#3333). Zero-specificity :where() so a component that already
      sizes itself for touch is not fought; min-height/min-width only ever
      grow a box. Checkboxes, radios and switches keep their drawn size and
-     get an invisible 44px hit area instead (switch: components/ui/switch). */
+     get an invisible 44px hit area instead (switch: components/ui/switch).
+     Links count too: min-height has no effect on an inline text link, so only
+     links laid out as boxes — card links, list rows — grow. */
   :where(
+    a[href],
     button,
     [role="button"],
     [role="tab"],

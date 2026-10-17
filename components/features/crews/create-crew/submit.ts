@@ -1,4 +1,4 @@
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
 import { toApiError } from "@/lib/api-error"
 import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"

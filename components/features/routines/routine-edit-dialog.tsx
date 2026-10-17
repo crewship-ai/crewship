@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { Pencil, Save } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import {
   CreateSurface,

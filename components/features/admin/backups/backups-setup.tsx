@@ -2,13 +2,13 @@
 
 import * as React from "react"
 import { Check, Copy, Download, KeyRound, Loader2, ShieldCheck, Sparkles } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { SettingsCard, controlHeight } from "@/components/features/settings/shared"
 import { ageKeyFile, canGenerateAgeKey, generateAgeKey, type AgeKeyPair } from "./age-key"
 import { newDraft } from "./backups-schedules"
@@ -98,19 +98,16 @@ export function BackupsSetup({ open, onOpenChange, keys, plans, demo, onChanged,
   const order: Step[] = ["key", "plan", "run", "done"]
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
-        <DialogHeader>
-          <div className="flex items-start gap-3">
-            <span className="icon-tile inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ "--ic": "var(--primary)" } as React.CSSProperties} aria-hidden>
-              <ShieldCheck className="h-5 w-5" />
-            </span>
-            <div>
-              <DialogTitle>Set up backups</DialogTitle>
-              <DialogDescription>A key to encrypt to, a plan that runs on its own, and the first backup.</DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
+    <CreateSurface open={open} onOpenChange={onOpenChange} size="md">
+        <CreateSurfaceHeader
+          icon={ShieldCheck}
+          title="Set up backups"
+          description="A key to encrypt to, a plan that runs on its own, and the first backup."
+          onClose={() => onOpenChange(false)}
+        />
+        {/* Each step owns its own action — the key, the plan, the first run —
+            so the surface has no shared footer; the header × is the way out. */}
+        <CreateSurfaceBody className="flex flex-col gap-4">
         <ol className="flex flex-wrap gap-1.5" aria-label="Steps">
           {steps.map((s) => {
             const done = order.indexOf(step) > order.indexOf(s.key) || (s.key === "key" && state.hasKey) || (s.key === "plan" && state.hasPlan)
@@ -144,8 +141,8 @@ export function BackupsSetup({ open, onOpenChange, keys, plans, demo, onChanged,
             </div>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+        </CreateSurfaceBody>
+    </CreateSurface>
   )
 }
 

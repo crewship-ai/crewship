@@ -6,7 +6,7 @@ import { describeStep } from "@/lib/routine-step-describe"
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { RoutineRunInputsDialog } from "./routine-run-inputs-dialog"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { apiFetch } from "@/lib/api-fetch"
@@ -30,14 +30,7 @@ import { Button } from "@/components/ui/button"
 import { formatDurationMs } from "@/lib/activity-stream"
 
 import { RoutineResultContent } from "./routine-result-content"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import {
   FileText,
   Activity,
@@ -49,7 +42,9 @@ import {
   Lightbulb,
   XCircle,
 } from "lucide-react"
-import { DetailCard, Pill } from "@/components/ui/detail"
+import { DetailCard } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
+import { toStatusTone } from "@/lib/status-tone"
 import { RoutineIdentityHeader } from "./routine-identity-header"
 import { routineViewHref } from "./routine-navigation"
 import {
@@ -183,7 +178,8 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         )}
       </div>
     )
-  const stop = async () => {
+  /** Resolves true once the server accepted the cancel. */
+  const stop = async (): Promise<boolean> => {
     setStopping(true)
     setActionError(null)
     try {
@@ -196,8 +192,10 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
       setConfirmStop(false)
       await refresh()
       await approval.refresh()
+      return true
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e))
+      return false
     } finally {
       setStopping(false)
     }
@@ -501,7 +499,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           </>
         }
       >
-        <Pill tone={presentation.tone}>{presentation.label}</Pill>
+        <StatusPill size="md" tone={toStatusTone(presentation.tone)} label={presentation.label} />
         {/* The facts of this run as one sentence: what used to be a four-cell
           stat strip below a second row of tabs. */}
         <span className="text-xs text-muted-foreground" data-testid="run-facts">
@@ -678,30 +676,20 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         </p>
       )}
 
-      <Dialog open={confirmStop} onOpenChange={setConfirmStop}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Stop this run?</DialogTitle>
-            <DialogDescription>
-              Pending work is asked to stop. What already happened — a ledger write, a
-              message — is not undone. Actions that already happened are not rolled back;
-              recorded results stay in History.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmStop(false)}
-              disabled={stopping}
-            >
-              Keep running
-            </Button>
-            <Button variant="destructive" onClick={stop} disabled={stopping}>
-              {stopping ? "Stopping…" : "Stop this run"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={confirmStop}
+        onOpenChange={setConfirmStop}
+        title="Stop this run?"
+        description="Pending work is asked to stop. What already happened — a ledger write, a message — is not undone. Actions that already happened are not rolled back; recorded results stay in History."
+        cancelLabel="Keep running"
+        confirmLabel="Stop this run"
+        destructive
+        onConfirm={async () => {
+          // A refused cancel keeps the question open, as before: the error
+          // is shown and the person can try again or keep the run going.
+          if (!(await stop())) throw new Error("cancel refused")
+        }}
+      />
       <RoutineRunInputsDialog
         definition={runDefinition}
         versionChoices={[

@@ -13,7 +13,7 @@
 // crews unless the workspace explicitly opts in here.
 
 import React, { useCallback, useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { ShieldAlert, Info } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"

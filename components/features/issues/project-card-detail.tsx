@@ -34,7 +34,9 @@ import {
 
 import { cn } from "@/lib/utils"
 import { formatDate, formatShortDate, relTime } from "@/lib/time"
-import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
+import { Appear, DetailCard, EntityChip, StatStrip } from "@/components/ui/detail"
+import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/ui/status-pill"
 import { TintedCard, type TintTone } from "./tinted-card"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
@@ -153,25 +155,27 @@ export function ProjectCardDetail({ project, stats, issues, actions, edit }: Pro
             )}
 
             <div className="flex flex-wrap items-center gap-1.5">
-              <Pill tone="default">
-                <ProjectStatusIcon status={project.status} className="h-3 w-3" />
-                {projectStatusLabel(project.status)}
-              </Pill>
-              <Pill tone={projectHealthTone(project.health)}>
-                {projectHealthLabel(project.health)}
-              </Pill>
+              <StatusPill
+                size="md"
+                status={project.status}
+                icon={<ProjectStatusIcon status={project.status} className="h-3 w-3" />}
+                label={projectStatusLabel(project.status)}
+              />
+              <StatusPill size="md" tone={projectHealthTone(project.health)} label={projectHealthLabel(project.health)} />
               {project.priority && project.priority !== "none" && (
-                <Pill tone={issuePriorityTone(project.priority)}>
-                  <PriorityIcon priority={project.priority} className="h-3 w-3" />
-                  {priorityLabel[project.priority]}
-                </Pill>
+                <StatusPill
+                  size="md"
+                  tone={issuePriorityTone(project.priority)}
+                  icon={<PriorityIcon priority={project.priority} className="h-3 w-3" />}
+                  label={priorityLabel[project.priority]}
+                />
               )}
               {/* Same source as the Scope figure below. Reading the row's
                   counter here while the band reads /stats puts two different
-                  answers to "how big is this" on one card. */}
-              <Pill tone="default">
+                  answers to "how big is this" on one card. A count, so a Badge. */}
+              <Badge variant="secondary">
                 {scope} {scope === 1 ? "issue" : "issues"}
-              </Pill>
+              </Badge>
             </div>
           </div>
         </DetailCard>

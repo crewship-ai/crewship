@@ -23,7 +23,7 @@ import * as React from "react"
 import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { IssueFilesCard } from "./issue-files-card"
 import { IssueWorkPanel } from "./issue-work-panel"

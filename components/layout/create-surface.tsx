@@ -1941,7 +1941,9 @@ export function CreateSurfaceFooter({
       )}
       <div className="flex-1 max-sm:hidden group-data-[mobile=true]/surface:hidden" />
       {aside}
+      {/* type="button": inside a <form> a bare button submits it. */}
       <Button
+        type="button"
         variant="ghost"
         size="sm"
         onClick={() => (guardCancel ? guard(onCancel) : onCancel())}

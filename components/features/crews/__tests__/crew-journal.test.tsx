@@ -74,7 +74,7 @@ it.each([404, 403, 500])("reports summary refusal %s and allows retry without re
   fireEvent.click(screen.getByRole("button", { name: "Generate Summary" }))
   await waitFor(() => expect(screen.getByRole("button", { name: "Generate Summary" })).toBeEnabled())
   if (status === 404) expect(toast.info).toHaveBeenCalledWith("Summary generation not yet available")
-  else expect(toast.error).toHaveBeenCalledWith(`Summary failed (${status})`)
+  else expect(toast.error).toHaveBeenCalledWith(`Summary failed (${status})`, { duration: Infinity })
   expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/v1/journal?"))).toHaveLength(1)
 })
 it.each([new Error("offline"), "unknown"])("reports a transport refusal without claiming summary success", async error => {
@@ -82,7 +82,7 @@ it.each([new Error("offline"), "unknown"])("reports a transport refusal without 
   render(<CrewJournal crewId="c" workspaceId="w" />)
   await screen.findByText("No events in the last 24 hours.")
   fireEvent.click(screen.getByRole("button", { name: "Generate Summary" }))
-  await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Summary failed", { description: error instanceof Error ? "offline" : undefined }))
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Summary failed", { duration: Infinity, description: error instanceof Error ? "offline" : undefined }))
   expect(toast.success).not.toHaveBeenCalled()
 })
 it("lets a new crew start a summary while an abandoned crew request is pending", async () => {

@@ -6,17 +6,15 @@ import { useEffect, useState } from "react"
 import { CheckCircle2, XCircle, Clock, MessageSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfaceSecondaryAction,
+} from "@/components/layout/create-surface"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import type { PendingWaitpoint } from "@/hooks/use-pending-approval"
 
 // RoutineApprovalBanner — the "this run is parked on YOU" strip. Primary
@@ -130,24 +128,28 @@ export function RoutineApprovalBanner({ waitpoint, deciding, onDecide, className
             <XCircle className="h-3.5 w-3.5" />
             Reject
           </Button>
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <MessageSquare className="h-3 w-3" />
-                View request
-              </button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>Approval request</DialogTitle>
-                <DialogDescription>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <MessageSquare className="h-3 w-3" />
+            View request
+          </button>
+          <CreateSurface open={open} onOpenChange={setOpen} size="md" restoreOpenerFocus>
+            <CreateSurfaceHeader
+              concept="routines"
+              icon={MessageSquare}
+              title="Approval request"
+              description={
+                <>
                   Step <span className="font-mono">{waitpoint.step_id}</span> · expires in{" "}
                   {remaining}
-                </DialogDescription>
-              </DialogHeader>
+                </>
+              }
+              onClose={() => setOpen(false)}
+            />
+            <CreateSurfaceBody className="flex flex-col gap-3">
               <div className="max-h-[50dvh] overflow-auto rounded-md border border-border/60 bg-background/40 px-3 py-2.5">
                 <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
                   {waitpoint.prompt}
@@ -160,33 +162,32 @@ export function RoutineApprovalBanner({ waitpoint, deciding, onDecide, className
                 onChange={(e) => setComment(e.target.value)}
                 className="h-20 w-full resize-none rounded-md border border-foreground/[0.1] bg-background p-2.5 text-[13px] leading-relaxed placeholder:text-muted-foreground-soft"
               />
-              <DialogFooter>
-                <Button
-                  variant="outline"
+            </CreateSurfaceBody>
+            <CreateSurfaceFooter
+              hint={null}
+              onCancel={() => setOpen(false)}
+              guardCancel={false}
+              secondary={
+                <CreateSurfaceSecondaryAction
+                  icon={XCircle}
                   onClick={() => {
                     setOpen(false)
                     void decide(false)
                   }}
                   disabled={deciding}
-                  className="gap-1.5"
                 >
-                  <XCircle className="h-3.5 w-3.5" />
                   Reject
-                </Button>
-                <Button
-                  onClick={() => {
-                    setOpen(false)
-                    void decide(true)
-                  }}
-                  disabled={deciding}
-                  className="gap-1.5 bg-warn text-background hover:bg-warn/90"
-                >
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  Approve
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+                </CreateSurfaceSecondaryAction>
+              }
+              primaryLabel="Approve"
+              primaryIcon={CheckCircle2}
+              onPrimary={() => {
+                setOpen(false)
+                void decide(true)
+              }}
+              primaryDisabled={deciding}
+            />
+          </CreateSurface>
         </div>
       )}
     </div>

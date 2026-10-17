@@ -12,7 +12,7 @@ import {
   ScrollText,
   Zap,
 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/ui/status-pill"
 import { SubBar } from "@/components/layout/sub-bar"
 import { cn } from "@/lib/utils"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -550,7 +550,7 @@ function JournalLog() {
         meta={
           activeTab === "timeline" && (
             <>
-              <StreamStatusBadge
+              <StreamStatus
                 status={streamStatus}
                 error={streamError}
                 gapDetected={streamGap}
@@ -815,7 +815,7 @@ function MetricsVisibilityChip({
  * that also re-reads the head, which is the only thing that can fill a gap
  * the fallback could not backfill.
  */
-function StreamStatusBadge({
+function StreamStatus({
   status,
   error,
   gapDetected = false,
@@ -827,31 +827,21 @@ function StreamStatusBadge({
   onReconnect?: () => void
 }) {
   if (status === "connected" && !gapDetected) {
-    return (
-      <Badge variant="outline" className="gap-1 text-[10px] bg-success/10 text-success border-success/30">
-        <Zap className="h-3 w-3" /> Live
-      </Badge>
-    )
+    return <StatusPill tone="success" icon={<Zap className="h-3 w-3" />} label="Live" />
   }
   if (status === "connecting" && !gapDetected) {
-    return (
-      <Badge variant="outline" className="gap-1 text-[10px] bg-info/10 text-info border-info/30">
-        <Radio className="h-3 w-3" /> Connecting
-      </Badge>
-    )
+    return <StatusPill tone="blue" icon={<Radio className="h-3 w-3" />} label="Connecting" />
   }
   if (status === "idle" && !gapDetected) return null
 
   // Degraded: polling, offline, or live-but-with-a-hole. All of these are
-  // states the user can act on, so the badge becomes a button.
+  // states the user can act on, so the pill sits inside a button.
   const label = gapDetected
     ? "Entries missing"
     : status === "polling"
       ? "Polling"
       : "Offline"
-  const tone = gapDetected || status === "error"
-    ? "bg-destructive/10 text-destructive border-destructive/30 hover:bg-destructive/20"
-    : "bg-warn/10 text-warn border-warn/30 hover:bg-warn/20"
+  const tone = gapDetected || status === "error" ? "danger" : "warn"
   const title = [
     error ?? (status === "polling" ? "Live stream unavailable — falling back to polling." : null),
     onReconnect ? "Click to reconnect and reload the window." : null,
@@ -859,23 +849,19 @@ function StreamStatusBadge({
     .filter(Boolean)
     .join(" ")
 
-  const content = (
-    <>
-      <RadioTower className="h-3 w-3" /> {label}
-    </>
-  )
+  const pill = <StatusPill tone={tone} icon={<RadioTower className="h-3 w-3" />} label={label} />
   if (!onReconnect) {
-    return (
-      <Badge variant="outline" title={title} className={cn("gap-1 text-[10px]", tone)}>
-        {content}
-      </Badge>
-    )
+    return <span title={title}>{pill}</span>
   }
   return (
-    <button type="button" onClick={onReconnect} title={title} aria-label={`${label} — reconnect`}>
-      <Badge variant="outline" className={cn("gap-1 text-[10px] cursor-pointer transition-colors", tone)}>
-        {content}
-      </Badge>
+    <button
+      type="button"
+      onClick={onReconnect}
+      title={title}
+      aria-label={`${label} — reconnect`}
+      className="rounded-full transition-opacity hover:opacity-80"
+    >
+      {pill}
     </button>
   )
 }

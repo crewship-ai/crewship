@@ -55,7 +55,7 @@ import { cn } from "@/lib/utils"
 import { isImeComposing } from "@/lib/ime"
 import { apiFetch } from "@/lib/api-fetch"
 import { useIssuePeople } from "@/hooks/use-issue-people"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import type { IssueLabel, IssuePriority, Milestone, Project } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
 

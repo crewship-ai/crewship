@@ -26,9 +26,7 @@ import * as React from "react"
 import { Check, Copy, Eye, RefreshCw, ShieldAlert } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
@@ -146,18 +144,23 @@ function RevealDialogSession({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[520px]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <ShieldAlert className="h-4 w-4 text-warn" />
-            Reveal <span className="font-mono">{credentialName}</span>
-          </DialogTitle>
-          <DialogDescription className="text-xs">
+    // The shell, without its footer and without onSubmit on purpose: the
+    // ceremony's button order is inverted (the way out is the primary, the
+    // reveal is an outline), and a reveal must never fire from Cmd+Enter.
+    <CreateSurface open={open} onOpenChange={onOpenChange} size="sm">
+      <CreateSurfaceHeader
+        icon={ShieldAlert}
+        accent="amber"
+        title={<>Reveal <span className="font-mono">{credentialName}</span></>}
+        description={
+          <>
             Every reveal is written to the tamper-evident journal before the value is returned. If
             the record cannot be written, the value is not returned.
-          </DialogDescription>
-        </DialogHeader>
+          </>
+        }
+        onClose={() => onOpenChange(false)}
+      />
+      <CreateSurfaceBody>
 
         {value === null ? (
           <div className="space-y-4">
@@ -257,8 +260,8 @@ function RevealDialogSession({
             {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+    </CreateSurface>
   )
 }
 

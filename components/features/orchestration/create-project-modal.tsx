@@ -54,7 +54,7 @@ import type { AssigneeOption } from "@/components/features/issues/assignee-picke
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { ISSUE_ICON_COLORS } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import type { IssueLabel, IssuePriority, ProjectStatus } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
 

@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { LogOut, Monitor, Smartphone, Terminal } from "lucide-react"
 
 import { apiFetch } from "@/lib/api-fetch"

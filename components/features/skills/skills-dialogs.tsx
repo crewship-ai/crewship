@@ -1,21 +1,18 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { KeyRound, Users } from "lucide-react"
 
 import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { StatusPill } from "@/components/ui/status-pill"
 import { useSetSkillAssignment } from "@/hooks/use-skills"
 import { SkillTile } from "./skill-card"
@@ -93,24 +90,35 @@ export function AssignDialog({
     onClose()
   }
 
+  const applyDisabled = busy || (added.length === 0 && removed.length === 0)
   const needs = target.mode === "skill" ? (target.skill.needs_credentials ?? []) : []
   const missingFor = (agentId: string) => (target.mode === "skill" ? (target.skill.installed_on ?? []).find((a) => a.agent_id === agentId)?.missing_credentials ?? [] : [])
 
   return (
-    <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent className="flex max-h-[min(640px,calc(100dvh-48px))] flex-col gap-0 p-0 sm:max-w-lg">
-        <DialogHeader className="px-5 pb-3 pt-5">
-          <DialogTitle>{target.mode === "skill" ? `Assign ${skillName(target.skill)}` : `Skills for ${target.agent.name}`}</DialogTitle>
-          <DialogDescription>
+    <CreateSurface
+      open
+      onOpenChange={(o) => !o && !busy && onClose()}
+      size="sm"
+      onSubmit={() => {
+        if (!applyDisabled) void apply()
+      }}
+    >
+      <CreateSurfaceHeader
+        concept="skills"
+        title={target.mode === "skill" ? `Assign ${skillName(target.skill)}` : `Skills for ${target.agent.name}`}
+        description={
+          <>
             {target.mode === "skill"
               ? "Pick agents or a whole crew. They load the skill on their next run."
               : `Checked skills load on ${target.agent.name}'s next run.`}
             {target.mode === "skill" && skillTrust(target.skill).level === "flagged" && (
               <span className="mt-1 block text-destructive">The import scan flagged this skill. Read its SKILL.md first.</span>
             )}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto border-t border-border">
+          </>
+        }
+        onClose={() => { if (!busy) onClose() }}
+      />
+        <CreateSurfaceBody padded={false}>
           {target.mode === "skill"
             ? [...crews.map((c) => ({ crew: c as SkillsCrew | null, members: agents.filter((a) => a.crew_id === c.id) })), { crew: null, members: agents.filter((a) => !a.crew_id) }]
                 .filter((g) => g.members.length)
@@ -187,19 +195,20 @@ export function AssignDialog({
                     </label>
                   )
                 })}
-        </div>
-        <DialogFooter className="flex-row items-center gap-2 border-t border-border px-5 py-3">
+        </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        lead={
           <span className="mr-auto text-label tabular-nums text-muted-foreground">
             {added.length} added · {removed.length} removed
           </span>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button onClick={apply} disabled={busy || (added.length === 0 && removed.length === 0)}>
-            {busy ? "Applying…" : "Apply"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        }
+        hint={null}
+        onCancel={onClose}
+        primaryLabel={busy ? "Applying…" : "Apply"}
+        onPrimary={apply}
+        primaryDisabled={added.length === 0 && removed.length === 0}
+        busy={busy}
+      />
+    </CreateSurface>
   )
 }

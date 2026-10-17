@@ -559,7 +559,7 @@ describe("routine run detail — one page, one order (#2519)", () => {
       "Work in progress · step 2 of 2, “Check the extraction”",
     )
     fireEvent.click(within(banner).getByRole("button", { name: "Stop" }))
-    expect(screen.getByRole("dialog").textContent).toContain("Stop this run?")
+    expect(screen.getByRole("alertdialog").textContent).toContain("Stop this run?")
     expect(screen.getByRole("button", { name: "Keep running" })).toBeTruthy()
   })
 

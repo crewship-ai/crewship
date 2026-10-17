@@ -56,6 +56,9 @@ import {
 import { cn } from "@/lib/utils"
 import { formatDate, relTime, timeAgo } from "@/lib/time"
 import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
+import { Badge } from "@/components/ui/badge"
+import { StatusPill } from "@/components/ui/status-pill"
+import { formatStatus } from "@/lib/format-status"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
@@ -320,15 +323,19 @@ export function IssueCardDetail({
 
 
             <div className="flex flex-wrap items-center gap-1.5">
-              <Pill tone={issueStatusTone(issue.status)}>
-                <StatusIcon status={issue.status} className="h-3 w-3" />
-                {statusLabel[issue.status] ?? issue.status}
-              </Pill>
+              <StatusPill
+                size="md"
+                tone={issueStatusTone(issue.status)}
+                icon={<StatusIcon status={issue.status} className="h-3 w-3" />}
+                label={statusLabel[issue.status] ?? formatStatus(issue.status).label}
+              />
               {issue.priority && issue.priority !== "none" && (
-                <Pill tone={issuePriorityTone(issue.priority)}>
-                  <PriorityIcon priority={issue.priority} className="h-3 w-3" />
-                  {priorityLabel[issue.priority]}
-                </Pill>
+                <StatusPill
+                  size="md"
+                  tone={issuePriorityTone(issue.priority)}
+                  icon={<PriorityIcon priority={issue.priority} className="h-3 w-3" />}
+                  label={priorityLabel[issue.priority]}
+                />
               )}
               {/* The full name. The old KPI tile cut it to 14 characters, which
                   turned "File Operations" into a project that does not exist. */}
@@ -345,9 +352,9 @@ export function IssueCardDetail({
                 </Pill>
               )}
               {(issue.sub_issues_count ?? 0) > 0 && (
-                <Pill tone="default">
+                <Badge variant="secondary">
                   {issue.sub_issues_count} sub-{issue.sub_issues_count === 1 ? "issue" : "issues"}
-                </Pill>
+                </Badge>
               )}
             </div>
           </div>

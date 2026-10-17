@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 
 // =============================================================================
 // F21 / B9 (#2362) — editing a webhook used to mean delete + recreate, which
@@ -39,6 +39,8 @@ const onCancel = vi.fn()
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // The rotation question is an in-page ConfirmDialog now; the browser's
+  // confirm() must never be the thing that decides.
   window.confirm = vi.fn().mockReturnValue(true)
 })
 
@@ -81,23 +83,34 @@ describe("RoutineWebhookEditorDialog", () => {
     expect(screen.getByText(/must be valid json/i)).toBeInTheDocument()
   })
 
-  it("only sends rotate_secret:true after an explicit confirmation", () => {
+  it("only sends rotate_secret:true after an explicit confirmation", async () => {
     render(<RoutineWebhookEditorDialog webhook={baseWebhook()} onCancel={onCancel} onSave={onSave} />)
     fireEvent.click(screen.getByRole("switch", { name: /rotate signing secret/i }))
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
-    expect(window.confirm).toHaveBeenCalled()
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ rotate_secret: true }))
+    // Save only asks; nothing is sent until the rotation is confirmed.
+    const question = await screen.findByRole("alertdialog")
+    expect(question).toHaveTextContent(/rotate the signing secret\?/i)
+    expect(onSave).not.toHaveBeenCalled()
+    fireEvent.click(within(question).getByRole("button", { name: "Rotate and save" }))
+
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ rotate_secret: true })),
+    )
+    expect(window.confirm).not.toHaveBeenCalled()
   })
 
-  it("does not save at all when the rotation confirmation is declined", () => {
-    window.confirm = vi.fn().mockReturnValue(false)
+  it("does not save at all when the rotation confirmation is declined", async () => {
     render(<RoutineWebhookEditorDialog webhook={baseWebhook()} onCancel={onCancel} onSave={onSave} />)
     fireEvent.click(screen.getByRole("switch", { name: /rotate signing secret/i }))
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
-    expect(window.confirm).toHaveBeenCalled()
+    const question = await screen.findByRole("alertdialog")
+    fireEvent.click(within(question).getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(onSave).not.toHaveBeenCalled()
+    expect(onCancel).not.toHaveBeenCalled()
   })
 
   it("calls onCancel without saving", () => {

@@ -10,11 +10,13 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { RefreshCw, Layers } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { DetailCard, Pill, TickRow } from "@/components/ui/detail"
+import { DetailCard, TickRow } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
+import type { StatusTone } from "@/lib/status-tone"
 import { apiFetch } from "@/lib/api-fetch"
 
 interface CrewImageStatus {
@@ -57,12 +59,12 @@ const VERDICT_LABEL: Record<Verdict, string> = {
   unavailable: "Unavailable",
 }
 
-const VERDICT_TONE: Record<Verdict, "default" | "success" | "warn"> = {
-  loading: "default",
+const VERDICT_TONE: Record<Verdict, StatusTone> = {
+  loading: "muted",
   behind: "warn",
   current: "success",
-  unknown: "default",
-  unavailable: "default",
+  unknown: "muted",
+  unavailable: "muted",
 }
 
 /** shortDigest renders "sha256:abcdef012345" — enough to compare two by eye. */
@@ -148,9 +150,12 @@ export function CrewImageFreshness({ crewId, workspaceId, canEdit }: CrewImageFr
     >
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <Pill tone={VERDICT_TONE[verdict]} data-testid="crew-image-freshness-verdict">
-            {VERDICT_LABEL[verdict]}
-          </Pill>
+          <StatusPill
+            size="md"
+            tone={VERDICT_TONE[verdict]}
+            label={VERDICT_LABEL[verdict]}
+            data-testid="crew-image-freshness-verdict"
+          />
           {status?.image ? (
             <span className="type-meta truncate font-mono text-muted-foreground-soft">{status.image}</span>
           ) : null}

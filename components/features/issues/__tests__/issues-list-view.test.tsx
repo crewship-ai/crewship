@@ -171,7 +171,7 @@ describe("IssuesListView bulk update", () => {
 
     // 1. The failure is stated, in the server's words.
     await waitFor(() =>
-      expect(toastError).toHaveBeenCalledWith("3 of 2 issues are locked by a running mission"),
+      expect(toastError).toHaveBeenCalledWith("3 of 2 issues are locked by a running mission", { duration: Infinity }),
     )
     expect(toastSuccess).not.toHaveBeenCalled()
 
@@ -197,7 +197,7 @@ describe("IssuesListView bulk update", () => {
 
     bulkSetDone()
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Failed to fetch"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Failed to fetch", { duration: Infinity }))
     expect(screen.getByText("2 selected")).toBeTruthy()
   })
 
@@ -207,7 +207,7 @@ describe("IssuesListView bulk update", () => {
 
     bulkSetDone()
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringContaining("502")))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringContaining("502"), { duration: Infinity }))
     expect(screen.getByText("2 selected")).toBeTruthy()
   })
 

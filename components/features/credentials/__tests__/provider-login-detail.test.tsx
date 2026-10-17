@@ -98,7 +98,7 @@ describe("Validity & refresh", () => {
     expect(screen.getByText(/^in 2 d 4 h/)).toBeInTheDocument()
     expect(screen.getByText("8d ago")).toBeInTheDocument()
     expect(screen.getByText(/^in 1d$/)).toBeInTheDocument()
-    expect(screen.getByTestId("refresh-token-sealed")).toHaveTextContent("SEALED")
+    expect(screen.getByTestId("refresh-token-sealed")).toHaveTextContent("Sealed")
     expect(screen.getByText("never leaves the server")).toBeInTheDocument()
     expect(screen.getByTestId("login-status-at_limit")).toBeInTheDocument()
   })

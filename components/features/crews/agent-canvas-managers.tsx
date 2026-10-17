@@ -1,12 +1,18 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { toast } from "sonner"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { toast } from "@/lib/toast"
 import { Plus, Trash2 } from "lucide-react"
 import type { AgentCredRow, AgentSkillRow } from "./agent-canvas"
 import { apiFetch } from "@/lib/api-fetch"
 import { toApiError } from "@/lib/api-error"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import {
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 
 interface WorkspaceSkill {
   id: string
@@ -347,8 +353,12 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
 }
 
 /**
- * Generic picker sheet for assign-skill / assign-credential dialogs.
- * Centered modal — a real Sheet/Dialog primitive could replace this later.
+ * Generic picker for the assign-skill / assign-credential flows.
+ *
+ * Mounted only while picking, so it is always open; closing goes through
+ * `onClose` and the caller unmounts it. The shell owns Esc, the overlay
+ * click, the focus trap and handing focus back to the opener — all four
+ * were hand-rolled here before, on a `fixed inset-0` overlay of its own.
  */
 
 function PickerSheet<T>({
@@ -363,77 +373,35 @@ function PickerSheet<T>({
   loading: boolean
   busy: boolean
 }) {
-  const dialogRef = useRef<HTMLDivElement | null>(null)
-  // Focus the dialog on open + listen for Escape on the document so the key
-  // dismisses the picker even if focus is somewhere outside the inner div.
-  // Restore focus to the original trigger element when we unmount so the
-  // user keeps their place in the page.
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null
-    dialogRef.current?.focus()
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose()
-    }
-    document.addEventListener("keydown", onKey)
-    return () => {
-      document.removeEventListener("keydown", onKey)
-      previouslyFocused?.focus?.()
-    }
-  }, [onClose])
-
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/60 grid place-items-center"
-      onClick={onClose}
-      role="presentation"
-    >
-      <div
-        ref={dialogRef}
-        tabIndex={-1}
-        className="w-[460px] max-w-[90vw] max-h-[70dvh] rounded-xl border border-foreground/10 bg-card shadow-2xl overflow-hidden flex flex-col outline-none"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <div className="px-4 py-3 border-b border-foreground/8">
-          <h3 className="text-sm font-semibold">{title}</h3>
-          <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>
-        </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-foreground/5">
-          {loading ? (
-            <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
-          ) : items.length === 0 ? (
-            <div className="px-4 py-6 text-xs text-muted-foreground italic">Nothing else to assign — all available items are already attached.</div>
-          ) : (
-            items.map((item, i) => {
-              const { primary, secondary } = renderItem(item)
-              return (
-                <button
-                  key={i}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onPick(item)}
-                  className="w-full text-left px-4 py-2.5 hover:bg-foreground/[0.04] disabled:opacity-50"
-                >
-                  <div className="text-sm text-foreground">{primary}</div>
-                  {secondary && <div className="text-[10px] text-muted-foreground">{secondary}</div>}
-                </button>
-              )
-            })
-          )}
-        </div>
-        <div className="px-4 py-2 border-t border-foreground/8 flex items-center justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-xs px-3 py-1.5 rounded border border-foreground/10 hover:bg-foreground/5 text-foreground"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
+    <CreateSurface open onOpenChange={(next) => { if (!next) onClose() }} size="sm" restoreOpenerFocus>
+      <CreateSurfaceHeader title={title} description={subtitle} onClose={onClose} />
+      <CreateSurfaceBody padded={false} className="divide-y divide-foreground/5">
+        {loading ? (
+          <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
+        ) : items.length === 0 ? (
+          <div className="px-4 py-6 text-xs text-muted-foreground italic">Nothing else to assign — all available items are already attached.</div>
+        ) : (
+          items.map((item, i) => {
+            const { primary, secondary } = renderItem(item)
+            return (
+              <button
+                key={i}
+                type="button"
+                disabled={busy}
+                onClick={() => onPick(item)}
+                className="w-full text-left px-4 py-2.5 hover:bg-foreground/[0.04] disabled:opacity-50 sm:px-5"
+              >
+                <div className="text-sm text-foreground">{primary}</div>
+                {secondary && <div className="text-[10px] text-muted-foreground">{secondary}</div>}
+              </button>
+            )
+          })
+        )}
+      </CreateSurfaceBody>
+      {/* The pick IS the action, so there is no primary — only the way out. */}
+      <CreateSurfaceFooter hint={null} onCancel={onClose} />
+    </CreateSurface>
   )
 }
 

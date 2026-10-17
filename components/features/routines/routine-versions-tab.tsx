@@ -3,7 +3,7 @@
 import { formatRoutineTime } from "@/lib/routine-time"
 
 import { useEffect, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -12,7 +12,8 @@ import { roleAtLeast } from "@/lib/routine-governance"
 import { relTime } from "@/lib/time"
 import { discardRoutineDraft, loadRoutineDraft, saveRoutineDraft } from "@/lib/routine-drafts"
 import type { PipelineDraftSummary } from "@/hooks/use-pipelines"
-import { DetailCard, Pill } from "@/components/ui/detail"
+import { DetailCard } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
 import { Button } from "@/components/ui/button"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineStepDefinition } from "./routine-step-definition"
@@ -223,7 +224,7 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
                 <span className="w-16 text-[15px] font-semibold">v{v.version}</span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    {v.is_head && <Pill tone="success">Published · Run uses this</Pill>}
+                    {v.is_head && <StatusPill size="md" tone="success" label="Published · Run uses this" />}
                     <span className="text-xs text-muted-foreground">{formatRoutineTime(v.created_at)}</span>
                   </div>
                   <p className="mt-1 text-xs">{v.change_summary || "Saved recipe"}</p>

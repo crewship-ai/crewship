@@ -17,10 +17,11 @@ import * as React from "react"
 import {
   CreditCard, FileText, FlaskConical, Gauge, LogIn, RefreshCw, ShieldOff, Trash2, UserPlus, Wallet,
 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
-import { Appear, DetailCard, Pill } from "@/components/ui/detail"
+import { Appear, DetailCard } from "@/components/ui/detail"
+import { StatusPill } from "@/components/ui/status-pill"
 import { Spinner } from "@/components/ui/spinner"
 import { apiFetch } from "@/lib/api-fetch"
 import { formatDate, formatRelativeTime, relTime } from "@/lib/time"
@@ -258,10 +259,12 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
                   )}
                 </Fact>
                 <Fact label="Refresh token">
-                  <Pill tone="purple" data-testid="refresh-token-sealed">
-                    <ShieldOff className="h-3 w-3" />
-                    SEALED
-                  </Pill>
+                  <StatusPill
+                    size="md"
+                    status="SEALED"
+                    icon={<ShieldOff className="h-3 w-3" />}
+                    data-testid="refresh-token-sealed"
+                  />
                   <span className="ml-1.5 text-muted-foreground-soft">never leaves the server</span>
                 </Fact>
               </>
