@@ -93,7 +93,7 @@ describe("failure paths that would otherwise pass silently", () => {
     mount(item({ kind: "waitpoint", source_id: "tok" }))
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("waitpoint store unavailable"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("waitpoint store unavailable", { duration: Infinity }))
     expect(onRefresh).not.toHaveBeenCalled()
   })
 
@@ -102,7 +102,7 @@ describe("failure paths that would otherwise pass silently", () => {
     mount(item({ kind: "escalation", payload: { kind: "skill_proposal", crew_id: "c", file_name: "f" } }))
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/dns/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/dns/), { duration: Infinity }))
   })
 
   it("reports a network failure on a retry", async () => {
@@ -110,7 +110,7 @@ describe("failure paths that would otherwise pass silently", () => {
     mount(item({ kind: "failed_run", payload: { pipeline_slug: "nightly" } }))
     fireEvent.click(screen.getByRole("button", { name: /Retry/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/offline/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/offline/), { duration: Infinity }))
   })
 
   it("reports a network failure on a consolidation decision", async () => {
@@ -118,7 +118,7 @@ describe("failure paths that would otherwise pass silently", () => {
     mount(item({ kind: "memory_consolidation", payload: { proposal_id: "p1" } }))
     fireEvent.click(screen.getByRole("button", { name: /Accept/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/gone/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/gone/), { duration: Infinity }))
   })
 
   it("falls back to a status code when the server sends no message", async () => {
@@ -126,7 +126,7 @@ describe("failure paths that would otherwise pass silently", () => {
     mount(item({ kind: "waitpoint", source_id: "a1", payload: { kind: "hire" } }))
     fireEvent.click(screen.getByRole("button", { name: /Approve hire/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/500/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/500/), { duration: Infinity }))
   })
 })
 
@@ -136,7 +136,7 @@ describe("the schedule calls fail loudly too", () => {
     mount(item({ kind: "schedule_circuit_breaker_tripped", payload: { schedule_id: "s1" } }))
     fireEvent.click(screen.getByRole("button", { name: /Re-enable schedule/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/offline/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/offline/), { duration: Infinity }))
     expect(onResolve).not.toHaveBeenCalled()
   })
 
@@ -145,7 +145,7 @@ describe("the schedule calls fail loudly too", () => {
     mount(item({ kind: "schedule_missed", payload: { schedule_id: "s2" } }))
     fireEvent.click(screen.getByRole("button", { name: /Run now/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/dns/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/dns/), { duration: Infinity }))
   })
 
   it("reports a refused run-now", async () => {
@@ -153,7 +153,7 @@ describe("the schedule calls fail loudly too", () => {
     mount(item({ kind: "schedule_missed", payload: { schedule_id: "s2" } }))
     fireEvent.click(screen.getByRole("button", { name: /Run now/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("runner not wired"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("runner not wired", { duration: Infinity }))
   })
 
   it("offers only Dismiss when a missed notice carries no schedule id", () => {

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { readApiError } from "@/lib/api-error"

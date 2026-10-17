@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { feedbackPreferenceChoices, useTurnPreference } from "@/hooks/use-feedback-preferences"
 import { useDrawerStore } from "@/stores/drawer-store"

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Bell, Boxes, FileText, Gauge, Globe, KeyRound, RotateCcw, Shield, Webhook, type LucideIcon } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SettingsCard, SettingsEmpty, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem, firstSentence } from "@/components/features/settings/shared"

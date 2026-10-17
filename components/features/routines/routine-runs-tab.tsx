@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronRight, CheckCircle2, XCircle, AlertTriangle, HelpCircle, Eye, Play, Square } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Spinner } from "@/components/ui/spinner"
 import { StatusPill } from "@/components/ui/status-pill"
 import { formatStatus } from "@/lib/format-status"

@@ -93,7 +93,7 @@ describe("ScheduleEditor", () => {
     // 1. The failure is stated, in the server's words — not swallowed, not
     //    replaced by a generic "something went wrong".
     await waitFor(() =>
-      expect(toastError).toHaveBeenCalledWith("cron expression has 6 fields, expected 5"),
+      expect(toastError).toHaveBeenCalledWith("cron expression has 6 fields, expected 5", { duration: Infinity }),
     )
     expect(toastSuccess).not.toHaveBeenCalled()
 

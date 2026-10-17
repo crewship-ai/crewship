@@ -42,7 +42,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { FolderOpen, Users } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Spinner } from "@/components/ui/spinner"
 import { apiFetch } from "@/lib/api-fetch"

@@ -32,7 +32,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { apiFetch } from "@/lib/api-fetch"
 import { AddMemberDialog } from "./add-member-dialog"
 import type { CrewMember, CrewMemberRole } from "@/lib/types/crew"

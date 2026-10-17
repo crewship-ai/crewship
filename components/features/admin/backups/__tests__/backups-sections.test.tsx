@@ -625,7 +625,7 @@ describe("Keys & alerts", () => {
       expect(await screen.findByText("test not delivered: webhook returned 503")).toBeInTheDocument()
       const post = h.apiFetch.mock.calls.find(([u]) => String(u).endsWith("/backups/settings/test-alert"))
       expect(post?.[1]).toMatchObject({ method: "POST", body: JSON.stringify({ channel_id: "nch_s" }) })
-      expect(h.toast.error).toHaveBeenCalledWith("Test alert to Slack · Ops was not delivered: webhook returned 503")
+      expect(h.toast.error).toHaveBeenCalledWith("Test alert to Slack · Ops was not delivered: webhook returned 503", { duration: Infinity })
     })
 
     it("keeps a routed channel that is no longer offered, with why its alerts fail", async () => {

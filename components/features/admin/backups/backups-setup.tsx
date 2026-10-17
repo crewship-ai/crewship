@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { Check, Copy, Download, KeyRound, Loader2, ShieldCheck, Sparkles } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { useSessionSafe } from "@/hooks/use-auth"

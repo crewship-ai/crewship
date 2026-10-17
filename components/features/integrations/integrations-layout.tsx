@@ -19,7 +19,7 @@ import {
   Wrench,
   Zap,
 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"

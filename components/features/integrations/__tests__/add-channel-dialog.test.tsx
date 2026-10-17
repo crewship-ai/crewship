@@ -333,7 +333,7 @@ describe("AddChannelDialog", () => {
 
     // The band survives; the toast is what fades.
     expect(await screen.findByRole("alert")).toHaveTextContent(/webhook url is not reachable/i)
-    expect(toast.error).toHaveBeenCalledWith("webhook url is not reachable")
+    expect(toast.error).toHaveBeenCalledWith("webhook url is not reachable", { duration: Infinity })
     expect(props.onClose).not.toHaveBeenCalled()
     // Still on the form, still submittable.
     expect(screen.getByRole("button", { name: /^connect$/i })).toBeEnabled()

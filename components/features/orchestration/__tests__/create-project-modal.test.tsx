@@ -172,7 +172,7 @@ describe("CreateProjectModal", () => {
     fireEvent.click(screen.getByText("Create project"))
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Name already taken")
-    expect(toast.error).toHaveBeenCalledWith("Name already taken")
+    expect(toast.error).toHaveBeenCalledWith("Name already taken", { duration: Infinity })
   })
 
   it("shows Backlog status pill by default", () => {
@@ -352,7 +352,7 @@ describe("CreateProjectModal", () => {
     fireEvent.click(screen.getByText("Create project"))
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Name already taken")
+      expect(toast.error).toHaveBeenCalledWith("Name already taken", { duration: Infinity })
     })
   })
 

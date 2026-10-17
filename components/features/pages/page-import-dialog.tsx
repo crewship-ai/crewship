@@ -35,7 +35,7 @@ import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
  */
 
 import * as React from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { FileJson, Upload, Wand2 } from "lucide-react"
 
 import { parsePageBundle, MAX_PAGE_BUNDLE_BYTES } from "@/lib/pages/parse-bundle"

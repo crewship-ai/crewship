@@ -22,7 +22,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import {
   CircleDot,
   ExternalLink,

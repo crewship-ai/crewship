@@ -5,7 +5,7 @@ import dynamic from "next/dynamic"
 import { motion } from "motion/react"
 import { ArrowLeft, Download, Eye, FileCode2, FileSpreadsheet, FileText, Maximize2, Minimize2, Pause, Play, X } from "lucide-react"
 import { marked } from "marked"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"

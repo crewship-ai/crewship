@@ -103,7 +103,7 @@ describe("useCrewLinks writes", () => {
     })
     const { result } = await mount()
     await act(() => result.current.setPair(ENG, OPS, "out"))
-    expect(toast.error).toHaveBeenCalledWith("target crew is archived")
+    expect(toast.error).toHaveBeenCalledWith("target crew is archived", { duration: Infinity })
   })
 
   it("warns the link is gone when even the restore fails", async () => {

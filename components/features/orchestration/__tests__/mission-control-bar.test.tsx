@@ -47,8 +47,8 @@ it.each(actions)("$label handles refusal, malformed JSON and network errors and 
     state.api.mockImplementation(() => failure === "network" ? Promise.reject(new Error("offline")) : Promise.resolve(failure === "refusal" ? json({ detail: "Action refused by server" }, 403) : new Response("not JSON", { status: 503 })))
     fireEvent.click(screen.getByRole("button", { name: action.label }))
     await waitFor(() => expect(screen.getByRole("button", { name: action.label })).toBeEnabled())
-    if (failure === "refusal") expect(state.error).toHaveBeenLastCalledWith("Action refused by server")
-    else expect(state.error).toHaveBeenLastCalledWith(expect.stringMatching(/^Failed to .* mission$/))
+    if (failure === "refusal") expect(state.error).toHaveBeenLastCalledWith("Action refused by server", { duration: Infinity })
+    else expect(state.error).toHaveBeenLastCalledWith(expect.stringMatching(/^Failed to .* mission$/), { duration: Infinity })
     expect(changed).not.toHaveBeenCalled()
     expect(state.success).not.toHaveBeenCalled()
   }

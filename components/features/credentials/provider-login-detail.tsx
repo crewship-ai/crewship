@@ -17,7 +17,7 @@ import * as React from "react"
 import {
   CreditCard, FileText, FlaskConical, Gauge, LogIn, RefreshCw, ShieldOff, Trash2, UserPlus, Wallet,
 } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
 import { Appear, DetailCard } from "@/components/ui/detail"

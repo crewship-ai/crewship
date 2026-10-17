@@ -222,7 +222,7 @@ describe("the 409s", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /your answer/i }), { target: { value: "hello" } })
     fireEvent.click(screen.getByRole("button", { name: "Send" }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/agent casey is held/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/agent casey is held/), { duration: Infinity }))
     expect(onRefresh).not.toHaveBeenCalled()
     expect(screen.queryByTestId("act-receipt")).not.toBeInTheDocument()
     // Still open for a retry once the cause is fixed.

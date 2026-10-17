@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { Plus, Trash2 } from "lucide-react"
 import type { AgentCredRow, AgentSkillRow } from "./agent-canvas"
 import { apiFetch } from "@/lib/api-fetch"

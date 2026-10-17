@@ -125,7 +125,7 @@ describe("save bar (PUT)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Auth endpoints: value out of range")
+      expect(toast.error).toHaveBeenCalledWith("Auth endpoints: value out of range", { duration: Infinity })
     })
     expect(screen.getByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
   })

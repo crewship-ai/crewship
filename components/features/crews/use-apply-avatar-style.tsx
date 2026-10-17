@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback } from "react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { useConfirm } from "@/components/ui/use-confirm"
 import { apiFetch } from "@/lib/api-fetch"

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { Inbox, ShieldX } from "lucide-react"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import type { WorkspaceRole } from "@/components/features/inbox/inbox-derive"
 import { Button } from "@/components/ui/button"

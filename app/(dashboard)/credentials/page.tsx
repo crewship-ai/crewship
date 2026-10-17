@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 import { AlertTriangle, CreditCard, Key, Layers, LayoutDashboard, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"

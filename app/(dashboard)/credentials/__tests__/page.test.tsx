@@ -435,7 +435,7 @@ describe("bulk delete partial failure (C6)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Delete 2" }))
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("1 deleted, 1 failed"))
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("1 deleted, 1 failed"), { duration: Infinity })
     })
     // The failed credential stays selected for one-click retry.
     expect(screen.getByRole("checkbox", { name: "Select KEY_B" })).toBeChecked()
@@ -566,7 +566,7 @@ describe("transient refresh failure (C-refresh)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Delete 1" }))
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Network error"))
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Network error"), { duration: Infinity })
     })
     // The full-page error card must NOT appear on a background refresh failure.
     expect(screen.queryByText("Couldn't load credentials")).not.toBeInTheDocument()

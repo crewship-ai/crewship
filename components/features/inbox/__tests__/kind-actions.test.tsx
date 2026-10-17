@@ -95,7 +95,7 @@ describe("hire waitpoints ride a different endpoint", () => {
     mount(hire)
     fireEvent.click(screen.getByRole("button", { name: /Approve hire/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/offline/)))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/offline/), { duration: Infinity }))
     expect(onRefresh).not.toHaveBeenCalled()
   })
 
@@ -108,7 +108,7 @@ describe("hire waitpoints ride a different endpoint", () => {
     mount(hire)
     fireEvent.click(screen.getByRole("button", { name: /Approve hire/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("nope"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("nope", { duration: Infinity }))
   })
 })
 
@@ -146,7 +146,7 @@ describe("credential escalations", () => {
     // A raw "404" tells the reader nothing about what to do next.
     await waitFor(() =>
       expect(toastError).toHaveBeenCalledWith(
-        expect.stringMatching(/Resolve this from its source/),
+        expect.stringMatching(/Resolve this from its source/), { duration: Infinity },
       ),
     )
   })
@@ -200,7 +200,7 @@ describe("routine proposals", () => {
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
     await waitFor(() =>
-      expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/already decided/i)),
+      expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/already decided/i), { duration: Infinity }),
     )
   })
 
@@ -241,7 +241,7 @@ describe("skill proposals", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("boom"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("boom", { duration: Infinity }))
   })
 })
 
@@ -281,7 +281,7 @@ describe("waitpoints are source-managed", () => {
     mount(item({ kind: "waitpoint", source_id: "tok" }))
     fireEvent.click(screen.getByRole("button", { name: /Deny/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("waitpoint store unavailable"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("waitpoint store unavailable", { duration: Infinity }))
     expect(onRefresh).not.toHaveBeenCalled()
   })
 })
@@ -295,7 +295,7 @@ describe("failed runs", () => {
     // is left over would fire the wrong routine, or none — the old fallback
     // read sender_name, which is the SCHEDULE's name, and 404'd.
     await waitFor(() =>
-      expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/cannot be retried/i)),
+      expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/cannot be retried/i), { duration: Infinity }),
     )
     // …and a failed Retry must not quietly resolve the row as cancelled. The
     // user asked to re-run it; Cancel is a separate button, right there.
@@ -320,7 +320,7 @@ describe("failed runs", () => {
     mount(item({ kind: "failed_run", payload: { pipeline_slug: "nightly" } }))
     fireEvent.click(screen.getByRole("button", { name: /Retry/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("bad inputs"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("bad inputs", { duration: Infinity }))
   })
 })
 
@@ -369,7 +369,7 @@ describe("memory consolidation", () => {
     mount(item({ kind: "memory_consolidation", payload: { proposal_id: "p1" } }))
     fireEvent.click(screen.getByRole("button", { name: /Reject/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("owner only"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("owner only", { duration: Infinity }))
   })
 })
 
@@ -399,7 +399,7 @@ describe("schedules reach the endpoints the CLI already uses", () => {
     mount(item({ kind: "schedule_circuit_breaker_tripped", payload: { schedule_id: "sch-1" } }))
     fireEvent.click(screen.getByRole("button", { name: /Re-enable schedule/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Forbidden"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Forbidden", { duration: Infinity }))
     expect(onResolve).not.toHaveBeenCalled()
   })
 
@@ -475,7 +475,7 @@ describe("keeper credential escalations", () => {
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
     await waitFor(() =>
-      expect(toastError).toHaveBeenCalledWith(expect.stringContaining("second approver")),
+      expect(toastError).toHaveBeenCalledWith(expect.stringContaining("second approver"), { duration: Infinity }),
     )
     expect(onRefresh).not.toHaveBeenCalled()
   })
@@ -489,7 +489,7 @@ describe("keeper credential escalations", () => {
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
     await waitFor(() =>
-      expect(toastError).toHaveBeenCalledWith(expect.stringContaining("Failed to fetch")),
+      expect(toastError).toHaveBeenCalledWith(expect.stringContaining("Failed to fetch"), { duration: Infinity }),
     )
     expect(toastSuccess).not.toHaveBeenCalled()
     expect(onRefresh).not.toHaveBeenCalled()
@@ -553,7 +553,7 @@ describe("backup incidents reach instance admins as message cards", () => {
     apiFetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: "Only an instance administrator can do this" }) })
     mount(incident)
     fireEvent.click(screen.getByRole("button", { name: /Retry/ }))
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Only an instance administrator can do this"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Only an instance administrator can do this", { duration: Infinity }))
   })
 
   it("follows no link that is not an in-app admin page", () => {

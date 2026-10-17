@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
+import { toast } from "@/lib/toast"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { humanizePatchError, memberCapabilitiesKey } from "@/components/admin/member-capabilities"
