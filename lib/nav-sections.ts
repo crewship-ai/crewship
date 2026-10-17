@@ -1,5 +1,5 @@
 import { roleAtLeast } from "@/lib/routine-governance"
-import { restrictedPathAllowed, type RestrictedSurface } from "@/lib/restricted-surfaces"
+import { restrictedHome, restrictedPathAllowed, type RestrictedSurface } from "@/lib/restricted-surfaces"
 import type { LucideIcon } from "lucide-react"
 
 import { CONCEPT_ICON } from "@/lib/concept-icons"
@@ -123,9 +123,19 @@ export function visibleItems(items: NavItem[], { role, instanceAdmin, surfaces }
   return items.filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
 }
 
-/** The phone tab bar for this person: a Guest keeps only granted tabs. */
+/**
+ * The phone tab bar for this person: a Guest keeps only granted tabs. A
+ * restricted session has no Dashboard, so Home leads to its own home
+ * (`restrictedHome`, SHL-07 / DSH-02) instead of vanishing; a tab that would
+ * point at the same place as Home is dropped.
+ */
 export function visiblePhoneTabs({ surfaces }: Pick<NavViewer, "surfaces"> & Partial<NavViewer>): NavItem[] {
-  return phoneTabs().filter((tab) => !surfaces || restrictedPathAllowed(tab.href, surfaces))
+  if (!surfaces) return phoneTabs()
+  const home = restrictedHome(surfaces)
+  return phoneTabs().flatMap((tab) => {
+    if (tab.href === "/") return home ? [{ ...tab, href: home }] : []
+    return tab.href !== home && restrictedPathAllowed(tab.href, surfaces) ? [tab] : []
+  })
 }
 
 /**
