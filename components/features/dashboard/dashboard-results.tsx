@@ -14,7 +14,7 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { StatusPill } from "@/components/ui/status-pill"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DashCard, DashLine, DashNote, DashSubHead } from "./dash-card"
-import { DashSegment } from "./dash-segment"
+import { Segmented } from "@/components/ui/segmented"
 import { entityHref } from "@/lib/entity-links"
 import { formatRelativeTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
@@ -136,8 +136,9 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
       link={{ label: "All issues", href: entityHref({ kind: "issues" }) }}
       className="xl:col-span-2"
       tools={
-        <DashSegment
-          label="Filter dashboard work"
+        <Segmented
+          ariaLabel="Filter dashboard work"
+          size="xs"
           value={filter}
           onChange={setFilter}
           options={RESULTS_FILTERS.map(({ key, label }) => ({ value: key, label, count: counts[key] }))}
