@@ -1,18 +1,12 @@
 "use client"
 
-import {
-  LayoutGrid, List, Bookmark, Save,
-} from "lucide-react"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { Filter } from "lucide-react"
+
 import { cn } from "@/lib/utils"
-import type { SavedView } from "@/lib/types/mission"
 import { Spinner } from "@/components/ui/spinner"
+import { StatusIcon } from "@/components/features/issues/status-icon"
+import { GROUP_OPTIONS, type GroupBy } from "@/components/features/issues/issues-view-model"
+import type { MissionStatus } from "@/lib/types/mission"
 
 /** 1015 → "1 015": a count a person reads, not a locale-dependent one. */
 export function formatCount(n: number): string {
@@ -29,15 +23,26 @@ export function issuesShowingLabel(loaded: number, total: number | null): string
   return `Showing newest ${formatCount(loaded)} of ${formatCount(total)}`
 }
 
+/** The status chips over the list, in this order. "All" clears them. */
+export const TOOLBAR_STATUSES: { status: MissionStatus; label: string }[] = [
+  { status: "IN_PROGRESS", label: "In progress" },
+  { status: "REVIEW", label: "In review" },
+  { status: "TODO", label: "Todo" },
+  { status: "BACKLOG", label: "Backlog" },
+]
+
 export interface IssuesToolbarStripProps {
-  issueViewMode: "board" | "list"
-  onViewModeChange: (mode: "board" | "list") => void
-  savedViews: SavedView[]
-  savedViewsOpen: boolean
-  onSavedViewsOpenChange: (open: boolean) => void
-  activeViewId: string | null
-  onActiveViewChange: (id: string | null, viewType?: "board" | "list") => void
-  /** Paging facts from usePagedList: what is loaded, the server's total, and a way to get more. */
+  statuses: MissionStatus[]
+  onToggleStatus: (s: MissionStatus) => void
+  onClearStatuses: () => void
+  /** Issues on screen after every filter. */
+  shown: number
+  groupBy: GroupBy
+  /** The board groups by status whatever the list does. */
+  board?: boolean
+  /** Phone: the Filters chip opens the panel sheet. */
+  onOpenFilters?: () => void
+  activeFilters?: number
   loaded?: number
   total?: number | null
   hasMore?: boolean
@@ -45,15 +50,24 @@ export interface IssuesToolbarStripProps {
   onLoadMore?: () => void
 }
 
-/** Toolbar strip for the issues center panel — view mode toggle + saved views dropdown */
+const CHIP = "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-label whitespace-nowrap transition-colors"
+const IDLE = "border-border bg-card text-muted-foreground hover:border-line-strong hover:text-foreground"
+const ON = "chip-active border-transparent"
+
+/**
+ * The strip over the list: status chips on the left, how many issues and how
+ * they are grouped on the right — and, when the workspace holds more than one
+ * page, how much of it is loaded with a way to load more.
+ */
 export function IssuesToolbarStrip({
-  issueViewMode,
-  onViewModeChange,
-  savedViews,
-  savedViewsOpen,
-  onSavedViewsOpenChange,
-  activeViewId,
-  onActiveViewChange,
+  statuses,
+  onToggleStatus,
+  onClearStatuses,
+  shown,
+  groupBy,
+  board = false,
+  onOpenFilters,
+  activeFilters = 0,
   loaded = 0,
   total = null,
   hasMore = false,
@@ -61,75 +75,37 @@ export function IssuesToolbarStrip({
   onLoadMore,
 }: IssuesToolbarStripProps) {
   const showing = issuesShowingLabel(loaded, total)
+  const grouped = board ? "status" : (GROUP_OPTIONS.find((g) => g.id === groupBy)?.label.toLowerCase() ?? groupBy)
   return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-foreground/[0.06] shrink-0">
-      <div className="flex gap-1 bg-foreground/[0.04] rounded-md p-0.5" role="group" aria-label="View mode">
-        <button
-          type="button"
-          aria-label="Board view"
-          aria-pressed={issueViewMode === "board"}
-          onClick={() => onViewModeChange("board")}
-          className={cn("p-1.5 rounded", issueViewMode === "board" ? "bg-foreground/[0.1] text-foreground" : "text-muted-foreground")}
-        >
-          <LayoutGrid className="h-3.5 w-3.5" />
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5" data-slot="issues-toolbar">
+      {onOpenFilters && (
+        <button type="button" onClick={onOpenFilters} className={cn(CHIP, activeFilters > 0 ? ON : IDLE)}>
+          <Filter className="size-3.5" aria-hidden />
+          Filters
+          {activeFilters > 0 && <span className="font-mono tabular-nums">{activeFilters}</span>}
         </button>
-        <button
-          type="button"
-          aria-label="List view"
-          aria-pressed={issueViewMode === "list"}
-          onClick={() => onViewModeChange("list")}
-          className={cn("p-1.5 rounded", issueViewMode === "list" ? "bg-foreground/[0.1] text-foreground" : "text-muted-foreground")}
-        >
-          <List className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      {/* Saved views dropdown */}
-      {savedViews.length > 0 && (
-        <DropdownMenu open={savedViewsOpen} onOpenChange={onSavedViewsOpenChange}>
-          <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs hover:bg-foreground/[0.06] text-muted-foreground transition-colors">
-              <Bookmark className="h-3 w-3" />
-              <span>{activeViewId ? savedViews.find((v) => v.id === activeViewId)?.name || "Saved Views" : "Saved Views"}</span>
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
-            <DropdownMenuItem
-              onClick={() => { onActiveViewChange(null); onSavedViewsOpenChange(false) }}
-              className={cn("text-xs", !activeViewId && "bg-foreground/[0.04]")}
-            >
-              All Issues
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {savedViews.map((view) => (
-              <DropdownMenuItem
-                key={view.id}
-                onClick={() => {
-                  if (view.view_type === "board" || view.view_type === "list") {
-                    onActiveViewChange(view.id, view.view_type)
-                  } else {
-                    onActiveViewChange(view.id)
-                  }
-                  onSavedViewsOpenChange(false)
-                }}
-                className={cn("text-xs", activeViewId === view.id && "bg-foreground/[0.04]")}
-              >
-                <Save className="h-3 w-3 mr-1.5 text-muted-foreground/50" />
-                {view.name}
-                {view.shared && (
-                  <span className="ml-auto text-[9px] text-foreground/40 uppercase">shared</span>
-                )}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
       )}
-
-      <div className="flex-1" />
-      {/* The list is bigger than the page: say so, and offer the next page.
-          Silent when the page is the list. */}
+      <div role="group" aria-label="Filter issues by status" className="flex min-w-0 items-center gap-1.5 overflow-x-auto [scrollbar-width:none]">
+        <button type="button" aria-pressed={statuses.length === 0} onClick={onClearStatuses} className={cn(CHIP, statuses.length === 0 ? ON : IDLE)}>
+          All
+        </button>
+        {TOOLBAR_STATUSES.map(({ status, label }) => {
+          const on = statuses.includes(status)
+          return (
+            <button key={status} type="button" aria-pressed={on} onClick={() => onToggleStatus(status)} className={cn(CHIP, on ? ON : IDLE)}>
+              <StatusIcon status={status} className="size-3" />
+              {label}
+            </button>
+          )
+        })}
+      </div>
+      <span className="flex-1" />
+      <span className="text-label text-muted-foreground-soft max-sm:hidden" data-testid="issues-count">
+        {formatCount(shown)} {shown === 1 ? "issue" : "issues"}
+        {groupBy !== "none" || board ? ` · grouped by ${grouped}` : ""}
+      </span>
       {showing && (
-        <span className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground" data-testid="issues-showing">
+        <span className="flex items-center gap-2 font-mono text-label text-muted-foreground" data-testid="issues-showing">
           {showing}
           {hasMore && onLoadMore && (
             <button
@@ -138,7 +114,7 @@ export function IssuesToolbarStrip({
               disabled={loadingMore}
               className="inline-flex items-center gap-1 text-primary-hover hover:underline disabled:opacity-60"
             >
-              {loadingMore && <Spinner className="h-3 w-3" />}
+              {loadingMore && <Spinner className="size-3" />}
               Load 100 more
             </button>
           )}

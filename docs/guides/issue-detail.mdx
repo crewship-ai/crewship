@@ -1,6 +1,6 @@
 ---
 title: "The issue detail"
-description: "One issue, one screen — the card surface behind /issues/<identifier> and the /issues centre pane, and the URL that now carries your selection."
+description: "One issue, one screen — the page behind /issues/<identifier>, the peek on /issues, and the URL that carries your selection and filters."
 icon: "circle-dot"
 stability: experimental
 tag: Experimental
@@ -23,11 +23,11 @@ you arrived.
 
 | URL | What it is |
 | --- | --- |
-| `/issues/<identifier>` | The canonical deep link. Back goes wherever `?from=` says, or to `/issues`. |
-| `/issues?issue=<identifier>` | The same detail in the centre pane, beside the explorer, the board and the bottom dock. |
+| `/issues/<identifier>` | The issue's page, where it is edited. Back goes wherever `?from=` says, or to `/issues`. |
+| `/issues?issue=<identifier>` | A 480 px **peek** over the list: status, who holds the work, owner and delegate, project, labels, due date and the brief. **J** / **K** step through the list, **Enter** or the title opens the issue's page, **Esc** closes. On a phone a row opens the page directly. |
 
-Both render `components/features/issues/issue-detail-surface.tsx`. The route
-only decides what sits above it.
+The page renders `components/features/issues/issue-detail-surface.tsx`; the
+peek reads the same issue and changes nothing.
 
 ## The selection is in the URL
 
@@ -234,37 +234,49 @@ scrolls internally if it is taller, so a long rail on a short window is still
 reachable. Below `xl` the columns stack and the rail scrolls with the page,
 exactly as before.
 
-## Finding issues: one filter, two places
+## Finding issues: the panel
 
-`/issues` filters by **crew, agent, priority and status**, and the four
-**combine** — "Engineering crew, high priority, still in Backlog" is one
-selection, not three attempts. Each pick used to clear the others, so the
-dropdown behaved like a set of switches; picking a crew left the priority
-alone, picking an agent did not, and no combination survived.
+The left panel of `/issues` holds **Views** (My work, All issues), **Projects**
+and **Saved views**, and a **Filter** menu with Status, Priority, Delegate,
+Owner, Who holds the work, Labels and Crew. The facets **combine** —
+"Engineering crew, high priority, still in Backlog" is one selection — and each
+pick changes only its own facet. The menu stays open while you pick.
 
 | Where | What it is |
 | --- | --- |
-| **Filter** button in the explorer (left panel) | All four facets. The badge counts every active one. Stays open while you pick, so a second facet is one click away. |
-| **Status chips** over the board | The same status selection, with live counts per status, one click each. |
+| **Filter** in the panel's toolbar | Every facet, with counts from the loaded issues. The badge counts the active ones. |
+| **Chips** under the toolbar | One per active facet; its × removes just that one. |
+| **Status chips** over the list | All, In progress, In review, Todo, Backlog — the same status selection, one click each. |
 
-The two are one piece of state, not two filters: picking **Backlog** in the
-dropdown lights the Backlog chip, and clearing the chip clears it in the
-dropdown. The chips are the quick, count-carrying affordance and disappear
-when an issue detail takes the centre pane; the dropdown is always reachable,
-which is why status belongs in it too.
-
-Clearing:
+Filters live in the URL (`?status=REVIEW,TODO&priority=high&crew_id=…&assignee_id=…&owner=…&holder=agent&label=docs`),
+so a filtered list can be shared and a link from another page lands filtered.
+Changing a filter replaces the URL rather than adding a history entry.
 
 - Click an active value again to drop **that** facet.
-- **All crews / All agents / Any priority / Any status** resets one facet and
-  leaves the others.
-- **Clear all** in the dropdown header drops everything, as does `Esc` on the
-  board.
+- **Any status / Any priority / All crews …** resets one facet and leaves the others.
+- **Clear all** drops every facet, as does `Esc` outside a text field.
+- **Saved views ›  +** keeps the current filters and layout under a name, optionally shared with the workspace.
+- Keys **1–9** select Views, then saved views, then projects; **C** opens New issue, **/** focuses search, **⇧V** opens Display options.
 
-The explorer's own issue list runs the same filter as the board
-(`hooks/use-filtered-issues.ts`). It used to apply only crew and agent, so a
-priority picked in the dropdown narrowed the board while the list beside it
-went on showing the rows the filter had excluded.
+**My work** is the open issues you own or hold. Needs my reply, Agents working,
+Waiting for my review and Blocked are not offered yet: the list endpoint does
+not report session state or relations, and a filter over the loaded page would
+leave issues out.
+
+## The list and the board
+
+A list row is one 38 px line: priority, ID, status, title, sub-issues, labels,
+due date, when it last changed, and the owner and delegate. **Display options**
+(⇧V) choose the grouping (status, project, delegate, priority or none), the
+order (manual, priority, updated, due date, created) and which of those fields
+a row shows; they are personal. Ticking rows opens a bar at the bottom for
+Status, Priority and Project; it asks before changing anything and says when the
+server changed only some of the selection.
+
+The board has Backlog, Todo, In progress, In review, Done and Failed columns;
+cancelled and duplicate issues stay in the list. Dragging a card to another
+column changes its status — moves to Done or In review ask first, and a move
+the workflow refuses leaves the card where it was with the reason.
 
 ## Read-only
 
@@ -313,7 +325,10 @@ nothing behind it, while `PATCH /api/v1/projects` has taken `start_date` and
 | The project equivalents | `components/features/issues/project-detail-surface.tsx`, `project-card-detail.tsx`, `project-card-editors.tsx` |
 | The URL-backed selection | `hooks/use-issue-detail.ts`, `hooks/use-project-detail.ts` |
 | Shared card primitives | `components/ui/detail` |
-| The filter dropdown + explorer list | `components/features/orchestration/unified-explorer.tsx` |
-| The status chips | `components/features/issues/issues-status-chips.tsx` |
-| The one filter both run | `hooks/use-filtered-issues.ts` |
+| The panel: views, projects, saved views, Filter | `components/features/orchestration/issues-panel.tsx` |
+| The status chips over the list | `components/features/orchestration/issues-toolbar-strip.tsx` |
+| Filters ⇄ URL, saved-view payload | `hooks/use-issue-filters.ts` |
+| The one filter everything runs | `hooks/use-filtered-issues.ts` |
+| Rows, grouping, order, quick views | `components/features/issues/issue-row.tsx`, `issues-view-model.ts` |
+| The peek | `components/features/issues/issue-peek.tsx` |
 | The run activity timeline | `components/features/activity/run-activity-timeline.tsx` |
