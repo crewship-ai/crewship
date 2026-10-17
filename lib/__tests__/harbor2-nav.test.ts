@@ -19,7 +19,8 @@ describe("Harbor 2 navigation", () => {
 
   it("has no announced-but-unbuilt rows (Marketplace is gone)", () => {
     const all = navSections.flatMap((s) => s.items)
-    expect(all.some((i) => i.href === "/marketplace" || i.badge === "FUTURE")).toBe(false)
+    // The "FUTURE" badge no longer exists in NavItem, so only the row itself can come back.
+    expect(all.some((i) => i.href === "/marketplace" || i.title === "Marketplace")).toBe(false)
   })
 
   it("keeps Journal admin-only until it moves into Activity", () => {
