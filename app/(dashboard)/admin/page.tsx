@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import {
-  Shield, AlertTriangle, ChevronRight, Menu,
+  Shield, AlertTriangle, ChevronRight,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -12,12 +12,10 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { withWs } from "@/lib/admin-workspace-query"
 import { SubBar } from "@/components/layout/sub-bar"
-import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { useIsMobile } from "@/hooks/use-mobile"
 import {
-  SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow, SIDEBAR_WIDTH,
+  SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow,
 } from "@/components/layout/sidebar-kit"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 
 import {
   initialAdminTab, movedAdminTabHref, adminSectionLabel, filterNav, ALL_TABS,
@@ -101,8 +99,7 @@ function AdminConsole() {
   }), [guard])
   // Universal search doubles as a command-finder — filters the nav live.
   const [navQuery, setNavQuery] = useState("")
-  const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const isMobile = useIsMobile()
+  const closePanelSheet = useCloseSecondaryPanelSheet()
   const navQ = navQuery.trim().toLowerCase()
   // Hooks must run before the early returns below, so keep this memo up here.
   const filteredSections = useMemo(() => filterNav(navQ), [navQ])
@@ -294,15 +291,11 @@ function AdminConsole() {
 
   const sectionLabel = adminSectionLabel(tab)
 
-  /* One nav body, rendered into a permanent column on a desktop and into a
-     Sheet on a phone. Choosing a section closes the Sheet — on a desktop
-     `setMobileNavOpen(false)` is a no-op. */
+  /* The panel's content: a column on a desktop, a bottom sheet on a phone.
+     Choosing a section closes the sheet — on a desktop that is a no-op. */
   const adminNav = (
     <>
-      {/* pr-10 on the phone: SheetContent draws its close button at
-          top-4 right-4 over this row, and it would otherwise take taps
-          meant for the search field. */}
-      <SidebarToolbar className={isMobile ? "pr-10" : undefined}>
+      <SidebarToolbar>
         <SidebarSearch
           value={navQuery}
           onValueChange={setNavQuery}
@@ -311,12 +304,12 @@ function AdminConsole() {
             if (e.key === "Enter" && firstNavMatch) {
               if (firstNavMatch.href) { const href = firstNavMatch.href; guard(() => router.push(href)) }
               else setTab(firstNavMatch.key as TabKey)
-              setMobileNavOpen(false)
+              closePanelSheet()
             }
           }}
         />
       </SidebarToolbar>
-      <nav className="flex-1 overflow-y-auto pb-4" aria-label="Admin sections">
+      <nav className="min-h-0 flex-1 overflow-y-auto pb-4" aria-label="Admin sections">
         {filteredSections.map((section) => (
           <SidebarSection key={section.label} label={section.label}>
             {section.items.map((item) => {
@@ -329,7 +322,7 @@ function AdminConsole() {
                   onSelect={() => {
                     if (item.href) { const href = item.href; guard(() => router.push(href)) }
                     else setTab(item.key as TabKey)
-                    setMobileNavOpen(false)
+                    closePanelSheet()
                   }}
                   aria-label={item.label}
                 >
@@ -353,44 +346,16 @@ function AdminConsole() {
         title="Admin Console"
         section={sectionLabel}
         ariaLabel="Admin Console"
-        /* The console's own nav is a 280px column. On a phone that leaves the
-           page 109px to render into, which is not a narrow layout — it is no
-           layout (#2483). Below `md` the same nav moves into a Sheet, reached
-           from here, exactly as Settings does. */
-        leading={
-          isMobile ? (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="h-7 w-7 -ml-1 coarse:relative coarse:after:absolute coarse:after:-inset-2.5 coarse:after:content-['']"
-              aria-label="Open admin navigation"
-              onClick={() => setMobileNavOpen(true)}
-            >
-              <Menu className="h-3.5 w-3.5" />
-            </Button>
-          ) : undefined
-        }
         meta={
           <span className="text-micro font-mono uppercase tracking-wide text-muted-foreground-soft">Instance admin</span>
         }
       />
 
       <div className="flex flex-1 min-h-0">
-        {/* ── Left nav ─────────────────────────────────────────────── */}
-        {isMobile ? (
-          <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
-            <SheetContent side="left" className="w-[280px] max-w-[85vw] p-0">
-              <SheetHeader className="sr-only">
-                <SheetTitle>Admin navigation</SheetTitle>
-              </SheetHeader>
-              <div className="flex h-full flex-col bg-card">{adminNav}</div>
-            </SheetContent>
-          </Sheet>
-        ) : (
-          <aside className={cn(SIDEBAR_WIDTH, "shrink-0 border-r border-foreground/[0.06] bg-card flex flex-col overflow-hidden")}>
-            {adminNav}
-          </aside>
-        )}
+        {/* ── Left nav: the one SecondaryPanel. A 272 px column on a
+             desktop; on a phone (where a column would leave the page no
+             layout, #2483) a bottom sheet from the top bar's panel button. */}
+        <SecondaryPanel id="admin" label="Admin navigation">{adminNav}</SecondaryPanel>
 
         {/* ── Content ─────────────────────────────────────────────── */}
         {/* tabIndex + role/label, not decoration: this pane scrolls, and the

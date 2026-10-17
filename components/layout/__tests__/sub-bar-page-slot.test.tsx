@@ -75,4 +75,14 @@ describe("SubBar in the top bar", () => {
     render(<SubBar title="Members" />)
     expect(screen.getByRole("heading", { level: 1, name: "Members" }).className).not.toMatch(/sr-only/)
   })
+
+  it("on a phone leaves no empty row when nothing visible is left in it", () => {
+    withSlot("Dashboard")
+    mobile = true
+    const { container } = render(<SubBar title="Dashboard" />)
+    const h1 = screen.getByRole("heading", { level: 1, name: "Dashboard" })
+    expect(h1.className).toMatch(/sr-only/)
+    // The heading stays for assistive technology, but the 36 px row is gone.
+    expect(container.querySelector(".min-h-9")).toBeNull()
+  })
 })

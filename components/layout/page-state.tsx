@@ -59,11 +59,24 @@ function ActionButton({ action, variant }: { action: PageAction; variant: "defau
   )
 }
 
-/** Skeleton rows or cards. After a second a note says it is still loading. */
-export function PageLoading({ variant = "list", rows = 7, className }: { variant?: "list" | "cards"; rows?: number; className?: string }) {
+/** How long a load may take before the page says so (Harbor 2: no spinner on a full page). */
+export const SLOW_LOAD_MS = 10_000
+
+/** Skeleton rows or cards. After 10 s a note says it is still loading, with Retry when given. */
+export function PageLoading({
+  variant = "list",
+  rows = 7,
+  className,
+  onRetry,
+}: {
+  variant?: "list" | "cards"
+  rows?: number
+  className?: string
+  onRetry?: () => void
+}) {
   const [slow, setSlow] = React.useState(false)
   React.useEffect(() => {
-    const t = setTimeout(() => setSlow(true), 1000)
+    const t = setTimeout(() => setSlow(true), SLOW_LOAD_MS)
     return () => clearTimeout(t)
   }, [])
   return (
@@ -91,6 +104,11 @@ export function PageLoading({ variant = "list", rows = 7, className }: { variant
         {slow ? (
           <>
             <Clock className="size-3.5" aria-hidden /> Still loading…
+            {onRetry && (
+              <Button size="sm" variant="ghost" onClick={onRetry}>
+                Retry
+              </Button>
+            )}
           </>
         ) : (
           <span className="sr-only">Loading</span>
