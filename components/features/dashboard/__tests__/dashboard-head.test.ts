@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 
 import { dashboardMeta, formatUntil, greeting, nextScheduledRun } from "../dashboard-head"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
@@ -37,5 +39,15 @@ describe("page head", () => {
     const now = at(9).getTime()
     expect(nextScheduledRun([s("past", at(8)), s("off", at(9, 5), false), s("late", at(11)), s("soon", at(9, 30)), s("none", null)], now)).toBe(at(9, 30).getTime())
     expect(nextScheduledRun([], now)).toBeNull()
+  })
+})
+
+describe("greeting size", () => {
+  it("uses the phone page-title size below md and the page title above it (18 px at Small on a phone)", () => {
+    const src = readFileSync(join(process.cwd(), "components/features/dashboard/dashboard-head.tsx"), "utf8")
+    const h1 = /<h1 data-testid="dashboard-greeting" className="([^"]+)"/.exec(src)?.[1] ?? ""
+    expect(h1.split(/\s+/)).toContain("text-title-phone")
+    expect(h1.split(/\s+/)).toContain("md:text-title")
+    expect(h1.split(/\s+/)).not.toContain("text-heading")
   })
 })

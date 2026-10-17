@@ -9,7 +9,9 @@ import { test, expect, type Page, type Route } from "@playwright/test"
 // API calls before the first navigation. storageState from global-setup
 // still authenticates it.
 
-const PINNED = { crewship_sidebar_mode: "pinned", "crewship-appearance-sync": "0" }
+// Small is the text size the v67 sizes are drawn at; sync off so the account's
+// stored size does not override it.
+const PINNED = { crewship_sidebar_mode: "pinned", "crewship-appearance-sync": "0", "crewship-text-size": "small" }
 
 async function seed(page: Page) {
   await page.addInitScript((e) => {
