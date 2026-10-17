@@ -26,6 +26,8 @@ import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { RoutineNewWizard } from "./routine-new-wizard"
 import { RoutinesViewPane, needsYou } from "./routines-views"
 import { RoutinesIntro } from "./routines-intro"
+import { RoutineRunPeek } from "./routine-run-peek"
+import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { ImportRoutineDialog } from "./routine-import-dialog"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useRoutinePanelIndex } from "@/hooks/use-routine-panel-index"
@@ -149,6 +151,15 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // The routine and run pages put their actions in the top bar through this
   // slot (a node inside the SubBar's action area).
   const [pageActions, setPageActions] = useState<HTMLElement | null>(null)
+  // While a run is open the panel lists its routine's runs (v67 rtPanel);
+  // "All routines" there goes back to the routine list. A row opens the peek.
+  const { records: runRecords } = usePipelineRunRecords(selectedRun && selectedSlug ? workspaceId : null, selectedRun ? selectedSlug : null)
+  const [routinesInPanel, setRoutinesInPanel] = useState(false)
+  const [peekRun, setPeekRun] = useState<string | null>(null)
+  useEffect(() => {
+    setRoutinesInPanel(false)
+    setPeekRun(null)
+  }, [selectedRun])
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [drafts, setDrafts] = useState<RoutineDraftListEntry[] | null>(null)
@@ -343,6 +354,17 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             crews={crews}
             index={panelIndex}
             bulk={isMobile ? undefined : bulk}
+            runsOf={
+              selectedRun && selectedSlug && !routinesInPanel
+                ? {
+                    routineName: selectedRoutine?.name || selectedSlug,
+                    runs: runRecords,
+                    current: selectedRun,
+                    onPeek: setPeekRun,
+                    onBack: () => setRoutinesInPanel(true),
+                  }
+                : undefined
+            }
           />
         </SecondaryPanel>
 
@@ -421,6 +443,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                     error={error}
                     onSelect={handleSelect}
                     onRetry={refresh}
+                    onOpenRun={openRun}
                     onNew={canCreate ? () => setCreateDialogOpen(true) : undefined}
                   />
                 </motion.div>
@@ -429,6 +452,20 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           </div>
         </div>
       </div>
+
+      {peekRun && selectedSlug && (
+        <RoutineRunPeek
+          workspaceId={workspaceId}
+          runs={runRecords}
+          runId={peekRun}
+          onChange={setPeekRun}
+          onClose={() => setPeekRun(null)}
+          onOpen={(id) => {
+            setPeekRun(null)
+            setSelectedRun(id)
+          }}
+        />
+      )}
 
       {importDialogOpen && canCreate && (
         <ImportRoutineDialog

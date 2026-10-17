@@ -36,7 +36,7 @@ const TONE: Record<RunBarTone, "success" | "danger" | "warn" | "muted" | "blue">
 }
 
 /** What a run did, in one sentence. */
-export function runSentence(r: Pick<PipelineRunRecord, "status" | "outcome" | "mode">): string {
+export function runSentence(r: { status: string; outcome?: string; mode?: string }): string {
   if (r.mode === "dry_run" || r.mode === "test_run") return "A test run: messages and writes were simulated."
   const { tone } = runBarTone(r)
   if (r.status === "cancelled") return "Someone stopped it. What finished before stays."
@@ -76,16 +76,38 @@ export function RoutinePreviousRuns({ runs, current, onPeek }: { runs: PipelineR
   )
 }
 
+/** What the peek reads from a run row: a routine's run records and the
+ *  workspace run list (All runs) both carry it. */
+export interface PeekRun {
+  id: string
+  status: string
+  started_at: string
+  cost_usd: number
+  duration_ms: number
+  outcome?: string
+  pipeline_version?: number
+  error_message?: string
+  triggered_by_id?: string
+  chain_depth?: number
+  mode?: string
+  triggered_via?: string
+  pipeline_slug?: string
+  pipeline_name?: string
+}
+
 export function RoutineRunPeek({
   runs,
   runId,
   onChange,
   onClose,
   onOpen,
+  routineName,
 }: {
   workspaceId: string
-  runs: PipelineRunRecord[]
+  runs: PeekRun[]
   runId: string
+  /** Named in the peek when its runs span several routines (All runs). */
+  routineName?: (run: PeekRun) => string | undefined
   onChange: (runId: string) => void
   onClose: () => void
   onOpen: (runId: string) => void
@@ -94,7 +116,7 @@ export function RoutineRunPeek({
   const run = i >= 0 ? runs[i] : null
   if (!run) return null
   const t = runBarTone(run)
-  const prov = runProvenance(run)
+  const prov = runProvenance(run as Parameters<typeof runProvenance>[0])
   // Newer is up the list (K), older down (J): the list is newest first.
   const newer = i > 0 ? runs[i - 1] : null
   const older = i < runs.length - 1 ? runs[i + 1] : null
@@ -118,6 +140,7 @@ export function RoutineRunPeek({
           <StatusPill size="md" tone={TONE[t.tone]} label={t.label} />
           {run.pipeline_version != null && <span className="font-mono text-xs text-muted-foreground">v{run.pipeline_version}</span>}
         </div>
+        {routineName?.(run) && <p className="text-body font-medium text-foreground">{routineName(run)}</p>}
         <p className="text-sm">{runSentence(run)}</p>
         <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs">
           <dt className="text-muted-foreground">Started</dt>
