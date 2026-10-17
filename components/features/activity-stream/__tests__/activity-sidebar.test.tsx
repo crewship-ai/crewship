@@ -162,7 +162,6 @@ function mount(over: Partial<ActivitySidebarProps> = {}) {
       lens="workflows"
       onLens={vi.fn()}
       onOpenEntity={vi.fn()}
-      onToggleCollapse={vi.fn()}
       onOpenSection={vi.fn()}
       {...over}
     />,

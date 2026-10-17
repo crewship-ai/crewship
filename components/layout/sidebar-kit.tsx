@@ -7,6 +7,7 @@ import { AnimatePresence, motion } from "motion/react"
 
 import { cn } from "@/lib/utils"
 import { ListRow } from "@/components/ui/list-row"
+import { SecondaryPanelContext } from "@/components/layout/secondary-panel"
 
 /**
  * sidebar-kit — the canonical building blocks for every in-page LEFT sidebar
@@ -23,15 +24,34 @@ import { ListRow } from "@/components/ui/list-row"
  *    collapse chevron). Same on explorers and on Settings/Admin nav.
  *  · Rows go through the shared ListRow so selection is the tokenized brand
  *    accent-bar — never hardcoded blue.
- *  · Width unified to 280px by the parent; collapsed 44px.
+ *  · Width 272px (Harbor 2), collapsed 44px — prefer the SecondaryPanel
+ *    container (components/layout/secondary-panel), which owns both.
  */
 
-export const SIDEBAR_WIDTH = "w-[280px]"
+export const SIDEBAR_WIDTH = "w-[272px]"
 export const SIDEBAR_WIDTH_COLLAPSED = "w-11"
 
 /* ---------------------------------------------------------------- toolbar */
 
 export function SidebarToolbar({ className, children, ...props }: React.ComponentProps<"div">) {
+  // Inside a SecondaryPanel this IS the panel's 48 px toolbar, with the
+  // panel's collapse button at its end.
+  const panel = React.useContext(SecondaryPanelContext)
+  const claim = panel?.claim
+  React.useLayoutEffect(() => (claim ? claim() : undefined), [claim])
+  if (panel) {
+    return (
+      <div className={cn("secondary-panel-toolbar", className)} {...props}>
+        {children}
+        {panel.toggle && (
+          <>
+            <span className="ml-auto" />
+            {panel.toggle}
+          </>
+        )}
+      </div>
+    )
+  }
   return (
     <div className={cn("shrink-0 flex items-center gap-1.5 px-2 py-2", className)} {...props}>
       {children}
@@ -62,13 +82,14 @@ export function SidebarSearch({
   return (
     <div
       className={cn(
-        "kit-tap flex items-center gap-1.5 h-8 px-2.5 flex-1 min-w-0 rounded-md",
-        "bg-foreground/[0.04] border border-foreground/[0.08]",
-        "focus-within:border-primary/40 transition-colors",
+        // Harbor 2: a 28 px field on the card surface with a hairline.
+        "kit-tap flex items-center gap-1.5 h-[var(--control-sm)] px-2.5 flex-1 min-w-0 rounded-md",
+        "bg-card border border-border",
+        "focus-within:border-ring transition-colors",
         className,
       )}
     >
-      <Search className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+      <Search className="h-3.5 w-3.5 text-muted-foreground-soft shrink-0" />
       <input
         type="text"
         value={value}
@@ -78,8 +99,8 @@ export function SidebarSearch({
         placeholder={placeholder}
         aria-label={ariaLabel ?? placeholder}
         className={cn(
-          "flex-1 min-w-0 bg-transparent text-xs text-foreground outline-none",
-          "placeholder:text-muted-foreground/40",
+          "flex-1 min-w-0 bg-transparent text-sm text-foreground outline-none",
+          "placeholder:text-muted-foreground-soft",
           inputClassName,
         )}
       />
@@ -111,11 +132,15 @@ export function SidebarFilterButton({
   ...props
 }: React.ComponentProps<"button"> & { activeCount?: number; active?: boolean; icon?: LucideIcon }) {
   const on = active ?? activeCount > 0
+  // In a 272 px SecondaryPanel the label would squeeze the search field: the
+  // button shows its icon (and count) and keeps the label for screen readers.
+  const inPanel = React.useContext(SecondaryPanelContext) != null
   return (
     <button
       type="button"
       className={cn(
-        "kit-tap inline-flex items-center gap-1.5 h-8 px-2.5 shrink-0 rounded-md border text-[11px] whitespace-nowrap transition-colors",
+        "kit-tap inline-flex items-center gap-1.5 h-8 shrink-0 rounded-md border text-[11px] whitespace-nowrap transition-colors",
+        inPanel ? "px-2" : "px-2.5",
         on
           ? "bg-primary/10 border-primary/30 text-primary-hover"
           : "bg-foreground/[0.04] border-foreground/[0.08] text-muted-foreground hover:text-foreground",
@@ -124,7 +149,7 @@ export function SidebarFilterButton({
       {...props}
     >
       <Icon className="h-3 w-3" />
-      {children}
+      {inPanel ? <span className="sr-only">{children}</span> : children}
       {activeCount > 0 && (
         <span className="ml-0.5 rounded-full bg-primary-hover px-1.5 min-w-[15px] text-center text-[9px] font-bold text-background tabular-nums">
           {activeCount}
@@ -402,13 +427,19 @@ export function SidebarCollapseButton({
 /** Removable active-filter chip, shown under the toolbar when filters apply. */
 export function SidebarActiveChip({
   onRemove,
+  label,
   className,
   children,
 }: {
   onRemove?: () => void
+  /** What the chip filters by, for the remove button's name; defaults to a text child. */
+  label?: string
   className?: string
   children: React.ReactNode
 }) {
+  // Every chip's × must say which filter it removes, or a row of chips is a
+  // row of identical "Remove filter" buttons to a screen reader.
+  const name = label ?? (typeof children === "string" || typeof children === "number" ? String(children) : undefined)
   return (
     <span
       className={cn(
@@ -419,7 +450,7 @@ export function SidebarActiveChip({
     >
       {children}
       {onRemove && (
-        <button type="button" onClick={onRemove} aria-label="Remove filter" className="opacity-70 hover:opacity-100">
+        <button type="button" onClick={onRemove} aria-label={name ? `Remove filter ${name}` : "Remove filter"} className="opacity-70 hover:opacity-100">
           <X className="h-2.5 w-2.5" />
         </button>
       )}
@@ -478,12 +509,14 @@ export function SidebarSection({
           )}
         />
       )}
-      <span className="min-w-0 truncate font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+      {/* Harbor 2: an 11 px grey heading with its count beside it. */}
+      <span className="min-w-0 truncate text-micro font-semibold text-muted-foreground-soft">
         {label}
       </span>
       {count != null && (
-        <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">{count}</span>
+        <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{count}</span>
       )}
+      {!collapsible && actions && <span className="ml-auto" />}
       {!collapsible && actions}
     </>
   )
@@ -497,7 +530,7 @@ export function SidebarSection({
             onClick={onToggle}
             aria-expanded={!collapsed}
             className={cn(
-              "kit-tap flex flex-1 items-center gap-1.5 px-3 py-1.5 hover:bg-foreground/[0.02] transition-colors",
+              "kit-tap flex flex-1 items-center gap-1.5 px-2 pb-1 pt-3 transition-colors hover:text-foreground",
               headerClassName,
             )}
           >
@@ -506,7 +539,7 @@ export function SidebarSection({
           {actions && <div className="flex shrink-0 items-center pr-2">{actions}</div>}
         </div>
       ) : (
-        <div className={cn("flex items-center gap-1.5 px-3 py-1.5 select-none", headerClassName)}>{headerInner}</div>
+        <div className={cn("flex items-center gap-1.5 px-2 pb-1 pt-3 select-none", headerClassName)}>{headerInner}</div>
       )}
       {!collapsed && children}
     </div>
@@ -543,7 +576,7 @@ export function SidebarRow({
         // py-1 rather than py-1.5: with the role line gone from every
         // unselected row, the portrait is what sets the height, and the extra
         // padding was only ever there to keep two lines of text from touching.
-        "kit-tap mx-1.5 gap-2 rounded-md px-2 py-1 type-nav",
+        "kit-tap mx-1.5 items-center gap-2 rounded-md px-2 py-1 type-nav",
         indent && "ml-6",
         className,
       )}

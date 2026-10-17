@@ -332,6 +332,12 @@ export function useSessionSafe() {
   return { data: ctx?.session ?? null, status: ctx?.status ?? "loading" }
 }
 
+/** Whether an AuthProvider is mounted — for chrome that shows account
+ *  controls only inside the signed-in app (the sidebar's user row). */
+export function useAuthAvailable(): boolean {
+  return useContext(AuthContext) != null
+}
+
 /** Returns session data and auth status (drop-in replacement for next-auth useSession). */
 export function useSession() {
   const { session, status } = useAuth()

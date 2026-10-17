@@ -57,54 +57,36 @@ function renderToolbarAt(route: string, tab: string | null = null) {
   return header
 }
 
-describe("AppToolbar — the top bar never repeats the page name", () => {
+describe("AppToolbar — the top bar names the area (Harbor 2, #3350)", () => {
   beforeEach(() => cleanup())
 
-  // Every one of these routes renders a sub-bar (or its own header) one row
-  // below carrying the page name already. Naming the page in the top bar too
-  // printed it twice, stacked — "Crews & Agents" over "Crews & Agents · 3
-  // crews" being the case that surfaced it.
+  // The left of the top bar is the area's tile and name; the page's own
+  // header (SubBar) joins it through a portal and does not repeat the name.
   it.each([
     ["/", "Dashboard"],
-    ["/crews", "Crews & Agents"],
+    ["/crews", "Crews"],
     ["/skills", "Skills"],
-    ["/credentials", "Credentials"],
+    ["/credentials", "Vault"],
     ["/settings", "Settings"],
-  ])("%s shows Crewship, not %s", (route, pageName) => {
+    ["/issues", "Issues"],
+    ["/inbox", "Inbox"],
+    ["/routines", "Routines"],
+    ["/integrations", "Integrations"],
+    ["/admin", "Admin"],
+    ["/journal", "Journal"],
+  ])("%s names the area %s", (route, area) => {
     const header = renderToolbarAt(route)
-    expect(header).toHaveTextContent("Crewship")
-    expect(header).not.toHaveTextContent(pageName)
+    expect(header.firstElementChild).toHaveTextContent(new RegExp(`^${area}$`))
+    expect(header.querySelector(".area-tile")).not.toBeNull()
   })
 
-  // "Crews" alone can't be asserted as absent — it is a substring of
-  // "Crewship". Pin the crews title exactly instead: the old map had
-  // "/crews" -> "Crews" behind the "Crews & Agents" hardcode, so a partial
-  // revert could leave that one behind and still pass the loop above.
-  it("shows Crewship and nothing else on /crews", () => {
-    const header = renderToolbarAt("/crews")
-    // First child of the <header> is the left-hand breadcrumb region; the
-    // second holds the status/search/bell cluster, which has semibold text
-    // of its own.
-    const crumbs = header.firstElementChild
-    expect(crumbs).toHaveTextContent(/^Crewship$/)
+  it("falls back to Crewship where no area matches", () => {
+    expect(renderToolbarAt("/somewhere-else").firstElementChild).toHaveTextContent(/^Crewship$/)
   })
 
-  // Routes that were already correct — guard against a regression that
-  // reintroduces a per-page title map.
-  it.each(["/inbox", "/issues", "/routines", "/integrations", "/admin", "/journal"])(
-    "%s keeps showing Crewship",
-    (route) => {
-      expect(renderToolbarAt(route)).toHaveTextContent("Crewship")
-    },
-  )
-
-  // Settings is NOT a detail view — its section nav never leaves the page — so
-  // its identity belongs in the sub-bar next to Admin's, not in a top-bar
-  // breadcrumb. Holding a section here would make /settings the only route
-  // whose top bar isn't plain "Crewship".
-  it("shows Crewship on settings even with a section selected", () => {
+  it("keeps naming Settings, not its section, when a section is selected", () => {
     const header = renderToolbarAt("/settings", "audit")
-    expect(header.firstElementChild).toHaveTextContent(/^Crewship$/)
+    expect(header.firstElementChild).toHaveTextContent(/^Settings$/)
   })
 
   // Deep pages are the exception: their top-bar text is a *breadcrumb*, a
@@ -138,7 +120,7 @@ describe("AppToolbar — the top bar never repeats the page name", () => {
   it("renders no breadcrumb into the deleted agents subtree", () => {
     const header = renderToolbarAt(`${DEAD}/ag_1`)
     expect(deadHrefs(header)).toEqual([])
-    expect(header.firstElementChild).toHaveTextContent(/^Crewship$/)
+    expect(header.firstElementChild).toHaveTextContent(/^Crews$/)
   })
 
   // Same guard, one level up: the index. Every route the toolbar can be

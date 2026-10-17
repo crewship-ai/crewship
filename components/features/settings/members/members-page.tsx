@@ -410,6 +410,7 @@ export function MembersPage() {
   return (
     <DrillPage
       parent={{ href: "/settings", label: "Settings", icon: SettingsIcon }}
+      panelId="drill-members"
       title="Members"
       icon={Users}
       description="Who is in this workspace, what each person manages and what they may do"

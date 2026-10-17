@@ -125,7 +125,6 @@ describe("a person's workspace access", () => {
   })
 
   it("issues a new setup link for someone who has not signed in yet", async () => {
-    h.apiFetch.mockImplementationOnce(async () => res(USERS)).mockImplementationOnce(async () => res(WORKSPACES))
     render(<PeoplePage />)
     await openPerson("Perko")
     fireEvent.click(screen.getByRole("button", { name: "New setup link" }))

@@ -4,9 +4,9 @@ import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useAuth, useIsInstanceAdmin } from "@/hooks/use-auth"
-import { LogOut, Search, X } from "lucide-react"
+import { ChevronRight, LogOut, PanelLeft, Search, X } from "lucide-react"
 
-import { navSections, isHiddenForRole } from "@/lib/nav-sections"
+import { areaOf, navSections, isHiddenForRole } from "@/lib/nav-sections"
 import { useRealtime } from "@/hooks/use-realtime"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,7 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { CommandPalette } from "@/components/command-palette"
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
 import { ActivityBell } from "@/components/features/activity/activity-bell"
+import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
@@ -103,7 +104,19 @@ export function AppToolbar() {
   // component rather than a child, so the state cannot be local to either.
   const mobileNavOpen = useAppStore((st) => st.mobileNavOpen)
   const setMobileNavOpen = useAppStore((st) => st.setMobileNavOpen)
-  const [cmdkOpen, setCmdkOpen] = useState(false)
+  const setPageBarSlot = useAppStore((st) => st.setPageBarSlot)
+  const secondaryPanel = useAppStore((st) => st.secondaryPanel)
+  const setSecondaryPanelOpen = useAppStore((st) => st.setSecondaryPanelOpen)
+  // The palette's open state lives in the app store so the sidebar's search
+  // field can open it; a local fallback keeps the toolbar working where a
+  // test or an embed provides a store without it.
+  const [localCmdk, setLocalCmdk] = useState(false)
+  const storeCmdk = useAppStore((st) => st.commandPaletteOpen)
+  const storeSetCmdk = useAppStore((st) => st.setCommandPaletteOpen)
+  // Typed as always present, but a partial store (tests, embeds) may lack it.
+  const hasStorePalette = typeof (storeSetCmdk as unknown) === "function"
+  const cmdkOpen = hasStorePalette ? Boolean(storeCmdk) : localCmdk
+  const setCmdkOpen = hasStorePalette ? storeSetCmdk : setLocalCmdk
   const { role } = useAbilities()
   const instanceAdmin = useIsInstanceAdmin()
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
@@ -136,7 +149,7 @@ export function AppToolbar() {
     }
     document.addEventListener("keydown", onKeyDown)
     return () => document.removeEventListener("keydown", onKeyDown)
-  }, [])
+  }, [setCmdkOpen])
 
   const userName = session?.user?.name ?? "User"
   const userEmail = session?.user?.email ?? ""
@@ -145,6 +158,8 @@ export function AppToolbar() {
   const chatMatch = pathname.match(/^\/chat\/([^/]+)/)
   const isChatPage = Boolean(chatMatch)
   const chatAgentSlug = chatMatch?.[1] ? decodeURIComponent(chatMatch[1]) : null
+
+  const area = areaOf(pathname)
 
   function renderBreadcrumbs() {
     // Chat page: a path back out of the conversation — Crews / <crew> /
@@ -178,10 +193,21 @@ export function AppToolbar() {
 
     return (
       <div className="flex items-center gap-1.5 min-w-0">
-        <span className="text-sm font-semibold truncate">Crewship</span>
+        {area ? (
+          <>
+            <span className="area-tile" aria-hidden><area.icon /></span>
+            {breadcrumbs.length > 0 ? (
+              <Link href={area.href} className="truncate text-sm text-muted-foreground transition-colors hover:text-foreground">{area.title}</Link>
+            ) : (
+              <span className="truncate text-sm font-semibold">{area.title}</span>
+            )}
+          </>
+        ) : (
+          <span className="text-sm font-semibold truncate">Crewship</span>
+        )}
         {breadcrumbs.length > 0 && breadcrumbs.map((item, i) => (
           <div key={i} className="flex items-center gap-1.5 min-w-0">
-            <span className="text-muted-foreground/30 text-xs">/</span>
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
             {item.href ? (
               <Link href={item.href} className="max-w-[160px] truncate text-xs text-muted-foreground transition-colors hover:text-foreground/90">
                 {item.label}
@@ -204,10 +230,15 @@ export function AppToolbar() {
   }
 
   return (
-    <header className="flex h-[var(--app-header-h)] pt-[env(safe-area-inset-top)] shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-foreground/[0.1]">
-      {/* Left: breadcrumb only */}
-      <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+    <header className="flex h-[var(--app-header-h)] pt-[env(safe-area-inset-top)] shrink-0 items-center justify-between bg-background px-3 sm:pl-4 sm:pr-3 border-b border-border">
+      {/* Left: the area and its breadcrumbs, then the page's own header —
+          title, live description and actions — which SubBar renders into
+          this slot (Harbor 2: one 48 px bar, not a bar plus a sub-bar). */}
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {renderBreadcrumbs()}
+        {/* On a phone the slot stays empty and hidden; SubBar still reads the
+            area it names so the page row does not repeat it. */}
+        <div ref={setPageBarSlot} data-slot="page-bar" data-area-title={area?.title ?? ""} className={cn("flex min-w-0 flex-1 items-center gap-2", isMobile && "hidden")} />
       </div>
 
       {/* Right: Status indicators + search + notifications */}
@@ -236,18 +267,15 @@ export function AppToolbar() {
           </div>
         )}
 
-        {/* Desktop: search button. Same pill geometry as the System / Crews
-            status pills it sits beside, and the same .type-meta register as
-            everything else in the strip — it had been the one control here
-            wearing a hardcoded text-xs label and a text-xs ⌘ inside a
-            text-[10px] key cap. */}
-        <Button variant="outline" size="sm" className="hidden md:flex h-8 gap-2 rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground px-3" aria-label="Search" onClick={() => setCmdkOpen(true)}>
-          <Search className="h-3.5 w-3.5" />
-          <span className="type-meta hidden sm:inline">Search...</span>
-          <kbd className="pointer-events-none hidden h-4 select-none items-center gap-0.5 rounded border border-foreground/[0.08] bg-foreground/[0.03] px-1 font-mono text-[10px] leading-none sm:flex">
-            &#8984;K
-          </kbd>
-        </Button>
+        {/* Search lives in the sidebar on desktop and tablet (Harbor 2); the
+            phone has no sidebar, so it keeps an icon here. ⌘K is still owned
+            by the listener above. */}
+        {/* Phone: the page's secondary panel opens as a sheet (Harbor 2 M3). */}
+        {isMobile && secondaryPanel && (
+          <Button variant="ghost" size="icon-sm" aria-label={secondaryPanel.label} onClick={() => setSecondaryPanelOpen(true)}>
+            <PanelLeft className="h-4 w-4" />
+          </Button>
+        )}
 
         {/* Mobile: search icon only */}
         <Button variant="ghost" size="icon-sm" className="md:hidden coarse:h-12 coarse:w-12" aria-label="Search" onClick={() => setCmdkOpen(true)}>
@@ -288,8 +316,11 @@ export function AppToolbar() {
         )}
 
 
-        {/* Personal settings live in the profile menu on every screen size. */}
-        <UserMenu />
+        {/* The profile menu is the sidebar's last row on desktop and tablet
+            (Harbor 2); the phone has no sidebar, so it stays here. */}
+        <div className="md:hidden">
+          <UserMenu />
+        </div>
 
       </div>
 
@@ -311,41 +342,24 @@ export function AppToolbar() {
               </div>
             </SheetHeader>
             <div className="flex-1 overflow-y-auto py-2">
-              {navSections.map((section) => (
-                <div key={section.label}>
-                  <div className="px-3 py-1 text-micro uppercase tracking-wider font-semibold text-muted-foreground">{section.label}</div>
+              {navSections.map((section, i) => (
+                <div key={section.label || `group-${i}`}>
+                  {section.label && <div className="px-3 py-1 text-micro uppercase tracking-wider font-semibold text-muted-foreground">{section.label}</div>}
                   {section.items
                     .filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
                     .map((item) => {
                       const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
-                      // FUTURE is announced, not built — the row reads as a
-                      // destination but must not navigate anywhere.
-                      const disabled = item.badge === "FUTURE"
                       const rowClass = `w-full flex items-center gap-3 px-4 min-h-12 py-2.5 text-sm transition-colors ${
-                        disabled
-                          ? "text-muted-foreground-soft"
-                          : isActive
-                            ? "bg-accent text-foreground font-medium"
-                            : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                        isActive ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
                       }`
                       const body = (
                         <>
                           <item.icon className="h-4 w-4 shrink-0" />
                           <span className="truncate">{item.title}</span>
                           {item.href === "/inbox" && <InboxUnreadBadge workspaceId={workspaceId} />}
-                          {disabled && <span className="text-micro bg-muted px-1.5 rounded ml-auto">FUTURE</span>}
                         </>
                       )
-                      // A FUTURE row announces something that does not exist
-                      // yet, so it must not be a link. `pointer-events-none`
-                      // only stops a mouse: the row stayed in the tab order,
-                      // Enter still followed href="#", and a screen reader
-                      // still called it a link to somewhere.
-                      return disabled ? (
-                        <div key={item.href} aria-disabled="true" className={rowClass}>
-                          {body}
-                        </div>
-                      ) : (
+                      return (
                         <Link
                           key={item.href}
                           href={item.href}

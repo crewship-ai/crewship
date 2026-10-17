@@ -3,14 +3,12 @@
 import { useEffect, useMemo, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { toast } from "sonner"
-import { ChevronLeft, ChevronRight, Library, PanelLeftOpen, Sparkles, Upload } from "lucide-react"
+import { ChevronLeft, ChevronRight, Library, Sparkles, Upload } from "lucide-react"
 
 import { ImportSkillDialog } from "@/components/skills/import-dialog"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { SubBar, SubBarPrimary } from "@/components/layout/sub-bar"
-import { Button } from "@/components/ui/button"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
-import { useIsMobile } from "@/hooks/use-mobile"
 import {
   useProposedSkills,
   useReviewProposedSkill,
@@ -20,7 +18,6 @@ import {
 } from "@/hooks/use-skills"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { cn } from "@/lib/utils"
 import { SkillPage, isSkillTab, type SkillTab } from "./skill-page"
 import { AssignDialog, type AssignTarget } from "./skills-dialogs"
 import { SkillEditor, type SkillEditorTarget } from "./skill-editor"
@@ -36,7 +33,7 @@ import {
   type SkillSort,
 } from "./skills-model"
 
-// /skills (#3033) on the app's one skeleton — SubBar, the 280px explorer,
+// /skills (#3033) on the app's one skeleton — SubBar, the SecondaryPanel explorer,
 // the content pane — exactly as Routines and Issues. The URL holds what a
 // reload must keep: the open skill and its tab, the View, the agent or crew
 // and the domain. Popover facets and search are the explorer's own state.
@@ -45,11 +42,9 @@ const MANAGER_ROLES = new Set(["OWNER", "ADMIN", "MANAGER"])
 
 export function SkillsLayout() {
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
-  const isMobile = useIsMobile()
-  const [collapsed, setCollapsed] = useState(false)
-  useEffect(() => {
-    if (isMobile) setCollapsed(true)
-  }, [isMobile])
+  // The explorer lives in the shared SecondaryPanel: a column on desktop, a
+  // bottom sheet from the top bar on a phone, closed again after a pick.
+  const closePanelSheet = useCloseSecondaryPanelSheet()
 
   const list = useSkillsList(workspaceId)
   const agentsQ = useSkillsAgents(workspaceId)
@@ -129,14 +124,13 @@ export function SkillsLayout() {
         const el = document.querySelector<HTMLInputElement>("[data-skills-search] input")
         if (el) {
           e.preventDefault()
-          if (collapsed) setCollapsed(false)
           el.focus()
         }
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [collapsed])
+  }, [])
 
   const onReview = async (p: ProposedSkill, approve: boolean) => {
     try {
@@ -191,52 +185,19 @@ export function SkillsLayout() {
       />
 
       <div className="relative flex flex-1 overflow-hidden">
-        {isMobile && !collapsed && (
-          <button
-            type="button"
-            aria-label="Close skills explorer"
-            onClick={() => setCollapsed(true)}
-            className="fixed inset-0 z-40 touch-none overscroll-contain bg-black/50"
+        <SecondaryPanel id="skills" label="Skills explorer">
+          <SkillsExplorer
+            skills={skills}
+            agents={agents}
+            crews={crews}
+            proposedCount={proposed.length}
+            filters={filters}
+            onChange={onChange}
+            onPicked={closePanelSheet}
           />
-        )}
-        <aside
-          aria-label="Skills explorer"
-          className={cn(
-            "shrink-0 overflow-hidden border-r border-foreground/[0.06] bg-card transition-all",
-            collapsed ? (isMobile ? "w-0 border-r-0" : "w-9") : "w-[280px]",
-            isMobile && !collapsed && "fixed inset-y-0 left-0 z-50 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl",
-          )}
-        >
-          {collapsed ? (
-            !isMobile && (
-              <div className="flex h-full flex-col items-center pt-1.5">
-                <SidebarCollapseButton collapsed onToggle={() => setCollapsed(false)} />
-              </div>
-            )
-          ) : (
-            <SkillsExplorer
-              skills={skills}
-              agents={agents}
-              crews={crews}
-              proposedCount={proposed.length}
-              filters={filters}
-              onChange={onChange}
-              onPicked={() => isMobile && setCollapsed(true)}
-              onToggleCollapse={() => setCollapsed(true)}
-            />
-          )}
-        </aside>
+        </SecondaryPanel>
 
         <div className="relative min-w-0 flex-1 overflow-hidden">
-          {/* On a phone the explorer is a drawer; this opens it. */}
-          {isMobile && collapsed && !skillId && (
-            <div className="absolute left-3 top-3 z-10">
-              <Button variant="outline" size="sm" onClick={() => setCollapsed(false)} className="h-11 gap-1.5 bg-card shadow-sm">
-                <PanelLeftOpen className="h-4 w-4" />
-                Filters
-              </Button>
-            </div>
-          )}
           <AnimatePresence mode="wait">
             {skillId ? (
               <motion.div
@@ -284,7 +245,7 @@ export function SkillsLayout() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
-                className={cn("absolute inset-0 overflow-y-auto", isMobile && collapsed && "pt-14")}
+                className="absolute inset-0 overflow-y-auto"
               >
                 <SkillsOverview
                   skills={skills}

@@ -41,7 +41,6 @@ import { AlertTriangle, ArrowUpDown, Bot, Building2, Check, Hash, KeyRound, Laye
 import { AnimatePresence, motion } from "motion/react"
 
 import {
-  SidebarCollapseButton,
   SidebarFacet,
   SidebarFacetOption,
   SidebarFilterPopover,
@@ -114,7 +113,6 @@ export interface CredentialsSidebarProps {
   onSelectModeChange?: (next: boolean) => void
   selectedIds?: ReadonlySet<string>
   onToggleSelected?: (id: string) => void
-  onToggleCollapse: () => void
   /** The credentials the current filters leave — the rail's body. */
   credentials?: SidebarCredential[]
   selectedCredentialId?: string | null
@@ -180,7 +178,6 @@ export function CredentialsSidebar({
   onSelectModeChange,
   selectedIds,
   onToggleSelected,
-  onToggleCollapse,
   credentials = [],
   selectedCredentialId = null,
   onSelectCredential,
@@ -412,7 +409,6 @@ export function CredentialsSidebar({
       )}
 
         </SidebarFilterPopover>
-        <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
       </SidebarToolbar>
 
       <SidebarSection

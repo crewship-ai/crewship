@@ -39,17 +39,18 @@ import { AppSidebar, NAV_ICONS } from "@/components/layout/app-sidebar"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 
+// Harbor 2 (#3350): Pages sits in the Work group, after Routines.
 function planGroup(): HTMLElement {
-  const label = screen.getByText("Plan")
+  const label = screen.getByText("Work")
   const group = label.closest("[data-sidebar='group']") as HTMLElement | null
-  if (!group) throw new Error("no Plan group")
+  if (!group) throw new Error("no Work group")
   return group
 }
 
 describe("Pages in the nav rail", () => {
   beforeEach(() => cleanup())
 
-  it("registers Pages in Plan, immediately after Routines", () => {
+  it("registers Pages in Work, immediately after Routines", () => {
     render(
       <SidebarProvider>
         <AppSidebar />
@@ -58,7 +59,7 @@ describe("Pages in the nav rail", () => {
     const items = within(planGroup())
       .getAllByRole("link")
       .map((a) => a.textContent?.trim())
-    expect(items).toEqual(["Dashboard", "Inbox", "Chat", "Issues", "Routines", "Pages"])
+    expect(items).toEqual(["Issues", "Routines", "Pages"])
   })
 
   it("points it at /pages", () => {

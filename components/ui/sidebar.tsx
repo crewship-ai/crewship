@@ -41,9 +41,11 @@ import {
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-const SIDEBAR_WIDTH = "13.25rem"
+// Harbor 2: 240 px open, a 56 px rail (pixels: the rail must not grow with
+// the user's text size, or the content column would shift).
+const SIDEBAR_WIDTH = "240px"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
-const SIDEBAR_WIDTH_ICON = "4rem"
+const SIDEBAR_WIDTH_ICON = "56px"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 const SIDEBAR_MODE_KEY = "crewship_sidebar_mode"
 const SIDEBAR_RAIL_MODE_KEY = "crewship_sidebar_rail_mode"

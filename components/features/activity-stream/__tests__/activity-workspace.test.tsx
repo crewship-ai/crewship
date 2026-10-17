@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(), replace: vi.fn(), work: vi.fn(), deliveries: vi.fn(), mobile: false, role: "OWNER",
@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
   useSearchParams: () => new URLSearchParams(window.location.search),
+  usePathname: () => window.location.pathname,
 }))
 vi.mock("../activity-stream-view", () => ({
   ActivityStreamView: ({ onOpenSection }: { onOpenSection: (s: "work" | "deliveries") => void }) => (
@@ -14,6 +15,11 @@ vi.mock("../activity-stream-view", () => ({
   ),
 }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mocks.mobile }))
+// The panel reads its remembered collapse from the user's preferences.
+vi.mock("@/lib/api-fetch", async (original) => ({
+  ...await original<typeof import("@/lib/api-fetch")>(),
+  apiFetch: vi.fn(async () => new Response("{}")),
+}))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: mocks.role }) }))
 vi.mock("@/hooks/use-work-items", async (original) => ({
   ...await original<typeof import("@/hooks/use-work-items")>(),
@@ -31,6 +37,7 @@ vi.mock("@/components/features/work/work-item-detail", () => ({
 vi.mock("@/components/ui/agent-avatar", () => ({ AgentAvatar: () => <span data-testid="avatar" /> }))
 import { ActivityWorkspace } from "../activity-workspace"
 import WorkPage from "@/app/(dashboard)/work/page"
+import { useAppStore } from "@/lib/store"
 
 const casey = { id: "a-casey", name: "Casey", slug: "casey", avatar_seed: "c", avatar_style: "" }
 const robot = { id: "a-robot", name: "Lab Robot 2", slug: "lab-robot-2", avatar_seed: "r", avatar_style: "" }
@@ -44,6 +51,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.mobile = false
   mocks.role = "OWNER"
+  try { window.localStorage.removeItem("crewship.pref.panel.activity.collapsed") } catch { /* no storage */ }
+  useAppStore.getState().setSecondaryPanelOpen(false)
   window.history.replaceState(null, "", "/activity")
   mocks.push.mockImplementation((url: string) => window.history.pushState(null, "", url))
   mocks.work.mockReturnValue({ items: [], capped: false, loading: false, error: null, refetch: vi.fn() })
@@ -145,7 +154,7 @@ it("keeps an agent picked on the Work queue removable on Deliveries, where it ha
   view.rerender(<ActivityWorkspace workspaceId="ws-a" />)
   expect(screen.getByRole("heading", { name: /Webhook deliveries · Casey/ })).toBeInTheDocument()
   expect(screen.getByLabelText(/^Casey, none here/)).toBeInTheDocument()
-  fireEvent.click(screen.getByRole("button", { name: "Remove filter" }))
+  fireEvent.click(screen.getByRole("button", { name: /^Remove filter/ }))
   expect(screen.getByRole("heading", { name: "Webhook deliveries" })).toBeInTheDocument()
 })
 
@@ -159,13 +168,38 @@ it("says the ledger did not load, and loads it again on request", () => {
   expect(refetch).toHaveBeenCalled()
 })
 
-it("opens on a phone with the rail closed over the page", () => {
+it("opens on a phone with the rail in the closed panel sheet, which a pick closes again", () => {
   mocks.mobile = true
   window.history.replaceState(null, "", "/activity?section=work")
+  mocks.work.mockReturnValue({
+    items: [work("w1", "succeeded", casey, "invoice.disputed", 2)],
+    capped: false, loading: false, error: null, refetch: vi.fn(),
+  })
   render(<ActivityWorkspace workspaceId="ws-a" />)
   expect(screen.getByRole("heading", { name: "Work queue" })).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "All activity" })).toBeNull()
-  expect(screen.queryByRole("button", { name: "Close filters" })).toBeNull()
+  expect(document.querySelector("[data-slot=secondary-panel]")).toBeNull()
+  act(() => useAppStore.getState().setSecondaryPanelOpen(true))
+  const sheet = screen.getByRole("dialog", { name: "Activity views" })
+  expect(within(sheet).getByRole("button", { name: "All activity" })).toBeInTheDocument()
+  fireEvent.click(within(sheet).getByLabelText(/^Casey,/))
+  expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
+})
+
+// Harbor 2 M3 (#3350): the ledger rail is Activity's SecondaryPanel.
+it("puts the ledger rail in the activity SecondaryPanel with Back in its toolbar and one collapse", () => {
+  window.history.replaceState(null, "", "/activity?section=work")
+  render(<ActivityWorkspace workspaceId="ws-a" />)
+  const panel = document.querySelector("[data-slot=secondary-panel]") as HTMLElement
+  expect(panel).toHaveAttribute("data-panel-id", "activity")
+  const toolbar = panel.querySelector(".secondary-panel-toolbar") as HTMLElement
+  expect(within(toolbar).getByRole("button", { name: "All activity" })).toBeInTheDocument()
+  expect(screen.getAllByRole("button", { name: "Hide Activity views" })).toHaveLength(1)
+  fireEvent.click(screen.getByRole("button", { name: "Hide Activity views" }))
+  expect(panel).toHaveAttribute("data-collapsed", "true")
+  expect(screen.queryByRole("navigation", { name: "Ledger" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Show Activity views" }))
+  expect(screen.getByRole("navigation", { name: "Ledger" })).toBeInTheDocument()
 })
 
 it("keeps work stuck for longer than the window in Needs you (#3017)", () => {

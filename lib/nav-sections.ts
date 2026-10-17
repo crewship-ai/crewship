@@ -20,11 +20,8 @@ export interface NavItem {
   title: string
   href: string
   icon: LucideIcon
-  /**
-   * FUTURE renders the row disabled — the destination is announced, not built.
-   * ADMIN hides the row below the console's ADMIN+ floor (#868/#893).
-   */
-  badge?: "FUTURE" | "ADMIN"
+  /** ADMIN hides the row from anyone who is not an instance administrator. */
+  badge?: "ADMIN"
   /**
    * The lowest workspace role that sees the row. The Journal is the raw
    * technical log; Activity is the readable record for everyone (#2979).
@@ -33,37 +30,42 @@ export interface NavItem {
 }
 
 export interface NavSection {
+  /** Group heading; empty for the ungrouped places you start from. */
   label: string
   items: NavItem[]
+  /** "footer" rows sit at the bottom of the sidebar (Settings, Admin). The
+   *  phone sheet lists every section, footer included. */
+  placement?: "footer"
 }
 
+/**
+ * Harbor 2 (#3350): the places you start from have no heading (Dashboard,
+ * Inbox, Chat, Activity); then **Work** (what gets done) and **Build** (who
+ * does it and with what). Settings and Admin live in the sidebar footer with
+ * the sidebar mode and the user menu. Marketplace — announced, never built —
+ * is gone. Journal stays an admin-only row beside Activity until it is merged
+ * into it. "Vault" is the label of Credentials (same route); "Pages" keeps its
+ * name until the Artifacts delivery renames it.
+ */
 export const navSections: NavSection[] = [
   {
-    label: "Plan",
+    label: "",
     items: [
       { title: "Dashboard", href: "/", icon: CONCEPT_ICON.dashboard },
       { title: "Inbox", href: "/inbox", icon: CONCEPT_ICON.inbox },
-      // Chat is under Plan, next to Inbox: both are "someone is waiting on a
-      // reply". It points at the index, never at /chat/<slug> — a nav row
-      // cannot know which agent, and the index is what answers that.
-      //
-      // The label is "Chat" (PRD O5 lists Chat / Talk / Conversations as open).
-      // It is the word the product already uses for the surface — the toolbar
-      // breadcrumb, the route and the panel component all say chat — so a
-      // different noun in the rail would be the only place that disagrees.
+      // Points at the index, never at /chat/<slug> — a nav row cannot know
+      // which agent, and the index is what answers that.
       { title: "Chat", href: "/chat", icon: CONCEPT_ICON.sessions },
-      { title: "Issues", href: "/issues", icon: CONCEPT_ICON.issues },
-      { title: "Routines", href: "/routines", icon: CONCEPT_ICON.routines },
-      // Plan, after Routines: a page is where a person goes to see the state
-      // of their work, not a thing they build once (docs/specs/pages.md §9b.5).
-      { title: "Pages", href: "/pages", icon: CONCEPT_ICON.pages },
+      { title: "Activity", href: "/activity", icon: CONCEPT_ICON.activity },
+      { title: "Journal", href: "/journal", icon: CONCEPT_ICON.journal, minRole: "ADMIN" },
     ],
   },
   {
-    label: "Run",
+    label: "Work",
     items: [
-      { title: "Activity", href: "/activity", icon: CONCEPT_ICON.activity },
-      { title: "Journal", href: "/journal", icon: CONCEPT_ICON.journal, minRole: "ADMIN" },
+      { title: "Issues", href: "/issues", icon: CONCEPT_ICON.issues },
+      { title: "Routines", href: "/routines", icon: CONCEPT_ICON.routines },
+      { title: "Pages", href: "/pages", icon: CONCEPT_ICON.pages },
     ],
   },
   {
@@ -71,14 +73,14 @@ export const navSections: NavSection[] = [
     items: [
       { title: "Crews", href: "/crews", icon: CONCEPT_ICON.crews },
       { title: "Skills", href: "/skills", icon: CONCEPT_ICON.skills },
-      { title: "Credentials", href: "/credentials", icon: CONCEPT_ICON.credentials },
+      { title: "Vault", href: "/credentials", icon: CONCEPT_ICON.credentials },
       { title: "Integrations", href: "/integrations", icon: CONCEPT_ICON.integrations },
     ],
   },
   {
-    label: "System",
+    label: "",
+    placement: "footer",
     items: [
-      { title: "Marketplace", href: "/marketplace", icon: CONCEPT_ICON.marketplace, badge: "FUTURE" },
       { title: "Settings", href: "/settings", icon: CONCEPT_ICON.settings },
       { title: "Admin", href: "/admin", icon: CONCEPT_ICON.admin, badge: "ADMIN" },
     ],
@@ -98,30 +100,29 @@ export function isHiddenForRole(item: NavItem, role: string | null | undefined, 
 }
 
 /**
- * The phone tab bar's destinations.
- *
- * Three, chosen from what the product already says about itself rather than
- * from taste: Inbox is the only nav row in the codebase carrying a live badge
- * (`useInboxUnreadCount`); Chat has a PRD section titled Mobile calling the
- * mobile chat "written and unreachable — the cheapest large improvement
- * available"; and the Dashboard is built as the aggregator of every other
- * surface's urgent items, which is what a phone gets opened for.
- *
- * Issues was considered and left out: `docs/ux/audit-work.md` measures its
- * board at 1088px wide on a 390px screen, so a tab would promote the product's
- * strongest desktop surface as its worst mobile one. It belongs here once the
- * list view is responsive.
+ * The phone tab bar's destinations (Harbor 2): Home, Inbox, Chat and Issues;
+ * the bar's fifth slot, More, opens the full navigation in a sheet.
  *
  * Hrefs, not copies — the label and icon still come from `navSections`, so a
- * rename cannot leave the tab bar saying something the rail does not.
+ * rename cannot leave the tab bar saying something the sidebar does not.
  */
-export const PHONE_TAB_HREFS = ["/", "/inbox", "/chat"] as const
+export const PHONE_TAB_HREFS = ["/", "/inbox", "/chat", "/issues"] as const
 
 export function phoneTabs(): NavItem[] {
   const byHref = new Map(navSections.flatMap((s) => s.items).map((i) => [i.href, i]))
   return PHONE_TAB_HREFS.map((href) => {
     const item = byHref.get(href)
     if (!item) throw new Error(`PHONE_TAB_HREFS names ${href}, which navSections does not carry`)
-    return item
+    // A tab is one short word: the Dashboard reads "Home" there.
+    return href === "/" ? { ...item, title: "Home" } : item
   })
+}
+
+/** The destination a path belongs to — the area the top bar names. */
+export function areaOf(pathname: string): NavItem | undefined {
+  const items = navSections.flatMap((s) => s.items)
+  return (
+    items.find((i) => i.href !== "/" && (pathname === i.href || pathname.startsWith(`${i.href}/`))) ??
+    (pathname === "/" ? items.find((i) => i.href === "/") : undefined)
+  )
 }

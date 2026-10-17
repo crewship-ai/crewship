@@ -22,7 +22,6 @@ import { motion } from "motion/react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 import {
-  SidebarCollapseButton,
   SidebarFacet,
   SidebarFacetOption,
   SidebarFilterPopover,
@@ -488,7 +487,6 @@ export interface ActivitySidebarProps {
    * out of a chain graph.
    */
   onOpenEntity: (kind: string, id: string, label: string) => void
-  onToggleCollapse: () => void
   /**
    * Open one of the two ledgers — accepted work and received webhooks.
    *
@@ -543,7 +541,6 @@ export function ActivitySidebar({
   lens,
   onLens,
   onOpenEntity,
-  onToggleCollapse,
   onOpenSection,
   entersFromLeft,
 }: ActivitySidebarProps) {
@@ -626,7 +623,9 @@ export function ActivitySidebar({
   const first = (k: (typeof facetKeys)[number]) => facetKeys[0] === k
 
   return (
-    <div className="flex h-full flex-col">
+    // Inside SecondaryPanel this kit toolbar is the panel toolbar, which
+    // carries the collapse button.
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       <SidebarToolbar className="relative">
         <SidebarSearch
           value={search}
@@ -904,7 +903,6 @@ export function ActivitySidebar({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
       </SidebarToolbar>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">

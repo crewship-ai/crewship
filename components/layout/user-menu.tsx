@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import {
-  Bell, BookOpen, ChevronDown, ChevronRight, CircleAlert, GitBranch, HelpCircle,
+  Bell, BookOpen, ChevronDown, ChevronRight, ChevronsUpDown, CircleAlert, GitBranch, HelpCircle,
   LogOut, MonitorSmartphone, Sparkles, SquareTerminal, User, Volume2,
 } from "lucide-react"
 
@@ -35,6 +35,11 @@ import { ConnectCliDialog } from "./connect-cli-dialog"
 // they are stable public properties; the docs site is the Mintlify source of
 // truth and Report an issue routes to the GitHub issue tracker.
 export const DOCS_URL = "https://docs.crewship.ai"
+
+/** OWNER → Owner, the way the role reads under a name. */
+function roleLabel(role: string): string {
+  return role.charAt(0) + role.slice(1).toLowerCase()
+}
 export const GITHUB_URL = "https://github.com/crewship-ai/crewship"
 export const SUPPORT_URL = "https://github.com/crewship-ai/crewship/issues"
 export const RELEASES_URL = "https://github.com/crewship-ai/crewship/releases"
@@ -56,7 +61,11 @@ const ICON = "h-4 w-4 text-muted-foreground"
  * left rail, because the workspace is the context of everything in that rail;
  * this menu is about the person, which holds across workspaces.
  */
-export function UserMenu() {
+export function UserMenu({ placement = "toolbar" }: {
+  /** "sidebar": the last row of the sidebar footer (Harbor 2) — avatar, name
+   *  and role, opening to the right. "toolbar": the phone top bar. */
+  placement?: "toolbar" | "sidebar"
+} = {}) {
   const { session, signOut } = useAuth()
   const { workspace, workspaceId, role: workspaceRole } = useWorkspace()
   // Guest browser pairing is account security (#3310). Profile and
@@ -77,16 +86,32 @@ export function UserMenu() {
     <>
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
-          <button
-            className="flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-1.5 coarse:min-h-12 hover:bg-accent data-[state=open]:bg-accent transition-colors"
-            aria-label="User menu"
-          >
-            <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-7 w-7" textClassName="text-micro" />
-            <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
-            <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
-          </button>
+          {placement === "sidebar" ? (
+            <button type="button" className="rail-user" aria-label="User menu">
+              <UserAvatar name={userName} email={userEmail} src={userAvatar} className="size-6 shrink-0" textClassName="text-micro" />
+              <span className="rail-label grid min-w-0 flex-1 leading-tight">
+                <span className="truncate text-label font-medium text-foreground">{userName}</span>
+                {workspaceRole && <span className="truncate text-micro text-muted-foreground-soft">{roleLabel(workspaceRole)}</span>}
+              </span>
+              <ChevronsUpDown className="rail-label size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
+            </button>
+          ) : (
+            <button
+              className="flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-1.5 coarse:min-h-12 hover:bg-accent data-[state=open]:bg-accent transition-colors"
+              aria-label="User menu"
+            >
+              <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-7 w-7" textClassName="text-micro" />
+              <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
+              <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
+            </button>
+          )}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-72 p-0">
+        <DropdownMenuContent
+          align="end"
+          side={placement === "sidebar" ? "right" : "bottom"}
+          sideOffset={placement === "sidebar" ? 8 : 4}
+          className="w-72 p-0"
+        >
           <div className="p-1">
             <DropdownMenuItem asChild className="items-center gap-3 px-2 py-2.5">
               <Link href="/settings?tab=profile" aria-label={`Your profile: ${userName}`}>

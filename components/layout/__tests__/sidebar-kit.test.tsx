@@ -10,6 +10,7 @@ import {
   SidebarActiveChip,
   SidebarCollapseButton,
 } from "../sidebar-kit"
+import { SecondaryPanelContext } from "../secondary-panel"
 
 describe("sidebar-kit", () => {
   beforeEach(() => cleanup())
@@ -42,6 +43,17 @@ describe("sidebar-kit", () => {
     render(<SidebarFilterButton activeCount={0} />)
     const btn = screen.getByRole("button", { name: /filter/i })
     expect(btn.className).toContain("border-foreground/[0.08]")
+  })
+
+  it("SidebarFilterButton is icon-only inside a 272 px panel so the search keeps its width", () => {
+    render(
+      <SecondaryPanelContext.Provider value={{ toggle: null, claim: () => () => undefined }}>
+        <SidebarFilterButton activeCount={1} />
+      </SecondaryPanelContext.Provider>,
+    )
+    const btn = screen.getByRole("button", { name: /filter/i })
+    expect(btn.querySelector(".sr-only")?.textContent).toBe("Filter")
+    expect(btn.textContent).toContain("1")
   })
 
   it("SidebarViewButton renders an accessible view control", () => {
@@ -98,5 +110,23 @@ describe("sidebar-kit", () => {
     expect(screen.getByText("Source: Manual")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: /remove filter/i }))
     expect(onRemove).toHaveBeenCalled()
+  })
+
+  it("SidebarActiveChip names the filter it removes, so two chips are told apart", () => {
+    render(
+      <>
+        <SidebarActiveChip onRemove={vi.fn()}>Status: Todo</SidebarActiveChip>
+        <SidebarActiveChip onRemove={vi.fn()} label="Crew Operations">
+          <b>Crew</b> Operations
+        </SidebarActiveChip>
+      </>,
+    )
+    expect(screen.getByRole("button", { name: "Remove filter Status: Todo" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Remove filter Crew Operations" })).toBeTruthy()
+  })
+
+  it("SidebarRow centres its icon and text, so a 44 px touch row does not leave the icon at the top", () => {
+    render(<SidebarRow onSelect={vi.fn()}><span>Needs you</span></SidebarRow>)
+    expect(screen.getByRole("button", { name: "Needs you" }).className).toMatch(/\bitems-center\b/)
   })
 })
