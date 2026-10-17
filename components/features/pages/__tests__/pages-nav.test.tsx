@@ -59,7 +59,8 @@ describe("Pages in the nav rail", () => {
     const items = within(planGroup())
       .getAllByRole("link")
       .map((a) => a.textContent?.trim())
-    expect(items).toEqual(["Issues", "Routines", "Pages"])
+    // Calendar (F-01, #3413) follows Pages as the last Work row.
+    expect(items).toEqual(["Issues", "Routines", "Pages", "Calendar"])
   })
 
   it("points it at /pages", () => {
