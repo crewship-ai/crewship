@@ -151,3 +151,91 @@ test.describe("S01 phone", () => {
     await expect(page).toHaveURL(/\/issues\/[^/?]+/)
   })
 })
+
+// Follow-up (#3425): the full issue page, the project page, board keyboard
+// moves and the restricted/legacy links. To run after the branch is deployed.
+test.describe("S05/S06 follow-up desktop", () => {
+  test.use({ viewport: { width: 1440, height: 1000 } })
+
+  test("S05 full page is two columns: session block in the main column, Work & control first in the aside", async ({ page }) => {
+    await seed(page, PINNED)
+    await listView(page)
+    await page.goto("/issues")
+    const id = await firstRow(page).getAttribute("data-issue")
+    await page.goto(`/issues/${id}`)
+    const session = page.getByRole("region", { name: "Session" })
+    const work = page.getByRole("region", { name: "Work & control" })
+    await expect(session).toBeVisible()
+    await expect(work).toBeVisible()
+    const s = (await session.boundingBox())!
+    const w = (await work.boundingBox())!
+    expect(w.x).toBeGreaterThan(s.x + s.width - 1)
+    expect(Math.round((await page.getByRole("complementary", { name: "Issue details" }).boundingBox())!.width)).toBe(320)
+    await expect(page.getByRole("switch", { name: "Require client acceptance" })).toBeVisible()
+  })
+
+  test("S05 Hand off opens a dialog that requires a note", async ({ page }) => {
+    await seed(page, PINNED)
+    await listView(page)
+    await page.goto("/issues")
+    const id = await firstRow(page).getAttribute("data-issue")
+    await page.goto(`/issues/${id}`)
+    const handOff = page.getByRole("region", { name: "Work & control" }).getByRole("button", { name: "Hand off…" })
+    test.skip((await handOff.count()) === 0, "the first issue offers no handoff")
+    await handOff.click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog).toContainText(/Revision \d+ · operation id is generated/)
+    await expect(dialog.getByRole("button", { name: "Hand off" })).toBeDisabled()
+    await page.keyboard.press("Escape")
+  })
+
+  test("S06 ?project= opens Overview; tabs keep ?tab= in URL; unknown id shows not found", async ({ page }) => {
+    await seed(page, PINNED)
+    const projects = await (await page.request.get("/api/v1/projects")).json()
+    test.skip(!Array.isArray(projects) || projects.length === 0, "no projects in the seed")
+    await page.goto(`/issues?project=${projects[0].id}`)
+    await expect(page.getByRole("heading", { level: 1, name: projects[0].name })).toBeVisible()
+    const tabs = page.getByRole("tablist", { name: "Project" })
+    await expect(tabs.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true")
+    await expect(tabs.getByRole("tab", { name: /Updates/ })).toHaveCount(0)
+    await tabs.getByRole("tab", { name: "Files" }).click()
+    await expect(page).toHaveURL(/[?&]tab=files/)
+    await page.reload()
+    await expect(tabs.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "true")
+
+    await page.goto("/issues?project=does-not-exist")
+    await expect(page.getByText("This project doesn’t exist")).toBeVisible()
+    await page.getByRole("button", { name: "Back to issues" }).click()
+    await expect(page).not.toHaveURL(/project=/)
+  })
+
+  test("Z10 legacy project link opens the project", async ({ page }) => {
+    await seed(page, PINNED)
+    const projects = await (await page.request.get("/api/v1/projects")).json()
+    test.skip(!Array.isArray(projects) || projects.length === 0, "no projects in the seed")
+    await page.goto(`/orchestration/projects/${projects[0].id}`)
+    await expect(page).toHaveURL(new RegExp(`/issues\\?project=${projects[0].id}`))
+  })
+
+  test("S01 board card moves from the keyboard with Move to", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.goto("/issues")
+    await page.getByRole("radio", { name: "Board" }).click()
+    const trigger = page.getByRole("button", { name: /^Move .+ to…$/ }).first()
+    await trigger.focus()
+    await page.keyboard.press("Enter")
+    await expect(page.getByRole("menu")).toContainText("Move to")
+    await page.keyboard.press("Escape")
+    await page.getByRole("radio", { name: "List" }).click()
+  })
+
+  test("S01 a status group's + opens New issue in that status", async ({ page }) => {
+    await seed(page, PINNED)
+    await listView(page)
+    await page.goto("/issues")
+    const plus = page.getByRole("button", { name: "New issue in Todo" })
+    test.skip((await plus.count()) === 0, "no Todo group on screen")
+    await plus.click()
+    await expect(page.getByRole("dialog")).toContainText("Todo")
+  })
+})

@@ -95,6 +95,7 @@ function IssuePage() {
             workspaceId={workspaceId}
             identifier={identifier}
             viewerInitial={session?.user?.name ?? session?.user?.email ?? "U"}
+            viewerId={session?.user?.id ?? null}
           />
         )}
       </div>

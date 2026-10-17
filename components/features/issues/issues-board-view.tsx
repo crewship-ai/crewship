@@ -1,16 +1,24 @@
 "use client"
 
 import { useCallback, useMemo, useState, type CSSProperties } from "react"
-import { Plus } from "lucide-react"
+import { MoreHorizontal, Plus } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import type { Mission } from "@/lib/types/mission"
 import { IssueCard } from "./issue-card"
 import { StatusIcon } from "./status-icon"
+import { isCreatableStatus } from "./issue-constants"
 import { BOARD_STATUSES, STATUS_TEXT, normalStatus } from "./issues-view-model"
 
 interface IssuesBoardViewProps {
@@ -102,14 +110,19 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
     [workspaceId, onMoved],
   )
 
+  /** A drop and the keyboard's Move to share this: same confirmation, same PATCH. */
+  const requestMove = (issue: Mission, status: string) => {
+    if (columnOf(issue) === status) return
+    if (ASKING.has(status)) setPending({ issue, status })
+    else void move(issue, status)
+  }
+
   const onDrop = (status: string, e: React.DragEvent) => {
     e.preventDefault()
     setDropTarget(null)
     const id = e.dataTransfer.getData("text/x-crewship-issue")
     const issue = issues.find((i) => i.id === id)
-    if (!issue || columnOf(issue) === status) return
-    if (ASKING.has(status)) setPending({ issue, status })
-    else void move(issue, status)
+    if (issue) requestMove(issue, status)
   }
 
   return (
@@ -150,7 +163,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
               <b className="truncate text-label font-semibold text-foreground">{STATUS_TEXT[col.status]}</b>
               <span className="font-mono text-label tabular-nums text-muted-foreground-soft">{col.all.length}</span>
               <span className="flex-1" />
-              {onCreateClick && (
+              {onCreateClick && isCreatableStatus(col.status) && (
                 <Button variant="ghost" size="icon-xs" aria-label={`New issue in ${STATUS_TEXT[col.status]}`} onClick={() => onCreateClick(col.status)}>
                   <Plus className="size-3.5" />
                 </Button>
@@ -162,17 +175,25 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
               </p>
             ) : (
               col.shown.map((issue) => (
-                <IssueCard
-                  key={issue.id}
-                  issue={issue}
-                  active={selectedIssueId === issue.id}
-                  onClick={() => onIssueClick(issue)}
-                  draggable={canDrag}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("text/x-crewship-issue", issue.id)
-                    e.dataTransfer.effectAllowed = "move"
-                  }}
-                />
+                <div key={issue.id} className="group/card relative">
+                  <IssueCard
+                    issue={issue}
+                    active={selectedIssueId === issue.id}
+                    onClick={() => onIssueClick(issue)}
+                    draggable={canDrag}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/x-crewship-issue", issue.id)
+                      e.dataTransfer.effectAllowed = "move"
+                    }}
+                  />
+                  {canDrag && (
+                    <MoveToMenu
+                      issue={issue}
+                      from={col.status}
+                      onMove={(status) => requestMove(issue, status)}
+                    />
+                  )}
+                </div>
               ))
             )}
             {col.all.length > BOARD_COLUMN_CAP && (
@@ -189,5 +210,37 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
         ))}
       </div>
     </>
+  )
+}
+
+/**
+ * The keyboard path for a drag: a small menu on the card's corner, shown on
+ * hover or focus and always under a coarse pointer, listing the other columns.
+ */
+function MoveToMenu({ issue, from, onMove }: { issue: Mission; from: string; onMove: (status: string) => void }) {
+  const label = issue.identifier || issue.title
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={`Move ${label} to…`}
+          title="Move to…"
+          className="absolute bottom-1.5 right-1.5 bg-card opacity-0 focus-visible:opacity-100 group-hover/card:opacity-100 group-focus-within/card:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100"
+        >
+          <MoreHorizontal className="size-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuLabel className="text-label text-muted-foreground">Move to</DropdownMenuLabel>
+        {BOARD_STATUSES.filter((s) => s !== from).map((s) => (
+          <DropdownMenuItem key={s} onSelect={() => onMove(s)}>
+            <StatusIcon status={s} className="size-3.5" />
+            {STATUS_TEXT[s]}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

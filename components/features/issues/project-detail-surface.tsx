@@ -13,6 +13,9 @@ import { ResourceShareDialog } from "@/components/features/settings/resource-sha
 
 import { ProjectMilestonesCard } from "./project-milestones-card"
 import { apiFetch } from "@/lib/api-fetch"
+import { toast } from "@/lib/toast"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import type { ProjectTab } from "@/hooks/use-project-detail"
 import { Skeleton } from "@/components/ui/skeleton"
 import { PageSaveBar, PageSaveProvider, useInPageSave, usePageSave } from "@/components/ui/page-save-bar"
 import { ProjectCardDetail } from "@/components/features/issues/project-card-detail"
@@ -30,6 +33,15 @@ interface Props {
   actions?: React.ReactNode
   /** The host's project list needs to know when a write landed. */
   onChanged?: () => void
+  /** The open tab; the host keeps it in `?tab=`. */
+  tab?: ProjectTab
+  onTabChange?: (tab: ProjectTab) => void
+  onOpenIssue?: (issue: Mission) => void
+  onNewIssue?: () => void
+  /** DELETE /projects/{id} is ADMIN+; without it the Danger zone is not shown. */
+  canDelete?: boolean
+  /** After the server deleted the project. */
+  onDeleted?: () => void
 }
 
 /**
@@ -67,7 +79,14 @@ function ProjectDetailDraft({
   editable = true,
   actions,
   onChanged,
+  tab = "overview",
+  onTabChange,
+  onOpenIssue,
+  onNewIssue,
+  canDelete = false,
+  onDeleted,
 }: Props) {
+  const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [stats, setStats] = React.useState<ProjectStats | null>(null)
   const [agents, setAgents] = React.useState<PickableAgent[]>([])
   const [busy, setBusy] = React.useState(false)
@@ -183,25 +202,68 @@ function ProjectDetailDraft({
     [issues, project.id],
   )
 
+  const deleteProject = React.useCallback(async () => {
+    const res = await apiFetch(`/api/v1/projects/${encodeURIComponent(project.id)}?${qs}`, { method: "DELETE" })
+    if (!res.ok) {
+      const b = await res.json().catch(() => null)
+      const reason = b?.detail ?? b?.error ?? `HTTP ${res.status}`
+      toast.error(`${project.name} was not deleted: ${reason}`)
+      // Thrown so the confirmation stays open where the person was.
+      throw new Error(reason)
+    }
+    toast.success(`Deleted ${project.name}`)
+    onDeleted?.()
+    onChanged?.()
+  }, [project.id, project.name, qs, onDeleted, onChanged])
+
   return (
     <>
-    <ProjectCardDetail
-      project={shown}
-      stats={stats}
-      issues={projectIssues}
-      actions={<><ResourceShareDialog workspaceId={workspaceId} resource={{ kind: "project", id: project.id, name: project.name }} />{actions}</>}
-      edit={edit}
-    />
-    <div className="px-4 pb-4"><ProjectMilestonesCard key={project.id} projectId={project.id} workspaceId={workspaceId} editable={editable} /></div>
+      <ProjectCardDetail
+        project={shown}
+        stats={stats}
+        issues={projectIssues}
+        actions={actions}
+        edit={edit}
+        tab={tab}
+        onTabChange={onTabChange}
+        workspaceId={workspaceId}
+        onOpenIssue={onOpenIssue}
+        onNewIssue={onNewIssue}
+        milestones={<ProjectMilestonesCard key={project.id} projectId={project.id} workspaceId={workspaceId} editable={editable} />}
+        share={<ResourceShareDialog workspaceId={workspaceId} resource={{ kind: "project", id: project.id, name: project.name }} />}
+        onRequestDelete={canDelete ? () => setConfirmDelete(true) : undefined}
+      />
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Delete ${project.name}?`}
+        description="Issues keep working without a project."
+        consequences={[
+          { tone: "kept", text: `${projectIssues.length === 1 ? "Its 1 issue stays" : `Its ${projectIssues.length} issues stay`}, without a project.` },
+          { tone: "lost", text: "Milestones, project files and the project's sharing go with it." },
+        ]}
+        confirmLabel="Delete project"
+        destructive
+        onConfirm={deleteProject}
+      />
     </>
   )
 }
 
+/** The hero and the tab strip, before the project list has arrived. */
 export function ProjectDetailSkeleton() {
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <Skeleton className="h-[132px] w-full rounded-xl" />
-      <Skeleton className="h-[64px] w-full rounded-xl" />
+    <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-4 px-4 py-5 sm:px-6" aria-busy="true" aria-label="Loading project">
+      <div className="flex items-start gap-4">
+        <Skeleton className="size-[52px] shrink-0 rounded-card" />
+        <div className="flex flex-1 flex-col gap-2">
+          <Skeleton className="h-3 w-40" />
+          <Skeleton className="h-8 w-72" />
+          <Skeleton className="h-4 w-96 max-w-full" />
+        </div>
+      </div>
+      <Skeleton className="h-8 w-full" />
+      <Skeleton className="h-24 w-full rounded-card" />
     </div>
   )
 }

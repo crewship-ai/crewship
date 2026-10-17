@@ -1,6 +1,11 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { ArrowLeft, CircleDot, RefreshCw } from "lucide-react"
+import { SubBar, SubBarIconButton, SubBarSecondary } from "@/components/layout/sub-bar"
+import { StatusPill } from "@/components/ui/status-pill"
+import { STATUS_TEXT } from "./issues-view-model"
 import { SharedIssueDelete } from "./shared-issue-delete"
 import { SharedProjectDetails } from "./shared-project-details"
 import { useId, useRef, useState } from "react"
@@ -51,6 +56,7 @@ function useIssueRequest() {
 
 /** Guests use dedicated project projections and never mount the trusted board. */
 export function RestrictedIssues({ identifier }: { identifier?: string | null }) {
+  const router = useRouter()
   const { workspaceId } = useWorkspace()
   const { data: session } = useSession()
   const context = useAccessContext()
@@ -84,7 +90,16 @@ export function RestrictedIssues({ identifier }: { identifier?: string | null })
     },
   })
   return <main className="mx-auto w-full max-w-4xl space-y-4 p-4 md:p-6">
-    <div className="flex items-center justify-between"><h1 className="text-lg font-semibold">{identifier ? "Issue" : "Issues shared with you"}</h1>{identifier ? <Link href="/issues" className="text-sm text-primary">Back to issues</Link> : <Button variant="outline" onClick={() => { void query.refetch(); void projects.refetch() }}>Refresh</Button>}</div>
+    {/* The page chrome is the top bar, as on every other page: the crumb,
+        Back from a shared issue, Refresh on the list. */}
+    <SubBar
+      icon={CircleDot}
+      title={identifier ? "Shared issues" : "Issues shared with you"}
+      section={identifier ? <span className="font-mono">{identifier}</span> : undefined}
+      ariaLabel="Shared issues"
+      leading={identifier ? <SubBarIconButton icon={ArrowLeft} aria-label="Back to issues" onClick={() => router.push("/issues")} /> : undefined}
+      actions={identifier ? undefined : <SubBarSecondary icon={RefreshCw} onClick={() => { void query.refetch(); void projects.refetch() }}>Refresh</SubBarSecondary>}
+    />
     <p className="text-sm text-muted-foreground">Your project grants decide which issues you can list, read and contribute to. Only comments explicitly shared with this project appear here.</p>
     {!identifier && <form className="touch-form space-y-2" onSubmit={event => { event.preventDefault(); setFilter({ ...currentFilter, q: currentFilter.draft.trim(), offset: 0 }) }}>
       <label htmlFor={searchId} className="text-sm font-medium">Search shared issues</label>
@@ -162,7 +177,7 @@ function IssueCard({ issue, detail, base, userId, mutationsDisabled }: { issue: 
   const send = useMutation({ mutationFn: () => commentRequest.send(`${path}/comments`, "POST", { body: draft, project_id: audience?.id }), onSuccess: async () => { commentRequest.clear(); setDraft(""); setAudience(null); await comments.refetch() } })
   const status = useMutation({ mutationFn: (next: string) => statusRequest.send(path, "PATCH", { status: next }), onSuccess: async () => { statusRequest.clear(); await client.invalidateQueries({ queryKey: ["restricted-issues"] }) } })
   return <article className="space-y-3 rounded-lg border bg-card p-4">
-    <p className="text-xs text-muted-foreground">{issue.project_name} · {issue.identifier} · {issue.status}</p>
+    <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>{issue.project_name}</span><span className="font-mono">{issue.identifier}</span><StatusPill status={issue.status} label={STATUS_TEXT[issue.status] ?? issue.status} /></p>
     <h2 className="font-medium">{!detail && issue.can_read ? <Link className="hover:underline" href={`/issues/${encodeURIComponent(issue.identifier)}`}>{issue.title}</Link> : issue.title}</h2>
     {detail && <p className="whitespace-pre-wrap text-sm">{issue.description || "No description."}</p>}
     {!detail && !issue.can_read && <p className="text-xs text-muted-foreground">Ask your administrator for project read access to open details.</p>}
