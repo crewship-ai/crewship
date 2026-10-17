@@ -12,7 +12,13 @@ import path from "node:path"
 
 const ROOT = path.resolve(__dirname, "../..")
 const DIRS = ["app", "components", "lib", "hooks", "stores"]
-const ALLOWED = new Set([path.join("app", "(dashboard)", "journal", "page.tsx"), path.join("lib", "journal-redirect.ts")])
+// lib/app-routes.ts lists every page so the not-found check (#3423) knows
+// /journal still exists as the redirect; that entry is a route, not a link.
+const ALLOWED = new Set([
+  path.join("app", "(dashboard)", "journal", "page.tsx"),
+  path.join("lib", "journal-redirect.ts"),
+  path.join("lib", "app-routes.ts"),
+])
 // A string or template literal that starts with /journal and ends there or
 // continues with a query, a hash or a sub-path. Not /journal-anything.
 const LINK = /["'`]\/journal(?=["'`?#/])/
