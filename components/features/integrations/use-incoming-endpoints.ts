@@ -72,6 +72,7 @@ export function useIncomingEndpoints(workspaceId: string, enabled: boolean) {
       kind: "routine" as const,
       icon: t.icon,
       color: t.color,
+      ...(t.head_version ? { version: t.head_version } : {}),
     })),
     ...(agents.data ?? []).map((t) => ({ ...t, kind: "agent" as const })),
     ...pages.pages.map((t) => ({

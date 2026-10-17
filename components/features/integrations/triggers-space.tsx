@@ -10,7 +10,8 @@ import { Switch } from "@/components/ui/switch"
 import { StatusPill } from "@/components/ui/status-pill"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { PageEmpty, PageError, PageLoading, PageNoResults, PageNotFound } from "@/components/layout/page-state"
-import { SettingsCard, SettingsDangerCard, SettingsRow, nativeSelect } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSaveBar, nativeSelect } from "@/components/features/settings/shared"
+import type { PipelineWebhook } from "@/hooks/use-pipeline-webhooks"
 import { formatRelativeShort } from "@/lib/time"
 import { IncomingTargetAvatar } from "./incoming-target-avatar"
 import type { IncomingKind, IncomingTarget } from "./incoming-model"
@@ -18,6 +19,7 @@ import { incomingJSON, type IncomingData } from "./use-incoming-endpoints"
 import { RecentReceipts } from "./views/incoming-webhooks-view"
 import { absolute, copy, RevealDialog, type Reveal } from "./views/incoming-credentials"
 import { triggerCounts, type TriggerRow, type TriggerView } from "./triggers-model"
+import { MappingEditor, mappingProblem, mappingRows, mappingTemplate, sameMapping, type MappingRow } from "./trigger-mapping"
 import { Banner, CellMain, CliLines, FlowSteps, GlyphTile, HealthStrip, InfoCard, MetaChip, ObjectPage, ResponsiveList, SpaceHead } from "./integrations-ui"
 
 /**
@@ -221,35 +223,8 @@ export function TriggerPage({
   const mapping = Object.entries(hook?.inputs_template ?? {})
 
   let body: React.ReactNode
-  if (current === "mapping") {
-    body = (
-      <InfoCard title="From the call to the routine's inputs" icon={Repeat}>
-        {mapping.length === 0 ? (
-          <p className="px-4 py-3 text-body text-muted-foreground">No mapping. The routine gets the call as <span className="font-mono">event</span>, <span className="font-mono">raw</span> and <span className="font-mono">headers</span>.</p>
-        ) : (
-          <table className="w-full text-body">
-            <caption className="sr-only">Mapping</caption>
-            <thead>
-              <tr>
-                <th scope="col" className="border-b border-border px-4 py-2 text-left text-label font-medium text-muted-foreground">Routine input</th>
-                <th scope="col" className="border-b border-border px-4 py-2 text-left text-label font-medium text-muted-foreground">Takes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mapping.map(([k, v]) => (
-                <tr key={k}>
-                  <td className="border-b border-border px-4 py-2 font-mono text-label">{k}</td>
-                  <td className="border-b border-border px-4 py-2 font-mono text-label text-muted-foreground">{typeof v === "string" ? v : JSON.stringify(v)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        <p className="border-t border-border px-4 py-2.5 text-label text-muted-foreground">
-          <span className="font-mono">event</span>, <span className="font-mono">raw</span> and <span className="font-mono">headers</span> are always there and cannot be overwritten. Change the mapping with <span className="font-mono">crewship routine webhooks update {hook!.id} --inputs-template</span>.
-        </p>
-      </InfoCard>
-    )
+  if (current === "mapping" && hook) {
+    body = <TriggerMapping key={hook.id} hook={hook} targetName={row.target.name} canEdit={canEdit} onSave={(t) => data.hooks.update(hook.id, { inputs_template: t })} />
   } else if (current === "calls") {
     body = <RecentReceipts workspaceId={workspaceId} target={row.target} rows={[e]} />
   } else if (current === "settings") {
@@ -430,6 +405,63 @@ export function TriggerPage({
         }}
       />
       {reveal && <RevealDialog reveal={reveal} onClose={() => setReveal(null)} />}
+    </>
+  )
+}
+
+/**
+ * Mapping (routine triggers): routine input ← what it takes from the call.
+ * A draft on the page's Save bar; one Save sends PATCH inputs_template.
+ * Testing a mapping against a sample call is not drawn: the server has no
+ * dry run for it yet.
+ */
+function TriggerMapping({
+  hook,
+  targetName,
+  canEdit,
+  onSave,
+}: {
+  hook: PipelineWebhook
+  targetName: string
+  canEdit: boolean
+  onSave: (template: Record<string, unknown>) => Promise<PipelineWebhook | null>
+}) {
+  const saved = hook.inputs_template ?? {}
+  const [rows, setRows] = React.useState<MappingRow[]>(() => mappingRows(saved))
+  const draft = mappingTemplate(rows)
+  const problem = mappingProblem(rows)
+  const keys = new Set([...Object.keys(saved), ...Object.keys(draft)])
+  const count = sameMapping(saved, draft) ? 0 : [...keys].filter((k) => JSON.stringify(saved[k]) !== JSON.stringify(draft[k])).length || 1
+  return (
+    <>
+      <InfoCard title="From the call to the routine's inputs" icon={Repeat}>
+        <div className="grid gap-2 px-4 py-3">
+          <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] gap-1.5 text-label font-medium text-muted-foreground max-sm:hidden" aria-hidden>
+            <span>Routine input</span>
+            <span>Takes</span>
+            <span className="w-7" />
+          </div>
+          {rows.length === 0 && (
+            <p className="text-body text-muted-foreground">
+              No mapping. The routine gets the call as <span className="font-mono">event</span>, <span className="font-mono">raw</span> and <span className="font-mono">headers</span>.
+            </p>
+          )}
+          <MappingEditor rows={rows} onChange={setRows} readOnly={!canEdit} problem={problem} />
+        </div>
+        <p className="border-t border-border px-4 py-2.5 text-label text-muted-foreground">
+          <span className="font-mono">event</span>, <span className="font-mono">raw</span> and <span className="font-mono">headers</span> are always there and cannot be overwritten. Agents get them fenced as untrusted text. Inputs come from routine {targetName}; a missing required one rejects the call with 422.
+        </p>
+      </InfoCard>
+      <SettingsSaveBar
+        label="Mapping"
+        count={canEdit ? count : 0}
+        canSave={problem === null}
+        onSave={async () => {
+          const result = await onSave(draft)
+          setRows(mappingRows(result?.inputs_template ?? draft))
+        }}
+        onDiscard={() => setRows(mappingRows(saved))}
+      />
     </>
   )
 }

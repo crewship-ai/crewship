@@ -14,13 +14,19 @@ import type { Tool, ToolsResp } from "./types"
 export function ToolsTab({
   workspaceId,
   suggestions,
+  initialSearch,
+  highlight,
 }: {
   workspaceId: string
   // Connected/known toolkit slugs surfaced as quick-pick chips.
   suggestions: string[]
+  /** Start searched for this (a tool found from the panel search). */
+  initialSearch?: string
+  /** A tool slug whose row is marked as the one looked for. */
+  highlight?: string
 }) {
   const [toolkit, setToolkit] = React.useState(suggestions[0] ?? "")
-  const [search, setSearch] = React.useState("")
+  const [search, setSearch] = React.useState(initialSearch ?? "")
   const [tools, setTools] = React.useState<Tool[]>([])
   const [total, setTotal] = React.useState(0)
   const [loading, setLoading] = React.useState(false)
@@ -134,7 +140,11 @@ export function ToolsTab({
             </thead>
             <tbody>
               {tools.map((t) => (
-                <tr key={t.slug} className="border-t border-foreground/[0.06] align-top">
+                <tr
+                  key={t.slug}
+                  aria-current={highlight === t.slug ? "true" : undefined}
+                  className={`border-t border-foreground/[0.06] align-top${highlight === t.slug ? " bg-primary/10" : ""}`}
+                >
                   <td className="px-3 py-2.5 font-mono text-[11px] text-foreground/90">{t.slug}</td>
                   <td className="px-3 py-2.5 text-[13px]">{t.name}</td>
                   <td className="px-3 py-2.5 text-[12px] text-muted-foreground">{t.description}</td>

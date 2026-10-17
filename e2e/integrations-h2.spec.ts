@@ -216,6 +216,102 @@ test.describe("desktop", () => {
     for (const tab of ["Overview", "Access", "Tools", "Triggers", "Settings"]) await expect(page.getByRole("tab", { name: tab })).toBeVisible()
   })
 
+  test("INT-01 New trigger is three steps; only a webhook starts it", async ({ page }) => {
+    await seed(page)
+    await page.goto("/integrations?space=triggers")
+    await primary(page).click()
+    const dialog = page.getByRole("dialog")
+    const steps = dialog.getByRole("navigation", { name: "Steps" })
+    await expect(steps.getByRole("listitem")).toHaveText(["1Goes to", "2Sender and mapping", "3URL"])
+    await expect(dialog.getByRole("group", { name: "Started by" }).getByRole("button")).toHaveText(["A webhook"])
+    await expect(dialog.getByText(/An app event|Email in/)).toHaveCount(0)
+    await expect(dialog.getByRole("radio")).toHaveCount(3)
+    await expect(dialog.getByText("Step 1 of 3")).toBeVisible()
+    await expect(dialog.getByRole("button", { name: "Continue" })).toBeDisabled()
+    await dialog.getByRole("combobox", { name: "Routine" }).click()
+    const option = page.getByRole("option").first()
+    test.skip((await option.count()) === 0, "no routine in this workspace")
+    await option.click()
+    await dialog.getByRole("button", { name: "Continue" }).click()
+    // Step 2 for a routine: who sends it, the mapping, the limit. Nothing is created here.
+    await expect(dialog.getByRole("radio", { name: "GitHub" })).toBeVisible()
+    await expect(dialog.getByRole("radio", { name: "Any system" })).toHaveAttribute("aria-checked", "true")
+    await dialog.getByRole("button", { name: "Add input" }).click()
+    await dialog.getByLabel("Input name 1").fill("event")
+    await dialog.getByLabel("Value of input 1").fill("x")
+    await expect(dialog.getByText("event, raw and headers come from the call and cannot be mapped")).toBeVisible()
+    await expect(dialog.getByRole("button", { name: "Create" })).toBeDisabled()
+    await dialog.getByRole("button", { name: "Back" }).click()
+    await expect(dialog.getByText("Step 1 of 3")).toBeVisible()
+  })
+
+  test("INT-02 a routine trigger's mapping is edited on the page and saved with the Save bar", async ({ page }) => {
+    await seed(page)
+    const ws = await (await page.request.get("/api/v1/workspaces")).json()
+    const workspaceId = (Array.isArray(ws) ? ws[0] : ws).id as string
+    const routines = await (await page.request.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines`)).json()
+    const list = (Array.isArray(routines) ? routines : (routines.pipelines ?? routines.items ?? [])) as { id: string }[]
+    test.skip(list.length === 0, "no routine in this workspace")
+    const name = `e2e-mapping-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const created = await page.request.post(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-webhooks`, { data: { name, target_pipeline_id: list[0].id, enabled: false } })
+    expect(created.ok(), await created.text()).toBeTruthy()
+    const id = (await created.json()).id as string
+    try {
+      await page.goto(`/integrations?space=triggers&id=${encodeURIComponent(id)}&pane=mapping`)
+      await expect(h1(page)).toHaveText(name)
+      await page.getByRole("button", { name: "Add input" }).click()
+      await page.getByLabel("Input name 1").fill("repo")
+      await page.getByLabel("Value of input 1").fill("{{ inputs.event.repository.full_name }}")
+      const bar = page.getByRole("region", { name: "Unsaved changes" })
+      await expect(bar).toContainText("1 unsaved change")
+      await bar.getByRole("button", { name: "Save" }).click()
+      await expect(bar).toHaveCount(0)
+      const list = await (await page.request.get(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-webhooks`)).json()
+      const saved = ((Array.isArray(list) ? list : list.webhooks) as { id: string; inputs_template: Record<string, unknown> }[]).find((w) => w.id === id)
+      expect(saved?.inputs_template).toEqual({ repo: "{{ inputs.event.repository.full_name }}" })
+      await page.reload()
+      await expect(page.getByLabel("Input name 1")).toHaveValue("repo")
+    } finally {
+      await page.request.delete(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-webhooks/${encodeURIComponent(id)}`)
+    }
+  })
+
+  test("INT-03 app access changes wait on the Save bar", async ({ page }) => {
+    await seed(page)
+    await page.goto("/integrations?space=tools")
+    const first = page.locator("[data-slot=integrations-table] tbody tr").first()
+    test.skip((await first.count()) === 0, "no Composio account connected")
+    await first.click()
+    await page.getByRole("tab", { name: "Access" }).click()
+    const group = page.getByRole("group", { name: /access for / }).first()
+    test.skip((await group.count()) === 0, "no agents in this workspace")
+    const next = group.locator("button[aria-pressed=false]").first()
+    await next.click()
+    const bar = page.getByRole("region", { name: "Unsaved changes" })
+    await expect(bar).toContainText("1 unsaved change")
+    // Nothing is written until Save; Discard puts it back.
+    await bar.getByRole("button", { name: "Discard" }).click()
+    await expect(bar).toHaveCount(0)
+    await expect(next).toHaveAttribute("aria-pressed", "false")
+  })
+
+  test("INT-04 the Tools panel search finds tools across connected apps", async ({ page }) => {
+    await seed(page)
+    await page.goto("/integrations?space=tools")
+    const first = page.locator("[data-slot=integrations-table] tbody tr").first()
+    test.skip((await first.count()) === 0, "no Composio account connected")
+    await panel(page).getByLabel("Search apps and tools").fill("list")
+    const results = page.getByRole("region", { name: "Tools matching “list”" })
+    await expect(results).toBeVisible()
+    // Settled: a hit, or the sentence that none matched.
+    await expect(results.locator("li button, p").first()).toBeVisible()
+    const hit = results.getByRole("button", { name: /^Open .+ in / }).first()
+    test.skip((await hit.count()) === 0, "no connected app has a tool matching “list”")
+    await hit.click()
+    await expect(page).toHaveURL(/pane=tools/)
+    await expect(page.locator("tr[aria-current=true]")).toHaveCount(1)
+  })
+
   test("N16 Add channel is three steps; Add webhook starts at step two", async ({ page }) => {
     await seed(page)
     await page.goto("/integrations?space=channels")
@@ -245,5 +341,16 @@ test.describe("phone", () => {
     const seg = page.getByRole("tablist", { name: "Spaces" })
     await seg.getByRole("tab", { name: "Webhooks" }).click()
     await expect(h1(page)).toHaveText("Webhooks")
+  })
+
+  test("INT-01 New trigger fits a phone", async ({ page }) => {
+    await seed(page)
+    await page.goto("/integrations?space=triggers")
+    await primary(page).click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog.getByRole("navigation", { name: "Steps" })).toContainText("1 / 3")
+    await expect(dialog.getByRole("radio")).toHaveCount(3)
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
   })
 })

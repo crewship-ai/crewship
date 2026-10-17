@@ -7,6 +7,7 @@ import { toast } from "@/lib/toast"
 import { SubBar, SubBarIconButton, SubBarPrimary } from "@/components/layout/sub-bar"
 import { SecondaryPanel } from "@/components/layout/secondary-panel"
 import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
+import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useSession } from "@/hooks/use-auth"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -20,7 +21,7 @@ import { McpEndpointsTab } from "./composio/mcp-endpoints-tab"
 import { channelKind, deriveStatus, isForeignPersonal, rowMatches, type ConnectionRow } from "./connection-model"
 import { CrewToolsView } from "./views/crew-tools-view"
 import { IncomingWebhooksView } from "./views/incoming-webhooks-view"
-import { IncomingCreateDialog } from "./views/incoming-credentials"
+import { NewTriggerDialog } from "./new-trigger-dialog"
 import { useIncomingEndpoints } from "./use-incoming-endpoints"
 import type { IncomingKind, IncomingTarget } from "./incoming-model"
 import { AddChannelDialog, type AddChannelMode } from "./add-channel-dialog"
@@ -28,8 +29,8 @@ import { ChannelsList, DeliveriesLog, matchesView, type ChannelsView } from "./c
 import { ChannelPage, CHANNEL_PANES, type ChannelPane } from "./channel-page"
 import { TriggerPage, TriggersList, TRIGGER_PANES, type TriggerPane } from "./triggers-space"
 import { filterTriggers, triggerRows, type TriggerView } from "./triggers-model"
-import { AppAccountPage, APP_PANES, CatalogAppPage, CatalogView, ToolsList, type AppPane } from "./tools-space"
-import { accountRows, filterAccounts, type ToolsListView } from "./tools-model"
+import { AppAccountPage, APP_PANES, CatalogAppPage, CatalogView, ToolSearchResults, ToolsList, type AppPane } from "./tools-space"
+import { accountRows, filterAccounts, TOOL_SEARCH_MIN, type ToolsListView } from "./tools-model"
 import { EMPTY_PANEL_FILTERS, IntegrationsPanel, SPACE_META, SpaceSwitcher, type PanelFilters } from "./integrations-panel"
 import { CliLines, SpaceHead } from "./integrations-ui"
 import { defaultView, integrationsSearch, parseIntegrationsRoute, SPACES, type IntegrationsRoute, type IntegrationsSpace } from "./spaces"
@@ -70,8 +71,13 @@ const CLI_LINES: [string, string][] = [
 ]
 
 export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
-  // Dialogs, selection and drafts belong to one workspace.
-  return <WorkspaceIntegrationsLayout key={workspaceId} workspaceId={workspaceId} />
+  // Dialogs, selection and drafts belong to one workspace. Edits on an
+  // object page (app access, a trigger's mapping) wait on one Save bar.
+  return (
+    <PageSaveProvider key={workspaceId}>
+      <WorkspaceIntegrationsLayout workspaceId={workspaceId} />
+    </PageSaveProvider>
+  )
 }
 
 function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
@@ -110,19 +116,34 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
       return next
     })
   }, [])
+  // Leaving an object page with unsaved edits asks first.
+  const guard = usePageSaveGuard()
+  const [toolFocus, setToolFocus] = React.useState<string | null>(null)
   const goSpace = React.useCallback(
-    (space: IntegrationsSpace) => {
-      setSearch("")
-      setFilters(EMPTY_PANEL_FILTERS)
-      setLastSpace(space)
-      setRoute({ space, view: defaultView(space), id: null, pane: null, server: null, starts: null, target: null })
-    },
-    [setRoute, setLastSpace],
+    (space: IntegrationsSpace) =>
+      guard(() => {
+        setSearch("")
+        setFilters(EMPTY_PANEL_FILTERS)
+        setLastSpace(space)
+        setToolFocus(null)
+        setRoute({ space, view: defaultView(space), id: null, pane: null, server: null, starts: null, target: null })
+      }),
+    [setRoute, setLastSpace, guard],
   )
-  const goView = (view: string) => setRoute({ ...route, view, id: null, pane: null })
-  const open = (id: string, view = route.view) => setRoute({ ...route, view, id, pane: null })
-  const back = () => setRoute({ ...route, id: null, pane: null })
-  const setPane = (pane: string) => setRoute({ ...route, pane })
+  const goView = (view: string) => guard(() => setRoute({ ...route, view, id: null, pane: null }))
+  const open = (id: string, view = route.view) => guard(() => setRoute({ ...route, view, id, pane: null }))
+  const back = () =>
+    guard(() => {
+      setToolFocus(null)
+      setRoute({ ...route, id: null, pane: null })
+    })
+  // A trigger's Mapping draft lives on its tab; app access is kept across tabs.
+  const setPane = (pane: string) => (route.space === "triggers" ? guard(() => setRoute({ ...route, pane })) : setRoute({ ...route, pane }))
+  const openTool = (accountId: string, tool: string) =>
+    guard(() => {
+      setToolFocus(tool)
+      setRoute({ ...route, view: "connected", id: accountId, pane: "tools" })
+    })
 
   // 1–4 switch spaces, as the panel's hints say.
   React.useEffect(() => {
@@ -381,6 +402,7 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
       objectName = row ? row.slug : null
       main = (
         <AppAccountPage
+          key={route.id}
           workspaceId={workspaceId}
           row={row}
           status={composio}
@@ -391,6 +413,7 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
           onChanged={() => setComposioRefresh((n) => n + 1)}
           onGone={back}
           onTriggers={() => goSpace("triggers")}
+          toolFocus={toolFocus ?? undefined}
         />
       )
     } else {
@@ -410,6 +433,11 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
             setSearch("")
             goView("connected")
           }}
+          toolSearch={
+            composio.configured && search.trim().length >= TOOL_SEARCH_MIN ? (
+              <ToolSearchResults workspaceId={workspaceId} apps={aRows.filter((r) => !r.signedOut).map((r) => ({ slug: r.slug, accountId: r.account.id }))} query={search} onOpenTool={openTool} />
+            ) : undefined
+          }
         />
       )
     }
@@ -479,11 +507,15 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
           />
         </SecondaryPanel>
 
-        <div className="relative min-w-0 flex-1 overflow-y-auto bg-background" data-slot="integrations-main">
-          <div className="mx-auto grid w-full max-w-[1240px] min-w-0 gap-3.5 px-4 py-4 md:px-7 md:py-6">
-            {isMobile && <SpaceSwitcher segmented space={route.space} counts={{}} onSpace={goSpace} />}
-            {main}
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <div className="relative min-w-0 flex-1 overflow-y-auto bg-background" data-slot="integrations-main">
+            {/* Bottom room so the Save bar never covers the last card. */}
+            <div className="mx-auto grid w-full max-w-[1240px] min-w-0 gap-3.5 px-4 pb-24 pt-4 md:px-7 md:pt-6">
+              {isMobile && <SpaceSwitcher segmented space={route.space} counts={{}} onSpace={goSpace} />}
+              {main}
+            </div>
           </div>
+          <PageSaveBar />
         </div>
       </div>
 
@@ -511,7 +543,7 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         onCreated={(id, webhook) => setRoute({ ...route, space: webhook ? "webhooks" : "channels", view: "all", id, pane: null })}
       />
       {incomingCreate && (
-        <IncomingCreateDialog
+        <NewTriggerDialog
           key={workspaceId}
           workspaceId={workspaceId}
           data={incoming}

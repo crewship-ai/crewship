@@ -5,7 +5,8 @@
 // list). The mockup's per-crew access is not offered; agents are grouped by
 // crew so the table still reads by team.
 
-import type { AgentBinding, AgentBindingsMap, AgentLite, BindingMode, ConnectedAccount } from "./composio/types"
+import { apiFetch } from "@/lib/api-fetch"
+import type { AgentBinding, AgentBindingsMap, AgentLite, BindingMode, ConnectedAccount, Tool, ToolsResp } from "./composio/types"
 
 export type AccessLevel = "off" | BindingMode
 
@@ -96,4 +97,48 @@ export function accessChange(current: AgentBinding[], toolkit: string, level: Ac
   const apps = others.map((b) => ({ toolkit: b.toolkit, mode: b.mode, ...(b.mode === "custom" ? { tools: b.tools ?? [] } : {}) }))
   apps.push({ toolkit, mode: level, ...(level === "custom" ? { tools: existing?.tools ?? [] } : {}) })
   return { kind: "bind", payload: { user_id: user, apps } }
+}
+
+/** Shorter queries would ask every connected app for half its tools. */
+export const TOOL_SEARCH_MIN = 2
+/** Tools shown per app in the panel search. */
+export const TOOL_SEARCH_PER_APP = 5
+
+export interface ToolHit {
+  tool: Tool
+  slug: string
+  /** The connected account whose page opens on Tools. */
+  accountId: string
+}
+
+/**
+ * Tool search across connected apps (N12). The server lists tools per app
+ * only (GET …/composio/tools?toolkit=), so each connected app is asked once
+ * with the query. An app that fails is named, not hidden behind "no results".
+ */
+export async function searchToolsAcrossApps(
+  workspaceId: string,
+  apps: { slug: string; accountId: string }[],
+  query: string,
+  signal?: AbortSignal,
+): Promise<{ hits: ToolHit[]; failed: string[] }> {
+  const q = query.trim()
+  if (q.length < TOOL_SEARCH_MIN) return { hits: [], failed: [] }
+  const bySlug = new Map<string, string>()
+  for (const a of apps) if (!bySlug.has(a.slug)) bySlug.set(a.slug, a.accountId)
+  const answers = await Promise.all(
+    [...bySlug.entries()].map(async ([slug, accountId]) => {
+      const params = new URLSearchParams({ workspace_id: workspaceId, toolkit: slug, search: q, limit: String(TOOL_SEARCH_PER_APP) })
+      try {
+        const r = await apiFetch(`/api/v1/integrations/composio/tools?${params}`, signal ? { signal } : undefined)
+        if (!r.ok) throw new Error(`Failed (${r.status})`)
+        const j = (await r.json()) as ToolsResp
+        return { slug, hits: (j.tools ?? []).map((tool) => ({ tool, slug, accountId })), failed: false }
+      } catch (e) {
+        if ((e as Error).name === "AbortError") throw e
+        return { slug, hits: [] as ToolHit[], failed: true }
+      }
+    }),
+  )
+  return { hits: answers.flatMap((a) => a.hits), failed: answers.filter((a) => a.failed).map((a) => a.slug) }
 }

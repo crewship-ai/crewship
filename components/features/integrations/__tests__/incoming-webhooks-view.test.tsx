@@ -3,12 +3,10 @@ import {
   render,
   screen,
   fireEvent,
-  waitFor,
   within,
 } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { IncomingWebhooksView } from "../views/incoming-webhooks-view"
-import { IncomingCreateDialog } from "../views/incoming-credentials"
 import {
   incomingRows,
   resolveIncomingTarget,
@@ -180,30 +178,6 @@ describe("actual incoming surfaces", () => {
     ).not.toBeInTheDocument()
     expect(screen.getByText("/api/v1/page-webhooks/•••••")).toBeVisible()
   })
-  it("creates the default signed endpoint without opening advanced settings", async () => {
-    const d = data()
-    vi.mocked(d.hooks.create).mockResolvedValue({ ...hook, token: "once", signing_secret: "sign-once" })
-    mount(<IncomingCreateDialog workspaceId="ws" data={d} initialTarget={targets[0]} onClose={vi.fn()} onCreated={vi.fn()} />)
-    expect(screen.queryByRole("combobox", { name: "Webhook format" })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }))
-    await waitFor(() => expect(d.hooks.create).toHaveBeenCalledWith(expect.objectContaining({ ingress_profile: "crewship", target_pipeline_id: "r1" })))
-    expect(await screen.findByTestId("incoming-receiving-url")).toHaveTextContent("/api/v1/webhooks/once")
-    expect(screen.getByText("sign-once")).toBeVisible()
-  })
-  it("creates a Page endpoint with an absolute receiving URL from the real form", async () => {
-    vi.mocked(apiFetch).mockImplementation(async (_url, init) => new Response(JSON.stringify(
-      init?.method === "POST"
-        ? {id:"new-page-hook",url:"/api/v1/page-webhooks/one-time",live:true}
-        : {id:"p1",slug:"report",name:"Report",panels:[{id:"result",schema:"status.v1",producer:"webhook/test"}]}
-    ), {status: init?.method === "POST" ? 201 : 200}))
-    mount(<IncomingCreateDialog workspaceId="ws" data={data()} initialTarget={targets[2]} onClose={vi.fn()} onCreated={vi.fn()}/>)
-    const panel = await screen.findByRole("combobox", {name:"Panel"})
-    fireEvent.keyDown(panel, {key:"ArrowDown"})
-    fireEvent.click(screen.getByRole("option", {name:"result"}))
-    fireEvent.click(screen.getByRole("button", {name:"Create endpoint"}))
-    expect(await screen.findByTestId("incoming-receiving-url")).toHaveTextContent(`${window.location.origin}/api/v1/page-webhooks/one-time`)
-    expect(apiFetch).toHaveBeenCalledWith("/api/v1/pages/report/webhooks?workspace_id=ws", expect.objectContaining({method:"POST",body:JSON.stringify({panel:"result"})}))
-  })
   it("presents load errors as errors and provides a retry", () => {
     const d = data()
     d.error = "backend unavailable"
@@ -211,53 +185,5 @@ describe("actual incoming surfaces", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(d.refresh).toHaveBeenCalled()
     expect(screen.getByRole("alert")).toHaveTextContent("backend unavailable")
-  })
-  it("creates a GitHub endpoint through the real form and reveals its URL once", async () => {
-    const d = data()
-    vi.mocked(d.hooks.create).mockResolvedValue({
-      ...hook,
-      token: "once",
-      signing_secret: "sign-once",
-    })
-    const done = vi.fn()
-    mount(
-      <IncomingCreateDialog
-        workspaceId="ws"
-        data={d}
-        initialTarget={targets[0]}
-        onClose={vi.fn()}
-        onCreated={done}
-      />,
-    )
-    expect(screen.queryByRole("combobox", { name: "Webhook format" })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Advanced settings" }))
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "Webhook format" }), {
-      key: "ArrowDown",
-    })
-    fireEvent.click(
-      screen.getByRole("option", { name: "GitHub pull requests" }),
-    )
-    fireEvent.change(screen.getByLabelText("Endpoint name"), {
-      target: { value: "PR events" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }))
-    await waitFor(() =>
-      expect(d.hooks.create).toHaveBeenCalledWith({
-        name: "PR events",
-        target_pipeline_id: "r1",
-        ingress_profile: "github",
-        enabled: true,
-      }),
-    )
-    expect(
-      await screen.findByTestId("incoming-receiving-url"),
-    ).toHaveTextContent("/api/v1/webhooks/once/github-pull-request")
-    expect(screen.getByText("sign-once")).toBeVisible()
-    // secret step cannot close by Esc before Done
-    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
-    expect(screen.getByTestId("incoming-receiving-url")).toBeInTheDocument()
-    expect(done).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: "Done" }))
-    expect(done).toHaveBeenCalledWith(targets[0])
   })
 })
