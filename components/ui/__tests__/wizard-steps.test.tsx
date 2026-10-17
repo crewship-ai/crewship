@@ -24,4 +24,24 @@ describe("WizardSteps", () => {
     fireEvent.click(screen.getByRole("button", { name: "Step 4: Limits" }))
     expect(go).toHaveBeenLastCalledWith(3)
   })
+
+  // COM-07 (#3481): past the last step (a wizard's "all set" screen) the bar
+  // read "4 / 3" on a phone.
+  it("shows every step done once the wizard is finished, never a step past the last", () => {
+    const steps = ["Workspace", "Runner", "Pair the CLI"]
+    const go = vi.fn()
+    render(<WizardSteps steps={steps} current={3} onStepChange={go} />)
+    expect(screen.getAllByRole("listitem").map((li) => li.getAttribute("data-state"))).toEqual(["done", "done", "done"])
+    expect(screen.getByRole("navigation", { name: "Steps" })).toHaveAttribute("data-complete")
+    expect(screen.queryByText("4 / 3")).toBeNull()
+    expect(screen.getByText("3 / 3 · Done")).toBeInTheDocument()
+    // Done steps can still be revisited.
+    fireEvent.click(screen.getByRole("button", { name: "Step 3: Pair the CLI" }))
+    expect(go).toHaveBeenCalledWith(2)
+  })
+
+  it("clamps a current index far past the end to the finished state", () => {
+    render(<WizardSteps steps={["A", "B"]} current={7} />)
+    expect(screen.getByText("2 / 2 · Done")).toBeInTheDocument()
+  })
 })
