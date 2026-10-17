@@ -60,9 +60,11 @@ interface AddSecretSheetProps {
   /** Where the wizard starts — the Providers tab opens it on its own shape,
    *  Re-login on the sign-in step of one seat's provider. */
   initial?: WizardInitial
+  /** Switch to "Add AI provider" when a pasted value is a model provider key. */
+  onAddProvider?: () => void
 }
 
-export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, knownTags, initial }: AddSecretSheetProps) {
+export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, knownTags, initial, onAddProvider }: AddSecretSheetProps) {
   // The guard belongs to the shell, the input belongs to the wizard, so the
   // one bit that connects them travels up.
   const [dirty, setDirty] = React.useState(false)
@@ -86,19 +88,12 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, kno
     >
       <CreateSurfaceHeader
         concept="credentials"
-        context="Credentials"
-        title={initial?.itemType === "PROVIDER_LOGIN" ? (initial.step === "values" ? "Re-login" : "Add provider") : "Add secret"}
+        context="Vault"
+        title={initial?.itemType === "PROVIDER_LOGIN" ? (initial.step === "values" ? "Re-login" : "Add AI provider") : "Add secret"}
         description={
-          <>
-            Encrypted at rest. Secret values stay hidden by default.
-            {/* The steps say what the steps are; on a phone that sentence is
-                three lines of chrome above the first control. */}
-            <span className="hidden sm:inline">
-              {initial?.itemType === "PROVIDER_LOGIN"
-                ? " Choose your AI provider, connect your account, then assign access."
-                : " Choose a secret type, enter its value, then choose who can use it."}
-            </span>
-          </>
+          initial?.itemType === "PROVIDER_LOGIN"
+            ? "A model account your agents think with: a subscription sign-in or an API key."
+            : "Stored encrypted; agents use it through the crew proxy or as a variable."
         }
         onClose={() => onOpenChange(false)}
       />
@@ -108,12 +103,13 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, kno
           still in state is a leak waiting for a screenshot. */}
       {open && (
         <AddCredentialWizard
-          key={workspaceId}
+          key={`${workspaceId}:${initial?.itemType ?? ""}:${initial?.credentialId ?? ""}`}
           workspaceId={workspaceId}
           knownTags={knownTags}
           initial={initial}
           onDirtyChange={setDirty}
           primaryRef={primaryRef}
+          onAddProvider={onAddProvider}
           onCancel={() => onOpenChange(false)}
           onSuccess={(credentialId) => {
             onSuccess(credentialId)

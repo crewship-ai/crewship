@@ -11,9 +11,11 @@
  *
  * Deliberate choices:
  *
- *  · The offered way out — "Replace value instead" — is a primary button here, not a
- *    footnote. §2.6 L8: most legitimate reasons to reveal are really reasons
- *    to rotate, and a control used rarely is a control that keeps working.
+ *  · Harbor 2 (S dialog): one reason field and one filled primary, "Reveal
+ *    for 30 s". A reason under the floor is refused at the field without a
+ *    request; a server refusal (generic reason, stale sign-in) lands at the
+ *    field too, and the dialog stays. "Replace value instead" stays on the
+ *    same screen as the cheaper path (§2.6 L8).
  *  · The value is rendered exactly once, in the result panel, and there is no
  *    way to ask for it again without starting over. Closing the dialog drops
  *    it from state.
@@ -26,12 +28,10 @@ import * as React from "react"
 import { Check, Copy, Eye, RefreshCw, ShieldAlert } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
-import { Label } from "@/components/ui/label"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceField, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { apiFetch } from "@/lib/api-fetch"
-import { cn } from "@/lib/utils"
 
 /** Mirrors minRevealReasonLen in internal/api/credentials_reveal.go. */
 export const MIN_REVEAL_REASON_LENGTH = 20
@@ -99,8 +99,15 @@ function RevealDialogSession({
   }
 
   const reasonTooShort = reason.trim().length < MIN_REVEAL_REASON_LENGTH
+  const [reasonError, setReasonError] = React.useState<string | null>(null)
 
   async function submit() {
+    // The floor is checked here only to spare a round trip; the server checks it too.
+    if (reasonTooShort) {
+      setReasonError(`Write at least ${MIN_REVEAL_REASON_LENGTH} characters — ${MIN_REVEAL_REASON_LENGTH - reason.trim().length} more.`)
+      return
+    }
+    setReasonError(null)
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller
@@ -143,98 +150,78 @@ function RevealDialogSession({
     }
   }
 
+  const sealed = sensitivity === "SEALED"
+  const fieldError = reasonError ?? error
+
   return (
-    // The shell, without its footer and without onSubmit on purpose: the
-    // ceremony's button order is inverted (the way out is the primary, the
-    // reveal is an outline), and a reveal must never fire from Cmd+Enter.
+    // No onSubmit on purpose: a reveal must never fire from Cmd+Enter.
     <CreateSurface open={open} onOpenChange={onOpenChange} size="sm">
       <CreateSurfaceHeader
-        icon={ShieldAlert}
+        icon={Eye}
         accent="amber"
-        title={<>Reveal <span className="font-mono">{credentialName}</span></>}
-        description={
-          <>
-            Every reveal is written to the tamper-evident journal before the value is returned. If
-            the record cannot be written, the value is not returned.
-          </>
-        }
+        context={credentialName}
+        title="Reveal the value?"
+        description="The reveal and your reason go to the audit log first. If the record cannot be written, nothing is shown."
         onClose={() => onOpenChange(false)}
       />
       <CreateSurfaceBody>
 
         {value === null ? (
-          <div className="space-y-4">
-            <ul className="space-y-1.5 text-[11px] text-muted-foreground">
-              <Condition ok>Reveal is enabled for this workspace</Condition>
-              <Condition ok>
-                You hold <span className="font-mono">credentials:reveal</span>
-              </Condition>
-              <Condition ok={sensitivity ? sensitivity !== "SEALED" : undefined}>
-                {sensitivity
-                  ? `Classification ${sensitivity}${sensitivity === "SEALED" ? " — never revealable" : " allows it"}`
-                  : "Classification is checked by the server when you submit"}
-              </Condition>
-              <Condition ok={!reasonTooShort}>
-                A reason of at least {MIN_REVEAL_REASON_LENGTH} characters
-              </Condition>
-            </ul>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="reveal-reason" className="text-xs">Reason</Label>
-              <Textarea
-                id="reveal-reason"
-                rows={3}
-                value={reason}
-                onChange={(e) => { setReason(e.target.value); setError(null) }}
-                placeholder="What do you need the value for? This is recorded in the audit log."
-                className="text-sm"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Generic reasons (&ldquo;test&rdquo;, &ldquo;debug&rdquo;) are rejected. Whoever reads
-                this in six months is trying to reconstruct an incident.
+          <div className="space-y-3">
+            {sealed ? (
+              <p role="alert" className="rounded-md border border-destructive/30 bg-chip-danger-bg px-3 py-2 text-label text-foreground">
+                <ShieldAlert className="mr-1 inline size-3.5 text-destructive" aria-hidden />
+                This secret is Sealed: it can never be revealed. Replace it instead.
               </p>
-            </div>
-
-            {onRotateInstead && <div className="rounded-md border border-primary/25 bg-primary/[0.06] px-3 py-2.5 text-xs">
-              <div className="font-medium">Already have a replacement?</div>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                You can store a new value without revealing the existing one. Create or change it
-                at your provider first; Crewship only updates its stored copy.
-              </p>
-              <Button size="sm" className="mt-2" onClick={onRotateInstead}>
-                <RefreshCw className="mr-1.5 h-3 w-3" />
-                Replace value instead
-              </Button>
-            </div>}
-
-            {error && (
-              <div
-                role="alert"
-                className="rounded-md border border-destructive/30 bg-destructive/[0.05] px-3 py-2 text-xs text-destructive"
+            ) : (
+              <CreateSurfaceField
+                label={`Reason (required, ${MIN_REVEAL_REASON_LENGTH} characters or more)`}
+                htmlFor="reveal-reason"
+                error={fieldError}
+                hint="Generic reasons (“test”, “debug”) are rejected. Whoever reads this in six months is trying to reconstruct an incident."
               >
-                {error}
-              </div>
+                <Textarea
+                  id="reveal-reason"
+                  rows={3}
+                  autoFocus
+                  value={reason}
+                  onChange={(e) => { setReason(e.target.value); setError(null); setReasonError(null) }}
+                  placeholder="What do you need the value for?"
+                  aria-invalid={fieldError ? true : undefined}
+                  aria-describedby={fieldError ? "reveal-reason-error" : undefined}
+                  className="text-control"
+                />
+              </CreateSurfaceField>
+            )}
+            <p className="text-label text-muted-foreground">
+              The value hides after 30 seconds or when you leave the tab. Sealed secrets cannot be revealed.
+            </p>
+            {onRotateInstead && (
+              <p className="text-label text-muted-foreground">
+                Already have a new value?{" "}
+                <button type="button" className="text-primary hover:underline" onClick={onRotateInstead}>
+                  <RefreshCw className="mr-0.5 inline size-3" aria-hidden />Replace value instead
+                </button>
+              </p>
             )}
 
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={submitting}>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={submitting}>
                 Cancel
               </Button>
               <Button
-                variant="outline"
                 size="sm"
-                className="ml-auto"
                 onClick={submit}
-                disabled={submitting || reasonTooShort || sensitivity === "SEALED"}
+                disabled={submitting || reason.trim() === "" || sealed}
               >
-                {submitting ? <Spinner className="mr-1.5 h-3 w-3" /> : <Eye className="mr-1.5 h-3 w-3" />}
-                Reveal the existing value
+                {submitting ? <Spinner className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                Reveal for 30 s
               </Button>
             </div>
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="rounded-md border border-warn/40 bg-warn/[0.06] px-3 py-2 text-[11px]">
+            <div className="rounded-md border border-warn/40 bg-warn/[0.06] px-3 py-2 text-label">
               Hidden automatically after 30 seconds, when you leave this tab, or when you close this dialog. A second look needs a second reveal,
               with its own reason and its own audit entry.
             </div>
@@ -262,20 +249,5 @@ function RevealDialogSession({
         )}
       </CreateSurfaceBody>
     </CreateSurface>
-  )
-}
-
-function Condition({ ok, children }: { ok?: boolean; children: React.ReactNode }) {
-  return (
-    <li className="flex items-start gap-2">
-      <span
-        aria-hidden="true"
-        className={cn(
-          "mt-[3px] inline-block h-1.5 w-1.5 shrink-0 rounded-full",
-          ok === true ? "bg-success" : ok === false ? "bg-destructive" : "bg-muted-foreground/40",
-        )}
-      />
-      <span>{children}</span>
-    </li>
   )
 }

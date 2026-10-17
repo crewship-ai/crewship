@@ -1,30 +1,39 @@
 "use client"
 
+/**
+ * The Vault (/credentials) — Harbor 2.
+ *
+ * Template "Explorer + entity": the SecondaryPanel picks a space (Secrets, AI
+ * providers), a view and facets; the content is the Secrets table with its
+ * health strip, or a secret's own page with tabs. Everything that decides what
+ * is on screen lives in the URL (lib/credentials/vault-url-state.ts), so links
+ * from other pages — `?id=`, `?crew=`, `?class=`, `?tab=providers` — land on
+ * exactly that, and a reload keeps it.
+ *
+ * A load failure is never drawn as an empty vault (#1085): an empty vault
+ * invites re-creating secrets that already exist.
+ */
+
 import * as React from "react"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Key, Layers, Plus, ShieldCheck, Sparkles, TerminalSquare, Trash2, X } from "lucide-react"
+
 import { toast } from "@/lib/toast"
-import { AlertTriangle, CreditCard, Key, Layers, LayoutDashboard, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
-import { EmptyState } from "@/components/layout/empty-state"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { Card } from "@/components/ui/card"
+import { SubBar, SubBarIconButton, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
+import { PageEmpty, PageError, PageLoading, PageNoResults, PageNotFound } from "@/components/layout/page-state"
 import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { AddSecretSheet } from "@/components/features/credentials/add-secret-sheet"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
-import { CredentialsSidebar } from "@/components/features/credentials/credentials-sidebar"
-import {
-  CredentialsOverview,
-  CredentialsOverviewSkeleton,
-} from "@/components/features/credentials/credentials-overview"
 import { RotationDialog } from "@/components/features/credentials/rotation-dialog"
-import { EditCredentialDialog, type CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { ProviderLoginsPanel } from "@/components/features/credentials/provider-logins-panel"
 import { ProviderPoolsDialog } from "@/components/features/credentials/provider-pools-dialog"
 import { ProviderLoginsSidebar } from "@/components/features/credentials/provider-logins-sidebar"
+import { SecretsTable, type VaultSecret } from "@/components/features/credentials/secrets-table"
+import { VaultHealth, buildVaultHealth } from "@/components/features/credentials/vault-health"
+import { VIEW_LABEL, VaultPanel, VaultSpaces, buildClassFacet } from "@/components/features/credentials/vault-panel"
+import { BulkDeleteDialog, BulkTierDialog } from "@/components/features/credentials/bulk-actions"
+import { VaultCliDialog } from "@/components/features/credentials/vault-cli-dialog"
 import type { WizardInitial } from "@/components/features/credentials/add-credential-wizard"
 import {
   EMPTY_LOGIN_FILTERS,
@@ -34,7 +43,6 @@ import {
   buildLoginProviderFacet,
   buildLoginStatusCounts,
   hasLogin,
-  loginTotals,
   sortLogins,
   type LoginFilters,
   type ProviderLogin,
@@ -42,42 +50,47 @@ import {
 import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
+import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
 import {
   EMPTY_CREDENTIAL_FILTERS,
   applyCredentialFilters,
   buildAgentFacet,
   buildBrandFacet,
-  buildShapeFacet,
   buildScopeFacet,
+  buildShapeFacet,
   buildTagFacet,
-  deriveCredentialStatus,
-  needsAttention,
+  credentialCrewIds,
+  deriveSecretState,
+  matchesView,
+  type CredentialFacetOption,
   type CredentialFilters,
 } from "@/lib/credentials/facets"
-import { buildTierFacet, tierOf } from "@/lib/credentials/tiers"
+import { buildTierFacet } from "@/lib/credentials/tiers"
+import {
+  activeFacetCount,
+  buildVaultQuery,
+  parseVaultUrl,
+  resolveCrewTokens,
+  type SecretTab,
+  type VaultSpace,
+  type VaultUrlState,
+} from "@/lib/credentials/vault-url-state"
 import { cn } from "@/lib/utils"
-import { selectionBar, selectionBarButton } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
 
-interface Credential {
-  id: string
-  name: string
+interface Credential extends VaultSecret {
   description: string | null
   type: "PROVIDER_LOGIN" | "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2"
        | "USERPASS" | "SSH_KEY" | "CERTIFICATE" | "GENERIC_SECRET"
-  provider: "ANTHROPIC" | "OPENAI" | "GOOGLE" | "CURSOR" | "FACTORY"
-          | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
-          | "VAULT_USERPASS" | "VAULT_SSH_KEY" | "VAULT_CERTIFICATE" | "VAULT_GENERIC"
-  status: "ACTIVE" | "EXPIRED" | "RATE_LIMITED" | "REVOKED" | "ERROR" | "PENDING" | "PENDING_APPROVAL"
+  provider: string
+  status: string
   scope: "WORKSPACE" | "CREW"
   crew_id: string | null
   crew_ids: string[]
   account_label: string | null
   account_email: string | null
-  // username is cleartext for USERPASS credentials, null otherwise.
-  // Backend sets the column to NULL for legacy types so a null-check
-  // is the cheapest "is this USERPASS-ish" detector at render time.
   username: string | null
   token_expires_at: string | null
   last_checked_at: string | null
@@ -89,33 +102,63 @@ interface Credential {
   updated_at: string
   _count_agent_credentials: number
   agent_names: string[]
+  agent_ids?: string[]
   mcp_used: boolean
-  /** Server-declared probe support — see credentials.go `testable`. */
   testable?: boolean
-  /** Keeper tier, 1–4 — see lib/credentials/tiers.ts. Optional so an older
-   *  server response renders as unclassified rather than crashing the page. */
   security_level?: number
   security_level_label?: string
-  /** The seat this row is when it pays for a model — PRD provider-logins §10.1.
-   *  Present on PROVIDER_LOGIN rows and on the older AI_CLI_TOKEN / API_KEY
-   *  rows with an AI provider; absent on every secret. */
+  sensitivity?: string | null
   login?: ProviderLogin | null
 }
 
-type SortKey = "last_used" | "name" | "created"
-type Tab = "overview" | "providers"
+/** How many rows one request asks for — the list endpoint's ceiling. */
+const LIST_LIMIT = 500
+
+const normalise = (c: Credential): Credential => ({
+  ...c,
+  last_used_at: c.last_used_at ?? null,
+  last_used_ips: Array.isArray(c.last_used_ips) ? c.last_used_ips : [],
+  tags: Array.isArray(c.tags) ? c.tags : [],
+  crew_ids: Array.isArray(c.crew_ids) ? c.crew_ids : [],
+  agent_names: Array.isArray(c.agent_names) ? c.agent_names : [],
+})
 
 export default function CredentialsPage() {
   const { abilities, hasCapability } = useAbilities()
-  // #1033: read the selected workspace from the shared store (driven by the
-  // top-bar workspace switcher) instead of hardcoding the first workspace, so
-  // users in multiple workspaces can manage each one's credentials.
   const { workspaceId, loading: wsLoading } = useWorkspace()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const isMobile = useIsMobile()
+  const closePanelSheet = useCloseSecondaryPanelSheet()
+
+  // Layered like the backend (requireRoleOrCapabilityOrForbid): MANAGER+ via
+  // role, or any member holding an explicit credential.create grant (#1034).
+  const canManage = abilities.can("create", "Credential") || hasCapability(Capability.CredentialCreate)
+  // DELETE is OWNER/ADMIN ("manage" → CASL "delete").
+  const canDelete = abilities.can("delete", "Credential")
+  // PATCH (tier) is MANAGER+.
+  const canEdit = abilities.can("update", "Credential")
+  // Provider logins, pools and bindings are OWNER/ADMIN.
+  const canBind = abilities.can("manage", "Credential")
+
+  // ── The URL is the state ────────────────────────────────────────────────
+  const url = React.useMemo(() => parseVaultUrl(searchParams), [searchParams])
+  const urlRef = React.useRef(url)
+  urlRef.current = url
+  const go = React.useCallback(
+    (patch: Partial<VaultUrlState>, mode: "push" | "replace" = "replace") => {
+      const next = { ...urlRef.current, ...patch }
+      router[mode](`/credentials${buildVaultQuery(next)}`, { scroll: false })
+    },
+    [router],
+  )
+  // A MEMBER following `?tab=providers` lands on Secrets and is told why.
+  const providersDenied = url.space === "providers" && !canBind
+  const space: VaultSpace = providersDenied ? "secrets" : url.space
+
   const [credentials, setCredentials] = React.useState<Credential[]>([])
-  // The Providers tab's own list — `?kind=provider_login` (§10.1). Kept apart
-  // from the vault list rather than filtered out of it so the tab still works
-  // on a server that attaches `login` only when asked, and so its failure is
-  // its own: a broken seats endpoint must not blank the secrets overview.
+  // The AI providers list — `?kind=provider_login`. Its failure is its own:
+  // a broken seats endpoint must not blank the secrets list.
   const [providerLogins, setProviderLogins] = React.useState<Credential[]>([])
   const [loginsError, setLoginsError] = React.useState<string | null>(null)
   const [loginFilters, setLoginFilters] = React.useState<LoginFilters>(EMPTY_LOGIN_FILTERS)
@@ -123,100 +166,37 @@ export default function CredentialsPage() {
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
   const [poolsOpen, setPoolsOpen] = React.useState(false)
-  // Where the wizard starts: the Providers tab opens it on its own shape, and
-  // Re-login on one seat's sign-in step. Cleared on close so the next plain
-  // "Add secret" starts at the shape grid.
+  const [cliOpen, setCliOpen] = React.useState(false)
   const [addInitial, setAddInitial] = React.useState<WizardInitial | undefined>(undefined)
-  const [editOpen, setEditOpen] = React.useState(false)
-  const [editCredential, setEditCredential] = React.useState<CredentialData | null>(null)
-  // Layered like the backend (requireRoleOrCapabilityOrForbid): MANAGER+
-  // via role, or any member holding an explicit credential.create grant
-  // (#1034). Gates the separate secret and provider onboarding flows.
-  const canManage = abilities.can("create", "Credential") || hasCapability(Capability.CredentialCreate)
-  // Bulk delete mirrors the backend: DELETE is OWNER/ADMIN only ("manage" →
-  // CASL "delete"). Hiding the checkbox beats letting a MEMBER tick rows and
-  // discover the 403 at the confirmation dialog.
-  const canDelete = abilities.can("delete", "Credential")
-  // POST /credentials/bindings is roleManage — the same gate the wizard's
-  // slot step and the seat's Assign use.
-  const canBind = abilities.can("manage", "Credential")
-  const [filters, setFilters] = React.useState<CredentialFilters>(EMPTY_CREDENTIAL_FILTERS)
-  // The rail is the shared SecondaryPanel ("vault"): a column on desktop that
-  // remembers its collapse, a bottom sheet from the top bar on a phone. A pick
-  // that opens a credential closes the sheet, as on /routines.
-  const closePanelSheet = useCloseSecondaryPanelSheet()
-  const [sortKey, setSortKey] = React.useState<SortKey>("last_used")
-  const [selectedDetailCredential, setDetailCredential] = React.useState<Credential | null>(null)
-  // Selection identifies the row; refreshed lists own its current metadata.
-  // Keeping only the original object made a successful Edit appear not to save.
-  const detailCredential = selectedDetailCredential
-    ? providerLogins.find((c) => c.id === selectedDetailCredential.id)
-      ?? credentials.find((c) => c.id === selectedDetailCredential.id)
-      ?? selectedDetailCredential
-    : null
-  const [detailOpen, setDetailOpen] = React.useState(false)
-  // The Providers list's Assign button: open the seat with its dialog up.
-  const [assignOnOpen, setAssignOnOpen] = React.useState(false)
-  // Selection is a mode you enter, not the resting state of the list — see the
-  // rail's `selectMode` prop. Leaving it drops the selection with it, so a
-  // forgotten tick cannot be deleted by a later click on the floating bar.
-  const [selectMode, setSelectMode] = React.useState(false)
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set())
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
-  const [bulkDeleting, setBulkDeleting] = React.useState(false)
+  const [bulkTierOpen, setBulkTierOpen] = React.useState(false)
+  const [rotateCredential, setRotateCredential] = React.useState<{ cred: Credential; mode: "rotate" | "patch" } | null>(null)
+  const [assignOnOpen, setAssignOnOpen] = React.useState(false)
+  // A linked secret that is not in the list (beyond the page, or deleted).
+  const [linked, setLinked] = React.useState<{ id: string; state: "loading" | "missing" | "error"; row?: Credential } | null>(null)
 
-  // /credentials?id=<id> — the ⌘K palette's Credentials rows, and any
-  // bookmark. Landing on the list and leaving the caller to find the secret
-  // they had just searched for is the same second-search-by-eye the members
-  // roster had.
-  //
-  // Keyed on the LAST id acted on, not a once-ever latch. A latch survives the
-  // gap before the list arrives (on the first render `credentials` is empty)
-  // but then swallows every later link: standing on /credentials?id=A, opening
-  // ⌘K and picking secret B changed the URL and nothing else, because this
-  // page never unmounts. Per id, each new one opens exactly once — a refresh
-  // of the vault is not a navigation, so it cannot reopen a sheet the user has
-  // closed, and an id no credential has is marked handled rather than retried.
-  const searchParams = useSearchParams()
-  const linkedCredentialId = searchParams.get("id")
-  // /credentials?tab=providers — the agent's "Pays with" picker links here.
-  const [tab, setTab] = React.useState<Tab>(searchParams.get("tab") === "providers" ? "providers" : "overview")
-  const appliedCredentialId = React.useRef<string | null>(null)
-  React.useEffect(() => {
-    if (!linkedCredentialId || credentials.length === 0) return
-    if (appliedCredentialId.current === linkedCredentialId) return
-    appliedCredentialId.current = linkedCredentialId
-    const hit = credentials.find((c) => c.id === linkedCredentialId)
-    if (!hit) return
-    setDetailCredential(hit)
-    setDetailOpen(true)
-  }, [linkedCredentialId, credentials])
-  const [rotateCredential, setRotateCredential] = React.useState<Credential | null>(null)
-  const [rotateOpen, setRotateOpen] = React.useState(false)
-
-  // Tool readiness (§2.3, blocker #3): "the secret is valid" and "the CLI that
-  // reads it exists in the container" are different questions, and only the
-  // second one predicts whether the agent's next command works.
   const readiness = useCredentialReadiness(workspaceId)
+  const agentDirectory = useWorkspaceAgentDirectory(workspaceId ?? undefined)
+  const agentCrew = React.useMemo(() => {
+    const m = new Map<string, string>()
+    for (const a of (agentDirectory.agents ?? []) as { id: string; crew_id?: string | null }[]) {
+      if (a.crew_id) m.set(a.id, a.crew_id)
+    }
+    return m
+  }, [agentDirectory.agents])
 
-  // Cancel an in-flight fetch when the workspace changes so a slower
-  // response from the previous workspace can't resolve later and overwrite
-  // the newly-selected workspace's rows (matches the AbortController idiom
-  // used by app/(dashboard)/crews/page.tsx).
   const abortRef = React.useRef<AbortController | null>(null)
 
-  // fetchCredentials THROWS on failure so loadData can surface a real
-  // error state — a failed fetch must never render as "no credentials
-  // yet" (which invites re-creating secrets that already exist).
+  // Throws on failure so the page can show an error state — never "empty".
   const fetchCredentials = React.useCallback(async (oid: string, signal?: AbortSignal) => {
     let res: Response
-    // The seats list rides along. Its failure is reported on the Providers
-    // tab, not thrown: the vault must still render when only this is broken.
     let loginsRes: Response | null = null
     try {
+      const ws = encodeURIComponent(oid)
       const [a, b] = await Promise.all([
-        apiFetch(`/api/v1/credentials?workspace_id=${oid}`, { signal }),
-        canBind ? apiFetch(`/api/v1/credentials?workspace_id=${oid}&kind=provider_login`, { signal }).catch((err) => {
+        apiFetch(`/api/v1/credentials?workspace_id=${ws}&limit=${LIST_LIMIT}`, { signal }),
+        canBind ? apiFetch(`/api/v1/credentials?workspace_id=${ws}&kind=provider_login&limit=${LIST_LIMIT}`, { signal }).catch((err) => {
           if ((err as { name?: string })?.name === "AbortError") throw err
           return null
         }) : Promise.resolve(null),
@@ -225,47 +205,32 @@ export default function CredentialsPage() {
       loginsRes = b
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") throw err
-      throw new Error("Network error while loading credentials.")
+      throw new Error("Network error while loading the vault.")
     }
-    // Belt-and-suspenders: even if the abort didn't preempt the fetch (or
-    // the mock/transport ignores signals), never apply a response that's no
-    // longer wanted.
     if (signal?.aborted) return
-    if (!res.ok) throw new Error(`Loading credentials failed (HTTP ${res.status}).`)
+    if (!res.ok) throw new Error(`Loading the vault failed (HTTP ${res.status}).`)
     const data = await res.json()
     if (signal?.aborted) return
-    const normalise = (c: Credential): Credential => ({
-      ...c,
-      last_used_at: c.last_used_at ?? null,
-      last_used_ips: Array.isArray(c.last_used_ips) ? c.last_used_ips : [],
-      tags: Array.isArray(c.tags) ? c.tags : [],
-      crew_ids: Array.isArray(c.crew_ids) ? c.crew_ids : [],
-    })
-    const normalised: Credential[] = (Array.isArray(data) ? data : []).map(normalise)
-    setCredentials(normalised)
-    // #1085: any successful load clears a stale error — otherwise a full-page
-    // error card from an earlier failure survives a later good refresh.
+    const rows: Credential[] = (Array.isArray(data) ? data : []).map(normalise)
+    setCredentials(rows)
+    // #1085: any successful load clears a stale error.
     setLoadError(null)
 
     if (!canBind) {
       setProviderLogins([])
       setLoginsError(null)
     } else if (loginsRes && loginsRes.ok) {
-      const rows = await loginsRes.json().catch(() => [])
+      const seats = await loginsRes.json().catch(() => [])
       if (signal?.aborted) return
-      setProviderLogins((Array.isArray(rows) ? rows : []).map(normalise).filter(hasLogin))
+      setProviderLogins((Array.isArray(seats) ? seats : []).map(normalise).filter(hasLogin))
       setLoginsError(null)
     } else {
-      // A server without the seats endpoint (or one that failed) still marks
-      // the rows it knows about: fall back to the vault list's own `login`.
-      setProviderLogins(normalised.filter(hasLogin))
+      setProviderLogins(rows.filter(hasLogin))
       setLoginsError(loginsRes ? `HTTP ${loginsRes.status}` : "network error")
     }
   }, [canBind])
 
   const loadData = React.useCallback(async () => {
-    // Wait for the workspace store to resolve the selected workspace before
-    // deciding there's nothing to load.
     if (wsLoading) return
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -273,142 +238,48 @@ export default function CredentialsPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      if (workspaceId) {
-        await fetchCredentials(workspaceId, controller.signal)
-      } else {
+      if (workspaceId) await fetchCredentials(workspaceId, controller.signal)
+      else {
         setCredentials([])
         setProviderLogins([])
       }
     } catch (err) {
       if (controller.signal.aborted || (err as { name?: string })?.name === "AbortError") return
-      setLoadError(err instanceof Error ? err.message : "Something went wrong while loading credentials.")
+      setLoadError(err instanceof Error ? err.message : "Something went wrong while loading the vault.")
     } finally {
-      // Only the currently-owned controller may flip loading back off —
-      // otherwise a superseded request's `finally` could clear the
-      // skeleton after the newer request already took over.
       if (abortRef.current === controller) setLoading(false)
     }
   }, [wsLoading, workspaceId, fetchCredentials])
 
-  // Reload whenever the selected workspace changes (switcher) or the store
-  // finishes loading.
   React.useEffect(() => {
     loadData()
     return () => { abortRef.current?.abort() }
   }, [loadData])
 
-  // Bulk-select and facets are per-workspace state: without this, switching
-  // workspaces leaves stale ids selected, floating the "N selected" bar over
-  // the new workspace's rows and letting bulk-delete fire DELETEs against the
-  // previous workspace's credential ids. The facets reset for the same
-  // reason — a crew id from the old workspace filters the new one to nothing.
+  // Selection and seat facets are per workspace: a stale id must never reach
+  // a DELETE in the next workspace.
   React.useEffect(() => {
-    setSelectMode(false)
     setSelectedIds(new Set())
-    setFilters(EMPTY_CREDENTIAL_FILTERS)
     setLoginFilters(EMPTY_LOGIN_FILTERS)
-    setDetailCredential(null)
-    setDetailOpen(false)
-    setEditOpen(false)
     setAddOpen(false)
-    if (!canBind) {
-      setTab("overview")
-      setProviderLogins([])
-    }
+    if (!canBind) setProviderLogins([])
   }, [workspaceId, canBind])
 
-  /** Opens the wizard, optionally somewhere other than the shape grid. */
+  /** A refresh while data is on screen: a failure is a toast, never the error page (#1085). */
+  const handleRefresh = React.useCallback(() => {
+    if (!workspaceId) return
+    fetchCredentials(workspaceId).catch((err) => {
+      toast.error(err instanceof Error ? err.message : "Couldn't refresh the vault.")
+    })
+  }, [workspaceId, fetchCredentials])
+
   const openAdd = React.useCallback((initial?: WizardInitial) => {
     if (initial?.itemType === "PROVIDER_LOGIN" && !canBind) return
     setAddInitial(initial)
     setAddOpen(true)
   }, [canBind])
 
-  const handleRefresh = React.useCallback(() => {
-    if (!workspaceId) return
-    // #1085: this refresh runs while data is already on screen (after a
-    // mutation). A transient failure should surface as a toast, not replace
-    // the loaded list with the full-page error card — the stale-but-visible
-    // list is more useful than an error screen, and the next refresh recovers.
-    fetchCredentials(workspaceId).catch((err) => {
-      toast.error(err instanceof Error ? err.message : "Couldn't refresh credentials.")
-    })
-  }, [workspaceId, fetchCredentials])
-
-  function handleEdit(credential: Credential) {
-    setEditCredential({
-      id: credential.id,
-      name: credential.name,
-      description: credential.description,
-      type: credential.type,
-      provider: credential.provider,
-      scope: credential.scope,
-      crew_id: credential.crew_id,
-      crew_ids: credential.crew_ids?.length > 0 ? credential.crew_ids : (credential.crew_id ? [credential.crew_id] : []),
-      tags: credential.tags,
-      token_expires_at: credential.token_expires_at,
-      security_level: credential.security_level,
-      isProviderLogin: hasLogin(credential),
-      username: credential.username,
-    })
-    setEditOpen(true)
-  }
-
-  function toggleSelected(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
-      return next
-    })
-  }
-
-  async function bulkDelete() {
-    if (!workspaceId) return
-    setBulkDeleting(true)
-    // Only what the rail is currently showing. `selectedIds` survives a filter
-    // or search change, so a tick made under one filter would otherwise delete
-    // a secret the user can no longer see — and the dialog would have counted
-    // it without naming it.
-    const visible = new Set(sorted.map((c) => c.id))
-    const ids = Array.from(selectedIds).filter((id) => visible.has(id))
-    try {
-      const results = await Promise.allSettled(
-        ids.map((id) =>
-          apiFetch(`/api/v1/credentials/${id}?workspace_id=${workspaceId}`, { method: "DELETE" }),
-        ),
-      )
-      const failedIds = ids.filter((_, i) => {
-        const r = results[i]
-        if (r.status === "rejected") return true
-        // #1085: a 404 means the credential is already gone (another admin
-        // deleted it first). Treat it as success, not a failure — otherwise it
-        // lingers in `selectedIds` as a phantom selection after the refresh
-        // removes its row, and the floating bar shows "1 selected" forever.
-        if (r.value.status === 404) return false
-        return !r.value.ok
-      })
-      const deleted = ids.length - failedIds.length
-      if (failedIds.length === 0) {
-        toast.success(`${deleted} credential${deleted === 1 ? "" : "s"} deleted`)
-        setSelectedIds(new Set())
-      } else {
-        // Keep the failures selected so the user can retry the exact
-        // remainder in one click instead of re-hunting the rows.
-        toast.error(
-          `${deleted} deleted, ${failedIds.length} failed — the failed credential${failedIds.length === 1 ? " stays" : "s stay"} selected`,
-        )
-        setSelectedIds(new Set(failedIds))
-      }
-      handleRefresh()
-      setBulkDeleteOpen(false)
-    } finally { setBulkDeleting(false) }
-  }
-
-  // The vault minus the seats. A provider login is not a secret (§6.1): it
-  // has its own tab and its own count in the header, and counting it in "12
-  // secrets" would make the Overview's KPIs mean two things at once. Ids from
-  // the seats endpoint AND rows the vault list itself marks — whichever the
-  // server sent, the row lands in exactly one list.
+  // ── Secrets: the vault minus the AI provider accounts ───────────────────
   const loginIds = React.useMemo(() => {
     const ids = new Set(providerLogins.map((c) => c.id))
     for (const c of credentials) if (hasLogin(c)) ids.add(c.id)
@@ -416,164 +287,105 @@ export default function CredentialsPage() {
   }, [credentials, providerLogins])
   const secrets = React.useMemo(() => credentials.filter((c) => !loginIds.has(c.id)), [credentials, loginIds])
 
-  // The rail's "Needs attention" count. The overview's own tiles derive their
-  // numbers from lib/credentials/overview.ts over the same predicate, so the
-  // rail and the dashboard cannot report a different total.
-  const attentionList = React.useMemo(() => secrets.filter(needsAttention), [secrets])
+  const filters: CredentialFilters = React.useMemo(
+    () => ({ ...url.filters, crew: resolveCrewTokens(url.filters.crew, readiness.crewsById) }),
+    [url.filters, readiness.crewsById],
+  )
+  const setFilters = (next: CredentialFilters) => {
+    setSelectedIds(new Set())
+    go({ filters: next, id: null, tab: null })
+  }
 
-  // The Providers tab. Counts, facets and the list come from one module over
-  // one array, so a rail row can never disagree with what clicking it shows.
+  const now = Date.now()
+  const missing = readiness.missingToolIds
+  const viewCounts = React.useMemo(() => {
+    const count = (v: "all" | "attention" | "recent" | "unused" | "missing-tool") => secrets.filter((c) => matchesView(c, v, missing)).length
+    return { all: secrets.length, attention: count("attention"), recent: count("recent"), unused: count("unused"), "missing-tool": count("missing-tool") }
+  }, [secrets, missing])
+  const health = React.useMemo(() => buildVaultHealth(secrets), [secrets])
+
+  const crewFacet = React.useMemo<CredentialFacetOption[]>(() => {
+    const counts = new Map<string, number>()
+    for (const c of secrets) for (const id of credentialCrewIds(c, agentCrew)) counts.set(id, (counts.get(id) ?? 0) + 1)
+    return [...counts.entries()]
+      .map(([id, count]) => ({ value: id, label: readiness.crewsById[id]?.name ?? id, count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+  }, [secrets, agentCrew, readiness.crewsById])
+
+  const facets = React.useMemo(() => ({
+    shapes: buildShapeFacet(secrets),
+    brands: buildBrandFacet(secrets),
+    scopes: buildScopeFacet(secrets, readiness.crewNames),
+    tiers: buildTierFacet(secrets),
+    classes: buildClassFacet(secrets),
+    tags: buildTagFacet(secrets),
+    agents: buildAgentFacet(secrets),
+  }), [secrets, readiness.crewNames])
+
+  const visible = React.useMemo(() => {
+    const out = applyCredentialFilters(secrets, filters, missing, { agentCrew })
+    // Broken first, then most recently used — "what is wrong" before "what is busy".
+    const rank = { rejected: 0, pending: 1, expiring: 2, ready: 3, unused: 4 } as const
+    return out.sort((a, b) => {
+      const d = rank[deriveSecretState(a).key] - rank[deriveSecretState(b).key]
+      if (d !== 0) return d
+      const at = a.last_used_at ? Date.parse(a.last_used_at) : 0
+      const bt = b.last_used_at ? Date.parse(b.last_used_at) : 0
+      return bt - at || a.name.localeCompare(b.name)
+    })
+  }, [secrets, filters, missing, agentCrew])
+
+  // Only what is on screen can be acted on — a tick made under another filter
+  // must not delete a secret the person can no longer see.
+  const visibleSelection = React.useMemo(() => visible.filter((c) => selectedIds.has(c.id)), [visible, selectedIds])
+  const canSelect = canDelete || canEdit
+
+  // ── AI providers ────────────────────────────────────────────────────────
   const loginCounts = React.useMemo(() => buildLoginStatusCounts(providerLogins), [providerLogins])
   const loginProviders = React.useMemo(() => buildLoginProviderFacet(providerLogins), [providerLogins])
   const loginModes = React.useMemo(() => buildLoginModeFacet(providerLogins), [providerLogins])
   const loginOwners = React.useMemo(() => buildLoginOwnerFacet(providerLogins), [providerLogins])
-  const visibleLogins = React.useMemo(
-    () => sortLogins(applyLoginFilters(providerLogins, loginFilters)),
-    [providerLogins, loginFilters],
-  )
-  const loginTotalsNow = React.useMemo(() => loginTotals(providerLogins), [providerLogins])
+  const visibleLogins = React.useMemo(() => sortLogins(applyLoginFilters(providerLogins, loginFilters)), [providerLogins, loginFilters])
 
-  // Distinct tags from data — drives the sidebar's Tag facet so we never
-  // show tags the workspace doesn't have.
-  const tagsInUse = React.useMemo(() => {
-    const set = new Set<string>()
-    for (const c of credentials) {
-      for (const t of c.tags ?? []) set.add(t)
+  const tagsInUse = React.useMemo(() => Array.from(new Set(credentials.flatMap((c) => c.tags ?? []))).sort(), [credentials])
+
+  // ── The open secret ─────────────────────────────────────────────────────
+  const listed = url.id ? providerLogins.find((c) => c.id === url.id) ?? credentials.find((c) => c.id === url.id) ?? null : null
+  React.useEffect(() => {
+    const id = url.id
+    if (!id || loading || loadError || listed || !workspaceId) {
+      if (!id) setLinked(null)
+      return
     }
-    return Array.from(set).sort()
-  }, [credentials])
+    if (linked?.id === id) return
+    let cancelled = false
+    setLinked({ id, state: "loading" })
+    apiFetch(`/api/v1/credentials/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then(async (r) => {
+        if (cancelled) return
+        if (r.status === 404 || r.status === 403) { setLinked({ id, state: "missing" }); return }
+        if (!r.ok) throw new Error()
+        const row = normalise(await r.json())
+        if (!cancelled) setLinked({ id, state: "loading", row })
+      })
+      .catch(() => { if (!cancelled) setLinked({ id, state: "error" }) })
+    return () => { cancelled = true }
+  }, [url.id, loading, loadError, listed, workspaceId, linked?.id])
+  const detail = listed ?? (linked?.id === url.id ? linked?.row ?? null : null)
 
-  const missingToolCount = React.useMemo(
-    () => secrets.filter((c) => readiness.missingToolIds.has(c.id)).length,
-    [secrets, readiness.missingToolIds],
-  )
-
-  const brands = React.useMemo(() => buildBrandFacet(secrets), [secrets])
-  const shapes = React.useMemo(() => buildShapeFacet(secrets), [secrets])
-  const scopes = React.useMemo(
-    () => buildScopeFacet(secrets, readiness.crewNames),
-    [secrets, readiness.crewNames],
-  )
-  // Counted over the whole vault, not the filtered view: a tier row that
-  // recounted itself after every click would report 0 for every tier but the
-  // selected one, which is the opposite of what the section is for.
-  const tiers = React.useMemo(() => buildTierFacet(secrets), [secrets])
-  const tagFacet = React.useMemo(() => buildTagFacet(secrets), [secrets])
-  const agentsInUse = React.useMemo(() => buildAgentFacet(secrets), [secrets])
-
-  const filtered = React.useMemo(
-    () => applyCredentialFilters(secrets, filters, readiness.missingToolIds),
-    [secrets, filters, readiness.missingToolIds],
-  )
-
-  const sorted = React.useMemo(() => {
-    const out = [...filtered]
-    out.sort((a, b) => {
-      // Errors always rank to the top so users see breakage on every
-      // sort, regardless of which key they picked.
-      const aErr = deriveCredentialStatus(a) === "Error" ? 0 : 1
-      const bErr = deriveCredentialStatus(b) === "Error" ? 0 : 1
-      if (aErr !== bErr) return aErr - bErr
-      if (sortKey === "name") return a.name.localeCompare(b.name)
-      if (sortKey === "created") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      // last_used desc; nulls go to the bottom
-      const aT = a.last_used_at ? new Date(a.last_used_at).getTime() : 0
-      const bT = b.last_used_at ? new Date(b.last_used_at).getTime() : 0
-      return bT - aT
-    })
-    return out
-  }, [filtered, sortKey])
-
-  const headerActions = canManage ? (
-    <>
-      {canBind && <SubBarSecondary icon={Layers} aria-label="Account groups" title="Account groups" onClick={() => setPoolsOpen(true)}><span className="hidden sm:inline">Account groups</span></SubBarSecondary>}
-      <SubBarSecondary icon={Plus} aria-label="Add secret" title="Add secret" onClick={() => openAdd()}>
-        <span className="hidden sm:inline">Add secret</span>
-      </SubBarSecondary>
-        {canBind && <SubBarPrimary icon={Plus} onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
-          Add provider
-        </SubBarPrimary>}
-    </>
-  ) : null
-
-  const selectTab = (next: Tab) => {
-    setTab(next)
-    // A tab is a place, and a credential open from the other tab is not in
-    // it. Closing the detail keeps "Providers" from showing a GitHub PAT.
-    setDetailOpen(false)
-    setDetailCredential(null)
+  const openSecret = (id: string) => {
+    go({ id, tab: null }, "push")
+    closePanelSheet()
+  }
+  const closeSecret = () => {
+    setAssignOnOpen(false)
+    go({ id: null, tab: null }, "push")
   }
 
-  // Canonical page chrome: the SubBar (identity + actions) directly under the
-  // global top bar, then the explorer rail + a scrollable, padded content
-  // region — the same shape Integrations uses.
-  const headerParts: string[] = []
-  if (credentials.length > 0) {
-    headerParts.push(`${secrets.length} secret${secrets.length === 1 ? "" : "s"}`)
-    headerParts.push(`${providerLogins.length} provider login${providerLogins.length === 1 ? "" : "s"}`)
-    if (loginTotalsNow.atLimit > 0) headerParts.push(`${loginTotalsNow.atLimit} at limit`)
-    if (missingToolCount > 0) headerParts.push(`${missingToolCount} waiting on a tool`)
+  const changeSpace = (s: VaultSpace) => {
+    setSelectedIds(new Set())
+    go({ space: s, id: null, tab: null, filters: EMPTY_CREDENTIAL_FILTERS, group: "none" }, "push")
   }
-  const subBar = (
-    <SubBar<Tab>
-      icon={Key}
-      title="Credentials"
-      ariaLabel="Credentials"
-      description={
-        credentials.length === 0
-          ? "Shared secrets, API keys, and CLI tokens for your agents"
-          : headerParts.join(" · ")
-      }
-      actions={headerActions}
-      tabs={[
-        { id: "overview", label: "Overview", icon: LayoutDashboard },
-        ...(canBind ? [{ id: "providers" as const, label: "Providers", icon: CreditCard, badge: providerLogins.length > 0 ? providerLogins.length : undefined }] : []),
-      ]}
-      activeTab={tab}
-      onTabChange={selectTab}
-    />
-  )
-
-  if (loading) {
-    return (
-      <div className="flex flex-col h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] bg-background">
-        {subBar}
-        <div className="flex-1 overflow-y-auto">
-          {/* The skeleton is the OVERVIEW's geometry, not three grey bars where
-              a table used to be — a placeholder that does not match what
-              replaces it makes the page reflow on load, which reads as a
-              second, unexplained render. */}
-          <div className="p-4 md:p-6">
-            <CredentialsOverviewSkeleton />
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // The rail is a filter surface. With nothing to filter (empty vault) or
-  // nothing loaded (error), it would be a column of zeroes next to a message
-  // asking the user to do something else.
-  const showSidebar = !loadError
-
-  // The selection bar's green, as in Members and Admin › People. It is the
-  // panel footer now (PNL-02), not a bar floating over the page.
-  const bulkBar = canDelete && selectMode && selectedIds.size > 0 ? (
-    <div role="toolbar" aria-label="Change the selected credentials" data-slot="credentials-bulk"
-      className={cn(selectionBar, "w-full whitespace-nowrap")}>
-      <span className="px-1 font-medium tabular-nums">{selectedIds.size} selected</span>
-      <Button type="button" variant="outline" size="sm" className={cn(selectionBarButton, "text-destructive hover:text-destructive")} onClick={() => setBulkDeleteOpen(true)}>
-        <Trash2 />Delete
-      </Button>
-      <Button type="button" variant="ghost" size="sm" className={cn(selectionBarButton, "border-transparent px-2.5")}
-        onClick={() => {
-          setSelectedIds(new Set())
-          setSelectMode(false)
-        }}>
-        Cancel
-      </Button>
-    </div>
-  ) : undefined
 
   /** Re-login: the wizard on the sign-in step, this seat's provider and mode chosen. */
   const relogin = (cred: Credential) => {
@@ -590,19 +402,216 @@ export default function CredentialsPage() {
     })
   }
 
+  // ── Top bar ─────────────────────────────────────────────────────────────
+  const viewTitle = space === "providers" ? "AI providers" : VIEW_LABEL[filters.status]
+  const headerActions = (
+    <>
+      <SubBarIconButton icon={TerminalSquare} aria-label="Command line" title="Command line" onClick={() => setCliOpen(true)} />
+      {space === "providers" ? (
+        <>
+          <SubBarSecondary icon={Layers} aria-label="Account groups" title="Account groups" onClick={() => setPoolsOpen(true)}>
+            <span className="hidden sm:inline">Account groups</span>
+          </SubBarSecondary>
+          {canManage && (
+            <SubBarSecondary icon={Key} aria-label="Add secret" title="Add secret" onClick={() => openAdd()}>
+              <span className="hidden sm:inline">Add secret</span>
+            </SubBarSecondary>
+          )}
+          <SubBarPrimary icon={Plus} aria-label="Add AI provider" onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
+            <span className="hidden sm:inline">Add AI provider</span>
+          </SubBarPrimary>
+        </>
+      ) : canManage ? (
+        <>
+          {canBind && (
+            <SubBarSecondary icon={Sparkles} aria-label="Add AI provider" title="Add AI provider" onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
+              <span className="hidden sm:inline">Add AI provider</span>
+            </SubBarSecondary>
+          )}
+          <SubBarPrimary icon={Plus} aria-label="Add secret" onClick={() => openAdd()}>
+            <span className="hidden sm:inline">Add secret</span>
+          </SubBarPrimary>
+        </>
+      ) : null}
+    </>
+  )
+
+  const subBar = (
+    <SubBar
+      icon={Key}
+      title={space === "providers" ? "AI providers" : "Secrets"}
+      section={detail ? detail.name : space === "secrets" && filters.status !== "all" ? viewTitle : undefined}
+      ariaLabel="Vault"
+      description={space === "providers" ? `${providerLogins.length} accounts` : `${secrets.length} secrets`}
+      actions={headerActions}
+      // The list and the secret page carry their own visible h1.
+      heading={false}
+    />
+  )
+
+  const spaces = (
+    <VaultSpaces
+      space={space}
+      counts={{ secrets: secrets.length, providers: providerLogins.length }}
+      showProviders={canBind}
+      onSpace={changeSpace}
+    />
+  )
+
+  const phoneSpaces = isMobile && canBind && !detail ? (
+    <div role="radiogroup" aria-label="Vault space" className="mb-3 grid grid-cols-2 rounded-lg border border-border bg-muted/40 p-0.5">
+      {(["secrets", "providers"] as const).map((s) => (
+        <button key={s} type="button" role="radio" aria-checked={space === s} onClick={() => changeSpace(s)}
+          className={cn("kit-tap h-8 rounded-md text-label", space === s ? "bg-card font-medium text-foreground shadow-xs" : "text-muted-foreground")}>
+          {s === "secrets" ? "Secrets" : "AI providers"}
+        </button>
+      ))}
+    </div>
+  ) : null
+
+  const bulkBar = canSelect && visibleSelection.length > 0 ? (
+    <div role="toolbar" aria-label="Change the selected secrets" data-slot="vault-bulk"
+      className="sticky bottom-3 z-20 mx-auto mt-3 flex w-fit max-w-full items-center gap-1.5 whitespace-nowrap rounded-xl border border-border bg-foreground px-3 py-1.5 text-label text-background shadow-xl">
+      <span className="pr-1 font-medium tabular-nums">{visibleSelection.length} selected</span>
+      <span className="h-4 w-px bg-background/30" aria-hidden />
+      {canEdit && (
+        <Button type="button" size="sm" variant="ghost" className="text-background hover:bg-background/15 hover:text-background" onClick={() => setBulkTierOpen(true)}>
+          <ShieldCheck className="size-3.5" aria-hidden /> Change tier
+        </Button>
+      )}
+      {canDelete && (
+        <Button type="button" size="sm" variant="ghost" className="text-background hover:bg-background/15 hover:text-background" onClick={() => setBulkDeleteOpen(true)}>
+          <Trash2 className="size-3.5" aria-hidden /> Delete
+        </Button>
+      )}
+      <Button type="button" size="icon-sm" variant="ghost" aria-label="Clear the selection" className="text-background hover:bg-background/15 hover:text-background" onClick={() => setSelectedIds(new Set())}>
+        <X className="size-3.5" />
+      </Button>
+    </div>
+  ) : null
+
+  // ── Content ─────────────────────────────────────────────────────────────
+  let content: React.ReactNode
+  if (loading) {
+    content = <PageLoading variant="list" onRetry={loadData} />
+  } else if (loadError) {
+    content = (
+      <PageError
+        title="Couldn't load the vault"
+        description={<>{loadError} Nothing was changed; your secrets are still stored.</>}
+        onRetry={loadData}
+      />
+    )
+  } else if (url.id && !detail) {
+    content = linked?.state === "missing" ? (
+      <PageNotFound what="secret" description="It was deleted, or the link points to another workspace." back={{ label: "Back to Secrets", onClick: closeSecret }} />
+    ) : linked?.state === "error" ? (
+      <PageError title="Couldn't open this secret" description="The vault list is fine; only this secret failed to load." onRetry={() => setLinked(null)} />
+    ) : (
+      <PageLoading variant="cards" />
+    )
+  } else if (detail && workspaceId) {
+    content = (
+      <CredentialDetailSheet
+        key={detail.id}
+        workspaceId={workspaceId}
+        credential={detail}
+        open
+        assignOnOpen={assignOnOpen}
+        tab={url.tab}
+        onTabChange={(t: SecretTab) => go({ tab: t === "overview" ? null : t })}
+        onOpenChange={(o) => { if (!o) closeSecret() }}
+        onBack={closeSecret}
+        backLabel={hasLogin(detail) ? "AI providers" : "Secrets"}
+        onRefresh={handleRefresh}
+        toolGaps={readiness.gapsByCredential.get(detail.id) ?? []}
+        readinessKnown={readiness.crewsChecked > 0}
+        crewsById={readiness.crewsById}
+        knownTags={tagsInUse}
+        onRotate={(c, mode) => setRotateCredential({ cred: c as unknown as Credential, mode: mode ?? "rotate" })}
+        onRelogin={canBind ? (c) => relogin(c as Credential) : undefined}
+      />
+    )
+  } else if (space === "providers") {
+    content = (
+      <>
+        {phoneSpaces}
+        <PageHead title="AI providers" description="The model accounts your agents think and pay with." />
+        {loginsError && providerLogins.length === 0 && (
+          <div role="alert" className="page-banner page-banner-warn mb-4">
+            Couldn&apos;t load the AI provider accounts ({loginsError}). Accounts marked on the vault list are shown.
+          </div>
+        )}
+        <ProviderLoginsPanel
+          logins={providerLogins}
+          visible={visibleLogins}
+          onSelect={openSecret}
+          onSelectStatus={(status) => setLoginFilters((f) => ({ ...f, status }))}
+          onAdd={() => openAdd({ itemType: "PROVIDER_LOGIN" })}
+          onAssign={(id) => { setAssignOnOpen(true); openSecret(id) }}
+        />
+      </>
+    )
+  } else if (secrets.length === 0) {
+    content = (
+      <>
+        {phoneSpaces}
+        {providersDenied && <ProvidersNote />}
+        <PageEmpty
+          icon={Key}
+          title="The vault is empty"
+          description="Store keys and logins your agents use, and the AI accounts they think with. Values are encrypted with AES-256-GCM."
+          primary={canManage ? { label: "Add secret", onClick: () => openAdd() } : undefined}
+          secondary={canBind ? { label: "Add AI provider", icon: Sparkles, onClick: () => openAdd({ itemType: "PROVIDER_LOGIN" }) } : undefined}
+          cli="crewship credential create"
+        />
+      </>
+    )
+  } else {
+    const filtered = filters.status !== "all" || activeFacetCount(filters) > 0 || filters.search.trim() !== ""
+    content = (
+      <>
+        {phoneSpaces}
+        {providersDenied && <ProvidersNote />}
+        <PageHead
+          title={viewTitle}
+          description="Keys, tokens, logins, files and certificates your tools need. Agents use them through the crew proxy; people reveal them only with a reason."
+        />
+        {filters.status === "all" && activeFacetCount(filters) === 0 && !filters.search.trim() && (
+          <VaultHealth className="mb-4" counts={health} onOpen={(view) => setFilters({ ...EMPTY_CREDENTIAL_FILTERS, status: view })} />
+        )}
+        {visible.length === 0 && filtered ? (
+          <PageNoResults
+            filters={describeFilters(filters, viewTitle)}
+            onClear={() => setFilters(EMPTY_CREDENTIAL_FILTERS)}
+          />
+        ) : (
+          <SecretsTable
+            rows={visible}
+            now={now}
+            group={url.group}
+            onGroupChange={(g) => go({ group: g })}
+            selectable={canSelect}
+            selectedIds={selectedIds}
+            onToggle={(id) => setSelectedIds((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })}
+            onToggleAll={(ids, on) => setSelectedIds((prev) => { const n = new Set(prev); for (const id of ids) { if (on) n.add(id); else n.delete(id) } return n })}
+            onOpen={openSecret}
+          />
+        )}
+        {bulkBar}
+      </>
+    )
+  }
+
+  const isPage = Boolean(detail && workspaceId && !loading && !loadError)
+
   return (
-    <div className="flex flex-col h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] bg-background">
+    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
       {subBar}
       <div className="relative flex flex-1 overflow-hidden">
-        {showSidebar && (
-          <SecondaryPanel
-            id="vault"
-            label="Vault"
-            // Bulk actions belong to the rows they act on, which are this
-            // panel's list: the bar sits in its footer while rows are ticked.
-            footer={bulkBar}
-          >
-            {tab === "providers" ? (
+        {!loadError && (
+          <SecondaryPanel id="vault" label="Vault">
+            {space === "providers" ? (
               <ProviderLoginsSidebar
                 filters={loginFilters}
                 onFiltersChange={setLoginFilters}
@@ -610,207 +619,35 @@ export default function CredentialsPage() {
                 providers={loginProviders}
                 modes={loginModes}
                 owners={loginOwners}
+                spaces={spaces}
               />
             ) : (
-              <CredentialsSidebar
-                loginProviders={loginProviders}
-                onSelectProvider={canBind ? (key) => {
-                  setLoginFilters({ ...EMPTY_LOGIN_FILTERS, provider: key ? [key] : [] })
-                  selectTab("providers")
-                } : undefined}
+              <VaultPanel
                 filters={filters}
                 onFiltersChange={setFilters}
-                counts={{
-                  all: secrets.length,
-                  attention: attentionList.length,
-                  missingTool: missingToolCount,
-                }}
-                brands={brands}
-                shapes={shapes}
-                scopes={scopes}
-                tiers={tiers}
-                agents={agentsInUse}
-                tags={tagFacet}
+                viewCounts={viewCounts}
+                {...facets}
+                crews={crewFacet}
                 crewsById={readiness.crewsById}
-                sort={sortKey}
-                onSortChange={setSortKey}
-                selectMode={selectMode}
-                onSelectModeChange={
-                  canDelete
-                    ? (next) => {
-                        setSelectMode(next)
-                        if (!next) setSelectedIds(new Set())
-                      }
-                    : undefined
-                }
-                selectedIds={selectedIds}
-                onToggleSelected={canDelete ? toggleSelected : undefined}
-                // The rail IS the list now — the table under the dashboard was
-                // the same names a second time. Which is why the sort control
-                // moved here with it: the order belongs to the list, and the
-                // list is here.
-                credentials={sorted.map((c) => ({
-                  id: c.id,
-                  name: c.name,
-                  provider: c.provider,
-                  type: c.type,
-                  tier: tierOf(c),
-                  tierLabel: c.security_level_label,
-                }))}
-                selectedCredentialId={detailOpen ? detailCredential?.id ?? null : null}
-                onSelectCredential={(id) => {
-                  const cred = sorted.find((c) => c.id === id)
-                  if (!cred) return
-                  setDetailCredential(cred)
-                  setDetailOpen(true)
-                  // Picking a credential on a phone means "show me that", and
-                  // the sheet covering it would be the opposite.
-                  closePanelSheet()
-                }}
+                spaces={spaces}
               />
             )}
           </SecondaryPanel>
         )}
-
-        {/* The detail owns its own scroll and padding — it is a full page in
-            the /issues shape, not a panel dropped into a padded box. Everything
-            else keeps the page's padding. */}
-        <div className={cn("flex-1", detailOpen && detailCredential && workspaceId ? "min-h-0 overflow-hidden" : "overflow-y-auto")}>
-          <div className={cn(!(detailOpen && detailCredential && workspaceId) && "p-4 md:p-6", "h-full")}>
-      {/* Master-detail, the /integrations shape: selecting a credential
-          REPLACES the list rather than covering it. A modal would keep the
-          table behind a scrim and make the reader dismiss one secret before
-          looking at the next — the wrong rhythm for a page whose job is moving
-          between them. Add-a-credential stays a dialog on purpose: a create is
-          a task you finish or abandon, an inspect is somewhere you navigate.
-          Written as the first branch of the existing chain so the detail needs
-          no wrapper of its own. */}
-      {detailOpen && detailCredential && workspaceId ? (
-        <CredentialDetailSheet
-          workspaceId={workspaceId}
-          credential={detailCredential}
-          open
-          assignOnOpen={assignOnOpen}
-          onOpenChange={(o) => { setDetailOpen(o); if (!o) { setDetailCredential(null); setAssignOnOpen(false) } }}
-          onBack={() => { setDetailOpen(false); setDetailCredential(null); setAssignOnOpen(false) }}
-          onRefresh={handleRefresh}
-          toolGaps={readiness.gapsByCredential.get(detailCredential.id) ?? []}
-          readinessKnown={readiness.crewsChecked > 0}
-          crewsById={readiness.crewsById}
-          onEdit={(c) => handleEdit(c as Credential)}
-          onRotate={(c) => {
-            setRotateCredential(c as unknown as Credential)
-            setRotateOpen(true)
-          }}
-          onRelogin={canBind ? (c) => relogin(c as Credential) : undefined}
-        />
-      ) : loadError ? (
-        // Load failure — visually and semantically distinct from the
-        // empty state: red accent, explicit error copy, and a Retry
-        // affordance. Never claims "no credentials yet".
-        <Card className="p-12 text-center border-destructive/30 bg-destructive/[0.03]" role="alert">
-          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" />
-          <h2 className="mt-3 text-sm font-medium text-foreground">Couldn&apos;t load credentials</h2>
-          <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
-          <Button size="sm" variant="outline" className="mt-4" onClick={loadData}>
-            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-            Retry
-          </Button>
-        </Card>
-      ) : tab === "providers" ? (
-        <>
-          {loginsError && providerLogins.length === 0 && (
-            <Card className="mb-4 p-4 border-warn/30 bg-warn/[0.03]" role="alert">
-              <p className="text-xs text-foreground/85">
-                Couldn&apos;t load the provider logins ({loginsError}). Seats marked on the vault list are shown;
-                a server without the Providers endpoint reports none.
-              </p>
-            </Card>
-          )}
-          <ProviderLoginsPanel
-            logins={providerLogins}
-            visible={visibleLogins}
-            onSelect={(id) => {
-              const cred = providerLogins.find((c) => c.id === id) ?? credentials.find((c) => c.id === id)
-              if (!cred) return
-              setDetailCredential(cred)
-              setDetailOpen(true)
-              closePanelSheet()
-            }}
-            onSelectStatus={(status) => setLoginFilters((f) => ({ ...f, status }))}
-            onAdd={canBind ? () => openAdd({ itemType: "PROVIDER_LOGIN" }) : undefined}
-            onAssign={
-              canBind
-                ? (id) => {
-                    const cred = providerLogins.find((c) => c.id === id)
-                    if (!cred) return
-                    setAssignOnOpen(true)
-                    setDetailCredential(cred)
-                    setDetailOpen(true)
-                  }
-                : undefined
-            }
-          />
-        </>
-      ) : credentials.length === 0 ? (
-        <EmptyState
-          icon={Key}
-          title="No credentials yet"
-          description="Add API keys, tokens, or secrets that your agents will use. All values are encrypted with AES-256-GCM."
-        >
-          {canManage && (
-            <div className="mt-4 flex items-center justify-center gap-2">
-              <Button onClick={() => openAdd()}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add first secret
-              </Button>
-              {canBind && <Button variant="outline" onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
-                <Plus className="mr-2 h-4 w-4" />
-                Add provider
-              </Button>}
-            </div>
-          )}
-        </EmptyState>
-      ) : (
-        // The landing pane is the vault's dashboard, and the table is the last
-        // card on it rather than the first thing you meet. See
-        // credentials-overview.tsx for why — in short, the rail to the left was
-        // already this list, and the copy in the main pane was the one you could
-        // not search.
-        // The landing pane is the vault's dashboard. The table that used to
-        // sit under it is gone: the rail on the left is the same list, iconed,
-        // searchable and filtered, and the copy in the main pane was the one
-        // that could not be searched. Everything the columns carried has a home
-        // — readiness and last use on the credential's own Overview, tags in
-        // its header, agents on its Used by tab, and the whole vault's shape in
-        // the cards above.
-        <CredentialsOverview
-          credentials={secrets}
-          missingToolIds={readiness.missingToolIds}
-          crewsChecked={readiness.crewsChecked}
-          readinessLoading={readiness.loading}
-          onSelect={(id) => {
-            const cred = secrets.find((c) => c.id === id)
-            if (!cred) return
-            setDetailCredential(cred)
-            setDetailOpen(true)
-          }}
-          onSelectTier={(tier) => setFilters((f) => ({ ...f, tier }))}
-          onSelectStatus={(status) => setFilters((f) => ({ ...f, status }))}
-        />
-      )}
+        <div className={cn("min-w-0 flex-1", isPage ? "min-h-0 overflow-hidden" : "overflow-y-auto")}>
+          <div className={cn(isPage ? "h-full" : "mx-auto w-full max-w-6xl p-4 md:p-6")}>{content}</div>
+        </div>
+      </div>
 
       {workspaceId && (
         <AddSecretSheet
           workspaceId={workspaceId}
           open={addOpen}
           onOpenChange={(o) => { setAddOpen(o); if (!o) setAddInitial(undefined) }}
+          onAddProvider={canBind ? () => { setAddInitial({ itemType: "PROVIDER_LOGIN" }) } : undefined}
           onSuccess={(id) => {
             handleRefresh()
-            if (id && workspaceId) apiFetch(`/api/v1/credentials/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`)
-              .then((r) => { if (!r.ok) throw new Error(); return r.json() })
-              .then((credential: Credential) => { if (!credential?.id) throw new Error(); setDetailCredential(credential); setDetailOpen(true) })
-              .catch(() => toast.error("Saved. Open the credential from the list to review its details."))
+            if (id) openSecret(id)
           }}
           knownTags={tagsInUse}
           initial={addInitial}
@@ -820,51 +657,63 @@ export default function CredentialsPage() {
       {workspaceId && rotateCredential && (
         <RotationDialog
           workspaceId={workspaceId}
-          credentialId={rotateCredential.id}
-          credentialName={rotateCredential.name}
-          credentialType={rotateCredential.type}
-          open={rotateOpen}
-          onOpenChange={(o) => { setRotateOpen(o); if (!o) setRotateCredential(null) }}
+          credentialId={rotateCredential.cred.id}
+          credentialName={rotateCredential.cred.name}
+          credentialType={rotateCredential.cred.type}
+          mode={rotateCredential.mode}
+          open
+          onOpenChange={(o) => { if (!o) setRotateCredential(null) }}
           onRotated={handleRefresh}
         />
       )}
 
-      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {selectedIds.size} credential{selectedIds.size === 1 ? "" : "s"}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              All selected credentials will be permanently deleted. Any agents using them will fail immediately.
-              This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-white hover:bg-destructive/90"
-              onClick={bulkDelete}
-              disabled={bulkDeleting}
-            >
-              {bulkDeleting ? "Deleting..." : `Delete ${selectedIds.size}`}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {workspaceId && editCredential && (
-        <EditCredentialDialog
+      {workspaceId && (
+        <BulkDeleteDialog
+          open={bulkDeleteOpen}
+          onOpenChange={setBulkDeleteOpen}
           workspaceId={workspaceId}
-          credential={editCredential}
-          open={editOpen}
-          onOpenChange={setEditOpen}
-          onSuccess={handleRefresh}
-          knownTags={tagsInUse}
+          targets={visibleSelection}
+          onDone={(failed) => { setSelectedIds(new Set(failed)); handleRefresh() }}
         />
       )}
+      {workspaceId && (
+        <BulkTierDialog
+          open={bulkTierOpen}
+          onOpenChange={setBulkTierOpen}
+          workspaceId={workspaceId}
+          targets={visibleSelection}
+          onDone={(failed) => { setSelectedIds(new Set(failed)); handleRefresh() }}
+        />
+      )}
+      <VaultCliDialog open={cliOpen} onOpenChange={setCliOpen} />
       {canBind && workspaceId && poolsOpen && <ProviderPoolsDialog key={workspaceId} workspaceId={workspaceId} onClose={() => setPoolsOpen(false)} />}
-          </div>
-        </div>
-      </div>
     </div>
   )
+}
+
+/** The page heading — the page's one visible h1 (the top bar's title is not a heading here). */
+function PageHead({ title, description }: { title: string; description: string }) {
+  return (
+    <header className="mb-4">
+      <h1 className="text-title font-semibold tracking-tight text-foreground">{title}</h1>
+      <p className="mt-1 max-w-[80ch] text-body text-muted-foreground">{description}</p>
+    </header>
+  )
+}
+
+function ProvidersNote() {
+  return (
+    <p role="note" className="page-banner mb-4 bg-muted">
+      AI provider accounts are managed by owners and admins.
+    </p>
+  )
+}
+
+function describeFilters(f: CredentialFilters, viewTitle: string): string {
+  const parts: string[] = []
+  if (f.status !== "all") parts.push(viewTitle)
+  const n = activeFacetCount(f)
+  if (n > 0) parts.push(`${n} filter${n === 1 ? "" : "s"}`)
+  if (f.search.trim()) parts.push(`“${f.search.trim()}”`)
+  return parts.join(" · ")
 }

@@ -1,47 +1,45 @@
-// Tests for the /credentials page — RBAC-gated row actions, the
-// list-load error state (must never masquerade as "no credentials
-// yet"), the pending-approval inbox deep-link, and bulk-delete
-// partial-failure reporting.
+// The Vault page (/credentials, Harbor 2): URL state, the Secrets table and its
+// health strip, page states, role-gated actions and bulk actions. The secret
+// page itself and the dialogs have their own suites.
 
+import * as React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
-import { toast } from "sonner"
-import { defineAbilitiesFor } from "@/lib/permissions/abilities"
-import type { OrgRole } from "@/lib/generated/prisma/client"
 import { _resetWorkspaceStoreForTests, useWorkspace } from "@/hooks/use-workspace"
+import { clearStaleCache } from "@/lib/stale-cache"
 import { useAppStore } from "@/lib/store"
 import CredentialsPage from "../page"
 
-/** The rail lists the same credential names as the table, so an unscoped
- *  text query matches twice. Scope to the labelled list region — which is
- *  what the assertion always meant. */
-function list() {
-  return within(screen.getByRole("region", { name: /credential list/i }))
-}
+// ── A router whose search params the page actually reads back ───────────────
+const nav = vi.hoisted(() => {
+  let search = ""
+  const listeners = new Set<() => void>()
+  const set = (url: string) => {
+    const i = url.indexOf("?")
+    search = i === -1 ? "" : url.slice(i + 1)
+    listeners.forEach((l) => l())
+  }
+  return {
+    get search() { return search },
+    reset(q = "") { search = q },
+    subscribe(l: () => void) { listeners.add(l); return () => listeners.delete(l) },
+    push: vi.fn((url: string) => set(url)),
+    replace: vi.fn((url: string) => set(url)),
+  }
+})
 
-/** Async twin of list(): waits for the region itself, so it can be used in a
- *  state the list has not rendered into yet (a retry, a workspace switch).
- *  list() resolves the region synchronously and would throw first. */
-/**
- * Enter selection mode.
- *
- * Ticking rows is a MODE now, not the resting state of the rail: a checkbox on
- * every row all the time reads as "this list is a thing you tick", when it is
- * overwhelmingly a thing you click — and it leaves a bulk-delete one mis-click
- * from every secret in the vault. Every bulk test opens the mode first,
- * because that is what a user now does.
- */
-async function enterSelectMode() {
-  fireEvent.click(await screen.findByRole("button", { name: /select several credentials/i }))
-}
+vi.mock("next/navigation", async () => {
+  const React = await import("react")
+  return {
+    useRouter: () => ({ push: nav.push, replace: nav.replace, prefetch: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn() }),
+    useSearchParams: () => {
+      const s = React.useSyncExternalStore(nav.subscribe, () => nav.search, () => nav.search)
+      return React.useMemo(() => new URLSearchParams(s), [s])
+    },
+    usePathname: () => "/credentials",
+  }
+})
 
-async function inList(name: string) {
-  const region = await screen.findByRole("region", { name: /credential list/i })
-  return within(region).findByText(name)
-}
-
-
-// Hoisted holder so vi.mock factories can read per-test state.
 const h = vi.hoisted(() => ({
   role: "OWNER" as string,
   capabilities: [] as string[],
@@ -50,24 +48,12 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => h.mobile }))
-
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
-}))
-
-vi.mock("@/lib/api-fetch", () => ({
-  apiFetch: (...args: unknown[]) => h.apiFetch(...args),
-}))
-
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => h.apiFetch(...args) }))
 vi.mock("next/link", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  default: ({ href, children, ...rest }: any) => (
-    <a href={href} {...rest}>
-      {children}
-    </a>
-  ),
+  default: ({ href, children, ...rest }: any) => <a href={href} {...rest}>{children}</a>,
 }))
-
 vi.mock("@/hooks/use-abilities", async () => {
   const { defineAbilitiesFor } = await import("@/lib/permissions/abilities")
   const { hasCapability } = await import("@/lib/capabilities")
@@ -82,26 +68,19 @@ vi.mock("@/hooks/use-abilities", async () => {
   }
 })
 
-// Feature children are exercised by their own suites — stub them so
-// this test stays about the page shell (list, actions, dialogs).
+// Children with their own suites are stubbed; the page shell is what is under test.
 vi.mock("@/components/features/credentials/add-secret-sheet", () => ({
-  AddSecretSheet: () => <div data-testid="add-secret-sheet" />,
+  AddSecretSheet: ({ open, initial }: { open: boolean; initial?: { itemType?: string } }) =>
+    open ? <div data-testid="add-secret-sheet" data-kind={initial?.itemType ?? "secret"} /> : null,
 }))
 vi.mock("@/components/features/credentials/credential-detail-sheet", () => ({
-  CredentialDetailSheet: () => <div data-testid="detail-sheet" />,
-}))
-vi.mock("@/components/features/credentials/rotation-dialog", () => ({
-  RotationDialog: () => <div data-testid="rotation-dialog" />,
-}))
-vi.mock("@/components/features/credentials/edit-credential-dialog", () => ({
-  EditCredentialDialog: () => <div data-testid="edit-dialog" />,
-}))
-vi.mock("@/components/features/credentials/connect-oauth-dialog", () => ({
-  ConnectOAuthDialog: ({ open }: { open: boolean }) => (
-    <div data-testid="connect-oauth-dialog" data-open={open ? "true" : "false"} />
+  CredentialDetailSheet: ({ credential, tab }: { credential: { name: string }; tab: string | null }) => (
+    <div data-testid="detail-sheet" data-tab={tab ?? "overview"}>{credential.name}</div>
   ),
 }))
+vi.mock("@/components/features/credentials/rotation-dialog", () => ({ RotationDialog: () => <div data-testid="rotation-dialog" /> }))
 
+const DAY = 24 * 3600 * 1000
 function makeCredential(overrides: Record<string, unknown> = {}) {
   return {
     id: "cred_1",
@@ -119,14 +98,17 @@ function makeCredential(overrides: Record<string, unknown> = {}) {
     token_expires_at: null,
     last_checked_at: null,
     last_error: null,
-    last_used_at: null,
+    last_used_at: new Date(Date.now() - DAY).toISOString(),
     last_used_ips: [],
     tags: [],
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     _count_agent_credentials: 0,
     agent_names: [],
+    agent_ids: [],
     mcp_used: false,
+    security_level: 1,
+    sensitivity: "STANDARD",
     ...overrides,
   }
 }
@@ -134,19 +116,39 @@ function makeCredential(overrides: Record<string, unknown> = {}) {
 function ok(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as unknown as Response
 }
-
 function fail(status: number): Response {
   return { ok: false, status, json: async () => ({}) } as unknown as Response
 }
 
-/** Default happy-path routing: one workspace, given credential list. */
-function routeApi(credentials: unknown[]) {
+interface Routes {
+  credentials?: unknown[]
+  crews?: unknown[]
+  agents?: unknown[]
+  single?: Response
+  dependents?: Record<string, unknown[]>
+}
+function routeApi({ credentials = [], crews = [], agents = [], single, dependents = {} }: Routes = {}) {
   h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
+    if (init?.method === "DELETE" || init?.method === "PATCH") return ok({})
     if (url.startsWith("/api/v1/credentials?")) return ok(credentials)
-    if (init?.method === "DELETE") return ok({})
+    const dep = /\/api\/v1\/credentials\/([^/?]+)\/dependents/.exec(url)
+    if (dep) return ok({ routines: dependents[decodeURIComponent(dep[1])] ?? [] })
+    if (/^\/api\/v1\/credentials\/[^/?]+\?/.test(url)) return single ?? fail(404)
+    if (url.startsWith("/api/v1/crews?")) return ok(crews)
+    if (url.startsWith("/api/v1/agents?")) return ok(agents)
     return ok([])
   })
+}
+
+function table() {
+  return within(screen.getByRole("table", { name: "Secrets" }))
+}
+async function findRow(name: string) {
+  return within(await screen.findByRole("table", { name: "Secrets" })).findByText(name)
+}
+function query() {
+  return new URLSearchParams(nav.search)
 }
 
 beforeEach(() => {
@@ -154,458 +156,335 @@ beforeEach(() => {
   h.capabilities = []
   h.mobile = false
   h.apiFetch.mockReset()
+  nav.reset()
+  nav.push.mockClear()
+  nav.replace.mockClear()
+  clearStaleCache()
   act(() => useAppStore.getState().setSecondaryPanelOpen(false))
-  // The workspace store is a module singleton with a localStorage-backed
-  // selection — reset both so each test starts from a clean slate (#1033).
   _resetWorkspaceStoreForTests()
   try { localStorage.clear() } catch { /* jsdom */ }
 })
 
-describe("load error state (C1)", () => {
-  it("shows an error card with Retry instead of the empty state when the fetch fails", async () => {
-    // Workspace resolves; the credentials fetch is what fails.
+describe("page states", () => {
+  it("Q01 load error never renders the empty vault, and Retry recovers", async () => {
     h.apiFetch.mockImplementation(async (url: string) => {
       if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
       throw new TypeError("fetch failed")
     })
     render(<CredentialsPage />)
-
-    expect(await screen.findByText("Couldn't load credentials")).toBeInTheDocument()
-    expect(screen.getByRole("alert")).toBeInTheDocument()
-    expect(screen.queryByText("No credentials yet")).not.toBeInTheDocument()
-
-    // Retry recovers once the API is healthy again.
-    routeApi([makeCredential()])
+    expect(await screen.findByText("Couldn't load the vault")).toBeInTheDocument()
+    expect(screen.queryByText("The vault is empty")).not.toBeInTheDocument()
+    routeApi({ credentials: [makeCredential()] })
     fireEvent.click(screen.getByRole("button", { name: /retry/i }))
-    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    expect(screen.queryByText("Couldn't load credentials")).not.toBeInTheDocument()
+    expect(await findRow("STRIPE_API_KEY")).toBeInTheDocument()
   })
 
-  it("shows the error state on a non-2xx credentials response", async () => {
-    h.apiFetch.mockImplementation(async (url: string) => {
-      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
-      return fail(500)
-    })
+  it("names the HTTP status of a failed load", async () => {
+    h.apiFetch.mockImplementation(async (url: string) => (url.startsWith("/api/v1/workspaces") ? ok([{ id: "ws1", name: "Test" }]) : fail(500)))
     render(<CredentialsPage />)
+    expect(await screen.findByText(/HTTP 500/)).toBeInTheDocument()
+  })
 
-    expect(await screen.findByText("Couldn't load credentials")).toBeInTheDocument()
-    expect(screen.getByText(/HTTP 500/)).toBeInTheDocument()
-    expect(screen.queryByText("No credentials yet")).not.toBeInTheDocument()
+  it("shows the empty vault with the CLI that exists", async () => {
+    routeApi()
+    render(<CredentialsPage />)
+    expect(await screen.findByText("The vault is empty")).toBeInTheDocument()
+    expect(screen.getByText("crewship credential create")).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "Add secret" }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole("button", { name: "Add AI provider" }).length).toBeGreaterThan(0)
+  })
+
+  it("says the filters matched nothing, without offering to create", async () => {
+    nav.reset("q=nothing-like-this")
+    routeApi({ credentials: [makeCredential()] })
+    render(<CredentialsPage />)
+    expect(await screen.findByText("Nothing matches these filters")).toBeInTheDocument()
+    expect(screen.queryByText("The vault is empty")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+    expect(await findRow("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(query().get("q")).toBeNull()
+  })
+
+  it("a linked secret that is gone shows not found with a way back", async () => {
+    nav.reset("id=gone")
+    routeApi({ credentials: [makeCredential()] })
+    render(<CredentialsPage />)
+    expect(await screen.findByText("This secret doesn’t exist")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Back to Secrets" }))
+    expect(await findRow("STRIPE_API_KEY")).toBeInTheDocument()
   })
 })
 
-describe("multi-workspace (#1033)", () => {
-  it("loads credentials for the workspace the shared store resolves", async () => {
-    const requested: string[] = []
-    h.apiFetch.mockImplementation(async (url: string) => {
-      if (url.startsWith("/api/v1/workspaces")) {
-        return ok([{ id: "ws-alpha", name: "Alpha" }, { id: "ws-beta", name: "Beta" }])
-      }
-      if (url.startsWith("/api/v1/credentials?")) {
-        requested.push(new URL(url, "http://x").searchParams.get("workspace_id") ?? "")
-        return ok([makeCredential({ id: "c1", name: "ALPHA_KEY" })])
-      }
-      return ok([])
+describe("the Secrets table", () => {
+  it("lists secrets, not AI provider accounts", async () => {
+    routeApi({
+      credentials: [
+        makeCredential(),
+        makeCredential({ id: "seat", name: "Claude Max", type: "PROVIDER_LOGIN", provider: "ANTHROPIC", login: { mode: "subscription", provider: "ANTHROPIC", plan: null, plan_label: null, owner_user_id: null, owner_email: null, expires_at: null, refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null }, quota: null, delivery: { kind: "env", target: "CLAUDE_CODE_OAUTH_TOKEN" }, pays_for: { agents: 0, crews: 0 } } }),
+      ],
     })
     render(<CredentialsPage />)
+    expect(await findRow("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(table().queryByText("Claude Max")).not.toBeInTheDocument()
+  })
 
-    // The page delegates workspace resolution to useWorkspace and fetches
-    // credentials for whichever workspace the store selected — no longer its
-    // own hardcoded orgs[0]. (Selection/persistence is use-workspace's own
-    // concern and suite.)
-    expect(await inList("ALPHA_KEY")).toBeInTheDocument()
-    expect(requested.length).toBeGreaterThan(0)
-    expect(requested.every((id) => id === "ws-alpha")).toBe(true)
+  it("opens a secret's page through the URL", async () => {
+    routeApi({ credentials: [makeCredential()] })
+    render(<CredentialsPage />)
+    fireEvent.click(await findRow("STRIPE_API_KEY"))
+    expect(nav.push).toHaveBeenCalledWith("/credentials?id=cred_1", { scroll: false })
+    expect(await screen.findByTestId("detail-sheet")).toHaveTextContent("STRIPE_API_KEY")
+  })
+
+  it("links: ?id= opens the entity page and ?tab= picks its tab", async () => {
+    nav.reset("id=cred_1&tab=history")
+    routeApi({ credentials: [makeCredential()] })
+    render(<CredentialsPage />)
+    expect(await screen.findByTestId("detail-sheet")).toHaveAttribute("data-tab", "history")
+  })
+
+  it("loads 50 rows at a time", async () => {
+    routeApi({ credentials: Array.from({ length: 63 }, (_, i) => makeCredential({ id: `c${i}`, name: `KEY_${String(i).padStart(2, "0")}` })) })
+    render(<CredentialsPage />)
+    await screen.findByRole("table", { name: "Secrets" })
+    expect(table().getAllByRole("row")).toHaveLength(51)
+    expect(screen.getByText("Showing 50 of 63")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /load 50 more/i }))
+    expect(table().getAllByRole("row")).toHaveLength(64)
   })
 })
 
-// Harness that renders the real useWorkspace() store alongside the page so
-// tests can drive a workspace switch the same way the top-bar switcher does.
-function renderWithSwitcher() {
-  function Harness() {
-    const { setWorkspaceId } = useWorkspace()
-    return (
-      <>
-        <button onClick={() => setWorkspaceId("ws-b")}>switch to B</button>
-        <CredentialsPage />
-      </>
-    )
+describe("health strip", () => {
+  it("tiles count rejected/expiring/unused and open the view", async () => {
+    routeApi({
+      credentials: [
+        makeCredential({ id: "a", name: "DEAD", status: "REVOKED" }),
+        makeCredential({ id: "b", name: "SOON", token_expires_at: new Date(Date.now() + 5 * DAY).toISOString() }),
+        makeCredential({ id: "c", name: "IDLE", last_used_at: null }),
+        makeCredential({ id: "d", name: "BUSY" }),
+      ],
+    })
+    render(<CredentialsPage />)
+    await findRow("BUSY")
+    const strip = within(screen.getByRole("group", { name: "Vault health" }))
+    expect(strip.getByRole("button", { name: /^1 rejected/i })).toBeInTheDocument()
+    expect(strip.getByRole("button", { name: /^1 expire within 14 days/i })).toBeInTheDocument()
+    expect(strip.getByRole("button", { name: /^1 not used in 30 days/i })).toBeInTheDocument()
+    // Old values and Shared with everyone need data the server does not send yet.
+    expect(strip.queryByText(/old values/i)).not.toBeInTheDocument()
+    expect(strip.queryByText(/shared with everyone|workspace-wide/i)).not.toBeInTheDocument()
+
+    fireEvent.click(strip.getByRole("button", { name: /^1 rejected/i }))
+    expect(query().get("view")).toBe("rejected")
+    await waitFor(() => expect(table().getAllByRole("row")).toHaveLength(2))
+    expect(table().getByText("DEAD")).toBeInTheDocument()
+    expect(screen.queryByRole("group", { name: "Vault health" })).not.toBeInTheDocument()
+  })
+})
+
+describe("URL filters from other pages", () => {
+  it("links: ?crew= filters by the crew's slug, through its agents and its scope", async () => {
+    nav.reset("crew=research")
+    routeApi({
+      credentials: [
+        makeCredential({ id: "a", name: "HELD_BY_SCOUT", agent_ids: ["ag-scout"], agent_names: ["Scout"] }),
+        makeCredential({ id: "b", name: "LINKED_TO_CREW", scope: "CREW", crew_ids: ["crew-r"] }),
+        makeCredential({ id: "c", name: "OTHER" }),
+      ],
+      crews: [{ id: "crew-r", name: "Research", slug: "research" }],
+      agents: [{ id: "ag-scout", slug: "scout", name: "Scout", crew_id: "crew-r" }],
+    })
+    render(<CredentialsPage />)
+    await waitFor(() => expect(screen.getByRole("table", { name: "Secrets" })).toBeInTheDocument())
+    await waitFor(() => expect(table().queryByText("OTHER")).not.toBeInTheDocument())
+    await waitFor(() => expect(table().getByText("HELD_BY_SCOUT")).toBeInTheDocument())
+    expect(table().getByText("LINKED_TO_CREW")).toBeInTheDocument()
+    expect(await screen.findByText("Used by crew: Research")).toBeInTheDocument()
+  })
+
+  it("links: ?class= filters by classification and the chip removes it", async () => {
+    nav.reset("class=SEALED")
+    routeApi({ credentials: [makeCredential({ id: "a", name: "SEALED_ONE", sensitivity: "SEALED" }), makeCredential({ id: "b", name: "PLAIN" })] })
+    render(<CredentialsPage />)
+    expect(await findRow("SEALED_ONE")).toBeInTheDocument()
+    expect(table().queryByText("PLAIN")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter Classification: Sealed" }))
+    expect(query().get("class")).toBeNull()
+    expect(await findRow("PLAIN")).toBeInTheDocument()
+  })
+
+  it("links: ?tab=providers opens AI providers for owners", async () => {
+    nav.reset("tab=providers")
+    routeApi({ credentials: [makeCredential()] })
+    render(<CredentialsPage />)
+    expect(await screen.findByRole("heading", { level: 1, name: "AI providers" })).toBeInTheDocument()
+  })
+
+  it("Q02 MEMBER deep link ?tab=providers lands on Secrets with note", async () => {
+    h.role = "MEMBER"
+    nav.reset("tab=providers")
+    routeApi({ credentials: [makeCredential()] })
+    render(<CredentialsPage />)
+    expect(await findRow("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(screen.getByRole("note")).toHaveTextContent("AI provider accounts are managed by owners and admins.")
+    expect(screen.queryByRole("navigation", { name: "Vault spaces" })).not.toBeInTheDocument()
+  })
+})
+
+describe("roles", () => {
+  it("OWNER can tick rows, change the tier and delete", async () => {
+    routeApi({ credentials: [makeCredential()] })
+    render(<CredentialsPage />)
+    await findRow("STRIPE_API_KEY")
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select STRIPE_API_KEY" }))
+    const bar = screen.getByRole("toolbar", { name: "Change the selected secrets" })
+    expect(within(bar).getByText("1 selected")).toBeInTheDocument()
+    expect(within(bar).getByRole("button", { name: /change tier/i })).toBeInTheDocument()
+    expect(within(bar).getByRole("button", { name: /delete/i })).toBeInTheDocument()
+  })
+
+  it("MANAGER can change the tier but not delete (DELETE is OWNER/ADMIN)", async () => {
+    h.role = "MANAGER"
+    routeApi({ credentials: [makeCredential()] })
+    render(<CredentialsPage />)
+    await findRow("STRIPE_API_KEY")
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select STRIPE_API_KEY" }))
+    const bar = screen.getByRole("toolbar", { name: "Change the selected secrets" })
+    expect(within(bar).getByRole("button", { name: /change tier/i })).toBeInTheDocument()
+    expect(within(bar).queryByRole("button", { name: /delete/i })).not.toBeInTheDocument()
+  })
+
+  it("MEMBER without credential.create sees the list without actions", async () => {
+    h.role = "MEMBER"
+    routeApi({ credentials: [makeCredential()] })
+    render(<CredentialsPage />)
+    await findRow("STRIPE_API_KEY")
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Add secret" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Add AI provider" })).not.toBeInTheDocument()
+  })
+
+  it("MEMBER with credential.create can add secrets but not AI providers", async () => {
+    h.role = "MEMBER"
+    h.capabilities = ["credential.create"]
+    routeApi({ credentials: [makeCredential()] })
+    render(<CredentialsPage />)
+    await findRow("STRIPE_API_KEY")
+    fireEvent.click(screen.getByRole("button", { name: "Add secret" }))
+    expect(screen.getByTestId("add-secret-sheet")).toHaveAttribute("data-kind", "secret")
+    expect(screen.queryByRole("button", { name: "Add AI provider" })).not.toBeInTheDocument()
+  })
+})
+
+describe("bulk delete from the page", () => {
+  it("counts only the visible selection and keeps failures selected", async () => {
+    routeApi({ credentials: [makeCredential({ id: "a", name: "ALPHA" }), makeCredential({ id: "b", name: "BETA" })] })
+    render(<CredentialsPage />)
+    await findRow("ALPHA")
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select ALPHA" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select BETA" }))
+    // Narrow the list: BETA is still ticked but no longer on screen.
+    fireEvent.change(screen.getByRole("textbox", { name: "Search secrets" }), { target: { value: "ALPHA" } })
+    await waitFor(() => expect(table().queryByText("BETA")).not.toBeInTheDocument())
+    // The filter change drops the selection — nothing hidden can be deleted.
+    expect(screen.queryByRole("toolbar", { name: "Change the selected secrets" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select ALPHA" }))
+    fireEvent.click(within(screen.getByRole("toolbar", { name: "Change the selected secrets" })).getByRole("button", { name: /delete/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(within(dialog).getByText("Delete ALPHA?")).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+    await waitFor(() => expect(h.apiFetch.mock.calls.filter(([, o]) => (o as RequestInit | undefined)?.method === "DELETE")).toHaveLength(1))
+    expect(String(h.apiFetch.mock.calls.find(([, o]) => (o as RequestInit | undefined)?.method === "DELETE")![0])).toContain("/credentials/a?")
+  })
+})
+
+describe("workspace switch", () => {
+  function renderWithSwitcher() {
+    function Harness() {
+      const { setWorkspaceId } = useWorkspace()
+      return (
+        <>
+          <button onClick={() => setWorkspaceId("ws-b")}>switch to B</button>
+          <CredentialsPage />
+        </>
+      )
+    }
+    return render(<Harness />)
   }
-  return render(<Harness />)
-}
 
-describe("stale response guard on workspace switch (#1156)", () => {
-  it("ignores a slow response from the previous workspace after switching", async () => {
+  it("ignores a slow response from the previous workspace (#1156)", async () => {
     let resolveA: (v: Response) => void = () => {}
     const pendingA = new Promise<Response>((resolve) => { resolveA = resolve })
     h.apiFetch.mockImplementation(async (url: string) => {
-      if (url.startsWith("/api/v1/workspaces")) {
-        return ok([{ id: "ws-a", name: "A" }, { id: "ws-b", name: "B" }])
-      }
-      if (url.includes("workspace_id=ws-a")) return pendingA
-      if (url.includes("workspace_id=ws-b")) {
-        return ok([makeCredential({ id: "cb", name: "BETA_KEY" })])
-      }
+      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws-a", name: "A" }, { id: "ws-b", name: "B" }])
+      if (url.startsWith("/api/v1/credentials?") && url.includes("workspace_id=ws-a")) return pendingA
+      if (url.startsWith("/api/v1/credentials?") && url.includes("workspace_id=ws-b")) return ok([makeCredential({ id: "cb", name: "BETA_KEY" })])
       return ok([])
     })
-
     renderWithSwitcher()
-
-    // Wait until the (still-pending) ws-a fetch has actually been issued.
-    await waitFor(() => {
-      expect(h.apiFetch.mock.calls.some((c) => String(c[0]).includes("workspace_id=ws-a"))).toBe(true)
-    })
-
+    await waitFor(() => expect(h.apiFetch.mock.calls.some((c) => String(c[0]).includes("workspace_id=ws-a"))).toBe(true))
     fireEvent.click(screen.getByText("switch to B"))
-
-    // ws-b's fetch resolves quickly and should win.
-    expect(await inList("BETA_KEY")).toBeInTheDocument()
-
-    // Now let the slow ws-a response resolve — it must NOT clobber the
-    // already-displayed ws-b rows, even though it resolves later.
+    expect(await findRow("BETA_KEY")).toBeInTheDocument()
     resolveA(ok([makeCredential({ id: "ca", name: "ALPHA_KEY" })]))
     await new Promise((r) => setTimeout(r, 0))
-    await new Promise((r) => setTimeout(r, 0))
-
     expect(screen.queryByText("ALPHA_KEY")).not.toBeInTheDocument()
-    expect(list().getByText("BETA_KEY")).toBeInTheDocument()
   })
-})
 
-describe("selection cleared on workspace switch (#1156)", () => {
-  it("clears bulk-select ids when the workspace changes", async () => {
+  it("clears the selection when the workspace changes", async () => {
     h.apiFetch.mockImplementation(async (url: string) => {
-      if (url.startsWith("/api/v1/workspaces")) {
-        return ok([{ id: "ws-a", name: "A" }, { id: "ws-b", name: "B" }])
-      }
-      if (url.includes("workspace_id=ws-a")) {
-        return ok([makeCredential({ id: "ca", name: "ALPHA_KEY" })])
-      }
-      if (url.includes("workspace_id=ws-b")) {
-        return ok([makeCredential({ id: "cb", name: "BETA_KEY" })])
-      }
+      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws-a", name: "A" }, { id: "ws-b", name: "B" }])
+      if (url.startsWith("/api/v1/credentials?") && url.includes("workspace_id=ws-a")) return ok([makeCredential({ id: "ca", name: "ALPHA_KEY" })])
+      if (url.startsWith("/api/v1/credentials?") && url.includes("workspace_id=ws-b")) return ok([makeCredential({ id: "cb", name: "BETA_KEY" })])
       return ok([])
     })
-
     renderWithSwitcher()
-
-    expect(await inList("ALPHA_KEY")).toBeInTheDocument()
-    await enterSelectMode()
-    fireEvent.click(screen.getByLabelText("Select ALPHA_KEY"))
-    expect(await screen.findByText("1 selected")).toBeInTheDocument()
-
+    await findRow("ALPHA_KEY")
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select ALPHA_KEY" }))
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
     fireEvent.click(screen.getByText("switch to B"))
-
-    expect(await inList("BETA_KEY")).toBeInTheDocument()
-    // Both the ids AND the mode reset: a tick left over from another
-    // workspace would target credential ids this one does not have.
+    expect(await findRow("BETA_KEY")).toBeInTheDocument()
     expect(screen.queryByText(/selected/)).not.toBeInTheDocument()
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
   })
 })
 
-// Per-row Edit and Delete buttons went with the table. Edit now lives on the
-// credential's own detail (one Edit, on the thing being edited), and delete is
-// either the detail's Settings tab or the rail's bulk selection. What the LIST
-// still gates is the bulk-select checkbox, and it gates it exactly where the
-// backend does: DELETE is OWNER/ADMIN.
-describe("RBAC-gated list actions (C2)", () => {
-  it.each(["VIEWER", "MEMBER"] as const)(
-    "%s sees neither Edit/Delete actions nor bulk-select checkboxes",
-    async (role) => {
-      h.role = role
-      routeApi([makeCredential()])
-      render(<CredentialsPage />)
-
-      expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-      expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument()
-      expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument()
-      // Neither the checkboxes nor the toggle that would produce them.
-      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
-      expect(
-        screen.queryByRole("button", { name: /select several credentials/i }),
-      ).not.toBeInTheDocument()
-    },
-  )
-
-  it("MANAGER gets no bulk-select checkbox (backend delete is OWNER/ADMIN)", async () => {
-    h.role = "MANAGER"
-    routeApi([makeCredential()])
-    render(<CredentialsPage />)
-
-    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: /select several credentials/i }),
-    ).not.toBeInTheDocument()
-  })
-
-  it("OWNER can turn selection on, and it is off until they do", async () => {
-    routeApi([makeCredential()])
-    render(<CredentialsPage />)
-
-    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    // Not until asked: the rail offers the toggle, and the checkboxes follow.
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
-    await enterSelectMode()
-    expect(screen.getByRole("checkbox", { name: "Select STRIPE_API_KEY" })).toBeInTheDocument()
-  })
-
-  it("CASL sanity: MANAGER lacks delete, OWNER has it", () => {
-    expect(defineAbilitiesFor("MANAGER" as OrgRole).can("delete", "Credential")).toBe(false)
-    expect(defineAbilitiesFor("OWNER" as OrgRole).can("delete", "Credential")).toBe(true)
-  })
-})
-
-describe("separate secret and provider entry points", () => {
-  it("offers both create flows without mounting legacy OAuth", async () => {
-    routeApi([makeCredential()])
-    render(<CredentialsPage />)
-
-    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /add provider/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /add secret/i })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /connect via oauth/i })).not.toBeInTheDocument()
-    expect(screen.queryByTestId("connect-oauth-dialog")).not.toBeInTheDocument()
-  })
-
-  it("MEMBER with credential.create can add secrets but not admin-only providers", async () => {
-    // The capability permits ordinary secrets, not provider-account management.
-    h.role = "MEMBER"
-    h.capabilities = ["chat", "credential.create"]
-    routeApi([makeCredential()])
-    render(<CredentialsPage />)
-
-    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /add provider/i })).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /add secret/i })).toBeInTheDocument()
-  })
-
-  it("MEMBER without the grant sees neither create action", async () => {
-    h.role = "MEMBER"
-    h.capabilities = ["chat"]
-    routeApi([makeCredential()])
-    render(<CredentialsPage />)
-
-    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /connect via oauth/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /add provider/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /add secret/i })).not.toBeInTheDocument()
-  })
-})
-
-// Approving an agent-proposed credential is an inbox action, so the row that
-// reports one has to LINK there. The badge used to carry the link from the
-// table; the attention queue on the overview carries it now, and the reason
-// text is the label.
-describe("pending-approval deep-link (C4)", () => {
-  it("links a pending credential straight to /inbox", async () => {
-    routeApi([makeCredential({ status: "PENDING_APPROVAL" })])
-    render(<CredentialsPage />)
-
-    const link = await screen.findByRole("link", { name: /approve or reject it/i })
-    expect(link).toHaveAttribute("href", "/inbox")
-  })
-})
-
-describe("bulk delete partial failure (C6)", () => {
-  it("reports X deleted / Y failed and keeps failed items selected", async () => {
-    const creds = [
-      makeCredential({ id: "cred_a", name: "KEY_A" }),
-      makeCredential({ id: "cred_b", name: "KEY_B" }),
-    ]
-    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+describe("readiness", () => {
+  it("offers Missing tool only once a crew has reported a gap, and it narrows the table", async () => {
+    h.apiFetch.mockImplementation(async (url: string) => {
       if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
-      if (url.startsWith("/api/v1/credentials?")) return ok(creds)
-      if (init?.method === "DELETE") {
-        return url.includes("cred_b") ? fail(500) : ok({})
-      }
+      if (url.startsWith("/api/v1/credentials?")) return ok([makeCredential({ id: "gh", name: "GH_TOKEN" }), makeCredential({ id: "x", name: "OTHER" })])
+      if (url.startsWith("/api/v1/crews?")) return ok([{ id: "crew1", name: "engineering" }])
+      if (url.includes("/credential-readiness")) return ok({ gaps: [{ credential_id: "gh", tool: "gh" }] })
       return ok([])
     })
     render(<CredentialsPage />)
-
-    await enterSelectMode()
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select KEY_A" }))
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select KEY_B" }))
-    expect(screen.getByText("2 selected")).toBeInTheDocument()
-
-    // Bulk bar → confirm dialog → confirm.
-    const bulkBar = screen.getByText("2 selected").parentElement!
-    fireEvent.click(within(bulkBar).getByRole("button", { name: "Delete" }))
-    fireEvent.click(await screen.findByRole("button", { name: "Delete 2" }))
-
-    await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("1 deleted, 1 failed"), { duration: Infinity })
-    })
-    // The failed credential stays selected for one-click retry.
-    expect(screen.getByRole("checkbox", { name: "Select KEY_B" })).toBeChecked()
-    expect(screen.getByRole("checkbox", { name: "Select KEY_A" })).not.toBeChecked()
-    expect(toast.success).not.toHaveBeenCalled()
-  })
-
-  it("reports success and clears the selection when everything deletes", async () => {
-    routeApi([makeCredential({ id: "cred_a", name: "KEY_A" })])
-    render(<CredentialsPage />)
-
-    await enterSelectMode()
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select KEY_A" }))
-    const bulkBar = screen.getByText("1 selected").parentElement!
-    fireEvent.click(within(bulkBar).getByRole("button", { name: "Delete" }))
-    fireEvent.click(await screen.findByRole("button", { name: "Delete 1" }))
-
-    await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("1 credential deleted"))
-    })
-    expect(screen.queryByText("1 selected")).not.toBeInTheDocument()
-  })
-
-  // #1085 item 1: a 404 (another admin deleted it first) is success, not a
-  // failure — the row must not linger selected as a phantom.
-  it("treats a 404 DELETE as success, not a phantom failure", async () => {
-    const creds = [makeCredential({ id: "cred_a", name: "KEY_A" })]
-    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
-      if (url.startsWith("/api/v1/credentials?")) return ok(creds)
-      if (init?.method === "DELETE") return fail(404) // already gone
-      return ok([])
-    })
-    render(<CredentialsPage />)
-
-    await enterSelectMode()
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select KEY_A" }))
-    const bulkBar = screen.getByText("1 selected").parentElement!
-    fireEvent.click(within(bulkBar).getByRole("button", { name: "Delete" }))
-    fireEvent.click(await screen.findByRole("button", { name: "Delete 1" }))
-
-    await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("1 credential deleted"))
-    })
-    expect(toast.error).not.toHaveBeenCalled()
-    expect(screen.queryByText("1 selected")).not.toBeInTheDocument()
+    const missing = await screen.findByText("Missing tool")
+    fireEvent.click(missing)
+    expect(query().get("view")).toBe("missing-tool")
+    await waitFor(() => expect(table().queryByText("OTHER")).not.toBeInTheDocument())
+    expect(table().getByText("GH_TOKEN")).toBeInTheDocument()
   })
 })
 
-// #1162: confirmDeleteCredential (single-item delete) still did
-// `if (res.ok) refresh` — a 404 (already deleted by another admin) was
-// silently swallowed: no toast, no refresh, stale row lingers. Apply the
-// same 404-as-already-gone semantics bulkDelete got in #1085.
-// The single-credential delete moved to the detail sheet's Settings tab when
-// the table's row actions went. Its #1162 404-as-already-gone handling is
-// tested against the real component in
-// components/features/credentials/__tests__/credential-detail-sheet.test.tsx.
-
-// #1085 item 2: a refresh failure after data is on screen must not replace the
-// loaded list with the full-page error card — it toasts and keeps the list.
-// The selection survives a filter change, and the rail only draws what the
-// filters leave. Ticking rows, then narrowing, then confirming used to DELETE
-// secrets that were no longer on screen — counted in the dialog, named nowhere.
-describe("bulk delete respects the filters (CodeRabbit #1948)", () => {
-  it("deletes only what the rail is still showing", async () => {
-    const creds = [
-      makeCredential({ id: "cred_a", name: "KEY_A", provider: "GITHUB" }),
-      makeCredential({ id: "cred_b", name: "KEY_B", provider: "ANTHROPIC" }),
-    ]
-    const deleted: string[] = []
-    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
-      if (url.startsWith("/api/v1/credentials?")) return ok(creds)
-      if (init?.method === "DELETE") {
-        deleted.push(String(url).split("/")[4].split("?")[0])
-        return ok({})
-      }
-      return ok([])
-    })
+describe("the panel is the shared SecondaryPanel", () => {
+  it("renders inside the vault panel with spaces and views", async () => {
+    routeApi({ credentials: [makeCredential()] })
     render(<CredentialsPage />)
-
-    expect(await inList("KEY_A")).toBeInTheDocument()
-    await enterSelectMode()
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select KEY_A" }))
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select KEY_B" }))
-    expect(await screen.findByText("2 selected")).toBeInTheDocument()
-
-    // Narrow so KEY_A is no longer on screen.
-    fireEvent.change(screen.getByPlaceholderText(/search a secret or tool/i), {
-      target: { value: "KEY_B" },
-    })
-    await waitFor(() => expect(list().queryByText("KEY_A")).not.toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }))
-    const dialog = await screen.findByRole("alertdialog")
-    fireEvent.click(within(dialog).getByRole("button", { name: /^Delete/ }))
-
-    await waitFor(() => expect(deleted.length).toBeGreaterThan(0))
-    expect(deleted).toEqual(["cred_b"])
-  })
-})
-
-describe("transient refresh failure (C-refresh)", () => {
-  it("toasts and keeps the list instead of showing the error card", async () => {
-    const creds = [makeCredential({ id: "cred_a", name: "KEY_A" })]
-    // Key the failure on "a delete has happened" rather than a call counter —
-    // React double-invokes the load effect in tests, so a counter is fragile.
-    let deletedHappened = false
-    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
-      if (url.startsWith("/api/v1/credentials?")) {
-        // Initial load(s) succeed; only the post-delete refresh fails.
-        return deletedHappened ? Promise.reject(new TypeError("fetch failed")) : ok(creds)
-      }
-      if (init?.method === "DELETE") {
-        deletedHappened = true
-        return ok({})
-      }
-      return ok([])
-    })
-    render(<CredentialsPage />)
-
-    // Delete the only credential — success path fires handleRefresh, which fails.
-    await enterSelectMode()
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select KEY_A" }))
-    const bulkBar = screen.getByText("1 selected").parentElement!
-    fireEvent.click(within(bulkBar).getByRole("button", { name: "Delete" }))
-    fireEvent.click(await screen.findByRole("button", { name: "Delete 1" }))
-
-    await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Network error"), { duration: Infinity })
-    })
-    // The full-page error card must NOT appear on a background refresh failure.
-    expect(screen.queryByText("Couldn't load credentials")).not.toBeInTheDocument()
-  })
-})
-
-describe("the rail is the shared SecondaryPanel (Harbor 2 M3)", () => {
-  it("renders inside the vault panel, which collapses to a rail", async () => {
-    routeApi([makeCredential()])
-    render(<CredentialsPage />)
-    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    const panel = document.querySelector('[data-slot="secondary-panel"]')
+    await findRow("STRIPE_API_KEY")
+    const panel = document.querySelector('[data-slot="secondary-panel"]') as HTMLElement
     expect(panel).toHaveAttribute("data-panel-id", "vault")
-    expect(panel).toContainElement(screen.getByRole("region", { name: /credential list/i }))
-    fireEvent.click(screen.getByRole("button", { name: "Hide Vault" }))
-    expect(panel).toHaveAttribute("data-collapsed", "true")
-    expect(screen.queryByRole("region", { name: /credential list/i })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Show Vault" }))
-    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(within(panel).getByRole("navigation", { name: "Vault spaces" })).toBeInTheDocument()
+    expect(within(panel).getByText("All secrets")).toBeInTheDocument()
+    // Folders and external vaults have no backend yet.
+    expect(within(panel).queryByText(/folders|external vaults/i)).not.toBeInTheDocument()
   })
 
-  it("puts the bulk bar in the panel footer while rows are ticked", async () => {
-    routeApi([makeCredential()])
-    render(<CredentialsPage />)
-    await enterSelectMode()
-    fireEvent.click(await screen.findByRole("checkbox", { name: "Select STRIPE_API_KEY" }))
-    const bar = screen.getByRole("toolbar", { name: "Change the selected credentials" })
-    expect(bar.closest(".secondary-panel-footer")).not.toBeNull()
-  })
-
-  it("on a phone the rail is the panel sheet, closed again by a pick", async () => {
+  it("on a phone the panel is the sheet, and a space switch sits above the content", async () => {
     h.mobile = true
-    routeApi([makeCredential()])
+    routeApi({ credentials: [makeCredential()] })
     render(<CredentialsPage />)
     await waitFor(() => expect(useAppStore.getState().secondaryPanel).toEqual({ id: "vault", label: "Vault" }))
     expect(document.querySelector('[data-slot="secondary-panel"]')).toBeNull()
-    act(() => useAppStore.getState().setSecondaryPanelOpen(true))
-    const sheet = await screen.findByRole("dialog", { name: "Vault" })
-    fireEvent.click(await within(sheet).findByText("STRIPE_API_KEY"))
-    expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
+    fireEvent.click(await screen.findByRole("radio", { name: "AI providers" }))
+    expect(query().get("space")).toBe("providers")
   })
 })
