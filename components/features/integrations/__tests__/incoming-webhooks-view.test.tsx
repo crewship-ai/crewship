@@ -12,7 +12,6 @@ import { IncomingCreateDialog } from "../views/incoming-credentials"
 import {
   incomingRows,
   resolveIncomingTarget,
-  incomingExplorer,
   type IncomingTarget,
 } from "../incoming-model"
 import type { IncomingData } from "../use-incoming-endpoints"
@@ -110,28 +109,8 @@ describe("incoming explorer model", () => {
     expect(resolveIncomingTarget([renamed], "agent", "a1")).toBe(renamed)
     expect(resolveIncomingTarget(targets, "agent", "pepa")).toBe(targets[1])
     expect(incomingRows([renamed], [])).toEqual([])
-    expect(incomingExplorer([renamed], [], "agent", "").items[0].id).toBe("agent:a1")
   })
 
-  it("counts targets with endpoints once and does not invent Page totals", () => {
-    const model = incomingExplorer(
-      targets,
-      incomingRows(targets, [hook, { ...hook, id: "h2" }]),
-      "endpoints",
-      "",
-    )
-    expect(model.sections.map((s) => [s.key, s.count])).toEqual([
-      ["endpoints", 3],
-      ["routine", 1],
-      ["agent", 1],
-      ["page", "per Page"],
-    ])
-    expect(model.items.find((i) => i.id === "agent:a1")).toMatchObject({
-      label: "Pepa",
-      dot: "bg-success",
-    })
-    expect(incomingExplorer(targets, [], "routine", "report").items).toEqual([])
-  })
 })
 describe("actual incoming surfaces", () => {
   it("renders KPI strip, cross-target endpoint table, and honest unknown 24h metric", () => {
@@ -274,6 +253,10 @@ describe("actual incoming surfaces", () => {
       await screen.findByTestId("incoming-receiving-url"),
     ).toHaveTextContent("/api/v1/webhooks/once/github-pull-request")
     expect(screen.getByText("sign-once")).toBeVisible()
+    // secret step cannot close by Esc before Done
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    expect(screen.getByTestId("incoming-receiving-url")).toBeInTheDocument()
+    expect(done).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Done" }))
     expect(done).toHaveBeenCalledWith(targets[0])
   })

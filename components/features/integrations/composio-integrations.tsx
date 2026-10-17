@@ -14,6 +14,7 @@ import {
   CreateSurfaceHeader,
 } from "@/components/layout/create-surface"
 import { cn } from "@/lib/utils"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { apiFetch } from "@/lib/api-fetch"
 import { invalidate, readThrough } from "@/lib/stale-cache"
 
@@ -79,6 +80,11 @@ export interface ComposioStatus {
   /** Agents + their bindings, so a detail can answer "who can act through it". */
   agents: AgentLite[]
   bindings: AgentBindingsMap
+  /** The catalog page for the current search, and Composio's total. */
+  catalog?: ToolkitInfo[]
+  catalogLoading?: boolean
+  /** Inventory failed to load (the host shows its own error state). */
+  error?: string | null
 }
 
 export interface ComposioIntegrationsProps {
@@ -100,6 +106,17 @@ export interface ComposioIntegrationsProps {
   search?: string
   /** Reports counts + configured state upward. Must be a stable callback. */
   onStatus?: (status: ComposioStatus) => void
+  /**
+   * Harbor 2: the host draws every list and page itself from the status above;
+   * this component only loads, reports and hosts its dialogs (API key,
+   * Connect with its sign-in popup).
+   */
+  headless?: boolean
+  /** Opens Connect — for one app, or the open "Connect an app" form. */
+  connectRequest?: { toolkit?: { slug: string; name: string } } | null
+  onConnectRequestHandled?: () => void
+  /** Bump to reload everything (after the host changed a binding or an account). */
+  refreshKey?: number
 }
 
 export function ComposioIntegrations({
@@ -109,6 +126,10 @@ export function ComposioIntegrations({
   onApiKeyOpenChange,
   search: searchProp,
   onStatus,
+  headless = false,
+  connectRequest,
+  onConnectRequestHandled,
+  refreshKey = 0,
 }: ComposioIntegrationsProps = {}) {
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
@@ -358,6 +379,19 @@ export function ComposioIntegrations({
     [load, loadToolkits, search, loadSettings, loadAgents],
   )
 
+  React.useEffect(() => {
+    if (!connectRequest) return
+    setConnect({ toolkit: connectRequest.toolkit })
+    onConnectRequestHandled?.()
+  }, [connectRequest, onConnectRequestHandled])
+
+  const lastRefreshKey = React.useRef(refreshKey)
+  React.useEffect(() => {
+    if (lastRefreshKey.current === refreshKey) return
+    lastRefreshKey.current = refreshKey
+    if (workspaceId) refreshAll(workspaceId)
+  }, [refreshKey, workspaceId, refreshAll])
+
   const [tabState, setTab] = React.useState<TabKey>("catalog")
   const tab = section ?? tabState
 
@@ -439,8 +473,14 @@ export function ComposioIntegrations({
       accounts: allAccounts,
       agents,
       bindings,
+      catalog: toolkits,
+      catalogLoading: tkLoading,
+      error,
     })
   }, [
+    toolkits,
+    tkLoading,
+    error,
     onStatus,
     busy,
     configured,
@@ -463,9 +503,10 @@ export function ComposioIntegrations({
         "space-y-5 bg-background",
         // The host page already supplies page padding when it embeds us.
         embedded ? "p-0" : "p-4 md:p-6 pb-6",
+        headless && "contents",
       )}
     >
-      {!embedded && (
+      {!embedded && !headless && (
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <Plug className="h-4 w-4 text-foreground/60" />
@@ -525,18 +566,18 @@ export function ComposioIntegrations({
         />
       )}
 
-      {busy && <InventorySkeleton />}
+      {!headless && busy && <InventorySkeleton />}
 
-      {!busy && error && (
+      {!headless && !busy && error && (
         <div className="rounded-card border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
           Couldn&apos;t load Composio inventory: {error}
         </div>
       )}
 
-      {!busy && !error && !configured && <NotConfigured onAddKey={() => setKeyOpen(true)} />}
+      {!headless && !busy && !error && !configured && <NotConfigured onAddKey={() => setKeyOpen(true)} />}
 
 
-      {!busy && !error && configured && workspaceId && data && (
+      {!headless && !busy && !error && configured && workspaceId && data && (
         <>
           {/* KPI row. Suppressed when embedded: the host renders the same
               four figures from the status it already receives. */}
@@ -709,20 +750,24 @@ function ApiKeyModal({
     }
   }
 
+  const [confirmRemove, setConfirmRemove] = React.useState(false)
+  // Asked first (ConfirmDialog), and the dialog stays open if the server refuses.
   const remove = async () => {
-    setSaving(true)
     setErr(null)
+    let r: Response
     try {
-      const r = await apiFetch(`/api/v1/integrations/composio/settings?${new URLSearchParams({ workspace_id: workspaceId })}`, {
+      r = await apiFetch(`/api/v1/integrations/composio/settings?${new URLSearchParams({ workspace_id: workspaceId })}`, {
         method: "DELETE",
       })
-      if (!r.ok) throw new Error(`Failed (${r.status})`)
-      onChanged()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to remove")
-    } finally {
-      setSaving(false)
+      setErr("Failed to remove")
+      throw e
     }
+    if (!r.ok) {
+      setErr(`Failed (${r.status})`)
+      throw new Error(`Failed (${r.status})`)
+    }
+    onChanged()
   }
 
   return (
@@ -772,7 +817,7 @@ function ApiKeyModal({
       <CreateSurfaceFooter
         lead={
           current?.source === "workspace" ? (
-            <Button variant="ghost" size="sm" onClick={remove} disabled={saving} className="h-8 text-xs">
+            <Button variant="ghost" size="sm" onClick={() => setConfirmRemove(true)} disabled={saving} className="h-8 text-xs">
               Remove key
             </Button>
           ) : undefined
@@ -782,6 +827,18 @@ function ApiKeyModal({
         onPrimary={save}
         primaryDisabled={!apiKey.trim()}
         busy={saving}
+      />
+      <ConfirmDialog
+        open={confirmRemove}
+        onOpenChange={setConfirmRemove}
+        title="Remove the Composio key?"
+        consequences={[
+          { tone: "lost", text: "Connected apps stop working for every agent" },
+          { tone: "kept", text: "Connected accounts stay at Composio; adding a key again brings them back" },
+        ]}
+        confirmLabel="Remove key"
+        destructive
+        onConfirm={remove}
       />
     </CreateSurface>
   )

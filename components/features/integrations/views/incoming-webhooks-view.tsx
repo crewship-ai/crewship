@@ -584,7 +584,7 @@ function PageEndpoints({
     </>
   )
 }
-function RecentReceipts({
+export function RecentReceipts({
   workspaceId,
   target,
   rows,
