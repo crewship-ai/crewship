@@ -3,10 +3,10 @@ import { test, expect } from "@playwright/test"
 // Production static export with synthetic Guest API responses only. Backend
 // quota/authority and real CLI-to-Router behavior are verified independently.
 for (const width of [1280, 390]) {
-  test(`shared issue search cooldown keeps drafts and recovers at ${width}px`, async ({ page }) => {
+  test(`PR browser contract subset — shared issue search cooldown keeps drafts and recovers at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await page.clock.install()
-    let limited = false, recovered = false, lists = 0
+    let limited = false, recovered = false, denied = false, lists = 0
     await page.addInitScript(() => localStorage.setItem("crewship.workspaceId:search-guest", "search-ws"))
     await page.route("**/api/**", async route => {
       const path = new URL(route.request().url()).pathname
@@ -16,7 +16,8 @@ for (const width of [1280, 390]) {
       else if (path === "/api/v1/workspaces") body = [{ id: "search-ws", name: "Shared workspace", slug: "shared", currentUserRole: "VIEWER", currentUserAccessMode: "restricted", restricted_session: true, restricted_surfaces: ["issues", "account_security"] }]
       else if (path.endsWith("/restricted-issues")) {
         lists++
-        if (limited && !recovered) { status = 429; headers["Retry-After"] = "30"; body = { error: "Shared issue searches are temporarily limited. Try again in 30s." } }
+        if (denied) { status = 403; body = {} }
+        else if (limited && !recovered) { status = 429; headers["Retry-After"] = "30"; body = { error: "Shared issue searches are temporarily limited. Try again in 30s." } }
         else body = [{ id: "issue-1", identifier: "CLIENT-1", title: recovered ? "Recovered issue" : "Shared issue", status: "TODO", project_id: "project-1", project_name: "Shared project", can_read: false, can_contribute: false }]
       }
       await route.fulfill({ status, headers, contentType: "application/json", body: JSON.stringify(body) })
@@ -42,6 +43,18 @@ for (const width of [1280, 390]) {
     await expect(page.getByText("Recovered issue", { exact: true })).toBeVisible()
     await expect(searchForm.getByRole("button", { name: "Search", exact: true })).toBeEnabled()
     await expect(page.getByLabel("Search shared issues")).toHaveValue("Keep my draft")
+    denied = true
+    await page.getByRole("button", { name: "Refresh", exact: true }).click()
+    await expect(page.getByText("Issues unavailable", { exact: true })).toBeVisible()
+    await expect(page.getByText("Recovered issue", { exact: true })).toHaveCount(0)
+    denied = false
+    recovered = false
+    await page.getByRole("button", { name: "Refresh", exact: true }).click()
+    await expect(page.getByText(/Shared issue searches are temporarily limited/)).toBeVisible()
+    await expect(page.getByText("Recovered issue", { exact: true })).toHaveCount(0)
+    recovered = true
+    await page.clock.runFor(31_000)
+    await expect(page.getByText("Recovered issue", { exact: true })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
   })
 }

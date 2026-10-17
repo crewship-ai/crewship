@@ -161,8 +161,10 @@ private descriptions or comments. It is only valid for the collection command.
 On a temporary 429 the browser preserves the current result view and search
 draft, pauses collection polling and disables search/refresh/pagination until
 the bounded Retry-After interval ends, then checks again. User/workspace
-changes clear that state; project metadata and contribution forms retain their
-separate requests. CLI prints the server retry guidance, exits 6 and does not
+changes clear that state. Definitive 401/403/404 responses discard the result
+projection; a subsequent 429 or failed query cannot restore its cached titles.
+Only a fresh successful response restores results. Project metadata and
+contribution forms retain their separate requests. CLI prints the server retry guidance, exits 6 and does not
 retry automatically.
 
 The list accepts `project_id`, `limit`, `offset` and optional `q` (up to 256
