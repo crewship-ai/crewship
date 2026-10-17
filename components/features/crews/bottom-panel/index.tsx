@@ -13,7 +13,7 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import { useAbilities } from "@/hooks/use-abilities"
 
 import type { BottomPanelProps, BottomTab } from "./types"
-import { EmptyState } from "./shared"
+import { PanelEmptyText } from "./shared"
 import { ExecTab } from "./exec-tab"
 import { FilesTab } from "./files-tab"
 import { ActivityTab } from "./activity-tab"
@@ -313,7 +313,7 @@ export function BottomPanel({
           {tab === "trace" && <TraceTab workspaceId={workspaceId} context={context} />}
           {tab === "terminal" && (
             role === "VIEWER" ? (
-              <EmptyState>Viewers cannot open a shell in a crew container. A member or a manager can.</EmptyState>
+              <PanelEmptyText>Viewers cannot open a shell in a crew container. A member or a manager can.</PanelEmptyText>
             ) : context?.kind === "agent" && context.crewId && context.crewSlug ? (
               <BottomPanelTerminal
                 key={`agent:${context.agentSlug}`}
@@ -326,11 +326,11 @@ export function BottomPanel({
               // The crew's own shell: no agent, the server starts it in /crew/shared.
               <BottomPanelTerminal key={`crew:${context.crewSlug}`} agentName={context.crewSlug} crewId={context.crewId} crewSlug={context.crewSlug} />
             ) : (
-              <EmptyState>
+              <PanelEmptyText>
                 {context?.kind === "agent"
                   ? "This agent has no crew, so it has no container to open a shell in."
                   : "Open a crew or an agent to open a shell."}
-              </EmptyState>
+              </PanelEmptyText>
             )
           )}
         </div>
