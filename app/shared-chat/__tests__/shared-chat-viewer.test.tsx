@@ -63,7 +63,12 @@ describe("shared chat viewer", () => {
     vi.stubGlobal("fetch", fetchMock)
     render(<SharedChatViewer />)
     fireEvent.click(screen.getByRole("button", { name: "Open transcript" }))
-    expect(screen.getByRole("alert")).toHaveTextContent(/complete share ID and token/i)
+    // Each malformed value is named under its own field.
+    const alerts = screen.getAllByRole("alert")
+    expect(alerts.map((a) => a.id)).toEqual(["share-id-error", "share-token-error"])
+    expect(alerts[0]).toHaveTextContent(/complete share ID/i)
+    expect(alerts[1]).toHaveTextContent(/complete share token/i)
+    expect(screen.getByLabelText("Share ID")).toHaveAttribute("aria-invalid", "true")
     expect(fetchMock).not.toHaveBeenCalled()
 
     fillCredentials()
@@ -86,7 +91,7 @@ describe("shared chat viewer", () => {
 
     fireEvent.change(screen.getByLabelText("Share token"), { target: { value: "incomplete" } })
     fireEvent.submit(form)
-    expect(screen.getByRole("alert")).toHaveTextContent(/complete share ID and token/i)
+    expect(screen.getByRole("alert")).toHaveTextContent(/complete share token/i)
     finish(new Response(JSON.stringify({ messages: [
       { id: "old", role: "assistant", content: "stale secret", created_at: "2026-09-27T00:00:00Z" },
     ] }), { status: 200 }))
@@ -110,5 +115,41 @@ describe("shared chat viewer", () => {
     fillCredentials()
     fireEvent.click(screen.getByRole("button", { name: "Open transcript" }))
     expect(await screen.findByRole("alert")).toHaveTextContent(/over 16 MiB or 1,000 messages/i)
+  })
+
+  it.each([
+    [401, "not-available", false],
+    [404, "not-available", false],
+    [413, "error", false],
+    [500, "error", true],
+    [503, "error", true],
+    ["invalid", "error", true],
+  ] as const)("maps %s to the %s state (Retry offered: %s)", async (status, kind, retry) => {
+    const response = status === "invalid"
+      ? new Response(JSON.stringify({ nope: true }), { status: 200 })
+      : new Response("{}", { status })
+    const fetchMock = vi.fn().mockResolvedValue(response)
+    vi.stubGlobal("fetch", fetchMock)
+    render(<SharedChatViewer />)
+    fillCredentials()
+    fireEvent.click(screen.getByRole("button", { name: "Open transcript" }))
+    const alert = await screen.findByRole("alert")
+    expect(alert.querySelector(`[data-state=${kind === "not-available" ? "empty" : "error"}]`) ?? alert.closest("[data-state]")).not.toBeNull()
+    if (kind === "not-available") expect(alert).toHaveTextContent("This share is not available")
+    expect(screen.queryByRole("button", { name: "Retry" }) !== null).toBe(retry)
+    if (retry) {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ messages: [] }), { status: 200 }))
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+      expect(await screen.findByText("No text messages yet")).toBeInTheDocument()
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    }
+    expect(alert).not.toHaveTextContent(token)
+  })
+
+  it("sits under the public bar with no account controls", () => {
+    render(<SharedChatViewer />)
+    const bar = screen.getByRole("banner")
+    expect(bar).toHaveTextContent("Shared chat")
+    expect(bar.querySelectorAll("a, button")).toHaveLength(0)
   })
 })

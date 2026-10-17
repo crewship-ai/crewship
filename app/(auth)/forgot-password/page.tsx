@@ -1,13 +1,12 @@
 "use client"
 
 import { useState, type FormEvent } from "react"
-import Link from "next/link"
-import { ArrowLeft } from "lucide-react"
-import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
+import { ArrowLeft, KeyRound, Terminal } from "lucide-react"
+import { AUTH_BUTTON, AUTH_INPUT, AuthCard, AuthLink, AuthReceipt, AuthScreen } from "@/components/branding/auth-card"
+import { CreateSurfaceField, CreateSurfaceNotice } from "@/components/layout/create-surface"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { serverFetch } from "@/lib/server-base"
 
 export default function ForgotPasswordPage() {
@@ -40,69 +39,57 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <CrewshipLogoTile />
+    <AuthScreen>
+      <AuthCard
+        icon={KeyRound}
+        title="Reset your password"
+        description="Enter the email on your account and we'll send you a reset link."
+        onSubmit={submitted ? undefined : handleSubmit}
+        links={
+          <AuthLink href="/login" className="gap-1.5">
+            <ArrowLeft aria-hidden className="size-3.5" />
+            Back to sign in
+          </AuthLink>
+        }
+        actions={
+          submitted ? undefined : (
+            <Button type="submit" disabled={loading || !email} className={AUTH_BUTTON}>
+              {loading && <Spinner className="size-3.5" />}
+              {loading ? "Sending…" : "Send reset link"}
+            </Button>
+          )
+        }
+      >
+        {submitted ? (
+          // One answer for every address and every failure: the response
+          // shape is non-enumerating, so this receipt must be too.
+          <div role="status" aria-live="polite" className="flex flex-col gap-3">
+            <AuthReceipt title="Check your inbox">
+              If an account exists for that email and email is configured on this server, a reset
+              link has been sent.
+            </AuthReceipt>
+            <CreateSurfaceNotice tone="info" icon={Terminal}>
+              Self-hosted administrators without email configured should run{" "}
+              <code className="font-mono text-foreground">crewship admin reset-password</code> on the
+              server.
+            </CreateSurfaceNotice>
           </div>
-          <CardTitle className="text-xl">Reset your password</CardTitle>
-          <CardDescription>
-            Enter the email on your account and we&apos;ll send you a reset link.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {submitted ? (
-            <div className="space-y-4">
-              <div
-                className="rounded-md border border-success/40 bg-success/10 p-4 text-sm"
-                role="status"
-                aria-live="polite"
-              >
-                <p className="font-medium text-success">Check your inbox.</p>
-                <p className="mt-1 text-muted-foreground">
-                  If an account exists for that email and email is configured on this server, a reset
-                  link has been sent. Self-hosted administrators without email configured should run{" "}
-                  <code className="rounded bg-muted px-1 py-0.5 text-xs">crewship admin reset-password</code>{" "}
-                  on the server.
-                </p>
-              </div>
-              <Link
-                href="/login"
-                className="flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back to sign in
-              </Link>
-            </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="you@company.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoFocus
-                />
-              </div>
-              <Button type="submit" className="w-full" disabled={loading || !email}>
-                {loading ? "Sending..." : "Send reset link"}
-              </Button>
-              <Link
-                href="/login"
-                className="flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back to sign in
-              </Link>
-            </form>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+        ) : (
+          <CreateSurfaceField label="Email" htmlFor="email">
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@company.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoFocus
+              className={AUTH_INPUT}
+            />
+          </CreateSurfaceField>
+        )}
+      </AuthCard>
+    </AuthScreen>
   )
 }

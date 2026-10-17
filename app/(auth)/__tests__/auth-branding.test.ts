@@ -2,16 +2,15 @@ import { describe, it, expect } from "vitest"
 import { readFileSync, readdirSync, existsSync } from "node:fs"
 import { join } from "node:path"
 
-// Every unauthenticated page is a first impression, and two of them were
-// wearing a generic lucide <Ship /> instead of the product mark. Login,
-// signup and bootstrap used CrewshipLogoTile; reset-password and
-// forgot-password did not — so the page an invited colleague lands on to
-// set their password showed a stock sailboat.
+// Every unauthenticated page is a first impression. Two of them once wore a
+// generic lucide <Ship /> instead of the product mark, and until Harbor 2 the
+// six routes used two different shells. Now there is one: the auth card
+// (components/branding/auth-card.tsx), which carries the lockup.
 //
-// A source-level check rather than a render test: these are five separate
-// route components with five different data dependencies, and the property
-// worth pinning ("nobody hand-rolls a brand mark here") is about the import,
-// not about any one page's runtime.
+// A source-level check rather than a render test: these are six separate
+// route components with six different data dependencies, and the properties
+// worth pinning ("every page uses the one shell", "nobody hand-rolls a brand
+// mark or a raw size here") are about the source, not about any one runtime.
 
 const AUTH_DIR = join(process.cwd(), "app", "(auth)")
 
@@ -23,17 +22,18 @@ function authPages(): { name: string; source: string }[] {
     .map((p) => ({ name: p.name, source: readFileSync(p.file, "utf8") }))
 }
 
-// A page satisfies the property either by rendering the tile itself or by
-// sitting inside AuthSplitShell, which renders it in the lockup. The second
-// route appeared when login moved to the split shell; the shell's own use of
-// the tile is pinned below, so the chain stays checked end to end.
-const SHELL = "AuthSplitShell"
-const TILE = "CrewshipLogoTile"
-// The shell shows the bare mark rather than the tile: nested inside both the
+// Every page renders inside AuthScreen, which draws the lockup; the card's own
+// use of the mark is pinned below, so the chain stays checked end to end.
+const SHELL = "AuthScreen"
+const CARD_FILE = join(process.cwd(), "components", "branding", "auth-card.tsx")
+// The lockup shows the bare mark rather than the tile: nested inside both the
 // tile's padding and the viewBox's, the sails stop being readable at lockup
-// size. Either component satisfies the property — both come from the shared
-// branding module, which is the thing being pinned.
-const SHARED_MARK = /Crewship(Logo|LogoTile)\b/
+// size.
+const SHARED_MARK = /CrewshipLogo\b/
+// Harbor 2 token rules (lib/__tests__/design-token-guard.test.ts) at zero for
+// these files, plus the hex gradient and clamp() sizes the old shell carried
+// (a colour has a letter in it; an issue reference like #3410 does not).
+const RAW = [/\btext-\[/, /\brounded(?:-[trblse]{1,2})?-\[/, /\brounded(?:-[trblse]{1,2})?-(?:2xl|3xl)\b/, /#(?=[0-9]*[a-fA-F])[0-9a-fA-F]{3,8}\b/, /\bclamp\(/]
 
 // Reading JSX with a regex is what made the two previous versions of the
 // `tight` guard unreliable, each in its own way: a substring on one line that
@@ -118,45 +118,34 @@ function hasAttribute(element: string, name: string): boolean {
 
 describe("auth pages wear the product mark", () => {
   const pages = authPages()
+  const card = readFileSync(CARD_FILE, "utf8")
 
   it("finds the auth routes at all (guards against a silent rename)", () => {
-    expect(pages.length).toBeGreaterThanOrEqual(4)
+    expect(pages.length).toBeGreaterThanOrEqual(6)
   })
 
-  it.each(pages.map((p) => p.name))("%s uses the shared logo component", (name) => {
+  it.each(pages.map((p) => p.name))("%s renders in the shared auth card", (name) => {
     const page = pages.find((p) => p.name === name)!
-    expect(
-      page.source.includes(TILE) || page.source.includes(SHELL),
-      `${name} renders neither ${TILE} nor ${SHELL}`
-    ).toBe(true)
+    expect(page.source, `${name} does not render ${SHELL}`).toContain(SHELL)
+    expect(page.source).toContain("@/components/branding/auth-card")
+    // The retired two-pane shell and the shadcn Card it competed with.
+    expect(page.source).not.toMatch(/AuthSplitShell|@\/components\/ui\/card/)
   })
 
-  it("the shared shell is what puts the mark on the pages that delegate to it", () => {
-    const shell = readFileSync(
-      join(process.cwd(), "components", "branding", "auth-split-shell.tsx"),
-      "utf8"
-    )
-    expect(shell).toMatch(SHARED_MARK)
+  it("the auth card is what puts the mark on the pages", () => {
+    expect(card).toMatch(SHARED_MARK)
   })
 
   it("shows the mark cropped to its own bounds when it stands without a tile", () => {
     // Without `tight` the mark renders inside the tile's padding with no tile
     // around it, which is what made it read as a few grey pixels at 28px.
-    const shell = readFileSync(
-      join(process.cwd(), "components", "branding", "auth-split-shell.tsx"),
-      "utf8"
-    )
-    const usages = crewshipLogoUsages(shell)
-    // A guard that finds nothing must fail, not pass vacuously — the third
-    // version of the same lesson this test keeps learning. An empty match list
-    // means the component was renamed or the file restructured, which is
-    // exactly when the property stops being checked.
+    const usages = crewshipLogoUsages(card)
+    // A guard that finds nothing must fail, not pass vacuously — an empty
+    // match list means the component was renamed or the file restructured,
+    // which is exactly when the property stops being checked.
     expect(usages.length).toBeGreaterThan(0)
     for (const usage of usages) {
-      expect(
-        hasAttribute(usage, "tight"),
-        `<CrewshipLogo> without \`tight\`: ${usage}`
-      ).toBe(true)
+      expect(hasAttribute(usage, "tight"), `<CrewshipLogo> without \`tight\`: ${usage}`).toBe(true)
     }
   })
 
@@ -166,4 +155,11 @@ describe("auth pages wear the product mark", () => {
     // icon here: it reads as someone else's product.
     expect(page.source).not.toMatch(/\bShip\b/)
   })
+
+  it.each([...pages.map((p) => [p.name, p.source]), ["auth-card", card]])(
+    "%s uses tokens only (no raw sizes, radii, hex or clamp)",
+    (_name, source) => {
+      for (const rx of RAW) expect(source).not.toMatch(rx)
+    },
+  )
 })

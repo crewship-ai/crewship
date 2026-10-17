@@ -93,7 +93,6 @@
   "components/admin/member-capabilities.tsx": 11,
   "components/ai-elements/attachments.tsx": 4,
   "components/ai-elements/model-selector.tsx": 1,
-  "components/branding/auth-split-shell.tsx": 1,
   "components/command-palette.tsx": 2,
   "components/features/activity-stream/activity-detail.tsx": 13,
   "components/features/activity-stream/activity-overview.tsx": 2,
