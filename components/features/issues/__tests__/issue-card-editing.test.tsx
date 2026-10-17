@@ -316,7 +316,7 @@ describe("IssueCardDetail — the editors write", () => {
   })
 
   it("Add relation is a popover at the Relations field: a type choice, an issue picker, Cancel and Add relation", async () => {
-    const searchIssues = vi.fn(async () => [{ identifier: "ENG-12", title: "Replace the Linear token", status: "IN_PROGRESS" }])
+    const searchIssues = vi.fn(async () => [{ identifier: "ENG-12", title: "Replace the Linear token", status: "IN_PROGRESS" as const }])
     const e = edit({ searchIssues })
     renderCard({ edit: e })
     const trigger = screen.getByRole("button", { name: "Add relation" })
