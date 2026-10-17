@@ -187,6 +187,18 @@ test.describe("desktop", () => {
     await expect(page).not.toHaveURL(/view=/)
   })
 
+  test("SET-10 T13 crew link facets open inside the panel, not as a popover", async ({ page }) => {
+    await seed(page, PINNED)
+    await page.goto("/settings/crew-links")
+    const panel = page.getByRole("complementary", { name: "Crew links navigation" })
+    await panel.getByRole("button", { name: /Filter/ }).click()
+    const block = panel.locator("[data-slot=facet-block]")
+    await expect(block).toBeVisible()
+    await expect(page.locator("[data-slot=popover-content]")).toHaveCount(0)
+    await block.getByRole("button", { name: /^Network/ }).click()
+    await expect(block.getByRole("button", { name: /^Restricted/ })).toBeVisible()
+  })
+
   test("SET-03 T16 the range is one segmented control on the top bar; a row opens its detail", async ({ page }) => {
     await seed(page, PINNED)
     await page.goto("/settings/audit")
@@ -284,6 +296,22 @@ test.describe("phone", () => {
     const card = page.getByRole("region", { name: "Privileged credentials" })
     await expect(card).toHaveAttribute("data-focused", "true")
     await expect(card).toBeInViewport()
+  })
+
+  test("SET-01/02/03 drill pages at 390: no horizontal overflow; the member Peek is a bottom sheet", async ({ page }) => {
+    for (const path of ["/settings/members", "/settings/crew-links", "/settings/audit"]) {
+      await page.goto(path)
+      await expect(page.locator("[data-slot=settings-page-head]")).toBeVisible()
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(overflow, path).toBeLessThanOrEqual(0)
+    }
+    await page.goto("/settings/members")
+    const person = page.locator("[data-slot=members-list] [title]").first()
+    await expect(person).toBeVisible()
+    await person.click()
+    const peek = page.locator("[data-slot=peek]")
+    await expect(peek).toBeVisible()
+    expect(Math.round((await peek.boundingBox())!.width)).toBe(390)
   })
 
   test("rows wrap their control under the label instead of overflowing", async ({ page }) => {
