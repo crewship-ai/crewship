@@ -212,7 +212,24 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
   const [ownFilters, setOwnFilters] = useAuditFilters()
   const filters = controlled ?? ownFilters
   const setFilters = onFiltersChange ?? setOwnFilters
-  const [page, setPage] = useState(1)
+  // The page belongs to the filters it was turned on: when they change — here
+  // or in the Audit log page's side panel, which sets them directly — the
+  // list starts again at page one, in the same render (no stray fetch of
+  // page N under the new filters).
+  const filterKey = JSON.stringify(filters)
+  const [paging, setPaging] = useState({ key: filterKey, page: 1 })
+  const page = paging.key === filterKey ? paging.page : 1
+  const setPage = useCallback((next: number | ((p: number) => number)) =>
+    setPaging((cur) => {
+      const from = cur.key === filterKey ? cur.page : 1
+      return { key: filterKey, page: typeof next === "function" ? next(from) : next }
+    }), [filterKey])
+  const [expandedFor, setExpandedFor] = useState(`${filterKey}#1`)
+  if (expandedFor !== `${filterKey}#${page}`) {
+    // A row open on another page or under other filters is not on screen.
+    setExpandedFor(`${filterKey}#${page}`)
+    if (expandedId !== null) setExpandedId(null)
+  }
   const [pagination, setPagination] = useState<AuditPagination | null>(null)
   const [exporting, setExporting] = useState(false)
   const people = useWorkspacePeople(workspaceId)
@@ -228,7 +245,6 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
   // Every filter change starts again from page one.
   const changeFilters = useCallback((next: Partial<AuditFilters>) => {
     setFilters(next)
-    setPage(1)
     setExpandedId(null)
   }, [setFilters])
 
@@ -369,7 +385,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
           <Button
             variant="outline"
             size="sm"
-            className="h-7 px-2.5 text-xs"
+            className="px-2.5 text-xs"
             onClick={() => fetchLogs({ silent: true })}
             disabled={loading || refreshing}
             aria-label="Refresh audit log"
@@ -380,7 +396,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
           <Button
             variant="outline"
             size="sm"
-            className="h-7 px-2.5 text-xs"
+            className="px-2.5 text-xs"
             onClick={handleExport}
             disabled={(pagination?.total ?? 0) === 0 || exporting || loading}
             aria-label="Export audit log to CSV"
@@ -392,7 +408,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+              className="px-2.5 text-xs text-muted-foreground hover:text-foreground"
               onClick={handleCancelExport}
               aria-label="Cancel export"
             >
@@ -462,7 +478,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
         // opposite ("your rows are still here, they're just old").
         <div className="p-6 text-center">
           <p role="alert" className="text-xs text-destructive mb-3">{error}</p>
-          <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => fetchLogs()}>
+          <Button variant="outline" size="sm" className="px-2.5 text-xs" onClick={() => fetchLogs()}>
             Retry
           </Button>
         </div>
@@ -523,7 +539,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 px-2 text-xs"
+                  className="px-2 text-xs"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
@@ -533,7 +549,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 px-2 text-xs"
+                  className="px-2 text-xs"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
                 >
