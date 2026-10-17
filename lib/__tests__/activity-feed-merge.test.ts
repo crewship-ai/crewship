@@ -15,6 +15,7 @@ import {
   parseFeedUrl,
   rangeBounds,
   rangeDates,
+  rangeIncluding,
   runHistory,
   stepRange,
   viewCounts,
@@ -172,6 +173,23 @@ describe("time range", () => {
     expect(rangeDates({ key: "today" }, NOW)).toBe("15 Oct")
     expect(rangeDates({ key: "yday" }, NOW)).toBe("14 Oct")
     expect(rangeDates({ key: "1h" }, NOW)).toBe("07:16 – now")
+  })
+
+  it("widens the range just enough to include a linked run, never narrower than before", () => {
+    const r7 = { key: "7d" as const }
+    // Already inside: the same range comes back.
+    expect(rangeIncluding(r7, new Date(2026, 9, 14).getTime(), NOW)).toBe(r7)
+    // 10 days ago is outside 7 days: the next preset that holds it.
+    expect(rangeIncluding(r7, new Date(2026, 9, 5).getTime(), NOW)).toEqual({ key: "30d" })
+    expect(rangeIncluding({ key: "1h" }, NOW - 3 * 3_600_000, NOW)).toEqual({ key: "24h" })
+    // Yesterday → a run this morning: 7 days holds both, Today would drop yesterday.
+    expect(rangeIncluding({ key: "yday" }, new Date(2026, 9, 15, 7).getTime(), NOW)).toEqual({ key: "7d" })
+    // Older than 30 days: a custom range from that day to now.
+    expect(rangeIncluding(r7, new Date(2026, 8, 1, 13).getTime(), NOW)).toEqual({
+      key: "custom",
+      from: new Date(2026, 8, 1).getTime(),
+      to: NOW,
+    })
   })
 
   it("steps shorter and longer and stops at the ends", () => {

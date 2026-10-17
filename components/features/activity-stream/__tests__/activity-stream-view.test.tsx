@@ -204,6 +204,24 @@ describe("ActivityStreamView", () => {
     expect(window.location.search).toBe("")
   })
 
+  it("?run=<id> outside the range widens the list range so the run is in the list", async () => {
+    const old = chain("run_old", { routine_slug: "digest", first_activity: ago(10 * 24 * 60), last_activity: ago(10 * 24 * 60 - 1) })
+    mock.chains.mockReturnValue(chainsState({ chains: [...CHAINS, old] }))
+    window.history.replaceState(null, "", "/activity?run=run_old")
+    show()
+    expect(await screen.findByTestId("activity-peek-work")).toBeInTheDocument()
+    await waitFor(() => expect(table().querySelector("[data-row-id=run_old]")).not.toBeNull())
+    expect(window.location.search).toContain("range=30d")
+    expect(window.location.search).toContain("run=run_old")
+  })
+
+  it("?run=<id> inside the range keeps the default range", async () => {
+    window.history.replaceState(null, "", "/activity?run=run_bad")
+    show()
+    await screen.findByTestId("activity-peek-work")
+    expect(window.location.search).not.toContain("range=")
+  })
+
   it("Open run walks to the run's page", async () => {
     window.history.replaceState(null, "", "/activity?run=run_bad")
     show()
@@ -213,6 +231,56 @@ describe("ActivityStreamView", () => {
     expect(window.location.search).toContain("walk=workflow%3Arun_bad")
     fireEvent.click(screen.getByRole("button", { name: /Back to activity/ }))
     expect(await screen.findByRole("heading", { level: 1, name: "Everything" })).toBeVisible()
+  })
+
+  it("a run page keeps one h1: its own title, not the top-bar path", async () => {
+    mock.run.mockImplementation(() => <h1>Nightly triage</h1>)
+    window.history.replaceState(null, "", "/activity?walk=workflow:run_bad")
+    show()
+    await screen.findByText("Nightly triage")
+    const h1s = screen.getAllByRole("heading", { level: 1 })
+    expect(h1s).toHaveLength(1)
+    expect(h1s[0]).toHaveTextContent(/^Nightly triage$/)
+  })
+
+  it("while a run page loads, the top bar is the one h1 until the page names itself", async () => {
+    let reveal = () => {}
+    function LoadingRun() {
+      const [ready, setReady] = React.useState(false)
+      reveal = () => setReady(true)
+      return ready ? <h1>Nightly triage</h1> : <div role="status">Loading run…</div>
+    }
+    mock.run.mockImplementation(() => <LoadingRun />)
+    window.history.replaceState(null, "", "/activity?walk=workflow:run_bad")
+    show()
+    await screen.findByText("Loading run…")
+    await waitFor(() => expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1))
+    act(() => reveal())
+    await screen.findByText("Nightly triage")
+    await waitFor(() => {
+      const h1s = screen.getAllByRole("heading", { level: 1 })
+      expect(h1s).toHaveLength(1)
+      expect(h1s[0]).toHaveTextContent(/^Nightly triage$/)
+    })
+  })
+
+  it("an unknown run that is still loading keeps exactly one h1", async () => {
+    mock.chains.mockReturnValue(chainsState({ chains: [], loading: true }))
+    window.history.replaceState(null, "", "/activity?walk=workflow:run_gone")
+    show()
+    await waitFor(() => expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1))
+  })
+
+  it("a record page keeps one h1: the record's own", async () => {
+    mock.detail.mockImplementation((p) => <h1>{p.entry.summary}</h1>)
+    window.history.replaceState(null, "", "/activity?entry=e1")
+    show()
+    await screen.findByTestId("activity-peek-change")
+    fireEvent.click(screen.getByRole("button", { name: "Open full record" }))
+    await screen.findByText("CRW-1 moved to In review", { selector: "h1" })
+    const h1s = screen.getAllByRole("heading", { level: 1 })
+    expect(h1s).toHaveLength(1)
+    expect(h1s[0]).toHaveTextContent(/^CRW-1 moved to In review$/)
   })
 
   it("keys 1–4 switch views and the view is written to the URL", async () => {
