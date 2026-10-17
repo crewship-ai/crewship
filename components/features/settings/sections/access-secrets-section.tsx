@@ -259,8 +259,9 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         )}
       </SettingsCard>
 
-      {/* Counts only, each a way into the Vault: the class itself is set on
-          each secret there, so this card has nothing to edit. */}
+      {/* Counts only, each a way into the Vault filtered to that class (the
+          Vault reads ?class=, lib/credentials/vault-url-state.ts): the class
+          itself is set on each secret there, so this card has nothing to edit. */}
       <SettingsCard icon={Layers}
         title="Classification"
         description="Read-only here; change it on each secret in Vault"
@@ -274,7 +275,7 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
               icon: cls.icon,
               label: cls.label,
               value: creds.filter((c) => (c.sensitivity || "STANDARD").toUpperCase() === cls.id).length,
-              href: "/credentials",
+              href: `/credentials?class=${cls.id}`,
             }))}
           />
         )}
