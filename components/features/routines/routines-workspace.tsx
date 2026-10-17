@@ -10,7 +10,7 @@ import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { usePendingStarts } from "@/hooks/use-pending-starts"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { useActiveRoutineRuns, isAwaitingApproval } from "@/hooks/use-active-routine-runs"
-import { InlineEmpty } from "@/components/ui/inline-empty"
+import { PageEmpty, PageError } from "@/components/layout/page-state"
 import {
   matchesRoutineFilters,
   routineFilterInput,
@@ -77,6 +77,10 @@ interface RoutinesWorkspaceProps {
   /** Search and filters belong to the explorer sidebar; the list only applies them. */
   search?: string
   filters?: RoutineFilterState
+  /** Load the list again after an error. */
+  onRetry?: () => void
+  /** Open New routine; absent when the person cannot create one. */
+  onNew?: () => void
 }
 
 /** The word and tone for a routine's last run, from the row plus the live feed. */
@@ -165,20 +169,24 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
         {tab === "routines" && (
           <section aria-label="Routines overview" className="p-4 md:p-6">
             {props.error && (
-              <p role="alert" className="mb-3 text-sm text-destructive">
-                Routines could not be loaded.
-              </p>
+              <PageError
+                className="mb-3"
+                title="Routines could not load"
+                description="The filters stay as they are. Try again in a moment."
+                onRetry={props.onRetry}
+              />
             )}
 
-            {/* The catalog lives in the sidebar; this pane is the week at a
+            {/* The catalog lives in the panel; this pane is the week at a
                 glance. An empty workspace still needs the way in. */}
             {!visible.length && !props.loading && !props.error ? (
-              <div className="rounded-xl border border-border/60 bg-card p-3">
-                <InlineEmpty
-                  icon={Workflow}
-                  text="No routines yet. Create one with New routine, or import a bundle."
-                />
-              </div>
+              <PageEmpty
+                icon={Workflow}
+                title="No routines yet"
+                description="Describe a job once; a crew runs it on a schedule or a trigger."
+                primary={props.onNew ? { label: "New routine", onClick: props.onNew } : undefined}
+                cli="crewship routine init"
+              />
             ) : (
               <RoutinesDashboard
                 routines={displayed}
