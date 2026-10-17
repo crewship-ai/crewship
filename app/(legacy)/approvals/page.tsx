@@ -16,6 +16,10 @@ import { LEGACY_APPROVALS_DEFAULT, legacyApprovalsTarget } from "@/components/fe
  * `crewship open approvals` (cmd/crewship/cmd_open.go). Never delete it.
  * Who may decide is unchanged: the Inbox loads the approvals feed only for the
  * admin tier, and POST /api/v1/approvals/{id}/decide stays roleManage.
+ *
+ * It sits in the layout-less (legacy) group, not (dashboard): the dashboard
+ * layout prerenders only a spinner until the client session resolves, so the
+ * <noscript> fallback below never reached the exported approvals.html there.
  */
 function Redirect() {
   const router = useRouter()
