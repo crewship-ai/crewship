@@ -13,9 +13,7 @@ import { SidebarSearch } from "@/components/layout/sidebar-kit"
 import { SettingsCard, SettingsSummary, SummaryItem, selectionBar, selectionBarAction, selectionBarButton } from "@/components/features/settings/shared"
 import { MembersAttention } from "@/components/features/settings/members/members-attention"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { WorkspaceTile } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import {
   FACETS, byAttentionThenName, displayName, facetMatches, isEmptyWorkspace, isPersonal, membersOf, personMatches, personStatus,
@@ -108,8 +106,9 @@ export function PeoplePage() {
     const targets = workspaces.filter((w) => pickedWs.has(w.id) && isPersonal(w) && isEmptyWorkspace(w))
     let done = 0
     for (const w of targets) if (await actions.deleteWorkspace(w.id, w.slug, "")) done++
+    // Every one refused: the confirmation stays open (each refusal toasted).
+    if (targets.length > 0 && done === 0) throw new Error("nothing removed")
     setPickedWs(new Set())
-    setConfirmDelete(false)
     if (done) toast.success(`Removed ${done} empty personal ${done === 1 ? "account" : "accounts"}`)
   }
   const attention = people.filter((p) => personStatus(p) !== "active").length
@@ -234,20 +233,15 @@ export function PeoplePage() {
             Only empty ones can be removed — no crews, no agents, no runs. The person keeps signing in and keeps every workspace they belong to. Open one to turn it into a workspace instead.
           </p>
         </SettingsCard>
-        <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Remove {pickedWs.size} empty personal {pickedWs.size === 1 ? "account" : "accounts"}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                {workspaces.filter((w) => pickedWs.has(w.id)).map((w) => personalOwnerName(w, people)).join(", ")}. Nothing is in them. The people keep signing in and keep every workspace they belong to. This cannot be undone.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction variant="destructive" onClick={(e) => { e.preventDefault(); void deletePicked() }}>Remove</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <ConfirmDialog open={confirmDelete} onOpenChange={setConfirmDelete} destructive
+          title={`Remove ${pickedWs.size} empty personal ${pickedWs.size === 1 ? "account" : "accounts"}?`}
+          description={`${workspaces.filter((w) => pickedWs.has(w.id)).map((w) => personalOwnerName(w, people)).join(", ")}. This cannot be undone.`}
+          consequences={[
+            { tone: "lost", text: "The personal accounts picked. Only accounts with no crews, agents or data are removed." },
+            { tone: "kept", text: "The people keep signing in and keep every workspace they belong to." },
+          ]}
+          confirmLabel="Remove"
+          onConfirm={deletePicked} />
       </>
     )
   } else if (view === "access") {
@@ -358,8 +352,9 @@ function BulkPeopleBar({ people, workspaces, actions, busy, onClear }: {
   const suspendAll = async () => {
     let ok = 0
     for (const p of people) if (await actions.suspend(p.id, "Suspended from People & workspaces", "")) ok++
+    // Every one refused: the confirmation stays open (each refusal toasted).
+    if (ok === 0) throw new Error("nobody suspended")
     toast.success(`Suspended ${ok} of ${people.length}`)
-    setSuspending(false)
     onClear()
   }
   return (
@@ -382,18 +377,15 @@ function BulkPeopleBar({ people, workspaces, actions, busy, onClear }: {
       </Popover>
       <Button variant="outline" size="sm" className={selectionBarButton} onClick={() => setSuspending(true)}><Ban />Suspend</Button>
       <Button variant="ghost" size="icon-sm" className={cn(selectionBarButton, "w-8 px-0")} aria-label="Clear selection" onClick={onClear}><X className="h-3.5 w-3.5" /></Button>
-      <AlertDialog open={suspending} onOpenChange={setSuspending}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Suspend {people.length} {people.length === 1 ? "person" : "people"}?</AlertDialogTitle>
-            <AlertDialogDescription>{people.map(displayName).join(", ")} can no longer sign in; their sessions end now. Their access is kept for when you reactivate them.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={(e) => { e.preventDefault(); void suspendAll() }}>Suspend</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog open={suspending} onOpenChange={setSuspending} destructive
+        title={`Suspend ${people.length} ${people.length === 1 ? "person" : "people"}?`}
+        description={`${people.map(displayName).join(", ")} can no longer sign in.`}
+        consequences={[
+          { tone: "lost", text: "Their sessions end first, then sign-in is refused" },
+          { tone: "kept", text: "Their access is kept for when you reactivate them" },
+        ]}
+        confirmLabel={`Suspend ${people.length}`}
+        onConfirm={suspendAll} />
     </div>
   )
 }

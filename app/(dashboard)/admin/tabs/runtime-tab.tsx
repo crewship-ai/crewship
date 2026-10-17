@@ -1,12 +1,11 @@
 import React from "react"
 import { toast } from "@/lib/toast"
-import { RefreshCw, AlertTriangle, ChevronRight, ExternalLink, Container, ScrollText, Wrench, Trash2, Loader2 } from "lucide-react"
+import { RefreshCw, AlertTriangle, ChevronRight, ExternalLink, Container, ScrollText, Wrench, Trash2, Loader2, Server, Bot, Terminal, List, Clock, Undo2, Box, Archive } from "lucide-react"
 import { StatusDot } from "@/components/ui/status-badge"
 import { StatusPill } from "@/components/ui/status-pill"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem, inlineControl } from "@/components/features/settings/shared"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSaveBar, SettingsSegmented } from "@/components/features/settings/shared"
 import { RuntimeIcon, runtimeBrand } from "@/components/icons/runtime-icons"
 import { apiFetch } from "@/lib/api-fetch"
 import { withWs } from "@/lib/admin-workspace-query"
@@ -14,6 +13,7 @@ import { readApiError } from "@/lib/api-error"
 import { cn } from "@/lib/utils"
 import type { AgentsStatus, DaemonStatus } from "../types"
 import { formatUptime, goDurationSeconds } from "./overview-tab"
+import { AdminStrip } from "./admin-kit"
 
 /** One crew hardening control the runtime in use is measured not to deliver. */
 export interface RuntimeGap {
@@ -88,13 +88,15 @@ const RuntimeInventory = React.memo(function RuntimeInventory({
   return (
     <SettingsCard icon={Container} tint="var(--purple)"
       title="Container runtime"
-      description="The runtime Crewship drives. This is a report, not a setting."
-      actions={
-        <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={onCheckRuntime} disabled={runtimeChecking}>
-          <RefreshCw className={cn("mr-1.5 h-3 w-3", runtimeChecking && "animate-spin")} />
-          Re-detect
-        </Button>
-      }
+      description="This is a report, not a setting."
+      footer={runtimeAvailable && ordered.length > 0 ? (
+        // The honesty requirement (#1690): `container.provider` accepts only
+        // docker, apple or auto — nothing above is a choice the operator can
+        // make here (the CLI's mistake, #1689). These two levers are the real ones.
+        <span data-testid="runtime-switch-note" title="Crewship drives one runtime at a time. Docker-compatible runtimes share one API and the first socket that answers wins.">
+          Use another runtime with <code className="font-mono">DOCKER_HOST</code>; Apple Containers is chosen with <code className="font-mono">container.provider</code> in the server config.
+        </span>
+      ) : undefined}
     >
       {runtimeChecking && (
         <div className="flex items-center gap-2 border-b border-border px-4 py-3 text-xs text-muted-foreground">
@@ -108,18 +110,21 @@ const RuntimeInventory = React.memo(function RuntimeInventory({
             const brand = runtimeBrand(rt.runtime)
             return (
               <div key={rt.runtime + rt.socket} className="border-b border-border">
-                <div data-testid={`runtime-row-${rt.runtime}`} className="flex items-center gap-3 px-4 py-2.5">
+                {/* Row anatomy: the vendor's mark in the 28 px tile, the name
+                    with its state, and the socket and version on the right. */}
+                <div data-testid={`runtime-row-${rt.runtime}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
                   <span data-testid="runtime-icon" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border bg-surface-subtle">
                     <RuntimeIcon runtime={rt.runtime} className="h-4 w-4" />
                   </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-2 text-control">
-                      <span>{brand.label}</span>
-                      {rt.version && <span className="font-mono text-xs text-muted-foreground">{rt.version}</span>}
-                    </div>
-                    {rt.socket && <p className="mt-0.5 truncate font-mono text-micro text-muted-foreground-soft">{rt.socket}</p>}
+                  <div className="flex min-w-0 flex-[1_1_8rem] items-center gap-2 text-control font-medium">
+                    <span>{brand.label}</span>
+                    <StatusPill status={rt.in_use ? "COMPLETED" : "PENDING"} label={rt.in_use ? "In use" : "Detected"} />
                   </div>
-                  <StatusPill status={rt.in_use ? "COMPLETED" : "PENDING"} label={rt.in_use ? "In use" : "Detected"} />
+                  <span className="ml-auto min-w-0 truncate font-mono text-label text-muted-foreground">
+                    {rt.socket && <span>{rt.socket}</span>}
+                    {rt.socket && rt.version && " · "}
+                    {rt.version && <span>{rt.version}</span>}
+                  </span>
                 </div>
                 {/*
                   Attached to the row rather than collected into one notice at
@@ -148,18 +153,6 @@ const RuntimeInventory = React.memo(function RuntimeInventory({
             </p>
           )}
 
-          {/*
-            The honesty requirement (#1690). `container.provider` accepts only
-            docker, apple or auto — nothing above is a choice the operator can
-            make here, and saying otherwise is the mistake the CLI made (#1689).
-            These two levers are the real ones.
-          */}
-          <SettingsRow label="Use another runtime"
-            description={<span data-testid="runtime-switch-note" title="Crewship drives one runtime at a time. Docker-compatible runtimes share one API and the first socket that answers wins.">
-              Point <code className="font-mono">DOCKER_HOST</code> at its daemon; Apple Containers is chosen with <code className="font-mono">container.provider</code>.
-            </span>}>
-            <span />
-          </SettingsRow>
         </>
       )}
 
@@ -193,6 +186,12 @@ const RuntimeInventory = React.memo(function RuntimeInventory({
           )}
         </>
       )}
+      <SettingsRow lead={RefreshCw} label="Re-detect" description="Probe every runtime socket again">
+        <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={onCheckRuntime} disabled={runtimeChecking}>
+          <RefreshCw className={cn("mr-1.5 h-3 w-3", runtimeChecking && "animate-spin")} />
+          Re-detect
+        </Button>
+      </SettingsRow>
     </SettingsCard>
   )
 })
@@ -233,28 +232,30 @@ export const RuntimeTab = React.memo(function RuntimeTab(props: RuntimeTabProps)
 
   return (
     <div className="space-y-4">
-      <SettingsSummary slot="runtime-summary">
-          {runtimeAvailable !== null && (
-            inUse
-              ? <SummaryItem tone="success" n={runtimeLabel}>in use</SummaryItem>
-              : <SummaryItem tone="warn">{runtimeAvailable ? "Runtime detected, none in use" : "No runtime detected"}</SummaryItem>
-          )}
-          {daemon.data && (
-            <SummaryItem tone={daemon.data.status === "ok" ? "success" : "warn"}>
-              Daemon {daemon.data.status === "ok" ? "healthy" : daemon.data.status}{daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}
-            </SummaryItem>
-          )}
-          {agents.data && (
-            <SummaryItem tone={agents.data.error ? "danger" : undefined}>
-              {agents.data.running} running · {agents.data.idle} idle · {agents.data.queued} queued{agents.data.error ? ` · ${agents.data.error} in error` : ""}
-            </SummaryItem>
-          )}
-          {log.data && (
-            <SummaryItem tone={log.data.level !== log.data.baseline ? "warn" : undefined}>
-              Log {log.data.level}{log.data.expires_at ? ` until ${clock(log.data.expires_at)}` : ""}
-            </SummaryItem>
-          )}
-      </SettingsSummary>
+      {/* Four figures (Harbor 2 strip): what runs the agents, the host
+          daemon, the agents by state, and the log level right now. */}
+      <AdminStrip label="Runtime at a glance" items={[
+        {
+          slot: "runtime", icon: inUse ? <RuntimeIcon runtime={inUse.runtime} /> : <Container />, label: "Runtime",
+          value: runtimeAvailable === null ? "Checking…" : inUse ? runtimeLabel : runtimeAvailable ? "Detected · none in use" : "Not detected",
+        },
+        {
+          slot: "daemon", icon: <Server />, label: "Daemon",
+          value: daemon.data
+            ? `${daemon.data.status === "ok" ? "healthy" : daemon.data.status}${daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}`
+            : !workspaceId ? "In a workspace" : daemon.loading ? "Checking…" : "Not reported",
+        },
+        {
+          slot: "agents", icon: <Bot />, label: "Agents",
+          value: agents.data
+            ? `${agents.data.running} running · ${agents.data.idle} idle · ${agents.data.queued} queued${agents.data.error ? ` · ${agents.data.error} in error` : ""}`
+            : !workspaceId ? "In a workspace" : agents.loading ? "Checking…" : "Not reported",
+        },
+        {
+          slot: "log", icon: <Terminal />, label: "Log level",
+          value: log.data ? `${log.data.level}${log.data.expires_at ? ` until ${clock(log.data.expires_at)}` : ""}` : log.loading ? "Checking…" : "Not reported",
+        },
+      ]} />
 
       <RuntimeInventory {...props} />
 
@@ -354,26 +355,11 @@ function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string | n
   }
   return (
     <SettingsCard icon={ScrollText} tint="var(--info)" title="Logging"
-      description="Raise verbosity for a while; it drops back to the baseline by itself.">
-      <SettingsRow label="Level"
-        description={state ? (
-          <span data-slot="log-current" className="inline-flex items-center gap-1.5">
-            <StatusDot status={overridden ? "BLOCKED" : "COMPLETED"} />
-            {overridden
-              ? `Now ${state.level}${state.expires_at ? ` until ${clock(state.expires_at)}` : ""} · baseline ${state.baseline}`
-              : `Baseline ${state.baseline}`}
-            <span className="text-muted-foreground-soft">· set on the server (CREWSHIP_LOG_LEVEL)</span>
-          </span>
-        ) : "Not reported"}>
-        <SettingsSegmented label="Level" options={LEVELS.map((l) => ({ value: l, label: l }))} value={level} onChange={setDraftLevel} disabled={busy} />
-      </SettingsRow>
-      <SettingsRow label="Drop back after"
-        description={atBaseline ? "Only for a level other than the baseline" : `Then back to ${state?.baseline ?? "the baseline"} by itself`}>
-        <SettingsSegmented label="Duration" options={DURATIONS.map((d) => ({ value: d.seconds, label: d.label }))} value={ttl} onChange={setTtl} disabled={busy || atBaseline} />
-      </SettingsRow>
-      {history.data && history.data.length > 0 && (
-        <SettingsRow label="Recent changes" description="From the instance audit">
-          <ul className="grid gap-0.5 text-right text-label text-muted-foreground" data-slot="log-history">
+      description="Raise verbosity for a while; it drops back to the baseline by itself."
+      footer={history.data && history.data.length > 0 ? (
+        <div className="min-w-0">
+          <span>Recent changes</span>
+          <ul className="mt-0.5 grid gap-0.5" data-slot="log-history">
             {history.data.map((c) => (
               <li key={c.id}>
                 <span className="font-mono tabular-nums">{clock(c.created_at)}</span>
@@ -382,14 +368,26 @@ function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string | n
               </li>
             ))}
           </ul>
-        </SettingsRow>
-      )}
-      {/* The edit joins the page's Save bar. A level change is the edit; a
-          duration only means something with one. */}
-      <SettingsSaveBar label="Logging" count={changed ? (ttl !== DEFAULT_TTL ? 2 : 1) : 0} saving={busy}
-        onSave={apply} onDiscard={() => { setDraftLevel(null); setTtl(DEFAULT_TTL) }} />
+        </div>
+      ) : undefined}>
+      <SettingsRow lead={List} label="Level"
+        description={state ? (
+          <span data-slot="log-current" className="inline-flex flex-wrap items-center gap-1.5">
+            <StatusDot status={overridden ? "BLOCKED" : "COMPLETED"} />
+            {overridden
+              ? `Now ${state.level}${state.expires_at ? ` until ${clock(state.expires_at)}` : ""} · baseline ${state.baseline}`
+              : `Baseline from CREWSHIP_LOG_LEVEL: ${state.baseline}`}
+            {overridden && <span className="text-muted-foreground-soft">· set on the server (CREWSHIP_LOG_LEVEL)</span>}
+          </span>
+        ) : "Not reported"}>
+        <SettingsSegmented label="Level" options={LEVELS.map((l) => ({ value: l, label: l }))} value={level} onChange={setDraftLevel} disabled={busy} />
+      </SettingsRow>
+      <SettingsRow lead={Clock} label="Drop back after"
+        description={atBaseline ? "Only for a level other than the baseline" : "A raised level returns to the baseline by itself"}>
+        <SettingsSegmented label="Duration" options={DURATIONS.map((d) => ({ value: d.seconds, label: d.label }))} value={ttl} onChange={setTtl} disabled={busy || atBaseline} />
+      </SettingsRow>
       {state && overridden && (
-        <div className="flex items-center justify-end gap-2 px-4 py-2.5">
+        <SettingsRow lead={Undo2} label={`Back to ${state.baseline}`} description="Now, without waiting for the timer">
           {/* An action, not an edit: it commits on the spot. */}
           <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy}
             onClick={() => put({ level: state.baseline, ttl_seconds: 0 })
@@ -397,8 +395,12 @@ function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string | n
               .catch((e: Error) => toast.error(e.message))}>
             {busy && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Back to {state.baseline}
           </Button>
-        </div>
+        </SettingsRow>
       )}
+      {/* The edit joins the page's Save bar. A level change is the edit; a
+          duration only means something with one. */}
+      <SettingsSaveBar label="Logging" count={changed ? (ttl !== DEFAULT_TTL ? 2 : 1) : 0} saving={busy}
+        onSave={apply} onDiscard={() => { setDraftLevel(null); setTtl(DEFAULT_TTL) }} />
     </SettingsCard>
   )
 }
@@ -420,8 +422,10 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string | null }) {
   const [orphans, setOrphans] = React.useState<OrphanReport | null>(null)
   const [legacy, setLegacy] = React.useState<boolean | null>(null)
   const [result, setResult] = React.useState<string | null>(null)
-  const [confirmOpen, setConfirmOpen] = React.useState(false)
-  const [typed, setTyped] = React.useState("")
+  // The two confirmations (POP-02): removing the orphans found, and the
+  // Danger zone's every-runtime removal behind the typed word.
+  const [reapOpen, setReapOpen] = React.useState(false)
+  const [pruneOpen, setPruneOpen] = React.useState(false)
 
   React.useEffect(() => {
     let cancelled = false
@@ -462,16 +466,16 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string | null }) {
     }
     setBusy(null)
   }
+  /** Throws when refused, so the confirmation stays open. */
   const reap = async () => {
     setBusy("reap")
     const r = await post<OrphanReport>("/api/v1/admin/reap-orphan-containers?apply=true", "The containers were not removed")
-    if (r) {
-      const n = r.orphans.filter((o) => o.reaped).length
-      setOrphans(r)
-      setResult(`Removed ${n} of ${r.count} orphaned container${r.count === 1 ? "" : "s"}.`)
-      toast.success(`Removed ${n} container${n === 1 ? "" : "s"}`)
-    }
     setBusy(null)
+    if (!r) throw new Error("The containers were not removed")
+    const n = r.orphans.filter((o) => o.reaped).length
+    setOrphans(r)
+    setResult(`Removed ${n} of ${r.count} orphaned container${r.count === 1 ? "" : "s"}.`)
+    toast.success(`Removed ${n} container${n === 1 ? "" : "s"}`)
   }
   const pruneLegacy = async () => {
     setBusy("legacy")
@@ -483,30 +487,30 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string | null }) {
     }
     setBusy(null)
   }
+  /** Throws when refused, so the confirmation stays open with the word typed. */
   const pruneCrews = async () => {
     setBusy("prune")
     const r = await post<{ removed: string[]; count: number }>("/api/v1/admin/prune-crew-runtimes", "Crew runtimes were not removed")
-    if (r) {
-      setResult(`Removed the runtime of ${r.count} crew${r.count === 1 ? "" : "s"}. Images were kept.`)
-      toast.success("Crew runtimes removed")
-      setConfirmOpen(false)
-      setTyped("")
-    }
     setBusy(null)
+    if (!r) throw new Error("Crew runtimes were not removed")
+    setResult(`Removed the runtime of ${r.count} crew${r.count === 1 ? "" : "s"}. Images were kept.`)
+    toast.success("Crew runtimes removed")
   }
+  const noWs = workspaceId ? undefined : "Choose a workspace: this acts on one workspace's crews"
+  const found = orphans && !orphans.applied ? orphans.count : 0
 
   return (
     <>
     <SettingsCard icon={Wrench} tint="var(--warn)" title="Maintenance" description="Checking changes nothing. Each clean-up says what it removes first.">
-      <SettingsRow label="Orphaned containers"
+      <SettingsRow lead={Box} label="Orphaned containers"
         description="Still holding a token from before the master key was rotated">
         <span className="flex flex-wrap items-center justify-end gap-1.5">
-          <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy !== null || !workspaceId} title={workspaceId ? undefined : "Choose a workspace: this acts on one workspace's crews"} onClick={check}>
+          <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy !== null || !workspaceId} title={noWs} onClick={check}>
             {busy === "check" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Check
           </Button>
-          {orphans && !orphans.applied && orphans.count > 0 && (
-            <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs text-destructive" disabled={busy !== null || !workspaceId} title={workspaceId ? undefined : "Choose a workspace: this acts on one workspace's crews"} onClick={reap}>
-              {busy === "reap" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Remove {orphans.count}
+          {found > 0 && (
+            <Button variant="ghost" size="sm" className="h-7 px-2.5 text-xs text-destructive" disabled={busy !== null || !workspaceId} title={noWs} onClick={() => setReapOpen(true)}>
+              Remove {found}
             </Button>
           )}
         </span>
@@ -521,7 +525,7 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string | null }) {
         </ul>
       )}
       {legacy && (
-        <SettingsRow label="Legacy resources" description="Containers and volumes from an older naming scheme; nothing uses them">
+        <SettingsRow lead={Archive} label="Legacy resources" description="Containers and volumes from an older naming scheme; nothing uses them">
           <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy !== null} onClick={pruneLegacy} data-testid="legacy-remove">
             {busy === "legacy" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Remove
           </Button>
@@ -530,27 +534,37 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string | null }) {
       {result && <p className="px-4 py-2.5 text-label text-muted-foreground motion-safe:animate-in motion-safe:fade-in-0" role="status" data-slot="maintenance-result">{result}</p>}
     </SettingsCard>
 
+    {/* The endpoint acts on this workspace's crews (authedAdminWrite), so the
+        card says so rather than promising the whole instance. */}
     <SettingsDangerCard icon={AlertTriangle} title="Danger zone" description="Irreversible actions on this workspace's crews">
       <SettingsRow label="Remove every crew runtime"
-        description="Stops and deletes containers and volumes. Images stay cached, so crews rebuild fast.">
-        {confirmOpen
-          ? <Button variant="ghost" size="sm" className="h-7 px-2.5 text-xs" disabled={busy === "prune"} onClick={() => { setConfirmOpen(false); setTyped("") }}>Cancel</Button>
-          : <Button variant="outline" size="sm" className="h-7 border-destructive/40 px-2.5 text-xs text-destructive" disabled={busy !== null || !workspaceId} title={workspaceId ? undefined : "Choose a workspace: this acts on one workspace's crews"} onClick={() => setConfirmOpen(true)}>
-              <Trash2 className="mr-1.5 h-3 w-3" />Remove runtimes…
-            </Button>}
+        description="Type “remove” to confirm. Crews rebuild their containers on the next run.">
+        <Button variant="destructive" size="sm" className="h-7 px-2.5 text-xs" disabled={busy !== null || !workspaceId} title={noWs} onClick={() => setPruneOpen(true)}>
+          <Trash2 className="mr-1.5 h-3 w-3" />Remove every runtime…
+        </Button>
       </SettingsRow>
-      {confirmOpen && (
-        <div className="flex flex-wrap items-center gap-2 px-4 pb-3" data-slot="runtime-danger">
-          <Label htmlFor="prune-confirm" className="text-label font-normal text-muted-foreground">
-            Type <span className="font-mono text-foreground">remove</span> to delete every crew&apos;s containers and volumes
-          </Label>
-          <Input id="prune-confirm" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className={cn(inlineControl, "w-32 font-mono")} />
-          <Button variant="destructive" size="sm" className="h-7 px-2.5 text-xs" disabled={typed.trim().toLowerCase() !== "remove" || busy === "prune"} onClick={pruneCrews}>
-            {busy === "prune" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Remove every runtime
-          </Button>
-        </div>
-      )}
     </SettingsDangerCard>
+
+    <ConfirmDialog open={reapOpen} onOpenChange={setReapOpen} destructive
+      title={`Remove ${found} orphaned container${found === 1 ? "" : "s"}?`}
+      description="Containers left behind with a token from before the master key was rotated."
+      consequences={[
+        { tone: "lost", text: `${found} container${found === 1 ? "" : "s"} stopped and deleted` },
+        { tone: "kept", text: "Volumes and images stay" },
+      ]}
+      confirmLabel={`Remove ${found}`}
+      onConfirm={reap} />
+    <ConfirmDialog open={pruneOpen} onOpenChange={setPruneOpen} destructive
+      title="Remove every crew runtime?"
+      description="Stops and deletes the containers and volumes of every crew in this workspace."
+      consequences={[
+        { tone: "lost", text: "Every crew's containers and volumes in this workspace" },
+        { tone: "kept", text: "Images stay cached, so crews rebuild fast on their next run" },
+        { tone: "kept", text: "Crews, agents and their settings" },
+      ]}
+      typeToConfirm="remove"
+      confirmLabel="Remove every runtime"
+      onConfirm={pruneCrews} />
     </>
   )
 }

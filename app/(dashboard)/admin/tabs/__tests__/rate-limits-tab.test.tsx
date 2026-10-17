@@ -4,7 +4,7 @@
 // out-of-range value is blocked client-side (Save disabled, no PUT fired).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { within, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { RateLimitsTab } from "../rate-limits-tab"
 
 const h = vi.hoisted(() => ({ apiFetch: vi.fn() }))
@@ -66,7 +66,8 @@ describe("rendering", () => {
   it("shows an error state when the list fetch fails", async () => {
     h.apiFetch.mockImplementation(async () => fail(500))
     render(<RateLimitsTab workspaceId="ws1" />)
-    expect(await screen.findByText(/Failed to load rate limiters/)).toBeInTheDocument()
+    expect(await screen.findByText("Couldn’t load the rate limits")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
   })
 })
 
@@ -100,7 +101,7 @@ describe("save bar (PUT)", () => {
     })
     // The returned limiters are merged in: the bar is gone, the rows say which way they moved.
     await waitFor(() => expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull())
-    expect(screen.getByText(/looser · default 10/)).toBeInTheDocument()
+    expect(screen.getByText("Changed · default 10")).toBeInTheDocument()
   })
 
   it("Discard puts every edited field back", async () => {
@@ -186,13 +187,23 @@ describe("reading a limit", () => {
     expect(d).toHaveAttribute("title", "Login / token-refresh throttle. Read-only session polls do not count.")
   })
 
-  it("counts what differs from the defaults and shows only those on request", async () => {
-    h.apiFetch.mockResolvedValue(ok(LIST))
+  it("changed filter, reset restores default, save bar", async () => {
+    h.apiFetch.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") return ok(makeLimiter({ key: "login.lockout_threshold", group: "Login", display_name: "Account lockout threshold", unit: "attempts", value: 50, default: 50, overridden: false }))
+      return ok(LIST)
+    })
     render(<RateLimitsTab workspaceId="ws-1" />)
-    expect(await screen.findByText(/tighter · default 50/)).toBeInTheDocument()
-    expect(document.querySelector("[data-slot=settings-summary]")).toHaveTextContent("1 changed from default")
-    fireEvent.click(screen.getByRole("button", { name: "Changed" }))
+    // A changed limit says so and names its default; the toolbar counts it.
+    expect(await screen.findByText("Changed · default 50")).toBeInTheDocument()
+    const bar = document.querySelector("[data-slot=limits-toolbar]") as HTMLElement
+    expect(bar).toHaveTextContent("Instance-wide · applies without a restart")
+    fireEvent.click(within(bar).getByRole("button", { name: "Changed 1" }))
     expect(screen.queryByText("Auth endpoints")).toBeNull()
     expect(screen.getByText("Account lockout threshold")).toBeInTheDocument()
+    // Reset is an icon, and it puts the default back.
+    fireEvent.click(screen.getByRole("button", { name: "Reset Account lockout threshold to 50" }))
+    await waitFor(() => expect(screen.queryByText("Changed · default 50")).toBeNull())
+    // Nothing typed, so nothing waits on the save bar.
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
   })
 })

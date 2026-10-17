@@ -20,7 +20,7 @@ import {
   RECOVERY_SHEET_HREF, addRecipient, removeRecipient, saveBackupSettings, sendTestAlert, setRecoveryKit,
   useBackupSettings, useIncidents, useRecipients, useVaultKeys,
 } from "./use-backup-settings"
-import { perform, performSave } from "./use-backups-data"
+import { perform, performConfirm, performSave } from "./use-backups-data"
 import type { SectionCtx } from "./backups-console"
 
 /**
@@ -114,7 +114,7 @@ export function RecipientsList({ list, ctx, reload }: { list: BackupRecipient[];
         ]}
         confirmLabel="Remove" onConfirm={async () => {
           if (!removing) return
-          if (await perform(ctx.demo, () => removeRecipient(removing.id), "Key removed", "The key could not be removed")) reload?.()
+          if (await performConfirm(ctx.demo, () => removeRecipient(removing.id), "Key removed", "The key could not be removed")) reload?.()
         }} />
     </>
   )
@@ -151,7 +151,7 @@ function VaultList({ vault, ctx, reload }: { vault: VaultKeysResponse; ctx: Sect
           { tone: "kept", text: "A restore on a new server unlocks credentials without re-entering them." },
         ]}
         confirmLabel="Turn on" onConfirm={async () => {
-          if (await perform(ctx.demo, () => setRecoveryKit(true), "Recovery kit on for new instance backups", "Could not turn the recovery kit on")) reload()
+          if (await performConfirm(ctx.demo, () => setRecoveryKit(true), "Recovery kit on for new instance backups", "Could not turn the recovery kit on")) reload()
         }} />
     </>
   )

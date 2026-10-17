@@ -75,3 +75,50 @@ export function DrawerSection({ label, children }: { label: string; children: Re
     </section>
   )
 }
+
+/** One figure in an AdminStrip: a 30 px grey tile, a small label, the value. */
+export interface StripItem {
+  icon: React.ReactNode
+  label: string
+  value: React.ReactNode
+  /** Stable hook for tests and the e2e spec ("runtime", "daemon"). */
+  slot?: string
+}
+
+/**
+ * The row of figures above a section's cards (Harbor 2 strip): Runtime,
+ * Daemon, Agents and Log level on Runtime; services, channels and email on
+ * Notifications. The boxes wrap on a phone.
+ */
+export function AdminStrip({ items, label, className }: { items: StripItem[]; label: string; className?: string }) {
+  return (
+    <ul aria-label={label} data-slot="admin-strip" className={cn("flex flex-wrap gap-2", className)}>
+      {items.map((it) => (
+        <li key={it.label} data-strip={it.slot} className="flex min-w-0 flex-[1_1_9rem] items-center gap-2.5 rounded-card border border-border bg-card px-3 py-2.5">
+          <span aria-hidden className="grid size-[var(--control-md)] shrink-0 place-items-center rounded-lg bg-surface-subtle text-muted-foreground [&>svg]:size-4">
+            {it.icon}
+          </span>
+          <span className="min-w-0">
+            <small className="block text-micro text-muted-foreground">{it.label}</small>
+            <b className="block truncate text-control font-semibold text-foreground">{it.value}</b>
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** The 24 px tile a panel row's icon sits in; the open section's is in the accent. */
+export function AdminNavTile({ icon: Icon, active }: { icon: React.ElementType; active: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "grid h-6 w-6 shrink-0 place-items-center rounded-md border",
+        active ? "icon-tile" : "border-border bg-surface-subtle text-muted-foreground",
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+    </span>
+  )
+}

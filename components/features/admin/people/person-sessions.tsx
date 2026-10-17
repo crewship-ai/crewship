@@ -8,6 +8,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { readApiError } from "@/lib/api-error"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import type { AdminUser, AdminUserSessions } from "@/app/(dashboard)/admin/types"
 import { DrawerSection, ago } from "@/app/(dashboard)/admin/tabs/admin-kit"
 
@@ -19,6 +20,7 @@ export function UserSessions({ user, workspaceId, isMe, onChanged }: { user: Adm
   const [data, setData] = React.useState<AdminUserSessions | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState<string | null>(null)
+  const [confirmAll, setConfirmAll] = React.useState(false)
   const load = React.useCallback(async () => {
     try {
       const res = await apiFetch(adminUserURL(user.id, workspaceId, "sessions"))
@@ -31,16 +33,19 @@ export function UserSessions({ user, workspaceId, isMe, onChanged }: { user: Adm
   }, [user.id, workspaceId])
   React.useEffect(() => { void load() }, [load])
 
-  const post = async (tail: string, key: string, done: string) => {
+  /** True when it went through; a refusal is a toast and false. */
+  const post = async (tail: string, key: string, done: string): Promise<boolean> => {
     setBusy(key)
     try {
       const res = await apiFetch(adminUserURL(user.id, workspaceId, tail), { method: "POST" })
-      if (!res.ok) { toast.error(await readApiError(res, "That did not go through")); return }
+      if (!res.ok) { toast.error(await readApiError(res, "That did not go through")); return false }
       toast.success(done)
       await load()
       onChanged()
+      return true
     } catch {
       toast.error("That did not go through")
+      return false
     } finally {
       setBusy(null)
     }
@@ -132,10 +137,23 @@ export function UserSessions({ user, workspaceId, isMe, onChanged }: { user: Adm
       </DrawerSection>
       {data.sessions.some((s) => !s.current) && !isMe && (
         <Button variant="outline" size="sm" className="h-8 w-fit text-xs text-destructive" disabled={busy === "all"}
-          onClick={() => { if (window.confirm(`Sign ${user.full_name ?? user.email} out of every device? Their password stays the same.`)) void post("sessions/revoke-all", "all", "Signed out everywhere") }}>
+          onClick={() => setConfirmAll(true)}>
           <LogOut className="mr-1.5 h-3 w-3" />Sign out everywhere
         </Button>
       )}
+      {/* The shared confirmation (POP-02), not the browser's own dialog: it
+          says what ends and what stays, and a refusal keeps it open. */}
+      <ConfirmDialog open={confirmAll} onOpenChange={setConfirmAll} destructive
+        title={`Sign ${user.full_name ?? user.email} out of every device?`}
+        consequences={[
+          { tone: "lost", text: "Every browser session ends now; they sign in again" },
+          { tone: "kept", text: "Their password stays the same" },
+          { tone: "kept", text: "CLI tokens keep working until revoked" },
+        ]}
+        confirmLabel="Sign out everywhere"
+        onConfirm={async () => {
+          if (!(await post("sessions/revoke-all", "all", "Signed out everywhere"))) throw new Error("not signed out")
+        }} />
     </>
   )
 }

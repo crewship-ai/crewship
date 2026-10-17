@@ -61,7 +61,6 @@
  },
  "raw-radius": {
   "app/(dashboard)/admin/tabs/admin-kit.tsx": 2,
-  "app/(dashboard)/admin/tabs/overview-tab.tsx": 1,
   "components/ai-elements/message.tsx": 2,
   "components/features/admin/backups/backups-kit.tsx": 1,
   "components/features/admin/backups/backups-page.tsx": 1,

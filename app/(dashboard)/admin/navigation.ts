@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Server, Shield, Database, History, Bell, Gauge } from "lucide-react"
+import { LayoutDashboard, Users, Server, Shield, Database, History, Bell, Gauge, type LucideIcon } from "lucide-react"
 import type { TabKey } from "./types"
 
 /** The pages of Admin › Backups (/admin/backups?section=). */
@@ -16,10 +16,12 @@ export const BACKUP_SECTIONS: { key: BackupsSection; label: string }[] = [
 export interface NavItem {
   key: TabKey | "people" | "security-page" | "backups-page"
   label: string
-  icon: React.ElementType
+  icon: LucideIcon
   /** A nested page of its own (DrillPage), opened with a chevron like
    *  Settings › Crew links; the rest are sections here. */
   href?: string
+  /** The sentence under the section head: what the section is for. */
+  about?: string
 }
 
 interface NavSection {
@@ -43,9 +45,9 @@ export const sections: NavSection[] = [
   {
     label: "Infrastructure",
     items: [
-      { key: "providers", label: "Runtime", icon: Server },
-      { key: "notifications", label: "Notifications", icon: Bell },
-      { key: "ratelimits", label: "Limits", icon: Gauge },
+      { key: "providers", label: "Runtime", icon: Server, about: "What the server runs agents on, and how much it logs" },
+      { key: "notifications", label: "Notifications", icon: Bell, about: "Which notification services workspaces may use" },
+      { key: "ratelimits", label: "Limits", icon: Gauge, about: "Rate limits for the whole instance" },
     ],
   },
   {
@@ -58,7 +60,7 @@ export const sections: NavSection[] = [
     label: "Data",
     items: [
       { key: "backups-page", label: "Backups", icon: Database, href: "/admin/backups" },
-      { key: "retention", label: "Data retention", icon: History },
+      { key: "retention", label: "Data retention", icon: History, about: "How long each kind of data is kept" },
     ],
   },
 ]
@@ -115,6 +117,11 @@ export function initialBackupsSection(search: string): BackupsSection {
 /** What the sub-bar names after "Admin Console". */
 export function adminSectionLabel(tab: TabKey): string | undefined {
   return sections.flatMap((s) => s.items).find((i) => !i.href && i.key === tab)?.label
+}
+
+/** The section's nav item: its icon and the sentence for the section head. */
+export function adminSectionItem(tab: TabKey): NavItem | undefined {
+  return sections.flatMap((s) => s.items).find((i) => !i.href && i.key === tab)
 }
 
 /** The sidebar filtered by the search box. */
