@@ -15,29 +15,33 @@ test("PR browser contract subset", async ({ page }) => {
     await page.goto("/crews")
     await expect(page).toHaveURL(/\/crews/)
     // A cold embedded export hydrates after the workspace request. The CI trace
-    // showed the correct heading just after the former five-second deadline.
-    await expect(page.getByRole("heading", { name: "Crews & agents", exact: true })).toBeVisible({ timeout: 20_000 })
+    // showed the page just after the former five-second deadline. Harbor 2 has
+    // no "Crews & agents" roster: on a desktop /crews opens the last crew.
+    await expect(page.getByTestId("crew-header")).toBeVisible({ timeout: 20_000 })
   })
 
   await test.step("agent create dialog is reachable", async () => {
-    await page.goto("/crews")
-    await page.getByRole("button", { name: /^Agent$/ }).click()
-    await expect(page.getByRole("dialog")).toBeVisible()
-    await expect(page.getByText(/^New agent$/)).toBeVisible()
-    await page.getByRole("button", { name: /Cancel|Close/i }).first().click()
+    // New ▾ is the page's one create action; New agent joins the open crew.
+    await page.goto("/crews?crew=engineering")
+    await page.getByRole("button", { name: "New", exact: true }).click()
+    await page.getByRole("menuitem", { name: /^New agent/ }).click()
+    await expect(page.getByRole("dialog", { name: /^New agent in / })).toBeVisible()
+    await page.getByRole("dialog").getByRole("button", { name: /Cancel|Close/i }).first().click()
   })
 
   await test.step("create crew via wizard", async () => {
     await page.goto("/crews")
-    await page.getByRole("button", { name: /^Crew$/ }).click()
-    await expect(page.getByRole("dialog")).toBeVisible()
-    await page.getByPlaceholder("Engineering", { exact: true }).fill(`E2E Crew ${slug}`)
-    await page.getByPlaceholder("engineering", { exact: true }).fill(slug)
-    await page.getByRole("button", { name: /Continue/ }).click()
-    await page.getByRole("button", { name: /Start empty/ }).click()
-    // Purpose → team → review. Environment settings are optional in review.
-    await page.getByRole("button", { name: /Continue/ }).click()
-    await page.getByRole("button", { name: /Create crew/ }).click()
+    await page.getByRole("button", { name: "New", exact: true }).click()
+    await page.getByRole("menuitem", { name: /^New crew/ }).click()
+    const wizard = page.getByRole("dialog", { name: /^New crew/ })
+    await expect(wizard).toBeVisible()
+    await wizard.getByPlaceholder("Engineering", { exact: true }).fill(`E2E Crew ${slug}`)
+    await wizard.getByPlaceholder("engineering", { exact: true }).fill(slug)
+    // Name → Agents → Environment. An empty crew needs no provider.
+    await wizard.getByRole("radio", { name: /^Empty crew/ }).click()
+    await wizard.getByRole("button", { name: "Continue", exact: true }).click()
+    await wizard.getByRole("button", { name: "Continue", exact: true }).click()
+    await wizard.getByRole("button", { name: /Create crew/ }).click()
     await expect(page.getByRole("dialog")).not.toBeVisible()
 
     const workspaces = await (await page.request.get("/api/v1/workspaces")).json()
@@ -52,9 +56,10 @@ test("PR browser contract subset", async ({ page }) => {
 
   await test.step("cancel create-crew dialog", async () => {
     await page.goto("/crews")
-    await page.getByRole("button", { name: /^Crew$/ }).click()
-    await expect(page.getByRole("dialog")).toBeVisible()
-    await page.getByRole("button", { name: /Cancel|Close/i }).first().click()
+    await page.getByRole("button", { name: "New", exact: true }).click()
+    await page.getByRole("menuitem", { name: /^New crew/ }).click()
+    await expect(page.getByRole("dialog", { name: /^New crew/ })).toBeVisible()
+    await page.getByRole("dialog").getByRole("button", { name: /Cancel|Close/i }).first().click()
     await expect(page.getByRole("dialog")).not.toBeVisible()
   })
 
