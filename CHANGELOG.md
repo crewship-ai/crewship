@@ -10,6 +10,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 
+- Internal transactional recorder for explicit preset selection intent, fenced to live administrator authority and matching canonical managed grants. The helper does not enable a public apply route or change permissions.
+
+### Added
+
+- Administrative member-access reads include server-computed preset selection provenance. Saved intent remains separate from effective permissions; manual edits cannot forge selections and personal access responses omit this metadata. The new selection fields keep their API names in CLI YAML. OpenAPI reuses the existing grant-provenance shape without changing authority.
+
 ### Changed
 
 - OpenAPI administrative member-access documents share the unchanged project/routine variants and complete resource-right union. Primitive operations remain independent; no preset or permission behavior changes.

@@ -113,6 +113,62 @@
         ],
         "type": "object"
       },
+      "AccessPresetSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "definition_hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "project",
+              "routine"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "preset_id": {
+            "type": "string"
+          },
+          "resource_id": {
+            "type": "string"
+          },
+          "selected_at": {
+            "type": "string"
+          },
+          "selected_by": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "selected",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "resource_id",
+          "preset_id",
+          "version",
+          "level",
+          "definition_hash",
+          "selected_at",
+          "state"
+        ],
+        "type": "object"
+      },
       "ActiveRunList": {
         "items": {
           "properties": {
@@ -9831,6 +9887,41 @@
           "kind",
           "id",
           "operation"
+        ],
+        "type": "object"
+      },
+      "MemberAccessGrant": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "issuer_id": {
+            "type": "string"
+          },
+          "issuer_name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "operation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "operation",
+          "issuer_id",
+          "created_at",
+          "live"
         ],
         "type": "object"
       },
@@ -145383,39 +145474,7 @@
                   "properties": {
                     "grant_details": {
                       "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "created_at": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "issuer_id": {
-                            "type": "string"
-                          },
-                          "issuer_name": {
-                            "type": "string"
-                          },
-                          "kind": {
-                            "type": "string"
-                          },
-                          "live": {
-                            "type": "boolean"
-                          },
-                          "operation": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "id",
-                          "operation",
-                          "issuer_id",
-                          "created_at",
-                          "live"
-                        ],
-                        "type": "object"
+                        "$ref": "#/components/schemas/MemberAccessGrant"
                       },
                       "readOnly": true,
                       "type": "array"
@@ -145430,6 +145489,13 @@
                         "restricted"
                       ],
                       "type": "string"
+                    },
+                    "preset_selections": {
+                      "items": {
+                        "$ref": "#/components/schemas/AccessPresetSelection"
+                      },
+                      "readOnly": true,
+                      "type": "array"
                     },
                     "reissue": {
                       "items": {
@@ -145602,39 +145668,7 @@
                 "properties": {
                   "grant_details": {
                     "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "created_at": {
-                          "type": "string"
-                        },
-                        "id": {
-                          "type": "string"
-                        },
-                        "issuer_id": {
-                          "type": "string"
-                        },
-                        "issuer_name": {
-                          "type": "string"
-                        },
-                        "kind": {
-                          "type": "string"
-                        },
-                        "live": {
-                          "type": "boolean"
-                        },
-                        "operation": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "kind",
-                        "id",
-                        "operation",
-                        "issuer_id",
-                        "created_at",
-                        "live"
-                      ],
-                      "type": "object"
+                      "$ref": "#/components/schemas/MemberAccessGrant"
                     },
                     "readOnly": true,
                     "type": "array"
@@ -145649,6 +145683,13 @@
                       "restricted"
                     ],
                     "type": "string"
+                  },
+                  "preset_selections": {
+                    "items": {
+                      "$ref": "#/components/schemas/AccessPresetSelection"
+                    },
+                    "readOnly": true,
+                    "type": "array"
                   },
                   "reissue": {
                     "items": {
@@ -145693,39 +145734,7 @@
                   "properties": {
                     "grant_details": {
                       "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "created_at": {
-                            "type": "string"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "issuer_id": {
-                            "type": "string"
-                          },
-                          "issuer_name": {
-                            "type": "string"
-                          },
-                          "kind": {
-                            "type": "string"
-                          },
-                          "live": {
-                            "type": "boolean"
-                          },
-                          "operation": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "id",
-                          "operation",
-                          "issuer_id",
-                          "created_at",
-                          "live"
-                        ],
-                        "type": "object"
+                        "$ref": "#/components/schemas/MemberAccessGrant"
                       },
                       "readOnly": true,
                       "type": "array"
@@ -145740,6 +145749,13 @@
                         "restricted"
                       ],
                       "type": "string"
+                    },
+                    "preset_selections": {
+                      "items": {
+                        "$ref": "#/components/schemas/AccessPresetSelection"
+                      },
+                      "readOnly": true,
+                      "type": "array"
                     },
                     "reissue": {
                       "items": {

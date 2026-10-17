@@ -12,6 +12,9 @@ type Policy struct {
 	Rights []Right `json:"rights"`
 	// Read-only provenance, recomputed by the server; never trusted on writes.
 	GrantDetails []GrantDetail `json:"grant_details,omitempty"`
+	// Informational saved choices are administrative only. A pointer preserves
+	// the complete empty array for admins while omitting the field in OwnPolicy.
+	PresetSelections *[]PresetSelection `json:"preset_selections,omitempty" yaml:"preset_selections,omitempty"`
 	// Only these rights are deliberately reissued by the authenticated actor.
 	Reissue []Right `json:"reissue,omitempty"`
 }
@@ -97,6 +100,13 @@ func (s Store) policyIn(ctx context.Context, tx *sql.Tx, actor, user, workspace 
 	}
 	if err = rows.Close(); err != nil {
 		return Policy{}, err
+	}
+	if !own {
+		choices, err := presetSelectionsForPolicyIn(ctx, tx, p, workspace)
+		if err != nil {
+			return Policy{}, err
+		}
+		p.PresetSelections = &choices
 	}
 	return p, nil
 }
