@@ -35,7 +35,8 @@ test.describe("signed in", () => {
     await page.goto("/does-not-exist")
     await expect(page.getByText("This page doesn’t exist")).toBeVisible()
     await expect(page.locator("[data-slot=sidebar-container]")).toBeVisible()
-    await page.getByRole("button", { name: "Search" }).click()
+    // The rail has its own Search; the not-found state's is in the page.
+    await page.getByRole("main").getByRole("button", { name: "Search" }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
   })
 

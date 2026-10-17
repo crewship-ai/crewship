@@ -13,6 +13,7 @@ import { z } from "zod"
 import { AUTH_EVENT, AUTH_CHANNEL, broadcastSignOut } from "@/lib/api-fetch"
 import { serverFetch } from "@/lib/server-base"
 import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
+import { isKnownAppPath } from "@/lib/app-routes"
 
 const sessionSchema = z.object({
   user: z.object({
@@ -187,6 +188,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let redirected = false
     const goLoginExpired = () => {
       if (redirected) return
+      // A path the app has no page for shows the not-found state, signed in
+      // or not (app/(dashboard)/layout.tsx). The static-export backend serves
+      // the dashboard there, whose first requests answer 401 for a visitor
+      // without a session — that is not an expired session, and the login
+      // page is not where an unknown link should lead.
+      if (!isKnownAppPath(window.location.pathname)) return
       redirected = true
       purgeOtherE2Recovery(null)
       const { pathname, search } = window.location
