@@ -54,6 +54,11 @@ describe("coarse pointer targets", () => {
     for (const role of ["button", "tab", "menuitem", "option", "combobox"]) expect(coarse).toContain(`[role="${role}"]`)
   })
 
+  it("links laid out as boxes (card links, list rows) are 44px tall too; inline text links are unaffected", () => {
+    const rule = /:where\(([^{]*)\)[^{]*\{\s*min-height:\s*44px;/.exec(coarse)
+    expect(rule?.[1]).toContain("a[href]")
+  })
+
   it("buttons are at least 44px wide, but checkboxes, radios and switches are not stretched", () => {
     expect(coarse).toMatch(/min-width:\s*44px;/)
     expect(coarse).toMatch(/:not\(\[role="checkbox"\], \[role="radio"\], \[role="switch"\]\)/)
