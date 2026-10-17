@@ -9,11 +9,34 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+
+### Changed
+
+- OpenAPI administrative member-access documents reuse the existing agent-right shape as a named schema. Accepted operations and runtime permissions are unchanged.
+
+
+### Added
+
+- Administrative API and CLI catalog for immutable v1 project and routine access presets. Listing preserves API field names in structured formats and does not grant permissions or enable preset application.
+- Index preset selection ownership, resources and selectors for parent cleanup and scoped backup lookups.
+
+- **Revoked project data stays hidden during connection errors.** Shared project details, milestones and issue deletion previews require a fresh successful read after access is refused; cached responses and late saves cannot restore the old view.
+
+- Guests with explicit project Read+Manage can open a known-project management link without List. The screen reuses reviewed metadata/milestone forms, preserves drafts during temporary workspace-directory loss, and optionally previews a known issue for confirmed deletion with the separate Delete issues share, without issue discovery or broader grants.
+
+- **Participants can start a conversation in an empty shared chat.** A current authorized execution profile confirms the existing chat without a creator-only create request; every send still rechecks access and refused sends keep the draft.
+
+- **Proposal comments address the chat agent explicitly.** “Send comment to agent” now includes its canonical mention so shared chats trigger the requested reply; rejected sends keep the comment draft.
+
+- **Guests can connect their CLI from the account menu.** Connect CLI now opens the existing browser pairing dialog for Guest accounts after access loads, retaining their current grants. Guest menus also avoid an unavailable system-version request.
 - ⚠️ **Behaviour change: enabling privileged runtime access requires an instance administrator.** Workspace OWNER/ADMIN rights alone no longer enable `allow_privileged_credentials`. Scoped CLI tokens also need `instance:admin`. Workspace administrators may still disable the opt-in; existing privileged containers require separate review and recreation.
+
+- **Protected chat runs wait for confirmed execution results after their observer disconnects.** Chat preserves partial replies and leaves the run admitted for retained-output reconciliation instead of recording a false failure or cancellation.
 
 - **Guest CLI pairing accepts verified browser sessions.** Pairing start and poll now pass the restricted route gate only for interactive sessions. CLI bearer callers remain forbidden; redemption retains the same current Guest grants as browser CLI token creation and rejects logout, revocation or suspension.
 
 - Chat shows advisory configured-model payer, budget and gate details above the composer after a current viewer/chat profile check.
+- **Crews can opt into whole-run approval before agent execution.** The existing policy API and `crewship policy set --whole-run-approval` enable a real `agent_run` rule. Chat preflight and runtime use the same crew-scoped rule, while default behavior and autonomy modes remain unchanged.
 - **Decision drafts retain focus during access rechecks.** Typing and caret position survive temporary verification outages; sending waits for verified access and explicit source-version review, while uncertain submitted responses remain locked for exact retry.
 - **Withdrawn chat approval sources cannot be rejected through a stale Inbox ID.** Canonical decisions now retain the original chat generation and current operator audience; authorized refusal still works when only the original requester loses access.
 
@@ -28,6 +51,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Shared issue searches visit only projects with live List grants.** Search and counts resolve current grant authority before reading issues, avoiding scans of hidden workspace issues. Issuer demotion/suspension and Read/Contribute without List return no list results.
 
 - **Guests can search shared issue titles and identifiers in UI and CLI.** Filtering and total counts retain live project grants; hidden descriptions, comments and unrelated projects are excluded. A new search starts from the first page in the UI. Creation confirmation remains visible when the filter hides the new issue.
+
+- **Shared issue searches explain temporary rate limits.** The browser keeps results and search drafts, pauses search polling and disables repeated requests until the retry interval ends. A definitive access denial discards old results so later throttled retries cannot restore them. CLI commands print retry guidance, exit 6 and require an explicit retry.
 - **Reloading a shared routine draft now discards local edits even when its saved revision has not changed.** A failed reload retains the local edits, and background refreshes of the same revision keep them.
 - **Agent images and charts appear in chat.** Authorized PNG, JPEG and WebP outputs from the reply’s run render inline with a filename caption, alt text and byte version. Access rechecks remove unavailable images; SVG and disguised active content stay outside the viewer.
 - **Decision reply drafts remain scoped to their viewer and source.** Reload restores an uncertain reply with its original retry key; definitive access loss removes protected recovery, and paginated source lists reconcile as complete snapshots.
@@ -78,6 +103,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - ⚠️ **Behaviour change:** Page shares become inactive when their issuer is suspended or restricted as a Guest anywhere. Existing share metadata remains visible to Page administrators with an account-status explanation.
 - ⚠️ Tokens with limited scopes can no longer create successor tokens or pairing codes. Use an interactive sign-in to create credentials; trusted full-role token creation remains available.
+
+- Internal foundations preserve explicit versioned resource-preset choice provenance through backup and fork restore. Existing grants remain unchanged and no preset selector/API/CLI is enabled yet; immutable v1 bundles, managed-edit invalidation and empty migration state prepare #3271.
+- Internal preset planning reads one live-authority snapshot and explains exact bundle changes, preserved issuers and independent consequences without changing any grants. Empty grant collections remain JSON arrays; unavailable unrelated historical resource grants remain preserved without granting authority. Confirmation checksums do not authorize access; public preview and application remain disabled pending the next #3271 slices.
 
 - Guests with an explicit routine View share can inspect its definition without an execution runtime or agent Run grants. Stored Run grants retain their existing invocation-only disclosure; View does not expose another person’s private runs. UI, CLI and access explanations use the same live issuer policy.
 - Guests with explicit project Read and Manage shares can edit shared project names and descriptions. UI and CLI preserve review snapshots and refuse conflicting saves; private project metadata and unrelated operations remain inaccessible.
@@ -407,6 +435,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Shared project management now has a verified CLI/API contract.** Real-router acceptance checks known-project Read+Manage without List, unrelated-client isolation, metadata and milestones, separate issue deletion, narrow credentials, active work, conflicts, audit rollback and live issuer revocation. Existing rights remain independent.
+
+
 - **Required Go race checks run in smaller parallel groups.** The API suite is split into four complete test partitions and the remaining race-tested packages into two balanced groups. Every partition remains required, with coverage evidence, distinct timing artifacts and the existing timeout and aggregate budget checks (#2886).
 
 - Live chat demo scripts now require `--state-dir` or `CREWSHIP_CHAT_DEMO_DIR` for private credentials, outside the checkout. The fleet-watch example requires `CREWSHIP_FLEET_ROOT` instead of assuming a workstation checkout path. Existing demos can reuse their state by selecting its current directory.
@@ -414,6 +445,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Public documentation now separates product contracts from internal working records and prototypes. Start at `docs/README.md` for guides, specifications and decisions; contributor instructions remain in `AGENTS.md`. Assistant-specific workstation files are ignored and rejected by the tracked-path CI guard. Public builds need no private context checkout. (#2778)
 
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
+
+- **Shared Guest issue searches have a bounded rate budget.** Browser sessions and CLI tokens share account/workspace and project budgets, including empty searches and pagination. Temporary limits return 429 with retry guidance; existing project audiences, counts and detail permissions are preserved.
+- Cap shared issue search limiter memory globally at 32768 lazy audiences, retaining active budgets and reclaiming only safely expired entries.
 
 ### Fixed
 
@@ -860,6 +894,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Keep daily-compaction, run-count and wake-scheduler test fixtures valid across clock boundaries, and avoid a false CI error annotation in route-parity diagnostics.
 - Rotation grace reconciliation checks exact active rotation IDs, including overlapping rotations. Operator-model evidence is shown only when it matches the current value; the provenance user foreign key has its own index.
+- **Credential isolation documentation now states the runtime boundary accurately.** Directory ownership permits the intended agent to read its secrets; it does not isolate processes sharing UID 1001. Authenticated RBAC and ten-workspace acceptance tests verify API authority, with filesystem and mount isolation requiring separate runtime evidence.
+
 - **Keeper documentation matches the code.** `docs/guides/keeper.mdx`, `architecture.mdx` and four sibling pages no longer claim more containment than exists: Keeper is off by default, gates two sidecar routes for `SECRET` credentials only, replies with a decision (never a value), L4's human step is the default profile rather than a law (`--escalate-from`), the behaviour watchdog is sampled detection that cannot undo a call, and a ruled escalation does not run anything. Two product defects the audit surfaced are filed as #2574 and #2575. (#2242)
 - OpenAPI: the 53 component schemas no operation referenced are removed (547 → 494) behind a reachability gate, and ten routes now reference the accurate schema that had been orphaned (`SkillDetail`, `HireResponse`, `AgentCredentialList`, `LabelList`, `CredentialPage`, `RunResult`, `BulkReplayResult`, `DryRunResult`); DELETE routes that read a body now document it. (#1849)
 - The `@sentry/nextjs` test-load crash is fixed upstream in 10.74.0 (getsentry/sentry-javascript#23789); the ceiling had already left `pnpm.overrides`, and the `vitest.config.ts` alias's docs now say it stays on its own merits. (#2235)

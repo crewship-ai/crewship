@@ -522,3 +522,11 @@ Unrelated edits do not reactivate shares from an inactive issuer.
 Use [`share`](./share) and [`unshare`](./unshare) to change an existing Guest's
 individual routine or project operations without replacing unrelated rights.
 The versioned member-policy commands remain available for complete policies.
+
+### List resource access presets
+
+```bash
+crewship workspace member access presets --format json
+```
+
+Lists immutable definitions and hashes for the selected workspace using the administrative API catalog. JSON, YAML and NDJSON preserve the complete definitions and API field names; the table lists each explicit level. No permissions change. Preset application remains a later operation.

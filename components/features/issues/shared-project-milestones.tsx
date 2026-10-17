@@ -1,5 +1,6 @@
 "use client"
 
+import { useRestrictedProjection } from "@/hooks/use-restricted-projection"
 import { useId, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { z } from "zod"
@@ -19,18 +20,23 @@ export function SharedProjectMilestones({ workspaceId, projectId, userId }: { wo
   const [offset, setOffset] = useState(0)
   const key = ["restricted-project-milestones", userId, workspaceId, projectId]
   const base = `/api/v1/workspaces/${requireApiPathSegment(workspaceId)}/restricted-projects/${requireApiPathSegment(projectId)}/milestones`
-  const query = useQuery({ queryKey: [...key, offset], retry: false, refetchInterval: 15_000,
+  const projection = useRestrictedProjection<{ items: Milestone[]; total: number; canManage: boolean }>(JSON.stringify([...key, offset]))
+  const query = useQuery({ queryKey: [...key, offset], retry: false, staleTime: 0, refetchInterval: 15_000, refetchOnMount: "always",
     queryFn: async ({ signal }) => {
+      const read = projection.read(signal)
       const response = await apiFetch(`${base}?limit=100&offset=${offset}`, { signal })
-      if (!response.ok) throw new MilestoneReadError(response.status)
+      if (!response.ok) { read.reject(response.status); throw new MilestoneReadError(response.status) }
       const items = z.array(schema).parse(await response.json())
       if (items.some(item => item.project_id !== projectId)) throw new Error("Milestone access could not be confirmed.")
       const totalHeader = response.headers.get("X-Total-Count")
       const total = totalHeader !== null && /^\d+$/.test(totalHeader) ? Number(totalHeader) : NaN
       if (!Number.isSafeInteger(total) || total < 0) throw new Error("Milestone pagination could not be confirmed.")
-      return { items, total, canManage: response.headers.get("X-Can-Manage") === "true" }
+      const confirmed = { items, total, canManage: response.headers.get("X-Can-Manage") === "true" }
+      read.accept(confirmed)
+      return confirmed
     },
   })
+  const visible = projection.value
   const lost = query.error instanceof MilestoneReadError && [401, 403, 404].includes(query.error.status)
   const refreshed = () => { void client.invalidateQueries({ queryKey: key }) }
   return <section className="space-y-3 border-t pt-3" aria-label="Shared project milestones">
@@ -38,11 +44,11 @@ export function SharedProjectMilestones({ workspaceId, projectId, userId }: { wo
     <Button variant="outline" onClick={() => void query.refetch()}>Refresh milestones</Button>
     {query.isPending && <p role="status">Loading milestones…</p>}
     {query.isError && <p role="alert">{query.error.message}</p>}
-    {!lost && query.data && <>
-      {query.data.canManage && <MilestoneForm key={`${userId}:${workspaceId}:${projectId}:new`} base={base} disabled={query.isError} onSaved={refreshed} />}
-      {query.data.items.length === 0 && <p className="text-sm text-muted-foreground">No milestones on this page.</p>}
-      {query.data.items.map(item => <MilestoneCard key={item.id} item={item} base={base} disabled={query.isError} onSaved={refreshed} />)}
-      <div className="flex gap-2"><Button variant="outline" disabled={offset === 0 || query.isError} onClick={() => setOffset(Math.max(0, offset - 100))}>Previous milestones</Button><Button variant="outline" disabled={offset + 100 >= query.data.total || query.isError} onClick={() => setOffset(offset + 100)}>Next milestones</Button></div>
+    {!lost && visible && <>
+      {visible.canManage && <MilestoneForm key={`${userId}:${workspaceId}:${projectId}:new`} base={base} disabled={query.isError} onSaved={refreshed} />}
+      {visible.items.length === 0 && <p className="text-sm text-muted-foreground">No milestones on this page.</p>}
+      {visible.items.map(item => <MilestoneCard key={item.id} item={item} base={base} disabled={query.isError} onSaved={refreshed} />)}
+      <div className="flex gap-2"><Button variant="outline" disabled={offset === 0 || query.isError} onClick={() => setOffset(Math.max(0, offset - 100))}>Previous milestones</Button><Button variant="outline" disabled={offset + 100 >= visible.total || query.isError} onClick={() => setOffset(offset + 100)}>Next milestones</Button></div>
     </>}
   </section>
 }
