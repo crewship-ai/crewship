@@ -43,7 +43,7 @@ import type { IntegrationsSpace } from "./spaces"
 import type { ChannelKindFilter } from "./channels-space"
 
 export const SPACE_META: Record<IntegrationsSpace, { label: string; icon: LucideIcon; search: string; add: string }> = {
-  tools: { label: "Tools", icon: Grid3x3, search: "Search apps…", add: "Connect an app" },
+  tools: { label: "Tools", icon: Grid3x3, search: "Search apps and tools…", add: "Connect an app" },
   triggers: { label: "Triggers", icon: Play, search: "Search triggers, routines, agents…", add: "New trigger" },
   channels: { label: "Channels", icon: MessageSquare, search: "Search channels…", add: "Add channel" },
   webhooks: { label: "Webhooks", icon: Webhook, search: "Search webhooks…", add: "Add webhook" },

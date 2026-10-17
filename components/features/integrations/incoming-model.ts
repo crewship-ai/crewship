@@ -16,6 +16,8 @@ export interface IncomingTarget {
   color?: string | null
   crew_id?: string
   webhook_secret_set?: boolean
+  /** Routines: the published version a trigger can pin. */
+  version?: number
 }
 export interface IncomingEndpoint {
   id: string
