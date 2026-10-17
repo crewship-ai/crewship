@@ -21,7 +21,7 @@ import {
   ACCESS_PROFILES, AREAS, ASSIGNABLE_ROLES, CAPABILITY_HINT, CAPABILITY_SHORT, ROLE_LABEL, ROLE_SUMMARY_BY_ROLE,
   aboveRole, accessProfile, exceptionCount, roleChoices, type Member,
 } from "./members-model"
-import { AREA_ICON, CAPABILITY_ICON, MemberDialogIcon, RestrictedPill, RolePill } from "./member-bits"
+import { AREA_ICON, CAPABILITY_ICON, ConfirmWhen, MemberDialogIcon, RestrictedPill, RolePill } from "./member-bits"
 import { joinedDate } from "./people-table"
 
 export { RolePill } from "./member-bits"
@@ -53,6 +53,7 @@ export function MemberDetail({
   onRevoke,
   revealEnabled = null,
   onAccessSaved,
+  inPeek = false,
 }: {
   member: Member
   workspaceId: string
@@ -74,6 +75,9 @@ export function MemberDetail({
   revealEnabled?: boolean | null
   /** A saved access mode changes the roster's Restricted marker; reload it. */
   onAccessSaved?: () => void
+  /** Inside the Peek, whose header already names the person: keep the
+   *  pills, drop the avatar and name. */
+  inPeek?: boolean
 }) {
   const label = personLabel(member.user.full_name, member.user.email)
   const isSelf = currentUserId === member.user.id
@@ -88,6 +92,13 @@ export function MemberDetail({
 
   return (
     <div className="space-y-4" data-slot="member-detail" aria-label={`Member details: ${label}`} role="region">
+      {inPeek ? (
+        <p className="flex flex-wrap items-center gap-1.5" data-slot="member-profile">
+          <RolePill role={member.role} />
+          <RestrictedPill mode={member.access_mode} />
+          <span className="inline-flex h-[22px] items-center rounded-md bg-surface-subtle px-2 font-mono text-micro text-muted-foreground">joined {joinedDate(member.created_at)}</span>
+        </p>
+      ) : (
       <div className="flex items-start gap-3.5 pr-8" data-slot="member-profile">
         <UserAvatar name={member.user.full_name} email={member.user.email} src={member.user.avatar_url} className="h-11 w-11" textClassName="text-sm" />
         <div className="min-w-0 flex-1">
@@ -103,6 +114,7 @@ export function MemberDetail({
           </p>
         </div>
       </div>
+      )}
 
       {above.length > 0 && !locked && (
         <div role="status" data-slot="member-above-role" className="flex items-start gap-2.5 rounded-xl border border-warn/40 bg-warn/[0.07] px-3.5 py-3">
@@ -113,11 +125,11 @@ export function MemberDetail({
               {above.map((c) => CAPABILITY_LABELS[c].en).join(", ")}. Raise the role, or turn {above.length === 1 ? "it" : "them"} off.
             </p>
             <div className="mt-2.5 flex flex-wrap gap-1.5">
-              <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy} onClick={() => onRevoke(member, above)}>
+              <Button variant="outline" size="sm" className="px-2.5 text-xs" disabled={busy} onClick={() => onRevoke(member, above)}>
                 Turn {above.length === 1 ? CAPABILITY_SHORT[above[0]] ?? "it" : "them"} off
               </Button>
               {choices.includes("MANAGER") && (
-                <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setPendingRole("MANAGER")}>Make Manager</Button>
+                <Button variant="outline" size="sm" className="px-2.5 text-xs" onClick={() => setPendingRole("MANAGER")}>Make Manager</Button>
               )}
             </div>
           </div>
@@ -305,6 +317,7 @@ function RoleControl({ member, choices, isSelf, label, onChangeRole, pendingRole
               <span className="font-medium">{ROLE_LABEL[member.role] ?? member.role}</span> to <span className="font-medium">{pendingRole ? ROLE_LABEL[pendingRole] ?? pendingRole : ""}</span>?
               {" "}What they can do stays as it is.
             </AlertDialogDescription>
+            <ConfirmWhen when="now" />
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="h-7 text-xs" disabled={saving}>Cancel</AlertDialogCancel>
@@ -339,7 +352,7 @@ function RemoveMember({ member, label, onConfirm }: { member: Member; label: str
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 border-destructive/40 px-2.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={removing}>
+        <Button variant="outline" size="sm" className="gap-1.5 border-destructive/40 px-2.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={removing}>
           <Trash2 className="h-3 w-3" />
           Remove member
         </Button>

@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { ChevronDown, Download, Mail, MessageSquare, Settings as SettingsIcon, Users, X } from "lucide-react"
+import { ChevronDown, Download, Mail, MessageSquare, Terminal, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -14,7 +14,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { personLabel } from "@/components/ui/user-avatar"
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
+import { Peek } from "@/components/ui/peek"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -22,9 +22,10 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
+import { DrillNavItem, DrillNavSection } from "@/components/layout/drill-page"
+import { SettingsDrillPage } from "@/components/features/settings/settings-drill-page"
 import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
-import { SettingsCard, SettingsPageHead, SettingsSummary, SummaryItem, selectionBar, selectionBarButton } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsSummary, SummaryItem, selectionBar, selectionBarButton } from "@/components/features/settings/shared"
 import { PageError } from "@/components/layout/page-state"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { HIGH_STAKES_CAPABILITIES, useMemberCapabilities } from "@/components/admin/member-capabilities"
@@ -41,7 +42,6 @@ import {
   ROLE_LABEL,
   aboveRole,
   accessProfile,
-  activeFilterCount,
   byRoleThenName,
   memberMatches,
   membersUrlQuery,
@@ -55,8 +55,8 @@ import {
 import { useMembers } from "./use-members"
 import { useAccessWrites } from "./use-access"
 import { MemberDetail } from "./member-detail"
-import { AREA_ICON, ROLE_ICON } from "./member-bits"
-import { InvitationList, PeopleList, PeopleTable, type PeopleGroup } from "./people-table"
+import { AREA_ICON, ConfirmWhen, ROLE_ICON } from "./member-bits"
+import { InvitationList, PeopleList, PeopleTable, joinedDate, type PeopleGroup } from "./people-table"
 import { MembersAttention, RevealCard, membersFindings } from "./members-attention"
 import { useInvitations, useRevealPolicy } from "./use-invitations"
 
@@ -67,6 +67,8 @@ interface Confirm {
   body: React.ReactNode
   action: string
   danger?: boolean
+  /** When the change lands: written on confirm, or drafted until Save. */
+  when: "now" | "save"
   run: () => Promise<unknown> | void
 }
 
@@ -201,13 +203,13 @@ export function MembersPage() {
   // draft. Everything else is undone by Discard.
   const askHighStakes = (title: string, body: React.ReactNode, action: string, gains: CapabilityValue[], run: () => void) => {
     if (gains.length === 0) { run(); return }
-    setConfirm({ title, body, action, danger: true, run })
+    setConfirm({ title, body, action, danger: true, when: "save", run })
   }
 
   const onCell = (m: Member, cap: CapabilityValue, next: boolean) => {
     const label = CAPABILITY_LABELS[cap].en
     askHighStakes(`Grant ${label}?`,
-      <><span className="font-medium text-foreground">{nameOf(m)}</span> will be able to: {CAPABILITY_LABELS[cap].description} It takes effect when you save.</>,
+      <><span className="font-medium text-foreground">{nameOf(m)}</span> will be able to: {CAPABILITY_LABELS[cap].description}</>,
       `Grant ${label}`, next && HIGH_STAKES_CAPABILITIES.has(cap) ? [cap] : [],
       () => stage([m], (cur) => (next ? [...cur, cap] : cur.filter((c) => c !== cap))))
   }
@@ -218,7 +220,7 @@ export function MembersPage() {
   const onProfile = (m: Member, preset: CapabilityBundle) => {
     const gains = highStakesGains([m], CAPABILITY_BUNDLES[preset])
     askHighStakes(`Set ${nameOf(m)} to ${PROFILE_LABEL[preset]}?`,
-      <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}. It takes effect when you save.</>,
+      <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}.</>,
       `Set to ${PROFILE_LABEL[preset]}`, gains, () => stage([m], () => [...CAPABILITY_BUNDLES[preset]]))
   }
 
@@ -232,13 +234,13 @@ export function MembersPage() {
       const people = selectedPeople
       const gains = highStakesGains(people, CAPABILITY_BUNDLES[preset])
       askHighStakes(`Set ${people.length} people to ${PROFILE_LABEL[preset]}?`,
-        <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}. It takes effect when you save.</>,
+        <>This grants high-stakes access: {gains.map((c) => CAPABILITY_LABELS[c].en).join(", ")}.</>,
         "Apply profile", gains, () => { stage(people, () => [...CAPABILITY_BUNDLES[preset]]); clearSelection() })
     },
     cap: (cap: CapabilityValue, next: boolean) => {
       const people = selectedPeople
       askHighStakes(`Grant ${CAPABILITY_LABELS[cap].en} to ${people.length} people?`,
-        <>{CAPABILITY_LABELS[cap].description} It takes effect when you save.</>,
+        <>{CAPABILITY_LABELS[cap].description}</>,
         "Grant", next && HIGH_STAKES_CAPABILITIES.has(cap) ? [cap] : [],
         () => { stage(people, (cur) => (next ? [...cur, cap] : cur.filter((c) => c !== cap))); clearSelection() })
     },
@@ -251,6 +253,7 @@ export function MembersPage() {
           Their capabilities do not change.
         </>,
         action: "Change role",
+        when: "now",
         run: async () => { await access.changeRole(eligible, r); clearSelection() },
       })
     },
@@ -371,6 +374,12 @@ export function MembersPage() {
     onInvited: () => setFilters({ status: "invited" }),
   }) : null
 
+  // J / K in the Peek walk the people in the order the roster shows them.
+  const order = groups.flatMap((g) => g.people)
+  const at = opened ? order.findIndex((m) => m.user.id === opened.user.id) : -1
+  const prev = at > 0 ? order[at - 1] : null
+  const next = at >= 0 && at < order.length - 1 ? order[at + 1] : null
+
   const addMember = isAdmin && workspaceId ? <InviteMemberDialog workspaceId={workspaceId} onInvited={roster.refresh} /> : null
   const cardActions = (
     <>
@@ -384,7 +393,7 @@ export function MembersPage() {
           ))}
         </div>
       )}
-      <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={exportCsv} disabled={shown.length === 0}>
+      <Button variant="outline" size="sm" className="px-2.5 text-xs" onClick={exportCsv} disabled={shown.length === 0}>
         <Download className="mr-1.5 h-3 w-3" />Export CSV
       </Button>
     </>
@@ -409,23 +418,20 @@ export function MembersPage() {
   )
 
   return (
-    <DrillPage
-      parent={{ href: "/settings", label: "Settings", icon: SettingsIcon }}
+    <SettingsDrillPage
       panelId="drill-members"
       title="Members"
       icon={Users}
-      description="Who is in this workspace, what each person manages and what they may do"
+      description="Who is in this workspace, what each person manages and what they may do."
       toolbar={toolbar}
       nav={nav}
       mobileNav={mobileNav}
-      filterCount={activeFilterCount(filters, capsReadable)}
       actions={isMobile ? undefined : addMember}
     >
       {wsLoading || roster.loading ? (
         <div className="space-y-3 p-4 md:p-6"><Skeleton className="h-6 w-80 rounded-md" /><Skeleton className="h-[420px] rounded-card" /></div>
       ) : (
         <div className={cn("space-y-4 p-4 md:p-6", selected.size > 0 && "pb-24")}>
-          <SettingsPageHead icon={Users} title="Members" description="Who is in this workspace, what each person manages and what they may do." />
           {isMobile && addMember && <div className="flex flex-wrap gap-2" data-slot="members-actions">{addMember}</div>}
           {chips.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -511,39 +517,51 @@ export function MembersPage() {
         )}
       </AnimatePresence>
 
-      <Sheet open={opened !== null} onOpenChange={(o) => { if (!o) open(null) }}>
-        <SheetContent side="right" className="w-full gap-0 overflow-y-auto bg-background p-5 sm:max-w-[520px]" data-slot="member-sheet">
-          <SheetTitle className="sr-only">{opened ? nameOf(opened) : "Member"}</SheetTitle>
-          <SheetDescription className="sr-only">Role, what they may do and where</SheetDescription>
-          {opened && (
-            <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin}
-              granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading || !serverCaps?.[opened.user.id]} busy={busy}
-              onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} revealEnabled={revealEnabled} onAccessSaved={roster.refresh} />
-          )}
-          {/* The page's own save bar sits under the sheet's overlay; the same
-              bar, from the same context, docks to the bottom of the sheet. */}
-          <div className="pointer-events-none sticky bottom-0 mt-4 flex justify-center pb-1 [&>*]:pointer-events-auto">
-            <PageSaveBar className="static left-auto bottom-auto translate-x-0 max-sm:static max-sm:rounded-xl max-sm:border-x max-sm:border-b" />
+      <Peek
+        open={opened !== null}
+        onOpenChange={(o) => { if (!o) open(null) }}
+        title={opened ? <>{nameOf(opened)}{opened.user.id === currentUserId && <span className="ml-1.5 text-xs font-normal text-muted-foreground">you</span>}</> : "Member"}
+        subtitle={opened ? <>{opened.user.full_name?.trim() ? `${opened.user.email} · ` : ""}joined {joinedDate(opened.created_at)}</> : undefined}
+        onPrev={prev ? () => open(prev) : undefined}
+        onNext={next ? () => open(next) : undefined}
+        footer={opened ? (
+          <div className="flex flex-col gap-2">
+            {/* The page's own save bar sits under the Peek's overlay; the
+                same bar, from the same context, docks here. */}
+            <div className="flex justify-center empty:hidden [&>*]:pointer-events-auto">
+              <PageSaveBar className="static left-auto bottom-auto translate-x-0 max-sm:static max-sm:rounded-xl max-sm:border-x max-sm:border-b" />
+            </div>
+            <p className="flex min-w-0 items-center gap-1.5 text-label text-muted-foreground" data-slot="member-cli">
+              <Terminal className="h-3 w-3 shrink-0" aria-hidden />
+              <code className="truncate font-mono text-micro">crewship workspace member capabilities list {opened.user.id}</code>
+            </p>
           </div>
-        </SheetContent>
-      </Sheet>
+        ) : undefined}
+      >
+        {opened && (
+          <MemberDetail member={opened} workspaceId={ws} currentUserId={currentUserId} callerRole={role} isAdmin={isAdmin} inPeek
+            granted={caps?.[opened.user.id] ?? []} serverGranted={serverCaps?.[opened.user.id] ?? []} capsLoading={capsLoading || !serverCaps?.[opened.user.id]} busy={busy}
+            onChangeRole={roster.changeRole} onRemove={onRemove} onCell={onCell} onProfile={onProfile} onRevoke={onRevoke} revealEnabled={revealEnabled} onAccessSaved={roster.refresh} />
+        )}
+      </Peek>
 
       <AlertDialog open={confirm !== null} onOpenChange={(o) => { if (!o) setConfirm(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="text-sm">{confirm?.title}</AlertDialogTitle>
             <AlertDialogDescription className="text-xs">{confirm?.body}</AlertDialogDescription>
+            {confirm && <ConfirmWhen when={confirm.when} />}
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
-            <AlertDialogAction className={cn("h-7 text-xs", confirm?.danger && "bg-destructive text-destructive-foreground hover:bg-destructive/90")}
+            <AlertDialogCancel className="text-xs">Cancel</AlertDialogCancel>
+            <AlertDialogAction className={cn("text-xs", confirm?.danger && "bg-destructive text-destructive-foreground hover:bg-destructive/90")}
               onClick={() => { const c = confirm; setConfirm(null); void c?.run() }}>
               {confirm?.action}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </DrillPage>
+    </SettingsDrillPage>
   )
 }
 

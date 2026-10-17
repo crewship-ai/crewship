@@ -531,9 +531,11 @@ describe("Members — the person peek", () => {
 
   it("moves to the next and previous person with J and K, in roster order", async () => {
     renderPage("/settings/members?member=u-mel")
-    await table()
     const p = await peek()
     expect(await sheet()).toHaveAccessibleName("Member details: Mel Member")
+    // The roster behind the modal Peek is hidden from the a11y tree; wait for
+    // the neighbours instead.
+    await within(p).findByRole("button", { name: "Next (J)" })
     fireEvent.keyDown(p, { key: "j" })
     await waitFor(() => expect(document.querySelector("[data-slot=member-detail]")).toHaveAccessibleName("Member details: vic@example.com"))
     fireEvent.keyDown(p, { key: "k" })
