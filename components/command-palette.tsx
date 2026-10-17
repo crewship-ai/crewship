@@ -288,6 +288,8 @@ const ISSUE_FETCH_LIMIT = 100
 interface CommandPaletteProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Text typed in when it opens: the not-found page's missing path (CHR-03). */
+  initialQuery?: string
 }
 
 // =============================================================================
@@ -438,7 +440,7 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
   return <span className="type-meta uppercase tracking-wider text-foreground/40">{children}</span>
 }
 
-export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+export function CommandPalette({ open, onOpenChange, initialQuery }: CommandPaletteProps) {
   const router = useRouter()
   const { workspaceId, role, workspaces, setWorkspaceId } = useWorkspace()
   // The lists below are not on the restricted allowlist; a restricted (or
@@ -484,7 +486,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   // every (debounced) keystroke, while every other group stays exactly as it
   // was — the entity rows never wait on it, and a failed or unconfigured
   // search simply renders no group at all.
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useState(open ? initialQuery ?? "" : "")
   const [conversations, setConversations] = useState<ConversationHit[]>([])
   const filteredIssues = issues.filter((issue) => issue.identifier)
   // A full page means there are probably more behind it. Saying so beats
@@ -571,6 +573,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setConversations([])
     }
   }, [open])
+
+  // Opened with text already typed (the not-found page's missing path).
+  useEffect(() => {
+    if (open && initialQuery) setQuery(initialQuery)
+  }, [open, initialQuery])
 
   // Debounced, cancellable conversation search. The abort does two jobs:
   // it stops the in-flight request when a newer keystroke replaces it, and
