@@ -15,7 +15,7 @@
 
 import * as React from "react"
 import {
-  CreditCard, FileText, FlaskConical, Gauge, LogIn, RefreshCw, ShieldOff, Trash2, UserPlus, Wallet,
+  Bot, CreditCard, FileText, FlaskConical, Gauge, LogIn, RefreshCw, ShieldOff, Wallet,
 } from "lucide-react"
 import { toast } from "@/lib/toast"
 
@@ -45,52 +45,46 @@ export interface ProviderLoginActionsProps {
   testing: boolean
   canUpdate: boolean
   canBind: boolean
-  canDelete: boolean
-  onAssign: () => void
+  /** Opens the Pays for tab. */
+  onPayFor: () => void
   onTest: () => void
+  /** Sign in again. Without it the action is not offered. */
   onRelogin?: () => void
-  onRevoke: () => void
 }
 
-/** Assign · Test · Re-login · Revoke — the header's action row. */
+/**
+ * The account page's header actions (Harbor 2): Test, then one primary —
+ * Sign in again while the account is signed out, else Pay for agents.
+ * Revoke lives in Settings, behind the confirm dialog.
+ */
 export function ProviderLoginActions({
-  credential, testable, testing, canUpdate, canBind, canDelete, onAssign, onTest, onRelogin, onRevoke,
+  credential, testable, testing, canUpdate, canBind, onPayFor, onTest, onRelogin,
 }: ProviderLoginActionsProps) {
   const { login } = credential
   // A subscription cannot be probed: its traffic is a CONNECT tunnel the
   // sidecar cannot see into, and a "Test" that always passes is a placebo.
   const showTest = testable && canUpdate && login.mode !== "subscription"
+  const status = deriveLoginStatus(credential)
+  const signedOut = status === "needs_relogin" || status === "expired"
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="login-actions">
-      {canBind && (
-        <Button size="sm" onClick={onAssign}>
-          <UserPlus className="mr-1.5 h-3 w-3" />
-          Assign to agent
-        </Button>
-      )}
       {showTest && (
-        <Button size="sm" variant="outline" onClick={onTest} disabled={testing}>
-          {testing ? <Spinner className="mr-1.5 h-3 w-3" /> : <FlaskConical className="mr-1.5 h-3 w-3" />}
+        <Button size="sm" variant="ghost" onClick={onTest} disabled={testing}>
+          {testing ? <Spinner className="size-3" /> : <FlaskConical className="size-3.5" aria-hidden />}
           Test
         </Button>
       )}
-      {canUpdate && onRelogin && (
-        <Button size="sm" variant="outline" onClick={onRelogin}>
-          <LogIn className="mr-1.5 h-3 w-3" />
-          Re-login
+      {signedOut && canUpdate && onRelogin ? (
+        <Button size="sm" onClick={onRelogin}>
+          <LogIn className="size-3.5" aria-hidden />
+          Sign in again
         </Button>
-      )}
-      {canDelete && (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onRevoke}
-          className="border-destructive/30 text-destructive hover:bg-destructive/[0.05]"
-        >
-          <Trash2 className="mr-1.5 h-3 w-3" />
-          Revoke
+      ) : canBind ? (
+        <Button size="sm" onClick={onPayFor}>
+          <Bot className="size-3.5" aria-hidden />
+          Pay for agents
         </Button>
-      )}
+      ) : null}
     </div>
   )
 }
@@ -284,7 +278,7 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
           )}
           {status === "needs_relogin" && (
             <p className="mt-3 type-meta text-destructive">
-              This account needs attention. Use Re-login to reconnect it; existing assignments stay unchanged.
+              This account needs attention. Use Sign in again to reconnect it; existing assignments stay unchanged.
             </p>
           )}
         </DetailCard>

@@ -10,13 +10,19 @@
  * from other pages — `?id=`, `?crew=`, `?class=`, `?tab=providers` — land on
  * exactly that, and a reload keeps it.
  *
+ * The AI providers space (OWNER/ADMIN) is the model accounts: a health strip,
+ * cards or a list, a provider's page (`?provider=`), an account group's page
+ * (`?pool=`) and each account's own page. Keys 1 and 2 switch the spaces; the
+ * last space is remembered per person and a bare /credentials opens it.
+ *
  * A load failure is never drawn as an empty vault (#1085): an empty vault
  * invites re-creating secrets that already exist.
  */
 
 import * as React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Key, Layers, Plus, ShieldCheck, Sparkles, TerminalSquare, Trash2, X } from "lucide-react"
+import { useQueries } from "@tanstack/react-query"
+import { Key, Plus, ShieldCheck, Sparkles, TerminalSquare, Trash2, X } from "lucide-react"
 
 import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
@@ -26,9 +32,11 @@ import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout
 import { AddSecretSheet } from "@/components/features/credentials/add-secret-sheet"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
 import { RotationDialog } from "@/components/features/credentials/rotation-dialog"
-import { ProviderLoginsPanel } from "@/components/features/credentials/provider-logins-panel"
-import { ProviderPoolsDialog } from "@/components/features/credentials/provider-pools-dialog"
-import { ProviderLoginsSidebar } from "@/components/features/credentials/provider-logins-sidebar"
+import { AccountsList, ProviderHead, ProviderHealth, providerLabel } from "@/components/features/credentials/provider-accounts"
+import { PROVIDER_VIEW_LABEL, ProvidersPanel } from "@/components/features/credentials/providers-panel"
+import { AccountGroupPage } from "@/components/features/credentials/account-group-page"
+import { NewAccountGroupDialog } from "@/components/features/credentials/new-account-group-dialog"
+import { AddProviderDialog } from "@/components/features/credentials/add-provider-dialog"
 import { SecretsTable, type VaultSecret } from "@/components/features/credentials/secrets-table"
 import { VaultHealth, buildVaultHealth } from "@/components/features/credentials/vault-health"
 import { VIEW_LABEL, VaultPanel, VaultSpaces, buildClassFacet } from "@/components/features/credentials/vault-panel"
@@ -41,12 +49,16 @@ import {
   buildLoginModeFacet,
   buildLoginOwnerFacet,
   buildLoginProviderFacet,
-  buildLoginStatusCounts,
+  buildProviderHealth,
   hasLogin,
   sortLogins,
   type LoginFilters,
   type ProviderLogin,
 } from "@/lib/credentials/provider-logins"
+import { loginProvider } from "@/lib/credentials/login-providers"
+import { poolKeys, poolRequest, useProviderPools, type ProviderPool } from "@/hooks/use-provider-pools"
+import { useUserPreference } from "@/hooks/use-user-preference"
+import { useSessionSafe } from "@/hooks/use-auth"
 import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -69,10 +81,14 @@ import {
 } from "@/lib/credentials/facets"
 import { buildTierFacet } from "@/lib/credentials/tiers"
 import {
+  DEFAULT_PROVIDERS_STATE,
   activeFacetCount,
+  activeLoginFacetCount,
   buildVaultQuery,
+  hasExplicitVaultState,
   parseVaultUrl,
   resolveCrewTokens,
+  type ProvidersUrlState,
   type SecretTab,
   type VaultSpace,
   type VaultUrlState,
@@ -114,6 +130,16 @@ interface Credential extends VaultSecret {
 /** How many rows one request asks for — the list endpoint's ceiling. */
 const LIST_LIMIT = 500
 
+/** Account groups whose members are read for the "Group" column and grouping. */
+const POOL_DETAIL_LIMIT = 25
+
+/** True when a key press belongs to a field, not to the page. */
+function isTypingTarget(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null
+  if (!el || typeof el.closest !== "function") return false
+  return Boolean(el.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role=textbox], [role=combobox]"))
+}
+
 const normalise = (c: Credential): Credential => ({
   ...c,
   last_used_at: c.last_used_at ?? null,
@@ -124,7 +150,8 @@ const normalise = (c: Credential): Credential => ({
 })
 
 export default function CredentialsPage() {
-  const { abilities, hasCapability } = useAbilities()
+  const { abilities, hasCapability, loading: abilitiesLoading } = useAbilities()
+  const session = useSessionSafe()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -161,18 +188,17 @@ export default function CredentialsPage() {
   // a broken seats endpoint must not blank the secrets list.
   const [providerLogins, setProviderLogins] = React.useState<Credential[]>([])
   const [loginsError, setLoginsError] = React.useState<string | null>(null)
-  const [loginFilters, setLoginFilters] = React.useState<LoginFilters>(EMPTY_LOGIN_FILTERS)
   const [loading, setLoading] = React.useState(true)
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
-  const [poolsOpen, setPoolsOpen] = React.useState(false)
+  const [newPoolOpen, setNewPoolOpen] = React.useState(false)
+  const [providerDialog, setProviderDialog] = React.useState<{ initial?: WizardInitial } | null>(null)
   const [cliOpen, setCliOpen] = React.useState(false)
   const [addInitial, setAddInitial] = React.useState<WizardInitial | undefined>(undefined)
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set())
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
   const [bulkTierOpen, setBulkTierOpen] = React.useState(false)
   const [rotateCredential, setRotateCredential] = React.useState<{ cred: Credential; mode: "rotate" | "patch" } | null>(null)
-  const [assignOnOpen, setAssignOnOpen] = React.useState(false)
   // A linked secret that is not in the list (beyond the page, or deleted).
   const [linked, setLinked] = React.useState<{ id: string; state: "loading" | "missing" | "error"; row?: Credential } | null>(null)
 
@@ -260,8 +286,8 @@ export default function CredentialsPage() {
   // a DELETE in the next workspace.
   React.useEffect(() => {
     setSelectedIds(new Set())
-    setLoginFilters(EMPTY_LOGIN_FILTERS)
     setAddOpen(false)
+    setProviderDialog(null)
     if (!canBind) setProviderLogins([])
   }, [workspaceId, canBind])
 
@@ -274,10 +300,28 @@ export default function CredentialsPage() {
   }, [workspaceId, fetchCredentials])
 
   const openAdd = React.useCallback((initial?: WizardInitial) => {
-    if (initial?.itemType === "PROVIDER_LOGIN" && !canBind) return
+    if (initial?.itemType === "PROVIDER_LOGIN") {
+      if (!canBind) return
+      setAddOpen(false)
+      setProviderDialog({ initial })
+      return
+    }
     setAddInitial(initial)
     setAddOpen(true)
   }, [canBind])
+  /** Add AI provider, optionally with the provider already chosen (a provider's page). */
+  const openAddProvider = React.useCallback((provider?: string) => {
+    if (!provider) { openAdd({ itemType: "PROVIDER_LOGIN" }); return }
+    const p = loginProvider(provider)
+    openAdd({
+      itemType: "PROVIDER_LOGIN",
+      provider: provider.toUpperCase(),
+      loginMode: p?.subscription && provider.toUpperCase() !== "GOOGLE" ? "subscription" : "api_key",
+      signIn: provider.toUpperCase() === "OPENAI" ? "device" : "paste",
+      step: "values",
+      name: p?.label,
+    })
+  }, [openAdd])
 
   // ── Secrets: the vault minus the AI provider accounts ───────────────────
   const loginIds = React.useMemo(() => {
@@ -341,11 +385,60 @@ export default function CredentialsPage() {
   const canSelect = canDelete || canEdit
 
   // ── AI providers ────────────────────────────────────────────────────────
-  const loginCounts = React.useMemo(() => buildLoginStatusCounts(providerLogins), [providerLogins])
+  const pv: ProvidersUrlState = url.providers
+  const loginFilters = pv.filters
+  const me = React.useMemo(() => ({ id: session.data?.user?.id ?? null, email: session.data?.user?.email ?? null }), [session.data?.user?.id, session.data?.user?.email])
+  const setLoginFilters = (next: LoginFilters) => go({ providers: { ...pv, filters: next, pool: null, poolTab: null }, id: null, tab: null })
+  const providerViewCounts = React.useMemo(() => {
+    const n = (status: LoginFilters["status"]) => applyLoginFilters(providerLogins, { ...EMPTY_LOGIN_FILTERS, status }, Date.now(), me).length
+    return { all: providerLogins.length, attention: n("attention"), unassigned: n("unassigned"), mine: n("mine") }
+  }, [providerLogins, me])
+  const providerHealth = React.useMemo(() => buildProviderHealth(providerLogins), [providerLogins])
   const loginProviders = React.useMemo(() => buildLoginProviderFacet(providerLogins), [providerLogins])
   const loginModes = React.useMemo(() => buildLoginModeFacet(providerLogins), [providerLogins])
   const loginOwners = React.useMemo(() => buildLoginOwnerFacet(providerLogins), [providerLogins])
-  const visibleLogins = React.useMemo(() => sortLogins(applyLoginFilters(providerLogins, loginFilters)), [providerLogins, loginFilters])
+  const visibleLogins = React.useMemo(() => sortLogins(applyLoginFilters(providerLogins, loginFilters, Date.now(), me)), [providerLogins, loginFilters, me])
+
+  // Account groups: the panel's list, and their members for the Group column.
+  const inProviders = space === "providers" && canBind && Boolean(workspaceId)
+  const poolsApi = useProviderPools(workspaceId ?? "", inProviders)
+  const poolItems: ProviderPool[] | undefined = poolsApi.pools?.items
+  const poolDetails = useQueries({
+    queries: (poolItems ?? []).slice(0, POOL_DETAIL_LIMIT).map((pool) => ({
+      queryKey: poolKeys.detail(workspaceId ?? "", pool.id),
+      enabled: inProviders,
+      retry: false,
+      queryFn: async ({ signal }: { signal: AbortSignal }) =>
+        (await poolRequest(workspaceId ?? "", `provider-logins/pools/${encodeURIComponent(pool.id)}`, { signal })).json() as Promise<ProviderPool>,
+    })),
+  })
+  const poolByAccount = React.useMemo(() => {
+    const m = new Map<string, string>()
+    for (const q of poolDetails) for (const mem of q.data?.members ?? []) if (!m.has(mem.credential_id)) m.set(mem.credential_id, q.data!.name)
+    return m
+  }, [poolDetails])
+  const poolOf = React.useCallback((id: string) => poolByAccount.get(id) ?? null, [poolByAccount])
+
+  // A provider's page: exactly one provider chosen.
+  const providerPage = space === "providers" && !pv.pool && loginFilters.provider.length === 1 ? loginFilters.provider[0] : null
+  const [workspaceDefaults, setWorkspaceDefaults] = React.useState<{ ws: string; rows: { credential_id: string; credential_name?: string }[] } | null>(null)
+  React.useEffect(() => {
+    if (!providerPage || !workspaceId || !canBind || workspaceDefaults?.ws === workspaceId) return
+    let cancelled = false
+    apiFetch(`/api/v1/credentials/bindings?workspace_id=${encodeURIComponent(workspaceId)}&scope=WORKSPACE`)
+      .then((r) => (r.ok ? r.json() : { bindings: [] }))
+      .then((body: { bindings?: { credential_id: string; credential_name?: string }[] }) => {
+        if (!cancelled) setWorkspaceDefaults({ ws: workspaceId, rows: Array.isArray(body?.bindings) ? body.bindings : [] })
+      })
+      .catch(() => { if (!cancelled) setWorkspaceDefaults({ ws: workspaceId, rows: [] }) })
+    return () => { cancelled = true }
+  }, [providerPage, workspaceId, canBind, workspaceDefaults?.ws])
+  const providerDefault = React.useMemo(() => {
+    if (!providerPage || workspaceDefaults?.ws !== workspaceId) return undefined
+    const ids = new Set(providerLogins.filter((c) => (c.login?.provider ?? c.provider).toUpperCase() === providerPage).map((c) => c.id))
+    const hit = workspaceDefaults.rows.find((b) => ids.has(b.credential_id))
+    return hit ? hit.credential_name ?? providerLogins.find((c) => c.id === hit.credential_id)?.name ?? null : null
+  }, [providerPage, workspaceDefaults, workspaceId, providerLogins])
 
   const tagsInUse = React.useMemo(() => Array.from(new Set(credentials.flatMap((c) => c.tags ?? []))).sort(), [credentials])
 
@@ -382,16 +475,60 @@ export default function CredentialsPage() {
     closePanelSheet()
   }
   const closeSecret = () => {
-    setAssignOnOpen(false)
     go({ id: null, tab: null }, "push")
   }
 
-  const changeSpace = (s: VaultSpace) => {
+  const changeSpace = React.useCallback((s: VaultSpace) => {
     setSelectedIds(new Set())
-    go({ space: s, id: null, tab: null, filters: EMPTY_CREDENTIAL_FILTERS, group: "none" }, "push")
+    go({ space: s, id: null, tab: null, filters: EMPTY_CREDENTIAL_FILTERS, group: "none", providers: DEFAULT_PROVIDERS_STATE }, "push")
+  }, [go])
+  const openPool = (id: string | null, poolTab: ProvidersUrlState["poolTab"] = null) => {
+    go({ providers: { ...pv, pool: id, poolTab }, id: null, tab: null }, "push")
+    closePanelSheet()
   }
 
-  /** Re-login: the wizard on the sign-in step, this seat's provider and mode chosen. */
+  // ── Keys 1 and 2 switch the spaces ──────────────────────────────────────
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      if (e.key !== "1" && e.key !== "2") return
+      if (isTypingTarget(e.target)) return
+      // A dialog owns the keyboard while it is open.
+      if (document.querySelector("[role=dialog], [role=alertdialog]")) return
+      if (e.key === "2" && !canBind) return
+      const next: VaultSpace = e.key === "1" ? "secrets" : "providers"
+      if (next === space && !url.id && !pv.pool) return
+      e.preventDefault()
+      changeSpace(next)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [canBind, space, url.id, pv.pool, changeSpace])
+
+  // ── The last space, per person ──────────────────────────────────────────
+  // A bare /credentials opens the space the person was last in. Any address
+  // that names a space, a filter or a page wins over the memory.
+  const [lastSpace, setLastSpace, { ready: lastSpaceReady }] = useUserPreference<VaultSpace>("vault.lastSpace", "secrets")
+  const restored = React.useRef(false)
+  React.useEffect(() => {
+    if (restored.current) return
+    if (hasExplicitVaultState(searchParams)) { restored.current = true; return }
+    if (lastSpace === "providers") {
+      if (canBind) { restored.current = true; go({ space: "providers" }, "replace"); return }
+      if (!abilitiesLoading) restored.current = true
+      return
+    }
+    // "secrets" from the local cache may still be overruled by the server's copy.
+    if (lastSpaceReady) restored.current = true
+  }, [searchParams, lastSpace, lastSpaceReady, canBind, abilitiesLoading, go])
+  React.useEffect(() => {
+    if (!restored.current || providersDenied) return
+    if (space !== lastSpace) setLastSpace(space)
+    // Only a change of space is worth a write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [space])
+
+  /** Sign in again: the provider dialog at Connect, this seat's provider, mode and name locked. */
   const relogin = (cred: Credential) => {
     const login = cred.login
     const provider = (login?.provider ?? cred.provider).toUpperCase()
@@ -408,20 +545,20 @@ export default function CredentialsPage() {
 
   // ── Top bar ─────────────────────────────────────────────────────────────
   const viewTitle = space === "providers" ? "AI providers" : VIEW_LABEL[filters.status]
+  const providersTitle = providerPage
+    ? providerLabel(providerPage)
+    : loginFilters.status !== "all" ? PROVIDER_VIEW_LABEL[loginFilters.status] ?? "AI providers" : "AI providers"
   const headerActions = (
     <>
       <SubBarIconButton icon={TerminalSquare} aria-label="Command line" title="Command line" onClick={() => setCliOpen(true)} />
       {space === "providers" ? (
         <>
-          <SubBarSecondary icon={Layers} aria-label="Account groups" title="Account groups" onClick={() => setPoolsOpen(true)}>
-            <span className="hidden sm:inline">Account groups</span>
-          </SubBarSecondary>
           {canManage && (
             <SubBarSecondary icon={Key} aria-label="Add secret" title="Add secret" onClick={() => openAdd()}>
               <span className="hidden sm:inline">Add secret</span>
             </SubBarSecondary>
           )}
-          <SubBarPrimary icon={Plus} aria-label="Add AI provider" onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
+          <SubBarPrimary icon={Plus} aria-label="Add AI provider" onClick={() => openAddProvider(providerPage ?? undefined)}>
             <span className="hidden sm:inline">Add AI provider</span>
           </SubBarPrimary>
         </>
@@ -444,7 +581,7 @@ export default function CredentialsPage() {
     <SubBar
       icon={Key}
       title={space === "providers" ? "AI providers" : "Secrets"}
-      section={detail ? detail.name : space === "secrets" && filters.status !== "all" ? viewTitle : undefined}
+      section={detail ? detail.name : space === "secrets" && filters.status !== "all" ? viewTitle : space === "providers" && (providerPage || loginFilters.status !== "all") ? providersTitle : undefined}
       ariaLabel="Vault"
       description={space === "providers" ? `${providerLogins.length} accounts` : `${secrets.length} secrets`}
       actions={headerActions}
@@ -521,7 +658,6 @@ export default function CredentialsPage() {
         workspaceId={workspaceId}
         credential={detail}
         open
-        assignOnOpen={assignOnOpen}
         tab={url.tab}
         onTabChange={(t: SecretTab) => go({ tab: t === "overview" ? null : t })}
         onOpenChange={(o) => { if (!o) closeSecret() }}
@@ -536,24 +672,77 @@ export default function CredentialsPage() {
         onRelogin={canBind ? (c) => relogin(c as Credential) : undefined}
       />
     )
+  } else if (space === "providers" && pv.pool && workspaceId) {
+    content = (
+      <AccountGroupPage
+        key={pv.pool}
+        workspaceId={workspaceId}
+        poolId={pv.pool}
+        tab={pv.poolTab}
+        onTabChange={(t) => go({ providers: { ...pv, poolTab: t === "accounts" ? null : t } })}
+        accounts={providerLogins}
+        canManage={canBind}
+        onBack={() => openPool(null)}
+        onOpenAccount={openSecret}
+        onDeleted={() => openPool(null)}
+      />
+    )
   } else if (space === "providers") {
+    const filtered = loginFilters.status !== "all" || activeLoginFacetCount(loginFilters) > 0 || loginFilters.search.trim() !== ""
     content = (
       <>
         {phoneSpaces}
-        <PageHead title="AI providers" description="The model accounts your agents think and pay with." />
+        {providerPage ? (
+          <ProviderHead
+            provider={providerPage}
+            rows={visibleLogins}
+            workspaceDefault={providerDefault}
+            onAdd={canBind ? () => openAddProvider(providerPage) : undefined}
+          />
+        ) : (
+          <PageHead title={providersTitle} description="The model accounts your agents think and pay with." />
+        )}
         {loginsError && providerLogins.length === 0 && (
           <div role="alert" className="page-banner page-banner-warn mb-4">
             Couldn&apos;t load the AI provider accounts ({loginsError}). Accounts marked on the vault list are shown.
           </div>
         )}
-        <ProviderLoginsPanel
-          logins={providerLogins}
-          visible={visibleLogins}
-          onSelect={openSecret}
-          onSelectStatus={(status) => setLoginFilters((f) => ({ ...f, status }))}
-          onAdd={() => openAdd({ itemType: "PROVIDER_LOGIN" })}
-          onAssign={(id) => { setAssignOnOpen(true); openSecret(id) }}
-        />
+        {providerLogins.length === 0 ? (
+          <PageEmpty
+            icon={Sparkles}
+            title="No AI provider accounts yet"
+            description="Add the model accounts your agents think with: a subscription sign-in (Claude, ChatGPT, Gemini) or an API key."
+            primary={canBind ? { label: "Add AI provider", onClick: () => openAddProvider() } : undefined}
+            cli="crewship credential login --provider OPENAI"
+          />
+        ) : (
+          <>
+            {!providerPage && !filtered && (
+              <ProviderHealth counts={providerHealth} onOpen={(view) => setLoginFilters({ ...EMPTY_LOGIN_FILTERS, status: view })} />
+            )}
+            {visibleLogins.length === 0 && filtered ? (
+              <PageNoResults
+                filters={describeLoginFilters(loginFilters, providersTitle)}
+                onClear={() => setLoginFilters(EMPTY_LOGIN_FILTERS)}
+              />
+            ) : (
+              <AccountsList
+                rows={visibleLogins}
+                layout={pv.layout}
+                onLayoutChange={(l) => go({ providers: { ...pv, layout: l } })}
+                group={pv.group}
+                onGroupChange={(g) => go({ providers: { ...pv, group: g } })}
+                onOpen={openSecret}
+                onAdd={canBind ? () => openAddProvider(providerPage ?? undefined) : undefined}
+                poolOf={poolOf}
+                isPhone={isMobile}
+              />
+            )}
+            <p className="mt-4 text-label text-muted-foreground">
+              Each account says whose it is and which agents it pays for. An agent uses the account bound to it, then its crew&apos;s, then the workspace default.
+            </p>
+          </>
+        )}
       </>
     )
   } else if (secrets.length === 0) {
@@ -616,13 +805,18 @@ export default function CredentialsPage() {
         {!loadError && (
           <SecondaryPanel id="vault" label="Vault">
             {space === "providers" ? (
-              <ProviderLoginsSidebar
+              <ProvidersPanel
                 filters={loginFilters}
                 onFiltersChange={setLoginFilters}
-                counts={loginCounts}
+                viewCounts={providerViewCounts}
                 providers={loginProviders}
                 modes={loginModes}
                 owners={loginOwners}
+                pools={poolItems}
+                poolsError={Boolean(poolsApi.error)}
+                selectedPool={pv.pool}
+                onOpenPool={(id) => openPool(id)}
+                onNewPool={canBind ? () => setNewPoolOpen(true) : undefined}
                 spaces={spaces}
               />
             ) : (
@@ -648,7 +842,7 @@ export default function CredentialsPage() {
           workspaceId={workspaceId}
           open={addOpen}
           onOpenChange={(o) => { setAddOpen(o); if (!o) setAddInitial(undefined) }}
-          onAddProvider={canBind ? () => { setAddInitial({ itemType: "PROVIDER_LOGIN" }) } : undefined}
+          onAddProvider={canBind ? () => openAdd({ itemType: "PROVIDER_LOGIN" }) : undefined}
           onSuccess={(id) => {
             handleRefresh()
             if (id) openSecret(id)
@@ -690,7 +884,28 @@ export default function CredentialsPage() {
         />
       )}
       <VaultCliDialog open={cliOpen} onOpenChange={setCliOpen} />
-      {canBind && workspaceId && poolsOpen && <ProviderPoolsDialog key={workspaceId} workspaceId={workspaceId} onClose={() => setPoolsOpen(false)} />}
+      {canBind && workspaceId && (
+        <AddProviderDialog
+          workspaceId={workspaceId}
+          open={providerDialog !== null}
+          onOpenChange={(o) => { if (!o) setProviderDialog(null) }}
+          initial={providerDialog?.initial}
+          knownTags={tagsInUse}
+          onSuccess={(id) => {
+            handleRefresh()
+            if (id && !providerDialog?.initial?.credentialId) openSecret(id)
+          }}
+        />
+      )}
+      {canBind && workspaceId && space === "providers" && (
+        <NewAccountGroupDialog
+          workspaceId={workspaceId}
+          open={newPoolOpen}
+          onOpenChange={setNewPoolOpen}
+          accounts={providerLogins}
+          onCreated={(id) => openPool(id)}
+        />
+      )}
     </div>
   )
 }
@@ -711,6 +926,15 @@ function ProvidersNote() {
       AI provider accounts are managed by owners and admins.
     </p>
   )
+}
+
+function describeLoginFilters(f: LoginFilters, viewTitle: string): string {
+  const parts: string[] = []
+  if (f.status !== "all") parts.push(viewTitle)
+  const n = activeLoginFacetCount(f)
+  if (n > 0) parts.push(`${n} filter${n === 1 ? "" : "s"}`)
+  if (f.search.trim()) parts.push(`“${f.search.trim()}”`)
+  return parts.join(" · ")
 }
 
 function describeFilters(f: CredentialFilters, viewTitle: string): string {
