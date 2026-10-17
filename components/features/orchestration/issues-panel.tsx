@@ -79,7 +79,8 @@ export interface IssuesPanelProps {
   filters: IssueFilters
   onFilters: (patch: Partial<IssueFilters>) => void
   onClearFilters: () => void
-  selection: IssuesPanelSelection
+  /** Null on the issue page, which shows an issue rather than a view. */
+  selection: IssuesPanelSelection | null
   onSelect: (s: IssuesPanelSelection) => void
   onNewProject: () => void
   /** Save the current filters as a view. Hidden when absent. */
@@ -156,7 +157,7 @@ export function IssuesPanel({
     onFilters({ statuses: filters.statuses.includes(s) ? filters.statuses.filter((x) => x !== s) : [...filters.statuses, s] })
   const meta = (k: number | undefined) => <span className="font-mono text-label tabular-nums text-muted-foreground-soft">{k ?? 0}</span>
 
-  const isOn = (s: IssuesPanelSelection) => selection.kind === s.kind && selection.id === s.id
+  const isOn = (s: IssuesPanelSelection) => selection !== null && selection.kind === s.kind && selection.id === s.id
 
   return (
     <div className="flex h-full min-h-0 flex-col">

@@ -102,6 +102,10 @@ interface Props {
   onChanged?: () => void
   /** Called once when the identifier resolves to nothing. */
   onNotFound?: () => void
+  /** A change made outside the surface (the page's ⋯ menu): reload on change. */
+  reloadKey?: number
+  /** The issue as loaded, for the page's ⋯ menu. */
+  onLoaded?: (issue: Mission | null) => void
 }
 
 /** The workspace lists the pickers choose from. Fetched once per workspace. */
@@ -122,6 +126,8 @@ export function IssueDetailSurface({
   viewerId = null,
   onChanged,
   onNotFound,
+  reloadKey,
+  onLoaded,
 }: Props) {
   const [issue, setIssue] = React.useState<Mission | null>(null)
   const [loading, setLoading] = React.useState(true)
@@ -453,6 +459,10 @@ export function IssueDetailSurface({
     ),
   })
 
+  React.useEffect(() => {
+    onLoaded?.(issue)
+  }, [issue, onLoaded])
+
   /* ---------------------------------------------------------------- *
    *  Writes                                                           *
    * ---------------------------------------------------------------- */
@@ -462,6 +472,13 @@ export function IssueDetailSurface({
     await fetchSubResources()
     onChanged?.()
   }, [fetchIssue, fetchSubResources, onChanged])
+
+  React.useEffect(() => {
+    if (!reloadKey) return
+    void refresh()
+    // Only a new key from the host reloads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey])
 
   const loadOlderComments = async () => {
     if (!base || olderBusy || !comments[0]) return
