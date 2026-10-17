@@ -90,6 +90,18 @@ export function IssuePeek({
     }
   }, [open, identifier, workspaceId, row?.updated_at])
 
+  // Initial focus on the sheet itself, not its first button. The sheet's
+  // focus trap lands on Previous, so the Enter that should open the full page
+  // pressed Previous instead (POP-04). The kit's `initialFocus="content"`
+  // (#3423) does this; until this branch carries it, the peek does it here.
+  React.useEffect(() => {
+    if (!open) return
+    const frame = requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('[data-slot="peek"]')?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [open])
+
   const issue = fresh?.id === identifier ? fresh.issue : row
   const holder = issue ? workHolder(issue) : null
   const due = issue ? dueLabel(issue.due_date, issue.status) : null
