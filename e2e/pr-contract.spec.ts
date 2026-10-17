@@ -97,9 +97,12 @@ test("PR browser contract subset", async ({ page }) => {
     const rows = Array.isArray(data) ? data : data.rows ?? data.data ?? []
     const identifier = rows.find((issue: { title?: string; identifier?: string }) => issue.title === title)?.identifier
     expect(identifier).toBeTruthy()
-    await page.request.delete(
-      `/api/v1/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceID)}`,
+    // Issues are deleted under their crew; /api/v1/issues/<id> has no DELETE
+    // (405), so this cleanup used to leave every fixture issue behind.
+    const removed = await page.request.delete(
+      `/api/v1/crews/${encodeURIComponent(seeded.id)}/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceID)}`,
     )
+    expect(removed.ok(), await removed.text()).toBeTruthy()
   })
 
   // #2398 / #2403 — a run_needs_human card is acted on from /inbox, against
