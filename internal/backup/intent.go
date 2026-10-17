@@ -43,6 +43,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"slides_object_ids":          IntentInclude,
 	"slides_writer_fence":        IntentExcludeRuntime, // installation-local serialization singleton
 
+	"document_creations":    IntentInclude, // durable provenance, never live creation consent
 	"documents":             IntentInclude,
 	"document_updates":      IntentInclude,
 	"document_receipts":     IntentInclude,
