@@ -1382,6 +1382,17 @@ jobs:
           path: out/
           retention-days: 1
 
+      - name: Set up Node 24 for Document engine verification
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.21.0"
+
+      - name: Verify the pinned Document engine
+        timeout-minutes: 3
+        run: |
+          pnpm --dir tools/docs-service install --frozen-lockfile
+          pnpm --dir tools/docs-service test
+
   # ── Frontend tests: four complete partitions, one global coverage gate ──
   frontend-test-types:
     needs: [merge-conflict-markers, changes]
