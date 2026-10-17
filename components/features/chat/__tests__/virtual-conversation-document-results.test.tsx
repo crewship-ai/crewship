@@ -32,7 +32,7 @@ it("shows a durable saved Document in the real empty virtual conversation after 
   expect(screen.getByText("Start a conversation")).toBeTruthy()
   const link = await screen.findByRole("link", { name: "Open document Restored saved plan" })
   expect(link.getAttribute("href")).toBe("/pages?ref=restored-document&workspace_id=workspace")
-  expect(apiFetch).toHaveBeenCalledWith("/api/v1/chats/recovered-chat/artifact-results?workspace_id=workspace", expect.objectContaining({ signal: expect.any(AbortSignal) }))
+  expect(apiFetch).toHaveBeenCalledWith("/api/v1/chats/recovered-chat/document-results?workspace_id=workspace", expect.objectContaining({ signal: expect.any(AbortSignal) }))
   expect(vi.mocked(apiFetch).mock.calls.every(call => !call[1]?.method)).toBe(true)
 })
 it.each(["disabled", "unknown human"])("does not request or show saved Documents when %s", reason => {

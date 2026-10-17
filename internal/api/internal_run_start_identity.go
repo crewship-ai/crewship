@@ -16,7 +16,11 @@ var errRunAlreadyTerminal = errors.New("run_already_terminal")
 // matchRunStart never accepts a conflicting or ambiguous historical identity.
 // Metadata participates in the immutable admission intent, not just the actor.
 func (h *InternalHandler) matchRunStart(ctx context.Context, want journal.Entry) (bool, error) {
-	rows, err := h.db.QueryContext(ctx, `SELECT workspace_id,COALESCE(crew_id,''),COALESCE(agent_id,''),payload FROM journal_entries WHERE trace_id=? AND entry_type='run.started'`, want.TraceID)
+	return matchRunStartQuery(ctx, h.db, want)
+}
+
+func matchRunStartQuery(ctx context.Context, q pageAuthQueryer, want journal.Entry) (bool, error) {
+	rows, err := q.QueryContext(ctx, `SELECT workspace_id,COALESCE(crew_id,''),COALESCE(agent_id,''),payload FROM journal_entries WHERE trace_id=? AND entry_type='run.started'`, want.TraceID)
 	if err != nil {
 		return false, err
 	}
@@ -50,7 +54,7 @@ func (h *InternalHandler) matchRunStart(ctx context.Context, want journal.Entry)
 	}
 	// An old admission ACK must never launch an already settled execution again.
 	var ended bool
-	if err = h.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM journal_entries WHERE workspace_id=? AND trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop'))`, want.WorkspaceID, want.TraceID).Scan(&ended); err != nil {
+	if err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM journal_entries WHERE workspace_id=? AND trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop'))`, want.WorkspaceID, want.TraceID).Scan(&ended); err != nil {
 		return false, err
 	}
 	if ended {

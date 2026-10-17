@@ -34,6 +34,10 @@ retry the same input with the same mutation ID. Changing that input conflicts;
 a retry never creates another document. Creation keeps the requesting human as
 owner and does not grant the run continued access to read or edit the document.
 
+An agent can also call `doc_create` in the Crewship routines MCP tools with the
+same four fields. The tool uses the same run permission and saved result; an
+exact retry can recover that result across the CLI and MCP interfaces.
+
 ## `crewship doc status`
 
 Read whether document support is configured on the selected instance. This
@@ -75,6 +79,19 @@ state again and decide on a new edit; the command never rebases it automatically
 For a lost confirmation, resend the original request with its original ID.
 The receipt identifies the durable revision; a successful exact retry does not
 create another write. Revoked credentials cannot replay saved requests.
+
+## Requesting a document in chat
+
+With Document support and the workspace creation policy enabled, use a direct
+private-chat request such as `vytvoř dokument o plánu uvedení produktu` without
+selecting an existing Page. The run creates a new populated document for you
+and returns its saved link. Quoted or ambiguous text does not grant creation
+permission.
+
+You remain the document's owner. This request does not grant the run permission
+to edit another Page or to keep accessing the document after creation. For an
+uncertain tool confirmation, retry the original input and mutation ID; sending
+a new chat message is a separate request.
 
 ## `crewship doc chat-results <chat-id>`
 
