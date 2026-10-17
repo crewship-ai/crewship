@@ -123,6 +123,24 @@ admission. Changes in an unrelated workspace do not revoke valid local shares.
 The upgrade preserves valid and inert grant metadata and fences work whose
 issuer was already unavailable. Effective access explains an unavailable issuer.
 
+### Ordered preset foundations (not enabled)
+
+The immutable v1 catalog defines routine View (`view,results`), Run
+(`view,results,run`) and draft-only Edit (`view,results,run,edit`), plus project
+View (`list,read`), Contribute (`list,read,contribute`) and Manage
+(`list,read,contribute,manage`). Publication and `delete_issues` remain separate.
+These are future explicit bundles: this foundation exposes no preset application
+route, CLI command or selector and changes no existing grants or access mode.
+
+An empty-on-upgrade `access_preset_selections` table preserves deliberately saved
+choice provenance separately from canonical `access_grants`. Matching independent
+grants remain Custom. Managed grant edits invalidate a saved label; orthogonal
+rights, unrelated revisions and issuer liveness changes preserve saved intent.
+Inactive grants stay inactive. Versioned definitions are immutable, with no
+backfill or automatic reissue. Applying and previewing these bundles, including
+regular-results disclosure and retained destructive consequences, require the
+subsequent API/CLI/UI work tracked by #3271.
+
 Supported operations:
 
 | Resource | Operations | Current scope |
@@ -495,3 +513,5 @@ Selected output content is capped at 256 KiB before loading; the encoded
 response is capped at 1 MiB. Oversized details return 413 while list metadata
 remains available. Final and step outputs are credential-scrubbed on read,
 including historical stored content; final output is also scrubbed on persist.
+
+Preset selection workspace, membership, resource and selector foreign keys have leading indexes. The workspace index also covers member lookups, so parent cleanup and scoped backup reads avoid scanning every selection.
