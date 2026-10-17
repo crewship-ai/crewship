@@ -351,25 +351,29 @@ export default function CredentialsPage() {
 
   // ── The open secret ─────────────────────────────────────────────────────
   const listed = url.id ? providerLogins.find((c) => c.id === url.id) ?? credentials.find((c) => c.id === url.id) ?? null : null
+  // Only the newest lookup may land. Not an effect cleanup: marking the lookup
+  // "loading" changes linked?.id and re-runs this effect, and a cleanup would
+  // then discard the very response it is waiting for.
+  const linkedRequest = React.useRef(0)
   React.useEffect(() => {
     const id = url.id
     if (!id || loading || loadError || listed || !workspaceId) {
-      if (!id) setLinked(null)
+      if (!id) { linkedRequest.current++; setLinked(null) }
       return
     }
     if (linked?.id === id) return
-    let cancelled = false
+    const request = ++linkedRequest.current
+    const current = () => request === linkedRequest.current
     setLinked({ id, state: "loading" })
     apiFetch(`/api/v1/credentials/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then(async (r) => {
-        if (cancelled) return
+        if (!current()) return
         if (r.status === 404 || r.status === 403) { setLinked({ id, state: "missing" }); return }
         if (!r.ok) throw new Error()
         const row = normalise(await r.json())
-        if (!cancelled) setLinked({ id, state: "loading", row })
+        if (current()) setLinked({ id, state: "loading", row })
       })
-      .catch(() => { if (!cancelled) setLinked({ id, state: "error" }) })
-    return () => { cancelled = true }
+      .catch(() => { if (current()) setLinked({ id, state: "error" }) })
   }, [url.id, loading, loadError, listed, workspaceId, linked?.id])
   const detail = listed ?? (linked?.id === url.id ? linked?.row ?? null : null)
 
