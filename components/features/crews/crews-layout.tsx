@@ -162,7 +162,11 @@ export function CrewsLayout({
   // Desktop and tablet never show an empty canvas: open the last crew seen,
   // or the first one in the panel's order (Needs you → Working → Idle).
   useEffect(() => {
-    if (isMobile || !loaded || selectedCrewSlug || selectedAgentSlug || crews.length === 0) return
+    // useIsMobile() is false until its own effect has measured, so this reads
+    // the width directly: on a phone the first pass would otherwise open a
+    // crew and the list would never show.
+    const phone = isMobile || (typeof window !== "undefined" && window.innerWidth < 768)
+    if (phone || !loaded || selectedCrewSlug || selectedAgentSlug || crews.length === 0) return
     const remembered = lastCrew && crews.some((c) => c.slug === lastCrew) ? lastCrew : null
     const first = remembered ?? firstCrewSlug(buildPanel({ crews, agents, provisioningByCrew, gapsByCrew, state: DEFAULT_PANEL_STATE }))
     if (first) update({ crew: first })

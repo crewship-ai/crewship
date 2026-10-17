@@ -14,15 +14,15 @@ import { useRouter } from "next/navigation"
  * It aimed at /crews/agents, a route the selection-driven redesign deleted
  * along with the rest of the subtree: no page.tsx, no crews/agents.html in the
  * static export. The roster it was reaching for is the /crews canvas itself,
- * so that is where it goes. Plain /crews and not /crews?agent=<slug> — this
- * page has no agent in scope, and /crews reads ?agent= as a *slug*
- * (hooks/use-crews-selection.tsx), so inventing one here would only clear
- * itself and land the user on an empty canvas.
+ * so that is where it goes, with the query the link carried and nothing
+ * invented: /crews reads ?agent= as a *slug* (hooks/use-crews-selection.tsx).
  */
 export default function LegacyAgentsRedirect() {
   const router = useRouter()
   useEffect(() => {
-    router.replace("/crews")
+    // The query is kept: an old link that names an agent (?agent=<slug>,
+    // ?tab=) still lands on that agent. Without one this is plain /crews.
+    router.replace(`/crews${window.location.search}`)
   }, [router])
   return (
     <noscript>

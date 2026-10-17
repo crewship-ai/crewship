@@ -27,8 +27,18 @@ describe("/agents", () => {
   // and /crews matches ?agent= against agent.slug (hooks/use-crews-selection),
   // so a value it cannot supply would be discarded and leave an empty canvas.
   it("redirects to the /crews roster", () => {
+    window.history.replaceState(null, "", "/agents")
     render(<LegacyAgentsRedirect />)
     expect(replace).toHaveBeenCalledWith("/crews")
+  })
+
+  // Z01: an old link that names an agent keeps naming it — /agents?agent=x
+  // must land on /crews?agent=x, not on whatever crew /crews opens by itself.
+  it("keeps the query string, so /agents?agent=x lands on /crews?agent=x", () => {
+    window.history.replaceState(null, "", "/agents?agent=scout&tab=persona")
+    render(<LegacyAgentsRedirect />)
+    expect(replace).toHaveBeenCalledWith("/crews?agent=scout&tab=persona")
+    window.history.replaceState(null, "", "/")
   })
 
   // The route is not decoration — `crewship open agents` builds <server>/agents
