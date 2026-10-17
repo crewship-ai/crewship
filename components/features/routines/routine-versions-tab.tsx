@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineStepDefinition } from "./routine-step-definition"
 import { draftAuthorLabel } from "./routine-identity-header"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 interface PipelineVersion {
   version: number
@@ -48,6 +49,12 @@ interface Props {
   onPublish?: () => void
   /** The draft row changed (discarded, or a version was restored as one). */
   onChanged?: () => void
+  /**
+   * Offer "Restore as draft" on older versions. Off: the Harbor 2 page keeps
+   * it hidden until the owner decides on it (the client-side restore works and
+   * stays tested).
+   */
+  allowRestore?: boolean
 }
 
 /**
@@ -59,7 +66,7 @@ interface Props {
  * (oponentura 12. 9.). Publishing that draft is the one way a live version
  * changes from the web.
  */
-export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublish, onChanged }: Props) {
+export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublish, onChanged, allowRestore = false }: Props) {
   const [versions, setVersions] = useState<PipelineVersion[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -71,6 +78,7 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
   const [compare, setCompare] = useState(false)
   const [step, setStep] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<{ kind: "discard" } | { kind: "restore"; version: number } | null>(null)
   const { role } = useAbilities()
   const { data: session } = useSessionSafe()
   const manager = roleAtLeast(role, "MANAGER")
@@ -127,10 +135,14 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
   }, [base, selected, compare, head, retry])
 
   /** Load the archived definition and save it as the routine's draft. */
+  const askRestore = (version: number) => {
+    if (busy) return
+    if (draft) setConfirming({ kind: "restore", version })
+    else void restoreAsDraft(version)
+  }
   const restoreAsDraft = async (version: number) => {
     if (busy) return
     const expectedDraft = draft ? { id: draft.id, revision: draft.revision } : null
-    if (draft && !window.confirm(`Replace draft r${draft.revision} with the recipe of v${version}? The draft's current content is lost; nothing published changes.`)) return
     setBusy(`restore:${version}`)
     try {
       const res = await apiFetch(`${base}/versions/${encodeURIComponent(String(version))}`)
@@ -165,7 +177,6 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
 
   const discard = async () => {
     if (!draft || busy) return
-    if (!window.confirm(`Discard draft r${draft.revision}? The published version stays as it is.`)) return
     setBusy("discard")
     try {
       await discardRoutineDraft(workspaceId, { slug, id: draft.id, revision: draft.revision })
@@ -200,7 +211,7 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
             {manager && (
               <div className="flex shrink-0 gap-1.5">
                 <Button size="sm" onClick={onPublish} disabled={!onPublish || !!busy}>Review and publish</Button>
-                <Button size="sm" variant="ghost" onClick={() => void discard()} disabled={!!busy}>Discard</Button>
+                <Button size="sm" variant="ghost" onClick={() => setConfirming({ kind: "discard" })} disabled={!!busy}>Discard</Button>
               </div>
             )}
           </div>
@@ -259,13 +270,13 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
                       Compare with published
                     </Button>
                   )}
-                  {!v.is_head && manager && (
+                  {!v.is_head && manager && allowRestore && (
                     <Button
                       size="sm"
                       variant="ghost"
                       title="Creates a draft from this version; publishing it makes a new version, history is not rewritten"
                       disabled={!!busy}
-                      onClick={() => void restoreAsDraft(v.version)}
+                      onClick={() => askRestore(v.version)}
                     >
                       {busy === `restore:${v.version}` ? "Restoring…" : "Restore as draft"}
                     </Button>
@@ -344,6 +355,26 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
             </>
           )}
         </DetailCard>
+      )}
+      {draft && (
+        <ConfirmDialog
+          open={confirming !== null}
+          onOpenChange={(open) => !open && setConfirming(null)}
+          title={confirming?.kind === "restore" ? `Restore v${confirming.version} as a draft?` : `Discard draft r${draft.revision}?`}
+          description={
+            confirming?.kind === "restore"
+              ? `Replaces draft r${draft.revision} with the recipe of v${confirming.version}. The live version stays until you publish.`
+              : "The published version stays as it is."
+          }
+          consequences={[{ tone: "lost", text: `What is saved in draft r${draft.revision}.` }, { tone: "kept", text: "Every published version and its runs." }]}
+          confirmLabel={confirming?.kind === "restore" ? "Restore as draft" : "Discard draft"}
+          destructive
+          onConfirm={async () => {
+            const c = confirming
+            if (c?.kind === "restore") await restoreAsDraft(c.version)
+            else await discard()
+          }}
+        />
       )}
     </div>
   )

@@ -10,8 +10,9 @@ const h = vi.hoisted(() => ({
   api: vi.fn(),
   refresh: vi.fn(),
 }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => h.api(...args) }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => h.api(...args), broadcastSessionExpired: vi.fn(), broadcastSignOut: vi.fn() }))
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: () => {}, useRealtimeEventSafe: () => {} }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
 vi.mock("@/hooks/use-trace", () => ({
   useTrace: () => ({ run: h.run, dsl: h.dsl, loading: false, error: null, refresh: h.refresh }),

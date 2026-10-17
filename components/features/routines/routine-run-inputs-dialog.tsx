@@ -42,7 +42,7 @@ import { cn } from "@/lib/utils"
  */
 export interface RoutineRunInputsDialogProps {
   definition?: Record<string, unknown> | null
-  submitLabel?: "Run" | "Schedule"
+  submitLabel?: "Run" | "Schedule" | "Test"
   /** Open when non-null; the specs are the routine's declared inputs. */
   versionChoices?: { value: string; label: string }[]
   selectedVersion?: string
@@ -125,7 +125,9 @@ export function RoutineRunInputsDialog({
             ) : null}
             {submitLabel === "Schedule"
               ? "the routine will start at the selected date and time."
-              : "a new run is added to History."}
+              : submitLabel === "Test"
+                ? "a test without side effects: nothing is sent, written or published."
+                : "a new run is added to History."}
           </>
         }
         onClose={dismiss}

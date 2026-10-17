@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render as renderUI, screen, fireEvent, waitFor, act, cleanup } from "@testing-library/react"
+import { render as renderUI, screen, fireEvent, waitFor, act, cleanup, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
@@ -31,6 +31,7 @@ vi.mock("@/lib/api-fetch", () => ({
 
 vi.mock("@/hooks/use-realtime", () => ({
   useRealtimeEvent: () => {},
+  useRealtimeEventSafe: () => {},
 }))
 
 vi.mock("@/hooks/use-access-mode", async (importOriginal) => ({
@@ -243,7 +244,7 @@ describe("<RoutinesDetailPanel> — live-run banner and Stop", () => {
       expect(toast.error).toHaveBeenCalledWith(
         "Stop failed",
         expect.objectContaining({
-          description: expect.stringMatching(/permission/i),
+          description: expect.stringMatching(/Owner or Admin/),
         }),
       )
     })
@@ -571,25 +572,48 @@ describe("<RoutinesDetailPanel> — a slug with a draft and no published routine
     })
   })
 
-  it("renders the draft as the routine, disables Run and offers Publish", async () => {
+  it("draft-only routine shows Not live yet, Test draft and Publish instead of Run", async () => {
     render(<RoutinesDetailPanel {...defaultProps} slug="daily-report-copy" />)
-    expect(await screen.findByText("Daily report (copy)")).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "Daily report (copy)" })).toBeInTheDocument()
     expect(screen.queryByText(/fetch routine: 404/)).toBeNull()
-    const run = screen.getByRole("button", { name: /^Run$/ })
-    expect(run).toBeDisabled()
-    expect(run.closest("span")).toHaveAttribute("title", expect.stringMatching(/Publish the draft first/))
-    expect(screen.getByRole("button", { name: /Publish draft r1/ })).toBeInTheDocument()
+    expect(screen.getByTestId("routine-state-line")).toHaveTextContent("Not live yet")
+    expect(screen.queryByRole("button", { name: /^Run$/ })).toBeNull()
+    const actions = within(screen.getByTestId("routine-page-actions"))
+    expect(actions.getByRole("button", { name: "Test draft" })).toBeInTheDocument()
+    expect(actions.getByRole("button", { name: "Publish" })).toBeInTheDocument()
+    // The draft bar says what it is, in words.
+    expect(screen.getByTestId("routine-draft-bar")).toHaveTextContent("This routine is not live yet")
   })
 
-  it("still reports a real 404 when there is no draft either", async () => {
+  it("Test draft runs the test without side effects on the draft's definition", async () => {
+    render(<RoutinesDetailPanel {...defaultProps} slug="daily-report-copy" />)
+    const actions = within(await screen.findByTestId("routine-page-actions"))
+    vi.mocked(apiFetch).mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith("/pipelines/daily-report-copy/draft")) return okJSON(DRAFT)
+      if (u.endsWith("/pipelines/test_run")) return okJSON({ status: "DRY_RUN_OK", save_token: "t" })
+      if (u.endsWith("/pipelines/daily-report-copy")) return notFound()
+      return okJSON([])
+    })
+    fireEvent.click(actions.getByRole("button", { name: "Test draft" }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Draft r1 passed the test", expect.anything()))
+    const call = vi.mocked(apiFetch).mock.calls.find(([u]) => String(u).endsWith("/pipelines/test_run"))!
+    expect(JSON.parse(String(call[1]?.body))).toMatchObject({ definition: DRAFT.document.definition, author_crew_id: "crew-1" })
+    expect(vi.mocked(apiFetch).mock.calls.some(([u]) => /\/(run|publish)$/.test(String(u)))).toBe(false)
+  })
+
+  it("404 shows that the routine no longer exists, with a way back", async () => {
     vi.mocked(apiFetch).mockImplementation(async (url) => {
       const u = String(url)
       if (u.endsWith("/draft")) return okJSON({ id: "", slug: "gone", revision: 0, base_pipeline_id: "", base_revision: 0, document: {} })
       if (u.endsWith("/pipelines/gone")) return notFound()
       return okJSON([])
     })
-    render(<RoutinesDetailPanel {...defaultProps} slug="gone" />)
-    expect(await screen.findByText(/fetch routine: 404/)).toBeInTheDocument()
+    const onClose = vi.fn()
+    render(<RoutinesDetailPanel {...defaultProps} slug="gone" onClose={onClose} />)
+    expect(await screen.findByText("This routine doesn’t exist")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Back to routines" }))
+    expect(onClose).toHaveBeenCalled()
   })
 
   it.each([403, 500, "network"])("preserves a draft lookup failure (%s) instead of reporting not found", async (status) => {
@@ -650,6 +674,7 @@ describe("active recipe sample testing", () => {
   it("opens captured-data testing from the actual recipe step without starting a run", async () => {
     sampleRoutine()
     await renderPanel()
+    fireEvent.click(screen.getByRole("tab", { name: "Steps" }))
     const details = document.querySelector('[data-step-id="value"]') as HTMLDetailsElement
     details.open = true
     fireEvent(details, new Event("toggle"))
@@ -674,6 +699,7 @@ describe("active recipe sample testing", () => {
     h.access.role = "MEMBER"
     sampleRoutine()
     await renderPanel()
+    fireEvent.click(screen.getByRole("tab", { name: "Steps" }))
     const details = document.querySelector('[data-step-id="value"]') as HTMLDetailsElement
     details.open = true
     fireEvent(details, new Event("toggle"))
@@ -708,9 +734,37 @@ it("keeps workspace and slug data in governance POST paths", async () => {
   const workspaceId = "workspace/child?x=#fragment"
   const slug = "recipe/child?x=#fragment"
   render(<RoutinesDetailPanel {...defaultProps} workspaceId={workspaceId} slug={slug} />)
-  fireEvent.click(await screen.findByRole("button", { name: "Approve" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Approve routine" }))
   await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
     `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/approve`,
     expect.objectContaining({ method: "POST" }),
   ))
 })
+
+describe("proposed routine actions", () => {
+  it.each([
+    ["MANAGER", true],
+    ["MEMBER", false],
+  ] as const)("%s sees Approve routine in the page actions: %s", async (role, shown) => {
+    cleanup()
+    h.access.role = role
+    vi.mocked(apiFetch).mockResolvedValue(okJSON({ ...ROUTINE, status: "proposed", head_version: 1 }))
+    render(<RoutinesDetailPanel {...defaultProps} />)
+    expect(await screen.findByTestId("routine-proposal")).toHaveTextContent("Proposed · waiting for approval")
+    expect(screen.queryByRole("button", { name: "Approve routine" }) !== null).toBe(shown)
+  })
+
+  it("Reject asks the shared confirmation before discarding", async () => {
+    cleanup()
+    h.access.role = "MANAGER"
+    vi.mocked(apiFetch).mockResolvedValue(okJSON({ ...ROUTINE, status: "proposed", head_version: 1 }))
+    render(<RoutinesDetailPanel {...defaultProps} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Reject" }))
+    const dialog = await screen.findByTestId("confirm-dialog")
+    expect(dialog).toHaveTextContent("The proposed routine is discarded.")
+    expect(vi.mocked(apiFetch).mock.calls.some(([u]) => String(u).endsWith("/reject"))).toBe(false)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reject routine" }))
+    await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.some(([u, init]) => String(u).endsWith("/reject") && init?.method === "POST")).toBe(true))
+  })
+})
+
