@@ -4,7 +4,6 @@ import {
   attentionOverflow,
   attentionState,
   buildAttentionItems,
-  capacitySignal,
   deriveFleetHealth,
   heldForWorkspace,
   kpisFromInsights,
@@ -130,6 +129,7 @@ describe("dashboard overview derivations", () => {
       successOk: 9,
       successTotal: 10,
       p95Ms: 9_000,
+      p50Ms: 1_000,
     })
   })
 })
@@ -155,7 +155,7 @@ describe("the strip distinguishes 'nothing is wrong' from 'we could not find out
   })
 
   it("shows the items whenever there are any, even mid-load", () => {
-    const item = { id: "approvals", label: "2 approvals waiting", detail: "", href: "/inbox", tone: "warn" as const, icon: (() => null) as never }
+    const item = { id: "approvals", label: "2 approvals waiting", count: "2", title: "Approvals waiting", detail: "", href: "/inbox", tone: "warn" as const }
     expect(attentionState({ items: [item], inboxLoading: true, inboxError: null }).kind).toBe("items")
     expect(attentionState({ items: [item], inboxLoading: false, inboxError: "boom" }).kind).toBe("items")
   })
@@ -195,45 +195,26 @@ describe("capacity holds are this workspace's, counted per crew", () => {
   })
 })
 
-describe("runtime capacity does not report healthy when it could not be read", () => {
-  it("is unknown, not Available, when the fetch failed", () => {
-    const r = capacitySignal(null, [])
-    // "Unavailable" is the right answer and contains the substring, so match
-    // the whole value rather than a fragment of it.
-    expect(r.value).not.toBe("Available")
-    expect(r.value).toBe("Unavailable")
-    expect(r.tone).not.toMatch(/success/)
-  })
-
-  it("says Disabled when admission control is genuinely off", () => {
-    expect(capacitySignal({ enabled: false, held: [] } as never, []).value).toMatch(/disabled/i)
-  })
-
-  it("says Available only when it answered and nothing is held", () => {
-    expect(capacitySignal({ enabled: true, held: [] } as never, []).value).toMatch(/available/i)
-  })
-})
-
 // Nothing in the strip may be silently dropped — #2187.
-describe("the strip does not lose items past the third", () => {
+describe("the tiles do not lose items past the fourth", () => {
   const item = (id: string) => ({
-    id, label: id, detail: "", href: "/x", tone: "warn" as const, icon: (() => null) as never,
+    id, label: id, count: "1", title: id, detail: "", href: "/x", tone: "warn" as const,
   })
 
   it("reports the overflow when there are more than it can show", () => {
     const o = attentionOverflow([item("a"), item("b"), item("c"), item("d"), item("e")])
-    expect(o.map((i) => i.id)).toEqual(["d", "e"])
+    expect(o.map((i) => i.id)).toEqual(["e"])
   })
 
   it("reports none when everything fits", () => {
-    expect(attentionOverflow([item("a"), item("b"), item("c")])).toHaveLength(0)
+    expect(attentionOverflow([item("a"), item("b"), item("c"), item("d")])).toHaveLength(0)
   })
 
   it("keeps the dropped items addressable, not just counted", () => {
     // The badge already showed items.length while three rendered, so the
     // count was never the problem — reachability was. A credential gap is
     // fourth and "Open Inbox" does not cover it.
-    const o = attentionOverflow([item("a"), item("b"), item("c"), item("credentials")])
+    const o = attentionOverflow([item("a"), item("b"), item("c"), item("d"), item("credentials")])
     expect(o[0]).toMatchObject({ id: "credentials", href: "/x" })
   })
 })
@@ -241,7 +222,7 @@ describe("the strip does not lose items past the third", () => {
 // The strip's own fix had the defect it was fixing, one layer up.
 describe("a partial answer is not presented as a complete one", () => {
   const item = (id: string) => ({
-    id, label: id, detail: "", href: "/x", tone: "warn" as const, icon: (() => null) as never,
+    id, label: id, count: "1", title: id, detail: "", href: "/x", tone: "warn" as const,
   })
 
   it("marks the list incomplete when items exist but the inbox failed", () => {

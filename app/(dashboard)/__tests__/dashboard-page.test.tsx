@@ -1,24 +1,28 @@
-import type { ReactNode } from "react"
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { AgentSummary, CrewSummary, CrewSpendResponse, RunInsightsResponse, RuntimeCapacityResponse, TimeseriesResponse } from "../dashboard-types"
+import { useAppStore } from "@/lib/store"
 import DashboardPage from "../page"
 
-type Query<T> = { data: T | undefined; isPending: boolean; isError: boolean; refetch: ReturnType<typeof vi.fn> }
+type Query<T> = { data: T | undefined | null; isPending: boolean; isError: boolean; refetch: ReturnType<typeof vi.fn> }
 const state = vi.hoisted(() => {
   const query = <T,>(): Query<T> => ({ data: undefined, isPending: false, isError: false, refetch: vi.fn() })
   return {
     workspace: { workspaceId: "a" as string | null, loading: false }, admin: false as boolean | null,
+    session: { data: { user: { name: "Pavel Srba" } } as { user: { name: string } } | null, status: "authenticated" },
     fetch: vi.fn(), events: new Map<string, () => void>(), invalidateA: vi.fn(), invalidateB: vi.fn(), volumeCalls: vi.fn(), insightsCalls: vi.fn(), agentCalls: vi.fn(), routineRefresh: vi.fn(),
     agents: query<AgentSummary[]>(), crews: query<CrewSummary[]>(), review: query<unknown[]>(), progress: query<unknown[]>(), completed: query<unknown[]>(), runs: query<unknown[]>(),
     insights: query<RunInsightsResponse>(), capacity: query<RuntimeCapacityResponse>(), spend: query<CrewSpendResponse>(), volume: query<Partial<TimeseriesResponse>>(),
     gaps: new Map<string, { crewId: string }[]>(),
+    inbox: { items: [] as unknown[], loading: false, error: null as string | null, activeByKind: {} as Record<string, number>, decisionCount: 0, refresh: vi.fn() },
+    schedules: [] as unknown[],
   }
 })
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => state.workspace }))
-vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => state.admin }))
+vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => state.admin, useSessionSafe: () => state.session }))
 vi.mock("@/lib/server-base", () => ({ serverFetch: (...args: unknown[]) => state.fetch(...args) }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: (event: string, callback: () => void) => { state.events.set(event, callback) } }))
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 vi.mock("@/hooks/use-dashboard-data", () => ({
   useAgentSummaries: (...args: unknown[]) => { state.agentCalls(...args); return state.agents },
   useCrewSummaries: () => state.crews,
@@ -32,21 +36,18 @@ vi.mock("@/hooks/use-dashboard-data", () => ({
   useInvalidateDashboard: (ws: string) => ws === "a" ? state.invalidateA : state.invalidateB,
 }))
 vi.mock("@/hooks/use-active-routine-runs", () => ({ useActiveRoutineRuns: () => ({ runs: [], recentDashboardRuns: [], loading: false, error: null, refresh: state.routineRefresh }) }))
-vi.mock("@/hooks/use-pipeline-schedules", () => ({ usePipelineSchedules: () => ({ schedules: [] }) }))
+vi.mock("@/hooks/use-pipeline-schedules", () => ({ usePipelineSchedules: () => ({ schedules: state.schedules }) }))
 vi.mock("@/hooks/use-credential-readiness", () => ({ useCredentialReadiness: () => ({ gapsByCredential: state.gaps }) }))
-vi.mock("@/hooks/use-inbox", () => ({ useInbox: () => ({ items: [], loading: false, error: null, activeByKind: {}, decisionCount: 0 }) }))
-vi.mock("@/components/ui/detail", async (importActual) => ({
-  ...await importActual<typeof import("@/components/ui/detail")>(), Appear: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-}))
+vi.mock("@/hooks/use-inbox", () => ({ useInbox: () => state.inbox }))
 vi.mock("@/components/features/dashboard/dashboard-overview", async (importActual) => ({
   ...await importActual<typeof import("@/components/features/dashboard/dashboard-overview")>(),
-  AttentionStrip: ({ items }: { items: { id: string; label: string; detail: string }[] }) => <div data-testid="attention">{items.map((item) => <p key={item.id}>{item.label}: {item.detail}</p>)}</div>,
-  OutcomeKpis: ({ spendUsd, spendPerRun }: { spendUsd: number | null | undefined; spendPerRun: number | null }) => <div data-testid="spend" data-per-run={String(spendPerRun)}>{spendUsd === undefined ? "pending" : spendUsd === null ? "unmetered" : String(spendUsd)}</div>,
-  UpNext: () => <div>Upcoming routines</div>,
+  AttentionTiles: ({ items }: { items: { id: string; label: string; detail: string }[] }) => <div data-testid="attention">{items.map((item) => <p key={item.id}>{item.label}: {item.detail}</p>)}</div>,
+  DashboardKpis: ({ spendUsd, spendPerRun }: { spendUsd: number | null | undefined; spendPerRun: number | null }) => <div data-testid="spend" data-per-run={String(spendPerRun)}>{spendUsd === undefined ? "pending" : spendUsd === null ? "unmetered" : String(spendUsd)}</div>,
+  DashboardUpNext: () => <div>Upcoming routines</div>,
 }))
 vi.mock("@/components/features/dashboard/fleet-board", async (importActual) => ({
   ...await importActual<typeof import("@/components/features/dashboard/fleet-board")>(),
-  FleetBoard: ({ cards }: { cards: { row: { crew: CrewSummary }; spendUsd: number | null }[] }) => <div data-testid="fleet">{cards.map((c) => <span key={c.row.crew.id}>{c.row.crew.name}:{String(c.spendUsd)}</span>)}</div>,
+  FleetBoard: ({ cards }: { cards: { row: { crew: CrewSummary } }[] }) => <div data-testid="fleet">{cards.map((c) => <span key={c.row.crew.id}>{c.row.crew.name}</span>)}</div>,
 }))
 vi.mock("@/components/features/dashboard/dashboard-results", () => ({
   DashboardResults: ({ onRetry, loading, error, workspaceId }: { onRetry: () => void; loading: boolean; error: boolean; workspaceId: string }) => <button onClick={onRetry} data-loading={String(loading)} data-error={String(error)} data-workspace={workspaceId}>Retry results</button>,
@@ -54,7 +55,7 @@ vi.mock("@/components/features/dashboard/dashboard-results", () => ({
 vi.mock("@/components/features/dashboard/run-volume-chart", () => ({
   RunVolumeChart: (props: { buckets: unknown[]; series: unknown[]; window: string }) => <pre data-testid="chart">{JSON.stringify(props)}</pre>,
 }))
-vi.mock("@/components/features/dashboard/recipes-cards", () => ({ RecipesEmptyState: ({ workspaceId, onInstalled }: { workspaceId: string; onInstalled: () => void }) => <button onClick={onInstalled}>Install recipe in {workspaceId}</button> }))
+vi.mock("@/components/features/dashboard/dashboard-empty", () => ({ DashboardEmpty: ({ workspaceId, onInstalled }: { workspaceId: string; onInstalled: () => void }) => <div data-state="empty"><h2>Your workspace is ready</h2><button onClick={onInstalled}>Install recipe in {workspaceId}</button></div> }))
 vi.mock("@/components/features/dashboard/pages-strip", () => ({ PagesStrip: () => <div>Workspace pages</div> }))
 vi.mock("@/components/features/dashboard/welcome-checklist", () => ({ WelcomeChecklist: ({ firstAgentId }: { firstAgentId: string | null }) => <div data-testid="welcome">{firstAgentId ?? "no first agent"}</div> }))
 
@@ -62,17 +63,23 @@ const crew = (id: string): CrewSummary => ({ id, name: `Crew ${id}`, slug: `${id
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
 beforeEach(() => {
   state.workspace = { workspaceId: "a", loading: false }; state.admin = false; state.gaps = new Map(); state.events.clear()
+  state.session = { data: { user: { name: "Pavel Srba" } }, status: "authenticated" }
+  state.inbox = { items: [], loading: false, error: null, activeByKind: {}, decisionCount: 0, refresh: vi.fn() }
+  state.schedules = []
   for (const key of ["agents", "crews", "review", "progress", "completed", "runs", "insights", "capacity", "spend", "volume"] as const) {
     state[key].data = undefined; state[key].isPending = false; state[key].isError = false; state[key].refetch.mockReset()
   }
+  // A workspace with a crew renders the dashboard; tests of the empty
+  // workspace clear it.
+  state.crews.data = [crew("one")]
   for (const mock of [state.fetch, state.invalidateA, state.invalidateB, state.volumeCalls, state.insightsCalls, state.agentCalls, state.routineRefresh]) mock.mockReset()
   state.fetch.mockResolvedValue(json({ completed: true }))
   window.localStorage.clear()
 })
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
+afterEach(() => { cleanup(); act(() => useAppStore.getState().setPageBarSlot(null)); vi.useRealTimers(); vi.restoreAllMocks() })
 async function loaded() { await screen.findByRole("button", { name: "Retry results" }) }
 
-it("holds dashboard queries until onboarding answers and offers recipes for an empty workspace", async () => {
+it("holds dashboard queries until onboarding answers", async () => {
   let resolve!: (value: Response) => void
   state.fetch.mockReturnValue(new Promise<Response>((done) => { resolve = done }))
   render(<DashboardPage />)
@@ -81,6 +88,16 @@ it("holds dashboard queries until onboarding answers and offers recipes for an e
   await act(async () => resolve(json({ completed: true })))
   await loaded()
   expect(state.agentCalls).toHaveBeenLastCalledWith("a", { enabled: true })
+})
+
+it("zero crews renders one EmptyState and no section cards", async () => {
+  state.crews.data = []
+  const view = render(<DashboardPage />)
+  await screen.findByText("Your workspace is ready")
+  expect(view.container.querySelectorAll('[data-state="empty"]')).toHaveLength(1)
+  for (const gone of ["Retry results", "Upcoming routines", "Workspace pages"]) expect(screen.queryByText(gone)).not.toBeInTheDocument()
+  expect(screen.queryByTestId("attention")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("dashboard-greeting")).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole("button", { name: "Install recipe in a" }))
   expect(state.invalidateA).toHaveBeenCalledTimes(1)
 })
@@ -92,6 +109,61 @@ it.each(["24h", "7d", "30d"])("uses the selected %s period for both insights and
   expect(screen.getByRole("button", { name: period })).toHaveAttribute("aria-pressed", "true")
   expect(state.volumeCalls).toHaveBeenLastCalledWith("a", { metric: "runs_count", window: period, bucket: period === "24h" ? "1h" : "1d", group_by: "crew" }, { enabled: true })
   expect(state.insightsCalls).toHaveBeenLastCalledWith("a", period, { enabled: true })
+  expect(screen.getByRole("region", { name: `Run volume · ${period} · by crew` })).toBeInTheDocument()
+})
+
+it("no DashboardPeriodBar; window segment rendered into top-bar actions", async () => {
+  const slot = document.createElement("div")
+  slot.dataset.areaTitle = "Dashboard"
+  document.body.appendChild(slot)
+  act(() => useAppStore.getState().setPageBarSlot(slot))
+  const view = render(<DashboardPage />)
+  await loaded()
+  const segment = within(slot).getByRole("group", { name: "Dashboard time window" })
+  expect(within(segment).getAllByRole("button").map((b) => b.textContent)).toEqual(["24h", "7d", "30d"])
+  // Nothing sticky of the page's own above the content, and the page body
+  // carries no window control of its own.
+  expect(view.container.querySelector(".sticky")).toBeNull()
+  expect(within(view.container).queryByRole("group", { name: "Dashboard time window" })).toBeNull()
+  slot.remove()
+})
+
+it("keeps the window in the top bar while the page is still loading", async () => {
+  state.workspace.loading = true
+  const view = render(<DashboardPage />)
+  await act(async () => {})
+  expect(screen.getByRole("group", { name: "Dashboard time window" })).toBeInTheDocument()
+  expect(view.container.querySelector('[data-state="loading"]')).not.toBeNull()
+  expect(screen.queryByRole("button", { name: "Retry results" })).not.toBeInTheDocument()
+})
+
+it("greeting by local time and meta omits zero parts", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] })
+  vi.setSystemTime(new Date(2026, 9, 15, 9, 12))
+  state.agents.data = [
+    { id: "x", name: "X", slug: "x", role_title: null, agent_role: "worker", status: "RUNNING", crew: null, crew_id: "one", _count: { skills: 0, credentials: 0, chats: 0 } },
+    { id: "y", name: "Y", slug: "y", role_title: null, agent_role: "worker", status: "IDLE", crew: null, crew_id: "one", _count: { skills: 0, credentials: 0, chats: 0 } },
+  ]
+  state.schedules = [{ id: "s", name: "Digest", enabled: true, next_run_at: new Date(2026, 9, 15, 9, 30).toISOString() }]
+  state.inbox.decisionCount = 2
+  render(<DashboardPage />)
+  await loaded()
+  expect(screen.getByTestId("dashboard-greeting")).toHaveTextContent("Good morning, Pavel")
+  expect(screen.getByText("Thursday 15 October · 1 thing needs you · 1 agent running · next routine in 18 min")).toBeInTheDocument()
+})
+
+it("says nothing needs you only when the inbox answered, and drops empty parts", async () => {
+  state.session = { data: { user: { name: "" } }, status: "authenticated" }
+  const view = render(<DashboardPage />)
+  await loaded()
+  const meta = screen.getByTestId("dashboard-greeting").nextElementSibling!
+  expect(meta.textContent).toMatch(/ · Nothing needs you$/)
+  expect(screen.getByTestId("dashboard-greeting").textContent).toMatch(/^Good (morning|afternoon|evening)$/)
+  view.unmount()
+  state.inbox = { ...state.inbox, error: "403" }
+  render(<DashboardPage />)
+  await loaded()
+  expect(screen.getByTestId("dashboard-greeting").nextElementSibling!.textContent).not.toContain("Nothing needs you")
 })
 
 it.each(["pending", "failed", "empty", "metered"])("distinguishes %s spend from unmetered work", async (mode) => {
@@ -102,6 +174,24 @@ it.each(["pending", "failed", "empty", "metered"])("distinguishes %s spend from 
   await loaded()
   expect(screen.getByTestId("spend")).toHaveTextContent(mode === "metered" ? "4" : mode === "empty" ? "unmetered" : "pending")
   expect(screen.getByTestId("spend")).toHaveAttribute("data-per-run", mode === "metered" ? "1" : "null")
+})
+
+it("part failure replaces only that card", async () => {
+  state.insights.data = null
+  state.volume.data = null
+  render(<DashboardPage />)
+  await loaded()
+  expect(screen.getByText("Could not load the run summary")).toBeInTheDocument()
+  expect(screen.getByText("Could not load run volume")).toBeInTheDocument()
+  expect(screen.queryByTestId("spend")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("chart")).not.toBeInTheDocument()
+  // The rest of the page is still there.
+  expect(screen.getByText("Workspace pages")).toBeVisible()
+  expect(screen.getByText("Upcoming routines")).toBeVisible()
+  const retries = screen.getAllByRole("button", { name: "Retry" })
+  for (const b of retries) fireEvent.click(b)
+  expect(state.insights.refetch).toHaveBeenCalledTimes(1)
+  expect(state.volume.refetch).toHaveBeenCalledTimes(1)
 })
 
 it("scopes instance-wide holds to current workspace crews and counts each crew once", async () => {
@@ -116,7 +206,7 @@ it("scopes instance-wide holds to current workspace crews and counts each crew o
   await loaded()
   expect(screen.getByTestId("attention")).toHaveTextContent("1 crew waiting for capacity")
   expect(screen.getByTestId("attention")).not.toHaveTextContent("FOREIGN PRIVATE DETAIL")
-  expect(screen.queryByRole("button", { name: /Install recipe/ })).not.toBeInTheDocument()
+  expect(screen.queryByText("Your workspace is ready")).not.toBeInTheDocument()
 })
 
 it("builds a run chart from wire buckets and resolves crew identity by id, slug, name or fallback", async () => {
@@ -196,20 +286,13 @@ it("uses the saved first agent and tolerates unavailable storage", async () => {
   expect(screen.getByTestId("welcome")).toHaveTextContent("no first agent")
 })
 
-it.each([0, 1, 2, 3])("keeps the %s-crew skeleton while workspace identity is unresolved", async (count) => {
-  state.workspace.loading = true
-  state.crews.data = Array.from({ length: count }, (_, i) => crew(String(i)))
-  const view = render(<DashboardPage />)
-  await act(async () => {})
-  expect(screen.queryByRole("button", { name: "Retry results" })).not.toBeInTheDocument()
-  expect(view.container.querySelectorAll('[data-slot="skeleton"]').length).toBe(count ? 11 : 10)
-})
-
 it.each(["admin", "onboarding"])("redirects the %s landing without enabling dashboard reads", async (destination) => {
   const assign = vi.spyOn(window.location, "assign").mockImplementation(() => {})
   if (destination === "admin") { state.workspace.workspaceId = null; state.admin = true }
   else state.fetch.mockResolvedValue(json({ completed: false }))
-  render(<DashboardPage />)
+  const view = render(<DashboardPage />)
   await waitFor(() => expect(assign).toHaveBeenCalledWith(`/${destination}`))
   expect(state.agentCalls).toHaveBeenLastCalledWith(state.workspace.workspaceId, { enabled: false })
+  // Nothing of the dashboard flashes before the redirect.
+  expect(view.container.querySelector('[data-testid="attention"]')).toBeNull()
 })
