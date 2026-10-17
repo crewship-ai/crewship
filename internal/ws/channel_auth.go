@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
@@ -41,8 +40,7 @@ func (a *DBChannelAuthorizer) CanDeliver(ctx context.Context, userID, channel st
 	if a == nil || a.db == nil || userID == "" {
 		return false, nil
 	}
-	restricted, err := (access.Store{DB: a.db}).HasRestrictedMembership(ctx, userID)
-	return err == nil && !restricted, err
+	return a.trustedAccountActive(ctx, userID)
 }
 
 // CanSubscribe reports whether the user is allowed to subscribe to the given
@@ -78,8 +76,8 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 	if chType == "session" || chType == "chat-hints" {
 		return a.isSessionOwner(ctx, userID, chID)
 	}
-	restricted, err := (access.Store{DB: a.db}).HasRestrictedMembership(ctx, userID)
-	if err != nil || restricted {
+	active, err := a.trustedAccountActive(ctx, userID)
+	if err != nil || !active {
 		return false, err
 	}
 
@@ -215,4 +213,15 @@ func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userI
 func (a *DBChannelAuthorizer) isSessionOwner(ctx context.Context, userID, chatID string) (bool, error) {
 	receipt, err := chataudience.CaptureTrusted(ctx, a.db, chatID, userID, nil)
 	return receipt != nil && err == nil, err
+}
+
+// Broad and protocol channels require a live account behind the trusted account
+// ceiling. Resolve both conditions in one snapshot; conversation channels use
+// their existing audience snapshot instead.
+func (a *DBChannelAuthorizer) trustedAccountActive(ctx context.Context, userID string) (bool, error) {
+	var active bool
+	err := a.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM users u
+ WHERE u.id=? AND u.suspended_at IS NULL
+ AND NOT EXISTS(SELECT 1 FROM workspace_members m WHERE m.user_id=u.id AND m.access_mode='restricted'))`, userID).Scan(&active)
+	return active, err
 }

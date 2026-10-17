@@ -23,14 +23,21 @@ const (
 
 func fixtureRoster() []map[string]any {
 	var rows []map[string]any
-	for i, u := range demoUsers {
+	for i, u := range append(append([]demoUser{}, demoUsers...), demoCapabilityUsers()...) {
 		rows = append(rows, map[string]any{"id": fmt.Sprintf("u%d", i), "email": u.Email, "role": u.Role})
 	}
 	return rows
 }
 func stubSeedUserProvision(s *clitest.StubServer, path string) {
+	workspace := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/workspaces/"), "/members/provision")
+	s.OnGet("/api/v1/workspaces", clitest.JSONResponse(200, []map[string]string{{"id": workspace, "name": "Demo", "slug": "demo", "currentUserRole": "OWNER"}}))
 	s.OnPost(path, clitest.JSONResponse(201, map[string]any{"user_id": "new-user", "created_user": true, "setup_url": "https://untrusted.invalid/reset-password?token=setup%2Btoken"}))
 	s.OnPost("/api/v1/auth/reset", clitest.JSONResponse(200, map[string]bool{"ok": true}))
+	for i, u := range append(append([]demoUser{}, demoUsers...), demoCapabilityUsers()...) {
+		capPath := fmt.Sprintf("%s/u%d/capabilities", strings.TrimSuffix(path, "/provision"), i)
+		s.OnPatch(capPath, clitest.JSONResponse(200, map[string]any{"capabilities": u.Capabilities}))
+		s.OnGet(capPath, clitest.JSONResponse(200, map[string]any{"capabilities": u.Capabilities}))
+	}
 }
 func TestSeedRBACUsers_RequiresWorkspace(t *testing.T) {
 	if err := seedRBACUsers(context.Background(), cli.NewClient("http://127.0.0.1:1", "tok", "")); err == nil || !strings.Contains(err.Error(), "workspace_id") {
@@ -77,6 +84,7 @@ func TestSeedRBACUsers_ExistingMembersRequireProof(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()
 	s.OnPost(provisionMembersPath, clitest.ErrorResponse(409, "existing account"))
+	s.OnGet("/api/v1/workspaces", clitest.JSONResponse(200, []map[string]string{{"id": covWS, "currentUserRole": "OWNER"}}))
 	s.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
 	if err := seedRBACUsers(t.Context(), newSeedClient(s)); err == nil {
 		t.Fatal("existing member without working fixture login accepted")
@@ -119,5 +127,20 @@ func TestSeedRBACUsers_RejectIncompleteFixture(t *testing.T) {
 				t.Fatal("unsafe reset")
 			}
 		})
+	}
+}
+
+func TestSeedRBACUsers_AdminStopsBeforeProvisioning(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	stubSeedUserProvision(s, provisionMembersPath)
+	s.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
+	s.OnGet("/api/v1/workspaces", clitest.JSONResponse(200, []map[string]string{{"id": covWS, "currentUserRole": "ADMIN"}}))
+	err := seedRBACUsers(t.Context(), newSeedClient(s))
+	if err == nil || !strings.Contains(err.Error(), "OWNER") {
+		t.Fatalf("ADMIN seed must require OWNER before changes, got %v", err)
+	}
+	if got := len(s.CallsFor("POST", provisionMembersPath)); got != 0 {
+		t.Fatalf("refused seed provisioned %d accounts", got)
 	}
 }

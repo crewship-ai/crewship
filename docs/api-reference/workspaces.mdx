@@ -201,7 +201,7 @@ Partial update -- only provided fields are changed. Setting `preferred_language`
 | `name` | string | 2-100 chars |
 | `slug` | string | 2-50 chars; must remain unique across all workspaces |
 | `preferred_language` | string | Canonical name or ISO code; empty string clears the field |
-| `allow_privileged_credentials` | boolean | Explicitly allow credentials in privileged crew sidecars. |
+| `allow_privileged_credentials` | boolean | Allow privileged runtime configuration and credential delivery. Enabling requires an instance administrator in addition to workspace OWNER/ADMIN, and scoped CLI tokens need `instance:admin` as well as `workspace:admin`. Disabling requires workspace OWNER/ADMIN only. |
 | `run_retention_days` | integer | Positive retention override in days. |
 | `credential_audit_retention_days` | integer | Days to keep `credential_audit`. `0` is legal and means keep forever. Negative is rejected. |
 | `audit_log_retention_days` | integer | Days to keep `audit_logs`. `0` is legal and means keep forever. Negative is rejected. |
@@ -1851,7 +1851,7 @@ POST /api/v1/workspaces/{workspaceId}/skills/import
 
 Imports a single `SKILL.md` either by URL (SSRF-validated, HTTPS-only, no loopback / private addresses) or by pasted content. Re-imports of the same slug update in place.
 
-**Auth:** `MANAGER`+ (`canRole "create"`).
+**Auth:** `MANAGER`+, or a trusted workspace member with explicit `skill.create`. Guest restrictions and scoped CLI `skills:write` still apply.
 
 **Request body:**
 
@@ -1877,7 +1877,8 @@ The import response carries only these four fields (`created` is `true` for a fr
 | Status | Condition |
 |---|---|
 | `400` | Missing/both of `url` + `content`, SSRF block (private/loopback/non-HTTPS), parse failure, license rejection |
-| `403` | Caller below `MANAGER` |
+| `403` | Neither creation role nor explicit `skill.create`, or insufficient CLI scope |
+| `500` | Capability lookup or import storage failure |
 
 ### Bulk import from git repo
 
