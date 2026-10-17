@@ -53,24 +53,11 @@ var workspaceAccessPresetPreviewCmd = &cobra.Command{Use: "preview MEMBER", Shor
 	if err := requireWorkspace(); err != nil {
 		return err
 	}
-	file, _ := cmd.Flags().GetString("file")
-	if file == "" {
-		return fmt.Errorf("--file is required (use - for stdin)")
-	}
-	input := cmd.InOrStdin()
-	if file != "-" {
-		f, err := os.Open(file)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		input = f
-	}
 	var selection access.PresetRequest
-	limited := &io.LimitedReader{R: input, N: (256 << 10) + 1}
-	d := json.NewDecoder(limited)
-	d.DisallowUnknownFields()
-	if d.Decode(&selection) != nil || d.Decode(new(any)) != io.EOF || limited.N == 0 || selection.MembershipID == "" || selection.Revision < 1 || selection.Resource.Kind == "" || selection.Resource.ID == "" || selection.PresetID == "" || selection.Version < 1 || selection.Level == "" {
+	if err := readExplicitPresetJSON(cmd, &selection); err != nil {
+		return err
+	}
+	if selection.MembershipID == "" || selection.Revision < 1 || selection.Resource.Kind == "" || selection.Resource.ID == "" || selection.PresetID == "" || selection.Version < 1 || selection.Level == "" {
 		return fmt.Errorf("invalid preset selection: provide current membership_id, revision, resource, preset_id, preset_version and level")
 	}
 	client := newAPIClient()
@@ -135,4 +122,28 @@ func formatPresetDocument(document any, headers []string, rows [][]string) error
 		return formatter.YAML(cli.RawJSON(encoded))
 	}
 	return formatter.Auto(document, headers, rows)
+}
+
+// Read one explicit bounded document without silently repairing consent.
+func readExplicitPresetJSON(cmd *cobra.Command, document any) error {
+	file, _ := cmd.Flags().GetString("file")
+	if file == "" {
+		return fmt.Errorf("--file is required (use - for stdin)")
+	}
+	input := cmd.InOrStdin()
+	if file != "-" {
+		f, err := os.Open(file)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		input = f
+	}
+	limited := &io.LimitedReader{R: input, N: (256 << 10) + 1}
+	decoder := json.NewDecoder(limited)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(document) != nil || decoder.Decode(new(any)) != io.EOF || limited.N == 0 {
+		return fmt.Errorf("provide one bounded preset JSON document without unknown or trailing fields")
+	}
+	return nil
 }

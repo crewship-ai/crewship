@@ -10113,6 +10113,64 @@
         ],
         "type": "object"
       },
+      "MemberAccessPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "grant_details": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessGrant"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "membership_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "trusted",
+              "restricted"
+            ],
+            "type": "string"
+          },
+          "preset_selections": {
+            "items": {
+              "$ref": "#/components/schemas/AccessPresetSelection"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "reissue": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessRight"
+            },
+            "maxItems": 256,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "rights": {
+            "items": {
+              "$ref": "#/components/schemas/MemberAccessRight"
+            },
+            "maxItems": 256,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "membership_id",
+          "mode",
+          "revision",
+          "rights"
+        ],
+        "type": "object"
+      },
       "MemberAccessProjectRight": {
         "additionalProperties": false,
         "properties": {
@@ -145658,62 +145716,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "grant_details": {
-                      "items": {
-                        "$ref": "#/components/schemas/MemberAccessGrant"
-                      },
-                      "readOnly": true,
-                      "type": "array"
-                    },
-                    "membership_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "mode": {
-                      "enum": [
-                        "trusted",
-                        "restricted"
-                      ],
-                      "type": "string"
-                    },
-                    "preset_selections": {
-                      "items": {
-                        "$ref": "#/components/schemas/AccessPresetSelection"
-                      },
-                      "readOnly": true,
-                      "type": "array"
-                    },
-                    "reissue": {
-                      "items": {
-                        "$ref": "#/components/schemas/MemberAccessRight"
-                      },
-                      "maxItems": 256,
-                      "type": "array",
-                      "uniqueItems": true
-                    },
-                    "revision": {
-                      "format": "int64",
-                      "minimum": 1,
-                      "type": "integer"
-                    },
-                    "rights": {
-                      "items": {
-                        "$ref": "#/components/schemas/MemberAccessRight"
-                      },
-                      "maxItems": 256,
-                      "type": "array",
-                      "uniqueItems": true
-                    }
-                  },
-                  "required": [
-                    "membership_id",
-                    "mode",
-                    "revision",
-                    "rights"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/MemberAccessPolicy"
                 }
               }
             },
@@ -145852,62 +145855,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": false,
-                "properties": {
-                  "grant_details": {
-                    "items": {
-                      "$ref": "#/components/schemas/MemberAccessGrant"
-                    },
-                    "readOnly": true,
-                    "type": "array"
-                  },
-                  "membership_id": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "mode": {
-                    "enum": [
-                      "trusted",
-                      "restricted"
-                    ],
-                    "type": "string"
-                  },
-                  "preset_selections": {
-                    "items": {
-                      "$ref": "#/components/schemas/AccessPresetSelection"
-                    },
-                    "readOnly": true,
-                    "type": "array"
-                  },
-                  "reissue": {
-                    "items": {
-                      "$ref": "#/components/schemas/MemberAccessRight"
-                    },
-                    "maxItems": 256,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  "revision": {
-                    "format": "int64",
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "rights": {
-                    "items": {
-                      "$ref": "#/components/schemas/MemberAccessRight"
-                    },
-                    "maxItems": 256,
-                    "type": "array",
-                    "uniqueItems": true
-                  }
-                },
-                "required": [
-                  "membership_id",
-                  "mode",
-                  "revision",
-                  "rights"
-                ],
-                "type": "object"
+                "$ref": "#/components/schemas/MemberAccessPolicy"
               }
             }
           },
@@ -145918,62 +145866,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "grant_details": {
-                      "items": {
-                        "$ref": "#/components/schemas/MemberAccessGrant"
-                      },
-                      "readOnly": true,
-                      "type": "array"
-                    },
-                    "membership_id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "mode": {
-                      "enum": [
-                        "trusted",
-                        "restricted"
-                      ],
-                      "type": "string"
-                    },
-                    "preset_selections": {
-                      "items": {
-                        "$ref": "#/components/schemas/AccessPresetSelection"
-                      },
-                      "readOnly": true,
-                      "type": "array"
-                    },
-                    "reissue": {
-                      "items": {
-                        "$ref": "#/components/schemas/MemberAccessRight"
-                      },
-                      "maxItems": 256,
-                      "type": "array",
-                      "uniqueItems": true
-                    },
-                    "revision": {
-                      "format": "int64",
-                      "minimum": 1,
-                      "type": "integer"
-                    },
-                    "rights": {
-                      "items": {
-                        "$ref": "#/components/schemas/MemberAccessRight"
-                      },
-                      "maxItems": 256,
-                      "type": "array",
-                      "uniqueItems": true
-                    }
-                  },
-                  "required": [
-                    "membership_id",
-                    "mode",
-                    "revision",
-                    "rights"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/MemberAccessPolicy"
                 }
               }
             },

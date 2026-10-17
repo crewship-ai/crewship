@@ -9,6 +9,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Transactional audit appends reject ignored journal inserts and withhold notifications so the owning business transaction can roll back.
+
+- Applying a resource preset preserves every unrelated canonical grant row, including inactive historical grants whose resources are unavailable; ordinary complete-document policy updates retain their existing validation.
+
+
+- Preset CLI document decoding shares the existing bounded, strict file/stdin contract without changing supported consent fields or refreshing revisions.
+
+- OpenAPI administrative member-policy reads and replacements reuse a named complete policy document; accepted fields, CAS requirements and permissions are unchanged.
 
 - Read-only resource-preset previews in the administrative API and CLI show exact managed changes, retained provenance, Results disclosure and independent destructive consequences. Confirmation digests bind live state without granting authority or changing permissions.
 
