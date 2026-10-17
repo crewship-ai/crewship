@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/slides"
 )
 
 // forkExtraRows returns the rows a forked restore writes ON TOP of the ones the
@@ -203,15 +204,15 @@ func resolveFKValue(t *testing.T, db *sql.DB, fk genFK, workspaceID string) (any
 		{fmt.Sprintf(`SELECT %s FROM %s WHERE workspace_id = ? LIMIT 1`, fk.refColumn, fk.refTable), []any{workspaceID}},
 		{fmt.Sprintf(`SELECT %s FROM %s LIMIT 1`, fk.refColumn, fk.refTable), nil},
 	}
-	// The Docs content type is exclusive. Legacy content fixtures must not
-	// attach panels/artifacts to the dedicated document Page merely because
+	// Docs and Slides content types are exclusive. Legacy fixtures must not
+	// attach panels/artifacts to either dedicated Page merely because
 	// its ID happens to sort first in a parent lookup.
 	if fk.refTable == "pages" {
 		queries = append([]struct {
 			q    string
 			args []any
 		}{
-			{fmt.Sprintf(`SELECT %s FROM pages WHERE workspace_id=? AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.page_id=pages.id) LIMIT 1`, fk.refColumn), []any{workspaceID}},
+			{fmt.Sprintf(`SELECT %s FROM pages WHERE workspace_id=? AND NOT EXISTS(SELECT 1 FROM documents d WHERE d.page_id=pages.id) AND NOT EXISTS(SELECT 1 FROM slides_heads s WHERE s.page_id=pages.id) LIMIT 1`, fk.refColumn), []any{workspaceID}},
 		}, queries...)
 	}
 	for _, cand := range queries {
@@ -302,6 +303,47 @@ var genColumnOverrides = map[string]any{
 // BackupTables order) and ultimately report the shortfall.
 func seedOneBackupTable(t *testing.T, db *sql.DB, table, workspaceID string) error {
 	t.Helper()
+	if table == "slides_heads" {
+		// Adapt the frozen fixture's separate typed Slides Page using the
+		// pure storage model, without its deferred runtime. Keep all four durable
+		// tables populated so fork row-parity assertions exercise their FKs.
+		if _, err := db.ExecContext(t.Context(), `INSERT OR IGNORE INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) SELECT 'gen_slides_page',?,'gen-slides-page','Generated Slides',owner_user_id,'{}' FROM pages WHERE workspace_id=? AND owner_user_id IS NOT NULL AND owner_crew_id IS NULL LIMIT 1`, workspaceID, workspaceID); err != nil {
+			return err
+		}
+		deck := slides.Deck{SchemaVersion: 1, DeckID: "gen_slides_page", Width: 960, Height: 540, Theme: slides.Theme{Background: "#ffffff", Color: "#000000", FontFamily: "Arial", FontSize: 24}, SlideOrder: []string{"slide_one"}, Slides: []slides.Slide{{ID: "slide_one", Notes: "Retained fixture", Elements: []slides.Element{}}}}
+		content, err := slides.Canonical(deck)
+		if err != nil {
+			return err
+		}
+		hash, err := slides.DeckHash(deck)
+		if err != nil {
+			return err
+		}
+		for _, row := range []struct {
+			query string
+			args  []any
+		}{
+			{`INSERT INTO slides_heads(workspace_id,page_id,schema_version,head_rev,order_version,canonical_json,content_hash) VALUES(?,'gen_slides_page',1,1,1,?,?)`, []any{workspaceID, content, hash}},
+			{`INSERT INTO slides_revisions(workspace_id,page_id,rev,parent_rev,order_version,schema_version,canonical_json,content_hash,actor,kind,mutation_id) VALUES(?,'gen_slides_page',1,0,1,1,?,?,'human','initialize','original_initialize')`, []any{workspaceID, content, hash}},
+			{`INSERT INTO slides_receipts(workspace_id,page_id,mutation_id,request_hash,actor,rev,order_version,kind,content_hash) VALUES(?,'gen_slides_page','original_initialize',?,'human',1,1,'initialize',?)`, []any{workspaceID, hash, hash}},
+			{`INSERT INTO slides_object_ids(workspace_id,page_id,object_id,object_kind) VALUES(?,'gen_slides_page','slide_one','slide')`, []any{workspaceID}},
+		} {
+			if _, err := db.ExecContext(t.Context(), row.query, row.args...); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if table == "slides_revisions" || table == "slides_receipts" || table == "slides_object_ids" {
+		var count int
+		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM `+table+` WHERE workspace_id=?`, workspaceID).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			return fmt.Errorf("Slides parent not seeded")
+		}
+		return nil
+	}
 	if table == "documents" {
 		// A single synthetic Page cannot host Docs and legacy panels together.
 		// Keep a separate, explicitly human-owned Page so both families and
@@ -432,6 +474,44 @@ func countBackupTableRows(t *testing.T, db *sql.DB) map[string]int {
 	return out
 }
 
+// Forks clear replay capabilities but preserve canonical history and the
+// revision mutation IDs that prevent those mutations being applied anew.
+func assertForkedSlidesFixture(t *testing.T, db *sql.DB, sourceWorkspace, forkWorkspace string) {
+	t.Helper()
+	for _, table := range []string{"slides_heads", "slides_revisions", "slides_receipts", "slides_object_ids"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE workspace_id=?`, sourceWorkspace).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("source %s coverage=%d err=%v", table, count, err)
+		}
+	}
+	for _, table := range []string{"slides_heads", "slides_revisions"} {
+		var pageID, canonical, hash string
+		if err := db.QueryRow(`SELECT page_id,canonical_json,content_hash FROM `+table+` WHERE workspace_id=?`, forkWorkspace).Scan(&pageID, &canonical, &hash); err != nil {
+			t.Fatal(err)
+		}
+		deck, err := slides.Decode([]byte(canonical))
+		if err != nil || pageID == "gen_slides_page" || deck.DeckID != pageID {
+			t.Fatalf("fork %s canonical Page identity: page=%q deck=%q err=%v", table, pageID, deck.DeckID, err)
+		}
+		if got, err := slides.DeckHash(deck); err != nil || got != hash {
+			t.Fatalf("fork %s canonical hash=%q want=%q err=%v", table, got, hash, err)
+		}
+	}
+	for _, check := range []struct {
+		query string
+		want  int
+	}{
+		{`SELECT COUNT(*) FROM slides_receipts WHERE workspace_id=?`, 0},
+		{`SELECT COUNT(*) FROM slides_revisions WHERE workspace_id=? AND rev=1 AND mutation_id='original_initialize'`, 1},
+		{`SELECT COUNT(*) FROM slides_object_ids WHERE workspace_id=? AND object_id='slide_one' AND object_kind='slide'`, 1},
+	} {
+		var count int
+		if err := db.QueryRow(check.query, forkWorkspace).Scan(&count); err != nil || count != check.want {
+			t.Fatalf("fork history/replay policy: %s count=%d want=%d err=%v", check.query, count, check.want, err)
+		}
+	}
+}
+
 // TestForkedRestore_EveryBackupTable answers #2260's "worth answering while
 // investigating": fork a bundle carrying at least one row for as much of
 // BackupTables as can be synthesised, into the same instance, and require both
@@ -516,6 +596,7 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 	}
 
 	assertNoFKViolations(t, source, "after every-table --as-workspace fork")
+	assertForkedSlidesFixture(t, source, workspaceID, res.RestoredWorkspaceID)
 
 	after := countBackupTableRows(t, source)
 	extra := forkExtraRows(dump, actor.UserID)
@@ -542,6 +623,15 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 			if got := after[table] - before[table]; got != 0 {
 				t.Errorf("%s is listed in knownForkDrops (%s) but the fork added %d row(s) — "+
 					"if that gap is fixed, delete the knownForkDrops entry", table, reason, got)
+			}
+			continue
+		}
+		if table == "slides_receipts" {
+			// Frozen source fork security policy: replay capabilities are
+			// cleared; the canonical history and mutation tombstone are
+			// asserted above, with explicit populated source coverage.
+			if got := after[table] - before[table]; got != 0 {
+				t.Errorf("fork revived %d Slides receipts", got)
 			}
 			continue
 		}
