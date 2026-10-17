@@ -434,6 +434,7 @@ export function OverviewTab({
           <SkillsManager
             agentId={agent.id}
             agentSlug={agent.slug}
+            agentName={agent.name}
             workspaceId={workspaceId}
             onChange={() => { refresh(); onAgentChanged() }}
           />

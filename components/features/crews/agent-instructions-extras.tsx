@@ -18,6 +18,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { toApiError } from "@/lib/api-error"
 import { cn } from "@/lib/utils"
 
+import { AgentReadOrder } from "./agent-read-order"
 import { CrCard, CrLine, CrNote } from "./cr-card"
 
 interface PersonaState { layer: string; from_default?: boolean }
@@ -31,13 +32,15 @@ const FIELD = cn("w-full rounded-md border border-hairline bg-background px-2.5 
  * the crew default it falls back to. "Suggest improvements" is not here: the
  * server's persona/suggest is the agent's own proposal flow, not a generator.
  */
-export function AgentInstructionsExtras({ workspaceId, agentId, agentName, crew, canEdit, onReset }: {
+export function AgentInstructionsExtras({ workspaceId, agentId, agentName, crew, canEdit, memoryEnabled = true, onReset }: {
   workspaceId: string
   agentId: string
   agentName: string
   crew: { id: string; name: string } | null
   /** MANAGER+ (persona PUT/DELETE are roleCreate). */
   canEdit: boolean
+  /** Remember between runs: without it a run reads no memory and no PERSONA.md. */
+  memoryEnabled?: boolean
   /** After a reset: the page reloads the inline form. */
   onReset: () => void
 }) {
@@ -124,6 +127,8 @@ export function AgentInstructionsExtras({ workspaceId, agentId, agentName, crew,
       </CrCard>
 
       {crew && <CrewDefaultCard workspaceId={workspaceId} crew={crew} canEdit={canEdit} onSaved={() => setRev((n) => n + 1)} />}
+
+      <AgentReadOrder crewName={crew?.name ?? null} memoryEnabled={memoryEnabled} />
 
       <ConfirmDialog
         open={confirmReset}
