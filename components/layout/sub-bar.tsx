@@ -87,6 +87,78 @@ export interface SubBarProps<T extends string = string> {
   className?: string
 }
 
+/* ---------------------------------------------------------------------------
+ * Page actions slot (COM-12). A page rendered below its layout's SubBar (the
+ * routine page under the Routines layout) puts its actions in the bar with
+ * <SubBarActions>, which portals them after the bar's own `actions`. The bar
+ * on screen owns the slot; with none, SubBarActions renders nothing.
+ * ------------------------------------------------------------------------ */
+let actionsSlot: HTMLElement | null = null
+const slotListeners = new Set<() => void>()
+function setActionsSlot(el: HTMLElement | null) {
+  if (actionsSlot === el) return
+  actionsSlot = el
+  for (const l of slotListeners) l()
+}
+function subscribeActionsSlot(l: () => void) {
+  slotListeners.add(l)
+  return () => {
+    slotListeners.delete(l)
+  }
+}
+
+/** The SubBar's actions container; registers itself as the page actions slot. */
+function ActionsSlot({ className, children }: { className?: string; children?: React.ReactNode }) {
+  const ref = React.useRef<HTMLDivElement | null>(null)
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    setActionsSlot(el)
+    return () => {
+      if (actionsSlot === el) setActionsSlot(null)
+    }
+  }, [])
+  return (
+    <div ref={ref} data-slot="sub-bar-actions" className={cn("flex shrink-0 items-center gap-1.5 empty:hidden", className)}>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * Actions for the page's SubBar from anywhere below it, instead of a portal
+ * target handed down by a layout. They render after the bar's own actions.
+ */
+export function SubBarActions({ children }: { children: React.ReactNode }) {
+  const slot = React.useSyncExternalStore(subscribeActionsSlot, () => actionsSlot, () => null)
+  return slot ? createPortal(children, slot) : null
+}
+
+/**
+ * Whether anything in the row's actions is displayed. A page may hide an
+ * action on a phone (Dashboard's window control below md); a row left with
+ * only the hidden heading would be an empty 36 px strip (COM-06).
+ */
+function useActionsShown(row: React.RefObject<HTMLDivElement | null>, active: boolean): boolean {
+  const [shown, setShown] = React.useState(true)
+  React.useLayoutEffect(() => {
+    const box = row.current?.querySelector<HTMLElement>("[data-slot=sub-bar-actions]")
+    if (!active || !box) {
+      setShown(true)
+      return
+    }
+    const measure = () => setShown(Array.from(box.children).some((k) => getComputedStyle(k).display !== "none"))
+    measure()
+    const mo = new MutationObserver(measure)
+    mo.observe(box, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] })
+    window.addEventListener("resize", measure)
+    return () => {
+      mo.disconnect()
+      window.removeEventListener("resize", measure)
+    }
+  }, [row, active])
+  return shown
+}
+
 const ROW = "shrink-0 flex items-center h-9 bg-card border-b border-foreground/[0.08] px-2 sm:px-3"
 const SCROLL_X = "overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
 
@@ -117,6 +189,13 @@ export function SubBar<T extends string = string>({
   // AppToolbar writes the area it names onto the slot.
   const areaTitle = slot?.dataset.areaTitle ?? ""
   const repeatsArea = areaTitle !== "" && areaTitle.toLowerCase() === title.toLowerCase()
+  // On a phone the top bar already names the area: a title that only repeats
+  // it is hidden, and then the row is only worth drawing while an action in
+  // it is displayed.
+  const identityHidden = isMobile && repeatsArea && section == null && !leading && meta == null
+  const rowRef = React.useRef<HTMLDivElement | null>(null)
+  const actionsShown = useActionsShown(rowRef, identityHidden)
+  const rowEmpty = identityHidden && !actionsShown
   if (slot && !isMobile) {
     return (
       <>
@@ -145,7 +224,7 @@ export function SubBar<T extends string = string>({
             {meta}
             <div className="flex-1" />
             {/* Keeps the primary action off the status icons that follow. */}
-            {actions && <div className="flex shrink-0 items-center gap-1.5 pr-2">{actions}</div>}
+            <ActionsSlot className="pr-2">{actions}</ActionsSlot>
           </div>,
           slot,
         )}
@@ -154,27 +233,27 @@ export function SubBar<T extends string = string>({
     )
   }
 
-  // On a phone a row whose only content is the hidden title would be an
-  // empty 36 px strip; keep just the heading for assistive technology.
-  if (isMobile && repeatsArea && section == null && !leading && !actions && meta == null) {
-    return (
-      <div className={cn("shrink-0", className)}>
-        {heading && <h1 className="sr-only">{title}</h1>}
-        {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} />}
-      </div>
-    )
-  }
-
   return (
     <div className={cn("shrink-0", className)}>
+      {/* A row with nothing displayed in it is not drawn (an empty 36 px
+          strip on a phone); its heading stays for assistive technology,
+          outside the hidden row. The actions stay mounted, so one that
+          shows again brings the row back. */}
+      {rowEmpty && heading && <h1 className="sr-only">{title}</h1>}
       {/* ---- Row 1: identity + actions ---- */}
       {/* min-h, not h: with a coarse pointer the actions are 44 px tall. */}
-      <div className={cn(ROW, "h-auto min-h-9 gap-2", SCROLL_X)} aria-label={ariaLabel}>
+      <div
+        ref={rowRef}
+        data-slot="sub-bar-row"
+        data-empty={rowEmpty || undefined}
+        className={cn(ROW, "h-auto gap-2 data-[empty]:hidden", !rowEmpty && "min-h-9", SCROLL_X)}
+        aria-label={ariaLabel}
+      >
         {leading && <div className="flex items-center shrink-0">{leading}</div>}
 
         {/* On a phone the top bar already names the area; a title that only
             repeats it stays the page's heading for assistive technology. */}
-        <div className="flex items-center gap-2 min-w-0 max-sm:shrink-0">
+        {!rowEmpty && <div className="flex items-center gap-2 min-w-0 max-sm:shrink-0">
           {Icon && !(repeatsArea && section == null) && <Icon className="h-3.5 w-3.5 text-foreground/70 shrink-0" />}
           {/* One <h1> spanning the whole path, so the accessible name of the
               page is "Admin Console / Users" rather than a bare section label
@@ -202,11 +281,11 @@ export function SubBar<T extends string = string>({
             </>
           )}
           {meta}
-        </div>
+        </div>}
 
         <div className="flex-1" />
 
-        {actions && <div className="flex items-center gap-1.5 shrink-0">{actions}</div>}
+        <ActionsSlot>{actions}</ActionsSlot>
       </div>
 
       {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} />}
@@ -272,9 +351,9 @@ function SubBarTabButton<T extends string>({
     >
       {Icon && <Icon className="h-3 w-3 opacity-75" />}
       {tab.label}
-      {tab.badge != null && <span className="text-[11px] text-muted-foreground/70">{tab.badge}</span>}
+      {tab.badge != null && <span className="text-micro text-muted-foreground/70">{tab.badge}</span>}
       {tab.locked && (
-        <span className="text-[9px] uppercase tracking-wider text-warn/70 font-mono">
+        <span className="text-micro uppercase tracking-wider text-warn/70 font-mono">
           {tab.lockedLabel ?? "soon"}
         </span>
       )}

@@ -387,7 +387,14 @@ export function usePageSave(entry: PageSaveEntry): boolean {
  * `sm`. Leave ~6rem of bottom padding in the scroller so it never covers the
  * last card.
  */
-export function PageSaveBar({ className }: { className?: string }) {
+export function PageSaveBar({
+  className,
+  saveLabel = "Save",
+}: {
+  className?: string
+  /** The primary's words where Save undersells it: "Save as draft" on a routine editor. */
+  saveLabel?: string
+}) {
   const s = React.useContext(PageSaveStateContext)
   if (!s || (s.count === 0 && !s.saving && !s.justSaved)) return null
   const done = s.count === 0 && !s.saving
@@ -419,7 +426,7 @@ export function PageSaveBar({ className }: { className?: string }) {
             </span>
             <span><span className="font-mono tabular-nums">{s.count}</span> unsaved change{s.count === 1 ? "" : "s"}</span>
           </span>
-          <kbd className="hidden rounded border border-[var(--save-bar-border)] px-1.5 font-mono text-[11px] sm:inline">⌘S</kbd>
+          <kbd className="hidden rounded border border-[var(--save-bar-border)] px-1.5 font-mono text-micro sm:inline">⌘S</kbd>
           <Button type="button" variant="ghost" size="sm"
             className="h-7 text-xs text-[var(--save-bar-fg)] opacity-85 hover:bg-[color-mix(in_oklab,var(--save-bar-fg)_10%,transparent)] hover:text-[var(--save-bar-fg)] hover:opacity-100 coarse:h-[2.75rem]"
             disabled={s.saving} onClick={s.discardAll}>
@@ -429,7 +436,7 @@ export function PageSaveBar({ className }: { className?: string }) {
             className="h-7 gap-1.5 bg-[var(--save-bar-action)] text-xs font-semibold text-[var(--save-bar-action-fg)] hover:bg-[var(--save-bar-action)] hover:brightness-110 coarse:h-[2.75rem]"
             disabled={s.saving || !s.canSave} onClick={s.saveAll}>
             {s.saving && <Loader2 className="h-3 w-3 animate-spin" />}
-            {s.saving ? "Saving…" : "Save"}
+            {s.saving ? "Saving…" : saveLabel}
           </Button>
         </>
       )}

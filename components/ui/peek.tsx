@@ -24,9 +24,18 @@ export function Peek({
   onOpenFull,
   actions,
   footer,
+  initialFocus,
   className,
   children,
 }: {
+  /**
+   * Where focus lands when the Peek opens. Default: Radix's first focusable
+   * control (the Previous / Next / Open buttons). `"content"` focuses the
+   * sheet itself, so J / K / Enter work at once without a control looking
+   * selected; `"none"` leaves focus where it was (a list that keeps its own
+   * roving focus); a ref focuses that element.
+   */
+  initialFocus?: "content" | "none" | React.RefObject<HTMLElement | null>
   open: boolean
   onOpenChange: (open: boolean) => void
   title: React.ReactNode
@@ -41,6 +50,7 @@ export function Peek({
   children?: React.ReactNode
 }) {
   const isMobile = useIsMobile()
+  const contentRef = React.useRef<HTMLDivElement>(null)
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     const t = e.target as HTMLElement
@@ -56,7 +66,15 @@ export function Peek({
       <SheetContent
         side={isMobile ? "bottom" : "right"}
         data-slot="peek"
+        ref={contentRef}
+        tabIndex={-1}
         onKeyDown={onKeyDown}
+        onOpenAutoFocus={initialFocus === undefined ? undefined : (e) => {
+          e.preventDefault()
+          if (initialFocus === "none") return
+          const target = initialFocus === "content" ? contentRef.current : initialFocus.current
+          target?.focus({ preventScroll: true })
+        }}
         className={cn(
           "flex flex-col gap-0 p-0",
           isMobile ? "max-h-[92dvh] rounded-t-xl" : "w-[480px] max-w-[calc(100vw-32px)] sm:max-w-[480px]",
