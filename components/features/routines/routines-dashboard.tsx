@@ -2,24 +2,22 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { CalendarClock, CalendarX, ChevronRight, FileEdit, Hourglass, Play, Radio, XCircle } from "lucide-react"
+import { ChevronRight, Radio } from "lucide-react"
 
-import { cn } from "@/lib/utils"
 import { formatDurationMs } from "@/lib/activity-stream"
 import { StatusPill } from "@/components/ui/status-pill"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { honestPct } from "@/lib/honest-pct"
 import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/components/features/dashboard/run-volume-chart"
-import { AttentionStrip, OutcomeKpis, UpNext, type AttentionItem, type OutcomeKpiData } from "@/components/features/dashboard/dashboard-overview"
+import type { OutcomeKpiData } from "@/components/features/dashboard/dashboard-overview"
 import { STATUS_PALETTE } from "@/app/(dashboard)/dashboard-helpers"
-import { routineRunPresentation, formatAgo, formatUntil } from "@/lib/routine-run-presentation"
+import { routineRunPresentation, formatAgo } from "@/lib/routine-run-presentation"
 import type { OverviewRun } from "@/lib/routines-overview"
-import { didNotRun, isWaitingForCapacity, type PendingStart } from "@/lib/routine-pending-starts"
+import type { PendingStart } from "@/lib/routine-pending-starts"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import { routineRunHref } from "./routines-workspace"
-import { routineViewHref } from "./routine-navigation"
 import { RoutineGlyph } from "./routine-glyph"
 
 // routines-dashboard — what the main pane answers when no routine is
@@ -187,7 +185,11 @@ export function groupLatestResults(runs: DashboardRun[], limit = 8): LatestResul
     .map(({ latest, count }) => ({ latest, count }))
 }
 
-export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince, pendingStarts = [], schedules, onSelect }: Props) {
+// The figures, Needs you, Running now and Next 24 hours moved to the overview
+// board above (routines-overview-board, RT-OV); this pane keeps the results of
+// the week and the chart. `pendingStarts`, `schedules` and `onSelect` stay on
+// the props for callers that pass them.
+export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince }: Props) {
   const now = React.useMemo(() => new Date(), [])
   const visibleRuns = React.useMemo(
     () => runs.filter((r) => routines.some((p) => p.slug === r.pipeline_slug)),
@@ -207,79 +209,11 @@ export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince, p
 
   const newest = (list: DashboardRun[]) =>
     [...list].sort((a, b) => (Date.parse(b.started_at) || 0) - (Date.parse(a.started_at) || 0))
-  const waiting = newest(visibleRuns.filter((r) => ["waiting", "paused"].includes((r.status ?? "").toLowerCase())))
-  const running = newest(visibleRuns.filter((r) => ["running", "queued"].includes((r.status ?? "").toLowerCase())))
   const since = now.getTime() - WINDOW_DAYS * 86_400_000
   const finished = newest(sampleRuns.filter((r) => !LIVE.has((r.status ?? "").toLowerCase()) && within(r, since)))
   const resultGroups = groupLatestResults(finished)
-  const failing = routines
-    .filter((r) => r.last_invocation_status === "failed" || r.last_run_outcome === "FAILED")
-    .sort((a, b) => (b.last_invoked_at ?? "").localeCompare(a.last_invoked_at ?? ""))
-  const myStarts = pendingStarts.filter((p) => routines.some((r) => r.slug === p.pipeline_slug))
-  // Accepted in the window but never ran: newest first, as the server lists them.
-  const notRun = myStarts.filter((p) => didNotRun(p) && Date.parse(p.fire_at) >= since)
-  const capacityWaits = myStarts.filter(isWaitingForCapacity)
-  const drafts = routines.filter((r) => r.draft)
-  const mySchedules = schedules.filter((s) => routines.some((p) => p.slug === s.target_pipeline_slug))
-  const nextStart = mySchedules
-    .filter((s) => s.enabled && s.next_run_at && Date.parse(s.next_run_at) > now.getTime())
-    .sort((a, b) => Date.parse(a.next_run_at!) - Date.parse(b.next_run_at!))[0]
-
-  // The same strip as /dashboard, with the routine-shaped items in a fixed
-  // order: what needs a person, what could not finish, the next planned
-  // start; drafts to publish come after and, like the dashboard's fourth
-  // item, are named below the strip when the three slots are taken.
-  const attention: AttentionItem[] = []
-  if (waiting.length)
-    attention.push({
-      id: "approvals",
-      label: `${waiting.length} ${waiting.length === 1 ? "decision" : "decisions"} waiting`,
-      detail: `Newest · ${waiting[0].pipeline_name || routineOf(waiting[0].pipeline_slug)?.name || waiting[0].pipeline_slug}`,
-      href: routineRunHref(waiting[0].pipeline_slug, waiting[0].id),
-      tone: "warn",
-      icon: Hourglass,
-    })
-  if (failing.length)
-    attention.push({
-      id: "failures",
-      label: `${failing.length} could not finish`,
-      detail: `Newest · ${failing[0].name}`,
-      href: `/routines?${new URLSearchParams({ slug: failing[0].slug })}`,
-      tone: "danger",
-      icon: XCircle,
-    })
-  if (notRun.length)
-    attention.push({
-      id: "starts-not-run",
-      label: `${notRun.length} accepted ${notRun.length === 1 ? "start" : "starts"} did not run`,
-      detail: `Newest · ${routineOf(notRun[0].pipeline_slug)?.name ?? notRun[0].pipeline_slug}`,
-      href: routineViewHref(notRun[0].pipeline_slug, "plan"),
-      tone: "danger",
-      icon: CalendarX,
-    })
-  if (nextStart?.target_pipeline_slug)
-    attention.push({
-      id: "schedules",
-      label: `Next start in ${formatUntil(nextStart.next_run_at!)}`,
-      detail: routineOf(nextStart.target_pipeline_slug)?.name ?? nextStart.target_pipeline_slug,
-      href: routineViewHref(nextStart.target_pipeline_slug, "plan"),
-      tone: "blue",
-      icon: CalendarClock,
-    })
-  if (drafts.length)
-    attention.push({
-      id: "drafts",
-      label: `${drafts.length} ${drafts.length === 1 ? "draft" : "drafts"} to publish`,
-      detail: drafts.map((r) => r.name).slice(0, 3).join(" · "),
-      href: `/routines?${new URLSearchParams({ slug: drafts[0].slug, view: "versions" })}`,
-      tone: "purple",
-      icon: FileEdit,
-    })
-
   return (
     <div className="@container/overview flex flex-col gap-3" data-testid="routines-dashboard">
-      <AttentionStrip items={attention} />
-
       <div className="flex flex-wrap items-center gap-2">
         <Radio className="h-3.5 w-3.5 text-primary-hover" aria-hidden />
         <h2 className="eyebrow">Routine run summary</h2>
@@ -291,19 +225,8 @@ export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince, p
         </span>
       </div>
 
-      <OutcomeKpis
-        data={kpis}
-        window="7d"
-        spendUsd={kpis.spendUsd}
-        spendPerRun={kpis.successTotal > 0 ? kpis.spendUsd / kpis.successTotal : null}
-      />
-
-      {/* The dashboard's shape: the main list on the left, the live column on
-          the right, the chart as its own row. Columns split by this pane's
-          width, not the viewport's — beside the explorer a 1280px window
-          leaves ~930px here. */}
-      <div className="grid grid-cols-1 gap-3 @5xl/overview:grid-cols-5">
-        <div className="@5xl/overview:col-span-3">
+      <div>
+        <div>
           <DashboardCard
             title="Latest results"
             icon={Radio}
@@ -327,73 +250,6 @@ export function RoutinesDashboard({ routines, runs, runsLoading, coveredSince, p
           </DashboardCard>
         </div>
 
-        <div className="flex min-w-0 flex-col gap-3 @5xl/overview:col-span-2">
-          <DashboardCard
-            title="Routines running now"
-            icon={Play}
-            hint={running.length ? `${running.length} running` : "none running"}
-            action={
-              <Link href="/activity?lens=routines" className="text-primary-hover hover:underline">
-                Activity →
-              </Link>
-            }
-          >
-            {running.length === 0 ? (
-              <InlineEmpty icon={Play} text="No routines are running right now." />
-            ) : (
-              <div>
-                {running.slice(0, 5).map((run) => (
-                  <RunRow key={run.id} run={run} routine={routineOf(run.pipeline_slug)} />
-                ))}
-              </div>
-            )}
-            {capacityWaits.length > 0 && (
-              <Link
-                href={routineViewHref(capacityWaits[0].pipeline_slug, "plan")}
-                className="mt-3 block rounded-lg bg-warn/10 px-3 py-2 text-label text-warn"
-              >
-                {capacityWaits.length} {capacityWaits.length === 1 ? "start waits" : "starts wait"} for a free slot · View →
-              </Link>
-            )}
-            {waiting.length > 0 && (
-              <Link
-                href={routineRunHref(waiting[0].pipeline_slug, waiting[0].id)}
-                className="mt-3 block rounded-lg bg-warn/10 px-3 py-2 text-label text-warn"
-              >
-                {waiting.length} waiting for a decision · Decide →
-              </Link>
-            )}
-          </DashboardCard>
-
-          <UpNext schedules={mySchedules} />
-
-          {drafts.length > 0 && (
-            <DashboardCard title="Drafts to publish" icon={FileEdit} hint={String(drafts.length)}>
-              <div>
-                {drafts.slice(0, 5).map((r) => (
-                  <button
-                    key={r.slug}
-                    type="button"
-                    onClick={() => onSelect(r.slug)}
-                    className="group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-md border-b border-border/50 px-2 py-2 text-left last:border-0 hover:bg-foreground/[0.025]"
-                  >
-                    <RoutineGlyph routine={r} />
-                    <span className="min-w-0">
-                      <span className="block truncate text-body font-medium text-foreground/90">{r.name}</span>
-                      <span className="block truncate text-label text-muted-foreground">
-                        {(r.head_version ?? 0) > 0 ? `Draft r${r.draft!.revision} · published v${r.head_version}` : "Not published yet"}
-                        {r.draft?.updated_at ? ` · ${formatAgo(r.draft.updated_at)}` : ""}
-                      </span>
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-label font-medium text-primary-hover">
-                      Publish <ChevronRight className="h-3.5 w-3.5" />
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </DashboardCard>
-          )}
-        </div>
       </div>
 
       <DashboardCard
@@ -448,30 +304,6 @@ function ResultRow({ run, count = 1, routine }: { run: DashboardRun; count?: num
       <span className="inline-flex items-center gap-1 text-label font-medium text-primary-hover">
         {/* The verb stays for screen readers on a phone, where the name needs the width. */}
         <span className="sr-only @3xl/overview:not-sr-only">Open run</span> <ChevronRight className="h-3.5 w-3.5" />
-      </span>
-    </Link>
-  )
-}
-
-/** One running or waiting run, as the dashboard's Routines running now draws it. */
-function RunRow({ run, routine }: { run: DashboardRun; routine?: Pipeline }) {
-  const p = routineRunPresentation({ status: run.status, outcome: run.outcome })
-  return (
-    <Link
-      href={routineRunHref(run.pipeline_slug, run.id)}
-      className="group grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-md border-b border-border/50 px-2 py-2 last:border-0 hover:bg-foreground/[0.025]"
-    >
-      <RoutineGlyph routine={routine ?? { slug: run.pipeline_slug }} />
-      <span className="min-w-0">
-        <span className="block truncate text-body font-medium text-foreground/90">{run.pipeline_name || routine?.name || run.pipeline_slug}</span>
-        <span className="block truncate text-label text-muted-foreground">
-          started {formatAgo(run.started_at)}
-          {run.current_step_id ? ` · ${run.current_step_id.replaceAll("_", " ")}` : ""}
-        </span>
-      </span>
-      <StatusPill tone={PILL[p.tone]} label={p.label} live={p.tone === "blue"} />
-      <span className={cn("inline-flex items-center gap-1 text-label font-medium text-primary-hover")}>
-        View <ChevronRight className="h-3.5 w-3.5" />
       </span>
     </Link>
   )

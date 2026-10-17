@@ -9,6 +9,7 @@ import type { Pipeline } from "@/hooks/use-pipelines"
 // than something this reaches for.
 
 import { isAwaitingApproval } from "@/hooks/use-active-routine-runs"
+import type { RoutineTriggerKind } from "@/lib/routine-panel-index"
 
 export type RoutineStatusFilter =
   | "all"
@@ -29,6 +30,9 @@ export interface RoutineFilterState {
   lifecycle?: RoutineLifecycleFilter
   /** The owning crew (`author_crew_id`); the panel groups by it. */
   crewId?: string | null
+  /** How it starts: schedule, webhook, issue start, chat command
+   *  (lib/routine-panel-index composes it). */
+  trigger?: RoutineTriggerKind | null
 }
 
 export type RoutineLifecycleFilter = "all" | "active" | "draft" | "proposed" | "disabled"
@@ -50,6 +54,8 @@ export interface RoutineFilterInput {
   /** A saved draft newer than the published version exists. */
   hasDraft?: boolean
   crewId?: string | null
+  /** The ways it starts; absent when the panel index is not known. */
+  triggers?: readonly string[]
 }
 
 /** Live runs keyed by pipeline slug — only `status` is read. */
@@ -95,6 +101,8 @@ export function matchesRoutineFilters(
 
   if (filters.crewId && routine.crewId !== filters.crewId) return false
 
+  if (filters.trigger && !routine.triggers?.includes(filters.trigger)) return false
+
   switch (filters.status) {
     case "all":
       return true
@@ -125,7 +133,7 @@ export function isRoutineTestFixture(slug: string): boolean {
   return slug.startsWith("test-routines-") || slug.startsWith("test-issue-")
 }
 
-export function routineFilterInput(p: Pipeline): RoutineFilterInput {
+export function routineFilterInput(p: Pipeline, triggers?: readonly string[]): RoutineFilterInput {
   return {
     slug: p.slug,
     name: p.name,
@@ -139,5 +147,6 @@ export function routineFilterInput(p: Pipeline): RoutineFilterInput {
     lifecycle: p.status,
     hasDraft: !!p.draft,
     crewId: p.author_crew_id ?? null,
+    triggers,
   }
 }

@@ -145,7 +145,7 @@ export function runBarTone(r: Pick<RunBarInput, "status" | "outcome">): { tone: 
 
 /* -------------------------------------------------------------- triggers */
 
-export type TriggerKind = "schedule" | "webhook" | "chat" | "event" | "manual"
+export type TriggerKind = "schedule" | "once" | "webhook" | "chat" | "event" | "manual"
 
 export interface TriggerRow {
   key: string
@@ -158,6 +158,10 @@ export interface TriggerRow {
   status: StateBadge
   /** The managing row further down the tab (`schedule-<id>`, `webhook-<id>`). */
   anchor?: string
+  /** The schedule, webhook or one-time start behind the row. */
+  id?: string
+  /** A one-time start the person may cancel. */
+  cancellable?: boolean
 }
 
 export interface TriggerScheduleInput {
@@ -245,6 +249,7 @@ export function routineTriggerRows(input: {
       code: `cron ${s.cron_expr}`,
       status,
       anchor: `schedule-${s.id}`,
+      id: s.id,
     })
   }
   for (const w of input.webhooks) {
@@ -262,6 +267,7 @@ export function routineTriggerRows(input: {
         .join(" · "),
       status: w.enabled ? { label: "On", tone: "success" } : { label: "Off", tone: "muted" },
       anchor: `webhook-${w.id}`,
+      id: w.id,
     })
   }
   if (input.slash?.enabled) {
@@ -280,7 +286,8 @@ export function routineTriggerRows(input: {
       kind: "event",
       kindLabel: "Event",
       title: a.name,
-      detail: `When ${a.event_type.replaceAll(".", " ").replaceAll("_", " ")} happens in the workspace`,
+      detail: `When ${a.event_type.replaceAll(".", " ").replaceAll("_", " ")} happens in the workspace · managed with crewship automation`,
+      code: `event ${a.event_type}`,
       status: a.enabled ? { label: "On", tone: "success" } : { label: "Off", tone: "muted" },
     })
   }
@@ -298,6 +305,30 @@ export function routineTriggerRows(input: {
           : { label: "On", tone: "success" },
   })
   return rows
+}
+
+/** The planned one-time starts of a routine as trigger rows (v67: "Creates a
+ *  one-time run you can cancel in Triggers"), soonest first. Starts that
+ *  already fired, failed or were cancelled are history, not triggers. */
+export function pendingStartRows(
+  starts: readonly { id: string; pipeline_slug: string; fire_at: string; status?: string; pinned_version?: number | null; can_cancel?: boolean }[],
+  slug: string,
+  opts: { canCancel: boolean; formatTime?: (iso: string) => string },
+): TriggerRow[] {
+  const fmt = opts.formatTime ?? ((iso: string) => iso)
+  return starts
+    .filter((p) => p.pipeline_slug === slug && (p.status ?? "pending") === "pending")
+    .sort((a, b) => Date.parse(a.fire_at) - Date.parse(b.fire_at))
+    .map((p) => ({
+      key: `once:${p.id}`,
+      kind: "once" as const,
+      kindLabel: "One-time",
+      title: fmt(p.fire_at),
+      detail: p.pinned_version ? `runs v${p.pinned_version} once` : "runs the live version once",
+      status: { label: "Planned", tone: "purple" as const },
+      id: p.id,
+      cancellable: p.can_cancel ?? opts.canCancel,
+    }))
 }
 
 /* -------------------------------------------------------------- timeline */

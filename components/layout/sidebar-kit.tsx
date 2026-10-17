@@ -139,7 +139,7 @@ export function SidebarFilterButton({
     <button
       type="button"
       className={cn(
-        "kit-tap inline-flex items-center gap-1.5 h-8 shrink-0 rounded-md border text-[11px] whitespace-nowrap transition-colors",
+        "kit-tap inline-flex items-center gap-1.5 h-8 shrink-0 rounded-md border text-micro whitespace-nowrap transition-colors",
         inPanel ? "px-2" : "px-2.5",
         on
           ? "bg-primary/10 border-primary/30 text-primary-hover"
@@ -151,7 +151,7 @@ export function SidebarFilterButton({
       <Icon className="h-3 w-3" />
       {inPanel ? <span className="sr-only">{children}</span> : children}
       {activeCount > 0 && (
-        <span className="ml-0.5 rounded-full bg-primary-hover px-1.5 min-w-[15px] text-center text-[9px] font-bold text-background tabular-nums">
+        <span className="ml-0.5 rounded-full bg-primary-hover px-1.5 min-w-[15px] text-center text-micro leading-4 font-bold text-background tabular-nums">
           {activeCount}
         </span>
       )}
@@ -272,14 +272,14 @@ export function SidebarFilterPopover({
               )}
             >
               <div className="flex items-center gap-2 border-b border-foreground/[0.06] px-3 py-1.5">
-                <span className="font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">
+                <span className="font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">
                   Filters
                 </span>
                 {activeCount > 0 && onClear && (
                   <button
                     type="button"
                     onClick={onClear}
-                    className="ml-auto text-[10px] text-muted-foreground/80 hover:text-foreground"
+                    className="ml-auto text-micro text-muted-foreground/80 hover:text-foreground"
                   >
                     Clear all
                   </button>
@@ -321,7 +321,7 @@ export function SidebarFacet({
   return (
     <>
       {!first && <div className="mt-1 border-t border-foreground/[0.06]" />}
-      <div className="px-3 py-1 font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">
+      <div className="px-3 py-1 font-mono text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground-soft">
         {label}
       </div>
       <button
@@ -443,7 +443,7 @@ export function SidebarActiveChip({
   return (
     <span
       className={cn(
-        "kit-tap inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[10px]",
+        "kit-tap inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-micro",
         "bg-primary/10 border border-primary/25 text-primary-hover",
         className,
       )}
@@ -576,7 +576,7 @@ export function SidebarRow({
         // py-1 rather than py-1.5: with the role line gone from every
         // unselected row, the portrait is what sets the height, and the extra
         // padding was only ever there to keep two lines of text from touching.
-        "kit-tap mx-1.5 gap-2 rounded-md px-2 py-1 type-nav",
+        "kit-tap mx-1.5 items-center gap-2 rounded-md px-2 py-1 type-nav",
         indent && "ml-6",
         className,
       )}

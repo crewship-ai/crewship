@@ -2,14 +2,16 @@
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { Workflow, Plus, Upload, List } from "lucide-react"
+import { Workflow, Plus, Upload, List, HelpCircle } from "lucide-react"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { roleAtLeast } from "@/lib/routine-governance"
+import { canKillRoutine, roleAtLeast } from "@/lib/routine-governance"
+import { bulkRunNow, bulkSummary, bulkTurnOff } from "@/lib/routine-bulk"
+import { toast } from "@/lib/toast"
 import { useRoutinePurposes } from "@/hooks/use-routine-purposes"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
@@ -23,8 +25,12 @@ import { RoutinesWorkspace } from "./routines-workspace"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { RoutineNewWizard } from "./routine-new-wizard"
 import { RoutinesViewPane, needsYou } from "./routines-views"
+import { RoutinesIntro } from "./routines-intro"
+import { RoutineRunPeek } from "./routine-run-peek"
+import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { ImportRoutineDialog } from "./routine-import-dialog"
 import { useUserPreference } from "@/hooks/use-user-preference"
+import { useRoutinePanelIndex } from "@/hooks/use-routine-panel-index"
 
 // Keep the shared panel mounted across the views, a routine and a run. The
 // URL identifies the view (?view=needs|live|runs|drafts), the routine
@@ -90,6 +96,31 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     () => (filters.showTestRoutines ? pipelines : pipelines.filter((p) => !isRoutineTestFixture(p.slug))),
     [pipelines, filters.showTestRoutines],
   )
+  const panelIndex = useRoutinePanelIndex(workspaceId, pipelines)
+  // Select several in the panel (PNL-03): Turn off (Owner/Admin, one
+  // disable per routine) and Run now (routines that need no answer).
+  const nameOf = (slug: string) => pipelines.find((p) => p.slug === slug)?.name || slug
+  const bulk = {
+    canTurnOff: canKillRoutine(role),
+    onTurnOff: async (slugs: string[]) => {
+      const result = await bulkTurnOff(workspaceId, slugs, apiFetch)
+      if (result.failed.length)
+        toast.error(`Turned off ${result.done.length} of ${slugs.length}`, {
+          description: result.failed.map((f) => `${nameOf(f.slug)}: ${f.reason}`).join(" · "),
+        })
+      else toast.success(`Turned off ${result.done.length} ${result.done.length === 1 ? "routine" : "routines"}`)
+      changed()
+    },
+    onRunNow: async (slugs: string[]) => {
+      const result = await bulkRunNow(workspaceId, slugs, apiFetch)
+      const details = [
+        ...result.skipped.map((s) => `${nameOf(s.slug)}: ${s.reason}`),
+        ...result.failed.map((f) => `${nameOf(f.slug)}: ${f.reason}`),
+      ].join(" · ")
+      ;(result.failed.length || result.skipped.length ? toast.warning : toast.success)(bulkSummary(result), details ? { description: details } : undefined)
+      changed()
+    },
+  }
   // The selected routine lives in the URL: /routines?slug=<slug> (every
   // routine link in the app points here; ?routine= is read as an alias).
   const [selectedRun, setSelectedRun] = useUrlSelection("run")
@@ -103,8 +134,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // that is open; leaving or switching routines clears them.
   const [, setTabParam] = useUrlSelection("tab")
   const [, setVersionParam] = useUrlSelection("version")
+  // `?view=intro` is "How routines work": a page of its own, not one of the five panel views.
+  const showIntro = !selectedSlug && !selectedRun && viewParam === "intro"
   const listView: RoutinesView = !selectedSlug && !selectedRun && LIST_VIEWS.has(viewParam as RoutinesView) ? (viewParam as RoutinesView) : "overview"
-  const panelView: RoutinesView | null = selectedSlug || selectedRun ? null : listView
+  const panelView: RoutinesView | null = selectedSlug || selectedRun || showIntro ? null : listView
   const clearRoutineView = () => {
     setViewParam(null, { replace: true })
     setTabParam(null, { replace: true })
@@ -118,6 +151,15 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // The routine and run pages put their actions in the top bar through this
   // slot (a node inside the SubBar's action area).
   const [pageActions, setPageActions] = useState<HTMLElement | null>(null)
+  // While a run is open the panel lists its routine's runs (v67 rtPanel);
+  // "All routines" there goes back to the routine list. A row opens the peek.
+  const { records: runRecords } = usePipelineRunRecords(selectedRun && selectedSlug ? workspaceId : null, selectedRun ? selectedSlug : null)
+  const [routinesInPanel, setRoutinesInPanel] = useState(false)
+  const [peekRun, setPeekRun] = useState<string | null>(null)
+  useEffect(() => {
+    setRoutinesInPanel(false)
+    setPeekRun(null)
+  }, [selectedRun])
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [drafts, setDrafts] = useState<RoutineDraftListEntry[] | null>(null)
@@ -188,6 +230,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           filters.status !== "all" ||
           (filters.lifecycle ?? "all") !== "all" ||
           filters.crewId ||
+          filters.trigger ||
           filters.invocations !== "all" ||
           filters.authorAgentId ||
           filters.showEphemeral ||
@@ -234,7 +277,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     ? [selectedRoutine?.name || selectedSlug || "Routine", "Run"].join(" › ")
     : selectedSlug
       ? [crewName, selectedRoutine?.name || selectedSlug].filter(Boolean).join(" › ")
-      : ROUTINE_VIEWS.find((v) => v.id === listView)!.label
+      : showIntro
+        ? "How routines work"
+        : ROUTINE_VIEWS.find((v) => v.id === listView)!.label
 
   const createActions = (
     <>
@@ -243,6 +288,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           {CREATE_ROUTINE_REASON}
         </span>
       )}
+      {/* v67: a ghost "How routines work" beside Import and New routine. */}
+      <SubBarSecondary icon={HelpCircle} className="max-sm:hidden" aria-pressed={showIntro} onClick={() => setViewParam(showIntro ? null : "intro")}>
+        How routines work
+      </SubBarSecondary>
       <span title={canCreate ? undefined : CREATE_ROUTINE_REASON} className="max-sm:hidden">
         <SubBarSecondary
           icon={Upload}
@@ -303,6 +352,19 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             onViewChange={showView}
             counts={{ needs: needsCount, live: liveCount, drafts: drafts?.length ?? null }}
             crews={crews}
+            index={panelIndex}
+            bulk={isMobile ? undefined : bulk}
+            runsOf={
+              selectedRun && selectedSlug && !routinesInPanel
+                ? {
+                    routineName: selectedRoutine?.name || selectedSlug,
+                    runs: runRecords,
+                    current: selectedRun,
+                    onPeek: setPeekRun,
+                    onBack: () => setRoutinesInPanel(true),
+                  }
+                : undefined
+            }
           />
         </SecondaryPanel>
 
@@ -355,6 +417,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                     />
                   </div>
                 </motion.div>
+              ) : showIntro ? (
+                <motion.div key="intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="absolute inset-0 overflow-auto">
+                  <RoutinesIntro onNew={canCreate ? () => setCreateDialogOpen(true) : undefined} />
+                </motion.div>
               ) : listView !== "overview" ? (
                 <motion.div key={`view-${listView}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="absolute inset-0 overflow-hidden">
                   <RoutinesViewPane
@@ -377,6 +443,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                     error={error}
                     onSelect={handleSelect}
                     onRetry={refresh}
+                    onOpenRun={openRun}
                     onNew={canCreate ? () => setCreateDialogOpen(true) : undefined}
                   />
                 </motion.div>
@@ -385,6 +452,20 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           </div>
         </div>
       </div>
+
+      {peekRun && selectedSlug && (
+        <RoutineRunPeek
+          workspaceId={workspaceId}
+          runs={runRecords}
+          runId={peekRun}
+          onChange={setPeekRun}
+          onClose={() => setPeekRun(null)}
+          onOpen={(id) => {
+            setPeekRun(null)
+            setSelectedRun(id)
+          }}
+        />
+      )}
 
       {importDialogOpen && canCreate && (
         <ImportRoutineDialog

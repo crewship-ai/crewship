@@ -10,19 +10,24 @@ const h = vi.hoisted(() => ({
   create: vi.fn(async () => ({})),
   remove: vi.fn(async () => {}),
   preview: vi.fn(async () => ({ cron_expr: "0 9 * * *", timezone: "Europe/Prague", occurrences: ["2026-10-18T07:00:00Z", "2026-10-19T07:00:00Z", "2026-10-20T07:00:00Z", "2026-10-21T07:00:00Z", "2026-10-22T07:00:00Z"] })),
+  update: vi.fn(async () => ({})),
+  createWebhook: vi.fn(async (body: Record<string, unknown>) => ({ id: "w9", token: "tok_9", signing_secret: "sec_9", ...body })),
+  starts: [] as Record<string, unknown>[],
+  refreshStarts: vi.fn(async () => {}),
   schedules: [] as Record<string, unknown>[],
   webhooks: [] as Record<string, unknown>[],
   role: "ADMIN",
 }))
+vi.mock("@/hooks/use-pending-starts", () => ({ usePendingStarts: () => ({ starts: h.starts, loading: false, error: null, refresh: h.refreshStarts }) }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: h.fetcher, broadcastSessionExpired: vi.fn() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: () => {}, useRealtimeEventSafe: () => {} }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: h.role, capabilities: [] }) }))
 vi.mock("@/hooks/use-pipeline-schedules", () => ({
-  usePipelineSchedules: () => ({ schedules: h.schedules, loading: false, error: null, refresh: vi.fn(), create: h.create, update: vi.fn(), remove: h.remove, preview: h.preview }),
+  usePipelineSchedules: () => ({ schedules: h.schedules, loading: false, error: null, refresh: vi.fn(), create: h.create, update: h.update, remove: h.remove, preview: h.preview }),
 }))
 vi.mock("@/hooks/use-pipeline-webhooks", () => ({
-  usePipelineWebhooks: () => ({ webhooks: h.webhooks, loading: false, error: null, create: vi.fn(), update: vi.fn(), remove: vi.fn() }),
+  usePipelineWebhooks: () => ({ webhooks: h.webhooks, loading: false, error: null, create: h.createWebhook, update: vi.fn(), remove: vi.fn() }),
 }))
 vi.mock("@/hooks/use-automations", () => ({ useAutomations: () => ({ automations: [], loading: false, error: null }) }))
 // The preset form reads the routine's inputs; this routine has none.
@@ -36,6 +41,11 @@ vi.mock("../routine-once-schedule", () => ({ RoutineOnceSchedule: () => <section
 
 const routine = { id: "pipe-1", slug: "weekly", name: "Weekly", definition: { steps: [] }, head_version: 2 } as unknown as RoutineDetail
 const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body })
+const schedule = { id: "s1", name: "Mornings", target_pipeline_slug: "weekly", target_pipeline_id: "pipe-1", cron_expr: "0 9 * * *", timezone: "UTC", enabled: true, inputs: {}, consecutive_failures: 0, max_consecutive_failures: 5 }
+const webhook = { id: "w1", name: "competitor-change", target_pipeline_id: "pipe-1", target_pipeline_slug: "weekly", enabled: true, rate_limit_per_min: 60, fire_count: 1, token: "t", signing_secret_set: true, inputs_template: {} }
+function openRowMenu(label: string) {
+  fireEvent.pointerDown(screen.getByRole("button", { name: `Options for ${label}` }), { button: 0, ctrlKey: false })
+}
 
 function renderTab() {
   const rows = routineTriggerRows({
@@ -54,6 +64,9 @@ beforeEach(() => {
   h.remove.mockClear()
   h.schedules = []
   h.webhooks = []
+  h.starts = []
+  h.update.mockClear()
+  h.createWebhook.mockClear()
   h.role = "ADMIN"
 })
 
@@ -73,10 +86,11 @@ describe("<RoutineTriggersTab>", () => {
   it("delete schedule asks the shared ConfirmDialog (no window.confirm)", async () => {
     const confirm = vi.fn(() => true)
     window.confirm = confirm
-    h.schedules = [{ id: "s1", name: "Mornings", target_pipeline_slug: "weekly", target_pipeline_id: "pipe-1", cron_expr: "0 9 * * *", timezone: "UTC", enabled: true, inputs: {}, consecutive_failures: 0, max_consecutive_failures: 5 }]
+    h.schedules = [schedule]
     h.fetcher.mockResolvedValue(json([]))
     renderTab()
-    fireEvent.click(screen.getByRole("button", { name: "Delete schedule Mornings" }))
+    openRowMenu("Schedule Every day at 09:00")
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete…" }))
     const dialog = await screen.findByTestId("confirm-dialog")
     expect(confirm).not.toHaveBeenCalled()
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete schedule" }))
@@ -95,6 +109,64 @@ describe("<RoutineTriggersTab>", () => {
     expect(table).toHaveTextContent("competitor-change")
     expect(table).toHaveTextContent("run_abcd")
     expect(table.querySelector('[data-slot="status-pill"]')).not.toBeNull()
+  })
+
+  it("one list and nothing below it repeats the triggers (RT-08)", () => {
+    h.schedules = [schedule]
+    h.webhooks = [webhook]
+    h.fetcher.mockResolvedValue(json({ items: [], next_cursor: null }))
+    renderTab()
+    const list = screen.getByTestId("routine-trigger-list")
+    expect(within(list).getByText("Every day at 09:00")).toBeInTheDocument()
+    expect(within(list).getByText("competitor-change")).toBeInTheDocument()
+    // Each trigger once: no managing cards for schedules, webhooks or one-time starts.
+    expect(screen.getAllByText("Every day at 09:00")).toHaveLength(1)
+    expect(screen.getAllByText("competitor-change")).toHaveLength(1)
+    expect(screen.queryByRole("region", { name: "Schedules" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "One-time starts" })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Manage triggers")).not.toBeInTheDocument()
+  })
+
+  it("Edit on a schedule row opens the schedule editor; Turn off sits in the row menu", async () => {
+    h.schedules = [schedule]
+    h.fetcher.mockResolvedValue(json([]))
+    renderTab()
+    fireEvent.click(screen.getByRole("button", { name: "Edit schedule Every day at 09:00" }))
+    expect(await screen.findByRole("dialog", { name: /Repeating schedule/ })).toBeInTheDocument()
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    openRowMenu("Schedule Every day at 09:00")
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Turn off" }))
+    await waitFor(() => expect(h.update).toHaveBeenCalledWith("s1", { cron_expr: "0 9 * * *", enabled: false }))
+  })
+
+  it("Edit on a webhook row opens the webhook editor", async () => {
+    h.webhooks = [webhook]
+    h.fetcher.mockResolvedValue(json({ items: [], next_cursor: null }))
+    renderTab()
+    fireEvent.click(screen.getByRole("button", { name: "Edit webhook competitor-change" }))
+    expect(await screen.findByRole("dialog", { name: /Edit webhook/ })).toBeInTheDocument()
+  })
+
+  it("a planned one-time start is a row of the list and can be cancelled there", async () => {
+    h.starts = [{ id: "ps1", pipeline_slug: "weekly", fire_at: "2030-01-02T09:00:00Z", status: "pending", can_cancel: true }]
+    h.fetcher.mockResolvedValue(json({}))
+    renderTab()
+    const row = within(screen.getByTestId("routine-trigger-list")).getByText("One-time").closest("li")!
+    expect(row).toHaveAttribute("data-kind", "once")
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: /Cancel this start/ }))
+    await waitFor(() => expect(h.fetcher).toHaveBeenCalledWith("/api/v1/workspaces/ws/pipelines/pending/ps1/cancel", { method: "POST" }))
+  })
+
+  it("Add trigger › Webhook creates it in the dialog and shows the URL and secret once", async () => {
+    h.fetcher.mockResolvedValue(json({ items: [], next_cursor: null }))
+    renderTab()
+    fireEvent.click(screen.getByRole("button", { name: "Add trigger" }))
+    const dialog = screen.getByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Webhook" }))
+    fireEvent.change(within(dialog).getByLabelText("Webhook name"), { target: { value: "github-push" } })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create webhook" }))
+    await waitFor(() => expect(h.createWebhook).toHaveBeenCalledWith(expect.objectContaining({ name: "github-push", target_pipeline_slug: "weekly", ingress_profile: "crewship", enabled: true })))
+    expect(await screen.findByText(/copy values now/i)).toBeInTheDocument()
   })
 
   it("a draft-only routine has nothing to start yet", () => {

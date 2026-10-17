@@ -11,6 +11,7 @@ import Link from "next/link"
 import { Activity, CheckCircle2, ChevronRight, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
+import { Segmented } from "@/components/ui/segmented"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
@@ -211,28 +212,18 @@ export function RoutineTabRow({
             <ChevronRight className="h-3 w-3" aria-hidden />
           </Link>
         </Button>
-        <div
-          role="radiogroup"
-          aria-label="Detail"
-          title="Simple hides ids, retries, limits and code. Your choice is remembered."
-          className="flex rounded-md border border-hairline p-0.5"
-        >
-          {(["simple", "full"] as const).map((d) => (
-            <button
-              key={d}
-              type="button"
-              role="radio"
-              aria-checked={depth === d}
-              onClick={() => onDepth(d)}
-              className={cn(
-                "h-7 rounded px-2.5 text-xs transition-colors coarse:h-10",
-                depth === d ? "bg-foreground/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {d === "simple" ? "Simple" : "Full detail"}
-            </button>
-          ))}
-        </div>
+        <span title="Simple hides ids, retries, limits and code. Your choice is remembered.">
+          <Segmented<DetailDepth>
+            ariaLabel="Detail"
+            size="xs"
+            value={depth}
+            onChange={onDepth}
+            options={[
+              { value: "simple", label: "Simple" },
+              { value: "full", label: "Full detail" },
+            ]}
+          />
+        </span>
       </div>
     </div>
   )

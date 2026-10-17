@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { ArrowUpRight, Hand, List, PenLine, Play } from "lucide-react"
 
@@ -13,6 +14,7 @@ import type { RoutineDraftListEntry } from "@/lib/routine-drafts"
 import { routineRunPresentation } from "@/lib/routine-run-presentation"
 import { formatElapsedSince, formatStepDuration } from "./routine-cost-format"
 import { RoutineGlyph } from "./routine-glyph"
+import { RoutineRunPeek } from "./routine-run-peek"
 import type { RoutinesView } from "./routines-explorer"
 
 // The four list views beside Overview. Each answers one question from data
@@ -98,6 +100,7 @@ export function RoutinesViewPane({
   const bySlug = new Map(routines.map((r) => [r.slug, r]))
   const glyph = (slug: string) => <RoutineGlyph routine={bySlug.get(slug) ?? { slug }} size="sm" />
   const t = TITLES[view]
+  const [peek, setPeek] = useState<string | null>(null)
 
   let body: React.ReactNode
   if (view === "needs") {
@@ -149,7 +152,8 @@ export function RoutinesViewPane({
           return (
             <Row
               key={r.id}
-              onClick={() => onOpenRun(r.pipeline_slug, r.id)}
+              // A row opens the run peek (RT-PEEK); Open run in it opens the page.
+              onClick={() => setPeek(r.id)}
               glyph={glyph(r.pipeline_slug)}
               title={r.pipeline_name || r.pipeline_slug}
               sub={`${r.started_at ? new Date(r.started_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "Not started"} · ${r.triggered_via || "manual"}`}
@@ -198,6 +202,21 @@ export function RoutinesViewPane({
         )}
       </div>
       <div className="min-h-0 flex-1 md:px-2">{body}</div>
+      {view === "runs" && peek && (
+        <RoutineRunPeek
+          workspaceId={workspaceId}
+          runs={runs}
+          runId={peek}
+          routineName={(r) => r.pipeline_name || r.pipeline_slug}
+          onChange={setPeek}
+          onClose={() => setPeek(null)}
+          onOpen={(id) => {
+            const r = runs.find((x) => x.id === id)
+            setPeek(null)
+            if (r) onOpenRun(r.pipeline_slug, id)
+          }}
+        />
+      )}
     </section>
   )
 }

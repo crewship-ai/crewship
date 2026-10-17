@@ -21,6 +21,8 @@ vi.mock("@/lib/api-fetch", async (importOriginal) => ({
   })),
 }))
 vi.mock("@/hooks/use-pipelines", () => ({ usePipelines: () => ({ pipelines: h.pipelines, loading: false, error: null, refresh: h.refresh }) }))
+vi.mock("@/hooks/use-routine-panel-index", async () => { const m = await import("@/lib/routine-panel-index"); return { useRoutinePanelIndex: () => m.EMPTY_PANEL_INDEX } })
+vi.mock("@/hooks/use-pipeline-run-records", () => ({ usePipelineRunRecords: () => ({ records: [], loading: false, error: null, refresh: vi.fn() }) }))
 vi.mock("motion/react", () => ({ AnimatePresence: ({ children }: { children: ReactNode }) => <>{children}</>, motion: { div: ({ children, className }: { children: ReactNode; className?: string }) => <div className={className}>{children}</div> } }))
 vi.mock("../routines-explorer", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../routines-explorer")>()),
@@ -36,6 +38,20 @@ vi.mock("../routines-views", () => ({ needsYou: () => [], RoutinesViewPane: ({ v
 vi.mock("../routines-detail-panel", () => ({ RoutinesDetailPanel: (p: { slug: string; onClose: () => void; onChanged: () => void; onRunStarted: (s: string) => void }) => <section aria-label={`Detail ${p.slug}`}><button onClick={p.onClose}>Close detail</button><button onClick={p.onChanged}>Refresh detail</button><button onClick={() => p.onRunStarted("run-1")}>Start historical run</button></section> }))
 vi.mock("../routine-run-detail", () => ({ RoutineRunDetail: ({ runId }: { runId: string }) => <div>Run {runId}</div> }))
 vi.mock("../routine-new-wizard", () => ({ RoutineNewWizard: (p: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: () => void; onOpenRoutine: (s: string) => void }) => p.open ? <section aria-label="New routine dialog"><button onClick={() => p.onOpenChange(false)}>Close creation</button><button onClick={() => { p.onCreated(); p.onOpenRoutine("created"); p.onOpenChange(false) }}>Open created routine</button></section> : null }))
+// A desktop window: at tablet width the kit's SecondaryPanel starts closed
+// and floats (COM-05), which the phone/desktop cases here do not exercise.
+beforeEach(() => {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia
+})
 beforeEach(() => {
   window.history.replaceState(null, "", "/routines"); h.mobile = false; h.role = "MANAGER"; h.refresh.mockClear()
   window.localStorage.removeItem("crewship.pref.panel.routines.collapsed")
@@ -161,5 +177,20 @@ it.each(["edit", "settings"])("a routine opened in the %s view keeps its slug an
   render(<RoutinesLayout workspaceId="workspace" />)
   expect(screen.getByRole("region", { name: "Detail nightly" })).toBeInTheDocument()
   fireEvent.click(screen.getByRole("button", { name: "Close detail" }))
+  expect(window.location.search).toBe("")
+})
+
+it("How routines work in the top bar opens the intro as ?view=intro (RT-09)", () => {
+  render(<RoutinesLayout workspaceId="workspace" />)
+  fireEvent.click(screen.getByRole("button", { name: "How routines work" }))
+  expect(window.location.search).toBe("?view=intro")
+  expect(screen.getByRole("heading", { name: "Work that repeats, done by your crew." })).toBeInTheDocument()
+  expect(screen.getByRole("heading", { name: "From a sentence to a routine in three steps" })).toBeInTheDocument()
+  // No template gallery and no workspace figures (ODCH-RT-08).
+  expect(screen.queryByText(/template/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/In this workspace this week/)).not.toBeInTheDocument()
+  // The intro is not one of the five views in the panel.
+  expect(screen.getByRole("navigation", { name: "Routine explorer" })).toHaveAttribute("data-view", "none")
+  fireEvent.keyDown(window, { key: "1" })
   expect(window.location.search).toBe("")
 })

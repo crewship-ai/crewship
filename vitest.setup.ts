@@ -107,3 +107,11 @@ if (typeof globalThis.Animation === 'function') {
     return cancel.call(this)
   }
 }
+
+// happy-dom's window is 1024 px wide, which Harbor 2 (#3358) treats as a
+// tablet: the SecondaryPanel then starts closed and floats (COM-05, #3481).
+// Unit tests are written against the desktop layout unless they set a width
+// or mock the breakpoint themselves, so the default window is a desktop one.
+type HappyDOMApi = { setViewport?: (v: { width: number; height: number }) => void }
+const happyDOM = (globalThis as { happyDOM?: HappyDOMApi; window?: { happyDOM?: HappyDOMApi } }).window?.happyDOM ?? (globalThis as { happyDOM?: HappyDOMApi }).happyDOM
+happyDOM?.setViewport?.({ width: 1440, height: 900 })

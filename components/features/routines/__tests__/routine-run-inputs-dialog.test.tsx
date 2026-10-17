@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import type * as React from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
 
 // =============================================================================
@@ -287,5 +288,85 @@ describe("routine run inputs dialog", () => {
     expect(onCancel).not.toHaveBeenCalled()
     expect(screen.getByRole("dialog")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Running…" })).toBeDisabled()
+  })
+})
+
+// v67 D-RTRUN (routines.md R14): one dialog, a segment Run now · Test run ·
+// Later, the shared inputs form, no native select, the limits in the footer.
+describe("routine run dialog — Run now · Test run · Later", () => {
+  const limited = { max_cost_usd: 2, concurrency_key: "weekly", steps: [] }
+  function openModes(over: Partial<React.ComponentProps<typeof RoutineRunInputsDialog>> = {}) {
+    return render(
+      <RoutineRunInputsDialog
+        inputs={[]}
+        routineName="Weekly scan"
+        headVersion={4}
+        definition={limited}
+        modes={["run", "test", "later"]}
+        onCancel={onCancel}
+        onRun={onRun}
+        {...over}
+      />,
+    )
+  }
+
+  it("offers the three ways as one segment and puts the limits in the footer", () => {
+    openModes()
+    const seg = screen.getByRole("radiogroup", { name: "How to run" })
+    expect(Array.from(seg.querySelectorAll('[role="radio"]')).map((r) => r.textContent)).toEqual(["Run now", "Test run", "Later"])
+    expect(screen.getByRole("radio", { name: "Run now" })).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByText("Max $2.00 · 1 at a time")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }))
+    expect(onRun).toHaveBeenCalledWith({}, { mode: "run" })
+  })
+
+  it("Test run says there are no side effects and starts a test", () => {
+    openModes()
+    fireEvent.click(screen.getByRole("radio", { name: "Test run" }))
+    expect(screen.getByRole("heading", { name: "Test Weekly scan" })).toBeInTheDocument()
+    expect(screen.getByText("No side effects")).toBeInTheDocument()
+    expect(screen.getByText(/Agents still run and cost money/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Start test run" }))
+    expect(onRun).toHaveBeenCalledWith({}, { mode: "test" })
+  })
+
+  it("Later asks when, refuses a start in the past, and hands back fire_at and the version", async () => {
+    openModes()
+    fireEvent.click(screen.getByRole("radio", { name: "Later" }))
+    expect(screen.getByText("Creates a one-time run you can cancel in Triggers")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Plan run" }))
+    expect(onRun).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent("Pick when it starts")
+    fireEvent.change(screen.getByLabelText("Start at"), { target: { value: "2001-01-01T09:00" } })
+    fireEvent.click(screen.getByRole("button", { name: "Plan run" }))
+    expect(onRun).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent("in the future")
+    fireEvent.change(screen.getByLabelText("Start at"), { target: { value: "2030-01-02T09:00" } })
+    // The version: follow the live one (default) or pin it — a kit Select.
+    fireEvent.pointerDown(screen.getByRole("combobox", { name: "Version" }), { button: 0, ctrlKey: false, pointerType: "mouse" })
+    fireEvent.click(await screen.findByRole("option", { name: "Pin v4" }))
+    fireEvent.click(screen.getByRole("button", { name: "Plan run" }))
+    expect(onRun).toHaveBeenCalledWith({}, { mode: "later", fireAt: new Date("2030-01-02T09:00").toISOString(), pinnedVersion: 4 })
+  })
+
+  it("offers only the ways the person may use (no Test run without Manager)", () => {
+    openModes({ modes: ["run", "later"] })
+    expect(screen.queryByRole("radio", { name: "Test run" })).not.toBeInTheDocument()
+  })
+
+  it("never draws a native select, also for Run again's version choice", () => {
+    render(
+      <RoutineRunInputsDialog
+        inputs={[]}
+        routineName="recipe"
+        versionChoices={[{ value: "current", label: "Current recipe" }, { value: "3", label: "Executed recipe · v3" }]}
+        selectedVersion="current"
+        onCancel={onCancel}
+        onRun={onRun}
+      />,
+    )
+    // (Radix keeps an aria-hidden native select for form submission only.)
+    expect(document.querySelector('select:not([aria-hidden="true"])')).toBeNull()
+    expect(screen.getByRole("combobox", { name: "Recipe version" })).toBeInTheDocument()
   })
 })

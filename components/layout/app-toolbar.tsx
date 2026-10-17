@@ -28,6 +28,7 @@ import { useAppStore } from "@/lib/store"
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
 import { SystemStatusPill } from "./status-pill"
 import { UserMenu } from "./user-menu"
+import { useIsTabletPanel } from "./secondary-panel"
 import { MobileWorkspaceSwitcher } from "./workspace-switcher"
 
 /**
@@ -107,6 +108,8 @@ export function AppToolbar() {
   const setPageBarSlot = useAppStore((st) => st.setPageBarSlot)
   const secondaryPanel = useAppStore((st) => st.secondaryPanel)
   const setSecondaryPanelOpen = useAppStore((st) => st.setSecondaryPanelOpen)
+  const secondaryPanelOpen = useAppStore((st) => st.secondaryPanelOpen)
+  const tabletPanel = useIsTabletPanel() && !isMobile
   // The palette's open state lives in the app store so the sidebar's search
   // field can open it; a local fallback keeps the toolbar working where a
   // test or an embed provides a store without it.
@@ -270,9 +273,18 @@ export function AppToolbar() {
         {/* Search lives in the sidebar on desktop and tablet (Harbor 2); the
             phone has no sidebar, so it keeps an icon here. ⌘K is still owned
             by the listener above. */}
-        {/* Phone: the page's secondary panel opens as a sheet (Harbor 2 M3). */}
-        {isMobile && secondaryPanel && (
-          <Button variant="ghost" size="icon-sm" aria-label={secondaryPanel.label} onClick={() => setSecondaryPanelOpen(true)}>
+        {/* Phone: the page's secondary panel opens as a sheet (Harbor 2 M3).
+            Tablet: it floats over the content and this button toggles it
+            (v67 panelBtn, COM-05). */}
+        {(isMobile || tabletPanel) && secondaryPanel && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={secondaryPanel.label}
+            aria-expanded={tabletPanel ? secondaryPanelOpen : undefined}
+            data-testid="secondary-panel-button"
+            onClick={() => setSecondaryPanelOpen(tabletPanel ? !secondaryPanelOpen : true)}
+          >
             <PanelLeft className="h-4 w-4" />
           </Button>
         )}

@@ -5,10 +5,10 @@ import { usePathname } from "next/navigation"
 import { Menu } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { phoneTabs } from "@/lib/nav-sections"
+import { phoneTabs, type NavItem } from "@/lib/nav-sections"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
-import { restrictedPathAllowed } from "@/lib/restricted-surfaces"
+import { restrictedHome, restrictedPathAllowed, type RestrictedSurface } from "@/lib/restricted-surfaces"
 import { useAppStore } from "@/lib/store"
 
 /**
@@ -31,7 +31,7 @@ export function MobileTabBar() {
   const workspaceId = useTrustedWorkspaceId()
   const setMobileNavOpen = useAppStore((s) => s.setMobileNavOpen)
   const surfaces = useRestrictedSurfaces()
-  const tabs = phoneTabs().filter((tab) => !surfaces || restrictedPathAllowed(tab.href, surfaces))
+  const tabs = phoneTabsFor(surfaces)
 
   return (
     <nav
@@ -75,6 +75,20 @@ export function MobileTabBar() {
       </button>
     </nav>
   )
+}
+
+/**
+ * The tabs a session gets. A restricted session has no Dashboard, so Home
+ * leads to its own home (`restrictedHome`, SHL-07 / DSH-02) instead of
+ * vanishing; a tab that would point at the same place as Home is dropped.
+ */
+function phoneTabsFor(surfaces: readonly RestrictedSurface[] | null): NavItem[] {
+  if (!surfaces) return phoneTabs()
+  const home = restrictedHome(surfaces)
+  return phoneTabs().flatMap((tab) => {
+    if (tab.href === "/") return home ? [{ ...tab, href: home }] : []
+    return tab.href !== home && restrictedPathAllowed(tab.href, surfaces) ? [tab] : []
+  })
 }
 
 /**
