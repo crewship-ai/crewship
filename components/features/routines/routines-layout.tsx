@@ -25,6 +25,7 @@ import { RoutineNewWizard } from "./routine-new-wizard"
 import { RoutinesViewPane, needsYou } from "./routines-views"
 import { ImportRoutineDialog } from "./routine-import-dialog"
 import { useUserPreference } from "@/hooks/use-user-preference"
+import { useRoutinePanelIndex } from "@/hooks/use-routine-panel-index"
 
 // Keep the shared panel mounted across the views, a routine and a run. The
 // URL identifies the view (?view=needs|live|runs|drafts), the routine
@@ -90,6 +91,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     () => (filters.showTestRoutines ? pipelines : pipelines.filter((p) => !isRoutineTestFixture(p.slug))),
     [pipelines, filters.showTestRoutines],
   )
+  const panelIndex = useRoutinePanelIndex(workspaceId, pipelines)
   // The selected routine lives in the URL: /routines?slug=<slug> (every
   // routine link in the app points here; ?routine= is read as an alias).
   const [selectedRun, setSelectedRun] = useUrlSelection("run")
@@ -188,6 +190,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           filters.status !== "all" ||
           (filters.lifecycle ?? "all") !== "all" ||
           filters.crewId ||
+          filters.trigger ||
           filters.invocations !== "all" ||
           filters.authorAgentId ||
           filters.showEphemeral ||
@@ -303,6 +306,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             onViewChange={showView}
             counts={{ needs: needsCount, live: liveCount, drafts: drafts?.length ?? null }}
             crews={crews}
+            index={panelIndex}
           />
         </SecondaryPanel>
 

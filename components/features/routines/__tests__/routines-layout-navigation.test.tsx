@@ -21,6 +21,7 @@ vi.mock("@/lib/api-fetch", async (importOriginal) => ({
   })),
 }))
 vi.mock("@/hooks/use-pipelines", () => ({ usePipelines: () => ({ pipelines: h.pipelines, loading: false, error: null, refresh: h.refresh }) }))
+vi.mock("@/hooks/use-routine-panel-index", async () => { const m = await import("@/lib/routine-panel-index"); return { useRoutinePanelIndex: () => m.EMPTY_PANEL_INDEX } })
 vi.mock("motion/react", () => ({ AnimatePresence: ({ children }: { children: ReactNode }) => <>{children}</>, motion: { div: ({ children, className }: { children: ReactNode; className?: string }) => <div className={className}>{children}</div> } }))
 vi.mock("../routines-explorer", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../routines-explorer")>()),

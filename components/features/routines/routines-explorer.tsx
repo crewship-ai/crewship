@@ -37,13 +37,25 @@ import {
 } from "@/lib/routine-filters"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
+import {
+  EMPTY_PANEL_INDEX,
+  ROUTINE_TRIGGER_KINDS,
+  groupRoutines,
+  sortRoutines,
+  type RoutineGroupBy,
+  type RoutinePanelIndex,
+  type RoutineSort,
+} from "@/lib/routine-panel-index"
 import { RoutineGlyph } from "./routine-glyph"
 
 // The Routines secondary panel (Harbor 2): Views first — Overview, Needs
 // you, Running now, All runs, Drafts — then every routine grouped by the
 // crew that owns it. A row is the routine's glyph, its name, a pencil when
 // it has changes that are not live, and at most one status pill. Facets
-// (Status, Last run, Crew) live in the Filter panel; group and sort in View.
+// (Status, Last run, Trigger, Crew) live in the Filter panel; group (Crew,
+// Trigger, None) and sort (Next run, Last run, Name, Spend) in View. Trigger,
+// next run and spend come from the panel index the layout composes from the
+// schedule, webhook, budget and chat command lists (lib/routine-panel-index).
 // Folders are not offered: routines have no folders (they are an Artifacts
 // concept), so the crew is the grouping the data actually has.
 
@@ -76,6 +88,8 @@ interface RoutinesExplorerProps {
   /** Counts beside the views; a null count is not shown. */
   counts: { needs: number | null; live: number | null; drafts: number | null }
   crews: ReadonlyMap<string, PanelCrew>
+  /** Triggers, next start and spend per routine; empty until loaded. */
+  index?: RoutinePanelIndex
 }
 
 /** The one pill a row carries: a live run first, then the routine's own
@@ -105,9 +119,17 @@ const LAST_RUN: { id: Exclude<RoutineStatusFilter, "all">; label: string }[] = [
   { id: "never", label: "Never run" },
 ]
 
-type GroupBy = "crew" | "none"
-type SortBy = "recent" | "name"
-const NO_CREW = "__none__"
+const GROUPS: { id: RoutineGroupBy; label: string }[] = [
+  { id: "crew", label: "Crew" },
+  { id: "trigger", label: "Trigger" },
+  { id: "none", label: "None" },
+]
+const SORTS: { id: RoutineSort; label: string }[] = [
+  { id: "next", label: "Next run" },
+  { id: "recent", label: "Last run" },
+  { id: "name", label: "Name" },
+  { id: "spend", label: "Spend" },
+]
 
 export function RoutinesExplorer({
   routines,
@@ -121,51 +143,49 @@ export function RoutinesExplorer({
   onViewChange,
   counts,
   crews,
+  index = EMPTY_PANEL_INDEX,
 }: RoutinesExplorerProps) {
   const { bySlug: liveBySlug } = useActiveRoutineRuns()
-  const [groupBy, setGroupBy] = useUserPreference<GroupBy>("routines.panel.group", "crew")
-  const [sortBy, setSortBy] = useUserPreference<SortBy>("routines.panel.sort", "recent")
+  const [storedGroup, setGroupBy] = useUserPreference<RoutineGroupBy>("routines.panel.group", "crew")
+  const [storedSort, setSortBy] = useUserPreference<RoutineSort>("routines.panel.sort", "recent")
+  // A stored value from another version of the panel falls back, never breaks it.
+  const groupBy = GROUPS.some((g) => g.id === storedGroup) ? storedGroup : "crew"
+  const sortBy = SORTS.some((o) => o.id === storedSort) ? storedSort : "recent"
+  const input = (p: Pipeline) => routineFilterInput(p, index.triggers.get(p.slug))
 
   // Facet counts are taken over the whole list, so picking one value does
   // not zero every other.
   const facetCounts = useMemo(() => {
-    const none = { ...filters, status: "all" as const, lifecycle: "all" as const, crewId: null }
+    const none = { ...filters, status: "all" as const, lifecycle: "all" as const, crewId: null, trigger: null }
     const count = (patch: Partial<RoutineFilterState>) =>
-      routines.filter((p) => matchesRoutineFilters(routineFilterInput(p), { ...none, ...patch }, liveBySlug, search)).length
+      routines.filter((p) => matchesRoutineFilters(input(p), { ...none, ...patch }, liveBySlug, search)).length
     return {
       lifecycle: Object.fromEntries(LIFECYCLE.map((o) => [o.id, count({ lifecycle: o.id })])),
       lastRun: Object.fromEntries(LAST_RUN.map((o) => [o.id, count({ status: o.id })])),
+      trigger: Object.fromEntries(ROUTINE_TRIGGER_KINDS.map((o) => [o.id, count({ trigger: o.id })])),
       crew: Object.fromEntries([...crews.keys()].map((id) => [id, count({ crewId: id })])),
     }
-  }, [routines, filters, liveBySlug, search, crews])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routines, filters, liveBySlug, search, crews, index])
 
-  const displayed = useMemo(() => {
-    const rows = routines.filter((p) => matchesRoutineFilters(routineFilterInput(p), filters, liveBySlug, search))
-    const time = (p: Pipeline) => Date.parse(p.last_invoked_at ?? p.updated_at ?? "") || 0
-    return rows.sort((a, b) =>
-      sortBy === "name" ? (a.name || a.slug).localeCompare(b.name || b.slug) : time(b) - time(a) || (a.name || a.slug).localeCompare(b.name || b.slug),
-    )
-  }, [routines, filters, liveBySlug, search, sortBy])
+  const displayed = useMemo(
+    () => sortRoutines(routines.filter((p) => matchesRoutineFilters(input(p), filters, liveBySlug, search)), sortBy, index),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [routines, filters, liveBySlug, search, sortBy, index],
+  )
 
-  const groups = useMemo(() => {
-    if (groupBy === "none") return [{ id: "all", label: "Routines", rows: displayed }]
-    const map = new Map<string, Pipeline[]>()
-    for (const p of displayed) {
-      const key = p.author_crew_id && crews.has(p.author_crew_id) ? p.author_crew_id : NO_CREW
-      map.set(key, [...(map.get(key) ?? []), p])
-    }
-    return [...map.entries()]
-      .map(([id, rows]) => ({ id, label: id === NO_CREW ? "No crew" : crews.get(id)!.name, rows }))
-      .sort((a, b) => (a.id === NO_CREW ? 1 : b.id === NO_CREW ? -1 : a.label.localeCompare(b.label)))
-  }, [displayed, groupBy, crews])
+  const groups = useMemo(() => groupRoutines(displayed, groupBy, index, crews), [displayed, groupBy, index, crews])
 
   const active = {
     lifecycle: filters.lifecycle && filters.lifecycle !== "all" ? filters.lifecycle : null,
     status: filters.status !== "all" ? filters.status : null,
+    trigger: filters.trigger ?? null,
     crewId: filters.crewId ?? null,
   }
-  const activeCount = (active.lifecycle ? 1 : 0) + (active.status ? 1 : 0) + (active.crewId ? 1 : 0) + (filters.showTestRoutines ? 1 : 0) + (filters.showEphemeral ? 1 : 0)
-  const clear = () => onChange({ ...filters, status: "all", lifecycle: "all", crewId: null, showTestRoutines: false, showEphemeral: false })
+  const triggerLabel = (id: string) => ROUTINE_TRIGGER_KINDS.find((k) => k.id === id)?.label ?? id
+  const activeCount =
+    (active.lifecycle ? 1 : 0) + (active.status ? 1 : 0) + (active.trigger ? 1 : 0) + (active.crewId ? 1 : 0) + (filters.showTestRoutines ? 1 : 0) + (filters.showEphemeral ? 1 : 0)
+  const clear = () => onChange({ ...filters, status: "all", lifecycle: "all", crewId: null, trigger: null, showTestRoutines: false, showEphemeral: false })
   const viewCount = (id: RoutinesView) => (id === "needs" ? counts.needs : id === "live" ? counts.live : id === "drafts" ? counts.drafts : null)
 
   return (
@@ -189,6 +209,14 @@ export function RoutinesExplorer({
               <SidebarFacetOption key={o.id} active={active.status === o.id} onToggle={() => onChange({ ...filters, status: active.status === o.id ? "all" : o.id })}>
                 <span className="flex-1">{o.label}</span>
                 <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{facetCounts.lastRun[o.id]}</span>
+              </SidebarFacetOption>
+            ))}
+          </SidebarFacet>
+          <SidebarFacet label="Trigger" resetLabel="Any trigger" resetActive={!active.trigger} onReset={() => onChange({ ...filters, trigger: null })}>
+            {ROUTINE_TRIGGER_KINDS.map((o) => (
+              <SidebarFacetOption key={o.id} active={active.trigger === o.id} onToggle={() => onChange({ ...filters, trigger: active.trigger === o.id ? null : o.id })}>
+                <span className="flex-1">{o.label}</span>
+                <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{facetCounts.trigger[o.id]}</span>
               </SidebarFacetOption>
             ))}
           </SidebarFacet>
@@ -221,15 +249,21 @@ export function RoutinesExplorer({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel>Group by</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={groupBy} onValueChange={(v) => setGroupBy(v as GroupBy)}>
-              <DropdownMenuRadioItem value="crew">Crew</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="none">None</DropdownMenuRadioItem>
+            <DropdownMenuRadioGroup value={groupBy} onValueChange={(v) => setGroupBy(v as RoutineGroupBy)}>
+              {GROUPS.map((g) => (
+                <DropdownMenuRadioItem key={g.id} value={g.id}>
+                  {g.label}
+                </DropdownMenuRadioItem>
+              ))}
             </DropdownMenuRadioGroup>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>Sort</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
-              <DropdownMenuRadioItem value="recent">Last run</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="name">Name</DropdownMenuRadioItem>
+            <DropdownMenuRadioGroup value={sortBy} onValueChange={(v) => setSortBy(v as RoutineSort)}>
+              {SORTS.map((o) => (
+                <DropdownMenuRadioItem key={o.id} value={o.id}>
+                  {o.label}
+                </DropdownMenuRadioItem>
+              ))}
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -244,6 +278,11 @@ export function RoutinesExplorer({
         {active.status && (
           <SidebarActiveChip label={LAST_RUN.find((o) => o.id === active.status)!.label} onRemove={() => onChange({ ...filters, status: "all" })}>
             {LAST_RUN.find((o) => o.id === active.status)!.label}
+          </SidebarActiveChip>
+        )}
+        {active.trigger && (
+          <SidebarActiveChip label={triggerLabel(active.trigger)} onRemove={() => onChange({ ...filters, trigger: null })}>
+            {triggerLabel(active.trigger)}
           </SidebarActiveChip>
         )}
         {active.crewId && crews.get(active.crewId) && (
