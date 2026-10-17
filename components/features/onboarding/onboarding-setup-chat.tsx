@@ -170,6 +170,15 @@ interface OnboardingSetupChatProps {
    *  language. The agent's own replies are handled separately, by the
    *  LANGUAGE block the server injects into its system prompt. */
   language?: string
+  /** Inside the setup card's body: no card chrome of its own, fill the column. */
+  embedded?: boolean
+}
+
+/** The chat's own card, or — embedded in the setup card — a column that fills its parent. */
+function chatShellClass(embedded = false): string {
+  return embedded
+    ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-card"
+    : "flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-card border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none"
 }
 
 /**
@@ -195,6 +204,7 @@ export function OnboardingSetupChat({
   onProposalApplied,
   onProposalPrepared,
   language,
+  embedded = false,
 }: OnboardingSetupChatProps) {
   const [session, setSession] = useState<SetupAgentSession | null>(null)
   const [starting, setStarting] = useState(true)
@@ -232,7 +242,7 @@ export function OnboardingSetupChat({
     // from a dashed placeholder to a full-height card when the Guide answers.
     return (
       <div
-        className="flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-card border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none"
+        className={chatShellClass(embedded)}
         role="status"
       >
         <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
@@ -273,6 +283,7 @@ export function OnboardingSetupChat({
         onProposalApplied={onProposalApplied}
         onProposalPrepared={onProposalPrepared}
         language={language}
+        embedded={embedded}
       />
     </RealtimeProvider>
   )
@@ -322,6 +333,7 @@ function ConnectedSetupChat({
   onProposalApplied,
   onProposalPrepared,
   language,
+  embedded = false,
 }: {
   agentId: string
   sessionId: string
@@ -329,6 +341,7 @@ function ConnectedSetupChat({
   onProposalApplied: (result: ApplyProposalResult, proposal: OnboardingProposal) => void
   onProposalPrepared?: (proposal: OnboardingProposal | null) => void
   language?: string
+  embedded?: boolean
 }) {
   const session = useSession()
   const currentUserId = session.data?.user?.id
@@ -665,7 +678,7 @@ function ConnectedSetupChat({
   }, [proposal, workspaceId, onProposalApplied])
 
   return (
-    <div className="flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-card border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none">
+    <div className={chatShellClass(embedded)}>
       <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-primary/30 bg-primary/15">
           <AgentAvatar
