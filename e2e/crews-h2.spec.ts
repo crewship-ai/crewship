@@ -199,6 +199,111 @@ test.describe("desktop", () => {
     await expect(prompt).toHaveValue(before)
   })
 
+  // ── Follow-up #3424 ────────────────────────────────────────────────────
+
+  test("K19 New agent is four steps (Who → Model → Access → Instructions) at M 640; Back keeps the name", async ({ page }) => {
+    const crew = await firstCrew(page)
+    await page.goto(`/crews?new=agent&crew=${crew}`)
+    const dialog = page.getByRole("dialog", { name: /New agent in/ })
+    await expect(dialog).toBeVisible()
+    expect(await dialog.evaluate((el) => (el as HTMLElement).offsetWidth)).toBe(640)
+    const steps = dialog.getByRole("navigation", { name: "Steps" }).getByRole("listitem")
+    await expect(steps).toHaveText([/Who/, /Model/, /Access/, /Instructions/])
+    await expect(dialog.getByText("Step 1 of 4").first()).toBeVisible()
+    await expect(dialog.getByRole("radiogroup", { name: "Start from" })).toBeVisible()
+    await dialog.getByPlaceholder("Filip").fill("H2 wizard probe")
+    await dialog.getByRole("button", { name: "Continue" }).click()
+    await expect(dialog.getByText("Step 2 of 4").first()).toBeVisible()
+    await dialog.getByRole("button", { name: "Back" }).click()
+    await expect(dialog.getByPlaceholder("Filip")).toHaveValue("H2 wizard probe")
+    await dialog.getByRole("button", { name: "Step 3: Access" }).click()
+    await expect(dialog.getByText("Pays with").first()).toBeVisible()
+  })
+
+  test("K18 Environment cards follow the segment; Rebuild offers a cached and a clean build", async ({ page }) => {
+    const crew = await firstCrew(page)
+    await page.goto(`/crews?crew=${crew}&tab=env`)
+    const env = page.getByTestId("crew-environment")
+    for (const card of ["Container", "Image", "Tools and versions", "Features", "Network", "Resources", "Preview links", "Security", "Folders in the container"]) {
+      await expect(env.getByRole("region", { name: card, exact: true })).toBeVisible()
+    }
+    await env.getByRole("radio", { name: "Tools" }).click()
+    await expect(env.getByRole("region", { name: "Container", exact: true })).toHaveCount(0)
+    await expect(env.getByRole("region", { name: "Tools and versions" })).toBeVisible()
+    await env.getByRole("radio", { name: "Container and image" }).click()
+    const rebuild = env.getByRole("button", { name: /Rebuild…/ })
+    if (await rebuild.count()) {
+      await rebuild.click()
+      const group = page.getByRole("radiogroup", { name: "How to build" })
+      await expect(group.getByRole("radio")).toHaveCount(2)
+      await page.keyboard.press("Escape")
+    }
+  })
+
+  test("K07 crew Settings no longer carries the runtime and security blocks", async ({ page }) => {
+    const crew = await firstCrew(page)
+    await page.goto(`/crews?crew=${crew}&tab=settings`)
+    const settings = page.getByTestId("crew-settings")
+    await expect(settings).toBeVisible()
+    for (const gone of ["Runtime & security", "Container resources", "Network policy", "Container image & features", "MCP servers"]) {
+      await expect(settings.getByText(gone, { exact: true })).toHaveCount(0)
+    }
+    await expect(settings.getByRole("heading", { name: "Escalations" })).toBeVisible()
+  })
+
+  test("K06 crew Memory shows CREW.md and every agent's AGENT.md; no review queue", async ({ page }) => {
+    const crew = await firstCrew(page)
+    await page.goto(`/crews?crew=${crew}&tab=memory`)
+    await expect(page.getByRole("region", { name: "CREW.md · how this crew works" })).toBeVisible()
+    await expect(page.getByRole("region", { name: "Shared notes and agent knowledge" })).toBeVisible()
+    await expect(page.getByText(/Waiting for review/)).toHaveCount(0)
+  })
+
+  test("K10 agent Memory: Remember between runs, what it knows about you, AGENT.md", async ({ page }) => {
+    const crew = await firstCrew(page)
+    const agent = await firstAgentOf(page, crew)
+    await page.goto(`/crews?agent=${agent}&crew=${crew}&tab=memory`)
+    await expect(page.getByRole("switch", { name: "Remember between runs" })).toBeVisible()
+    await expect(page.getByRole("region", { name: "What it knows about you" })).toBeVisible()
+    await expect(page.getByRole("region", { name: "AGENT.md" })).toBeVisible()
+  })
+
+  test("K20 Instructions: source and History, crew default; no Suggest improvements", async ({ page }) => {
+    const crew = await firstCrew(page)
+    const agent = await firstAgentOf(page, crew)
+    await page.goto(`/crews?agent=${agent}&crew=${crew}&tab=persona`)
+    const source = page.getByTestId("agent-instructions-source")
+    await expect(source).toBeVisible()
+    await source.getByRole("button", { name: "History" }).click()
+    await expect(page.getByRole("region", { name: /^Crew default · / })).toBeVisible()
+    await expect(page.getByRole("button", { name: /Suggest improvements/ })).toHaveCount(0)
+  })
+
+  test("K08 agent Overview has Messages from teammates", async ({ page }) => {
+    const crew = await firstCrew(page)
+    const agent = await firstAgentOf(page, crew)
+    await page.goto(`/crews?agent=${agent}&crew=${crew}`)
+    await expect(page.getByTestId("agent-teammate-messages")).toBeVisible()
+  })
+
+  test("KIT-04 a tab switch with unsaved inline edits asks first; Stay keeps them, Discard drops them", async ({ page }) => {
+    const crew = await firstCrew(page)
+    const agent = await firstAgentOf(page, crew)
+    await page.goto(`/crews?agent=${agent}&crew=${crew}&tab=persona`)
+    const prompt = page.getByRole("textbox", { name: "Agent system prompt" })
+    const before = await prompt.inputValue()
+    await prompt.fill(`${before}\nprobe`)
+    await page.getByRole("tab", { name: "Overview" }).click()
+    const ask = page.getByRole("alertdialog")
+    await expect(ask.getByText(/Leave with 1 unsaved change/)).toBeVisible()
+    await ask.getByRole("button", { name: "Stay" }).click()
+    await expect(page.getByRole("tab", { name: "Instructions" })).toHaveAttribute("aria-selected", "true")
+    await expect(prompt).toHaveValue(`${before}\nprobe`)
+    await page.getByRole("tab", { name: "Overview" }).click()
+    await page.getByRole("alertdialog").getByRole("button", { name: "Discard" }).click()
+    await expect(page.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true")
+  })
+
   test("Z01 /agents?agent=x lands on /crews?agent=x", async ({ page }) => {
     await page.goto("/agents?agent=does-not-matter")
     await expect(page).toHaveURL(/\/crews\?agent=does-not-matter/)

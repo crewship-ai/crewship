@@ -46,6 +46,8 @@ export interface CrewCanvasProps {
   onSelectAgent: (slug: string, tab?: AgentTab) => void
   /** Opens the dock on the Terminal tab for this crew. */
   onOpenTerminal: () => void
+  /** Opens the dock on the Files tab (Environment › Folders). */
+  onOpenFiles?: () => void
   /** Back to the crews list after a delete or from "not found". */
   onBackToCrews: () => void
   /** The layout's one provisioning poller; the canvas does not start its own. */
@@ -67,6 +69,7 @@ export function CrewCanvas({
   onLoaded,
   onSelectAgent,
   onOpenTerminal,
+  onOpenFiles,
   onBackToCrews,
   provisioning: provisioningProp,
 }: CrewCanvasProps) {
@@ -320,7 +323,22 @@ export function CrewCanvas({
             </>
           )}
           {tab === "tools" && <CrewTools workspaceId={workspaceId} crewSlug={crew.slug} agents={agents} integrations={integrations} />}
-          {tab === "env" && <CrewEnvironment workspaceId={workspaceId} crew={crew} canEdit={canUpdate} onSaved={() => { void fetchCrew(); onCrewChanged() }} />}
+          {tab === "env" && (
+            <CrewEnvironment
+              workspaceId={workspaceId}
+              crew={crew}
+              canEdit={canUpdate}
+              isAdmin={isAdmin}
+              containers={containers}
+              runningAgents={agents.filter((a) => a.status === "RUNNING").length}
+              onRestartAgents={() => setConfirmRestart(true)}
+              onOpenTerminal={onOpenTerminal}
+              onOpenFiles={onOpenFiles}
+              onContainersChanged={() => setTick((n) => n + 1)}
+              patch={patch}
+              onSaved={() => { void fetchCrew(); onCrewChanged() }}
+            />
+          )}
           {tab === "memory" && (
             <>
               <CrewMemoryCards workspaceId={workspaceId} crewId={crew.id} agents={agents.filter((a) => !a.expired_at)} onOpenAgent={(slug) => onSelectAgent(slug, "memory")} />
@@ -332,11 +350,9 @@ export function CrewCanvas({
               workspaceId={workspaceId}
               crew={crew}
               agents={agents}
-              integrations={integrations}
               patch={patch}
               onApplyAvatarStyle={(reset) => setAvatarConfirm({ reset })}
               onDelete={isAdmin ? () => setConfirmDelete(true) : undefined}
-              onSaved={() => { void fetchCrew(); onCrewChanged() }}
             />
           )}
         </CanvasTabPanel>

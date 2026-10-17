@@ -80,7 +80,6 @@ function renderTab(overrides: Partial<CrewRecord> = {}, patch = vi.fn().mockReso
       workspaceId="w1"
       crew={{ ...baseCrew, ...overrides }}
       agentsForCrew={[]}
-      integrations={[]}
       patch={patch}
       applyAvatarStyle={vi.fn()}
       onDelete={vi.fn()}
@@ -124,12 +123,9 @@ describe("Issue prefix field (#2118)", () => {
   })
 })
 
- it("only lets OWNER and ADMIN edit disk policy", () => {
-   for (const role of ["OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER"]) {
-     permission.role = role
-     const view = render(<SettingsTab workspaceId="w1" crew={baseCrew} agentsForCrew={[]} integrations={[]} patch={vi.fn()} applyAvatarStyle={vi.fn()} onDelete={vi.fn()} />)
-     expect((screen.getByRole("button", { name: "Edit service disk policy" }) as HTMLButtonElement).disabled).toBe(role !== "OWNER" && role !== "ADMIN")
-     view.unmount()
-   }
-   permission.role = "ADMIN"
- })
+ it("no longer carries the runtime blocks: disk policy and the container live in Environment", () => {
+  render(<SettingsTab workspaceId="w1" crew={baseCrew} agentsForCrew={[]} patch={vi.fn()} applyAvatarStyle={vi.fn()} onDelete={vi.fn()} />)
+  expect(screen.queryByRole("button", { name: "Edit service disk policy" })).not.toBeInTheDocument()
+  for (const gone of ["Runtime & security", "Container resources", "Network policy"]) expect(screen.queryByText(gone)).not.toBeInTheDocument()
+  expect(screen.getByRole("heading", { name: "Escalations" })).toBeInTheDocument()
+})

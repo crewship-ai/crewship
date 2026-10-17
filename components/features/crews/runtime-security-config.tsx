@@ -48,13 +48,20 @@ interface RuntimeSecurityConfigProps {
   /** When false the privileged toggle is read-only (non-admin, or the
    *  workspace has not opted into allow_privileged_credentials). */
   canEditPrivileged?: boolean
+  /** Render only these blocks (the crew Environment splits them over its
+   *  Security and Environment variables cards). Default: all of them. */
+  parts?: SecurityPart[]
 }
+
+export type SecurityPart = "isolation" | "capabilities" | "mounts" | "env" | "hook"
 
 export function RuntimeSecurityConfig({
   value,
   onChange,
   canEditPrivileged = false,
+  parts,
 }: RuntimeSecurityConfigProps) {
+  const has = (part: SecurityPart) => !parts || parts.includes(part)
   const patch = (p: Partial<SecurityConfigValue>) => onChange({ ...value, ...p })
 
   const capSet = useMemo(() => new Set(value.capAdd), [value.capAdd])
@@ -141,6 +148,7 @@ export function RuntimeSecurityConfig({
        * not happening. A warning that is always on screen is furniture, and
        * furniture is what people stop reading. It appears when the thing it
        * warns about is actually switched on. */}
+      {has("isolation") && (
       <CreateSurfaceSection
         title="Isolation"
         icon={value.privileged ? ShieldAlert : ShieldCheck}
@@ -218,8 +226,10 @@ export function RuntimeSecurityConfig({
           }
         />
       </CreateSurfaceSection>
+      )}
 
       {/* Capabilities. */}
+      {has("capabilities") && (
       <CreateSurfaceSection
         title="Linux capabilities"
         icon={KeyRound}
@@ -313,8 +323,10 @@ export function RuntimeSecurityConfig({
           </details>
         )}
       </CreateSurfaceSection>
+      )}
 
       {/* Mounts. */}
+      {has("mounts") && (
       <CreateSurfaceSection
         title="Extra mounts"
         icon={FolderCog}
@@ -385,10 +397,12 @@ export function RuntimeSecurityConfig({
           </div>
         )}
       </CreateSurfaceSection>
+      )}
 
       {/* Container env. The init toggle that used to sit here moved up into
           Isolation, beside the other switch that changes how the container
           runs rather than what is in it. */}
+      {has("env") && (
       <CreateSurfaceSection
         title="Container environment"
         icon={Terminal}
@@ -439,8 +453,10 @@ export function RuntimeSecurityConfig({
           </div>
         )}
       </CreateSurfaceSection>
+      )}
 
       {/* Start hook. */}
+      {has("hook") && (
       <CreateSurfaceSection title="Start hook" icon={Terminal} accent="purple" hint="runs on every start">
         <Label htmlFor="rc-start-hook" className="sr-only">Start hook (init script)</Label>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -458,6 +474,7 @@ export function RuntimeSecurityConfig({
           className="font-mono text-xs min-h-[80px] resize-y"
         />
       </CreateSurfaceSection>
+      )}
     </div>
   )
 }
