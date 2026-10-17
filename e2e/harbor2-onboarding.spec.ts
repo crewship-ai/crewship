@@ -47,6 +47,17 @@ async function mockSetup(page: Page, f: Fixture = {}) {
   return state
 }
 
+/**
+ * Wait until the setup has restored and the real step-1 card is up. The
+ * route first shows the loading skeleton, which is also a SetupCard; measuring
+ * right after goto() can catch that one while it unmounts (boundingBox null).
+ */
+async function openStepOne(page: Page) {
+  await page.goto("/onboarding")
+  await expect(page.getByRole("heading", { level: 1, name: "Set up Crewship" })).toBeVisible()
+  await expect(page.locator("[data-slot=setup-card][data-state=loading]")).toHaveCount(0)
+}
+
 async function box(page: Page, selector: string) {
   const b = await page.locator(selector).first().boundingBox()
   expect(b, selector).not.toBeNull()
@@ -162,7 +173,7 @@ test.describe("setup card — tablet", () => {
 
   test("the card keeps its 800 px width with room either side", async ({ page }) => {
     await mockSetup(page)
-    await page.goto("/onboarding")
+    await openStepOne(page)
     const card = await box(page, "[data-slot=setup-card]")
     expect(Math.round(card.width)).toBe(800)
     expect(card.x).toBeGreaterThanOrEqual(16)
@@ -174,7 +185,7 @@ test.describe("setup card — phone", () => {
 
   test("full-bleed card, step count instead of labels, a sticky footer with 44 px buttons", async ({ page }) => {
     await mockSetup(page)
-    await page.goto("/onboarding")
+    await openStepOne(page)
     const card = await box(page, "[data-slot=setup-card]")
     expect(Math.round(card.width)).toBe(390)
     await expect(page.locator(".wizard-steps-count")).toHaveText("1 / 3")
