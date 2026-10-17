@@ -108,18 +108,21 @@ Controls and tables in Settings and Admin come from
 
 ### Harbor: where the look lives
 
-The design language is Harbor (the marketing site's), expressed only through
-tokens and a handful of utilities, so it can be changed in one place.
+The design language is Harbor (the marketing site's; revision Harbor 2 since
+October 2026), expressed only through tokens and a handful of utilities, so it
+can be changed in one place.
 
 | What | Where | Rule |
 |---|---|---|
-| Light / dark palettes | `app/globals.css` (`:root`, `.dark`) | dark is the default; both are held to AA by `lib/__tests__/theme-contrast.test.ts` |
+| Light / dark palettes | `app/globals.css` (`:root`, `.dark`) | Harbor 2 values; every text token is held to AA (4.5:1) on every surface, its hover and every accent's selection by `lib/__tests__/theme-contrast.test.ts` |
+| Text greys | `foreground`, `muted-foreground`, `muted-foreground-soft` | three text tiers; `icon-faint` is a fourth grey for icons and dividers only (3:1), never text |
+| Fonts | `public/fonts/inter`, `public/fonts/jetbrains-mono`, `app/layout.tsx` | Inter for the interface, JetBrains Mono for ids and code; both bundled, never fetched from a font service |
 | Accent (brand) colour | `app/styles/accents.css` + `lib/theme/accents.ts` | one light and one dark block per accent; components never name an accent colour, they use `primary` / `primary-hover` / `primary-strong` |
 | Theme + accent pickers | `components/layout/theme-switcher.tsx` (profile menu) | per browser; accent painted before first paint by `ACCENT_BOOT_SCRIPT` |
-| Selected row | `.row-selected` (via `ListRow` / `SidebarRow`, `lib/interaction.ts`) | tint + hairline + straight 3px bar; never a `border-left` on a rounded row |
+| Selected row | `.row-selected` (via `ListRow` / `SidebarRow`, `lib/interaction.ts`) | opaque accent tint (`--selection-bg` = `--brand-tint`) + hairline + straight 3px bar; never a translucent grey, never a `border-left` on a rounded row |
 | Status chip | `StatusPill` and the `--chip-*-bg/fg` tokens | the only place a row shows severity |
 | Icon in a box | `icon-tile` utility (`ConceptIcon variant="chip"`) | tint via `--ic`; neutral unless the icon itself is the status |
-| Cards | `rounded-[20px] border bg-card`, hover `lift` | no resting shadow |
+| Cards | `rounded-card` (10px) `border bg-card`, hover `lift` | no resting shadow; shadows only on layers above the page (popovers, dialogs) |
 | Deep panel | `panel-surface` | heroes, terminals, graph canvases |
 | Nested page | `DrillPage` (`components/layout/drill-page`) | a big sub-area (Settings › Crew links, › Audit log) gets its own route; its side panel REPLACES the parent's and starts with "← Parent", then the sidebar-kit toolbar (search, Filter, collapse) and collapsible `DrillNavSection`s whose values carry counts. Never a third column, never a nested page inside a nested page; on a phone the panel becomes a bottom sheet behind a "Filters" button, and view tabs stay on the page |
 

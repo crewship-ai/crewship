@@ -221,3 +221,120 @@ describe("concept hue text contrast", () => {
     expect(contrast(luminanceFromRgb(tokenRgb("night", name)), luminanceFromRgb(tokenRgb("night", "card")))).toBeGreaterThanOrEqual(4.5)
   })
 })
+
+// ── Harbor 2 ─────────────────────────────────────────────────────────────
+//
+// The Harbor 2 revision keeps every token name and moves the values to the
+// design's (pinned mockup v67), with two contrast fixes the design itself
+// misses: the tertiary text grey (--muted-foreground-soft) is darker in day
+// and lighter in night than the design's #757D8C / #767D8B, which measured
+// 3.4–4.2:1 on several surfaces. --icon-faint is the design's unnamed fourth
+// grey, for icons and dividers only (3:1, WCAG 1.4.11).
+
+const HARBOR2: Record<Theme, Record<string, string>> = {
+  day: {
+    background: "#FFFFFF",
+    sidebar: "#F3F4F6",
+    card: "#FFFFFF",
+    popover: "#FFFFFF",
+    muted: "#F8F9FA",
+    "surface-subtle": "#F8F9FA",
+    "surface-raised": "#FFFFFF",
+    foreground: "#0C111B",
+    "muted-foreground": "#4B5363",
+    "muted-foreground-soft": "#616875",
+    "icon-faint": "#7E8797",
+    border: "#E4E6EA",
+    "sidebar-border": "#E4E6EA",
+    "line-strong": "#D2D6DC",
+    success: "#157A45",
+    warn: "#8A5A00",
+    destructive: "#C0261B",
+    "chip-ok-fg": "#157A45",
+    "chip-ok-bg": "#E5F4EC",
+    "chip-warn-fg": "#8A5A00",
+    "chip-warn-bg": "#FCF1DC",
+    "chip-danger-fg": "#C0261B",
+    "chip-danger-bg": "#FCEAE8",
+    "chip-violet-fg": "#6544D6",
+    "chip-violet-bg": "#F0EBFD",
+  },
+  night: {
+    background: "#0F1013",
+    sidebar: "#0A0B0D",
+    card: "#181A1F",
+    popover: "#181A1F",
+    muted: "#1E2127",
+    "surface-subtle": "#0F1013",
+    "surface-raised": "#1E2127",
+    foreground: "#ECEEF2",
+    "muted-foreground": "#A4AAB6",
+    "muted-foreground-soft": "#9096A1",
+    "icon-faint": "#6F7683",
+    border: "#282B33",
+    "sidebar-border": "#282B33",
+    "line-strong": "#373B45",
+    success: "#4CC38A",
+    warn: "#E5A83B",
+    destructive: "#F2695C",
+    "chip-ok-fg": "#4CC38A",
+    "chip-ok-bg": "#10261C",
+    "chip-warn-fg": "#E5A83B",
+    "chip-warn-bg": "#2B2010",
+    "chip-danger-fg": "#F2695C",
+    "chip-danger-bg": "#2E1513",
+    "chip-violet-fg": "#A28BFA",
+    "chip-violet-bg": "#1E1835",
+  },
+}
+
+describe.each(["day", "night"] as const)("Harbor 2 %s token values", (theme) => {
+  it.each(Object.entries(HARBOR2[theme]))("--%s is %s", (name, value) => {
+    expect(token(theme, name).toUpperCase()).toBe(value)
+  })
+})
+
+describe.each(["day", "night"] as const)("Harbor 2 %s contrast matrix", (theme) => {
+  const lum = (name: string) => luminanceFromRgb(tokenRgb(theme, name))
+  const SURFACES = ["background", "sidebar", "card", "muted", "surface-subtle", "surface-raised"]
+  // Hover is translucent foreground (--row-hover-bg, 4 %) over a surface;
+  // selection is the opaque accent tint (--selection-bg), so it is checked
+  // for every accent.
+  const hovered = (surface: string) =>
+    luminanceFromRgb(blend(tokenRgb(theme, "foreground"), 0.04, tokenRgb(theme, surface)))
+  const TEXT = ["foreground", "muted-foreground", "muted-foreground-soft", "success", "warn", "destructive"]
+
+  it("row hover is 4 % foreground and selection is the accent tint", () => {
+    expect(token(theme, "row-hover-bg")).toBe("color-mix(in srgb, var(--foreground) 4%, transparent)")
+    expect(block(theme)).toMatch(/--selection-bg:\s*var\(--brand-tint\);/)
+  })
+
+  it.each(TEXT)("text %s ≥ 4.5:1 on every surface and on its hover", (text) => {
+    for (const s of SURFACES) {
+      expect(contrast(lum(text), lum(s)), `${text} on ${s}`).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(lum(text), hovered(s)), `${text} on hovered ${s}`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  it.each(ACCENT_IDS)("every text token ≥ 4.5:1 on a selected row (accent %s)", (accent) => {
+    const tint = luminanceFromRgb(tokenRgb(theme, "selection-bg", accent))
+    for (const text of TEXT) {
+      expect(contrast(lum(text), tint), `${text} on ${accent} selection`).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  it("icon-faint ≥ 3:1 on every surface (icons and dividers only, never text)", () => {
+    for (const s of SURFACES) expect(contrast(lum("icon-faint"), lum(s)), `icon-faint on ${s}`).toBeGreaterThanOrEqual(3)
+  })
+
+  it("control-border ≥ 3:1 on every surface (WCAG 1.4.11, ODCH-16)", () => {
+    // scripts/check-control-accessibility.tsx measures the same thing in a
+    // browser in CI; it caught #8792AB at 2.96:1 on the day sidebar ground.
+    for (const s of SURFACES) expect(contrast(lum("control-border"), lum(s)), `control-border on ${s}`).toBeGreaterThanOrEqual(3)
+  })
+
+  it.each(["ok", "warn", "danger", "violet"])("chip %s text ≥ 4.5:1 on its fill and on card", (tone) => {
+    expect(contrast(lum(`chip-${tone}-fg`), lum(`chip-${tone}-bg`))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(lum(`chip-${tone}-fg`), lum("card"))).toBeGreaterThanOrEqual(4.5)
+  })
+})

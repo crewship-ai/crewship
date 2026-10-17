@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Harbor 2 look, first step.** New light and dark palette (white content on a grey sidebar ground, corrected text greys that meet WCAG AA everywhere, opaque accent selection), Inter bundled with the app, 10 px cards and flat primary buttons. ⚠️ **Behaviour change:** a new device starts at Small text (13 px) and the System theme; devices and accounts that already have a text size or theme keep it, and Text size now reads Small / Standard / Large. On touch screens every control is at least 44 px. Appearance gains a separate `appearance.style` preference (only Harbor today) and shows **Not synced · Retry** if the server refuses a write.
 - **Participants can start a conversation in an empty shared chat.** A current authorized execution profile confirms the existing chat without a creator-only create request; every send still rechecks access and refused sends keep the draft.
 
 - **Proposal comments address the chat agent explicitly.** “Send comment to agent” now includes its canonical mention so shared chats trigger the requested reply; rejected sends keep the comment draft.

@@ -121,7 +121,7 @@ describe("useAppearanceSync", () => {
     renderSync()
 
     await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "dark", accent: "graphite", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover" })
+    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "dark", accent: "graphite", density: "comfortable", motion: "system", textSize: "small", sidebar: "hover" })
   })
 
   it("completes a partial server value from local and writes the whole thing back", async () => {
@@ -130,7 +130,7 @@ describe("useAppearanceSync", () => {
 
     await waitFor(() => expect(result.current.theme).toBe("light"))
     await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "blue", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover" })
+    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "blue", density: "comfortable", motion: "system", textSize: "small", sidebar: "hover" })
   })
 
   it("completes a value saved by an older build, keeping its fields", async () => {
@@ -141,7 +141,7 @@ describe("useAppearanceSync", () => {
 
     await waitFor(() => expect(result.current.accent).toBe("workspace"))
     await waitFor(() => expect(puts()).toHaveLength(1))
-    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "workspace", density: "comfortable", motion: "system", textSize: "default", sidebar: "hover" })
+    expect(JSON.parse(puts()[0][1].body)).toEqual({ theme: "light", accent: "workspace", density: "comfortable", motion: "system", textSize: "small", sidebar: "hover" })
   })
 
   it("sends nothing at all with sync off on this device", async () => {
@@ -198,5 +198,94 @@ describe("useAppearanceSync", () => {
     await new Promise((r) => setTimeout(r, 600))
     expect(puts()).toHaveLength(0)
     expect(result.current.theme).toBe("dark")
+  })
+})
+
+// ── Harbor 2: the style key and the outbox (#3334) ──────────────────────
+import { STYLE_STORAGE_KEY } from "@/lib/theme/appearance-style"
+import { OUTBOX_STORAGE_KEY } from "@/lib/theme/appearance-outbox"
+import { retryAppearanceSync, useAppearanceSyncStatus } from "../use-appearance-sync"
+
+const STYLE_PUT = "/api/v1/me/preferences/appearance.style"
+const fullAppearance = { theme: "dark", accent: "blue", density: "comfortable", motion: "system", textSize: "small", sidebar: "hover" }
+function stylePuts() {
+  return apiFetch.mock.calls.filter((c) => c[0] === STYLE_PUT)
+}
+
+describe("useAppearanceSync — appearance.style", () => {
+  it("adopts the server's style when nothing local is pending", async () => {
+    apiFetch.mockResolvedValue(ok({ appearance: fullAppearance, "appearance.style": { v: 1, style: "harbor", knobs: { radius: "round" } } }))
+    renderSync()
+    await waitFor(() => expect(store.get(STYLE_STORAGE_KEY)).toBe('{"v":1,"style":"harbor","knobs":{"radius":"round"}}'))
+    await new Promise((r) => setTimeout(r, 450))
+    expect(stylePuts()).toHaveLength(0)
+  })
+
+  it("never seeds an empty server with a default style", async () => {
+    apiFetch.mockResolvedValue(ok({ appearance: fullAppearance }))
+    renderSync()
+    await new Promise((r) => setTimeout(r, 500))
+    expect(stylePuts()).toHaveLength(0)
+  })
+
+  it("a style change still waiting in the outbox beats the server's value", async () => {
+    store.set(STYLE_STORAGE_KEY, '{"v":1,"style":"harbor","knobs":{"radius":"sharp"}}')
+    store.set(OUTBOX_STORAGE_KEY, JSON.stringify([{ key: "appearance.style", body: '{"v":1,"style":"harbor","knobs":{"radius":"sharp"}}' }]))
+    apiFetch.mockResolvedValue(ok({ appearance: fullAppearance, "appearance.style": { v: 1, style: "harbor", knobs: {} } }))
+    renderSync()
+    await waitFor(() => expect(stylePuts()).toHaveLength(1))
+    expect(stylePuts()[0][1].body).toBe('{"v":1,"style":"harbor","knobs":{"radius":"sharp"}}')
+    expect(store.get(STYLE_STORAGE_KEY)).toContain("sharp")
+  })
+
+  it("writes appearance before appearance.style when both change together", async () => {
+    apiFetch.mockResolvedValue(ok({ appearance: fullAppearance }))
+    const { result } = renderSync()
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(PREFS))
+    await new Promise((r) => setTimeout(r, 50))
+    act(() => {
+      // A style pick: the style first, then its accent — the order on the wire is fixed anyway.
+      store.set(STYLE_STORAGE_KEY, '{"v":1,"style":"harbor","knobs":{}}')
+      result.current.setAccent("teal")
+    })
+    await waitFor(() => expect(stylePuts()).toHaveLength(1))
+    const order = apiFetch.mock.calls.map((c) => c[0]).filter((u) => u === PUT || u === STYLE_PUT)
+    expect(order).toEqual([PUT, STYLE_PUT])
+  })
+
+  it("a style write refused for good keeps the local style and reports Not synced; Retry sends it again", async () => {
+    apiFetch.mockImplementation(async (url: string, init?: { method?: string }) => {
+      if (url === PREFS) return ok({ appearance: fullAppearance })
+      if (url === STYLE_PUT && init?.method === "PUT") return { ok: false, status: 400, json: async () => ({}) }
+      return ok({})
+    })
+    const status = renderHook(() => useAppearanceSyncStatus())
+    renderSync()
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(PREFS))
+    await new Promise((r) => setTimeout(r, 50))
+    act(() => {
+      store.set(STYLE_STORAGE_KEY, '{"v":1,"style":"harbor","knobs":{"radius":"round"}}')
+      window.dispatchEvent(new StorageEvent("storage", { key: STYLE_STORAGE_KEY }))
+    })
+    await waitFor(() => expect(status.result.current).toBe("failed"))
+    expect(store.get(STYLE_STORAGE_KEY)).toContain("round")
+    apiFetch.mockImplementation(async () => ok({}))
+    await act(async () => retryAppearanceSync())
+    await waitFor(() => expect(status.result.current).toBe("synced"))
+  })
+
+  it("paints Harbor for a style this build does not know, keeping the stored value", async () => {
+    apiFetch.mockResolvedValue(ok({ appearance: fullAppearance, "appearance.style": { v: 1, style: "from-the-future", knobs: {} } }))
+    renderSync()
+    await waitFor(() => expect(store.get(STYLE_STORAGE_KEY)).toContain("from-the-future"))
+    expect(document.documentElement.dataset.style).toBe("harbor")
+  })
+
+  it("sync off: no request for either key", async () => {
+    store.set(APPEARANCE_SYNC_STORAGE_KEY, "0")
+    store.set(STYLE_STORAGE_KEY, '{"v":1,"style":"harbor","knobs":{}}')
+    renderSync()
+    await new Promise((r) => setTimeout(r, 500))
+    expect(apiFetch).not.toHaveBeenCalled()
   })
 })
