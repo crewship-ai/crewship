@@ -124,4 +124,9 @@ describe("sidebar-kit", () => {
     expect(screen.getByRole("button", { name: "Remove filter Status: Todo" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Remove filter Crew Operations" })).toBeTruthy()
   })
+
+  it("SidebarRow centres its icon and text, so a 44 px touch row does not leave the icon at the top", () => {
+    render(<SidebarRow onSelect={vi.fn()}><span>Needs you</span></SidebarRow>)
+    expect(screen.getByRole("button", { name: "Needs you" }).className).toMatch(/\bitems-center\b/)
+  })
 })
