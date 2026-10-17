@@ -192,6 +192,35 @@ func TestDocumentRestoreCorruptBinaryRollsBackFence(t *testing.T) {
 		t.Fatal("failed restore changed live authority")
 	}
 }
+func TestDocumentReceiptEvidenceBeyondTenThousandSurvivesEncryptedRestore(t *testing.T) {
+	source := openMigratedDB(t)
+	ws := seedWorkspace(t, source)
+	seedBackupDocument(t, source, ws, "document-page", "u_admin")
+	if _, err := source.Exec(`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<10000)
+ INSERT INTO document_receipts(workspace_id,page_id,id,digest,fingerprint,rev,epoch,actor,kind,created_at)
+ SELECT ?, 'document-page','historical-'||i,'digest','fingerprint',2,41,'user:historical-actor','human','2000-01-01T00:00:00.000Z' FROM n`, ws); err != nil {
+		t.Fatal(err)
+	}
+	actor := backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}
+	bundle, err := backup.CreateBackup(t.Context(), source, backup.CreateOptions{Scope: backup.ScopeWorkspace, WorkspaceID: ws, OutputDir: t.TempDir(), Passphrase: "receipt-evidence-passphrase", Actor: actor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := openMigratedDB(t)
+	if _, err = backup.RestoreBackup(t.Context(), target, backup.RestoreOptions{Path: bundle.Path, Passphrase: "receipt-evidence-passphrase", Actor: actor}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err = target.QueryRow(`SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id='document-page'`, ws).Scan(&count); err != nil || count != 10001 {
+		t.Fatalf("receipt evidence truncated: %d %v", count, err)
+	}
+	store := documents.New(target, documents.Options{})
+	allow := func(context.Context, *sql.Tx) (string, error) { return "user:historical-actor", nil }
+	r, found, err := store.LookupReceipt(t.Context(), documents.Key{WorkspaceID: ws, PageID: "document-page"}, "original-request", "original-fingerprint", allow)
+	if err != nil || !found || r.Rev != 2 || r.Epoch != 41 {
+		t.Fatalf("original durable retry evidence lost: %+v %v %v", r, found, err)
+	}
+}
 
 // These assertions qualify only the dormant foundation, not populated Slides recovery.
 func assertDormantSlides(t *testing.T, db *sql.DB, wantFence int) {
