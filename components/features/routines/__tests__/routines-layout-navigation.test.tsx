@@ -164,3 +164,18 @@ it.each(["edit", "settings"])("a routine opened in the %s view keeps its slug an
   fireEvent.click(screen.getByRole("button", { name: "Close detail" }))
   expect(window.location.search).toBe("")
 })
+
+it("How routines work in the top bar opens the intro as ?view=intro (RT-09)", () => {
+  render(<RoutinesLayout workspaceId="workspace" />)
+  fireEvent.click(screen.getByRole("button", { name: "How routines work" }))
+  expect(window.location.search).toBe("?view=intro")
+  expect(screen.getByRole("heading", { name: "Work that repeats, done by your crew." })).toBeInTheDocument()
+  expect(screen.getByRole("heading", { name: "From a sentence to a routine in three steps" })).toBeInTheDocument()
+  // No template gallery and no workspace figures (ODCH-RT-08).
+  expect(screen.queryByText(/template/i)).not.toBeInTheDocument()
+  expect(screen.queryByText(/In this workspace this week/)).not.toBeInTheDocument()
+  // The intro is not one of the five views in the panel.
+  expect(screen.getByRole("navigation", { name: "Routine explorer" })).toHaveAttribute("data-view", "none")
+  fireEvent.keyDown(window, { key: "1" })
+  expect(window.location.search).toBe("")
+})

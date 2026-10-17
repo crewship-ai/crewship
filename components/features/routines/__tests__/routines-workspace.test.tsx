@@ -162,6 +162,15 @@ describe("<RoutinesWorkspace> — the overview pane", () => {
     expect(screen.queryByRole("button", { name: "New routine" })).not.toBeInTheDocument()
   })
 
+  it("an empty workspace explains routines under the empty state, without templates or figures (RT-09)", () => {
+    render(<RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error={null} onSelect={vi.fn()} />)
+    expect(screen.getByText(/No routines yet/)).toBeVisible()
+    expect(screen.getByRole("heading", { name: "From a sentence to a routine in three steps" })).toBeInTheDocument()
+    expect(screen.getByText("Runs without you")).toBeInTheDocument()
+    expect(screen.queryByText(/template/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/In this workspace this week/)).not.toBeInTheDocument()
+  })
+
   it("a load error offers Retry", () => {
     const onRetry = vi.fn()
     render(<RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error="boom" onSelect={vi.fn()} onRetry={onRetry} />)

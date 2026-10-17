@@ -436,6 +436,43 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
       })
     })
   })
+
+  it("Later in the run dialog sends fire_at to …/run, a one-time start (R14)", async () => {
+    mockFor(WITH_INPUTS)
+    render(<RoutinesDetailPanel {...defaultProps} slug="routine-a" />)
+    await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Later" }))
+    fireEvent.change(within(dialog).getByLabelText(/obdobi/i), { target: { value: "2026-07" } })
+    fireEvent.change(within(dialog).getByLabelText("Start at"), { target: { value: "2030-01-02T09:00" } })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Plan run" }))
+    await waitFor(() => {
+      const post = vi.mocked(apiFetch).mock.calls.find(([u, init]) => init?.method === "POST" && String(u).endsWith("/run"))
+      expect(post).toBeTruthy()
+      expect(JSON.parse((post![1] as RequestInit).body as string)).toEqual({
+        inputs: { obdobi: "2026-07" },
+        fire_at: new Date("2030-01-02T09:00").toISOString(),
+      })
+    })
+  })
+
+  it("Test run in the run dialog posts …/dry_run with the inputs (R14)", async () => {
+    mockFor(WITH_INPUTS)
+    render(<RoutinesDetailPanel {...defaultProps} slug="routine-a" />)
+    await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Test run" }))
+    expect(within(dialog).getByText("No side effects")).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByLabelText(/obdobi/i), { target: { value: "2026-07" } })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Start test run" }))
+    await waitFor(() => {
+      const post = vi.mocked(apiFetch).mock.calls.find(([u, init]) => init?.method === "POST" && String(u).endsWith("/dry_run"))
+      expect(post).toBeTruthy()
+      expect(JSON.parse((post![1] as RequestInit).body as string)).toEqual({ inputs: { obdobi: "2026-07" } })
+    })
+  })
 })
 
 describe("routine start delivery", () => {
