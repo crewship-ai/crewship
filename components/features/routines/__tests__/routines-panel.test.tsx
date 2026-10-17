@@ -3,18 +3,23 @@
 // are not live, and Filter facets that agree with the groups.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, within, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, within, cleanup, waitFor } from "@testing-library/react"
 
 import { RoutinesExplorer, routineRowState } from "../routines-explorer"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { RoutineFilterState } from "@/lib/routine-filters"
 
-const h = vi.hoisted(() => ({ live: new Map<string, unknown>() }))
+const h = vi.hoisted(() => ({ live: new Map<string, unknown>(), prefs: {} as Record<string, unknown> }))
 vi.mock("@/hooks/use-active-routine-runs", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/hooks/use-active-routine-runs")>()
   return { ...mod, useActiveRoutineRuns: () => ({ bySlug: h.live, runs: [], activeCount: 0 }) }
 })
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })), broadcastSessionExpired: vi.fn() }))
+// GET /api/v1/me/preferences answers with h.prefs: the panel's group and sort
+// are user preferences (the test setup stubs localStorage out).
+vi.mock("@/lib/api-fetch", () => ({
+  apiFetch: vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => (url === "/api/v1/me/preferences" ? h.prefs : {}) })),
+  broadcastSessionExpired: vi.fn(),
+}))
 
 function pipeline(over: Partial<Pipeline>): Pipeline {
   return {
@@ -49,6 +54,22 @@ const crews = new Map([
 ])
 const filters: RoutineFilterState = { status: "all", invocations: "all", authorAgentId: null, showEphemeral: false }
 
+function baseProps(): React.ComponentProps<typeof RoutinesExplorer> {
+  return {
+    routines,
+    search: "",
+    onSearchChange: vi.fn(),
+    selectedSlug: null,
+    onSelectRoutine: vi.fn(),
+    filters,
+    onChange: vi.fn(),
+    view: "overview",
+    onViewChange: vi.fn(),
+    counts: { needs: 4, live: 1, drafts: 2 },
+    crews,
+  }
+}
+
 function renderPanel(over: Partial<React.ComponentProps<typeof RoutinesExplorer>> = {}) {
   const props = {
     routines,
@@ -70,6 +91,7 @@ function renderPanel(over: Partial<React.ComponentProps<typeof RoutinesExplorer>
 
 beforeEach(() => {
   h.live = new Map()
+  h.prefs = {}
   window.localStorage.clear()
 })
 afterEach(cleanup)
@@ -136,6 +158,79 @@ describe("<RoutinesExplorer> Harbor 2 panel", () => {
     expect(within(screen.getByRole("group", { name: "Views" })).getByRole("button", { name: "Overview" })).toHaveAttribute("aria-pressed", "false")
     fireEvent.click(screen.getByText("News digest"))
     expect(props.onSelectRoutine).toHaveBeenCalledWith("news")
+  })
+})
+
+describe("<RoutinesExplorer> triggers, next run and spend (RT-02)", () => {
+  // Composed in the browser from the schedule, webhook and budget lists and
+  // the chat command catalog (lib/routine-panel-index).
+  const index = {
+    triggers: new Map<string, ("schedule" | "webhook" | "issue" | "chat")[]>([
+      ["weekly", ["schedule", "chat"]],
+      ["news", ["schedule"]],
+      ["invoice", ["webhook", "issue"]],
+    ]),
+    nextRun: new Map([
+      ["weekly", "2026-10-22T08:00:00Z"],
+      ["news", "2026-10-18T07:30:00Z"],
+    ]),
+    spend: new Map([
+      ["invoice", 4.5],
+      ["weekly", 12],
+    ]),
+  }
+
+  it("the Trigger facet counts Schedule, Webhook, Issue start and Chat command", () => {
+    const props = renderPanel({ index })
+    fireEvent.click(screen.getByRole("button", { name: /Filter/ }))
+    const panel = screen.getByRole("group", { name: "Filter routines" })
+    expect(within(panel).getByRole("button", { name: /Schedule\s*2/ })).toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: /Webhook\s*1/ })).toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: /Issue start\s*1/ })).toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: /Chat command\s*1/ })).toBeInTheDocument()
+    fireEvent.click(within(panel).getByRole("button", { name: /Webhook\s*1/ }))
+    expect(props.onChange).toHaveBeenCalledWith({ ...filters, trigger: "webhook" })
+  })
+
+  it("a Trigger filter keeps only the routines that start that way, and shows as a chip", () => {
+    const props = renderPanel({ index, filters: { ...filters, trigger: "schedule" } })
+    expect(screen.getByText("Weekly report")).toBeInTheDocument()
+    expect(screen.getByText("News digest")).toBeInTheDocument()
+    expect(screen.queryByText("Invoice intake")).not.toBeInTheDocument()
+    expect(screen.queryByText("Orphan")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter Schedule" }))
+    expect(props.onChange).toHaveBeenCalledWith({ ...filters, trigger: null })
+  })
+
+  it("View offers Group by Trigger and Sort by Next run and Spend", async () => {
+    renderPanel({ index })
+    fireEvent.pointerDown(screen.getByRole("button", { name: "View: group and sort" }), { button: 0, ctrlKey: false })
+    expect(await screen.findByRole("menuitemradio", { name: "Trigger" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitemradio", { name: "Next run" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitemradio", { name: "Spend" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitemradio", { name: "Last run" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitemradio", { name: "Name" })).toBeInTheDocument()
+  })
+
+  it("Group by Trigger puts each routine under how it starts", async () => {
+    h.prefs = { "routines.panel.group": "trigger" }
+    renderPanel({ index })
+    expect(within(await screen.findByRole("group", { name: "Schedule" })).getAllByText(/Weekly report|News digest/)).toHaveLength(2)
+    expect(within(screen.getByRole("group", { name: "Webhook" })).getByText("Invoice intake")).toBeInTheDocument()
+    const manual = screen.getByRole("group", { name: "Only when someone presses Run" })
+    expect(within(manual).getByText("Cert check")).toBeInTheDocument()
+    expect(within(manual).getByText("Orphan")).toBeInTheDocument()
+  })
+
+  it("Sort by Next run puts the soonest start first; Spend puts the most spent first", async () => {
+    h.prefs = { "routines.panel.group": "none", "routines.panel.sort": "next" }
+    const { unmount } = render(<RoutinesExplorer {...baseProps()} index={index} />)
+    const order = () => Array.from(document.querySelectorAll("[data-routine-row]")).map((el) => el.textContent?.replace(/(Failed|Proposed|Off)$/, ""))
+    await waitFor(() => expect(order().slice(0, 2)).toEqual(["News digest", "Weekly report"]))
+    unmount()
+    h.prefs = { "routines.panel.group": "none", "routines.panel.sort": "spend" }
+    render(<RoutinesExplorer {...baseProps()} index={index} />)
+    await waitFor(() => expect(order().slice(0, 2)).toEqual(["Weekly report", "Invoice intake"]))
   })
 })
 
