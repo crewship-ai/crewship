@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { AlertTriangle, Bot, Circle, Grid3x3, KeyRound, Link2, Plug, RefreshCw, Terminal, Trash2, Users, Webhook, Wrench } from "lucide-react"
+import { AlertTriangle, Bot, Circle, Grid3x3, KeyRound, Link2, Plug, RefreshCw, Search, Terminal, Trash2, Users, Webhook, Wrench } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
@@ -10,14 +10,14 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { PageEmpty, PageError, PageLoading, PageNoResults, PageNotFound } from "@/components/layout/page-state"
-import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSegmented } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSaveBar, SettingsSegmented } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import type { ComposioStatus } from "./composio-integrations"
 import type { ActiveTriggersResp, AgentLite, ToolkitInfo, TriggerInstance } from "./composio/types"
 import { ToolkitIcon, toolkitLabel } from "./composio/shared"
 import { ToolsTab } from "./composio/tools-tab"
-import { accessChange, accessSummary, agentsByCrew, type AccessLevel, type AccountRow, type ToolsListView } from "./tools-model"
+import { accessChange, accessSummary, agentsByCrew, searchToolsAcrossApps, TOOL_SEARCH_MIN, type AccessLevel, type AccountRow, type ToolHit, type ToolsListView } from "./tools-model"
 import { Banner, CellMain, CliLines, HealthStrip, InfoCard, MetaChip, ObjectPage, ResponsiveList, SpaceHead } from "./integrations-ui"
 
 /**
@@ -66,6 +66,7 @@ export function ToolsList({
   onView,
   onAddKey,
   onClearFilters,
+  toolSearch,
 }: {
   rows: AccountRow[]
   allRows: AccountRow[]
@@ -78,6 +79,8 @@ export function ToolsList({
   onView: (v: ToolsListView | "catalog") => void
   onAddKey: () => void
   onClearFilters: () => void
+  /** Tools of connected apps that match the panel search (N12), under the apps. */
+  toolSearch?: React.ReactNode
 }) {
   const signedOut = allRows.filter((r) => r.signedOut).length
   const idle = allRows.filter((r) => r.agents.length === 0).length
@@ -93,6 +96,7 @@ export function ToolsList({
   else if (status.error && allRows.length === 0) body = <PageError title="Connected apps could not load" description="Triggers and Channels are not affected." onRetry={undefined} detail={status.error} />
   else if (allRows.length === 0)
     body = <PageEmpty icon={Plug} title="Nothing connected" description="Give agents tools, start work from outside and reach people." primary={{ label: "Connect an app", onClick: onConnect }} cli="crewship integration composio inventory" />
+  else if (rows.length === 0 && toolSearch) body = <p className="text-label text-muted-foreground">No connected app matches; tools that do are below.</p>
   else if (rows.length === 0) body = <PageNoResults onClear={onClearFilters} />
   else
     body = (
@@ -148,7 +152,82 @@ export function ToolsList({
         />
       )}
       {body}
+      {toolSearch}
     </div>
+  )
+}
+
+/**
+ * Tools whose name matches the panel search, across every connected app
+ * (N12). A hit opens that app's page on Tools with the tool marked.
+ */
+export function ToolSearchResults({
+  workspaceId,
+  apps,
+  query,
+  onOpenTool,
+}: {
+  workspaceId: string
+  apps: { slug: string; accountId: string }[]
+  query: string
+  onOpenTool: (accountId: string, tool: string) => void
+}) {
+  const q = query.trim()
+  const appsKey = apps.map((a) => `${a.slug}:${a.accountId}`).join(",")
+  const appsRef = React.useRef(apps)
+  appsRef.current = apps
+  const active = q.length >= TOOL_SEARCH_MIN && apps.length > 0
+  const [state, setState] = React.useState<{ q: string; loading: boolean; hits: ToolHit[]; failed: string[] } | null>(null)
+  React.useEffect(() => {
+    if (!active) {
+      setState(null)
+      return
+    }
+    const ctrl = new AbortController()
+    setState((s) => ({ q, loading: true, hits: s?.hits ?? [], failed: [] }))
+    const t = setTimeout(() => {
+      searchToolsAcrossApps(workspaceId, appsRef.current, q, ctrl.signal)
+        .then((r) => setState({ q, loading: false, ...r }))
+        .catch(() => {})
+    }, 300)
+    return () => {
+      clearTimeout(t)
+      ctrl.abort()
+    }
+  }, [workspaceId, q, appsKey, active])
+  if (!active || !state) return null
+  return (
+    <InfoCard title={`Tools matching “${q}”`} icon={Search}>
+      {state.loading && state.hits.length === 0 ? (
+        <div className="grid gap-2 px-4 py-3">
+          <Skeleton className="h-4 w-56" />
+          <Skeleton className="h-4 w-40" />
+        </div>
+      ) : state.hits.length === 0 ? (
+        <p className="px-4 py-3 text-body text-muted-foreground">No tool in a connected app matches “{state.q}”.</p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {state.hits.map((h) => (
+            <li key={`${h.slug}:${h.tool.slug}`}>
+              <button
+                type="button"
+                aria-label={`Open ${h.tool.slug} in ${toolkitLabel(h.slug)}`}
+                onClick={() => onOpenTool(h.accountId, h.tool.slug)}
+                className="kit-tap flex w-full min-w-0 items-center gap-2.5 px-4 py-2 text-left hover:bg-[var(--row-hover-bg)]"
+              >
+                <AppMark slug={h.slug} />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-mono text-label text-foreground">{h.tool.slug}</span>
+                  <span className="truncate text-label text-muted-foreground">{h.tool.name}</span>
+                </span>
+                <span className="shrink-0 text-label text-muted-foreground max-sm:hidden">{toolkitLabel(h.slug)} › Tools</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {state.failed.length > 0 && <p className="border-t border-border px-4 py-2 text-label text-muted-foreground">{state.failed.map(toolkitLabel).join(", ")} did not answer.</p>}
+    </InfoCard>
   )
 }
 
@@ -272,6 +351,7 @@ export function AppAccountPage({
   onChanged,
   onGone,
   onTriggers,
+  toolFocus,
 }: {
   workspaceId: string
   row: AccountRow | null
@@ -284,9 +364,16 @@ export function AppAccountPage({
   onChanged: () => void
   onGone: () => void
   onTriggers: () => void
+  /** A tool found from the panel search: Tools opens searched for it, its row marked. */
+  toolFocus?: string
 }) {
   const [busy, setBusy] = React.useState<string | null>(null)
   const [confirm, setConfirm] = React.useState<"revoke" | "remove" | null>(null)
+  // Access is a draft on the page's Save bar (KIT-04): agent id -> level.
+  const [draft, setDraft] = React.useState<Record<string, AccessLevel>>({})
+  // Levels just saved, shown until the reloaded bindings arrive.
+  const [applied, setApplied] = React.useState<Record<string, AccessLevel>>({})
+  React.useEffect(() => setApplied({}), [status.bindings])
   if (!row) return status.loading ? <PageLoading rows={4} /> : <PageNotFound what="connected app" back={{ label: "Back to Tools", onClick: onBack }} />
   const name = toolkitLabel(row.slug)
   const base = `/api/v1/integrations/composio/accounts/${encodeURIComponent(row.account.id)}`
@@ -305,24 +392,44 @@ export function AppAccountPage({
     }
   }
 
-  const setLevel = async (agent: AgentLite, level: AccessLevel) => {
-    const change = accessChange(status.bindings[agent.id] ?? [], row.slug, level, row.account.user_id)
-    if (!change) {
+  const savedLevel = (agentId: string): AccessLevel => applied[agentId] ?? (status.bindings[agentId] ?? []).find((x) => x.toolkit === row.slug)?.mode ?? "off"
+
+  const choose = (agent: AgentLite, level: AccessLevel) => {
+    if (level !== "off" && accessChange(status.bindings[agent.id] ?? [], row.slug, level, row.account.user_id) === null) {
       toast.error(`${agent.name} acts as another Composio user; change it on the agent's Tools and access`)
       return
     }
-    setBusy(agent.id)
-    try {
-      const url = `/api/v1/integrations/composio/agents/${encodeURIComponent(agent.id)}/bind?${q}`
-      if (change.kind === "unbind") await send(`${url}&toolkit=${encodeURIComponent(change.toolkit)}`, { method: "DELETE" })
-      else await send(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(change.payload) })
-      toast.success(level === "off" ? `${agent.name} no longer has ${name}` : `${agent.name} has ${name}`)
-      onChanged()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Access was not changed")
-    } finally {
-      setBusy(null)
+    setDraft((d) => {
+      const next = { ...d }
+      if (level === savedLevel(agent.id)) delete next[agent.id]
+      else next[agent.id] = level
+      return next
+    })
+  }
+
+  /** One bind per changed agent; a refused agent keeps its draft and is named. */
+  const saveAccess = async () => {
+    const failures: string[] = []
+    for (const [agentId, level] of Object.entries(draft)) {
+      const label = status.agents.find((a) => a.id === agentId)?.name ?? agentId
+      try {
+        const change = accessChange(status.bindings[agentId] ?? [], row.slug, level, row.account.user_id)
+        if (!change) throw new Error("acts as another Composio user")
+        const url = `/api/v1/integrations/composio/agents/${encodeURIComponent(agentId)}/bind?${q}`
+        if (change.kind === "unbind") await send(`${url}&toolkit=${encodeURIComponent(change.toolkit)}`, { method: "DELETE" })
+        else await send(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(change.payload) })
+        setApplied((m) => ({ ...m, [agentId]: level }))
+        setDraft((d) => {
+          const next = { ...d }
+          delete next[agentId]
+          return next
+        })
+      } catch (e) {
+        failures.push(`${label}: ${e instanceof Error ? e.message : "not saved"}`)
+      }
     }
+    onChanged()
+    if (failures.length > 0) throw new Error(`${failures.join("; ")}.`)
   }
 
   let body: React.ReactNode
@@ -337,16 +444,16 @@ export function AppAccountPage({
             <SettingsCard key={g.crew} title={g.crew} icon={Users}>
               {g.agents.map((a) => {
                 const b = (status.bindings[a.id] ?? []).find((x) => x.toolkit === row.slug)
-                const level: AccessLevel = b ? b.mode : "off"
+                const level: AccessLevel = draft[a.id] ?? savedLevel(a.id)
                 const options = [
                   { value: "off" as AccessLevel, label: "Off" },
                   { value: "read" as AccessLevel, label: "Read-only" },
                   { value: "full" as AccessLevel, label: "Full" },
-                  ...(level === "custom" ? [{ value: "custom" as AccessLevel, label: `Custom · ${b?.tools?.length ?? 0} tools` }] : []),
+                  ...(savedLevel(a.id) === "custom" ? [{ value: "custom" as AccessLevel, label: `Custom · ${b?.tools?.length ?? 0} tools` }] : []),
                 ]
                 return (
                   <SettingsRow key={a.id} label={<span className="flex items-center gap-2"><AgentAvatar seed={a.avatar_seed || a.name} style={a.avatar_style || a.crew?.avatar_style} avatarUrl={a.avatar_url} className="size-5 rounded-md" />{a.name}</span>}>
-                    <SettingsSegmented label={`${name} access for ${a.name}`} options={options} value={level} disabled={!canManage || busy !== null} onChange={(v) => v !== level && void setLevel(a, v)} />
+                    <SettingsSegmented label={`${name} access for ${a.name}`} options={options} value={level} disabled={!canManage || busy !== null} onChange={(v) => choose(a, v)} />
                   </SettingsRow>
                 )
               })}
@@ -359,7 +466,7 @@ export function AppAccountPage({
   } else if (pane === "tools") {
     body = (
       <>
-        <ToolsTab workspaceId={workspaceId} suggestions={[row.slug]} />
+        <ToolsTab workspaceId={workspaceId} suggestions={[row.slug]} initialSearch={toolFocus} highlight={toolFocus} />
         <p className="text-label text-muted-foreground">The tools are read-only here. Which an agent may call is its access level; a custom list is picked on the agent.</p>
       </>
     )
@@ -465,6 +572,7 @@ export function AppAccountPage({
       >
         {body}
       </ObjectPage>
+      <SettingsSaveBar label={`${name} access`} count={Object.keys(draft).length} onSave={saveAccess} onDiscard={() => setDraft({})} />
       <ConfirmDialog
         open={confirm !== null}
         onOpenChange={(o) => !o && setConfirm(null)}

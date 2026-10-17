@@ -35,16 +35,26 @@ trigger runs a saved routine with the request body as its `event` input; an
 agent trigger starts a background run; an artifact trigger writes a webhook or
 script panel (artifacts keep theirs per artifact). Opening a trigger gives it
 a page — Overview (Sender → Checks → Becomes → Starts, the URL, recent calls),
-Mapping (routine inputs), Calls and Settings (point it at another routine,
+Mapping (routine inputs, edited in place), Calls and Settings (point it at another routine,
 calls per minute, on/off, **Rotate…**, which stops the old secret at once, and
 **Delete…**). Call counts exist only for routine triggers. The filter is
 linkable (`/integrations?space=triggers&starts=routine&target=<id>`; the old
 `?tab=incoming&section=routine&target=<id>` still works).
 
-**Creating one.** Click **New trigger**, pick the target kind and target, and
-name the endpoint. The URL and secret are shown once; the dialog closes with
-**Done**, not with Esc. Routine endpoints have an **Advanced settings → Webhook format**
-selector:
+**Creating one.** Click **New trigger**; it takes three steps:
+
+1. **Goes to** — a Routine, an Agent or an Artifact panel, and which one. A
+   routine trigger can pin the routine's current version (**Pin vN**) or follow
+   **Always latest**. Only a webhook starts a trigger today; schedules stay on
+   the routine.
+2. **Sender and mapping** — **Who sends it** (for a routine: **GitHub** or
+   **Any system**; an agent takes any signed system; an artifact uses a token
+   in the URL), the routine's input **mapping**, **Calls per minute** and an
+   optional name.
+3. **URL** — the URL and secret, shown once. This step closes with **Done**,
+   not with Esc or a click outside.
+
+**Who sends it** is the routine endpoint's format:
 
 | Format | Use it for | Signature the sender must provide |
 |---|---|---|
@@ -52,11 +62,19 @@ selector:
 | **GitHub pull requests** (`ingress_profile: github`) | A GitHub repository webhook; only `pull_request` `opened` / `synchronize` / `reopened` start the routine, `ping` is acknowledged | GitHub's own `X-Hub-Signature-256` — paste the secret into the repository's webhook settings, content type `application/json`, event **Pull requests** |
 
 The format is fixed once the endpoint exists; to switch a sender's protocol,
-create a new endpoint. Collapsing Advanced settings does not change the
-selection.
+create a new endpoint.
 
-**Where the URL and secret show.** On **Create endpoint** the dialog shows the
-**Receiving URL** and the **Signing secret** once, each with a copy button.
+**Mapping.** A routine trigger maps the call to the routine's inputs: each row
+is an input name and what it takes, usually a template such as
+`{{ inputs.event.pull_request.number }}`. Add, change or remove rows on the
+trigger's **Mapping** tab; the edits wait on the page's Save bar and one
+**Save** sends them (`PATCH …/pipeline-webhooks/{id}` with `inputs_template`).
+`event`, `raw` and `headers` always come from the call and cannot be mapped;
+a name used twice or a row without a value cannot be saved. The CLI
+equivalent is `crewship routine webhooks update <id> --inputs-template`.
+
+**Where the URL and secret show.** On **Create** the dialog's last step shows
+the **URL** and the **Secret** once, each with a copy button.
 The routine URL contains the token and is masked afterwards; the secret is
 never displayed again. Copy both now. A GitHub-format URL ends in
 `/github-pull-request` — the suffix is part of what you paste into GitHub.
@@ -84,6 +102,17 @@ Crewship's managed integration path uses [Composio](https://composio.dev) so you
 | **Connected account** | One user's authorised connection to an app (OAuth tokens). |
 
 **How isolation works.** An agent is bound to exactly **one `user_id`** and therefore sees only that user's connected accounts — never anyone else's. To give 30 mailboxes to 30 agents, create 30 users (one per mailbox) and bind each agent to its user; the per-agent MCP URL is scoped server-side, so an agent cannot reach another user's accounts even in principle. Use Composio **projects** only for coarse isolation (per environment, or per customer/workspace) — not per agent.
+
+**Giving agents an app.** Open the app under **Integrations → Tools** and its
+**Access** tab: each agent, grouped by crew, is **Off**, **Read-only** or
+**Full** (a custom tool list is picked on the agent and kept here). Changes
+are a draft: the page's Save bar counts the agents changed, **Save** writes one
+bind per agent and **Discard** puts them back. An agent the server refuses
+keeps its change and is named in the error; the others are saved. The panel
+search on Tools finds apps and also tools by name across every connected app
+(`GITHUB_CREATE_PULL_REQUEST`); a hit opens that app on **Tools** with the tool
+marked. The CLI equivalent is `crewship integration composio tools <app>
+--search <text>`.
 
 **Enabling.** Add a Composio **project API key** either per-workspace from the app (Integrations → **API key**, or `crewship integration composio key set`) — validated and stored encrypted — or server-wide via the `COMPOSIO_API_KEY` env. The effective key resolves workspace-first, then env. Billing is by tool calls (Composio free tier = 20K/mo), not by number of users or connected accounts.
 

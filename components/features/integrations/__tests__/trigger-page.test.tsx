@@ -2,10 +2,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 vi.mock("../views/incoming-webhooks-view", () => ({ RecentReceipts: () => <p>Receipts</p> }))
 
 import { TriggerPage } from "../triggers-space"
+import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
 import { triggerRows } from "../triggers-model"
 import type { IncomingData } from "../use-incoming-endpoints"
 import type { IncomingEndpoint, IncomingTarget } from "../incoming-model"
@@ -53,9 +55,74 @@ describe("TriggerPage", () => {
     expect(onDeleted).toHaveBeenCalled()
   })
 
-  it("shows the mapping read-only and never offers Replay or Test mapping", () => {
+  it("never offers Replay, Test mapping or Send test", () => {
     setup("mapping")
-    expect(screen.getByText("repo")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /Replay|Test mapping|Send test/ })).not.toBeInTheDocument()
+    expect(screen.getByDisplayValue("repo")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Replay|Test mapping|Use last call|Send test/ })).not.toBeInTheDocument()
+  })
+})
+
+// INT-02: the mapping is edited in the app, as a draft on the page's Save bar
+// (PATCH inputs_template; event, raw and headers stay reserved).
+describe("TriggerPage › Mapping", () => {
+  function mapping(canEdit = true) {
+    const update = vi.fn(async () => hook)
+    const data = { targets: [r1, r2], rows: [endpoint], hooks: { update, remove: vi.fn() }, refresh: vi.fn(), loading: false, error: null } as unknown as IncomingData
+    render(
+      <PageSaveProvider>
+        <TriggerPage workspaceId="ws" row={triggerRows([endpoint])[0]} data={data} pane="mapping" onPane={vi.fn()} canEdit={canEdit} onBack={vi.fn()} onDeleted={vi.fn()} />
+        <PageSaveBar />
+      </PageSaveProvider>,
+    )
+    return update
+  }
+  const bar = () => screen.queryByRole("region", { name: "Unsaved changes" })
+
+  it("edits, adds and removes inputs and writes nothing before Save", async () => {
+    const update = mapping()
+    fireEvent.change(screen.getByLabelText("Value of input 1"), { target: { value: "{{ inputs.event.repo }}" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add input" }))
+    fireEvent.change(screen.getByLabelText("Input name 2"), { target: { value: "pr_number" } })
+    fireEvent.change(screen.getByLabelText("Value of input 2"), { target: { value: "{{ inputs.event.pull_request.number }}" } })
+    expect(bar()).toHaveTextContent("unsaved change")
+    expect(update).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith("w1", { inputs_template: { repo: "{{ inputs.event.repo }}", pr_number: "{{ inputs.event.pull_request.number }}" } }),
+    )
+  })
+
+  it("removing every input saves an empty mapping", async () => {
+    const update = mapping()
+    fireEvent.click(screen.getByRole("button", { name: "Remove input 1" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(update).toHaveBeenCalledWith("w1", { inputs_template: {} }))
+  })
+
+  it("Discard puts the saved mapping back", () => {
+    const update = mapping()
+    fireEvent.change(screen.getByLabelText("Input name 1"), { target: { value: "repository" } })
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(screen.getByLabelText("Input name 1")).toHaveValue("repo")
+    expect(bar()).toBeNull()
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it("a reserved or duplicate input name blocks Save", () => {
+    mapping()
+    fireEvent.change(screen.getByLabelText("Input name 1"), { target: { value: "headers" } })
+    expect(screen.getByText("event, raw and headers come from the call and cannot be mapped")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText("Input name 1"), { target: { value: "repo" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add input" }))
+    fireEvent.change(screen.getByLabelText("Input name 2"), { target: { value: "repo" } })
+    expect(screen.getByText("Each input name can be used once")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+  })
+
+  it("without the right to edit, the mapping is read-only", () => {
+    mapping(false)
+    expect(screen.getByLabelText("Input name 1")).toBeDisabled()
+    expect(screen.queryByRole("button", { name: "Add input" })).not.toBeInTheDocument()
   })
 })

@@ -4,10 +4,11 @@ import type { NotificationChannel, NotificationProvider } from "@/hooks/use-noti
 import type { NotificationDelivery } from "@/hooks/use-notification-deliveries"
 import type { ComponentProps } from "react"
 import type { IncomingTarget } from "../incoming-model"
-import type { ConnectedAccount } from "../composio/types"
+import type { AgentLite, ConnectedAccount } from "../composio/types"
 import type { ComposioStatus, ComposioIntegrationsProps } from "../composio-integrations"
-const mocks = vi.hoisted(() => ({ admin: true, mobile: false, success: vi.fn(), error: vi.fn(), refreshIncoming: vi.fn(), invalidate: vi.fn(), channels: [] as NotificationChannel[], providers: [] as NotificationProvider[], deliveries: [] as NotificationDelivery[], configured: false, accounts: [] as ConnectedAccount[], targets: [] as IncomingTarget[], incomingError: null as string | null, incomingLoading: false }))
+const mocks = vi.hoisted(() => ({ admin: true, mobile: false, success: vi.fn(), error: vi.fn(), refreshIncoming: vi.fn(), invalidate: vi.fn(), channels: [] as NotificationChannel[], providers: [] as NotificationProvider[], deliveries: [] as NotificationDelivery[], configured: false, accounts: [] as ConnectedAccount[], targets: [] as IncomingTarget[], incomingError: null as string | null, incomingLoading: false, agents: [] as AgentLite[] }))
 vi.mock("@/lib/toast", () => ({ toast: { success: mocks.success, error: mocks.error } }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ abilities: { can: () => mocks.admin } }) }))
 vi.mock("@/hooks/use-auth", () => ({ useSession: () => ({ data: { user: { id: "me" } } }) }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mocks.mobile }))
@@ -18,12 +19,12 @@ vi.mock("../notification-prefs-section", () => ({ NotificationPrefsSection: ({ w
 vi.mock("../composio-integrations", async () => {
   const React = await import("react")
   return { ComposioIntegrations: ({ onStatus, apiKeyOpen, onApiKeyOpenChange, section }: ComposioIntegrationsProps) => {
-    React.useEffect(() => { const state: ComposioStatus = { loading: false, configured: mocks.configured, keyLabel: mocks.configured ? "Team" : null, counts: { apps: 10, accounts: mocks.accounts.length, users: mocks.accounts.length ? 1 : 0, agentsBound: 1, agentsTotal: 2, endpoints: 1 }, toolkits: [{ slug: "github", count: 1 }, { slug: "slack", count: 1 }], users: [{ id: "me", count: 1 }, { id: "someone", count: 1 }], accounts: mocks.accounts, agents: [], bindings: {} }; onStatus?.(state) }, [onStatus])
+    React.useEffect(() => { const state: ComposioStatus = { loading: false, configured: mocks.configured, keyLabel: mocks.configured ? "Team" : null, counts: { apps: 10, accounts: mocks.accounts.length, users: mocks.accounts.length ? 1 : 0, agentsBound: 1, agentsTotal: 2, endpoints: 1 }, toolkits: [{ slug: "github", count: 1 }, { slug: "slack", count: 1 }], users: [{ id: "me", count: 1 }, { id: "someone", count: 1 }], accounts: mocks.accounts, agents: mocks.agents, bindings: {} }; onStatus?.(state) }, [onStatus])
     return <div><p hidden>{section}</p>{apiKeyOpen && <button onClick={() => onApiKeyOpenChange?.(false)}>Close API key editor</button>}</div>
   } }
 })
 vi.mock("../views/incoming-webhooks-view", () => ({ RecentReceipts: () => <p>Receipts</p>, IncomingWebhooksView: (props: ComponentProps<typeof import("../views/incoming-webhooks-view").IncomingWebhooksView>) => <div><p>Incoming section: {props.section}</p><p>Selected incoming: {props.targetId ?? "none"}</p>{props.data.targets.map(target => <button key={target.id} onClick={() => props.onSelect(target)}>Open incoming {target.name}</button>)}<button onClick={props.onBack}>Back to incoming endpoints</button><button onClick={() => props.onAdd(props.data.targets[0])}>Add incoming endpoint</button></div> }))
-vi.mock("../views/incoming-credentials", () => ({ IncomingCreateDialog: (props: ComponentProps<typeof import("../views/incoming-credentials").IncomingCreateDialog>) => <div role="dialog" aria-label="Incoming creation"><button onClick={props.onClose}>Close incoming creation</button><button onClick={() => props.onCreated(props.data.targets[0])}>Finish incoming creation</button></div> }))
+vi.mock("../new-trigger-dialog", () => ({ NewTriggerDialog: (props: ComponentProps<typeof import("../new-trigger-dialog").NewTriggerDialog>) => <div role="dialog" aria-label="Incoming creation"><button onClick={props.onClose}>Close incoming creation</button><button onClick={() => props.onCreated(props.data.targets[0])}>Finish incoming creation</button></div> }))
 vi.mock("../views/crew-tools-view", () => ({ CrewToolsView: (props: ComponentProps<typeof import("../views/crew-tools-view").CrewToolsView>) => <div><p>Crew tools for {props.workspaceId}</p><p>Linked server: {props.initialServerId ?? "none"}</p><button onClick={props.onServerConsumed}>Consume linked server</button></div> }))
 import { apiFetch } from "@/lib/api-fetch"
 import { useAppStore } from "@/lib/store"
@@ -34,7 +35,7 @@ beforeEach(() => {
   window.history.replaceState({}, "", "/integrations")
   try { window.localStorage.removeItem("crewship.pref.panel.integrations.collapsed") } catch { /* no storage */ }
   act(() => useAppStore.getState().setSecondaryPanelOpen(false))
-  mocks.admin = true; mocks.mobile = false; mocks.configured = false; mocks.accounts = []; mocks.targets = []; mocks.incomingError = null; mocks.incomingLoading = false; mocks.success.mockReset(); mocks.error.mockReset(); mocks.refreshIncoming.mockReset(); mocks.invalidate.mockReset()
+  mocks.admin = true; mocks.mobile = false; mocks.configured = false; mocks.accounts = []; mocks.targets = []; mocks.incomingError = null; mocks.incomingLoading = false; mocks.agents = []; mocks.success.mockReset(); mocks.error.mockReset(); mocks.refreshIncoming.mockReset(); mocks.invalidate.mockReset()
   mocks.channels = [channel()]; mocks.providers = [{ provider: "slack", label: "Slack", blurb: "Team messaging", category: "chat", enabled: true, fields: [] }]; mocks.deliveries = []
   vi.mocked(apiFetch).mockReset().mockImplementation(async (input, init) => {
     const url = new URL(String(input), "http://localhost")
@@ -172,6 +173,45 @@ describe("Integrations on four spaces", () => {
     expect(await screen.findByRole("row", { name: "Open Github" })).toHaveTextContent("Not given to any agent")
     fireEvent.click(screen.getByRole("row", { name: "Open Github" }))
     expect(await screen.findByRole("heading", { level: 1, name: "Github" })).toBeInTheDocument()
+  })
+
+  it("N12: the panel search finds a tool across apps and opens the app on Tools", async () => {
+    mocks.configured = true
+    mocks.accounts = [
+      { id: "ca_1", user_id: "me", status: "ACTIVE", toolkit: { slug: "github" } },
+      { id: "ca_2", user_id: "me", status: "ACTIVE", toolkit: { slug: "slack" } },
+    ]
+    const base = vi.mocked(apiFetch).getMockImplementation()!
+    vi.mocked(apiFetch).mockImplementation(async (input, init) => {
+      const url = new URL(String(input), "http://localhost")
+      if (url.pathname === "/api/v1/integrations/composio/tools") {
+        const github = url.searchParams.get("toolkit") === "github"
+        return ok({ enabled: true, total: github ? 1 : 0, tools: github ? [{ slug: "GITHUB_CREATE_PULL_REQUEST", name: "Create a pull request", description: "", toolkit: { slug: "github" } }] : [] })
+      }
+      return base(input, init)
+    })
+    render(<IntegrationsLayout workspaceId="ws" />)
+    await screen.findByRole("row", { name: "Open Github" })
+    fireEvent.change(screen.getByLabelText("Search apps and tools"), { target: { value: "pull request" } })
+    fireEvent.click(await screen.findByRole("button", { name: "Open GITHUB_CREATE_PULL_REQUEST in Github" }))
+    expect(await screen.findByRole("heading", { level: 1, name: "Github" })).toBeInTheDocument()
+    const url = new URL(window.location.href)
+    expect(url.searchParams.get("id")).toBe("ca_1")
+    expect(url.searchParams.get("pane")).toBe("tools")
+    expect(await screen.findByRole("row", { name: /GITHUB_CREATE_PULL_REQUEST/ })).toHaveAttribute("aria-current", "true")
+  })
+
+  it("INT-03: app access edits wait on the page Save bar", async () => {
+    mocks.configured = true
+    mocks.accounts = [{ id: "ca_1", user_id: "me", status: "ACTIVE", toolkit: { slug: "github" } }]
+    window.history.replaceState({}, "", "/integrations?space=tools&view=connected&id=ca_1&pane=access")
+    mocks.agents = [{ id: "a1", name: "Reviewer", slug: "reviewer", crew: { name: "Code review" } }]
+    render(<IntegrationsLayout workspaceId="ws" />)
+    expect(await screen.findByRole("heading", { level: 1, name: "Github" })).toBeInTheDocument()
+    const before = vi.mocked(apiFetch).mock.calls.length
+    fireEvent.click(within(screen.getByRole("group", { name: "Github access for Reviewer" })).getByRole("button", { name: "Full" }))
+    expect(await screen.findByRole("region", { name: "Unsaved changes" })).toHaveTextContent("1 unsaved change")
+    expect(vi.mocked(apiFetch).mock.calls.slice(before).filter(([, init]) => init?.method === "POST")).toEqual([])
   })
 
   it("keeps the panel in the integrations SecondaryPanel with the four spaces", async () => {
