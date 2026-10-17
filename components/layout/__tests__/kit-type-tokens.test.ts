@@ -15,6 +15,8 @@ const KIT_FILES = [
   "components/layout/sidebar-kit.tsx",
   "components/layout/sidebar-facets.tsx",
   "components/ui/segmented.tsx",
+  "components/layout/sub-bar.tsx",
+  "components/ui/page-save-bar.tsx",
 ]
 
 describe("kit type tokens", () => {

@@ -423,19 +423,15 @@
   "components/layout/bar-menu.tsx": 4,
   "components/layout/create-surface.tsx": 21,
   "components/layout/drill-page.tsx": 5,
-  "components/layout/sidebar-kit.tsx": 6,
   "components/layout/sidebar-version.tsx": 2,
-  "components/layout/sub-bar.tsx": 2,
   "components/layout/workspace-switcher.tsx": 3,
   "components/shared/editable-field.tsx": 2,
   "components/skills/import-dialog.tsx": 3,
   "components/ui/calendar.tsx": 2,
   "components/ui/detail/index.tsx": 2,
-  "components/ui/page-save-bar.tsx": 1,
   "components/ui/save-footer.tsx": 3,
   "components/ui/side-panel.tsx": 1,
   "components/ui/status-pill.tsx": 1,
-  "components/ui/tab-bar.tsx": 1,
   "components/ui/user-avatar.tsx": 1
  }
 }
