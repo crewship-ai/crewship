@@ -558,8 +558,12 @@ export function ActivityStreamView({
     const p = feedUrlParams({ filters, group, bundle, range, peek: peekIsChange ? undefined : (peekId ?? undefined) })
     if (record) p.set("entry", record.id)
     else if (peekIsChange) p.set("entry", peekItem.id)
+    // An unresolved ?entry= link stays in the address until the journal
+    // answers; otherwise a Back in the meantime lands on the bare list and
+    // drops it.
+    else if (pendingEntryId) p.set("entry", pendingEntryId)
     return p.toString()
-  }, [path, filters, group, bundle, range, peekId, peekItem, record])
+  }, [path, filters, group, bundle, range, peekId, peekItem, record, pendingEntryId])
   const position = `${path.stops.map((s) => s.id).join("/")}|${peekId ?? ""}|${record?.id ?? ""}`
   const lastPosition = React.useRef(position)
   React.useEffect(() => {
