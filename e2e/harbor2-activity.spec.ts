@@ -38,13 +38,23 @@ test.describe("desktop", () => {
 
   test("/activity?run=<id> opens Peek, Esc closes, URL drops run", async ({ page }) => {
     await seed(page)
+    // A run id from the chain index the page itself reads. The first row of
+    // the list may be a change (that one is written as ?entry=), and the run
+    // may sit outside the default range, so the id is not taken from a row.
+    const chains = page.waitForResponse((r) => /\/api\/v1\/chains\?/.test(r.url()) && r.ok())
     await page.goto("/activity")
-    const first = page.getByRole("table", { name: "Activity" }).locator("[data-row-id]").first()
-    await first.click()
-    const id = await first.getAttribute("data-row-id")
-    await expect(page.locator("[data-slot=peek]")).toBeVisible()
-    await expect(page).toHaveURL(new RegExp(`run=${id}`))
-    await page.reload()
+    const { chains: list } = (await (await chains).json()) as { chains: { origin: string }[] }
+    test.skip(list.length === 0, "needs at least one recorded run")
+    const id = list[0].origin
+    const row = page.locator(`[data-row-id="${id}"]`)
+    if (await row.count()) {
+      await row.click()
+      await expect(page.locator("[data-slot=peek]")).toBeVisible()
+      await expect(page).toHaveURL(new RegExp(`run=${id}`))
+      await page.reload()
+    } else {
+      await page.goto(`/activity?run=${id}`)
+    }
     await expect(page.locator("[data-slot=peek]")).toBeVisible()
     await page.keyboard.press("Escape")
     await expect(page.locator("[data-slot=peek]")).toBeHidden()
@@ -74,6 +84,9 @@ test.describe("desktop", () => {
     await seed(page)
     await page.route("**/api/v1/chains?**", (r) => r.fulfill({ json: { chains: [], has_more: false, has_unrecorded_runs: false } }))
     await page.route("**/api/v1/journal?**", (r) => r.fulfill({ json: { entries: [], next_cursor: null } }))
+    // The live stream replays the newest changes to a fresh client; an empty
+    // workspace has none to replay.
+    await page.route("**/api/v1/journal/stream?**", (r) => r.fulfill({ status: 200, contentType: "text/event-stream", body: ": empty\n\n" }))
     await page.goto("/activity")
     await expect(page.getByText("No activity yet")).toBeVisible()
     await expect(page.getByText("crewship activity")).toBeVisible()
