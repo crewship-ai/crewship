@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"io"
-	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,11 +27,7 @@ func openTest(t *testing.T, path string) *database.DB {
 func fixture(t *testing.T, o Options) (*Store, *database.DB, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "documents.db")
-	db := openTest(t, path)
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(ctx, db.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatal(err)
-	}
+	db := openMigratedTestDBAt(t, path)
 	for _, q := range []string{
 		`INSERT INTO users(id,email) VALUES('document-owner','document-owner@example.test')`,
 		`INSERT INTO workspaces(id,name,slug) VALUES('workspace-a','A','document-a'),('workspace-b','B','document-b')`,
