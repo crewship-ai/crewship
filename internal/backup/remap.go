@@ -406,6 +406,19 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	// Composite document FKs point at documents(workspace_id,page_id), not
+	// a remapped documents.id. Follow the anchor identities explicitly.
+	for _, table := range []string{"document_updates", "document_receipts", "document_checkpoints"} {
+		for _, row := range dump.Tables[table] {
+			for column, anchor := range map[string]string{"workspace_id": "workspaces", "page_id": "pages"} {
+				if old, ok := row[column].(string); ok {
+					if mapped := idMap[anchor][old]; mapped != "" {
+						row[column] = mapped
+					}
+				}
+			}
+		}
+	}
 	if err := remapSlides(dump, idMap); err != nil {
 		return err
 	}

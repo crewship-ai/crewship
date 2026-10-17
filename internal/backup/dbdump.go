@@ -311,6 +311,14 @@ var BackupTables = []string{
 	"page_folders",    // pages.folder_id → page_folders, so folders land first; FK owner_crew_id → crews
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
+	"documents",
+	"slides_heads",
+	"slides_revisions",
+	"slides_receipts",
+	"slides_object_ids",
+	"document_updates",
+	"document_receipts",
+	"document_checkpoints",
 	"page_panels",               // FK page_id → pages; FK owner_crew_id → crews
 	"page_panel_data",           // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
 	"page_versions",             // FK page_id → pages
@@ -715,7 +723,7 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			}
 			row := make(map[string]any, len(cols))
 			for i, c := range cols {
-				row[c] = normalizeScan(raw[i])
+				row[c] = normalizeDocumentScan(table, c, raw[i])
 			}
 			out = append(out, row)
 		}
@@ -856,7 +864,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 			}
 			row := make(map[string]any, len(cols))
 			for i, c := range cols {
-				row[c] = normalizeScan(raw[i])
+				row[c] = normalizeDocumentScan(f.table, c, raw[i])
 			}
 			out = append(out, row)
 		}
@@ -1207,6 +1215,15 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			// copies whatever row is current — has to come after it or its
 			// CANCELLED status would be thrown away.
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
+			row, err = safeDocumentRestoreRow(table, row)
+			if err != nil {
+				return stats, err
+			}
+			if table == "documents" {
+				if _, err := tx.ExecContext(ctx, `UPDATE documents SET epoch=MAX(epoch+1,?),writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?`, row["epoch"], row["workspace_id"], row["page_id"]); err != nil {
+					return stats, fmt.Errorf("backup: fence existing document writer: %w", err)
+				}
+			}
 			if err := validateSlidesRestoreRow(table, row); err != nil {
 				return stats, err
 			}
@@ -1259,6 +1276,12 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					continue
 				}
 				val := row[k]
+				if documentBinaryColumn(table, k) {
+					val, err = restoreDocumentBinary(val)
+					if err != nil {
+						return stats, fmt.Errorf("backup: %s.%s: %w", table, k, err)
+					}
+				}
 				// The one VALUE-level check in this loop, and it is
 				// deliberately here rather than in the PreInsert hook:
 				// PreInsert is composed by the caller (runner_restore.go),
