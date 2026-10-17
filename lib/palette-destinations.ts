@@ -171,7 +171,7 @@ const ENTRIES: Entry[] = [
   { id: "journal:timeline", title: "Timeline", trail: "Journal", href: "/journal?tab=timeline", icon: BookOpen, keywords: ["events", "audit", "log"] },
   { id: "journal:runs", title: "Runs", trail: "Journal", href: "/journal?tab=runs", icon: BookOpen, keywords: ["executions", "run history"] },
   { id: "journal:spend", title: "Spend", trail: "Journal", href: "/journal?tab=spend", icon: Coins, keywords: ["cost", "usage", "tokens", "billing", "budget"], visible: (ctx) => isAdminTier(ctx.role) },
-  { id: "routines:calendar", title: "Routine calendar", trail: "Routines", href: "/routines?tab=calendar", icon: CalendarDays, keywords: ["schedule", "calendar", "cron"] },
+  { id: "calendar", title: "Calendar", trail: "Work", href: "/calendar", icon: CalendarDays, keywords: ["schedule", "calendar", "cron", "dates", "routine calendar"] },
   { id: "issues:missions", title: "Missions", trail: "Issues", href: "/issues?mission_type=mission", icon: CircleDot, keywords: ["mission list"] },
   { id: "credentials:providers", title: "Model providers", trail: "Credentials", href: "/credentials?tab=providers", icon: KeyRound, keywords: ["providers", "pays with", "anthropic", "openai", "subscription"] },
 

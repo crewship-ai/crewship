@@ -15,6 +15,12 @@ describe("paletteDestinations", () => {
     for (const d of owner) expect(d.href, d.id).toMatch(/^\//)
   })
 
+  it("opens the workspace Calendar, not the Routines tab, for every member", () => {
+    const calendar = member.find((d) => d.id === "calendar")
+    expect(calendar).toMatchObject({ title: "Calendar", href: "/calendar" })
+    expect(owner.some((d) => d.href.includes("tab=calendar"))).toBe(false)
+  })
+
   it("keeps what a role cannot open out of its palette", () => {
     // Danger zone is the owner's, Spend and invites are ADMIN+, Access &
     // Secrets is MANAGER+, the Admin console is instance administrators'.
