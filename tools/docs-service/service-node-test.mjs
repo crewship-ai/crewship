@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import * as Y from 'yjs';
-import { mkdtemp, writeFile, stat, chmod, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, copyFile, appendFile, writeFile, stat, chmod, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startService, PROTOCOL } from './service.mjs';
-import { RICH_VERSION, create, snapshot, initialJSON, outline, load, anchor, find, encode } from './schema.mjs';
+import { RICH_VERSION, create, snapshot, initialJSON, outline, load, validate, anchor, find, encode } from './schema.mjs';
 const secret = 'a'.repeat(48);
 function call(socket, path, data, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -623,5 +624,64 @@ test('semantic commit authority follows the authenticated realm', async () => {
       assert.equal(saved.outline.find(block => block.id === 'intro').text, 'realm replacement');
       assert.deepEqual(saved.outline.filter(block => block.id !== 'intro'), untouched);
     } finally { await f.close(); }
+  }
+});
+
+
+test('prepare-create builds closed schema3 content without Go data RPCs', async () => {
+  const model=authorityModel(), f=await fixture(model.handle); await f.start();
+  const baseline=model.seen.length, before=structuredClone(model.state);
+  const blocks=[{type:'heading',level:1,text:'Prepared report'},{type:'paragraph',text:'Literal <script> & text'},{type:'bulletList',items:['First','Second']},{type:'orderedList',items:['Step']},{type:'codeBlock',text:'const literal = "<script>";\n'}];
+  const prepare=(body,headers)=>call(f.socket,'/v1/documents/new/prepare-create',body,headers);
+  try {
+    const result=await prepare({blocks},{Authorization:'Bearer agtv2.synthetic-creation'});
+    assert.equal(result.status,200,'private prepare-create dispatcher must admit bounded authoring');
+    assert.deepEqual(Object.keys(result.body).sort(),['blocks','schema','snapshot']);
+    assert.equal(result.body.schema,RICH_VERSION);
+    const doc=load(result.body.snapshot);
+    try {
+      const content=validate(doc,RICH_VERSION), prepared=await outline(doc,RICH_VERSION);
+      assert.deepEqual(content.content.map(block=>block.type),['heading','paragraph','bulletList','orderedList','codeBlock']);
+      assert.equal(content.content[1].content[0].text,'Literal <script> & text');
+      assert.deepEqual(result.body.blocks,prepared.map(({id,hash})=>({id,hash})));
+      assert.equal(new Set(prepared.map(block=>block.id)).size,prepared.length);
+      assert.ok(prepared.every(block=>/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(block.id)));
+      assert.ok(prepared.every(block=>/^[a-f0-9]{64}$/.test(block.hash)));
+    } finally {doc.destroy()}
+    const repeated=await prepare({blocks});
+    assert.equal(repeated.status,200);
+    assert.ok(repeated.body.blocks.every(block=>!result.body.blocks.some(previous=>previous.id===block.id)),'Node owns fresh block UUIDs');
+    for(const invalid of [{blocks,operation:'initialize'},{blocks,schema:3},{blocks:[{type:'paragraph',id:'forged',text:'x'}]},{blocks:[{type:'paragraph',text:'x',marks:[]}]},{blocks:[{type:'image',src:'https://example.invalid'}]},{blocks:[{type:'paragraph',text:' '}]},null]) {
+      assert.equal((await prepare(invalid)).status,400);
+    }
+    assert.equal((await prepare({blocks},{'X-Crewship-Docs-Service':'bad'})).status,403);
+    assert.equal((await prepare({blocks},{Authorization:''})).status,401);
+    assert.equal((await prepare({blocks},{'X-Workspace-ID':''})).status,401);
+    assert.deepEqual(model.seen.slice(baseline),[],'preparation must not call Go state, receipt, lease or mutation RPCs');
+    assert.deepEqual(model.state,before);
+    assert.equal(model.acquisitions,0); assert.equal(model.commits,0); assert.equal(model.receipts.size,0);
+  } finally {await f.close()}
+});
+
+
+test('authoring adapter bytes change the copied service build identity', async () => {
+  const dir=await mkdtemp(join(tmpdir(),'docs-build-'));
+  let f, service;
+  try {
+    for(const file of ['pnpm-lock.yaml','schema.mjs','schema-core.mjs','service.mjs','create-document.mjs','secret.mjs'])await copyFile(new URL(file,import.meta.url),join(dir,file));
+    await symlink(fileURLToPath(new URL('node_modules',import.meta.url)),join(dir,'node_modules'),'dir');
+    const {startService:copiedStart}=await import(pathToFileURL(join(dir,'service.mjs')).href);
+    f=await fixture(authorityModel().handle);
+    const start=()=>copiedStart({socket:f.socket,authoritySocket:f.authoritySocket,tokenFile:f.tokenFile});
+    service=await start(); const original=service.identity.build;
+    await service.close(); service=undefined;
+    service=await start(); assert.equal(service.identity.build,original,'restarting unchanged public bytes keeps identity');
+    await service.close(); service=undefined;
+    // Only an inactive, private copy changes; installed and repository bytes stay intact.
+    await appendFile(join(dir,'create-document.mjs'),'\n// copied public fixture identity change\n');
+    service=await start();
+    assert.notEqual(service.identity.build,original,'authoring adapter changes must invalidate service identity');
+  } finally {
+    try {if(service)await service.close()} finally {try {if(f)await f.close()} finally {await rm(dir,{recursive:true})}}
   }
 });
