@@ -168,9 +168,11 @@ const ENTRIES: Entry[] = [
   { id: "inbox:schedule-alerts", title: "Schedule alerts", trail: "Inbox", href: "/inbox?attention=schedule-alerts", icon: Inbox, keywords: ["missed schedules"] },
   { id: "activity:work", title: "Work queue", trail: "Activity", href: "/activity?section=work", icon: Activity, keywords: ["queue", "assignments", "running work"] },
   { id: "activity:deliveries", title: "Webhook deliveries", trail: "Activity", href: "/activity?section=deliveries", icon: Activity, keywords: ["webhook log"] },
-  { id: "journal:timeline", title: "Timeline", trail: "Journal", href: "/journal?tab=timeline", icon: BookOpen, keywords: ["events", "audit", "log"] },
-  { id: "journal:runs", title: "Runs", trail: "Journal", href: "/journal?tab=runs", icon: BookOpen, keywords: ["executions", "run history"] },
-  { id: "journal:spend", title: "Spend", trail: "Journal", href: "/journal?tab=spend", icon: Coins, keywords: ["cost", "usage", "tokens", "billing", "budget"], visible: (ctx) => isAdminTier(ctx.role) },
+  // The Journal's three tabs, merged into Activity (F-02) and gated as before:
+  // OWNER / ADMIN only.
+  { id: "journal:timeline", title: "Technical log", trail: "Activity", href: "/activity?section=log", icon: BookOpen, keywords: ["journal", "timeline", "events", "audit", "log", "trace"], visible: (ctx) => isAdminTier(ctx.role) },
+  { id: "journal:runs", title: "Fleet runs", trail: "Activity", href: "/activity?section=runs", icon: BookOpen, keywords: ["journal", "runs", "executions", "run history"], visible: (ctx) => isAdminTier(ctx.role) },
+  { id: "journal:spend", title: "Spend", trail: "Activity", href: "/activity?mode=spend", icon: Coins, keywords: ["journal", "cost", "usage", "tokens", "billing", "budget"], visible: (ctx) => isAdminTier(ctx.role) },
   { id: "calendar", title: "Calendar", trail: "Work", href: "/calendar", icon: CalendarDays, keywords: ["schedule", "calendar", "cron", "dates", "routine calendar"] },
   { id: "issues:missions", title: "Missions", trail: "Issues", href: "/issues?mission_type=mission", icon: CircleDot, keywords: ["mission list"] },
   { id: "credentials:providers", title: "Model providers", trail: "Credentials", href: "/credentials?tab=providers", icon: KeyRound, keywords: ["providers", "pays with", "anthropic", "openai", "subscription"] },

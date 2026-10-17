@@ -83,7 +83,6 @@
  "raw-text-size": {
   "app/(dashboard)/crews/page.tsx": 1,
   "app/(dashboard)/integrations/page.tsx": 8,
-  "app/(dashboard)/journal/page.tsx": 2,
   "app/(dashboard)/missions/[id]/timeline/mission-timeline-client.tsx": 13,
   "app/(onboarding)/onboarding/page.tsx": 20,
   "app/(dashboard)/page.tsx": 2,

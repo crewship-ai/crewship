@@ -191,7 +191,7 @@ describe("⌘K — Pages group", () => {
     openPalette()
     const g2 = await group(/^pages$/i)
     const input = screen.getByPlaceholderText(/search issues/i)
-    fireEvent.change(input, { target: { value: "fleet" } })
+    fireEvent.change(input, { target: { value: "fleet board" } })
     await waitFor(() => expect(within(g2).getByRole("option")).toHaveAttribute("aria-selected", "true"))
     fireEvent.keyDown(input, { key: "Enter" })
     expect(h.push).toHaveBeenCalledWith("/pages/fleet")

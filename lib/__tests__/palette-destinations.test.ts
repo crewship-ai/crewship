@@ -24,7 +24,7 @@ describe("paletteDestinations", () => {
   it("keeps what a role cannot open out of its palette", () => {
     // Danger zone is the owner's, Spend and invites are ADMIN+, Access &
     // Secrets is MANAGER+, the Admin console is instance administrators'.
-    for (const id of ["settings:general:danger-zone", "journal:spend", "act:invite", "settings:access-secrets:value-reveal", "admin:backups", "settings:audit"]) {
+    for (const id of ["settings:general:danger-zone", "journal:spend", "journal:timeline", "journal:runs", "act:invite", "settings:access-secrets:value-reveal", "admin:backups", "settings:audit"]) {
       expect(ids(owner), id).toContain(id)
       expect(ids(member), id).not.toContain(id)
     }

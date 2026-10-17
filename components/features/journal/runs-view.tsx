@@ -695,7 +695,7 @@ export function RunsView({
                         : run.status === "CANCELLED"
                           ? XCircle
                           : Play
-                const traceHref = `/journal?tab=timeline&trace_id=${encodeURIComponent(run.id)}`
+                const traceHref = `/activity?section=log&trace_id=${encodeURIComponent(run.id)}`
                 return (
                   <div
                     key={run.id}
@@ -868,7 +868,7 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
       </div>
       <ul className="divide-y divide-border/40">
         {runs.map((run) => {
-          const traceHref = `/journal?tab=timeline&trace_id=${encodeURIComponent(run.id)}`
+          const traceHref = `/activity?section=log&trace_id=${encodeURIComponent(run.id)}`
           return (
             <li
               key={run.id}
