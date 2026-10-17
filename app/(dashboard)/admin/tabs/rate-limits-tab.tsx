@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Bell, Boxes, FileText, Gauge, Globe, KeyRound, RotateCcw, Shield, Webhook, type LucideIcon } from "lucide-react"
 import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { SettingsCard, SettingsEmpty, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem, firstSentence } from "@/components/features/settings/shared"
+import { PageEmpty, PageError, PageLoading } from "@/components/layout/page-state"
+import { SettingsCard, SettingsSaveBar, SettingsSegmented, firstSentence } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
 import { withWs } from "@/lib/admin-workspace-query"
 import { cn } from "@/lib/utils"
@@ -132,15 +132,18 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
   }, [limiters])
 
   if (loading && limiters.length === 0) {
-    return <Skeleton className="h-[240px] rounded-card" />
+    return <PageLoading rows={6} className="px-0 py-0" />
   }
 
   if (error) {
     return (
-      <SettingsCard icon={Gauge} tint="var(--purple)" title="Limits" description="Rate limits for the whole instance">
-        <SettingsEmpty>Failed to load rate limiters ({error})</SettingsEmpty>
-      </SettingsCard>
+      <PageError className="px-0 py-0" title="Couldn’t load the rate limits" detail={`${error} from GET /api/v1/admin/rate-limits`}
+        description="Nothing was changed. The limits the server holds still apply." onRetry={() => void refresh()} />
     )
+  }
+
+  if (groups.length === 0) {
+    return <PageEmpty icon={Gauge} title="No rate limits on this server" description="This build exposes no tunable limiters." cli="crewship admin ratelimits list" className="px-0 py-0" />
   }
 
   const changedCount = limiters.filter((l) => l.overridden).length
@@ -154,77 +157,62 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
 
   return (
     <div className="space-y-4">
-      <SettingsSummary>
-        <SummaryItem n={limiters.length}>limits in {groups.length} areas</SummaryItem>
-        {changedCount
-          ? <SummaryItem n={changedCount} tone="warn">changed from default</SummaryItem>
-          : <SummaryItem>All at defaults</SummaryItem>}
-        <SummaryItem>Instance-wide · no restart</SummaryItem>
-        <span className="ml-auto">
-          <SettingsSegmented label="Show" value={onlyChanged ? "changed" : "all"} onChange={(v) => setOnlyChanged(v === "changed")}
-            options={[{ value: "all", label: "All" }, { value: "changed", label: "Changed" }]} />
-        </span>
-      </SettingsSummary>
+      <div data-slot="limits-toolbar" className="flex flex-wrap items-center gap-2.5">
+        <span className="text-label text-muted-foreground">Instance-wide · applies without a restart</span>
+        <span className="flex-1" />
+        <span className="text-label text-muted-foreground">Show</span>
+        <SettingsSegmented label="Show" value={onlyChanged ? "changed" : "all"} onChange={(v) => setOnlyChanged(v === "changed")}
+          options={[{ value: "all", label: "All" }, { value: "changed", label: `Changed ${changedCount}` }]} />
+      </div>
 
       {visible.map(([group, rows]) => {
         const meta = GROUP_META[group] ?? { icon: Gauge, tint: "var(--purple)", about: "" }
-        const groupChanged = rows.filter((l) => l.overridden).length
         return (
-          <SettingsCard
-            key={group}
-            icon={meta.icon}
-            tint={meta.tint}
-            title={group}
-            description={meta.about || undefined}
-            actions={<span className="font-mono text-micro text-muted-foreground">{groupChanged ? `${groupChanged} changed` : "defaults"}</span>}
-          >
+          <SettingsCard key={group} icon={meta.icon} tint={meta.tint} title={group} description={meta.about || undefined}>
             {rows.map((l) => {
               const draft = drafts[l.key] ?? String(l.value)
               const trimmed = draft.trim()
               const inRange = validDraft(l, trimmed)
               const dirty = trimmed !== String(l.value)
-              const direction = l.value > l.default ? "looser" : l.value < l.default ? "tighter" : null
               const inputId = `ratelimit-${l.key}`
               return (
                 <div
                   key={l.key}
                   data-limiter={l.key}
+                  data-changed={l.overridden || undefined}
                   className={cn(
-                    "flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2.5 last:border-b-0 sm:flex-nowrap",
-                    dirty ? "bg-primary/[0.05]" : l.overridden && "bg-warn/[0.04]",
+                    "flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-3 last:border-b-0",
+                    dirty && "bg-primary/[0.05]",
                   )}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <label htmlFor={inputId} className="text-control text-foreground">{l.display_name}</label>
-                      {l.overridden && direction && (
-                        <span className="rounded-full bg-warn/15 px-1.5 font-mono text-micro text-warn">{direction} · default {l.default}</span>
-                      )}
-                    </div>
-                    {inRange ? (
-                      <p className="mt-0.5 truncate text-label text-muted-foreground-soft" title={l.description}>{firstSentence(l.description)}</p>
-                    ) : (
+                  <div className="min-w-0 flex-[1_1_11rem]">
+                    <label htmlFor={inputId} className="text-control font-medium text-foreground">{l.display_name}</label>
+                    {!inRange ? (
                       <p className="mt-0.5 text-label text-destructive">Must be between {l.min} and {l.max}</p>
+                    ) : l.overridden ? (
+                      <p className="mt-0.5 text-label text-warn">Changed · default {l.default.toLocaleString("en")}</p>
+                    ) : (
+                      <p className="mt-0.5 truncate text-label text-muted-foreground" title={l.description}>{firstSentence(l.description)}</p>
                     )}
                   </div>
-                  <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-64">
-                    <div className={cn(
-                      "flex h-8 w-44 items-center overflow-hidden rounded-md border border-control-border bg-surface-subtle focus-within:border-ring",
-                      !inRange && "border-destructive",
-                    )}>
-                      <input
-                        id={inputId}
-                        type="text"
-                        inputMode="numeric"
-                        value={draft}
-                        aria-invalid={!inRange}
-                        aria-label={`${l.display_name} value`}
-                        disabled={saving || busyKey === l.key}
-                        onChange={(e) => setDrafts((prev) => ({ ...prev, [l.key]: e.target.value }))}
-                        className="h-full w-20 min-w-0 bg-transparent px-2 text-right font-mono text-control tabular-nums outline-none"
-                      />
-                      <span className="flex h-full flex-1 items-center truncate border-l border-border bg-muted px-2 text-label text-muted-foreground" title={l.unit}>{l.unit}</span>
-                    </div>
+                  {/* The figure in mono, the unit beside it, and Reset as an
+                      icon only where the value differs from the default. */}
+                  <div className="ml-auto flex shrink-0 items-center gap-2">
+                    <input
+                      id={inputId}
+                      type="text"
+                      inputMode="numeric"
+                      value={draft}
+                      aria-invalid={!inRange}
+                      aria-label={`${l.display_name} value`}
+                      disabled={saving || busyKey === l.key}
+                      onChange={(e) => setDrafts((prev) => ({ ...prev, [l.key]: e.target.value }))}
+                      className={cn(
+                        "h-[var(--control-md)] w-24 rounded-md border border-control-border bg-surface-subtle px-2.5 text-right font-mono text-control tabular-nums outline-none hover:border-line-strong focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 coarse:h-[2.75rem]",
+                        !inRange && "border-destructive",
+                      )}
+                    />
+                    <span className="w-24 truncate text-label text-muted-foreground" title={l.unit}>{l.unit}</span>
                     {l.overridden ? (
                       <Button size="icon-sm" variant="ghost" className="h-7 w-7" disabled={saving || busyKey === l.key}
                         onClick={() => handleReset(l)} aria-label={`Reset ${l.display_name} to ${l.default}`} title={`Reset to ${l.default}`}>
@@ -239,13 +227,9 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
         )
       })}
 
-      {groups.length === 0 ? (
-        <SettingsCard icon={Gauge} tint="var(--purple)" title="Limits" description="Rate limits for the whole instance">
-          <SettingsEmpty>No rate limiters configured.</SettingsEmpty>
-        </SettingsCard>
-      ) : visible.length === 0 ? (
-        <div className="rounded-card border border-border bg-card px-4 py-6 text-center text-xs text-muted-foreground">Every limit is at its default.</div>
-      ) : null}
+      {visible.length === 0 && (
+        <div className="rounded-card border border-border bg-card px-4 py-6 text-center text-label text-muted-foreground">Every limit is at its default.</div>
+      )}
 
       <SettingsSaveBar
         label="Limits"

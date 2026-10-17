@@ -16,7 +16,7 @@ import { Gate, Unavailable } from "./backups-kit"
 import { formatSize, formatWhen, verifiedByText, type BackupSettings, type NewOffsiteDestination, type OffsiteDestination, type SpaceInfo } from "./backups-model"
 import { addDestination, removeDestination, saveBackupSettings, testDestination, useBackupSettings, useDestinations } from "./use-backup-settings"
 import { useBackupsOverview } from "./use-backups-overview"
-import { perform, performSave } from "./use-backups-data"
+import { perform, performConfirm, performSave } from "./use-backups-data"
 import type { SectionCtx } from "./backups-console"
 
 /**
@@ -172,7 +172,7 @@ export function StorageBody({ settings, destinations = [], destinationsReady = t
         ]}
         confirmLabel="Remove" onConfirm={async () => {
           if (!removing) return
-          if (await perform(ctx.demo, () => removeDestination(removing.id), "Destination removed", "The destination could not be removed")) reload?.()
+          if (await performConfirm(ctx.demo, () => removeDestination(removing.id), "Destination removed", "The destination could not be removed")) reload?.()
         }} />
     </>
   )

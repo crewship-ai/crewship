@@ -1,15 +1,19 @@
 "use client"
 
 import * as React from "react"
+import {
+  Bell, Brain, Building, CheckSquare, Clock, FileText, KeyRound, MessageSquare, RefreshCw, ScrollText, Shield, Workflow,
+  type LucideIcon,
+} from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
-import { SettingsSaveBar, SettingsSegmented } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsCardActions, SettingsRow, SettingsSaveBar, SettingsSegmented } from "@/components/features/settings/shared"
 import { ConfirmDialog, type Consequence } from "@/components/ui/confirm-dialog"
-import { Gate, TD, TH, WarnBar } from "./backups-kit"
+import { Gate, WarnBar, WsAvatar } from "./backups-kit"
 import { RETENTION_OPTIONS, retentionDiff, retentionLabel, type RetentionChange, type RetentionRow } from "./backups-model"
 import { putRetention, putRetentionDefaults, useDataRetention, useRetentionDefaults, type RetentionDefaultsPut } from "./use-data-retention"
-import type { SectionCtx } from "./backups-console"
+import { useBackupsScope, type SectionCtx } from "./backups-console"
 
 /**
  * Admin › Data retention: how long the server keeps each kind of live data,
@@ -17,16 +21,107 @@ import type { SectionCtx } from "./backups-console"
  * every value it overwrites and how many rows the next sweep deletes, and
  * older backups still hold those rows until they age out. Housekeeping the
  * server runs on its own is shown read-only.
+ *
+ * Harbor 2 layout: the "Applies to" strip (all workspaces or chosen ones,
+ * kept in ?scope=&ws=), then the cards Keep for, Defaults for new workspaces
+ * and Housekeeping.
  */
+export function RetentionPage() {
+  const { workspaceId, demo, workspaces, urlState, selected, scope, commit, backUpNow } = useBackupsScope(true)
+  const ctx: SectionCtx = {
+    scope, selected, workspaces, currentWorkspaceId: workspaceId, demo,
+    focusRun: null, focusPath: null, backUpNow, newPlanSignal: 0, go: () => {},
+  }
+  return (
+    <div data-slot="retention-page" className="space-y-4 text-control">
+      <RetentionScope workspaces={workspaces} selected={selected} picking={urlState.ws !== null}
+        onChange={(next) => commit(urlState.scope, next)} />
+      {demo && <p className="font-mono text-micro uppercase tracking-wide text-muted-foreground-soft">Demo data · ?demo=1 · nothing is sent</p>}
+      <DataRetention ctx={ctx} />
+    </div>
+  )
+}
+
+/**
+ * "Applies to  [All workspaces · 3 | Chosen workspaces]". Chosen shows the
+ * workspaces as toggles; the selection is the URL's ?ws=, so a reload or a
+ * shared link opens the same workspaces.
+ */
+export function RetentionScope({ workspaces, selected, picking: urlPicking, onChange }: {
+  workspaces: { id: string; slug: string; name: string }[]
+  selected: Set<string>
+  /** True when the URL names workspaces (?ws=). */
+  picking: boolean
+  onChange: (next: Set<string>) => void
+}) {
+  const [picking, setPicking] = React.useState(urlPicking)
+  React.useEffect(() => { if (urlPicking) setPicking(true) }, [urlPicking])
+  const n = workspaces.length
+  const mode = picking ? "pick" : "all"
+  const names = workspaces.filter((w) => selected.has(w.id)).map((w) => w.name)
+  return (
+    <div data-slot="retention-scope" className="flex flex-wrap items-center gap-2.5">
+      <span className="text-label text-muted-foreground">Applies to</span>
+      <SettingsSegmented<"all" | "pick"> label="Applies to" value={mode}
+        onChange={(v) => {
+          setPicking(v === "pick")
+          if (v === "all") onChange(new Set(workspaces.map((w) => w.id)))
+        }}
+        options={[{ value: "all", label: `All workspaces · ${n}` }, { value: "pick", label: "Chosen workspaces" }]} />
+      <span className="flex-1" />
+      <span className="text-label text-muted-foreground" data-slot="scope-count">
+        {mode === "all" ? "One policy for the whole Crewship" : names.length ? names.join(", ") : "No workspace chosen"}
+      </span>
+      {mode === "pick" && (
+        <div className="flex w-full flex-wrap items-center gap-1.5" role="group" aria-label="Chosen workspaces">
+          {workspaces.map((w) => {
+            const on = selected.has(w.id)
+            return (
+              <button key={w.id} type="button" aria-pressed={on} data-ws={w.slug}
+                onClick={() => {
+                  const next = new Set(selected)
+                  if (on) next.delete(w.id)
+                  else next.add(w.id)
+                  onChange(next)
+                }}
+                className={cn(
+                  "inline-flex h-7 items-center gap-1.5 rounded-full border border-control-border py-0.5 pl-1 pr-2.5 text-control transition-opacity coarse:h-[2.75rem]",
+                  !on && "border-dashed opacity-50",
+                )}>
+                <WsAvatar name={w.name} size={18} />
+                {w.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function DataRetention({ ctx }: { ctx: SectionCtx }) {
   const res = useDataRetention(ctx.selected)
-  if (ctx.selected.size === 0) return <p className="text-control text-muted-foreground">Tick a workspace in the bar above.</p>
+  if (ctx.selected.size === 0) return <p className="text-control text-muted-foreground">Choose a workspace above.</p>
   return (
     <Gate resource={res} what="Data retention" skeleton="h-[360px]">
       {(data) => <RetentionBody rows={data.rows} ctx={ctx} reload={res.reload} />}
     </Gate>
   )
 }
+
+/** The row's grey tile, by retention key; an unknown key gets the clock. */
+const KEY_ICON: Record<string, LucideIcon> = {
+  routine_runs_days: Workflow,
+  approvals_days: CheckSquare,
+  audit_days: ScrollText,
+  credential_audit_days: KeyRound,
+  memory_versions_days: Brain,
+  page_panel_data_days: FileText,
+  inbox_days: Bell,
+  chats_days: MessageSquare,
+  keeper_decisions_days: Shield,
+}
+const keyIcon = (key: string) => KEY_ICON[key] ?? Clock
 
 function fmtChange(c: RetentionChange, label: string): string {
   const rows = c.rows_affected ? ` · ${c.rows_affected.toLocaleString("en-GB")} row${c.rows_affected === 1 ? "" : "s"} go at the next sweep` : ""
@@ -35,6 +130,10 @@ function fmtChange(c: RetentionChange, label: string): string {
 
 /** What the confirmation says when the server refuses a stale preview (409). */
 export const STALE_PREVIEW = "Something changed since the preview — review again"
+/** The line the confirmation adds once it has fetched a new preview after a 409. */
+export const NEW_PREVIEW = "Someone changed retention while you were reviewing. This is the new preview; nothing was written."
+/** Said instead of a dialog when the dry run finds nothing to write. */
+export const NOTHING_TO_CHANGE = "Nothing to change — the chosen workspaces already keep these"
 
 /**
  * A preview and the exact request it previewed. Confirming sends this
@@ -51,6 +150,16 @@ interface RetentionPreview {
   count: number
   all: boolean
   size: number
+  /** Set after a 409: this preview replaced the one that went stale. */
+  refreshed?: boolean
+}
+
+/** A segmented value of RETENTION_OPTIONS, plus the server's own value when it is not one of them. */
+function windowOptions(r: RetentionRow, value: number | null) {
+  const options = RETENTION_OPTIONS.filter((o) => o.days !== null || r.foreverAllowed !== false)
+    .map((o) => ({ value: o.days === null ? "forever" : String(o.days), label: o.label }))
+  if (value !== null && !options.some((o) => o.value === String(value))) options.push({ value: String(value), label: `${value} d` })
+  return options
 }
 
 export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx: SectionCtx; reload?: () => void }) {
@@ -110,7 +219,8 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
     const r = await putRetention(snap.targets, snap.changes, true)
     // An answer for a selection or a draft that is no longer on screen is dropped.
     if (epoch.current !== asked) return
-    if (r.ok) setPreview({ ...snap, plan: r.data.changes, previewId: r.data.preview_id })
+    if (r.ok && r.data.changes.length === 0) toast.info(NOTHING_TO_CHANGE)
+    else if (r.ok) setPreview({ ...snap, plan: r.data.changes, previewId: r.data.preview_id })
     else if (r.unavailable) toast.message("Data retention: not available on this server yet")
     else toast.error(`The change could not be checked: ${r.error}`)
     setBusy(false)
@@ -121,81 +231,93 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
     if (ctx.demo) { toast.message("Demo data · nothing was sent"); return }
     const r = await putRetention(p.targets, p.changes, false, p.previewId)
     if (!r.ok && r.status === 409) {
-      // Nothing was written. The draft stays so the admin can review again.
+      // Nothing was written. The dialog stays and shows a fresh preview, so
+      // the admin decides again on what the server holds now.
       setStale(true)
       toast.error(STALE_PREVIEW)
       reload?.()
+      const again = await putRetention(p.targets, p.changes, true)
+      if (again.ok && again.data.changes.length > 0) {
+        setPreview({ ...p, plan: again.data.changes, previewId: again.data.preview_id, refreshed: true })
+        throw new Error(STALE_PREVIEW)
+      }
+      // The other change already did what this one asked: nothing is left.
+      setPreview(null)
+      if (again.ok) toast.info(NOTHING_TO_CHANGE)
       return
     }
     if (!r.ok) { toast.error(`The change could not be saved: ${r.error}`); throw new Error(r.error) }
     toast.success("Retention saved")
+    setStale(false)
     setDraft({})
     reload?.()
   }
   const plan = preview?.plan ?? []
   const swept = plan.reduce((a, c) => a + c.rows_affected, 0)
   const consequences: Consequence[] = [
+    ...(preview?.refreshed ? [{ tone: "warn" as const, text: NEW_PREVIEW }] : []),
     ...plan.map((c) => ({ tone: (c.rows_affected ? "lost" : "warn") as Consequence["tone"], text: fmtChange(c, label(c.key)) })),
-    ...(swept ? [{ tone: "kept" as const, text: `${swept.toLocaleString("en-GB")} rows go at the next sweep; older backups still hold them until they age out.` }] : []),
+    // Deleting rows is a loss, said in the loss tone; only what stays is green.
+    ...(swept ? [
+      { tone: "lost" as const, text: `${swept.toLocaleString("en-GB")} row${swept === 1 ? "" : "s"} go at the next sweep.` },
+      { tone: "kept" as const, text: "Older backups still hold them until they age out." },
+    ] : []),
     { tone: "kept" as const, text: "New workspaces are not changed; they start from Defaults for new workspaces." },
   ]
+  const mixedAny = editable.some((r) => r.mixed && !(r.key in draft))
 
   return (
     <>
-      {stale && <WarnBar tone="bad" title={STALE_PREVIEW}>Nothing was written. The values below are still unsaved; Save shows the new preview.</WarnBar>}
-      {ctx.selected.size > 1 && (
-        <WarnBar title={`${ctx.selected.size} workspaces selected.`}>A change is written into each after a dialog lists what it overwrites. New workspaces are not affected; their defaults are set below.</WarnBar>
-      )}
-      <div className="overflow-hidden rounded-card border border-border bg-card">
-        <div className="overflow-x-auto">
-          <table className="w-full" data-slot="retention-table">
-            <thead><tr><th className={TH}>Data</th><th className={TH}>Keep for</th></tr></thead>
-            <tbody>
-              {editable.map((r) => {
-                const value = r.key in draft ? draft[r.key] : r.days
-                const known = RETENTION_OPTIONS.some((o) => o.days === value)
-                const options = [...RETENTION_OPTIONS.filter((o) => o.days !== null || r.foreverAllowed !== false).map((o) => ({ value: o.days === null ? "forever" : String(o.days), label: o.label })),
-                  ...(!known && value !== null ? [{ value: String(value), label: `${value} d` }] : [])]
-                return (
-                  <tr key={r.key} data-key={r.key} className="[&:last-child>td]:border-b-0">
-                    <td className={cn(TD, "whitespace-normal")}>
-                      <div>{r.label}{r.mixed && !(r.key in draft) && <span className="ml-2 font-mono text-micro text-warn">mixed</span>}</div>
-                      {r.note && <div className="text-label text-muted-foreground">{r.note}</div>}
-                    </td>
-                    <td className={TD}>
-                      <div className="w-max"><SettingsSegmented<string> label={`Keep ${r.label} for`} value={r.mixed && !(r.key in draft) ? "" : value === null ? "forever" : String(value)}
-                        onChange={(v) => setDraft((d) => ({ ...d, [r.key]: v === "forever" ? null : Number(v) }))} options={options} /></div>
-                    </td>
-                  </tr>
-                )
-              })}
-              {housekeeping.length > 0 && (
-                <tr><td colSpan={2} className={cn(TH, "bg-muted/40")}>Housekeeping · runs on its own, not editable here</td></tr>
-              )}
-              {housekeeping.map((r) => (
-                <tr key={r.key} data-key={r.key} className="text-muted-foreground [&:last-child>td]:border-b-0">
-                  <td className={TD}>{r.label}</td>
-                  <td className={cn(TD, "font-mono text-label")}>{r.fixed ?? retentionLabel(r.days)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {stale && <WarnBar tone="bad" title={STALE_PREVIEW}>Nothing was written. The values below are still unsaved.</WarnBar>}
+      <SettingsCard icon={Clock} title="Keep for" description="Saving shows a dry run of what would be deleted first">
+        <div data-slot="retention-table">
+          {editable.map((r) => {
+            const value = r.key in draft ? draft[r.key] : r.days
+            const mixed = r.mixed && !(r.key in draft)
+            return (
+              <div key={r.key} data-key={r.key}>
+                <SettingsRow lead={keyIcon(r.key)} label={r.label}
+                  description={mixed
+                    ? <span className="text-warn">The chosen workspaces differ · a value here sets it for all of them</span>
+                    : r.note ?? undefined}>
+                  <SettingsSegmented<string> label={`Keep ${r.label} for`} value={mixed ? "" : value === null ? "forever" : String(value)}
+                    onChange={(v) => setDraft((d) => ({ ...d, [r.key]: v === "forever" ? null : Number(v) }))} options={windowOptions(r, value)} />
+                </SettingsRow>
+              </div>
+            )
+          })}
         </div>
-      </div>
-      <p className="rounded-lg border border-border bg-card px-3 py-2 text-control text-muted-foreground">
-        Turning a limit on says how many rows go at the next sweep, and that older backups still hold them until they age out.
-      </p>
+      </SettingsCard>
+      {mixedAny && ctx.selected.size > 1 && (
+        <p className="text-label text-muted-foreground">Choose workspaces above to change only some of them.</p>
+      )}
       <SettingsSaveBar label="Data retention" count={diff.length} saving={busy} onDiscard={() => setDraft({})} onSave={review} />
       <ConfirmDialog open={preview !== null} onOpenChange={(o) => { if (!o) setPreview(null) }} destructive={swept > 0}
-        title={preview && plan.length ? `Apply ${preview.count} limit${preview.count === 1 ? "" : "s"} to ${preview.all ? "every existing workspace" : `${preview.size} workspace${preview.size === 1 ? "" : "s"}`}?` : "Nothing to change"}
+        title={preview ? `Apply ${preview.count} limit${preview.count === 1 ? "" : "s"} to ${preview.all ? "every existing workspace" : `${preview.size} workspace${preview.size === 1 ? "" : "s"}`}?` : ""}
         description="The dry run lists every value this overwrites."
         consequences={consequences}
         confirmLabel="Apply"
         onConfirm={apply} />
       <RetentionDefaultsCard rows={editable} demo={ctx.demo} />
+      {housekeeping.length > 0 && (
+        <SettingsCard icon={RefreshCw} title="Housekeeping" description="Runs by itself; not adjustable">
+          <div data-slot="retention-housekeeping">
+            {housekeeping.map((r) => (
+              <div key={r.key} data-key={r.key}>
+                <SettingsRow lead={keyIcon(r.key)} label={r.label} description={r.note ?? undefined}>
+                  <span className="text-label text-muted-foreground">{r.fixed ?? retentionLabel(r.days)}</span>
+                </SettingsRow>
+              </div>
+            ))}
+          </div>
+        </SettingsCard>
+      )}
     </>
   )
 }
+
+/** How many defaults show before "Show all N". */
+const DEFAULTS_FOLD = 4
 
 /**
  * What a workspace created from now on starts with. A separate operation from
@@ -205,9 +327,10 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
 export function RetentionDefaultsCard({ rows, demo }: { rows: RetentionRow[]; demo: boolean }) {
   const res = useRetentionDefaults(true)
   const [draft, setDraft] = React.useState<Record<string, number | null>>({})
+  const [showAll, setShowAll] = React.useState(false)
   // The preview and the exact windows it previewed; confirming sends those
   // with the server's preview_id, never the form as it is by then.
-  const [preview, setPreview] = React.useState<{ changes: RetentionDefaultsPut["changes"]; windows: Record<string, number | null>; previewId?: string } | null>(null)
+  const [preview, setPreview] = React.useState<{ changes: RetentionDefaultsPut["changes"]; windows: Record<string, number | null>; previewId?: string; refreshed?: boolean } | null>(null)
   const [stale, setStale] = React.useState(false)
   const current = res.data?.defaults ?? {}
   const edits = Object.entries(draft).filter(([k, v]) => current[k] !== v)
@@ -230,7 +353,8 @@ export function RetentionDefaultsCard({ rows, demo }: { rows: RetentionRow[]; de
     if (demo) { setPreview({ windows, changes: edits.map(([key, to]) => ({ key, from: current[key] ?? null, to })) }); return }
     const r = await putRetentionDefaults(windows, true)
     if (epoch.current !== asked) return
-    if (r.ok) setPreview({ windows, changes: r.data.changes, previewId: r.data.preview_id })
+    if (r.ok && r.data.changes.length === 0) toast.info("Nothing to change — new workspaces already start with these")
+    else if (r.ok) setPreview({ windows, changes: r.data.changes, previewId: r.data.preview_id })
     else if (r.unavailable) toast.message("Defaults for new workspaces: not available on this server yet")
     else toast.error(`The defaults could not be checked: ${r.error}`)
   }
@@ -240,57 +364,63 @@ export function RetentionDefaultsCard({ rows, demo }: { rows: RetentionRow[]; de
     if (demo) { toast.message("Demo data · nothing was sent"); return }
     const r = await putRetentionDefaults(p.windows, false, p.previewId)
     if (!r.ok && r.status === 409) {
+      // Nothing was written; the dialog stays with a fresh preview.
       setStale(true)
       toast.error(STALE_PREVIEW)
       res.reload()
+      const again = await putRetentionDefaults(p.windows, true)
+      if (again.ok && again.data.changes.length > 0) {
+        setPreview({ ...p, changes: again.data.changes, previewId: again.data.preview_id, refreshed: true })
+        throw new Error(STALE_PREVIEW)
+      }
+      setPreview(null)
       return
     }
     if (!r.ok) { toast.error(`The defaults could not be saved: ${r.error}`); throw new Error(r.error) }
     toast.success("Defaults for new workspaces saved")
+    setStale(false)
     setDraft({})
     res.reload()
   }
 
   if (res.status === "unavailable") return null
+  const shown = showAll ? rows : rows.slice(0, DEFAULTS_FOLD)
   return (
-    <div className="overflow-hidden rounded-card border border-border bg-card" data-slot="retention-defaults">
-      <div className="border-b border-border px-4 py-3">
-        <div className="text-body font-medium">Defaults for new workspaces</div>
-        <div className="text-control text-muted-foreground">What a workspace created from now on starts with. Existing workspaces are not changed.</div>
-      </div>
-      {stale && <div className="border-b border-border px-4 py-2.5"><WarnBar tone="bad" title={STALE_PREVIEW}>Nothing was written.</WarnBar></div>}
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <tbody>
-            {rows.map((r) => {
-              const value = r.key in draft ? draft[r.key] : (current[r.key] ?? null)
-              const options = RETENTION_OPTIONS.filter((o) => o.days !== null || r.foreverAllowed !== false)
-                .map((o) => ({ value: o.days === null ? "forever" : String(o.days), label: o.label }))
-              if (value !== null && !options.some((o) => o.value === String(value))) options.push({ value: String(value), label: `${value} d` })
-              return (
-                <tr key={r.key} data-key={r.key} className="[&:last-child>td]:border-b-0">
-                  <td className={cn(TD, "whitespace-normal")}>{r.label}</td>
-                  <td className={TD}>
-                    <div className="w-max"><SettingsSegmented<string> label={`New workspaces keep ${r.label} for`} value={value === null ? "forever" : String(value)}
-                      onChange={(v) => setDraft((d) => ({ ...d, [r.key]: v === "forever" ? null : Number(v) }))} options={options} /></div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+    <SettingsCard icon={Building} title="Defaults for new workspaces" description="A new workspace starts with these; change it later here">
+      <div data-slot="retention-defaults">
+        {stale && <div className="border-b border-border px-4 py-2.5"><WarnBar tone="bad" title={STALE_PREVIEW}>Nothing was written.</WarnBar></div>}
+        {shown.map((r) => {
+          const value = r.key in draft ? draft[r.key] : (current[r.key] ?? null)
+          return (
+            <div key={r.key} data-key={r.key}>
+              <SettingsRow lead={keyIcon(r.key)} label={r.label}>
+                <SettingsSegmented<string> label={`New workspaces keep ${r.label} for`} value={value === null ? "forever" : String(value)}
+                  onChange={(v) => setDraft((d) => ({ ...d, [r.key]: v === "forever" ? null : Number(v) }))} options={windowOptions(r, value)} />
+              </SettingsRow>
+            </div>
+          )
+        })}
+        {rows.length > DEFAULTS_FOLD && (
+          <SettingsCardActions className="border-t border-border pt-2.5">
+            <button type="button" onClick={() => setShowAll((v) => !v)} aria-expanded={showAll}
+              className="text-label font-medium text-primary-hover hover:underline">
+              {showAll ? "Show fewer" : `Show all ${rows.length}`}
+            </button>
+          </SettingsCardActions>
+        )}
       </div>
       {/* The page's Save bar opens the preview below; the confirm writes. */}
       <SettingsSaveBar label="Defaults for new workspaces" count={edits.length} onDiscard={() => setDraft({})} onSave={review} />
       <ConfirmDialog open={preview !== null} onOpenChange={(o) => { if (!o) setPreview(null) }}
-        title={preview && preview.changes.length ? `Change ${preview.changes.length} default${preview.changes.length === 1 ? "" : "s"} for new workspaces?` : "Nothing to change"}
+        title={preview ? `Change ${preview.changes.length} default${preview.changes.length === 1 ? "" : "s"} for new workspaces?` : ""}
         description="Only workspaces created from now on start with these."
         consequences={[
+          ...(preview?.refreshed ? [{ tone: "warn" as const, text: "Someone changed these defaults while you were reviewing. This is the new preview; nothing was written." }] : []),
           ...(preview?.changes ?? []).map((c) => ({ tone: "warn" as const, text: `${label(c.key)}: ${retentionLabel(c.from)} → ${retentionLabel(c.to)}` })),
           { tone: "kept" as const, text: "No existing workspace changes." },
         ]}
         confirmLabel="Save defaults for new workspaces"
         onConfirm={apply} />
-    </div>
+    </SettingsCard>
   )
 }
