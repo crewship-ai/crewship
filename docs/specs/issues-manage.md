@@ -47,6 +47,12 @@ The shared Issues UI offers project administration through its authorized
 project selector, milestone forms and explicit issue deletion controls. That
 selector requires List and must not discover projects from Manage shares.
 The API and CLI's known-ID management contract itself does not require List.
+The dedicated `/issues/manage?project=PROJECT_ID` screen also accepts a known
+project without List and checks its current Read+Manage through the dedicated
+server projection. It reuses the reviewed metadata and milestone forms without
+fetching a project/issue collection. An optional `issue_id` opens deletion review
+only for that known issue in the same project, with the separate delete_issues
+share and fresh confirmation after a conflict. These links grant no authority.
 The ordinary Issues board, global navigation and trusted catalogs must not be
 opened to work around that distinction.
 
@@ -77,6 +83,12 @@ Successful changes and their audit entry commit in one transaction. Audit
 failure rolls the change back. Authority loss refuses a write made through an
 already-open editor or existing CLI session. An issuer's demotion must not
 revoke an independent grant issued by a different, still-authorized issuer.
+
+The UI hides project metadata, milestones and deletion previews after a known
+access refusal. Later connection errors, cached successes or an earlier save
+response cannot restore them. Only a new successful read for the same current
+account, workspace and resource can restore that view; old or cancelled reads
+cannot confirm access for another selection.
 
 Queued, running and waiting pipeline work protects an issue even when an older
 issue execution row is superseded. Metadata administration must not terminate,
