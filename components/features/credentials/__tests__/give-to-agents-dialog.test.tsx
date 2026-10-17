@@ -91,3 +91,14 @@ describe("GiveToAgentsDialog", () => {
     expect(within(screen.getByRole("dialog")).getByText(/letters, digits and underscores/)).toBeInTheDocument()
   })
 })
+
+describe("GiveToAgentsDialog · kit Segmented (COM-02)", () => {
+  it("Who gets it is the kit control; the arrow keys move between Agents, Crews and Whole workspace", async () => {
+    renderDialog()
+    await screen.findByRole("checkbox", { name: "Give to Fixer" })
+    const who = screen.getByRole("radiogroup", { name: "Who gets it" })
+    expect(who).toHaveAttribute("data-slot", "segmented")
+    fireEvent.keyDown(within(who).getByRole("radio", { name: /Agents/ }), { key: "ArrowRight" })
+    expect(within(who).getByRole("radio", { name: /Crews/ })).toHaveAttribute("aria-checked", "true")
+  })
+})

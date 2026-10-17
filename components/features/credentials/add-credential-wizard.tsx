@@ -59,6 +59,7 @@ import {
 import { cn } from "@/lib/utils"
 import { ACCENT, type Accent } from "@/lib/concept-accents"
 import { BrandPicker } from "./brand-picker"
+import { ProviderKeyTest } from "./provider-key-test"
 import { CREDENTIAL_TIERS } from "./credential-form"
 
 /**
@@ -222,6 +223,8 @@ export function AddCredentialWizard({
   const [ownerId, setOwnerId] = React.useState<string>("")
   const [members, setMembers] = React.useState<Member[]>([])
   const [primaryValue, setPrimaryValue] = React.useState("")
+  // VLT-01: whether the value now in the field passed Test (never the value itself).
+  const [keyTested, setKeyTested] = React.useState(false)
   const [extras, setExtras] = React.useState<Record<string, string>>({})
   const [custom, setCustom] = React.useState<CustomFieldDraft[]>([])
   const [name, setName] = React.useState(initial?.name ?? "")
@@ -970,6 +973,15 @@ export function AddCredentialWizard({
                 )}
                 </div>
                 {attempted && valueError && <p role="alert" className="text-xs text-destructive">{valueError}</p>}
+                {login && !usingDevice && (loginMode === "api_key" || provider === "ANTHROPIC") && (
+                  <ProviderKeyTest
+                    provider={provider}
+                    providerLabel={loginProvider(provider)?.label ?? provider}
+                    mode={loginMode}
+                    value={primaryValue}
+                    onResult={setKeyTested}
+                  />
+                )}
                 {login && !usingDevice && (
                   <details className="space-y-1.5">
                     <summary className="cursor-pointer py-2 type-meta text-muted-foreground">Account owner · {members.find((m) => m.user.id === ownerId)?.user.email || sessionUserEmail || "you"}</summary>
@@ -1082,7 +1094,7 @@ export function AddCredentialWizard({
           <>
             <div className="flex items-center gap-3 rounded-xl border border-border/60 p-3">
               {login ? <BrandIcon className="size-5" /> : <ItemIcon className="size-5" />}
-              <div><h3 className="text-sm font-medium">{name}</h3><p className="text-xs text-muted-foreground">{deviceCredentialId ? "Account saved · finish its setup" : "Connection not tested · save does not verify access"}</p></div>
+              <div><h3 className="text-sm font-medium">{name}</h3><p className="text-xs text-muted-foreground">{deviceCredentialId ? "Account saved · finish its setup" : keyTested ? `Connection tested · the ${loginMode === "api_key" ? "key" : "token"} works` : "Connection not tested · save does not verify access"}</p></div>
             </div>
             <CreateSurfaceSection title={login ? "Pays for" : "How will you use it?"} icon={Users} accent="teal">
               <div className="grid grid-cols-2 gap-2">

@@ -70,6 +70,8 @@ async function stub(page: Page, { role = "OWNER", failList = false, seats = [] }
     else if (path === "/api/v1/provider-logins/pools") body = { items: [POOL], next_cursor: null }
     else if (path === `/api/v1/provider-logins/pools/${POOL.id}`) body = POOL
     else if (path === "/api/v1/me/preferences") body = {}
+    // VLT-01: the pre-save probe. The fixture never echoes the value back.
+    else if (path === "/api/v1/credentials/test") body = { valid: true, supported: true, status: 200 }
     else if (/^\/api\/v1\/credentials\/[^/]+\/access\/me$/.test(path)) body = { actions: { read: { state: "allowed" }, edit: { state: "allowed" } } }
     else if (/^\/api\/v1\/credentials\/[^/]+\/dependents$/.test(path)) body = { routines: [] }
     else if (/^\/api\/v1\/credentials\/bindings$/.test(path)) body = { bindings: [] }
@@ -259,3 +261,36 @@ test("shortcuts: keys 1 and 2 switch the spaces", async ({ page }) => {
   await page.keyboard.press("1")
   await expect(page.getByRole("heading", { level: 1, name: "All secrets" })).toBeVisible()
 })
+
+test("VLT-01 Add AI provider: Test checks an API key before saving and never shows it", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await stub(page, { seats: SEATS })
+  const sent: unknown[] = []
+  page.on("request", (r) => { if (r.url().endsWith("/api/v1/credentials/test")) sent.push(r.postDataJSON()) })
+  await page.goto("/credentials?space=providers")
+  await page.getByRole("button", { name: "Add AI provider", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: /Add AI provider/ })
+  await dialog.getByRole("group", { name: "Choose AI provider" }).getByRole("button", { name: /Claude \/ Anthropic/ }).click()
+  await dialog.getByRole("button", { name: "API key", exact: true }).click()
+  const key = "fixture-" + "k".repeat(32)
+  await dialog.getByLabel(/API key/i).last().fill(key)
+  await dialog.getByRole("button", { name: "Test", exact: true }).click()
+  await expect(dialog.getByText("The key works")).toBeVisible()
+  expect(sent).toEqual([{ provider: "ANTHROPIC", type: "PROVIDER_LOGIN", mode: "api_key", value: key }])
+  expect(await dialog.textContent()).not.toContain(key)
+})
+
+for (const [space, label] of [["secrets", "Filter secrets"], ["providers", "Filter accounts"]] as const) {
+  test(`VLT-12 ${space}: Filter opens the facets inside the panel, not a popover`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await stub(page, { seats: SEATS })
+    await page.goto(`/credentials?space=${space}`)
+    const panel = page.locator("[data-slot=secondary-panel]")
+    const filter = panel.getByRole("button", { name: /^Filter/ })
+    await expect(filter).not.toHaveAttribute("aria-haspopup", "dialog")
+    await filter.click()
+    await expect(panel.getByRole("group", { name: label })).toBeVisible()
+    await filter.click()
+    await expect(panel.getByRole("group", { name: label })).toHaveCount(0)
+  })
+}

@@ -30,6 +30,7 @@ import {
   type ProviderHealthCounts,
 } from "@/lib/credentials/provider-logins"
 import type { ProvidersGroup, ProvidersLayout } from "@/lib/credentials/vault-url-state"
+import { Segmented } from "@/components/ui/segmented"
 import { cn } from "@/lib/utils"
 import { AccountStateMark, LoginBrandMark, QuotaBar } from "./provider-login-bits"
 
@@ -211,29 +212,6 @@ function AccountsTable({ rows, caption, groupOf, onOpen }: { rows: LoginCredenti
   )
 }
 
-function Segment<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: React.ReactNode; aria?: string }[]; onChange: (v: T) => void }) {
-  return (
-    <div role="radiogroup" aria-label={label} className="inline-flex rounded-md border border-border bg-muted/40 p-0.5">
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          role="radio"
-          aria-checked={value === o.value}
-          aria-label={o.aria}
-          onClick={() => onChange(o.value)}
-          className={cn(
-            "kit-tap inline-flex h-6 items-center rounded px-2 text-label transition-colors",
-            value === o.value ? "bg-card font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 export interface AccountsListProps {
   rows: LoginCredential[]
   /** null = the default for the size: list from 13 accounts (cards on a phone). */
@@ -290,8 +268,9 @@ export function AccountsList({ rows, layout, onLayoutChange, group, onGroupChang
         {view === "list" && !fixed && (
           <>
             <span className="text-label text-muted-foreground">Group</span>
-            <Segment
-              label="Group accounts"
+            <Segmented
+              ariaLabel="Group accounts"
+              size="xs"
               value={group}
               onChange={onGroupChange}
               options={[{ value: "none", label: "None" }, { value: "provider", label: "Provider" }, { value: "owner", label: "Owner" }, { value: "pool", label: "Group" }]}
@@ -299,13 +278,14 @@ export function AccountsList({ rows, layout, onLayoutChange, group, onGroupChang
           </>
         )}
         {!fixed && (
-          <Segment
-            label="Show accounts as"
+          <Segmented
+            ariaLabel="Show accounts as"
+            size="xs"
             value={view}
             onChange={onLayoutChange}
             options={[
-              { value: "cards", label: <LayoutGrid className="size-3.5" aria-hidden />, aria: "Cards" },
-              { value: "list", label: <List className="size-3.5" aria-hidden />, aria: "List" },
+              { value: "cards", label: null, icon: LayoutGrid, ariaLabel: "Cards" },
+              { value: "list", label: null, icon: List, ariaLabel: "List" },
             ]}
           />
         )}
