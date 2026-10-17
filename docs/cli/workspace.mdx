@@ -543,3 +543,13 @@ crewship --workspace WORKSPACE --format json workspace member access preset prev
 ```
 
 Table output shows the saved choice or Custom, managed changes, retained orthogonal rights and original issuers/timestamps. Review Results history, execution prerequisites, file-role floors and conditional `delete_issues` eligibility. JSON/YAML/NDJSON preserve the complete normalized selection, provenance, consequences and confirmation checksum, including exact int64 revisions. The checksum supplies no authority; this command never applies a preset. See the [API contract](../api-reference/workspaces.mdx#preview-member-access-preset).
+
+### `crewship workspace member access preset apply MEMBER`
+
+Apply an explicitly reviewed preview using required `--file confirmed.json` or `--file -` for stdin. The JSON document contains only `selection` copied unchanged from preview and its exact `confirmation_digest`. Review preview warnings and provenance before creating this document. Requires current trusted OWNER/ADMIN authority and `workspace:admin` for scoped credentials.
+
+```bash
+crewship --workspace WORKSPACE workspace member access preset apply MEMBER --file confirmed.json
+```
+
+The command resolves the member once, sends one write and returns canonical policy/provenance in table/JSON/YAML/NDJSON. Unknown/trailing/oversized or malformed consent is rejected before network access. Conflicts/denials exit nonzero without rereading, retrying or replacing consent. Recompute and review a new preview after409; inspect current policy first after an uncertain write outcome.

@@ -2645,6 +2645,14 @@ Only this resource's managed operations change in the proposed policy. Unrelated
 
 The response includes `selection`, `definition_hash`, nullable `current_selection`, complete `before` provenance, `changes`, `after_rights`, `orthogonal_rights`, `warnings` and `confirmation_digest`. One snapshot binds membership incarnation/revision, caller/issuer authority, role floors, resource state and exact consequences. Display names and future application timestamps are not authority; the digest never authorizes a write.
 
-Warnings explain Results history, conditional retained issue deletion, runtime gates and draft-only Edit. Preview changes no grants, choices, member revisions or policy audit; ordinary credential-use accounting still applies. No apply route is enabled by this slice.
+Warnings explain Results history, conditional retained issue deletion, runtime gates and draft-only Edit. Preview changes no grants, choices, member revisions or policy audit; ordinary credential-use accounting still applies. Application uses the separate confirmed endpoint described below.
 
 Malformed/version/reissue/trusted-target input returns400; stale membership revision returns409 requiring a fresh preview; hidden/foreign targets return404 without their identities; administrative credential denial returns403. Database errors return500.
+
+## Apply a confirmed member access preset
+
+`POST /api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/apply` requires the same current trusted workspace administrator and `workspace:admin` credential scope as policy replacement. Submit only `{selection: <normalized preview selection>, confirmation_digest: <exact preview checksum>}`. Bounded strict JSON rejects unknown and trailing fields. The existing restricted membership and immutable version/level must still match.
+
+The server recomputes the whole preview in the writer transaction and compares its digest before replacing canonical managed grants. Unrelated rights and unchanged grant IDs/issuers/timestamps remain intact; only deliberately named retained managed rights are reissued as the authenticated actor. It never changes mode, role or future publication authority. Canonical replacement, complete provenance/preset audit and final informational selection commit once. Any audit/selection failure rolls back all grants, revisions and metadata. The no-store response is the current complete administrative member policy with server-computed selections.
+
+Malformed consent returns400; changed membership/authority/resource/consequences returns409 and requires a new reviewed preview; foreign/hidden targets return404; credential denial returns403; transactional failures return500 without partial writes. The server never substitutes a refreshed revision or automatic reissue. On an uncertain network outcome, read current policy before producing new consent.
