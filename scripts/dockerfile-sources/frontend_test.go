@@ -136,6 +136,7 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	jsonImports := regexp.MustCompile(`@/([^"'\s]+\.json)`)
+	relativeImports := regexp.MustCompile(`(?:from\s+|import\s*\(\s*)["'](\.{1,2}/[^"'\s]+\.(?:mjs|js|json))["']`)
 	for _, file := range strings.Split(string(output), "\x00") {
 		if !strings.HasSuffix(file, ".ts") && !strings.HasSuffix(file, ".tsx") {
 			continue
@@ -151,6 +152,17 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 			dependency := string(match[1])
 			if !copiedBy(sources, dependency) {
 				t.Errorf("frontend COPY omits JSON contract %s referenced by %s", dependency, file)
+			}
+		}
+		// Browser adapters can share closed implementations outside the TS
+		// source tree. A full-checkout build hides missing in-image modules.
+		for _, match := range relativeImports.FindAllSubmatch(content, -1) {
+			dependency := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(file), string(match[1]))))
+			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(dependency))); err != nil {
+				t.Fatal(err)
+			}
+			if !copiedBy(sources, dependency) {
+				t.Errorf("frontend COPY omits shared module %s referenced by %s", dependency, file)
 			}
 		}
 		if !copiedBy(sources, file) {
@@ -179,7 +191,7 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 		}
 	}
 	for _, file := range []string{"internal/api/api.go", "cmd/crewship/main.go", "config/embed.go", "config/rate-limits.yml",
-		"schemas/embed.go", "scripts/claim-issue.sh", "tools/gen-licenses/main.go", "docs/README.md"} {
+		"schemas/embed.go", "scripts/claim-issue.sh", "tools/gen-licenses/main.go", "tools/docs-service/service.mjs", "docs/README.md"} {
 		if copiedBy(sources, file) {
 			t.Errorf("backend/unrelated input %s invalidates frontend source cache", file)
 		}
