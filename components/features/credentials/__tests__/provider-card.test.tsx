@@ -94,6 +94,23 @@ describe("AccountsList", () => {
   })
 })
 
+describe("AccountsList · kit Segmented (COM-02)", () => {
+  const list = (n: number) => Array.from({ length: n }, (_, i) => acc(`a${i}`))
+  const props = { onLayoutChange: vi.fn(), group: "none" as const, onGroupChange: vi.fn(), onOpen: vi.fn(), poolOf: () => null }
+
+  it("Show accounts as and Group accounts are the kit control: one tab stop, arrows select", () => {
+    const onGroupChange = vi.fn()
+    render(<AccountsList rows={list(13)} layout="list" {...props} onGroupChange={onGroupChange} />)
+    for (const name of ["Show accounts as", "Group accounts"]) {
+      expect(screen.getByRole("radiogroup", { name })).toHaveAttribute("data-slot", "segmented")
+    }
+    const group = screen.getByRole("radiogroup", { name: "Group accounts" })
+    expect(within(group).getAllByRole("radio").filter((r) => r.tabIndex === 0)).toHaveLength(1)
+    fireEvent.keyDown(within(group).getByRole("radio", { name: "None" }), { key: "ArrowRight" })
+    expect(onGroupChange).toHaveBeenCalledWith("provider")
+  })
+})
+
 describe("ProviderHealth", () => {
   it("counts and opens the views; people is not a door", () => {
     const onOpen = vi.fn()
