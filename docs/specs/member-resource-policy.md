@@ -368,6 +368,20 @@ snapshot; CLI requires the reviewed version and never automatically retries it.
 Live account, local membership, Read/Manage issuers, update and journal entry
 share one transaction. Other client projects and private metadata remain hidden.
 
+Known-project metadata and milestones also open at
+`/issues/manage?project=<known-project-id>` with Read+Manage and no List share.
+The exact route checks only that resource through the dedicated API before
+showing protected fields; it adds no Issues navigation, selector, issue list,
+search or count. Query data never grants access or selects another workspace.
+User/workspace/project changes require fresh verification and reset protected
+drafts; current credential hints still control mutation affordances. Temporary
+workspace-directory loss preserves the existing draft behind the availability
+boundary; it cannot admit another resource. Actual resource access loss clears
+protected fields. An optional explicit `issue_id` opens only that issue's fresh
+deletion preview after project verification, with matching project and current
+Read+Manage+`delete_issues`. Successful confirmed deletion stays on this route
+and preserves the project draft; it never opens an issue collection.
+
 Milestones and explicit issue deletion use dedicated scoped routes. Remaining
 project settings require further scoped enforcement. The original
 PRD's level hierarchy remains a target: current operations are explicit, additive

@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Revoked project data stays hidden during connection errors.** Shared project details, milestones and issue deletion previews require a fresh successful read after access is refused; cached responses and late saves cannot restore the old view.
+
+- Guests with explicit project Read+Manage can open a known-project management link without List. The screen reuses reviewed metadata/milestone forms, preserves drafts during temporary workspace-directory loss, and optionally previews a known issue for confirmed deletion with the separate Delete issues share, without issue discovery or broader grants.
+
 - **Participants can start a conversation in an empty shared chat.** A current authorized execution profile confirms the existing chat without a creator-only create request; every send still rechecks access and refused sends keep the draft.
 
 - **Proposal comments address the chat agent explicitly.** “Send comment to agent” now includes its canonical mention so shared chats trigger the requested reply; rejected sends keep the comment draft.

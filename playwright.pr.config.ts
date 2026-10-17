@@ -8,7 +8,7 @@ import { storageFilePath } from "./e2e/global-setup"
 // coverage.
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["pr-contract.spec.ts", "shared-issue-search-retry.spec.ts"],
+  testMatch: ["pr-contract.spec.ts", "shared-issue-search-retry.spec.ts", "known-project-manage.spec.ts"],
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

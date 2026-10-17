@@ -66,7 +66,10 @@ export default function DashboardLayout({
   // screen's requests are never sent; the root goes to chat.
   const router = useRouter()
   const surfaces = useRestrictedSurfaces()
-  const restrictedBlocked = surfaces !== null && !restrictedPathAllowed(pathname, surfaces)
+  // This exact page mounts only a known resource's server-checked boundary.
+  // It does not offer Issues discovery or widen the navigation surfaces.
+  const knownProjectManagement = pathname === "/issues/manage"
+  const restrictedBlocked = surfaces !== null && !knownProjectManagement && !restrictedPathAllowed(pathname, surfaces)
   const restrictedLanding = restrictedBlocked && pathname === "/" ? restrictedHome(surfaces) : null
   useEffect(() => {
     if (restrictedLanding) router.replace(restrictedLanding)
