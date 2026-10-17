@@ -19,7 +19,13 @@ import {
 import { cn } from "@/lib/utils"
 import { routineRunPresentation } from "@/lib/routine-run-presentation"
 import { RoutineCalendar } from "./routine-calendar"
-import { RoutinesDashboard, windowCoverage } from "./routines-dashboard"
+import { RoutinesDashboard, outcomeKpis, windowCoverage } from "./routines-dashboard"
+import { RoutinesOverviewBoard } from "./routines-overview-board"
+import { useAbilities } from "@/hooks/use-abilities"
+import { useWorkspaceWaitpoints } from "@/hooks/use-workspace-waitpoints"
+import { useBudgetSummary } from "@/hooks/use-routine-budget"
+import { apiFetch } from "@/lib/api-fetch"
+import { toast } from "@/lib/toast"
 import { RoutinesIntro } from "./routines-intro"
 
 // The server caps a run list at 200 rows.
@@ -80,6 +86,8 @@ interface RoutinesWorkspaceProps {
   filters?: RoutineFilterState
   /** Load the list again after an error. */
   onRetry?: () => void
+  /** Open a run page (from Needs you and Running now). */
+  onOpenRun?: (slug: string, runId: string) => void
   /** Open New routine; absent when the person cannot create one. */
   onNew?: () => void
 }
@@ -134,6 +142,20 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
   const displayed = visible.filter(
     (routine) => !filters || matchesRoutineFilters(routineFilterInput(routine), filters, bySlug, search),
   )
+  const { role } = useAbilities()
+  const { waitpoints, decide } = useWorkspaceWaitpoints(props.workspaceId)
+  const { summary: spend } = useBudgetSummary(props.workspaceId)
+  // The 7-day figure counts the history rows of the routines on screen; an
+  // older active run is not part of "the newest N runs" (routines-dashboard).
+  const boardKpis = useMemo(() => {
+    const from = coveredSince ? Date.parse(coveredSince) : NaN
+    const rows = recordedRuns.filter(
+      (r) => displayed.some((p) => p.slug === r.pipeline_slug) && (!Number.isFinite(from) || Date.parse(r.started_at) >= from),
+    )
+    const k = outcomeKpis(rows)
+    return { total: k.total, successPct: k.successPct }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordedRuns, coveredSince, displayed.map((p) => p.slug).join(",")])
 
   // What needs me, first: the newest run parked on a decision for one of
   // these routines, the newest routine that could not finish, and the next
@@ -193,6 +215,33 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                 <RoutinesIntro compact />
               </>
             ) : (
+              <div className="flex flex-col gap-4">
+              {/* RT-OV: figures, Needs you, Running now, Next 24 hours. */}
+              <RoutinesOverviewBoard
+                routines={displayed}
+                activeRuns={activeRuns.filter((r) => displayed.some((p) => p.slug === r.pipeline_slug))}
+                waitpoints={waitpoints}
+                schedules={schedules}
+                pendingStarts={pendingStarts}
+                kpis={boardKpis}
+                coveredSince={coveredSince}
+                spend={spend}
+                role={role}
+                onDecide={async (runId, approved) => {
+                  const ok = await decide(runId, approved)
+                  if (ok) toast.success(approved ? "Approved · the run continues" : "Rejected")
+                  else toast.error("The decision was not accepted", { description: "It may have been answered already. Open the run to see." })
+                  return ok
+                }}
+                onStop={async (runId) => {
+                  const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(props.workspaceId)}/pipelines/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" })
+                  if (!res.ok) toast.error("Could not stop this run. It may already have finished.")
+                  else toast.success("Stop requested")
+                  return res.ok
+                }}
+                onOpenRun={(slug, runId) => props.onOpenRun?.(slug, runId)}
+                onSelect={props.onSelect}
+              />
               <RoutinesDashboard
                 routines={displayed}
                 runs={dashboardRuns}
@@ -202,6 +251,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                 schedules={schedules}
                 onSelect={props.onSelect}
               />
+              </div>
             )}
           </section>
         )}

@@ -96,6 +96,30 @@ describe("<RoutinesOverviewBoard>", () => {
     expect(within(screen.getByRole("region", { name: "Running now" })).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument()
   })
 
+  // Moved from the dashboard's attention strip and running card: an accepted
+  // start that never ran must not leave the page silently, and a start that
+  // waits for a free slot is named as such — no ETA, no position.
+  it("names accepted starts that did not run and those waiting for a free slot", () => {
+    const pendingStarts = [
+      { id: "p_failed", pipeline_slug: "weekly", fire_at: at(-5), status: "failed", last_error: "The routine is no longer active." },
+      { id: "p_expired", pipeline_slug: "pr", fire_at: at(-6), status: "expired" },
+      { id: "p_old", pipeline_slug: "weekly", fire_at: at(-24 * 10), status: "failed" },
+      { id: "p_wait", pipeline_slug: "pr", fire_at: at(-0.1), status: "pending", dispatch_attempts: 2 },
+    ] as never[]
+    render(<RoutinesOverviewBoard {...props({ pendingStarts, activeRuns: [], waitpoints: [] })} />)
+    const needs = screen.getByRole("region", { name: "Needs you" })
+    expect(within(needs).getByText("Weekly report: 1 accepted start did not run")).toBeInTheDocument()
+    expect(within(needs).getByText("Review pull requests: 1 accepted start did not run")).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Running now" })).getByText(/1 start waits for a free slot/)).toBeInTheDocument()
+  })
+
+  it("says so when nothing needs anyone and nothing runs", () => {
+    render(<RoutinesOverviewBoard {...props({ routines: [], activeRuns: [], waitpoints: [], schedules: [] })} />)
+    expect(screen.getByText(/No decision is waiting/)).toBeInTheDocument()
+    expect(screen.getByText("Nothing is running right now.")).toBeInTheDocument()
+    expect(screen.getByText("Nothing is planned for the next 24 hours.")).toBeInTheDocument()
+  })
+
   it("Next 24 hours lists the starts due within a day, with a way to the calendar", () => {
     render(<RoutinesOverviewBoard {...props({ pendingStarts: [{ id: "ps", pipeline_slug: "pr", fire_at: at(5), status: "pending" }] as never[] })} />)
     const card = screen.getByRole("region", { name: "Next 24 hours" })
