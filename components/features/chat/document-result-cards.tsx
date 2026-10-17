@@ -5,9 +5,9 @@ import { useDocumentChatResults, DocumentChatResultsError } from "@/hooks/use-do
 import { Button } from "@/components/ui/button"
 
 export function DocumentResultCards({ workspaceId, chatId, isStreaming, currentUserId, documentsEnabled = false }: { workspaceId: string; chatId: string; isStreaming: boolean; currentUserId?: string | null; documentsEnabled?: boolean }) {
-  const query = useDocumentChatResults(workspaceId, chatId, isStreaming, documentsEnabled)
+  const query = useDocumentChatResults(workspaceId, chatId, currentUserId, isStreaming, documentsEnabled)
   const [expanded, setExpanded] = useState(false)
-  if (!documentsEnabled || !workspaceId || !chatId) return null
+  if (!documentsEnabled || !workspaceId || !chatId || !currentUserId) return null
   if (query.error instanceof DocumentChatResultsError && [401, 403, 404].includes(query.error.status)) return null
   const results = query.data?.results ?? []
   if (!results.length) return null

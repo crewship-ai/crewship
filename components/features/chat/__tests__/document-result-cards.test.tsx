@@ -42,7 +42,7 @@ it("removes private content and cache after a current authorization refusal", as
   status = 403
   await act(async () => { await view.client.invalidateQueries({ queryKey: ["document-chat-results"] }) })
   await waitFor(() => expect(screen.queryByText("Finished plan")).toBeNull())
-  expect(view.client.getQueryData(["document-chat-results", "ws /&", "chat"])).toEqual({ results: [] })
+  expect(view.client.getQueryData(["document-chat-results", "ws /&", "chat", "human"])).toEqual({ results: [] })
 })
 it("retains the last authorized card with an honest warning on transient failure", async () => {
   const view = mount()
@@ -51,4 +51,37 @@ it("retains the last authorized card with an honest warning on transient failure
   await act(async () => { await view.client.invalidateQueries({ queryKey: ["document-chat-results"] }) })
   expect(screen.getByText("Finished plan")).toBeTruthy()
   expect(await screen.findByText(/Showing the last authorized results/)).toBeTruthy()
+})
+
+it("never shows the previous human's private card while the next identity waits or fails", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } })
+  clients.push(client)
+  let rejectNext!: (error: Error) => void
+  const nextResponse = new Promise<Response>((_resolve, reject) => { rejectNext = reject })
+  vi.mocked(apiFetch).mockResolvedValueOnce(new Response(JSON.stringify({ results: [row] })))
+    .mockImplementation(() => nextResponse)
+  const content = (userId: string) => <QueryClientProvider client={client}><DocumentResultCards workspaceId="same-workspace" chatId="same-chat" isStreaming={false} currentUserId={userId} documentsEnabled /></QueryClientProvider>
+  const view = render(content("human-a"))
+  await screen.findByRole("link", { name: "Open document Finished plan" })
+  view.rerender(content("human-b"))
+  expect(screen.queryByText("Finished plan")).toBeNull()
+  expect(screen.queryByRole("link", { name: "Open document Finished plan" })).toBeNull()
+  await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.length).toBeGreaterThanOrEqual(2))
+  await act(async () => { rejectNext(new Error("synthetic next-user network failure")) })
+  await waitFor(() => expect(client.isFetching()).toBe(0))
+  expect(screen.queryByText("Finished plan")).toBeNull()
+  expect(screen.queryByRole("link", { name: "Open document Finished plan" })).toBeNull()
+})
+
+it("immediately hides authorized cards when the current human identity becomes unavailable", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } })
+  clients.push(client)
+  const content = (userId?: string) => <QueryClientProvider client={client}><DocumentResultCards workspaceId="workspace" chatId="chat" isStreaming={false} currentUserId={userId} documentsEnabled /></QueryClientProvider>
+  const view = render(content("human"))
+  await screen.findByRole("link", { name: "Open document Finished plan" })
+  const calls = vi.mocked(apiFetch).mock.calls.length
+  view.rerender(content())
+  expect(screen.queryByText("Finished plan")).toBeNull()
+  expect(screen.queryByRole("link", { name: "Open document Finished plan" })).toBeNull()
+  expect(vi.mocked(apiFetch).mock.calls).toHaveLength(calls)
 })
