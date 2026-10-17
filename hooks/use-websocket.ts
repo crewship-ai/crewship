@@ -127,6 +127,10 @@ export function useWebSocket({
   const disconnectingRef = useRef(false)
   const terminatedRef = useRef(false)
   const unavailableRef = useRef(false)
+  // Set only by terminateTransport: the automatic loop gave up, which a
+  // person pressing "Retry now" may override (retryNow below). An auth or an
+  // unavailable termination stays final.
+  const transportGaveUpRef = useRef(false)
 
   // Use refs for callbacks to prevent reconnection loops when consumers
   // pass non-memoized functions.
@@ -167,6 +171,7 @@ export function useWebSocket({
 
   const terminateTransport = useCallback(() => {
     terminatedRef.current = true
+    transportGaveUpRef.current = true
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current)
       reconnectTimerRef.current = undefined
@@ -233,7 +238,7 @@ export function useWebSocket({
       }
       const delay = backoffDelay(attempts)
       reconnectAttemptsRef.current = attempts + 1
-      reconnectTimerRef.current = setTimeout(() => { void connect() }, delay)
+      reconnectTimerRef.current = setTimeout(() => { reconnectTimerRef.current = undefined; void connect() }, delay)
       return
     }
 
@@ -324,7 +329,7 @@ export function useWebSocket({
       }
       const delay = backoffDelay(attempts)
       reconnectAttemptsRef.current = attempts + 1
-      reconnectTimerRef.current = setTimeout(() => { void connect() }, delay)
+      reconnectTimerRef.current = setTimeout(() => { reconnectTimerRef.current = undefined; void connect() }, delay)
     }
   }, [url, enabled, updateStatus, terminateAuth, terminateTransport, terminateUnavailable])
 
@@ -332,6 +337,7 @@ export function useWebSocket({
     disconnectingRef.current = true
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = undefined
     }
     const ws = wsRef.current
     wsRef.current = null
@@ -378,7 +384,32 @@ export function useWebSocket({
     return () => disconnect()
   }, [connect, disconnect, enabled])
 
-  return { status, send, disconnect, reconnect: () => { void connect() } }
+  /**
+   * "Retry now" from the reconnecting banner: try at once with a fresh
+   * backoff budget instead of waiting for the next scheduled attempt — also
+   * after the automatic loop gave up. Does nothing while a socket is open or
+   * opening, or when realtime is unavailable or the session is dead.
+   */
+  const retryNow = useCallback(() => {
+    if (!enabled || unavailableRef.current) return
+    // Only two states may be cut short: an attempt waiting on its backoff
+    // timer, and a loop that gave up. Anything else is a connect in flight
+    // (ticket request or socket opening) or an open socket, and a second
+    // connect would leak a socket.
+    const waiting = reconnectTimerRef.current !== undefined && !terminatedRef.current
+    const gaveUp = terminatedRef.current && transportGaveUpRef.current
+    if (!waiting && !gaveUp) return
+    terminatedRef.current = false
+    transportGaveUpRef.current = false
+    reconnectAttemptsRef.current = 0
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = undefined
+    }
+    void connect()
+  }, [enabled, connect])
+
+  return { status, send, disconnect, reconnect: () => { void connect() }, retryNow }
 }
 
 /** Compute WS URL at runtime via the server-base seam (lib/server-base.ts).

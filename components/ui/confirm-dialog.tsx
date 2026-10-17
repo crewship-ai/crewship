@@ -37,14 +37,26 @@ export interface ConfirmDialogProps {
   description?: React.ReactNode
   /** What is lost, kept, or worth a warning — each its own line. */
   consequences?: Consequence[]
-  confirmLabel: string
+  /** Required unless `closeOnly`. */
+  confirmLabel?: string
   cancelLabel?: string
   /** Red confirm for deletes and revokes; the default is the soft primary. */
   destructive?: boolean
   /** Require this exact text before the confirm button enables. */
   typeToConfirm?: string
-  /** Called on confirm; the dialog closes when it resolves. */
-  onConfirm: () => void | Promise<void>
+  /** Called on confirm; the dialog closes when it resolves. Required unless `closeOnly`. */
+  onConfirm?: () => void | Promise<void>
+  /**
+   * A notice with nothing to decide — "This can't be undone from here" — so
+   * the footer is one button, labelled `cancelLabel` (default "Close").
+   */
+  closeOnly?: boolean
+  /**
+   * A field between the consequences and the footer — a reason, a "also
+   * revoke tokens" checkbox. The caller owns its state and reads it in
+   * `onConfirm`.
+   */
+  children?: React.ReactNode
 }
 
 const TONE_ICON: Record<ConsequenceTone, { Icon: React.ComponentType<{ className?: string }>; className: string }> = {
@@ -60,11 +72,14 @@ export function ConfirmDialog({
   description,
   consequences = [],
   confirmLabel,
-  cancelLabel = "Cancel",
+  cancelLabel: cancelLabelProp,
   destructive = false,
   typeToConfirm,
   onConfirm,
+  closeOnly = false,
+  children,
 }: ConfirmDialogProps) {
+  const cancelLabel = cancelLabelProp ?? (closeOnly ? "Close" : "Cancel")
   const [typed, setTyped] = React.useState("")
   const [busy, setBusy] = React.useState(false)
   const inputId = React.useId()
@@ -99,7 +114,8 @@ export function ConfirmDialog({
             })}
           </ul>
         )}
-        {typeToConfirm != null && (
+        {children != null && <div className="flex flex-col gap-2" data-slot="confirm-field">{children}</div>}
+        {typeToConfirm != null && !closeOnly && (
           <label htmlFor={inputId} className="flex flex-col gap-1.5 text-label text-muted-foreground">
             <span>
               Type <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro text-foreground/85">{typeToConfirm}</code> to confirm
@@ -116,6 +132,7 @@ export function ConfirmDialog({
         )}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>{cancelLabel}</AlertDialogCancel>
+          {!closeOnly && (
           <AlertDialogAction
             disabled={disabled}
             aria-disabled={disabled || undefined}
@@ -129,7 +146,7 @@ export function ConfirmDialog({
               if (disabled) return
               setBusy(true)
               try {
-                await onConfirm()
+                await onConfirm?.()
                 onOpenChange(false)
               } catch {
                 // The caller has already said what went wrong (a toast); the
@@ -141,6 +158,7 @@ export function ConfirmDialog({
           >
             {busy ? "Working…" : confirmLabel}
           </AlertDialogAction>
+          )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
