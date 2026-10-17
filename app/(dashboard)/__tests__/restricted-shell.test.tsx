@@ -214,6 +214,24 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     expect(within(bar).queryByRole("link", { name: "Inbox" })).toBeNull()
   })
 
+  it("mounts only the exact known-project management boundary without Issues discovery", async () => {
+    workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: ["account_security"] }]
+    nav.pathname = "/issues/manage"
+    mount(<div data-testid="known-project-boundary">Known project access check</div>)
+    expect(await screen.findByTestId("known-project-boundary")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Issues" })).toBeNull()
+    expect(forbidden()).toEqual([])
+  })
+
+  it.each(["/issues", "/issues/manage/other", "/issues/manage-all"])("does not widen adjacent management path %s", async pathname => {
+    workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: ["account_security"] }]
+    nav.pathname = pathname
+    mount()
+    expect(await screen.findByText("Not available with your access")).toBeInTheDocument()
+    expect(screen.queryByTestId("page")).toBeNull()
+    expect(forbidden()).toEqual([])
+  })
+
   it("shows the unavailable page for a forbidden URL and never mounts the screen", async () => {
     nav.pathname = "/issues"
     mount()

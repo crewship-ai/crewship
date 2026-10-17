@@ -63,6 +63,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"restricted_workflow_jobs":              IntentExcludeRuntime, // copying private queue capsules must not replay paid work
 	"restricted_workflow_attempt_roots":     IntentExcludeRuntime, // dispatch fences and stop identities belong to excluded work attempts; never transplant runtime authority
 	"access_files":                          IntentExcludeRuntime, // classified outputs depend on excluded attempt authority
+	"access_preset_selections":              IntentInclude,        // saved explicit intent, never execution authority
 	"access_grants":                         IntentInclude,        // exact member/resource rights survive restore
 	"access_context_dependencies":           IntentExcludeRuntime, // dependency authority requires fresh admission
 	"access_context":                        IntentExcludeRuntime, // prompt context requires fresh admission

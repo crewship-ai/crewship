@@ -92,6 +92,16 @@ crewship-<scope>-<slug>-<iso-ts>.tar.zst
 - **Default location:** `$CREWSHIP_DATA_DIR/backups/` on the server (mode `0700`), or `~/.crewship/backups/` when `CREWSHIP_DATA_DIR` is unset — the same root every other piece of per-instance state resolves against, so isolated instances on one host never share a bundle directory. `--output`/`output_dir` overrides it explicitly.
 - **Naming:** `crewship-<scope>-<slug>-<iso-ts>.tar.zst`. Collisions append `-<hash8>`.
 
+Explicit resource-preset choice provenance is included as informational metadata
+alongside canonical resource grants. Workspace backups carry only the historical
+selecting users actually referenced by that workspace, including selectors no
+longer in its roster. Fork restores remap typed membership/resource IDs while
+preserving the immutable definition hash. Older bundles have no saved choices;
+restore does not infer one from matching grants. Custom category subsets omit
+choice labels whose resource or membership is not carried, leaving canonical
+grants unchanged. This foundation does not enable preset application or revive
+in-flight execution authority.
+
 Inside `payload.age`, bundles carry three distinct notions of "memory" — don't confuse them:
 
 - **Per-crew agent and crew-shared memory** (`crew/<slug>` section) — the real memory tree: `/crew/shared/.memory` and `/crew/agents/<agent-slug>/.memory` inside the crew container. This is what an agent accumulates and what is hardest to regenerate. Collected by the docker phase, at every scope level including `quick`.

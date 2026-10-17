@@ -10,6 +10,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - **Human-owned content can be handed over explicitly.** Workspace administrators can review eligible readers and transfer custody while preserving content and grants. Private content requires a human successor before its owner leaves; ordinary Pages retain their existing succession behavior.
+- Index preset selection ownership, resources and selectors for parent cleanup and scoped backup lookups.
+
+- **Revoked project data stays hidden during connection errors.** Shared project details, milestones and issue deletion previews require a fresh successful read after access is refused; cached responses and late saves cannot restore the old view.
+
+- Guests with explicit project Read+Manage can open a known-project management link without List. The screen reuses reviewed metadata/milestone forms, preserves drafts during temporary workspace-directory loss, and optionally previews a known issue for confirmed deletion with the separate Delete issues share, without issue discovery or broader grants.
+
 - **Participants can start a conversation in an empty shared chat.** A current authorized execution profile confirms the existing chat without a creator-only create request; every send still rechecks access and refused sends keep the draft.
 
 - **Proposal comments address the chat agent explicitly.** “Send comment to agent” now includes its canonical mention so shared chats trigger the requested reply; rejected sends keep the comment draft.
@@ -37,6 +43,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Shared issue searches visit only projects with live List grants.** Search and counts resolve current grant authority before reading issues, avoiding scans of hidden workspace issues. Issuer demotion/suspension and Read/Contribute without List return no list results.
 
 - **Guests can search shared issue titles and identifiers in UI and CLI.** Filtering and total counts retain live project grants; hidden descriptions, comments and unrelated projects are excluded. A new search starts from the first page in the UI. Creation confirmation remains visible when the filter hides the new issue.
+
+- **Shared issue searches explain temporary rate limits.** The browser keeps results and search drafts, pauses search polling and disables repeated requests until the retry interval ends. A definitive access denial discards old results so later throttled retries cannot restore them. CLI commands print retry guidance, exit 6 and require an explicit retry.
 - **Reloading a shared routine draft now discards local edits even when its saved revision has not changed.** A failed reload retains the local edits, and background refreshes of the same revision keep them.
 - **Agent images and charts appear in chat.** Authorized PNG, JPEG and WebP outputs from the reply’s run render inline with a filename caption, alt text and byte version. Access rechecks remove unavailable images; SVG and disguised active content stay outside the viewer.
 - **Decision reply drafts remain scoped to their viewer and source.** Reload restores an uncertain reply with its original retry key; definitive access loss removes protected recovery, and paginated source lists reconcile as complete snapshots.
@@ -87,6 +95,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - ⚠️ **Behaviour change:** Page shares become inactive when their issuer is suspended or restricted as a Guest anywhere. Existing share metadata remains visible to Page administrators with an account-status explanation.
 - ⚠️ Tokens with limited scopes can no longer create successor tokens or pairing codes. Use an interactive sign-in to create credentials; trusted full-role token creation remains available.
+
+- Internal foundations preserve explicit versioned resource-preset choice provenance through backup and fork restore. Existing grants remain unchanged and no preset selector/API/CLI is enabled yet; immutable v1 bundles, managed-edit invalidation and empty migration state prepare #3271.
 
 - Guests with an explicit routine View share can inspect its definition without an execution runtime or agent Run grants. Stored Run grants retain their existing invocation-only disclosure; View does not expose another person’s private runs. UI, CLI and access explanations use the same live issuer policy.
 - Guests with explicit project Read and Manage shares can edit shared project names and descriptions. UI and CLI preserve review snapshots and refuse conflicting saves; private project metadata and unrelated operations remain inaccessible.
@@ -416,6 +426,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Shared project management now has a verified CLI/API contract.** Real-router acceptance checks known-project Read+Manage without List, unrelated-client isolation, metadata and milestones, separate issue deletion, narrow credentials, active work, conflicts, audit rollback and live issuer revocation. Existing rights remain independent.
+
+
 - **Required Go race checks run in smaller parallel groups.** The API suite is split into four complete test partitions and the remaining race-tested packages into two balanced groups. Every partition remains required, with coverage evidence, distinct timing artifacts and the existing timeout and aggregate budget checks (#2886).
 
 - Live chat demo scripts now require `--state-dir` or `CREWSHIP_CHAT_DEMO_DIR` for private credentials, outside the checkout. The fleet-watch example requires `CREWSHIP_FLEET_ROOT` instead of assuming a workstation checkout path. Existing demos can reuse their state by selecting its current directory.
@@ -423,6 +436,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Public documentation now separates product contracts from internal working records and prototypes. Start at `docs/README.md` for guides, specifications and decisions; contributor instructions remain in `AGENTS.md`. Assistant-specific workstation files are ignored and rejected by the tracked-path CI guard. Public builds need no private context checkout. (#2778)
 
 - ⚠️ **Behaviour change:** Restricted routine, Page and assigned-issue runs now use the shared work ledger and dispatcher. Interrupted runs with uncertain effects show “Needs review” and require reconciliation before outputs are released or new work repeats; legacy running jobs are adopted into this state.
+
+- **Shared Guest issue searches have a bounded rate budget.** Browser sessions and CLI tokens share account/workspace and project budgets, including empty searches and pagination. Temporary limits return 429 with retry guidance; existing project audiences, counts and detail permissions are preserved.
+- Cap shared issue search limiter memory globally at 32768 lazy audiences, retaining active budgets and reclaiming only safely expired entries.
 
 ### Fixed
 

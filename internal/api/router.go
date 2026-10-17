@@ -230,6 +230,7 @@ type Router struct {
 	// the wrapped muxes above, retained so a runtime override from the admin
 	// Rate Limiters console (ratelimitStore.OnChange) can retune them in place
 	// — SetReqPerMin — without rebuilding the handler chain.
+	sharedSearch   *sharedSearchLimiter
 	authRL         *RateLimiter
 	apiRL          *RateLimiter
 	credTestRL     *RateLimiter
@@ -853,6 +854,7 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	authMw := NewAuthMiddleware(validator, sessionsStore, db, logger)
 
 	r := &Router{
+		sharedSearch:  newSharedSearchLimiter(),
 		mux:           newRouteMux(),
 		db:            db,
 		logger:        logger,

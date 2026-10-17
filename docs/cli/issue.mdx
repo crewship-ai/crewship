@@ -823,6 +823,12 @@ comments. SQLite ASCII case folding applies; `%` and `_` are literal. Search doe
 not change pagination offsets automatically in CLI; pass `--offset 0` for a new
 search. Combining `--search` with an issue identifier is rejected locally.
 
+Shared collection requests use the same per-user/workspace budget as the browser
+and every CLI token: default 20/minute (burst 15), plus 20/minute (burst 5) per
+project or all-project selection. Empty search and pagination count too. A 429
+prints the server retry guidance and exits 6 without retrying automatically.
+Wait before rerunning; HTTP scripts should honor `Retry-After` seconds.
+
 Trusted collaborators can explicitly publish a new project comment with
 `crewship issue comment CLIENT-1 --body "Staff answer" --guest-visible`.
 Omitting `--guest-visible` keeps it private. Agent mentions must remain in private

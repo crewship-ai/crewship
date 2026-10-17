@@ -162,6 +162,13 @@ cache path explicitly when the Go test isolates HOME:
 PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_MEMBER_NAV_BROWSER=1 go test -tags member_navigation_browser ./internal/api -run '^TestMemberNavigationBrowser$' -count=1 -timeout 6m
 ```
 
+Set `CREWSHIP_ISSUES_MANAGE_BROWSER=1` with the same tagged harness to run
+`acceptance-known-project-manage-browser.mjs` instead of the broad navigation
+journey. It verifies known-ID metadata/milestone UI with real Router/DB sessions,
+two independent clients, Read+Manage without List, reviewed conflicts and access
+revocation. It records and rejects catalog, issue collection/count, trusted and
+execution requests. No API responses are mocked.
+
 `CREWSHIP_MEMBER_NAV_OUTPUT` optionally selects the report/screenshot directory;
 the default is an OS temporary path. The fixture JSON is created with mode 0600
 and deleted by the Go test; reports contain synthetic results, not session tokens.

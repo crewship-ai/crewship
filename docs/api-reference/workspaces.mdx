@@ -2199,7 +2199,18 @@ included. `X-Total-Count` counts the filtered total and `X-Next-Offset` pages re
 | `401` | Authentication required |
 | `403` | Workspace authentication gate denied |
 | `404` | Unavailable Guest membership/project |
+| `429` | Temporary search budget/capacity refusal; honor `Retry-After` |
 | `500` | Database error |
+
+Collection searches and empty-query lists share an authenticated user/workspace
+budget across browser sessions and CLI tokens: default 20 requests/minute with
+burst 15, and 20/minute with burst 5 per authorized project or all-project
+selection. Query/offset changes do not reset the budget. A temporary refusal
+returns `429`, `Cache-Control: no-store` and integer `Retry-After` seconds, with
+a generic retry message and no workspace/audience counts. Scripts should wait
+at least that interval. Details and comments retain their separate behavior.
+The in-memory policy applies per server process, and finite capacity can also
+produce the same temporary refusal.
 
 ## Guest project issue detail
 

@@ -51,6 +51,8 @@ type Meta struct {
 // Registry keys. Exported so call sites reference a symbol, not a string
 // literal that could drift from the registry and silently read the default.
 const (
+	KeySharedSearchAccount  = "issues.shared_search_account_per_min"
+	KeySharedSearchProject  = "issues.shared_search_project_per_min"
 	KeyHTTPAuthPerMin       = "http.auth_per_min"
 	KeyHTTPAPIPerMin        = "http.api_per_min"
 	KeyHTTPCredTestPerMin   = "http.cred_test_per_min"
@@ -107,6 +109,8 @@ const lockoutThresholdMax = 1000
 // See defaults_headroom_test.go, which asserts the headroom rather than the
 // numbers, so a future tightening has to argue with a measurement.
 var registry = []Meta{
+	{KeySharedSearchAccount, "Issues", "Shared issue account search rate", "List/search requests per user and workspace across all browser sessions and CLI tokens; burst 15.", "requests/min", 20, 1, hardMax},
+	{KeySharedSearchProject, "Issues", "Shared issue project search rate", "List/search requests per user, workspace and authorized project (or all-project selection); burst 5.", "requests/min", 20, 1, hardMax},
 	// The per-IP auth bucket bounds two different things, and only one of
 	// them has a second layer. Repeated guesses at ONE account are bounded by
 	// the lockout counter (50 consecutive failures, KeyLoginLockoutThresh),

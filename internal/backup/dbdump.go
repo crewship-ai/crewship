@@ -219,6 +219,7 @@ var BackupTables = []string{
 	"assignments",
 	"approvals_queue",
 	"pipelines",
+	"access_preset_selections", // informational choice; after membership and typed resource parents
 	"pipeline_versions",
 	"pipeline_drafts",
 	"pipeline_schedules",
@@ -649,6 +650,10 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			if hasMembers {
 				where = "(" + where + `) OR id IN (SELECT user_id FROM workspace_members WHERE workspace_id = ?)`
 				args = append(args, workspaceID)
+			}
+			where, args, err = includePresetSelectionUsers(ctx, tx, workspaceID, where, args)
+			if err != nil {
+				return nil, err
 			}
 			where, args, err = includeConversationUsers(ctx, tx, workspaceID, where, args)
 			if err != nil {

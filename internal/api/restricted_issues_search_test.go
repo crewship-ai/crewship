@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
 )
@@ -47,6 +48,9 @@ func TestRestrictedIssuesSearchPreservesProjectAudience(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(router.Shutdown)
+	// Audience/SQL regressions exercise separate requests, not limiter exhaustion.
+	searchClock := time.Now()
+	router.sharedSearch.now = func() time.Time { searchClock = searchClock.Add(time.Minute); return searchClock }
 	tokens := map[string]string{}
 	for _, user := range []string{"search-a", "search-b"} {
 		tokens[user] = mintTokenFor(t, db, user, user+"-"+strings.Repeat("0", 40))

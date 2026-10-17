@@ -123,6 +123,24 @@ admission. Changes in an unrelated workspace do not revoke valid local shares.
 The upgrade preserves valid and inert grant metadata and fences work whose
 issuer was already unavailable. Effective access explains an unavailable issuer.
 
+### Ordered preset foundations (not enabled)
+
+The immutable v1 catalog defines routine View (`view,results`), Run
+(`view,results,run`) and draft-only Edit (`view,results,run,edit`), plus project
+View (`list,read`), Contribute (`list,read,contribute`) and Manage
+(`list,read,contribute,manage`). Publication and `delete_issues` remain separate.
+These are future explicit bundles: this foundation exposes no preset application
+route, CLI command or selector and changes no existing grants or access mode.
+
+An empty-on-upgrade `access_preset_selections` table preserves deliberately saved
+choice provenance separately from canonical `access_grants`. Matching independent
+grants remain Custom. Managed grant edits invalidate a saved label; orthogonal
+rights, unrelated revisions and issuer liveness changes preserve saved intent.
+Inactive grants stay inactive. Versioned definitions are immutable, with no
+backfill or automatic reissue. Applying and previewing these bundles, including
+regular-results disclosure and retained destructive consequences, require the
+subsequent API/CLI/UI work tracked by #3271.
+
 Supported operations:
 
 | Resource | Operations | Current scope |
@@ -158,6 +176,14 @@ CLI: `crewship issue shared --project PROJECT_ID` lists a shared project;
 `--offset` page the catalog without using shared workspace issue endpoints.
 `--search TEXT` filters shared issue titles and identifiers, without searching
 private descriptions or comments. It is only valid for the collection command.
+On a temporary 429 the browser preserves the current result view and search
+draft, pauses collection polling and disables search/refresh/pagination until
+the bounded Retry-After interval ends, then checks again. User/workspace
+changes clear that state. Definitive 401/403/404 responses discard the result
+projection; a subsequent 429 or failed query cannot restore its cached titles.
+Only a fresh successful response restores results. Project metadata and
+contribution forms retain their separate requests. CLI prints the server retry guidance, exits 6 and does not
+retry automatically.
 
 The list accepts `project_id`, `limit`, `offset` and optional `q` (up to 256
 Unicode characters, trimmed). Search is a literal substring of title or identifier,
@@ -174,6 +200,26 @@ issue board, global search and statistics routes remain closed to Guests;
 searching this dedicated Guest projection does not open them. Collection
 `X-Total-Count` counts the filtered total before pagination; the next-offset header
 supports pagination.
+
+Shared issue collection requests (including empty search and pagination) have a
+per-process authenticated budget shared by browser sessions and CLI tokens of the
+same user/workspace: default 20/minute, burst 15, plus 20/minute, burst 5 for
+each explicitly authorized project or the all-project selection. Both budgets
+are charged together only when admitted. Query text, offset and IP do not create
+new budgets. Detail, comments and project metadata are outside this policy.
+Invalid inputs and forbidden explicit projects retain their existing errors.
+A refusal returns generic 429, `Cache-Control: no-store` and rounded-up
+`Retry-After` seconds; it discloses no audience or workspace counts.
+
+The lazy limiter retains at most 4096 user/workspace entries and 257 audiences
+per entry (256 valid List projects plus all-projects), and 32768 audiences
+globally. Existing audiences remain usable at capacity; a refused new audience
+does not allocate an empty account or charge either budget. Capacity overflow is the
+same transient 429; active entries are never evicted to grant a fresh burst.
+Idle entries expire after at least five minutes and the configured full-refill
+interval. Rate settings are exposed in Rate Limiters; process restart resets
+these in-memory budgets and replicas enforce their own budgets. Rate limiting
+does not truncate counts or bound the cost of one large authorized search.
 
 The web catalog keeps an unsubmitted new-issue draft when the search changes.
 A confirmed creation shows its identifier and, when readable, a detail link even
@@ -340,6 +386,20 @@ snapshot; CLI requires the reviewed version and never automatically retries it.
 Live account, local membership, Read/Manage issuers, update and journal entry
 share one transaction. Other client projects and private metadata remain hidden.
 
+Known-project metadata and milestones also open at
+`/issues/manage?project=<known-project-id>` with Read+Manage and no List share.
+The exact route checks only that resource through the dedicated API before
+showing protected fields; it adds no Issues navigation, selector, issue list,
+search or count. Query data never grants access or selects another workspace.
+User/workspace/project changes require fresh verification and reset protected
+drafts; current credential hints still control mutation affordances. Temporary
+workspace-directory loss preserves the existing draft behind the availability
+boundary; it cannot admit another resource. Actual resource access loss clears
+protected fields. An optional explicit `issue_id` opens only that issue's fresh
+deletion preview after project verification, with matching project and current
+Read+Manage+`delete_issues`. Successful confirmed deletion stays on this route
+and preserves the project draft; it never opens an issue collection.
+
 Milestones and explicit issue deletion use dedicated scoped routes. Remaining
 project settings require further scoped enforcement. The original
 PRD's level hierarchy remains a target: current operations are explicit, additive
@@ -453,3 +513,5 @@ Selected output content is capped at 256 KiB before loading; the encoded
 response is capped at 1 MiB. Oversized details return 413 while list metadata
 remains available. Final and step outputs are credential-scrubbed on read,
 including historical stored content; final output is also scrubbed on persist.
+
+Preset selection workspace, membership, resource and selector foreign keys have leading indexes. The workspace index also covers member lookups, so parent cleanup and scoped backup reads avoid scanning every selection.
