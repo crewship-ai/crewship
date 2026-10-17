@@ -4,14 +4,11 @@ import { useEffect, useState } from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -108,22 +105,30 @@ export function CreateMissionDialog({
     }
   }
 
+  const canSubmit = !saving && !!title.trim() && !!leadAgentId
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" className="gap-1">
-          <Plus className="h-3.5 w-3.5" />
-          Create Mission
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Create Mission</DialogTitle>
-          <DialogDescription>
-            Create a new mission for the lead agent to plan and execute.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 py-2">
+    <>
+      <Button size="sm" className="gap-1" onClick={() => setOpen(true)} aria-haspopup="dialog">
+        <Plus className="h-3.5 w-3.5" />
+        Create Mission
+      </Button>
+      <CreateSurface
+        open={open}
+        onOpenChange={setOpen}
+        size="md"
+        restoreOpenerFocus
+        dirty={!!title.trim() || !!description.trim()}
+        discardLabel="this mission"
+        onSubmit={() => { if (canSubmit) void handleSubmit() }}
+      >
+        <CreateSurfaceHeader
+          concept="missions"
+          title="Create Mission"
+          description="Create a new mission for the lead agent to plan and execute."
+          onClose={() => setOpen(false)}
+        />
+        <CreateSurfaceBody className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="mission-title">Title</Label>
             <Input
@@ -189,16 +194,15 @@ export function CreateMissionDialog({
               </p>
             </div>
           )}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={saving || !title.trim() || !leadAgentId}>
-            {saving ? "Creating..." : "Create Mission"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </CreateSurfaceBody>
+        <CreateSurfaceFooter
+          onCancel={() => setOpen(false)}
+          primaryLabel={saving ? "Creating..." : "Create Mission"}
+          onPrimary={() => void handleSubmit()}
+          primaryDisabled={!title.trim() || !leadAgentId}
+          busy={saving}
+        />
+      </CreateSurface>
+    </>
   )
 }

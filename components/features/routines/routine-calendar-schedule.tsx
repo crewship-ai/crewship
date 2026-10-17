@@ -2,18 +2,18 @@
 
 import { formatRoutineTime } from "@/lib/routine-time"
 
-import { useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import type { Pipeline } from "@/hooks/use-pipelines"
+import { CalendarClock } from "lucide-react"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog"
-import { InputsForm } from "./routine-run-inputs-dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
+import { InputsForm, inputsSubmitContent, submitInputsForm } from "./routine-run-inputs-dialog"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { dateKey, scheduledInstant } from "@/lib/routine-calendar"
 
@@ -40,6 +40,7 @@ export function RoutineCalendarSchedule({
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [retry, setRetry] = useState(0)
+  const formId = useId()
   const eligible = routines.filter((r) => !r.status || r.status === "active")
   useEffect(() => {
     const controller = new AbortController()
@@ -99,21 +100,25 @@ export function RoutineCalendarSchedule({
       setSaving(false)
     }
   }
+  const dismiss = () => {
+    if (!saving) onClose()
+  }
+  const formReady = specs !== null && loadedSlug === slug
   return (
-    <Dialog
+    <CreateSurface
       open
-      onOpenChange={(open) => {
-        if (!open && !saving) onClose()
-      }}
+      onOpenChange={(open) => !open && dismiss()}
+      size="sm"
+      onSubmit={() => formReady && submitInputsForm(formId)}
     >
-      <DialogContent className="max-h-[90dvh] overflow-y-auto border-border bg-card sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Schedule a routine</DialogTitle>
-          <DialogDescription>
-            Choose an existing recipe and its inputs for one scheduled start. Repeating schedules
-            can be managed in the routine’s Plan.
-          </DialogDescription>
-        </DialogHeader>
+      <CreateSurfaceHeader
+        concept="routines"
+        icon={CalendarClock}
+        title="Schedule a routine"
+        description="Choose an existing recipe and its inputs for one scheduled start. Repeating schedules can be managed in the routine’s Plan."
+        onClose={dismiss}
+      />
+      <CreateSurfaceBody className="space-y-4">
         <div className="space-y-2">
           <label htmlFor="calendar-routine" className="text-sm font-medium">
             Routine
@@ -181,17 +186,27 @@ export function RoutineCalendarSchedule({
           </p>
         )}
         {slug && !error && specs === null && <p role="status">Loading inputs…</p>}
-        {specs !== null && loadedSlug === slug && (
+        {specs !== null && formReady && (
           <InputsForm
             key={slug}
+            formId={formId}
             inputs={specs}
             submitting={saving}
-            onCancel={onClose}
             onRun={schedule}
             submitLabel="Schedule routine"
           />
         )}
-      </DialogContent>
-    </Dialog>
+      </CreateSurfaceBody>
+      {/* The primary appears with the inputs form, as the form's own button
+          did: until the recipe's inputs load there is nothing to submit. */}
+      <CreateSurfaceFooter
+        hint={null}
+        onCancel={onClose}
+        guardCancel={false}
+        primaryLabel={formReady ? inputsSubmitContent("Schedule routine", saving) : undefined}
+        onPrimary={formReady ? () => submitInputsForm(formId) : undefined}
+        busy={saving}
+      />
+    </CreateSurface>
   )
 }

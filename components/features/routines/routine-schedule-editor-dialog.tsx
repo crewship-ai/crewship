@@ -3,15 +3,13 @@
 import { formatRoutineTime } from "@/lib/routine-time"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { CalendarClock } from "lucide-react"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -156,17 +154,23 @@ export function RoutineScheduleEditorDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Repeating schedule</DialogTitle>
-          <DialogDescription>
-            Choose when this routine runs, which version it uses and how it handles
-            interruptions.
-          </DialogDescription>
-        </DialogHeader>
+    <CreateSurface
+      open
+      onOpenChange={(open) => !open && onCancel()}
+      size="sm"
+      onSubmit={() => {
+        if (!submitting && cronExpr.trim()) submit()
+      }}
+    >
+        <CreateSurfaceHeader
+          concept="routines"
+          icon={CalendarClock}
+          title="Repeating schedule"
+          description="Choose when this routine runs, which version it uses and how it handles interruptions."
+          onClose={onCancel}
+        />
 
-        <div className="max-h-[70dvh] space-y-5 overflow-y-auto pr-1">
+        <CreateSurfaceBody className="space-y-5">
           <div>
             <Label htmlFor="sched-name">Name</Label>
             <Input id="sched-name" value={name} onChange={(e) => setName(e.target.value)} className="mt-1.5" />
@@ -295,15 +299,16 @@ export function RoutineScheduleEditorDialog({
                 : "Enabled"}
             </Label>
           </div>
-        </div>
+        </CreateSurfaceBody>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Button>
-          <Button onClick={submit} disabled={submitting || !cronExpr.trim()}>
-            {submitting ? "Saving…" : "Save"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <CreateSurfaceFooter
+          onCancel={onCancel}
+          guardCancel={false}
+          primaryLabel={submitting ? "Saving…" : "Save"}
+          onPrimary={submit}
+          primaryDisabled={!cronExpr.trim()}
+          busy={submitting}
+        />
+    </CreateSurface>
   )
 }

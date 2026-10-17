@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Harbor 2: one dialog shell.** Thirty-five create, edit and form dialogs across routines, crews, issues, integrations, credentials, skills, settings and admin now share the same surface: four fixed widths (480/640/800/960 px), the same header with a close button, a bottom sheet on phones, and ⌘↵ / Ctrl↵ to confirm. Confirmations ("Stop this run?", rotating a webhook secret) use the shared confirmation dialog in place of an ad-hoc one or the browser's `confirm()`. Fields, validation and submit behaviour are unchanged. ⚠️ **Behaviour change:** Create mission and the account-group editor now ask before discarding typed input; the Approve button in an approval request uses the standard primary colour.
+
 - **Harbor 2 look, first step.** New light and dark palette (white content on a grey sidebar ground, corrected text greys that meet WCAG AA everywhere, opaque accent selection), Inter bundled with the app, 10 px cards and flat primary buttons. ⚠️ **Behaviour change:** a new device starts at Small text (13 px) and the System theme; devices and accounts that already have a text size or theme keep it, and Text size now reads Small / Standard / Large. On touch screens every control is at least 44 px. Appearance gains a separate `appearance.style` preference (only Harbor today) and shows **Not synced · Retry** if the server refuses a write.
 
 - **Guest CLI pairing accepts verified browser sessions.** Pairing start and poll now pass the restricted route gate only for interactive sessions. CLI bearer callers remain forbidden; redemption retains the same current Guest grants as browser CLI token creation and rejects logout, revocation or suspension.

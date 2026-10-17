@@ -16,16 +16,13 @@
 import * as React from "react"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { Textarea } from "@/components/ui/textarea"
 import { useWebhookDelivery } from "@/hooks/use-webhook-deliveries"
 import { replayAvailability, useReplayWorkItem, useResolveWorkItem, type WorkItem } from "@/hooks/use-work-items"
@@ -116,48 +113,55 @@ export function ResolveWorkDialog({
     }
   }
 
+  const canSubmit = stopped && reason.trim() !== "" && !pending && !blocked
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{copy.title}</DialogTitle>
-          <DialogDescription>
-            {item ? (
-              <>
-                <span className="font-mono">{workSubject(item)}</span> → {agentName(item.agent)}. {copy.body}
-              </>
-            ) : null}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-3">
-          <Textarea
-            aria-label="What you checked"
-            placeholder="What you checked — e.g. the export is not in the ERP"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            rows={3}
-          />
-          <label className="flex items-start gap-2 text-xs text-muted-foreground">
-            <Checkbox checked={stopped} onCheckedChange={(v) => setStopped(v === true)} className="mt-0.5" />
-            I checked that nothing is still running for this work.
-          </label>
-          {blocked && (
-            <p className="text-xs text-muted-foreground">
-              {replayable.reason}
-              {replayable.state === "unavailable" && " Mark it as failed instead."}
-            </p>
-          )}
-          {error && <p className="text-xs text-destructive">{error}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button disabled={!stopped || reason.trim() === "" || pending || blocked} onClick={() => void submit()}>
-            {copy.action}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <CreateSurface
+      open={open}
+      onOpenChange={onOpenChange}
+      size="sm"
+      onSubmit={() => { if (canSubmit) void submit() }}
+    >
+      <CreateSurfaceHeader
+        concept="work"
+        title={copy.title}
+        description={
+          item ? (
+            <>
+              <span className="font-mono">{workSubject(item)}</span> → {agentName(item.agent)}. {copy.body}
+            </>
+          ) : undefined
+        }
+        onClose={() => onOpenChange(false)}
+      />
+      <CreateSurfaceBody className="flex flex-col gap-3">
+        <Textarea
+          aria-label="What you checked"
+          placeholder="What you checked — e.g. the export is not in the ERP"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          rows={3}
+          autoFocus
+        />
+        <label className="flex items-start gap-2 text-xs text-muted-foreground">
+          <Checkbox checked={stopped} onCheckedChange={(v) => setStopped(v === true)} className="mt-0.5" />
+          I checked that nothing is still running for this work.
+        </label>
+        {blocked && (
+          <p className="text-xs text-muted-foreground">
+            {replayable.reason}
+            {replayable.state === "unavailable" && " Mark it as failed instead."}
+          </p>
+        )}
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter
+        onCancel={() => onOpenChange(false)}
+        primaryLabel={copy.action}
+        onPrimary={() => void submit()}
+        primaryDisabled={!canSubmit}
+        busy={pending}
+      />
+    </CreateSurface>
   )
 }
