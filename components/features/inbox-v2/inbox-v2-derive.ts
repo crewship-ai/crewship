@@ -275,6 +275,12 @@ export interface InboxV2Filters {
   /** One crew, by id — a real field on every source (README §4: a filter has
    *  to be answerable). The triage's "By crew" sets it. */
   crew: string | null
+  /** One agent, by id or slug — whichever the link or the facet named
+   *  (`?agent_id=` from old /approvals links, `?agent=<slug>` from agent
+   *  pages). Matched over the loaded feed: GET /api/v1/inbox has no agent
+   *  filter yet (#3455). Resolved against the roster, so filterEntries
+   *  ignores it; filterInboxEntries applies it. */
+  agent: string | null
 }
 
 export const EMPTY_INBOX_V2_FILTERS: InboxV2Filters = {
@@ -284,6 +290,7 @@ export const EMPTY_INBOX_V2_FILTERS: InboxV2Filters = {
   deadline: null,
   unreadOnly: false,
   crew: null,
+  agent: null,
 }
 
 /** The type facet a row answers to. A grouped advisory answers as its members. */
