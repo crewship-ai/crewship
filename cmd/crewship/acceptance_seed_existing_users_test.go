@@ -101,7 +101,11 @@ func seedExistingUsersAcceptance(t *testing.T, wrongPasswords bool) (*sql.DB, st
 
 func runExistingUsersSeedCLI(t *testing.T, cfg string) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	// The shipped seed now provisions 44 profiles through the real password
+	// handlers. API hashing is race-instrumented in this test process; keep
+	// a bounded budget for the full roster rather than the former four users.
+	binary := buildCrewshipBinary(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	raw, err := os.ReadFile(cfg)
 	if err != nil {
@@ -113,7 +117,7 @@ func runExistingUsersSeedCLI(t *testing.T, cfg string) string {
 			server = strings.TrimPrefix(line, "server: ")
 		}
 	}
-	cmd := exec.CommandContext(ctx, buildCrewshipBinary(t), "seed", "--server", server, "--offline-demo", "--nuke", "--yes", "--with-users", "--skip-issues")
+	cmd := exec.CommandContext(ctx, binary, "seed", "--server", server, "--offline-demo", "--nuke", "--yes", "--with-users", "--skip-issues")
 	cmd.Dir = t.TempDir() // No workstation .env.local or setup-token files.
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "CREWSHIP_CONFIG=" + cfg, "CREWSHIP_NO_SLUG_CACHE=1", "NO_COLOR=1"}
 	out, err := cmd.CombinedOutput()

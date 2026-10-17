@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -182,5 +183,65 @@ func TestHandleChatMessage_NotifiesOnDetachedPartialReply(t *testing.T) {
 				t.Fatalf("partial reply notifications: %+v", calls)
 			}
 		})
+	}
+}
+
+// Inject the wrapped boundary outcome into the real chat handler. Observer
+// cancellation must not override a protected execution's unknown outcome.
+type unconfirmedReplyContainer struct {
+	scriptedContainer
+	cancel context.CancelFunc
+}
+
+func (c *unconfirmedReplyContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	if len(cfg.Env) > 0 && c.cancel != nil {
+		c.cancel()
+	}
+	return c.scriptedContainer.Exec(ctx, cfg)
+}
+
+func TestHandleChatMessage_ProtectedObserverRemainsNonterminal(t *testing.T) {
+	for _, cancelled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancelled=%v", cancelled), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			resolver := &capResolver{info: baseInfo()}
+			ctr := &unconfirmedReplyContainer{scriptedContainer: scriptedContainer{agentExecErr: fmt.Errorf("protected terminal output requires reconciliation: %w", orchestrator.ErrHostCaptureUnconfirmed)}}
+			if cancelled {
+				ctr.cancel = cancel
+			}
+			b := testBridgeWithContainer(t, resolver, ctr)
+			var events []ws.ChatEvent
+			if err := b.HandleChatMessage(ctx, "user-1", "sess-protected-observer", "hello", func(e ws.ChatEvent) { events = append(events, e) }); err != nil {
+				t.Fatalf("observer outcome became failure: %v", err)
+			}
+			if len(resolver.runUpdates) != 0 {
+				t.Fatalf("unconfirmed protected run became terminal: %+v", resolver.runUpdates)
+			}
+			done := 0
+			for _, e := range events {
+				if e.Type == "error" {
+					t.Fatalf("unconfirmed execution emitted terminal error: %+v", e)
+				}
+				meta, _ := e.Metadata.(map[string]any)
+				if e.Type == "done" && meta["reason"] == "host_capture_unconfirmed" {
+					done++
+				}
+			}
+			if done != 1 {
+				t.Fatalf("observer stream closes=%d, want1", done)
+			}
+		})
+	}
+}
+
+func TestHandleChatMessage_OrdinaryExecutionFailureRemainsFailed(t *testing.T) {
+	resolver := &capResolver{info: baseInfo()}
+	b := testBridgeWithContainer(t, resolver, &scriptedContainer{agentExecErr: fmt.Errorf("ordinary exec failure")})
+	if err := b.HandleChatMessage(t.Context(), "user-1", "sess-ordinary-failure", "hello", func(ws.ChatEvent) {}); err == nil {
+		t.Fatal("ordinary failure disappeared")
+	}
+	if len(resolver.runUpdates) != 1 || resolver.runUpdates[0].status != "FAILED" {
+		t.Fatalf("ordinary failure updates: %+v", resolver.runUpdates)
 	}
 }
