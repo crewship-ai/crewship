@@ -1,5 +1,5 @@
 "use client"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { DetailCard } from "@/components/ui/detail"
 import { Files } from "lucide-react"
@@ -41,6 +41,8 @@ export function RoutineRunArtifacts({
   const [page, setPage] = useState("")
   const [pages, setPages] = useState<string[]>([])
   const [contents, setContents] = useState<Record<string, string>>({})
+  const onCountRef = useRef(onCount)
+  onCountRef.current = onCount
   const base = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-runs/${encodeURIComponent(runId)}/artifacts`
   const refresh = useCallback(
     async (signal: AbortSignal) => {
@@ -50,7 +52,7 @@ export function RoutineRunArtifacts({
         const data = await res.json()
         if (!signal.aborted) {
           setArtifacts(data.artifacts)
-          onCount?.(Array.isArray(data.artifacts) ? data.artifacts.length : 0, !!data.next_cursor)
+          onCountRef.current?.(Array.isArray(data.artifacts) ? data.artifacts.length : 0, !!data.next_cursor)
           setCursor(data.next_cursor)
           setError(null)
         }
