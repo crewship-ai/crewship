@@ -108,6 +108,24 @@ test.describe("Skills desktop", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("On agents")
   })
 
+  test("L02 Views advertise their 1–6 keys and the keys switch views", async ({ page }) => {
+    await seed(page)
+    await page.goto("/skills")
+    const views = panel(page).getByRole("navigation", { name: "Skill views" })
+    const labels = ["Library", "On agents", "Not on any agent", "Needs attention"]
+    for (const [i, label] of labels.entries()) {
+      const hint = views.getByText(label, { exact: true })
+      await expect(hint).toHaveAttribute("aria-keyshortcuts", String(i + 1))
+      await expect(hint).toHaveAttribute("title", `${label} · press ${i + 1}`)
+    }
+    await page.locator("[data-slot=skills-content]").click({ position: { x: 5, y: 5 } })
+    await page.keyboard.press("2")
+    await expect(page).toHaveURL(/view=used/)
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("On agents")
+    await page.keyboard.press("1")
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Library")
+  })
+
   test("L03 ?view=proposed as MEMBER falls back to Library", async ({ browser }) => {
     const page = await loginAs(browser, process.env.E2E_MEMBER_EMAIL || "member-baseline@crewship.local")
     test.skip(!page, "no RBAC member user in this environment")
