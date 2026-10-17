@@ -157,14 +157,18 @@ export function SkillsExplorer({ skills, agents, crews, proposedCount, canReview
 
         <SidebarSection label="Views">
           <nav aria-label="Skill views">
-            {visibleViews(canReview).map((v) => {
+            {visibleViews(canReview).map((v, i) => {
               const Icon = VIEW_ICON[v]
               const n = v === "proposed" ? proposedCount : counts.views[v]
               const selected = !skillOpen && filters.view === v
               return (
                 <SidebarRow key={v} selected={selected} onSelect={() => pick({ view: v })} data-testid={`skills-view-${v}`}>
                   <Icon className={cn("size-3.5 shrink-0", v === "attention" && n > 0 ? "text-warn" : "text-muted-foreground")} aria-hidden />
-                  <span className="min-w-0 flex-1 truncate text-foreground/85">{VIEW_LABEL[v]}</span>
+                  {/* The 1–6 key hint sits on the label until SidebarRow passes
+                      `title`/`aria-keyshortcuts` through to the row (kit #3423). */}
+                  <span className="min-w-0 flex-1 truncate text-foreground/85" title={`${VIEW_LABEL[v]} · press ${i + 1}`} aria-keyshortcuts={String(i + 1)}>
+                    {VIEW_LABEL[v]}
+                  </span>
                   <Count n={n} />
                 </SidebarRow>
               )
