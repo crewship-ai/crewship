@@ -6,7 +6,10 @@ import { SkillsLayout } from "../skills-layout"
 
 // Harbor 2 M3 (#3350): the skills explorer sits in the shared SecondaryPanel.
 
-const h = vi.hoisted(() => ({ mobile: false }))
+const h = vi.hoisted(() => ({
+  mobile: false,
+  skills: [{ id: "s1", name: "a", slug: "a", display_name: null, description: null, version: null, author: null, category: "CODING", source: "BUNDLED", icon: null }],
+}))
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
   usePathname: () => "/skills",
@@ -16,7 +19,7 @@ vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => h.mobile }))
 vi.mock("@/lib/api-fetch", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/api-fetch")>()), apiFetch: vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })) }))
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws", role: "OWNER", loading: false }) }))
 vi.mock("@/hooks/use-skills", () => ({
-  useSkillsList: () => ({ data: [], isLoading: false, isError: false, refetch: vi.fn() }),
+  useSkillsList: () => ({ data: h.skills, isLoading: false, isError: false, refetch: vi.fn() }),
   useSkillsAgents: () => ({ data: [] }),
   useSkillsCrews: () => ({ data: [] }),
   useProposedSkills: () => ({ proposed: [] }),
@@ -26,8 +29,11 @@ vi.mock("motion/react", () => ({
   AnimatePresence: ({ children }: { children: ReactNode }) => <>{children}</>,
   motion: { div: ({ children, className }: { children: ReactNode; className?: string }) => <div className={className}>{children}</div> },
 }))
-vi.mock("@/components/skills/import-dialog", () => ({ ImportSkillDialog: () => null }))
+vi.mock("../add-skill-dialog", () => ({ AddSkillDialog: (p: { open: boolean }) => (p.open ? <div role="dialog" aria-label="Add skill" /> : null) }))
+vi.mock("../skills-cli-dialog", () => ({ SkillsCliDialog: (p: { open: boolean }) => (p.open ? <div role="dialog" aria-label="Skills from the command line" /> : null) }))
+vi.mock("../give-to-picker", () => ({ GiveToPicker: () => null }))
 vi.mock("../skills-explorer", () => ({
+  visibleViews: () => ["library", "used", "unused", "attention", "proposed", "archived"],
   SkillsExplorer: (p: { onPicked?: () => void }) => (
     <nav aria-label="Skill views">
       <div data-skills-search><input aria-label="Search skills" /></div>
@@ -35,9 +41,8 @@ vi.mock("../skills-explorer", () => ({
     </nav>
   ),
 }))
-vi.mock("../skills-overview", () => ({ SkillsOverview: () => <div>Overview</div> }))
-vi.mock("../skill-page", () => ({ SkillPage: () => null, isSkillTab: () => false }))
-vi.mock("../skills-dialogs", () => ({ AssignDialog: () => null }))
+vi.mock("../skills-library", () => ({ SkillsLibrary: () => <div>Library</div> }))
+vi.mock("../skill-page", () => ({ SkillPage: () => null }))
 vi.mock("../skill-editor", () => ({ SkillEditor: () => null }))
 
 beforeEach(() => {
@@ -77,4 +82,37 @@ it("on a phone shows the explorer in the panel sheet and closes it after a pick"
   expect(sheet).toContainElement(screen.getByRole("navigation", { name: "Skill views" }))
   fireEvent.click(screen.getByRole("button", { name: "Pick a view" }))
   expect(useAppStore.getState().secondaryPanelOpen).toBe(false)
+})
+
+it("puts Command line and Add skill in the page actions", () => {
+  render(<SkillsLayout />)
+  fireEvent.click(screen.getByRole("button", { name: "Command line" }))
+  expect(screen.getByRole("dialog", { name: "Skills from the command line" })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Add skill" }))
+  expect(screen.getByRole("dialog", { name: "Add skill" })).toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: /^Import/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "New skill" })).not.toBeInTheDocument()
+})
+
+it("has one visible h1 naming the view and the library line", () => {
+  render(<SkillsLayout />)
+  expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Library")
+  expect(screen.getByText(/Instructions agents load when a task needs them · 1 in the library from 1 source/)).toBeInTheDocument()
+})
+
+it("a legacy ?view= lands on its new name and keeps the other parameters", () => {
+  window.history.replaceState(null, "", "/skills?view=assigned&crew=c1")
+  render(<SkillsLayout />)
+  const q = new URLSearchParams(window.location.search)
+  expect(q.get("view")).toBe("used")
+  expect(q.get("crew")).toBe("c1")
+})
+
+it("number keys switch views", () => {
+  render(<SkillsLayout />)
+  fireEvent.keyDown(window, { key: "2" })
+  expect(new URLSearchParams(window.location.search).get("view")).toBe("used")
+  fireEvent.keyDown(window, { key: "1" })
+  expect(new URLSearchParams(window.location.search).get("view")).toBeNull()
 })
