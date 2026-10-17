@@ -82,4 +82,12 @@ describe("Agent Instructions extras", () => {
     expect(screen.queryByRole("button", { name: "Reset to crew default…" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Edit crew default" })).not.toBeInTheDocument()
   })
+
+  it("shows what it reads before every run, following Remember between runs", async () => {
+    stub()
+    render(<AgentInstructionsExtras {...props} memoryEnabled={false} onReset={vi.fn()} />)
+    const card = await screen.findByRole("region", { name: "What it reads before every run" })
+    expect(within(card).getAllByText("Skipped: Remember between runs is off")).toHaveLength(3)
+    expect(within(card).getByText(/or the Research default when it has none/)).toBeInTheDocument()
+  })
 })
