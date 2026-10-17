@@ -40,6 +40,31 @@ actual step actions; an unreadable recipe is shown as unavailable.
 Selecting a routine uses `?slug=` in the URL. Reload and browser history preserve
 that selection. A selected run adds `&run=` and keeps its recorded recipe version.
 
+**Filter** opens the facets inside the panel, under its toolbar: Status, Last
+run, **Trigger** (Schedule, Webhook, Issue start, Chat command) and Crew, each
+naming its choice and clearing on its own. **View** groups the routines by crew,
+by trigger or not at all, and sorts them by next run, last run, name or this
+month's spend. **Select several** (not on a phone) puts a checkbox on each
+routine and a bar at the bottom: **Turn off** (Owner and Admin, after one
+question) and **Run now**, which starts only the routines that need no answer
+and names the ones it skipped. With a run open, the panel lists that routine's
+runs by status and day; a row opens the run peek, and **All routines** goes back.
+
+The **Overview** opens with four figures — Needs you, Running now, runs in the
+last 7 days with the share completed, and this month's spend against the budget
+— then **Needs you** (a plain approval can be approved in place by a Manager or
+above; a decision with a form opens its run), **Running now** with **Stop** for
+Owner and Admin, and **Next 24 hours** with a way to the calendar. **How routines
+work** in the top bar (`?view=intro`) explains routines in three steps; an empty
+workspace shows the same guide under its empty state. In **All runs** a row
+opens the run peek; **Open run** in it opens the run page.
+
+**Run** opens one dialog with **Run now**, **Test run** (no side effects, Manager
+and above; agents still run and cost money) and **Later**, which plans a one-time
+start at a time you pick — following the live version or pinned to it — that is
+listed under Triggers until it starts and can be cancelled there. The footer
+names the routine's cost cap and how many runs may go at once.
+
 ### The routine page
 
 The header names the routine, its crew and the agent it runs as, and says its
@@ -59,7 +84,7 @@ routine that only exists as a draft offers **Test draft** and **Publish**.
 | --- | --- |
 | **Overview** | What needs you first — the decision the latest run waits for, or why the last run could not finish, with what ran and what did not — then *What it does* (written from the definition, not by a model), the steps in one line, the last 20 runs, the six answers *in one look*, what starts it, and its inputs. |
 | **Steps** | The steps with what each does and **Test step** on sample data; a read-only **Map**; the stored **Definition** in Full detail. **Edit steps** opens the editor: add, remove (refused while a later step reads its result) and reorder agent tasks, approvals, notifications, waits, issue actions, web calls and sub-routines, and edit agent prompts and decision forms of steps written in code. |
-| **Triggers** | One list of everything that starts the routine — schedules, webhooks, the chat command, workspace events and the Run button — with **Add trigger** (a schedule previews its next five starts), the webhook delivery log, and the cards that manage each kind. |
+| **Triggers** | One list of everything that starts the routine — schedules, planned one-time starts, webhooks, the chat command, workspace events and the Run button — each managed in its row (**Edit**, and a menu to turn a schedule on or off, set its answers or delete it; **Cancel** for a planned start), with **Add trigger** (a schedule previews its next five starts; a webhook is created in place and shows its URL and secret once) and the webhook delivery log. |
 | **Settings** | About (name, purpose), Inputs, Limits (cost cap, one at a time; model tiers, input guardrails and estimates in Full detail), the chat command, Access and Share, Budget, and Turn off or delete. |
 | **Versions** | Full detail only: published versions, the draft on top with **Review and publish**, and comparisons. |
 
@@ -77,8 +102,14 @@ you can rename it; nothing saved is overwritten.
 The run page (`&run=`) carries **Copy for AI** (a Markdown trace of the run;
 inputs that look like secrets are left out), **Stop** (Owner and Admin, with one
 confirmation), **Run again** and a way back to the routine. Figures for duration,
-cost and steps, the previous runs as dots (click one to peek, J / K to move,
-Enter to open) and a **Steps | Timeline** switch sit above the steps.
+cost, steps and the files it produced, the previous runs as dots (click one to
+peek, J / K to move, Enter to open) and a **Steps | Timeline** switch sit above
+the steps. The steps are listed with their state; the selected one opens in an
+inspector with **Output**, **Input** (the run's inputs and what the step was
+asked to do), **Log** (the log lines recorded while the step ran) and
+**Details** (agent, model, attempts, times, the run's limits). On a phone the
+inspector is its own screen with **Back to steps**; on a tablet it sits under
+the list.
 
 Steps use an explicit name when provided, otherwise a description of their action.
 Stable IDs remain secondary technical identifiers. Empty schedules and results

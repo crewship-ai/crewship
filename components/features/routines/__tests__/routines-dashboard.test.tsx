@@ -4,7 +4,7 @@
 // themselves are covered where they live.
 
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import { RoutinesDashboard, outcomeKpis, runOutcomesByDay, groupLatestResults, outcomeVolumeShape, honestPct, windowCoverage, type DashboardRun } from "../routines-dashboard"
@@ -140,33 +140,19 @@ describe("runOutcomesByDay", () => {
 })
 
 describe("<RoutinesDashboard>", () => {
-  it("is built from the dashboard's strip, tiles, chart and Up next", () => {
-    const select = vi.fn()
-    render(<RoutinesDashboard routines={routines} runs={runs} schedules={schedules} onSelect={select} />)
-    // The attention strip, with routine-shaped items and their verbs.
-    expect(screen.getByText("Needs your attention")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /1 decision waiting.*Review/ })).toHaveAttribute("href", "/routines?slug=briefing&run=r4")
-    expect(screen.getByRole("link", { name: /1 could not finish.*Inspect/ })).toHaveAttribute("href", "/routines?slug=briefing")
-    expect(screen.getByRole("link", { name: /Next start.*Review/ })).toHaveAttribute("href", "/routines?slug=invoice&view=plan")
-    // A fourth item is named under the strip, as on /dashboard.
-    expect(screen.getByText("1 more:")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "1 draft to publish" })).toHaveAttribute("href", "/routines?slug=invoice&view=versions")
-    // The outcome tiles.
+  it("keeps the week's results and the chart; what needs you, runs now and starts next is on the overview board", () => {
+    render(<RoutinesDashboard routines={routines} runs={runs} schedules={schedules} onSelect={vi.fn()} />)
+    // RT-OV: the strip, the tiles, Running now, Up next and Drafts to publish
+    // moved to routines-overview-board (Needs you, the figures, Running now,
+    // Next 24 hours); drafts have their own view in the panel.
+    expect(screen.queryByText("Needs your attention")).toBeNull()
+    expect(screen.queryByText("P95 duration")).toBeNull()
+    expect(screen.queryByText("Up next")).toBeNull()
+    expect(screen.queryByText("Routines running now")).toBeNull()
+    expect(screen.queryByText("Drafts to publish")).toBeNull()
     expect(screen.getByText("Routine run summary")).toBeInTheDocument()
-    expect(screen.getAllByText("Completed").length).toBeGreaterThan(0)
-    expect(screen.getByText("50%")).toBeInTheDocument()
-    expect(screen.getByText("P95 duration")).toBeInTheDocument()
-    expect(screen.getByText("$0.09")).toBeInTheDocument()
-    // The run-volume chart by routine, and the running-now card.
     expect(screen.getByTestId("run-volume")).toHaveAttribute("data-buckets", "7")
-    const runningRow = screen.getByText(/draft text/).closest("a")!
-    expect(runningRow).toHaveAttribute("href", "/routines?slug=briefing&run=r5")
-    expect(runningRow).toHaveTextContent("Morning briefing")
-    expect(runningRow).toHaveTextContent("View")
-    expect(screen.getByText("1 running")).toBeInTheDocument()
     expect(screen.queryByText("Elsewhere")).toBeNull()
-    // Up next lists the enabled schedule only.
-    expect(screen.getByText("Up next")).toBeInTheDocument()
     // Latest results: finished runs of the window, failures first then newest,
     // each opening its run.
     const results = screen.getAllByRole("link", { name: /Open run/ })
@@ -177,9 +163,6 @@ describe("<RoutinesDashboard>", () => {
     ])
     expect(results[0]).toHaveTextContent("Result failed")
     expect(results[2]).toHaveTextContent("Stopped")
-    // Drafts open the routine.
-    fireEvent.click(screen.getByRole("button", { name: /Invoice intake.*Publish/ }))
-    expect(select).toHaveBeenCalledWith("invoice")
     // Runs live in Activity.
     expect(screen.getAllByRole("link", { name: /Activity/ })[0]).toHaveAttribute("href", "/activity?lens=routines")
   })
@@ -222,27 +205,11 @@ describe("<RoutinesDashboard>", () => {
     expect(screen.getByTestId("run-outcomes-single-day")).toHaveTextContent("The newest 2 runs all started today")
   })
 
-  // An accepted start that never ran must not leave the page silently, and a
-  // start that waits for a free slot is named as such — no ETA, no position.
-  it("names accepted starts that did not run and those waiting for a free slot", () => {
-    const pendingStarts = [
-      { id: "p_failed", pipeline_slug: "invoice", fire_at: hoursAgo(5), status: "failed", last_error: "The routine is no longer active." },
-      { id: "p_expired", pipeline_slug: "briefing", fire_at: hoursAgo(6), status: "expired" },
-      { id: "p_old", pipeline_slug: "invoice", fire_at: hoursAgo(24 * 10), status: "failed" },
-      { id: "p_wait", pipeline_slug: "briefing", fire_at: hoursAgo(0.1), status: "pending", dispatch_attempts: 2 },
-      { id: "p_fired", pipeline_slug: "invoice", fire_at: hoursAgo(1), status: "fired", run_id: "" },
-      { id: "p_other", pipeline_slug: "not-mine", fire_at: hoursAgo(1), status: "failed" },
-    ]
-    render(<RoutinesDashboard routines={routines} runs={[]} pendingStarts={pendingStarts} schedules={[]} onSelect={vi.fn()} />)
-    expect(screen.getByRole("link", { name: /2 accepted starts did not run/ })).toHaveAttribute("href", "/routines?slug=invoice&view=plan")
-    expect(screen.getByRole("link", { name: /1 start waits for a free slot/ })).toHaveAttribute("href", "/routines?slug=briefing&view=plan")
-  })
+  // Accepted starts that did not run and starts waiting for a free slot are
+  // named on the overview board now (routines-overview-board.test.tsx).
 
-  it("says so when nothing needs anyone and nothing runs", () => {
+  it("says so when nothing finished in the window", () => {
     render(<RoutinesDashboard routines={routines.slice(1).map((r) => ({ ...r, last_invocation_status: "completed" }))} runs={[]} schedules={[]} onSelect={vi.fn()} />)
-    expect(screen.getByText(/nothing blocking your crews/)).toBeInTheDocument()
-    expect(screen.getByText("No routines are running right now.")).toBeInTheDocument()
     expect(screen.getByText("Nothing finished in the last 7 days.")).toBeInTheDocument()
-    expect(screen.queryByText("Drafts to publish")).toBeNull()
   })
 })

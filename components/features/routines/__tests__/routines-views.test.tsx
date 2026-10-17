@@ -12,6 +12,7 @@ vi.mock("@/hooks/use-active-routine-runs", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/hooks/use-active-routine-runs")>()
   return { ...mod, useActiveRoutineRuns: () => ({ bySlug: new Map(), runs: h.active, activeCount: h.active.length }) }
 })
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 vi.mock("@/hooks/use-pipeline-runs", () => ({ usePipelineRuns: () => ({ runs: h.runs, loading: false, error: null, refresh: vi.fn() }) }))
 
 const p = (over: Partial<Pipeline>) =>
@@ -65,11 +66,16 @@ describe("<RoutinesViewPane>", () => {
     expect(screen.getByRole("button", { name: /Weekly report/ })).toHaveTextContent("draft")
   })
 
-  it("All runs lists runs across routines", () => {
+  it("All runs lists runs across routines; a row opens the run peek, Open run the run page (RT-07)", async () => {
     h.runs = [run({ status: "completed", id: "r9" }), run({ id: "r8", status: "failed", pipeline_slug: "news", pipeline_name: "News digest" })]
     const onOpenRun = vi.fn()
     render(<RoutinesViewPane {...base} view="runs" onOpenRun={onOpenRun} />)
     fireEvent.click(screen.getByRole("button", { name: /News digest/ }))
+    expect(onOpenRun).not.toHaveBeenCalled()
+    const peek = await screen.findByTestId("run-peek")
+    expect(peek).toHaveTextContent("Could not finish")
+    expect(peek).toHaveTextContent("News digest")
+    fireEvent.click(screen.getByRole("button", { name: "Open run" }))
     expect(onOpenRun).toHaveBeenCalledWith("news", "r8")
   })
 

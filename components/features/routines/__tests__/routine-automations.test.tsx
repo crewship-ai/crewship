@@ -201,21 +201,29 @@ describe("automations bound to a routine", () => {
     h.automations = [rule({ id: "a1", name: "Triage new bugs", event_type: "mission.status_change" }), rule({ id: "a2", name: "Escalate stalls", event_type: "assignment.failed" })]
     renderPage()
     tab("Triggers")
+    // RT-08: the rules are rows of the one list — no second Automations card.
     const list = screen.getByTestId("routine-trigger-list")
-    expect(list).toHaveTextContent("Triage new bugs")
-    expect(list).toHaveTextContent("Escalate stalls")
-    const panel = screen.getByTestId("routine-automations")
-    expect(panel).toHaveTextContent("mission.status_change")
-    expect(panel).toHaveTextContent("assignment.failed")
-    expect(screen.getByTestId("routine-automations-count")).toHaveTextContent("2")
-    expect(panel).toHaveTextContent("crewship automation")
+    const events = () => Array.from(screen.getByTestId("routine-trigger-list").querySelectorAll('[data-kind="event"]'))
+    const row = (name: string) => events().find((el) => el.textContent?.includes(name))!
+    expect(events()).toHaveLength(2)
+    expect(row("Triage new bugs")).toHaveTextContent("When mission status change happens")
+    expect(row("Escalate stalls")).toHaveTextContent("When assignment failed happens")
+    expect(row("Triage new bugs")).toHaveTextContent("crewship automation")
+    expect(list).toBeInTheDocument()
+    expect(screen.queryByTestId("routine-automations")).not.toBeInTheDocument()
+    // Full detail names the raw event type.
+    fireEvent.click(screen.getByRole("radio", { name: "Full detail" }))
+    expect(row("Triage new bugs")).toHaveTextContent("event mission.status_change")
+    expect(row("Escalate stalls")).toHaveTextContent("event assignment.failed")
   })
 
-  it("marks a disabled rule as disabled rather than hiding it", () => {
+  it("marks a disabled rule as off rather than hiding it", () => {
     h.automations = [rule({ id: "a1", name: "Triage new bugs", enabled: false })]
     renderPage()
     tab("Triggers")
-    expect(screen.getByTestId("automation-row-a1")).toHaveTextContent(/disabled/i)
+    const row = screen.getByTestId("routine-trigger-list").querySelector('[data-kind="event"]')!
+    expect(row).toHaveTextContent("Triage new bugs")
+    expect(row).toHaveTextContent("Off")
   })
 })
 

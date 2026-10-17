@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test"
+import { expectInlineFacets } from "./helpers/inline-facets"
 
 // Routines on the Harbor 2 shell: the shared top bar carries the breadcrumb
 // and the page actions, the shared SecondaryPanel carries Views first and the
@@ -216,5 +217,164 @@ test.describe("R05 phone 390", () => {
     expect(box!.height).toBeGreaterThanOrEqual(44)
     const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
     expect(scrollWidth).toBeLessThanOrEqual(390)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Stabilisation (#3492): RT-01 … RT-09.
+
+const routinesPanel = (page: import("@playwright/test").Page) => page.locator('[data-slot="secondary-panel"][data-panel-id="routines"]')
+
+test("RT-01 the routine facets open inside the panel (kit COM-01)", async ({ page }) => {
+  await page.goto("/routines")
+  await expect(routinesPanel(page)).toBeVisible({ timeout: TIMEOUT })
+  await expectInlineFacets(page, "Filter routines")
+})
+
+test("RT-02 Trigger facet; View groups by Trigger and sorts by Next run or Spend", async ({ page }) => {
+  await page.goto("/routines")
+  const panel = routinesPanel(page)
+  await expect(panel).toBeVisible({ timeout: TIMEOUT })
+  await panel.getByRole("button", { name: /^Filter/ }).click()
+  const block = panel.getByRole("group", { name: "Filter routines" })
+  await expect(block.getByRole("group", { name: "Trigger" }).getByRole("button")).toHaveText([/^Schedule/, /^Webhook/, /^Issue start/, /^Chat command/])
+  await page.keyboard.press("Escape")
+  await panel.getByRole("button", { name: "View: group and sort" }).click()
+  for (const name of ["Crew", "Trigger", "None", "Next run", "Last run", "Name", "Spend"]) await expect(page.getByRole("menuitemradio", { name })).toBeVisible()
+  await page.getByRole("menuitemradio", { name: "Trigger" }).click()
+  await expect(panel.getByRole("group", { name: /^(Schedule|Webhook|Issue start|Chat command|Only when someone presses Run)$/ }).first()).toBeVisible()
+  await panel.getByRole("button", { name: "View: group and sort" }).click()
+  await page.getByRole("menuitemradio", { name: "Crew" }).click()
+})
+
+test("RT-03 select several routines: a bulk bar with Turn off and Run now", async ({ page }) => {
+  await page.goto("/routines")
+  const panel = routinesPanel(page)
+  await expect(panel).toBeVisible({ timeout: TIMEOUT })
+  await panel.getByRole("button", { name: "Select several" }).click()
+  const bar = panel.getByRole("toolbar", { name: "Selected routines" })
+  await expect(bar).toContainText("Pick routines")
+  await expect(bar.getByRole("button", { name: "Run now" })).toBeDisabled()
+  await panel.getByRole("checkbox").first().click()
+  await expect(bar).toContainText("1 selected")
+  await expect(bar.getByRole("button", { name: "Run now" })).toBeEnabled()
+  // Turn off asks first; this only checks the question, it turns nothing off.
+  if (await bar.getByRole("button", { name: "Turn off" }).count()) {
+    await bar.getByRole("button", { name: "Turn off" }).click()
+    await expect(page.getByRole("alertdialog")).toContainText("Turn off 1 routine?")
+    await page.getByRole("button", { name: "Cancel" }).click()
+  }
+  await bar.getByRole("button", { name: "Done selecting" }).click()
+  await expect(bar).toHaveCount(0)
+})
+
+test("RT-04 the overview opens with four figures, Needs you, Running now and Next 24 hours", async ({ page }) => {
+  await page.goto("/routines")
+  const figures = page.getByRole("list", { name: "Routine figures" })
+  await expect(figures).toBeVisible({ timeout: TIMEOUT })
+  await expect(figures.getByRole("listitem")).toHaveText([/^Needs you/, /^Running now/, /^Runs · 7 days/, /^Spend · /])
+  for (const name of ["Needs you", "Running now", "Next 24 hours"]) await expect(page.getByRole("region", { name })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Next 24 hours" }).getByRole("link", { name: "Open calendar" })).toHaveAttribute("href", "/routines?tab=calendar")
+})
+
+test("RT-05 Run opens one dialog: Run now · Test run · Later, limits in the footer", async ({ page }) => {
+  await openFirstRoutine(page)
+  const run = page.getByRole("button", { name: /^Run$/ })
+  test.skip((await run.count()) === 0 || (await run.isDisabled()), "the first routine cannot be run by this account")
+  await run.click()
+  const dialog = page.getByRole("dialog")
+  const how = dialog.getByRole("radiogroup", { name: "How to run" })
+  await expect(how).toBeVisible({ timeout: TIMEOUT })
+  await how.getByRole("radio", { name: "Later" }).click()
+  await expect(dialog.getByLabel("Start at")).toBeVisible()
+  await expect(dialog.getByText("Creates a one-time run you can cancel in Triggers")).toBeVisible()
+  await expect(dialog.locator('select:not([aria-hidden="true"])')).toHaveCount(0)
+  if (await how.getByRole("radio", { name: "Test run" }).count()) {
+    await how.getByRole("radio", { name: "Test run" }).click()
+    await expect(dialog.getByText("No side effects")).toBeVisible()
+  }
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(dialog).toHaveCount(0)
+})
+
+async function openFirstRun(page: import("@playwright/test").Page) {
+  await openFirstRoutine(page)
+  const bars = page.getByTestId("routine-run-bars")
+  test.skip((await bars.count()) === 0, "the first routine has no runs")
+  await bars.getByRole("listitem").last().click()
+  await expect(page).toHaveURL(/run=/, { timeout: TIMEOUT })
+}
+
+test("RT-06 the run page lists the steps with an inspector: Output · Input · Log · Details", async ({ page }) => {
+  await openFirstRun(page)
+  const steps = page.getByRole("list", { name: "Steps of this run" })
+  test.skip((await steps.count()) === 0, "the run's recipe is not available")
+  await expect(steps).toBeVisible({ timeout: TIMEOUT })
+  const inspector = page.getByRole("region", { name: "Step inspector" })
+  await expect(inspector.getByRole("radiogroup", { name: "Inspect" }).getByRole("radio")).toHaveText(["Output", "Input", "Log", "Details"])
+  await inspector.getByRole("radio", { name: "Log" }).click()
+  await expect(inspector).not.toContainText("Loading the log…", { timeout: TIMEOUT })
+  await inspector.getByRole("radio", { name: "Details" }).click()
+  await expect(inspector).toContainText("Attempts")
+  await expect(page.getByTestId("run-kpis")).toContainText("Produced")
+})
+
+test("RT-07 with a run open the panel lists its runs, and a row opens the peek", async ({ page }) => {
+  await openFirstRun(page)
+  const panel = routinesPanel(page)
+  await expect(panel.getByRole("group", { name: "Run status" })).toBeVisible({ timeout: TIMEOUT })
+  await panel.getByRole("button", { name: /^Peek at run / }).first().click()
+  await expect(page.getByTestId("run-peek")).toBeVisible()
+  await page.keyboard.press("Escape")
+  await panel.getByRole("button", { name: "All routines" }).click()
+  await expect(panel.getByRole("group", { name: "Views" })).toBeVisible()
+})
+
+test("RT-07 All runs: a row opens the run peek, Open run the run page", async ({ page }) => {
+  await page.goto("/routines?view=runs")
+  const list = page.getByRole("list", { name: "All runs" })
+  test.skip(!(await list.isVisible({ timeout: TIMEOUT }).catch(() => false)), "no runs in this workspace")
+  await list.getByRole("button").first().click()
+  await expect(page.getByTestId("run-peek")).toBeVisible()
+  await page.getByRole("button", { name: "Open run" }).click()
+  await expect(page).toHaveURL(/run=/, { timeout: TIMEOUT })
+})
+
+test("RT-08 Triggers: nothing below the list repeats it", async ({ page }) => {
+  await openFirstRoutine(page)
+  await page.getByRole("tab", { name: /^Triggers/ }).click()
+  await expect(page.getByTestId("routine-trigger-list")).toBeVisible({ timeout: TIMEOUT })
+  await expect(page.getByRole("region", { name: "Schedules" })).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "One-time starts" })).toHaveCount(0)
+  await expect(page.getByTestId("routine-automations")).toHaveCount(0)
+})
+
+test("RT-09 How routines work opens the intro, without templates or figures", async ({ page }) => {
+  await page.goto("/routines")
+  await page.getByRole("button", { name: "How routines work" }).click()
+  await expect(page).toHaveURL(/view=intro/)
+  await expect(page.getByRole("heading", { name: "Work that repeats, done by your crew." })).toBeVisible({ timeout: TIMEOUT })
+  await expect(page.getByRole("heading", { name: "From a sentence to a routine in three steps" })).toBeVisible()
+  await expect(page.getByText(/template/i)).toHaveCount(0)
+})
+
+test.describe("RT-06 phone 390", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  test("a step opens the inspector as its own screen with Back", async ({ page }) => {
+    await page.goto("/routines")
+    await page.getByRole("button", { name: "All routines" }).click()
+    const sheet = page.getByRole("dialog", { name: "Routine list" })
+    await sheet.getByRole("group").nth(1).getByRole("button").first().click()
+    const bars = page.getByTestId("routine-run-bars")
+    await expect(page.getByTestId("routine-page-header")).toBeVisible({ timeout: TIMEOUT })
+    test.skip((await bars.count()) === 0, "the first routine has no runs")
+    await bars.getByRole("listitem").last().click()
+    const steps = page.getByRole("list", { name: "Steps of this run" })
+    test.skip(!(await steps.isVisible({ timeout: TIMEOUT }).catch(() => false)), "the run's recipe is not available")
+    await steps.getByRole("button").first().click()
+    await expect(page.getByRole("region", { name: "Step inspector" })).toBeVisible()
+    await expect(steps).toHaveCount(0)
+    await page.getByRole("button", { name: "Back to steps" }).click()
+    await expect(page.getByRole("list", { name: "Steps of this run" })).toBeVisible()
   })
 })
