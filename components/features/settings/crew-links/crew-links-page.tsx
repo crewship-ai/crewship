@@ -13,7 +13,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DrillNavItem, DrillNavSection } from "@/components/layout/drill-page"
 import { CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
-import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
+import { SidebarFilterButton, SidebarSearch } from "@/components/layout/sidebar-kit"
+import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
 
 import {
   DEFAULT_CREW_LINK_FILTERS,
@@ -129,6 +130,7 @@ export function CrewLinksPage() {
   const insOf = (id: string) => sorted.filter((c) => dirs.has(dirKey(c.id, id)))
   const facetCount = (key: CrewLinkFilters["links"]) => sorted.filter((c) => crewMatches(c, { ...filters, links: key }, linkedIds.has(c.id), agentsOf(c))).length
   const popoverCount = Number(Boolean(filters.agents)) + Number(Boolean(filters.net))
+  const facets = useSidebarFacets()
   const countWhere = (f: (c: Crew) => boolean) => crews.filter(f).length
 
   const crewItem = (c: Crew, i: number) => (
@@ -142,29 +144,36 @@ export function CrewLinksPage() {
   const toolbar = (
     <>
       <SidebarSearch value={filters.q} onValueChange={(q) => setFilters({ q })} placeholder="Search crews, agents…" />
-      <SidebarFilterPopover label="Filter crews" activeCount={popoverCount} onClear={() => setFilters({ agents: "", net: "" })} panelClassName="min-w-[220px]">
-        <SidebarFacet label="Agents" resetLabel="Any crew" resetActive={!filters.agents} onReset={() => setFilters({ agents: "" })} first>
-          <SidebarFacetOption active={filters.agents === "with"} onToggle={() => setFilters({ agents: filters.agents === "with" ? "" : "with" })}>
-            With agents<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere((c) => (agentCount(c, agentsOf(c)) ?? 0) > 0)}</span>
-          </SidebarFacetOption>
-          <SidebarFacetOption active={filters.agents === "none"} onToggle={() => setFilters({ agents: filters.agents === "none" ? "" : "none" })}>
-            No agents (collectors)<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere((c) => agentCount(c, agentsOf(c)) === 0)}</span>
-          </SidebarFacetOption>
-        </SidebarFacet>
-        <SidebarFacet label="Network" resetLabel="Any network" resetActive={!filters.net} onReset={() => setFilters({ net: "" })}>
-          <SidebarFacetOption active={filters.net === "restricted"} onToggle={() => setFilters({ net: filters.net === "restricted" ? "" : "restricted" })}>
-            Restricted<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere((c) => c.network_mode != null && !isOpenNetwork(c))}</span>
-          </SidebarFacetOption>
-          <SidebarFacetOption active={filters.net === "open"} onToggle={() => setFilters({ net: filters.net === "open" ? "" : "open" })}>
-            Open<span className="ml-auto font-mono text-micro text-muted-foreground">{countWhere(isOpenNetwork)}</span>
-          </SidebarFacetOption>
-        </SidebarFacet>
-      </SidebarFilterPopover>
+      <SidebarFilterButton activeCount={popoverCount} {...facets.triggerProps}>Filter crews</SidebarFilterButton>
     </>
   )
 
   const nav = (
     <>
+      {/* The facets open here, inside the panel under the toolbar (kit
+          COM-01, v67 panel() → pk-fx), never as a floating popover. */}
+      <SidebarFacetBlock {...facets.blockProps} label="Filter crews" activeCount={popoverCount} onClear={() => setFilters({ agents: "", net: "" })} className="mt-2">
+        <SidebarInlineFacet
+          label="Agents"
+          values={[
+            { value: "with", label: "With agents", count: countWhere((c) => (agentCount(c, agentsOf(c)) ?? 0) > 0) },
+            { value: "none", label: "No agents (collectors)", count: countWhere((c) => agentCount(c, agentsOf(c)) === 0) },
+          ]}
+          selected={filters.agents || null}
+          onToggle={(v) => setFilters({ agents: filters.agents === v ? "" : v as CrewLinkFilters["agents"] })}
+          onClear={() => setFilters({ agents: "" })}
+        />
+        <SidebarInlineFacet
+          label="Network"
+          values={[
+            { value: "restricted", label: "Restricted", count: countWhere((c) => c.network_mode != null && !isOpenNetwork(c)) },
+            { value: "open", label: "Open", count: countWhere(isOpenNetwork) },
+          ]}
+          selected={filters.net || null}
+          onToggle={(v) => setFilters({ net: filters.net === v ? "" : v as CrewLinkFilters["net"] })}
+          onClear={() => setFilters({ net: "" })}
+        />
+      </SidebarFacetBlock>
       <SettingsSpaces
         spaces={VIEWS.map((v) => ({ ...v, count: v.key === "crew" ? crews.length : v.key === "all" ? stats.directions : undefined }))}
         value={view}
