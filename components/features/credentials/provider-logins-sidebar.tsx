@@ -45,10 +45,12 @@ export interface ProviderLoginsSidebarProps {
   providers: LoginFacetOption[]
   modes: LoginFacetOption[]
   owners: LoginFacetOption[]
+  /** The Vault's space switch, drawn right under the toolbar. */
+  spaces?: React.ReactNode
 }
 
 export function ProviderLoginsSidebar({
-  filters, onFiltersChange, counts, providers, modes, owners,
+  filters, onFiltersChange, counts, providers, modes, owners, spaces,
 }: ProviderLoginsSidebarProps) {
   const set = (patch: Partial<LoginFilters>) => onFiltersChange({ ...filters, ...patch })
   const toggle = (list: string[], value: string) =>
@@ -80,6 +82,7 @@ export function ProviderLoginsSidebar({
           />
         </div>
       </SidebarToolbar>
+      {spaces}
 
       {/* Every status row is printed, zeroes included, the way the secrets
           rail prints its tiers: "Needs re-login · 0" is the answer to a
