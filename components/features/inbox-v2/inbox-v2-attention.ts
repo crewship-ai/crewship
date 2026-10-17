@@ -22,6 +22,9 @@ export function parseInboxAttention(value: string | null): InboxAttention | null
 /** Keep the dashboard count and focused Inbox tied to actual human decisions. */
 export function matchesInboxAttention(entry: InboxV2Entry, attention: InboxAttention): boolean {
   if (entry.historical) return false
+  // A pending approvals-queue request is a decision waiting: /approvals
+  // redirects here, and leaving its rows out emptied the page it replaced.
+  if (entry.source === "approval") return attention === "approvals" && entry.actionable
   const items = entry.source === "group" ? entry.groupedItems ?? [] : entry.inboxItem ? [entry.inboxItem] : []
   return items.some((item) => attention === "approvals" ? isBlockingInboxItem(item) : ATTENTION_KINDS[attention].has(item.kind))
 }

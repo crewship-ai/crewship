@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import Link from "next/link"
 
 import {
@@ -10,10 +10,13 @@ import {
 
 import { remainingLabel } from "@/components/features/inbox/inbox-derive"
 import {
-  SidebarActiveChip, SidebarActiveChips, SidebarFacet,
-  SidebarFacetOption, SidebarFilterButton, SidebarRow, SidebarSearch,
+  SidebarActiveChip, SidebarActiveChips, SidebarFilterButton, SidebarRow, SidebarSearch,
   SidebarSection, SidebarToolbar, SidebarViewButton,
 } from "@/components/layout/sidebar-kit"
+import {
+  FACET_VALUE_LIMIT, SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets, type SidebarFacetValue,
+} from "@/components/layout/sidebar-facets"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Badge } from "@/components/ui/badge"
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup,
@@ -23,20 +26,20 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { cn } from "@/lib/utils"
 
-import { InboxCrewPicker } from "./inbox-crew-picker"
-import { EntryAvatar, entryIdentity } from "./inbox-entry-identity"
+import { agentByRef, EntryAvatar, entryFromAgent, entryIdentity } from "./inbox-entry-identity"
 import { ATTENTION_LABELS, type InboxAttention } from "./inbox-v2-attention"
 import {
   ageLabel, entryKindPill, entryTitle, facetCounts, INBOX_ATTENTION, INBOX_SORTS, INBOX_V2_TYPES,
   isArchivedNotDecided, needsHumanDecision,
   type InboxSort, type InboxV2DeadlineKey, type InboxV2Filters, type InboxV2TypeKey,
 } from "./inbox-v2-derive"
-import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Entry, type InboxV2View } from "./inbox-v2-types"
+import { EMPTY_INBOX_LOOKUP, type InboxAgentRef, type InboxLookup, type InboxV2Entry, type InboxV2View } from "./inbox-v2-types"
 
 /**
  * The Inbox's secondary panel (Harbor 2): search, Filter and Sort in the
- * panel toolbar; the facets open IN the panel under it (never a popover, so
- * two facets combine in one visit and the list stays in view); the three
+ * panel toolbar; the facets open IN the panel under it — the kit's facet
+ * block (COM-01), never a popover, so two facets combine in one visit and the
+ * list stays in view; each facet lists six values and "All N…"; the three
  * spaces as a segmented control (keys 1–3); an Overview row; then the list in
  * its sections.
  *
@@ -72,8 +75,6 @@ const DEADLINES: { key: InboxV2DeadlineKey; label: string }[] = [
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(INBOX_V2_TYPES.map((t) => [t.key, t.label]))
 const ATTENTION_LABEL: Record<string, string> = Object.fromEntries(INBOX_ATTENTION.map((a) => [a.key, a.label]))
 
-/** How many crews the Crew facet lists before it offers the full picker. */
-const CREW_FACET_LIMIT = 6
 
 interface Props {
   view: InboxV2View
@@ -126,7 +127,21 @@ export function InboxV2Explorer({
       })
       .sort((a, b) => b.count - a.count || a.crew.name.localeCompare(b.crew.name))
   }, [entries, lookup])
-  const [showFilters, setShowFilters] = useState(false)
+  // Agent (INB-01): the agents behind the rows of this space, by id. Counted
+  // over the loaded feed — the server has no agent filter yet (#3455).
+  const agents = useMemo(() => {
+    const byId = new Map<string, { agent: InboxAgentRef; count: number }>()
+    for (const entry of entries) {
+      const agent = entryIdentity(entry, lookup).agent
+      if (!agent) continue
+      const seen = byId.get(agent.id)
+      if (seen) seen.count += 1
+      else byId.set(agent.id, { agent, count: 1 })
+    }
+    return [...byId.values()].sort((a, b) => b.count - a.count || a.agent.name.localeCompare(b.agent.name))
+  }, [entries, lookup])
+  const facets = useSidebarFacets()
+  const showFilters = facets.open
   const searchRef = useRef<HTMLDivElement>(null)
 
   // `/` focuses search, as every panel does (v67 toolbar hint).
@@ -144,11 +159,46 @@ export function InboxV2Explorer({
 
   const activeCount =
     (filters.type ? 1 : 0) + (filters.deadline ? 1 : 0) + (filters.unreadOnly ? 1 : 0) +
-    (filters.attention ? 1 : 0) + (filters.crew ? 1 : 0)
+    (filters.attention ? 1 : 0) + (filters.crew ? 1 : 0) + (filters.agent ? 1 : 0)
   const crewChip = filters.crew ? lookup.crewById.get(filters.crew)?.name ?? "Crew" : null
+  const agentChip = filters.agent ? agentName(filters.agent, lookup, entries) : null
   const narrowed = Boolean(attention) || activeCount > 0 || filters.search.trim() !== ""
   const set = (patch: Partial<InboxV2Filters>) => onFilters({ ...filters, ...patch })
-  const clearFacets = () => set({ type: null, deadline: null, unreadOnly: false, attention: null, crew: null })
+  const clearFacets = () => set({ type: null, deadline: null, unreadOnly: false, attention: null, crew: null, agent: null })
+
+  const stateValues: SidebarFacetValue[] = [
+    { value: "unread", label: "Unread only", count: counts.unread, icon: <Bell className="h-3.5 w-3.5 shrink-0" aria-hidden /> },
+    ...DEADLINES.map((d) => ({ value: d.key, label: d.label, count: counts.deadline[d.key], icon: <Clock3 className="h-3.5 w-3.5 shrink-0" aria-hidden /> })),
+  ]
+  const stateSelected = [...(filters.unreadOnly ? ["unread"] : []), ...(filters.deadline ? [filters.deadline] : [])]
+  const attentionValues: SidebarFacetValue[] = INBOX_ATTENTION.map((a) => ({ value: a.key, label: a.label, count: counts.attention[a.key] }))
+  const typeValues: SidebarFacetValue[] = INBOX_V2_TYPES.filter((t) => counts.type[t.key] > 0 || filters.type === t.key).map((t) => {
+    const Icon = TYPE_ICON[t.key]
+    return { value: t.key, label: t.label, count: counts.type[t.key], icon: <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden /> }
+  })
+  // The facet lists the crews that have rows here; "All N…" every crew.
+  const crewsWithRows = new Map(crews.map(({ crew, count }) => [crew.id, count]))
+  const crewValues: SidebarFacetValue[] = [
+    ...crews.map(({ crew }) => crew),
+    ...[...lookup.crewById.values()].filter((crew) => !crewsWithRows.has(crew.id)).sort((a, b) => a.name.localeCompare(b.name)),
+  ].map((crew) => ({
+    value: crew.id, label: crew.name, text: `${crew.name} ${crew.slug}`, count: crewsWithRows.get(crew.id) ?? 0,
+    icon: <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="h-4 w-4 shrink-0 rounded-sm [&_svg]:h-2.5 [&_svg]:w-2.5" />,
+  }))
+  const agentValues: SidebarFacetValue[] = agents.map(({ agent, count }) => ({
+    value: agent.id, label: agent.name, text: `${agent.name} ${agent.slug}`, count,
+    icon: <AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} avatarUrl={agent.avatar_url} alt="" className="h-4 w-4 shrink-0 rounded-sm bg-muted" />,
+  }))
+  // The facet value of the chosen agent: a link may name it by slug, the
+  // facet lists ids. A link can also name an agent this space has no row
+  // from, or one nobody knows: it is still the choice, so it stays listed
+  // and removable.
+  const agentSelected = filters.agent
+    ? agents.find(({ agent }) => agent.id === filters.agent || agent.slug === filters.agent)?.agent.id ?? filters.agent
+    : null
+  if (agentSelected && !agentValues.some((v) => v.value === agentSelected)) {
+    agentValues.unshift({ value: agentSelected, label: agentChip ?? agentSelected, count: entries.filter((e) => entryFromAgent(e, agentSelected, lookup)).length })
+  }
 
   const sections = attention
     ? [{ label: ATTENTION_LABELS[attention], rows: visible }]
@@ -179,12 +229,7 @@ export function InboxV2Explorer({
             placeholder="Search inbox…"
           />
         </div>
-        <SidebarFilterButton
-          activeCount={activeCount}
-          aria-expanded={showFilters}
-          aria-controls="inbox-facets"
-          onClick={() => setShowFilters((open) => !open)}
-        >
+        <SidebarFilterButton activeCount={activeCount} {...facets.triggerProps}>
           Filter
         </SidebarFilterButton>
         {onTogglePicking && (
@@ -219,83 +264,57 @@ export function InboxV2Explorer({
         <SidebarActiveChips>
           {attention && <SidebarActiveChip onRemove={onClearAttention ?? (() => {})}>{ATTENTION_LABELS[attention]}</SidebarActiveChip>}
           {filters.unreadOnly && <SidebarActiveChip onRemove={() => set({ unreadOnly: false })}>State: Unread only</SidebarActiveChip>}
-          {filters.deadline && (
-            <SidebarActiveChip onRemove={() => set({ deadline: null })}>
-              State: {DEADLINES.find((d) => d.key === filters.deadline)?.label}
-            </SidebarActiveChip>
-          )}
-          {filters.attention && <SidebarActiveChip onRemove={() => set({ attention: null })}>Attention: {ATTENTION_LABEL[filters.attention]}</SidebarActiveChip>}
-          {filters.type && <SidebarActiveChip onRemove={() => set({ type: null })}>Source type: {TYPE_LABEL[filters.type]}</SidebarActiveChip>}
-          {crewChip && <SidebarActiveChip onRemove={() => set({ crew: null })}>Crew: {crewChip}</SidebarActiveChip>}
+          {filters.deadline && <Chip onRemove={() => set({ deadline: null })} text={`State: ${DEADLINES.find((d) => d.key === filters.deadline)?.label}`} />}
+          {filters.attention && <Chip onRemove={() => set({ attention: null })} text={`Attention: ${ATTENTION_LABEL[filters.attention]}`} />}
+          {filters.type && <Chip onRemove={() => set({ type: null })} text={`Source type: ${TYPE_LABEL[filters.type]}`} />}
+          {crewChip && <Chip onRemove={() => set({ crew: null })} text={`Crew: ${crewChip}`} />}
+          {agentChip && <Chip onRemove={() => set({ agent: null })} text={`Agent: ${agentChip}`} />}
         </SidebarActiveChips>
       )}
 
-      {showFilters && (
-        <div id="inbox-facets" role="group" aria-label="Filter inbox" className="max-h-[50%] shrink-0 overflow-y-auto border-b border-border pb-1">
-          <div className="flex items-center gap-2 px-3 pb-1 pt-1">
-            <span className="text-micro font-semibold text-muted-foreground-soft">Filter</span>
-            {activeCount > 0 && (
-              <>
-                <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{activeCount}</span>
-                <button type="button" onClick={clearFacets} className="ml-auto text-micro text-primary-hover hover:underline">Clear</button>
-              </>
-            )}
-          </div>
-          <SidebarFacet label="State" resetLabel="Read and unread, any time" resetActive={!filters.unreadOnly && !filters.deadline} onReset={() => set({ unreadOnly: false, deadline: null })} first>
-            <SidebarFacetOption active={filters.unreadOnly} onToggle={() => set({ unreadOnly: !filters.unreadOnly })}>
-              <Bell className="h-3.5 w-3.5 shrink-0" />
-              Unread only
-              <FacetCount value={counts.unread} />
-            </SidebarFacetOption>
-            {DEADLINES.map((d) => (
-              <SidebarFacetOption key={d.key} active={filters.deadline === d.key} onToggle={() => set({ deadline: filters.deadline === d.key ? null : d.key })}>
-                <Clock3 className="h-3.5 w-3.5 shrink-0" />
-                {d.label}
-                <FacetCount value={counts.deadline[d.key]} />
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-
-          <SidebarFacet label="Attention" resetLabel="Any attention" resetActive={!filters.attention} onReset={() => set({ attention: null })}>
-            {INBOX_ATTENTION.map((a) => (
-              <SidebarFacetOption key={a.key} active={filters.attention === a.key} onToggle={() => set({ attention: filters.attention === a.key ? null : a.key })}>
-                {a.label}
-                <FacetCount value={counts.attention[a.key]} />
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-
-          <SidebarFacet label="Source type" resetLabel="Any type" resetActive={!filters.type} onReset={() => set({ type: null })}>
-            {INBOX_V2_TYPES.filter((t) => counts.type[t.key] > 0 || filters.type === t.key).map((t) => {
-              const Icon = TYPE_ICON[t.key]
-              return (
-                <SidebarFacetOption key={t.key} active={filters.type === t.key} onToggle={() => set({ type: filters.type === t.key ? null : t.key })}>
-                  <Icon className="h-3.5 w-3.5 shrink-0" />
-                  {t.label}
-                  <FacetCount value={counts.type[t.key]} />
-                </SidebarFacetOption>
-              )
-            })}
-          </SidebarFacet>
-
-          {(crews.length > 0 || filters.crew) && (
-            <SidebarFacet label="Crew" resetLabel="All crews" resetActive={!filters.crew} onReset={() => set({ crew: null })}>
-              {crews.slice(0, CREW_FACET_LIMIT).map(({ crew, count }) => (
-                <SidebarFacetOption key={crew.id} active={filters.crew === crew.id} onToggle={() => set({ crew: filters.crew === crew.id ? null : crew.id })}>
-                  <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="h-4 w-4 shrink-0 rounded-sm [&_svg]:h-2.5 [&_svg]:w-2.5" />
-                  <span className="min-w-0 truncate">{crew.name}</span>
-                  <FacetCount value={count} />
-                </SidebarFacetOption>
-              ))}
-              {lookup.crewById.size > CREW_FACET_LIMIT && (
-                <div className="px-2 py-1">
-                  <InboxCrewPicker lookup={lookup} entries={entries} value={filters.crew} onChange={(crew) => set({ crew })} label={`All ${lookup.crewById.size}…`} />
-                </div>
-              )}
-            </SidebarFacet>
-          )}
-        </div>
-      )}
+      <SidebarFacetBlock {...facets.blockProps} label="Filter inbox" activeCount={activeCount} onClear={clearFacets}>
+        <SidebarInlineFacet
+          label="State"
+          values={stateValues}
+          selected={stateSelected}
+          onToggle={(value) => value === "unread" ? set({ unreadOnly: !filters.unreadOnly }) : set({ deadline: filters.deadline === value ? null : value as InboxV2DeadlineKey })}
+          onClear={() => set({ unreadOnly: false, deadline: null })}
+        />
+        <SidebarInlineFacet
+          label="Attention"
+          values={attentionValues}
+          selected={filters.attention}
+          onToggle={(value) => set({ attention: filters.attention === value ? null : value as InboxV2Filters["attention"] })}
+          onClear={() => set({ attention: null })}
+        />
+        <SidebarInlineFacet
+          label="Source type"
+          values={typeValues}
+          selected={filters.type}
+          onToggle={(value) => set({ type: filters.type === value ? null : value as InboxV2TypeKey })}
+          onClear={() => set({ type: null })}
+        />
+        {(crews.length > 0 || filters.crew) && (
+          <SidebarInlineFacet
+            label="Crew"
+            values={crewValues}
+            // Up to six of the crews that have rows here; every crew behind All N….
+            limit={Math.max(1, Math.min(FACET_VALUE_LIMIT, crews.length))}
+            selected={filters.crew}
+            onToggle={(value) => set({ crew: filters.crew === value ? null : value })}
+            onClear={() => set({ crew: null })}
+          />
+        )}
+        {agentValues.length > 0 && (
+          <SidebarInlineFacet
+            label="Agent"
+            values={agentValues}
+            selected={agentSelected}
+            onToggle={(value) => set({ agent: agentSelected === value ? null : value })}
+            onClear={() => set({ agent: null })}
+          />
+        )}
+      </SidebarFacetBlock>
 
       <div className="shrink-0 px-2 pt-2">
         <div role="tablist" aria-label="Inbox spaces" className="grid gap-0.5 rounded-lg bg-muted p-0.5 ring-1 ring-border ring-inset">
@@ -367,7 +386,7 @@ export function InboxV2Explorer({
                   view={view}
                   narrowed={narrowed}
                   onClear={() => {
-                    onFilters({ search: "", type: null, attention: null, deadline: null, unreadOnly: false, crew: null })
+                    onFilters({ search: "", type: null, attention: null, deadline: null, unreadOnly: false, crew: null, agent: null })
                     onClearAttention?.()
                   }}
                 />
@@ -395,10 +414,10 @@ function ExplorerEmpty({ view, narrowed, onClear }: { view: InboxV2View; narrowe
     return (
       <InlineEmpty
         icon={Inbox}
-        text="Nothing matches those filters."
+        text="Nothing matches these filters."
         action={
           <button type="button" onClick={onClear} className="text-primary-hover hover:underline">
-            Clear
+            Clear filters
           </button>
         }
       />
@@ -419,10 +438,21 @@ function ExplorerEmpty({ view, narrowed, onClear }: { view: InboxV2View; narrowe
   return <InlineEmpty icon={Inbox} text="Nothing waits for you. Decisions, questions and reviews from agents land here." />
 }
 
-/** SidebarFacetOption has no count slot; the kit's Check claims ml-auto, and
- *  the first auto margin wins, so the count carries it and the tick follows. */
-function FacetCount({ value }: { value: number }) {
-  return <span className="ml-auto shrink-0 font-mono text-micro tabular-nums opacity-70">{value}</span>
+/** An active-filter chip whose × names the filter it removes ("Remove filter Agent: Scout"). */
+function Chip({ text, onRemove }: { text: string; onRemove: () => void }) {
+  return <SidebarActiveChip onRemove={onRemove} label={text}>{text}</SidebarActiveChip>
+}
+
+/**
+ * The name an agent chip shows: the roster's, else the key the rows carry
+ * when some row in the space is from it, else "unknown" once the roster has
+ * answered (an old link naming an agent that is gone) — "…" until then.
+ */
+function agentName(ref: string, lookup: InboxLookup, entries: InboxV2Entry[]): string {
+  const known = agentByRef(lookup, ref)
+  if (known) return known.name
+  if (entries.some((entry) => entryFromAgent(entry, ref, lookup))) return ref
+  return lookup.ready ? "unknown" : "…"
 }
 
 function EntryRow({ entry, selected, picking = false, onOpen, lookup }: { entry: InboxV2Entry; selected: boolean; picking?: boolean; onOpen: () => void; lookup: InboxLookup }) {

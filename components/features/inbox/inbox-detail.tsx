@@ -22,7 +22,7 @@ import { EMPTY_INBOX_LOOKUP, type InboxLookup } from "@/components/features/inbo
 import { entryIdentity } from "@/components/features/inbox-v2/inbox-entry-identity"
 import { inboxEntry } from "@/components/features/inbox-v2/inbox-v2-derive"
 import {
-  DecisionBlock, DetailExpand, DetailFrame, Dock, HistoryReceipt, OriginChips, RoleNote, outcomeLabel, type DecisionTone,
+  DecisionBlock, DetailExpand, DetailFrame, Dock, HistoryReceipt, OriginChips, RailPart, RoleNote, outcomeLabel, type DecisionTone,
 } from "@/components/features/inbox-v2/inbox-detail-frame"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { FourEyesNotice } from "@/components/features/escalations/four-eyes-notice"
@@ -693,17 +693,17 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
         </>
       )}
 
-      <OriginChips links={relatedLinks} />
+      <RailPart><OriginChips links={relatedLinks} /></RailPart>
 
       {item.kind === "waitpoint" && runID !== "" && (
-        <DetailExpand title="How the run got here" open={!isResolved}>
+        <RailPart><DetailExpand title="How the run got here" open={!isResolved}>
           <WaitpointRunDetail workspaceId={item.workspace_id} pipelineRunId={runID} inboxResolved={isResolved} />
-        </DetailExpand>
+        </DetailExpand></RailPart>
       )}
       {item.payload && visibleContextEntries(item.payload).length > 0 && (
-        <DetailExpand title="Additional context">
+        <RailPart><DetailExpand title="Additional context">
           <ContextDetails payload={item.payload} />
-        </DetailExpand>
+        </DetailExpand></RailPart>
       )}
       {isResolved && (
         <p className="m-0 text-label text-muted-foreground">

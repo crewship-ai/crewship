@@ -42,6 +42,11 @@ function renderExplorer(over: Partial<React.ComponentProps<typeof InboxV2Explore
   return { onFilters, props }
 }
 
+/** The kit's facets (COM-01) fold: unfold one by its header to reach its values. */
+function unfold(label: string) {
+  fireEvent.click(within(screen.getByRole("group", { name: "Filter inbox" })).getByRole("button", { name: new RegExp(`^${label}`), expanded: false }))
+}
+
 describe("inbox v2 explorer", () => {
   it("offers the three spaces with their counts, and the Overview row", () => {
     const onOverview = vi.fn()
@@ -92,6 +97,7 @@ describe("inbox v2 explorer", () => {
   it("counts each type facet over the whole feed, not over what is on screen", () => {
     renderExplorer({ visible: [FEED[0]] })
     fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
+    unfold("Source type")
     const waitpoint = screen.getByRole("button", { name: /Approval step/i })
     expect(within(waitpoint).getByText("2")).toBeTruthy()
   })
@@ -99,6 +105,7 @@ describe("inbox v2 explorer", () => {
   it("asks the parent to narrow when a facet is chosen", () => {
     const { onFilters } = renderExplorer()
     fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
+    unfold("Source type")
     fireEvent.click(screen.getByRole("button", { name: /Agent request or notice/i }))
     expect(onFilters).toHaveBeenCalledWith(expect.objectContaining({ type: "escalation" }))
   })
@@ -108,6 +115,7 @@ describe("inbox v2 explorer", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
     const facets = screen.getByRole("group", { name: "Filter inbox" })
     for (const label of ["State", "Attention", "Source type"]) expect(within(facets).getByText(label)).toBeInTheDocument()
+    unfold("Attention")
     fireEvent.click(within(facets).getByRole("button", { name: /^Decision/ }))
     expect(onFilters).toHaveBeenCalledWith(expect.objectContaining({ attention: "decision" }))
     expect(screen.getByRole("group", { name: "Filter inbox" })).toBeInTheDocument()
@@ -124,6 +132,7 @@ describe("inbox v2 explorer", () => {
     const row = inboxEntry(item({ id: "c1", kind: "waitpoint", payload: { crew_id: "c-ops" } }))
     const { onFilters } = renderExplorer({ entries: [row], visible: [row], lookup })
     fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
+    unfold("Crew")
     fireEvent.click(within(screen.getByRole("group", { name: "Filter inbox" })).getByRole("button", { name: /^Ops/ }))
     expect(onFilters).toHaveBeenCalledWith(expect.objectContaining({ crew: "c-ops" }))
   })
@@ -146,7 +155,7 @@ describe("inbox v2 explorer", () => {
 
   it("explains an empty crew selection as a filter result", () => {
     renderExplorer({ visible: [], filters: { ...EMPTY_INBOX_V2_FILTERS, crew: "empty-crew" } })
-    expect(screen.getByText("Nothing matches those filters.")).toBeInTheDocument()
+    expect(screen.getByText("Nothing matches these filters.")).toBeInTheDocument()
   })
 
   it("never offers a filter the server cannot answer", () => {

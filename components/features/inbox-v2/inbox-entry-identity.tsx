@@ -7,7 +7,7 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { ActorAvatar } from "@/components/features/inbox/inbox-actor"
 import { payloadString, subjectOf } from "@/components/features/inbox/inbox-derive"
 import { entryAgentRef, entryCrewId, filterEntries, matchesSearch, sortInboxEntries, type InboxSort, type InboxV2Filters } from "./inbox-v2-derive"
-import { resolveAgent, type InboxLookup, type InboxV2Entry } from "./inbox-v2-types"
+import { resolveAgent, type InboxAgentRef, type InboxLookup, type InboxV2Entry } from "./inbox-v2-types"
 
 export function entryIdentity(entry: InboxV2Entry, lookup: InboxLookup) {
   const item = entry.inboxItem
@@ -49,12 +49,30 @@ export function EntryAvatar({ entry, lookup, compact = false, size }: { entry: I
   return <span className={`flex items-center justify-center bg-primary/10 text-primary-hover ${box}`}><Icon className="h-4 w-4" aria-hidden /></span>
 }
 
+/**
+ * Is this row from that agent? `ref` is an id or a slug — old /approvals
+ * links send the id, agent pages the slug. The roster resolves either; a
+ * sender the roster does not know still matches by the key the row carries.
+ */
+export function entryFromAgent(entry: InboxV2Entry, ref: string, lookup: InboxLookup): boolean {
+  const agent = entryIdentity(entry, lookup).agent
+  if (agent && (agent.id === ref || agent.slug === ref)) return true
+  const raw = entryAgentRef(entry)
+  return raw.id === ref || raw.slug === ref
+}
+
+/** The roster agent a facet value or a link names, by id first, then slug. */
+export function agentByRef(lookup: InboxLookup, ref: string): InboxAgentRef | null {
+  return lookup.agentById.get(ref) ?? lookup.agentBySlug.get(ref) ?? null
+}
+
 /** Search the names shown on screen, and use the same crew resolution for filtering. */
 export function filterInboxEntries(entries: InboxV2Entry[], filters: InboxV2Filters, lookup: InboxLookup, sort: InboxSort = "urgency") {
   const search = filters.search.trim().toLowerCase()
   const kept = filterEntries(entries, { ...filters, crew: null, search: "" }).filter((entry) => {
     const { crew, agent, name } = entryIdentity(entry, lookup)
     if (filters.crew && crew?.id !== filters.crew) return false
+    if (filters.agent && !entryFromAgent(entry, filters.agent, lookup)) return false
     return !search || matchesSearch(entry, search) || `${crew?.name || ""} ${crew?.slug || ""} ${agent?.name || ""} ${agent?.slug || ""} ${name}`.toLowerCase().includes(search)
   })
   return sortInboxEntries(kept, sort, (entry) => entryIdentity(entry, lookup).crew?.name ?? "")
