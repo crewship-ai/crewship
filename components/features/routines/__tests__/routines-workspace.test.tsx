@@ -150,6 +150,25 @@ describe("<RoutinesWorkspace> — the overview pane", () => {
     )
     expect(screen.getByText(/No routines yet/)).toBeVisible()
   })
+
+  it("empty workspace shows New routine and the CLI hint; without the role there is no New routine", () => {
+    const onNew = vi.fn()
+    render(<RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error={null} onSelect={vi.fn()} onNew={onNew} />)
+    screen.getByRole("button", { name: "New routine" }).click()
+    expect(onNew).toHaveBeenCalled()
+    expect(screen.getByText("crewship routine init")).toBeInTheDocument()
+    cleanup()
+    render(<RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error={null} onSelect={vi.fn()} />)
+    expect(screen.queryByRole("button", { name: "New routine" })).not.toBeInTheDocument()
+  })
+
+  it("a load error offers Retry", () => {
+    const onRetry = vi.fn()
+    render(<RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error="boom" onSelect={vi.fn()} onRetry={onRetry} />)
+    expect(screen.getByRole("alert")).toHaveTextContent("Routines could not load")
+    screen.getByRole("button", { name: "Retry" }).click()
+    expect(onRetry).toHaveBeenCalled()
+  })
 })
 
 describe("routineLastState", () => {
