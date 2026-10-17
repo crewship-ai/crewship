@@ -18,6 +18,23 @@ class WorkflowContracts(unittest.TestCase):
     def job(self, text, name):
         return re.search(r'^  ' + re.escape(name) + r':\n(.*?)(?=^  [a-z][\w-]*:\n|\Z)', text, re.M | re.S).group(1)
 
+    def test_document_image_artifact_requires_qualified_source_without_publication(self):
+        lane = self.job(self.text('ci.yml'), 'frontend')
+        smoke = lane.index('DOCS_IMAGE="$image" node tools/docs-service/image-smoke.mjs')
+        save = lane.index('docker save --output "$artifact/image.tar" "$image_id"')
+        upload = lane.index('name: docs-service-image-')
+        self.assertLess(smoke, save)
+        self.assertLess(save, upload)
+        for guard in ('git diff --exit-code -- tools/docs-service',
+                      'test "$context_tree" = "$reviewed_tree"',
+                      'docker image inspect --format', 'hashlib.sha256',
+                      'source_sha', 'context_tree', 'image_id', 'archive_sha256',
+                      'run_id', 'run_attempt', 'if-no-files-found: error'):
+            self.assertIn(guard, lane)
+        for privilege in ('packages: write', 'id-token: write', 'docker login',
+                          'docker push', 'if: always()', 'continue-on-error:'):
+            self.assertNotIn(privilege, lane)
+
     def test_osv_covers_every_shipped_npm_lockfile(self):
         security = self.text('security.yml')
         osv = self.job(security, 'osv-scan')
