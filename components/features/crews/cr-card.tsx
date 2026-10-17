@@ -55,7 +55,7 @@ export function CrCard({
   )
 }
 
-const LINK = "inline-flex shrink-0 items-center gap-0.5 text-control font-medium text-muted-foreground transition-colors hover:text-foreground coarse:min-h-11"
+const LINK = "inline-flex shrink-0 items-center gap-0.5 text-control font-medium text-muted-foreground transition-colors hover:text-foreground coarse:min-h-[44px]"
 
 function CardLink({ label, href, onClick }: { label: string; href?: string; onClick?: () => void }) {
   const body = (
@@ -98,7 +98,7 @@ export function CrLine({
     <div data-slot="cr-line" className={cn("flex min-w-0 items-center gap-3 border-t border-border px-4 py-2.5", className)} {...rest}>
       {lead}
       {onOpen ? (
-        <button type="button" onClick={onOpen} className="min-w-0 flex-1 rounded-sm text-left hover:[&>b]:underline focus-visible:outline-2 focus-visible:outline-primary coarse:min-h-11">
+        <button type="button" onClick={onOpen} className="min-w-0 flex-1 rounded-sm text-left hover:[&>b]:underline focus-visible:outline-2 focus-visible:outline-primary coarse:min-h-[44px]">
           {text}
         </button>
       ) : (
@@ -166,7 +166,7 @@ export function CrSegment<T extends string>({ value, options, onChange, label, c
             aria-checked={on}
             onClick={() => onChange(o.id)}
             className={cn(
-              "inline-flex h-5 items-center whitespace-nowrap rounded-sm px-2 text-micro font-medium transition-colors coarse:min-h-11",
+              "inline-flex h-5 items-center whitespace-nowrap rounded-sm px-2 text-micro font-medium transition-colors coarse:min-h-[44px]",
               on ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
             )}
           >

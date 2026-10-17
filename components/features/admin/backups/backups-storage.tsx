@@ -69,7 +69,7 @@ export function InfoTip({ label, children }: { label: string; children: React.Re
   )
 }
 
-const rowButton = "h-7 px-2.5 text-xs coarse:h-[2.75rem]"
+const rowButton = "h-7 px-2.5 text-xs coarse:h-[44px]"
 
 export function StorageBody({ settings, destinations = [], destinationsReady = true, space, ctx, reload }: {
   settings: BackupSettings

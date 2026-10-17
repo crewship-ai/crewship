@@ -329,7 +329,7 @@ export default function DashboardPage() {
 
           {insightsFailed ? (
             <div data-testid="dashboard-kpis" className="mt-4 overflow-hidden rounded-card border border-border bg-card [&>*]:border-t-0">
-              <DashNote tone="error" action={<Button size="xs" variant="outline" onClick={() => { void insightsQ.refetch() }} className="coarse:min-h-11">Retry</Button>}>
+              <DashNote tone="error" action={<Button size="xs" variant="outline" onClick={() => { void insightsQ.refetch() }} className="coarse:min-h-[44px]">Retry</Button>}>
                 Could not load the run summary
               </DashNote>
             </div>
@@ -353,7 +353,7 @@ export default function DashboardPage() {
               className="xl:col-span-2"
             >
               {volumeFailed ? (
-                <DashNote tone="error" action={<Button size="xs" variant="outline" onClick={retryVolume} className="coarse:min-h-11">Retry</Button>}>
+                <DashNote tone="error" action={<Button size="xs" variant="outline" onClick={retryVolume} className="coarse:min-h-[44px]">Retry</Button>}>
                   Could not load run volume
                 </DashNote>
               ) : (

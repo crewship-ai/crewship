@@ -67,7 +67,7 @@ export function SkillChips({ workspaceId, value, onChange, enabled }: {
       ) : (
         <div className="space-y-2">
           {skills.length > 8 && (
-            <label className="flex h-8 items-center gap-2 rounded-md border border-hairline bg-background px-2.5 coarse:h-12">
+            <label className="flex h-8 items-center gap-2 rounded-md border border-hairline bg-background px-2.5 coarse:h-[44px]">
               <Search className="size-3.5 text-muted-foreground" aria-hidden />
               <input aria-label="Find a skill" placeholder="Find a skill" value={query} onChange={(e) => setQuery(e.target.value)} className="min-w-0 flex-1 bg-transparent text-xs outline-none" />
             </label>
@@ -83,7 +83,7 @@ export function SkillChips({ workspaceId, value, onChange, enabled }: {
                   title={s.description ?? undefined}
                   onClick={() => onChange(on ? value.filter((v) => v.id !== s.id) : [...value, s])}
                   className={cn(
-                    "inline-flex h-7 items-center rounded-md border px-2.5 text-label transition-colors coarse:min-h-11",
+                    "inline-flex h-7 items-center rounded-md border px-2.5 text-label transition-colors coarse:min-h-[44px]",
                     on ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground",
                   )}
                 >

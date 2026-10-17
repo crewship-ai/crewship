@@ -356,7 +356,7 @@ function CheckDialog({ run, legacy, onClose, onCheck }: {
             <label className="flex flex-col gap-1">
               <span className="text-muted-foreground">or passphrase (older bundles)</span>
               <input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} autoComplete="off"
-                className="h-8 rounded-md border border-control-border bg-surface-subtle px-2 coarse:h-[2.75rem]" />
+                className="h-8 rounded-md border border-control-border bg-surface-subtle px-2 coarse:h-[44px]" />
             </label>
           </div>
         )}

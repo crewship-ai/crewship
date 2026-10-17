@@ -142,14 +142,14 @@ function NewIssue({ base, projects, disabled }: { base: string; projects: Projec
   return <details className="rounded-lg border bg-card p-4"><summary className="cursor-pointer font-medium">New issue</summary>
     <form className="touch-form mt-3 space-y-3" onSubmit={event => { event.preventDefault(); if (!disabled && selected?.intake_ready && title.trim() && !save.isPending) save.mutate() }}>
       <label htmlFor={`${id}-project`} className="block text-sm">Project</label>
-      <select id={`${id}-project`} className="min-h-9 w-full rounded-md border bg-background px-3 coarse:min-h-12" value={projectId} disabled={disabled || save.isPending} onChange={event => setProjectId(event.target.value)}><option value="">Choose a project</option>{eligible.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
+      <select id={`${id}-project`} className="min-h-9 w-full rounded-md border bg-background px-3 coarse:min-h-[44px]" value={projectId} disabled={disabled || save.isPending} onChange={event => setProjectId(event.target.value)}><option value="">Choose a project</option>{eligible.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
       {selected && !selected.intake_ready && <p role="status" className="text-sm text-muted-foreground">Ask your administrator to configure this project’s issue intake crew.</p>}
       <label htmlFor={`${id}-title`} className="block text-sm">Title</label><Input id={`${id}-title`} value={title} maxLength={4096} disabled={save.isPending} onChange={event => setTitle(event.target.value)} required />
       <label htmlFor={`${id}-description`} className="block text-sm">Description</label><Textarea id={`${id}-description`} value={description} maxLength={65536} disabled={save.isPending} onChange={event => setDescription(event.target.value)} />
       <p className="text-xs text-muted-foreground">Creates an unassigned request in Backlog. An authorized workspace member can review it and start work.</p>
       <Button type="submit" disabled={disabled || !selected?.intake_ready || !title.trim() || save.isPending}>{save.isPending ? "Creating…" : "Create issue"}</Button>
       {save.isError && <p role="alert" className="text-sm">{save.error.message}</p>}
-      {created && <div><p role="status" className="text-sm">Created {created.identifier}.</p>{created.can_read && <Link className="inline-flex min-h-9 items-center text-sm text-primary underline coarse:min-h-12" href={`/issues/${encodeURIComponent(created.identifier)}`}>Open {created.identifier}</Link>}</div>}
+      {created && <div><p role="status" className="text-sm">Created {created.identifier}.</p>{created.can_read && <Link className="inline-flex min-h-9 items-center text-sm text-primary underline coarse:min-h-[44px]" href={`/issues/${encodeURIComponent(created.identifier)}`}>Open {created.identifier}</Link>}</div>}
     </form>
   </details>
 }

@@ -16,7 +16,7 @@ describe("inline control height", () => {
     expect(inlineControl).toContain("h-[var(--control-sm)]")
     expect(inlineControl).not.toMatch(/(^|\s)h-7(\s|$)/)
     // A finger still gets 44 px.
-    expect(inlineControl).toContain("coarse:h-[2.75rem]")
+    expect(inlineControl).toContain("coarse:h-[44px]")
   })
 
   it("no small Button in Settings is squeezed below the token with h-7 / h-6", () => {

@@ -343,7 +343,7 @@ function FacetAll({
                     value={`${valueText(v)} ${v.value}`}
                     onSelect={() => onToggle(v.value)}
                     data-checked={on || undefined}
-                    className="min-h-10 gap-2 coarse:min-h-12"
+                    className="min-h-10 gap-2 coarse:min-h-[44px]"
                   >
                     <FacetCheck on={on} />
                     {v.icon}

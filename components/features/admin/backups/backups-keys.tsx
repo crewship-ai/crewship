@@ -64,7 +64,7 @@ export function BackupsKeys({ ctx }: { ctx: SectionCtx }) {
   )
 }
 
-const rowButton = "h-7 px-2.5 text-xs coarse:h-[2.75rem]"
+const rowButton = "h-7 px-2.5 text-xs coarse:h-[44px]"
 
 export function RecipientsList({ list, ctx, reload }: { list: BackupRecipient[]; ctx: SectionCtx; reload?: () => void }) {
   const [removing, setRemoving] = React.useState<BackupRecipient | null>(null)

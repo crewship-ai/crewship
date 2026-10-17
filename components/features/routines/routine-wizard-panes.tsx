@@ -312,7 +312,7 @@ export function BasicsPane({
         <div className="flex items-center gap-3 rounded-lg border border-hairline bg-foreground/[0.02] px-3 py-2">
           {appearance}
           <span className="min-w-0 flex-1 text-xs text-muted-foreground">Icon and colour — how it shows in lists and the calendar.</span>
-          <Button type="button" variant="ghost" size="sm" onClick={onAppearance} className="h-8 text-xs coarse:h-12">
+          <Button type="button" variant="ghost" size="sm" onClick={onAppearance} className="h-8 text-xs coarse:h-[44px]">
             Icon and colour
           </Button>
         </div>
@@ -460,7 +460,7 @@ export function WhenPane({
               </datalist>
             </CreateSurfaceField>
             <CreateSurfaceField label="Cron">
-              <div data-testid="routine-cron" className="flex h-8 items-center rounded-md border border-hairline bg-background px-2.5 font-mono text-xs text-foreground coarse:h-12">
+              <div data-testid="routine-cron" className="flex h-8 items-center rounded-md border border-hairline bg-background px-2.5 font-mono text-xs text-foreground coarse:h-[44px]">
                 {cron || "—"}
               </div>
             </CreateSurfaceField>
@@ -665,7 +665,7 @@ export function StepsPane({
                 aria-expanded={open}
                 aria-label={`Step ${i + 1}: ${title}`}
                 onClick={() => onOpenStep(open ? null : step.id)}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left coarse:min-h-12"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left coarse:min-h-[44px]"
               >
                 <span className="w-4 shrink-0 text-center font-mono text-label text-muted-foreground">{i + 1}</span>
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground/[0.05]">
@@ -698,11 +698,11 @@ export function StepsPane({
                         <>Later steps read its result as <span className="font-mono">{`{{ steps.${step.id}.output }}`}</span></>
                       )}
                     </span>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => remove(step.id)} className="h-8 gap-1.5 text-xs coarse:h-12">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => remove(step.id)} className="h-8 gap-1.5 text-xs coarse:h-[44px]">
                       <Trash2 className="h-3 w-3" />
                       Remove
                     </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={() => onOpenStep(null)} className="h-8 text-xs coarse:h-12">
+                    <Button type="button" variant="outline" size="sm" onClick={() => onOpenStep(null)} className="h-8 text-xs coarse:h-[44px]">
                       Done
                     </Button>
                   </div>
@@ -714,7 +714,7 @@ export function StepsPane({
       </ol>
 
       <div className="flex flex-col gap-2">
-        <Button type="button" variant="outline" size="sm" aria-expanded={adding} onClick={() => setAdding((v) => !v)} className="h-8 w-fit gap-1.5 text-xs coarse:h-12">
+        <Button type="button" variant="outline" size="sm" aria-expanded={adding} onClick={() => setAdding((v) => !v)} className="h-8 w-fit gap-1.5 text-xs coarse:h-[44px]">
           <Plus className="h-3 w-3" />
           Add a step
         </Button>
@@ -744,7 +744,7 @@ function InsertRefs({ refs, onInsert }: { refs: string[]; onInsert: (ref: string
           type="button"
           aria-label={`Insert ${r}`}
           onClick={() => onInsert(r)}
-          className="rounded-md border border-hairline bg-foreground/[0.03] px-1.5 py-0.5 font-mono text-label text-muted-foreground hover:text-foreground coarse:min-h-12"
+          className="rounded-md border border-hairline bg-foreground/[0.03] px-1.5 py-0.5 font-mono text-label text-muted-foreground hover:text-foreground coarse:min-h-[44px]"
         >
           {r}
         </button>
@@ -1169,12 +1169,12 @@ export function TestPane({
             </span>
           </span>
           {passed || test.state === "expired" || test.state === "failed" ? (
-            <Button type="button" variant="outline" size="sm" onClick={onTest} className="h-8 gap-1.5 text-xs coarse:h-12">
+            <Button type="button" variant="outline" size="sm" onClick={onTest} className="h-8 gap-1.5 text-xs coarse:h-[44px]">
               <RefreshCw className="h-3 w-3" />
               Test again
             </Button>
           ) : (
-            <Button type="button" size="sm" onClick={onTest} disabled={test.state === "running"} className="h-8 gap-1.5 text-xs coarse:h-12">
+            <Button type="button" size="sm" onClick={onTest} disabled={test.state === "running"} className="h-8 gap-1.5 text-xs coarse:h-[44px]">
               {test.state === "running" ? <Spinner className="h-3 w-3" /> : <Play className="h-3 w-3" />}
               {test.state === "running" ? "Testing…" : "Run the test"}
             </Button>

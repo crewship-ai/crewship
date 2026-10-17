@@ -32,8 +32,8 @@ export function CardWriteFeedback({ state, message, retry, resolveConflict }: {
     {state === "saved" && "Saved"}
     {state === "validation" && message}
     {state === "rechecking" && "Checking current access…"}
-    {state === "unknown" && <><p>The outcome is unknown. Your draft is kept.</p><Button size="sm" variant="outline" className="coarse:min-h-12" onClick={() => void retry()}>Check and retry the same operation</Button></>}
-    {state === "conflict" && <><p>This issue changed. Your draft is kept.</p><Button size="sm" variant="outline" className="coarse:min-h-12" onClick={resolveConflict}>Reload current values; keep my draft</Button></>}
+    {state === "unknown" && <><p>The outcome is unknown. Your draft is kept.</p><Button size="sm" variant="outline" className="coarse:min-h-[44px]" onClick={() => void retry()}>Check and retry the same operation</Button></>}
+    {state === "conflict" && <><p>This issue changed. Your draft is kept.</p><Button size="sm" variant="outline" className="coarse:min-h-[44px]" onClick={resolveConflict}>Reload current values; keep my draft</Button></>}
   </div>
 }
 
@@ -69,7 +69,7 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
       return (Array.isArray(body) ? body : body.agents ?? []) as { id: string; name: string }[]
     },
   })
-  if (rechecking && !ref.current) return <EntityCardFrame><p role="status" className="text-muted-foreground">Checking current access…</p><Button size="sm" variant="outline" className="coarse:min-h-12" onClick={reconcile}>Retry verification</Button></EntityCardFrame>
+  if (rechecking && !ref.current) return <EntityCardFrame><p role="status" className="text-muted-foreground">Checking current access…</p><Button size="sm" variant="outline" className="coarse:min-h-[44px]" onClick={reconcile}>Retry verification</Button></EntityCardFrame>
   if (ref.kind !== "issue") return <EntityCardFrame><p>Unavailable</p></EntityCardFrame>
   if (ref.entity.deleted) return <EntityCardFrame><p className="text-muted-foreground">Issue deleted</p></EntityCardFrame>
   const current = ref.current
@@ -116,10 +116,10 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
     </div>
     <p className="text-xs text-muted-foreground">{verb} by {actorName} · {new Date(ref.provenance.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
     <div className="flex flex-wrap gap-1.5">
-      {current.allowed_actions.some((a) => ["edit_fields", "assign", "change_status"].includes(a)) && <Button size="sm" variant="ghost" className="coarse:min-h-12" onClick={() => openEditor("fields")}><Pencil className="size-3.5" />Edit</Button>}
-      {current.allowed_actions.includes("comment") && <Button size="sm" variant="ghost" className="coarse:min-h-12" onClick={() => openEditor("comment")}><MessageSquare className="size-3.5" />Comment</Button>}
-      <Button size="sm" variant="ghost" className="coarse:min-h-12" aria-expanded={pullRequestsOpen} onClick={() => setPullRequestsOpen(open => !open)}>Pull requests</Button>
-      <Button size="sm" variant="outline" className="ml-auto coarse:min-h-12" onClick={() => onOpen(ref)}>Open on right<ArrowRight className="size-3.5" /></Button>
+      {current.allowed_actions.some((a) => ["edit_fields", "assign", "change_status"].includes(a)) && <Button size="sm" variant="ghost" className="coarse:min-h-[44px]" onClick={() => openEditor("fields")}><Pencil className="size-3.5" />Edit</Button>}
+      {current.allowed_actions.includes("comment") && <Button size="sm" variant="ghost" className="coarse:min-h-[44px]" onClick={() => openEditor("comment")}><MessageSquare className="size-3.5" />Comment</Button>}
+      <Button size="sm" variant="ghost" className="coarse:min-h-[44px]" aria-expanded={pullRequestsOpen} onClick={() => setPullRequestsOpen(open => !open)}>Pull requests</Button>
+      <Button size="sm" variant="outline" className="ml-auto coarse:min-h-[44px]" onClick={() => onOpen(ref)}>Open on right<ArrowRight className="size-3.5" /></Button>
     </div>
     {pullRequestsOpen && <div className="border-t pt-3">
       {detail.isPending ? <p role="status">Checking current access…</p> : detail.error ? <p role="alert">Pull requests unavailable. <button type="button" className="underline" onClick={() => void detail.refetch()}>Retry verification</button></p> : detail.data?.crew_id ? <ChatIssuePullRequests crewId={detail.data.crew_id} identifier={ref.entity.identifier ?? ref.entity.id} revision={current.aggregate_revision} /> : <p role="status">Pull requests unavailable</p>}
@@ -138,13 +138,13 @@ export function IssueEntityCard({ reference: ref, chatId, userId, rechecking, li
       if (await mutation.submit(target, editor === "comment" ? "POST" : "PATCH", body)) { if (editor === "comment") setComment(""); setEditor(null) }
     }}>
       <fieldset disabled={locked} className="min-w-0">{detail.isPending ? <p role="status">Checking current access…</p> : detail.error ? <p role="alert">Could not verify current access. <button type="button" className="underline" onClick={() => void detail.refetch()}>Try again</button></p> : editor === "comment" ? can("comment") && <label className="block space-y-1 text-xs">Comment<textarea required value={comment} onChange={(e) => setComment(e.target.value)} className="block min-h-24 w-full rounded-md border bg-background p-2 text-sm" /></label> : <div className="grid gap-3 sm:grid-cols-2">
-        {can("edit_fields") && <><label className="space-y-1 text-xs sm:col-span-2">Title<input required value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} className="block h-9 w-full rounded-md border bg-background px-2 coarse:min-h-12" /></label><label className="space-y-1 text-xs">Priority<select value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value as typeof draft.priority })} className="block h-9 w-full rounded-md border bg-background px-2 coarse:min-h-12">{ALL_PRIORITIES.map((p) => <option key={p} value={p}>{priorityLabel[p]}</option>)}</select></label></>}
-        {can("change_status") && <label className="space-y-1 text-xs">Status<select value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as typeof draft.status })} className="block h-9 w-full rounded-md border bg-background px-2 coarse:min-h-12">{ISSUE_STATUSES.map((s) => <option key={s} value={s}>{statusLabel[s]}</option>)}</select></label>}
-        {can("assign") && <label className="space-y-1 text-xs">Assignee<select value={draft.assignee_id} disabled={!roster.data} onChange={(e) => setDraft({ ...draft, assignee_id: e.target.value })} className="block h-9 w-full rounded-md border bg-background px-2 coarse:min-h-12"><option value="">Unassigned</option>{baseline.current.assignee_id && !roster.data?.some((a) => a.id === baseline.current.assignee_id) && <option value={baseline.current.assignee_id}>{detail.data?.assignee_name ?? "Current assignee"}</option>}{roster.data?.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>{roster.error && <span role="alert">Could not load assignees</span>}</label>}
+        {can("edit_fields") && <><label className="space-y-1 text-xs sm:col-span-2">Title<input required value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} className="block h-9 w-full rounded-md border bg-background px-2 coarse:min-h-[44px]" /></label><label className="space-y-1 text-xs">Priority<select value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value as typeof draft.priority })} className="block h-9 w-full rounded-md border bg-background px-2 coarse:min-h-[44px]">{ALL_PRIORITIES.map((p) => <option key={p} value={p}>{priorityLabel[p]}</option>)}</select></label></>}
+        {can("change_status") && <label className="space-y-1 text-xs">Status<select value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value as typeof draft.status })} className="block h-9 w-full rounded-md border bg-background px-2 coarse:min-h-[44px]">{ISSUE_STATUSES.map((s) => <option key={s} value={s}>{statusLabel[s]}</option>)}</select></label>}
+        {can("assign") && <label className="space-y-1 text-xs">Assignee<select value={draft.assignee_id} disabled={!roster.data} onChange={(e) => setDraft({ ...draft, assignee_id: e.target.value })} className="block h-9 w-full rounded-md border bg-background px-2 coarse:min-h-[44px]"><option value="">Unassigned</option>{baseline.current.assignee_id && !roster.data?.some((a) => a.id === baseline.current.assignee_id) && <option value={baseline.current.assignee_id}>{detail.data?.assignee_name ?? "Current assignee"}</option>}{roster.data?.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>{roster.error && <span role="alert">Could not load assignees</span>}</label>}
       </div>}</fieldset>
       {mutation.state === "conflict" && detail.data && <div className="space-y-1 text-xs" aria-label="Current server values"><p>Current server values</p><p>Title: {detail.data.title}</p><p>Status: {detail.data.status} · Priority: {detail.data.priority} · Assignee: {detail.data.assignee_id ?? "Unassigned"}</p><p>Your draft remains in the fields above.</p></div>}
       <CardWriteFeedback {...mutation} resolveConflict={() => void reloadConflict()} />
-      <div className="flex gap-2"><Button type="submit" size="sm" className="coarse:min-h-12" disabled={!detail.data || locked || rechecking || (editor === "comment" && !can("comment"))}>{mutation.state === "saving" ? <RefreshCw className="size-3.5 animate-spin" /> : null}Save</Button><Button type="button" size="sm" variant="ghost" className="coarse:min-h-12" onClick={() => setEditor(null)} disabled={locked}>Cancel</Button></div>
+      <div className="flex gap-2"><Button type="submit" size="sm" className="coarse:min-h-[44px]" disabled={!detail.data || locked || rechecking || (editor === "comment" && !can("comment"))}>{mutation.state === "saving" ? <RefreshCw className="size-3.5 animate-spin" /> : null}Save</Button><Button type="button" size="sm" variant="ghost" className="coarse:min-h-[44px]" onClick={() => setEditor(null)} disabled={locked}>Cancel</Button></div>
     </form>}
   </EntityCardFrame>
 }

@@ -108,7 +108,7 @@ export function CrewTeam({
                       data-agent-row={a.slug}
                     >
                       <td className="px-4 py-2">
-                        <button type="button" className="flex min-w-0 items-center gap-2.5 text-left coarse:min-h-11" onClick={(e) => { e.stopPropagation(); onSelectAgent(a.slug) }}>
+                        <button type="button" className="flex min-w-0 items-center gap-2.5 text-left coarse:min-h-[44px]" onClick={(e) => { e.stopPropagation(); onSelectAgent(a.slug) }}>
                           <AgentAvatar seed={a.avatar_seed || a.name} style={a.avatar_style} avatarUrl={a.avatar_url} className="size-6 shrink-0 rounded-md" />
                           <span className="min-w-0">
                             <b className="flex items-center gap-1.5 truncate font-medium text-foreground">{a.name}{a.agent_role === "LEAD" && <LeadMark />}</b>

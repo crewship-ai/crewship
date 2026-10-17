@@ -148,7 +148,7 @@ export function WorkItemDetailBody({
           <button
             type="button"
             onClick={() => onNavigate?.(item.replay_of as string)}
-            className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary coarse:min-h-12"
+            className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary coarse:min-h-[44px]"
           >
             replay of {item.replay_of.slice(0, 10)}…
           </button>

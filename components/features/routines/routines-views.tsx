@@ -66,7 +66,7 @@ function Row({ onClick, glyph, title, sub, pill, meta }: { onClick: () => void; 
       <button
         type="button"
         onClick={onClick}
-        className="flex w-full items-center gap-3 border-b border-hairline px-4 py-2.5 text-left transition-colors hover:bg-foreground/[0.03] coarse:min-h-12"
+        className="flex w-full items-center gap-3 border-b border-hairline px-4 py-2.5 text-left transition-colors hover:bg-foreground/[0.03] coarse:min-h-[44px]"
       >
         {glyph}
         <span className="min-w-0 flex-1">

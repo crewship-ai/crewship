@@ -262,7 +262,7 @@ export function AuthLink({ className, ...props }: React.ComponentProps<"a">) {
       {...props}
       className={cn(
         "inline-flex items-center rounded-sm text-body text-primary-hover underline-offset-4 hover:underline",
-        "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 coarse:min-h-12",
+        "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 coarse:min-h-[44px]",
         className,
       )}
     />
@@ -270,9 +270,9 @@ export function AuthLink({ className, ...props }: React.ComponentProps<"a">) {
 }
 
 /** Height class for the footer's buttons: the kit's 32 px, 44 px under a coarse pointer. */
-export const AUTH_BUTTON = "coarse:h-12 coarse:text-base"
+export const AUTH_BUTTON = "coarse:h-[44px] coarse:text-base"
 /** Height class for the fields: the kit's 32 px, 44 px under a coarse pointer. */
-export const AUTH_INPUT = "coarse:h-12"
+export const AUTH_INPUT = "coarse:h-[44px]"
 
 /** Card-shaped skeleton for a screen that must ask the server before it can draw. */
 export function AuthCardSkeleton({ delayMs = 1000 }: { delayMs?: number }) {

@@ -209,7 +209,7 @@ export function RoutineSettingsTab({
                               else delete next.execution_tier
                             })
                           }
-                          className={cn("rounded-full border px-2.5 py-1 text-xs coarse:min-h-11", on ? "border-primary/40 bg-primary/10 text-primary" : "border-hairline text-muted-foreground")}
+                          className={cn("rounded-full border px-2.5 py-1 text-xs coarse:min-h-[44px]", on ? "border-primary/40 bg-primary/10 text-primary" : "border-hairline text-muted-foreground")}
                         >
                           {t}
                         </button>
@@ -332,17 +332,17 @@ export function RoutineSettingsTab({
           <div className="flex flex-wrap gap-2">
             {lifecycle !== "proposed" &&
               (lifecycle === "disabled" ? (
-                <Button type="button" variant="outline" size="sm" onClick={() => onGovernance("enable")} className="gap-1.5 coarse:h-11">
+                <Button type="button" variant="outline" size="sm" onClick={() => onGovernance("enable")} className="gap-1.5 coarse:h-[44px]">
                   <Power className="h-3.5 w-3.5" aria-hidden />
                   Turn on
                 </Button>
               ) : (
-                <Button type="button" variant="outline" size="sm" onClick={() => onGovernance("disable")} className="gap-1.5 coarse:h-11">
+                <Button type="button" variant="outline" size="sm" onClick={() => onGovernance("disable")} className="gap-1.5 coarse:h-[44px]">
                   <PowerOff className="h-3.5 w-3.5" aria-hidden />
                   Turn off
                 </Button>
               ))}
-            <Button type="button" variant="destructive" size="sm" onClick={onDelete} className="gap-1.5 coarse:h-11">
+            <Button type="button" variant="destructive" size="sm" onClick={onDelete} className="gap-1.5 coarse:h-[44px]">
               <Trash2 className="h-3.5 w-3.5" aria-hidden />
               Delete routine…
             </Button>

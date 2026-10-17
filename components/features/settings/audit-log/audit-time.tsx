@@ -140,7 +140,7 @@ export function AuditTimePicker({ filters, onChange, bounds, tally, now }: {
       value={filters.range as TimeRange}
       presets={PICKER_PRESETS}
       customLabel={customLabel}
-      triggerClassName="h-8 gap-1.5 px-2.5 font-mono text-xs [&>svg]:opacity-60 coarse:h-[2.75rem]"
+      triggerClassName="h-8 gap-1.5 px-2.5 font-mono text-xs [&>svg]:opacity-60 coarse:h-[44px]"
       onChange={(v) => { if (v !== "custom") onChange({ range: v as AuditFilters["range"], from: "", to: "", sliceFrom: "", sliceTo: "" }) }}
       renderCustom={(close) => (
         <div className="space-y-2" data-slot="audit-custom-range">

@@ -154,7 +154,7 @@ export function ImportRoutineDialog({
         >
           <FileUp className="h-5 w-5 text-muted-foreground" aria-hidden />
           <p className="text-xs text-muted-foreground">Drop a .json bundle here, or</p>
-          <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()} className="coarse:h-11">
+          <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()} className="coarse:h-[44px]">
             Choose a file
           </Button>
           <input

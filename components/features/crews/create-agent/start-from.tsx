@@ -19,7 +19,7 @@ const OPTIONS: Array<{ id: AgentStart; label: string; hint: string; icon: typeof
   { id: "copy", label: "Copy an agent", hint: "Same model and access as another", icon: Copy },
 ]
 
-const FIELD = "w-full rounded-md border border-hairline bg-background px-2.5 h-8 text-xs outline-none focus:border-primary coarse:h-12 coarse:text-base"
+const FIELD = "w-full rounded-md border border-hairline bg-background px-2.5 h-8 text-xs outline-none focus:border-primary coarse:h-[44px] coarse:text-base"
 
 /**
  * New agent › Who › "Start from": a blank agent, a template (the catalogue on
@@ -77,7 +77,7 @@ export function StartFrom({ workspaceId, start, onStart, selectedPersona, onPick
             aria-checked={start === id}
             onClick={() => onStart(id)}
             className={cn(
-              "flex flex-col items-start gap-1 rounded-md border p-3 text-left transition-colors coarse:min-h-11",
+              "flex flex-col items-start gap-1 rounded-md border p-3 text-left transition-colors coarse:min-h-[44px]",
               start === id ? "border-primary bg-primary/10" : "border-border hover:bg-muted",
             )}
           >

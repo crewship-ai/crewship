@@ -1540,7 +1540,7 @@ export default function OnboardingPage() {
                 {createdCrews.map((c) => (
                   <li key={c.id}>
                     <details className="group">
-                      <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 coarse:min-h-12">
+                      <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 coarse:min-h-[44px]">
                         {c.proposal.crewIcon && (
                           <CrewIcon icon={c.proposal.crewIcon} color={c.proposal.crewColor} size="sm" />
                         )}

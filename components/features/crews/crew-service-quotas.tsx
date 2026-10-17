@@ -100,7 +100,7 @@ export function CrewServiceQuotas({ servicesJSON, canManage, save }: {
     {draft?.length === 0 && <p className="text-sm text-muted-foreground">Declare services through a crew manifest or the CLI to configure their disk policy here.</p>}
     {draft?.map((service, i) => <div key={service.name} className="rounded-xl border p-4 space-y-3">
       <div><h3 className="font-medium">{service.name}</h3><p className="text-sm text-muted-foreground">{service.quota_enforced ? "Enforced disk quotas requested" : "Legacy trusted storage · root and persistent disks have no capacity limit"}</p></div>
-      {canManage && <label className="flex items-center gap-2 text-sm coarse:min-h-12"><Checkbox checked={!!service.quota_enforced} disabled={pending} aria-label={`${service.name}: Enforce disk quotas`} onCheckedChange={checked => {
+      {canManage && <label className="flex items-center gap-2 text-sm coarse:min-h-[44px]"><Checkbox checked={!!service.quota_enforced} disabled={pending} aria-label={`${service.name}: Enforce disk quotas`} onCheckedChange={checked => {
         const enabled = checked === true
         update(i, { quota_enforced: enabled, volumes: enabled ? service.volumes?.map(volume => ({ ...volume, quota_bytes: volume.quota_bytes ?? 512 * MIB, generation: volume.generation ?? 1 })) : service.volumes })
       }} />Enforce disk quotas</label>}
@@ -119,6 +119,6 @@ export function CrewServiceQuotas({ servicesJSON, canManage, save }: {
     {usesQuotaStorage && !(canManage && changed && storageChanged) && <p role="note" className="text-sm text-muted-foreground">{BACKUP_WARNING}</p>}
     {canManage && changed && storageChanged && <label className="flex items-start gap-2 text-sm"><Checkbox className="mt-1" checked={acknowledged} disabled={pending} onCheckedChange={checked => setAcknowledged(checked === true)} /><span>I understand that changing storage policy or generation recreates the service and switches volumes. New quota generations start empty; existing data is not copied automatically. {usesQuotaStorage && BACKUP_WARNING}</span></label>}
     {error && <p role="alert" className="text-sm">{error}</p>}
-    {canManage && draft && draft.length > 0 && <Button className="coarse:h-12" disabled={!changed || pending} onClick={() => void submit()}>{pending ? "Saving…" : "Save disk policy"}</Button>}
+    {canManage && draft && draft.length > 0 && <Button className="coarse:h-[44px]" disabled={!changed || pending} onClick={() => void submit()}>{pending ? "Saving…" : "Save disk policy"}</Button>}
   </section>
 }

@@ -255,7 +255,7 @@ export function AppToolbar() {
         )}
 
         {/* Mobile: search icon only */}
-        <Button variant="ghost" size="icon-sm" className="md:hidden coarse:h-12 coarse:w-12" aria-label="Search" onClick={() => setCmdkOpen(true)}>
+        <Button variant="ghost" size="icon-sm" className="md:hidden coarse:h-[44px] coarse:w-[44px]" aria-label="Search" onClick={() => setCmdkOpen(true)}>
           <Search className="h-4 w-4" />
         </Button>
 

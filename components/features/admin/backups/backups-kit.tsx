@@ -81,7 +81,7 @@ export function LocalOnlyBar({ onStorage }: { onStorage?: () => void }) {
 export function SmallButton({ primary, danger, className, ...props }: React.ComponentProps<"button"> & { primary?: boolean; danger?: boolean; asChild?: boolean }) {
   return (
     <Button type={props.asChild ? undefined : "button"} size="sm" variant={danger ? "destructive" : primary ? "default" : "outline"}
-      className={cn("h-7 px-2.5 text-xs coarse:h-[2.75rem]", className)} {...props} />
+      className={cn("h-7 px-2.5 text-xs coarse:h-[44px]", className)} {...props} />
   )
 }
 
@@ -112,7 +112,7 @@ export function WsName({ name, instance, here }: { name: string; instance?: bool
 export function InlineInput({ className, ...props }: React.ComponentProps<"input">) {
   return (
     <input {...props}
-      className={cn("mx-1 h-7 w-[5.5rem] rounded-md border border-control-border bg-surface-subtle px-2 text-control text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 coarse:h-[2.75rem]", className)} />
+      className={cn("mx-1 h-7 w-[5.5rem] rounded-md border border-control-border bg-surface-subtle px-2 text-control text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 coarse:h-[44px]", className)} />
   )
 }
 

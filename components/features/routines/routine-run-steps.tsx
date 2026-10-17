@@ -135,7 +135,7 @@ export function RoutineRunSteps({ workspaceId, runId, steps, executions, outputs
               aria-current={selected === s.id ? "true" : undefined}
               onClick={() => setSelected(s.id)}
               className={cn(
-                "flex w-full items-center gap-3 rounded-md border border-transparent px-3 py-2 text-left transition-colors hover:bg-foreground/[0.03] coarse:min-h-12",
+                "flex w-full items-center gap-3 rounded-md border border-transparent px-3 py-2 text-left transition-colors hover:bg-foreground/[0.03] coarse:min-h-[44px]",
                 selected === s.id && "border-hairline bg-foreground/[0.04]",
               )}
             >
@@ -169,7 +169,7 @@ export function RoutineRunSteps({ workspaceId, runId, steps, executions, outputs
   const inspector = step && (
     <section aria-label="Step inspector" className="flex min-w-0 flex-col gap-3 rounded-card border border-hairline bg-card p-3">
       {phone && (
-        <Button type="button" variant="ghost" size="sm" className="-ml-1 w-fit gap-1 coarse:h-11" onClick={() => setSelected(null)}>
+        <Button type="button" variant="ghost" size="sm" className="-ml-1 w-fit gap-1 coarse:h-[44px]" onClick={() => setSelected(null)}>
           <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
           Back to steps
         </Button>

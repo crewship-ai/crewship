@@ -107,7 +107,7 @@ export function WorkReplayDialog({
             value={targetRevision}
             onChange={(e) => setTargetRevision(e.target.value)}
             placeholder={item.target_revision || "inherits the original"}
-            className="mt-1.5 h-9 font-mono text-sm coarse:h-12"
+            className="mt-1.5 h-9 font-mono text-sm coarse:h-[44px]"
             disabled={blocked || pending}
           />
           <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">

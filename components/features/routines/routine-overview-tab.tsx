@@ -110,7 +110,7 @@ export function RoutineOverviewTab({
             <p className="text-xs text-muted-foreground">{nextRun ? `First run ${nextRun}. Run it now to see a real result before then.` : "It runs when someone presses Run."}</p>
           </div>
           {canRun && (
-            <Button type="button" variant="outline" size="sm" onClick={onRun} className="gap-1.5 coarse:h-11">
+            <Button type="button" variant="outline" size="sm" onClick={onRun} className="gap-1.5 coarse:h-[44px]">
               <Play className="h-3.5 w-3.5" aria-hidden />
               Run it now
             </Button>
@@ -296,11 +296,11 @@ function FailureBlock({
         </ol>
       )}
       <footer className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={onOpen} className="coarse:h-11">
+        <Button type="button" variant="outline" size="sm" onClick={onOpen} className="coarse:h-[44px]">
           Open run
         </Button>
         {canRun && (
-          <Button type="button" size="sm" onClick={onRun} className="gap-1.5 coarse:h-11">
+          <Button type="button" size="sm" onClick={onRun} className="gap-1.5 coarse:h-[44px]">
             <RotateCcw className="h-3.5 w-3.5" aria-hidden />
             Run again
           </Button>

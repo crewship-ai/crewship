@@ -58,7 +58,7 @@ function ShareDialog({ workspaceId, resource }: { workspaceId: string; resource:
   })
   const requestOpen = (next: boolean) => { if (!busyMember) setOpen(next) }
   return <>
-    <Button variant="outline" size="sm" className="coarse:h-12" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><Share2 className="mr-1.5 h-3.5 w-3.5" />Share</Button>
+    <Button variant="outline" size="sm" className="coarse:h-[44px]" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><Share2 className="mr-1.5 h-3.5 w-3.5" />Share</Button>
     <CreateSurface open={open} onOpenChange={requestOpen} size="md" restoreOpenerFocus>
       <CreateSurfaceHeader title={`Share ${resource.name}`} onClose={() => requestOpen(false)} description={<>
         {resource.kind === "routine" ? "View shares the stored definition, including its prompts and defaults, without permission to execute. View runs and outputs additionally shares past and future routine run history and outputs; inherited private conversation audiences still apply. Inputs are not shown directly; outputs may contain them. It does not share transcripts or execution authority. Edit draft additionally shares the collaborative unpublished draft and permits changes with View. It does not publish or grant execution. Existing Run shares do not automatically expose the definition. Run uses the routine’s configured credentials and also requires access to every agent it uses." : "List shows the project in Issues. Read opens its issues and explicitly shared comments. Contribute also permits requests, shared comments and arranging intake work; it requires Read. Manage with Read explicitly shares the project description and permits editing its name, description and milestones. Only empty milestones can be removed. Delete issues also requires Read and Manage, and explicitly permits permanent removal of Backlog or Cancelled issues without active work or sub-issues."}
@@ -117,15 +117,15 @@ function ShareMember({ workspaceId, resource, policy, label, onSaved, disabled, 
     {shareOperations[resource.kind].map(operation => {
       const detail = policy.grant_details?.find(right => isResourceRight(right, resource) && right.operation === operation)
       return <div key={operation} className="space-y-1">
-        <label className="flex min-h-9 items-center gap-2 coarse:min-h-12"><input type="checkbox" checked={selected.includes(operation)} onChange={event => {
+        <label className="flex min-h-9 items-center gap-2 coarse:min-h-[44px]"><input type="checkbox" checked={selected.includes(operation)} onChange={event => {
           setSelected(event.target.checked ? [...selected, operation] : selected.filter(op => op !== operation))
           if (!event.target.checked) setReissue(reissue.filter(op => op !== operation))
         }} />{operation === "results" ? "View runs and outputs" : operation === "view" ? "View definition" : operation === "edit" ? "Edit draft" : operation === "run" ? "Run" : operation === "list" ? "List in Issues" : operation === "contribute" ? "Contribute to issues" : operation === "delete_issues" ? "Delete issues" : operation === "manage" ? "Manage project" : "Read issues"}</label>
         {detail && <p className="text-xs text-muted-foreground">{detail.live ? "Active" : "Inactive — issuer no longer has authority"} · Issued by {detail.issuer_name || detail.issuer_id}</p>}
-        {detail && !detail.live && selected.includes(operation) && <label className="flex min-h-9 items-center gap-2 text-xs coarse:min-h-12"><input type="checkbox" checked={reissue.includes(operation)} onChange={event => setReissue(event.target.checked ? [...reissue, operation] : reissue.filter(op => op !== operation))} />Reissue {operation} as me</label>}
+        {detail && !detail.live && selected.includes(operation) && <label className="flex min-h-9 items-center gap-2 text-xs coarse:min-h-[44px]"><input type="checkbox" checked={reissue.includes(operation)} onChange={event => setReissue(event.target.checked ? [...reissue, operation] : reissue.filter(op => op !== operation))} />Reissue {operation} as me</label>}
       </div>
     })}
-    <Button variant="outline" size="sm" className="coarse:h-12" disabled={!changed || saving || conflict} onClick={() => void save()}>{saving ? "Saving…" : `Save access for ${label}`}</Button>
+    <Button variant="outline" size="sm" className="coarse:h-[44px]" disabled={!changed || saving || conflict} onClick={() => void save()}>{saving ? "Saving…" : `Save access for ${label}`}</Button>
     {error && <p role="alert" className="text-sm">{error}</p>}
   </fieldset>
 }

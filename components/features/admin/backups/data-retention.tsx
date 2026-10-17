@@ -85,7 +85,7 @@ export function RetentionScope({ workspaces, selected, picking: urlPicking, onCh
                   onChange(next)
                 }}
                 className={cn(
-                  "inline-flex h-7 items-center gap-1.5 rounded-full border border-control-border py-0.5 pl-1 pr-2.5 text-control transition-opacity coarse:h-[2.75rem]",
+                  "inline-flex h-7 items-center gap-1.5 rounded-full border border-control-border py-0.5 pl-1 pr-2.5 text-control transition-opacity coarse:h-[44px]",
                   !on && "border-dashed opacity-50",
                 )}>
                 <WsAvatar name={w.name} size={18} />

@@ -264,7 +264,7 @@ export function CommentComposer({
           {open ? `${matches.length} agents match. Use the arrow keys.` : ""}
         </p>
 
-        {(allowGuestSharing || guestVisible) && <label className="flex min-h-9 items-center gap-2 text-xs coarse:min-h-12"><input type="checkbox" checked={guestVisible} disabled={disabled || submitting} onChange={event => { setGuestVisible(event.target.checked); setAudience(event.target.checked ? guestProject ?? null : null) }} />Share this comment with Guests who can read this project{guestProject ? ` (${guestProject.name})` : ""}</label>}
+        {(allowGuestSharing || guestVisible) && <label className="flex min-h-9 items-center gap-2 text-xs coarse:min-h-[44px]"><input type="checkbox" checked={guestVisible} disabled={disabled || submitting} onChange={event => { setGuestVisible(event.target.checked); setAudience(event.target.checked ? guestProject ?? null : null) }} />Share this comment with Guests who can read this project{guestProject ? ` (${guestProject.name})` : ""}</label>}
         {audienceChanged && <p role="alert" className="text-xs">The project changed. Your draft is kept. Turn sharing off and review the new project before sharing it.</p>}
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-muted-foreground-soft">

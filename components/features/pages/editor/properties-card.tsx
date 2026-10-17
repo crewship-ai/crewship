@@ -98,7 +98,7 @@ function FolderRow({ workspaceId, slug, page }: { workspaceId: string; slug: str
       icon={FolderOpen}
       label="Folder"
       control={
-        <Button type="button" variant="ghost" size="xs" className="coarse:min-h-11" onClick={() => setMoving(true)}>
+        <Button type="button" variant="ghost" size="xs" className="coarse:min-h-[44px]" onClick={() => setMoving(true)}>
           Change…
         </Button>
       }
@@ -152,7 +152,7 @@ function AddressRow({ slug }: { slug: string }) {
             type="button"
             variant="ghost"
             size="xs"
-            className="coarse:min-h-11"
+            className="coarse:min-h-[44px]"
             aria-label="Copy address"
             onClick={() => void copy()}
           >

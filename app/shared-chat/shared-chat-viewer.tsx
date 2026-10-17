@@ -140,7 +140,7 @@ export function SharedChatViewer() {
               onClick={() => void load()}
               aria-label="Refresh"
               title="Refresh"
-              className="coarse:size-12"
+              className="coarse:size-[44px]"
             >
               <RefreshCw className="size-4" aria-hidden />
             </Button>

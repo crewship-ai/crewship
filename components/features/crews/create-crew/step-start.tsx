@@ -38,7 +38,7 @@ export function StartChoice({ value, onChange }: { value: CrewStart; onChange: (
               aria-checked={on}
               onClick={() => onChange(s.id)}
               className={cn(
-                "flex min-w-0 flex-col items-start gap-1 rounded-lg border p-2.5 text-left transition-colors coarse:min-h-11",
+                "flex min-w-0 flex-col items-start gap-1 rounded-lg border p-2.5 text-left transition-colors coarse:min-h-[44px]",
                 on ? "border-primary/40 bg-primary/[0.08]" : "border-hairline bg-foreground/[0.02] hover:bg-foreground/[0.05]",
               )}
             >
@@ -85,7 +85,7 @@ export function InlineIconPicker({ state, setState, onMore }: {
               aria-label={g.id}
               onClick={() => setState({ color: asCrewColor(g.id) })}
               className={cn(
-                "size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow coarse:size-11",
+                "size-6 rounded-full ring-offset-2 ring-offset-card transition-shadow coarse:size-[44px]",
                 g.swatch,
                 state.color === g.id ? "ring-2 ring-foreground/70" : "hover:ring-2 hover:ring-foreground/20",
               )}
@@ -107,7 +107,7 @@ export function InlineIconPicker({ state, setState, onMore }: {
                 title={def.label}
                 onClick={() => setState({ icon: name })}
                 className={cn(
-                  "grid aspect-square place-items-center rounded-md border transition-colors coarse:min-h-11",
+                  "grid aspect-square place-items-center rounded-md border transition-colors coarse:min-h-[44px]",
                   on ? "border-primary/50 bg-primary/10 text-primary-hover" : "border-transparent text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
                 )}
               >
@@ -200,20 +200,20 @@ export function StepSuggest({ workspaceId, state, setState }: {
             aria-label={`Agent ${i + 1} name`}
             value={a.name}
             onChange={(e) => update(i, { name: e.target.value })}
-            className="h-8 min-w-0 flex-1 rounded-md border border-hairline bg-background px-2 text-body outline-none focus:border-primary coarse:h-12"
+            className="h-8 min-w-0 flex-1 rounded-md border border-hairline bg-background px-2 text-body outline-none focus:border-primary coarse:h-[44px]"
           />
           <input
             aria-label={`Agent ${i + 1} title`}
             value={a.role_title}
             onChange={(e) => update(i, { role_title: e.target.value })}
-            className="h-8 min-w-0 flex-1 rounded-md border border-hairline bg-background px-2 text-label text-muted-foreground outline-none focus:border-primary coarse:h-12 max-sm:hidden"
+            className="h-8 min-w-0 flex-1 rounded-md border border-hairline bg-background px-2 text-label text-muted-foreground outline-none focus:border-primary coarse:h-[44px] max-sm:hidden"
           />
           <span className="shrink-0 text-micro text-muted-foreground">{agentRoleLabel(a.agent_role)}</span>
           <button
             type="button"
             aria-label={`Remove ${a.name}`}
             onClick={() => setState({ suggested: state.suggested.filter((_, j) => j !== i) })}
-            className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground coarse:size-11"
+            className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground coarse:size-[44px]"
           >
             <X className="size-3.5" aria-hidden />
           </button>

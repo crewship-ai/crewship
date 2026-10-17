@@ -129,7 +129,7 @@ export function WelcomeChecklist({ firstAgentId }: { firstAgentId?: string | nul
       concept="dashboard"
       className="mb-4"
       action={
-        <Button variant="ghost" size="sm" onClick={dismiss} aria-label="Dismiss welcome checklist" className="coarse:min-h-11">
+        <Button variant="ghost" size="sm" onClick={dismiss} aria-label="Dismiss welcome checklist" className="coarse:min-h-[44px]">
           Dismiss
         </Button>
       }
@@ -145,7 +145,7 @@ export function WelcomeChecklist({ firstAgentId }: { firstAgentId?: string | nul
               sub={item.description}
               right={
                 item.cta && "href" in item.cta ? (
-                  <Button asChild size="sm" variant="outline" className="coarse:min-h-11">
+                  <Button asChild size="sm" variant="outline" className="coarse:min-h-[44px]">
                     <Link href={item.cta.href}>{item.cta.label}</Link>
                   </Button>
                 ) : item.cta && "copy" in item.cta ? (
@@ -179,7 +179,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     }
   }
   return (
-    <Button type="button" size="sm" variant="outline" className="coarse:min-h-11" onClick={handleCopy}>
+    <Button type="button" size="sm" variant="outline" className="coarse:min-h-[44px]" onClick={handleCopy}>
       {copied ? "Copied" : label}
     </Button>
   )

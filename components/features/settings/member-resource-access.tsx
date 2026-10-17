@@ -37,7 +37,7 @@ export function MemberResourceAccess({ workspaceId, memberId, label, role, onSav
     },
   })
   return <section className="mt-4 space-y-2" aria-label={`Resource access for ${label}`}>
-    <Button variant="outline" className="coarse:h-12" onClick={() => setOpen(!open)} aria-expanded={open}>
+    <Button variant="outline" className="coarse:h-[44px]" onClick={() => setOpen(!open)} aria-expanded={open}>
       {open ? "Close resource access" : "Edit resource access"}
     </Button>
     {open && policy.isPending && <p className="text-xs">Loading resource access…</p>}
@@ -121,7 +121,7 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
           </Button>}
         </span>)}
         <span>{right.kind}: {directories[right.kind].data?.find(resource => resource.id === right.id)?.name ?? right.id} · {resourceOperationLabel(right.operation)}</span>
-        <Button size="sm" variant="ghost" className="coarse:h-12" disabled={save.isPending || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
+        <Button size="sm" variant="ghost" className="coarse:h-[44px]" disabled={save.isPending || conflict} onClick={() => setRights(rights.filter((_, row) => row !== index))}
           aria-label={`Remove ${right.kind} ${right.id} ${right.operation}`}>Remove</Button>
       </li>)}</ul>
       {rights.length === 0 && <p>No resource operations are granted.</p>}
@@ -135,14 +135,14 @@ function PolicyEditor({ policy, url, queryKey, workspaceId, role, label, onSaved
         <select aria-label="Resource operation" className={selectClass} value={operation} disabled={save.isPending || conflict} onChange={event => setOperation(event.target.value)}>
           {operations[kind].map(value => <option key={value} value={value}>{resourceOperationLabel(value)}</option>)}
         </select>
-        <Button size="sm" className="coarse:h-12" variant="outline" disabled={save.isPending || conflict || !resourceId || rights.length >= 256} onClick={addRight}>Add grant</Button>
+        <Button size="sm" className="coarse:h-[44px]" variant="outline" disabled={save.isPending || conflict || !resourceId || rights.length >= 256} onClick={addRight}>Add grant</Button>
       </div>
       {directory.isError && <p role="alert">Resources unavailable. <button type="button" onClick={() => void directory.refetch()}>Reload resources</button></p>}
     </>}
     <EffectiveAccess url={url.replace("/access?", "/access/effective?")} revision={policy.revision} memberId={policy.membership_id} />
     {conflict && <p role="alert">Policy changed. Reload to discard this draft and review the current grants.</p>}
     <div className="flex flex-wrap gap-2">
-      <Button size="sm" variant="outline" className="coarse:h-12" disabled={save.isPending} onClick={() => void queryClient.invalidateQueries({ queryKey })}>Reload current policy</Button>
+      <Button size="sm" variant="outline" className="coarse:h-[44px]" disabled={save.isPending} onClick={() => void queryClient.invalidateQueries({ queryKey })}>Reload current policy</Button>
     </div>
   </div>
 }

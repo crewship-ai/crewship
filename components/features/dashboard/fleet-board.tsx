@@ -105,7 +105,7 @@ export function FleetBoard({ cards: unordered }: { cards: FleetCard[] }) {
               key={row.crew.id}
               href={entityHref({ kind: "crew", slug: row.crew.slug })}
               data-testid="dashboard-fleet-card"
-              className="flex min-w-0 items-center gap-2.5 bg-card px-3 py-2.5 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary coarse:min-h-11"
+              className="flex min-w-0 items-center gap-2.5 bg-card px-3 py-2.5 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary coarse:min-h-[44px]"
             >
               <CrewIcon icon={row.crew.icon || "users"} color={row.crew.color} size="sm" />
               <span className="min-w-0">

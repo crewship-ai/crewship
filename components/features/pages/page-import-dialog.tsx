@@ -211,7 +211,7 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
                 onChange={(e) => setSlug(e.target.value)}
                 placeholder={bundle.page.slug}
                 aria-label="Slug to install under"
-                className="h-8 text-xs coarse:h-12 coarse:text-sm"
+                className="h-8 text-xs coarse:h-[44px] coarse:text-sm"
               />
             </CreateSurfaceField>
 
@@ -243,7 +243,7 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
                       onChange={(e) => setBind((b) => ({ ...b, [r.ref]: e.target.value }))}
                       placeholder={r.ref}
                       aria-label={`Bind ${r.ref}`}
-                      className="h-8 text-xs coarse:h-12 coarse:text-sm"
+                      className="h-8 text-xs coarse:h-[44px] coarse:text-sm"
                     />
                   </CreateSurfaceField>
                 ))}

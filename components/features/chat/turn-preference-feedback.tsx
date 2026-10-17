@@ -18,7 +18,7 @@ interface Props {
 export function TurnPreferenceFeedback(props: Props) {
   const [opened, setOpened] = useState(false)
   return <div className="basis-full pt-1">
-    {!opened ? <button type="button" className="min-h-8 text-xs text-muted-foreground underline-offset-4 hover:underline coarse:min-h-12" onClick={() => setOpened(true)}>What should change next time? (optional)</button> : <PreferenceReasonForm {...props} />}
+    {!opened ? <button type="button" className="min-h-8 text-xs text-muted-foreground underline-offset-4 hover:underline coarse:min-h-[44px]" onClick={() => setOpened(true)}>What should change next time? (optional)</button> : <PreferenceReasonForm {...props} />}
   </div>
 }
 
@@ -30,7 +30,7 @@ function PreferenceReasonForm(props: Props) {
   const failed = state.isError || remember.isError
   return <div className="max-w-sm space-y-2 rounded-lg border bg-card p-3">
     <p className="text-xs text-muted-foreground">Optional: choose a preference for future private chats with this agent. A thumb alone only rates this response.</p>
-    <div className="flex flex-col gap-1">{feedbackPreferenceChoices.map(reason => <Button key={reason} type="button" variant="outline" size="sm" className="h-auto min-h-8 justify-start whitespace-normal py-2 text-left coarse:min-h-12" disabled={remember.isPending} onClick={() => {
+    <div className="flex flex-col gap-1">{feedbackPreferenceChoices.map(reason => <Button key={reason} type="button" variant="outline" size="sm" className="h-auto min-h-8 justify-start whitespace-normal py-2 text-left coarse:min-h-[44px]" disabled={remember.isPending} onClick={() => {
       void remember.mutateAsync(reason).catch(error => toast.error(error instanceof Error ? error.message : "Unable to save your preference"))
     }}>{reason}</Button>)}</div>
     <p role="status" className="text-xs">{remember.isPending ? "Saving your preference…" : failed ? "Unable to verify memory status." : preferenceStatusLabel(status)}

@@ -32,8 +32,8 @@ import { PageSaveLabel, toastSaveError, usePageSave } from "@/components/ui/page
  */
 // The control token, not the spacing scale: --spacing is 0.23rem, so h-8 is
 // ~27px at the Small text size, where a settings field is 32 (--control-md).
-// coarse:h-[2.75rem] — a finger needs 44px; desktop density is untouched.
-export const controlHeight = "h-[var(--control-md)] coarse:h-[2.75rem]"
+// coarse:h-[44px] — a finger needs 44px; desktop density is untouched.
+export const controlHeight = "h-[var(--control-md)] coarse:h-[44px]"
 export const settingsControl = cn(controlHeight, "w-full sm:w-64")
 /**
  * A control inside a table or list row (a role picker, a model picker): one
@@ -41,7 +41,7 @@ export const settingsControl = cn(controlHeight, "w-full sm:w-64")
  * Outside a SettingsRow, a form uses `controlHeight` and the primitive's
  * text-control size; a dialog keeps the primitive's default.
  */
-export const inlineControl = "h-[var(--control-sm)] text-xs coarse:h-[2.75rem]"
+export const inlineControl = "h-[var(--control-sm)] text-xs coarse:h-[44px]"
 /**
  * The one table style for Settings and Admin: a 12px sentence-case header in
  * the muted ink, 13px cells, 16px side padding, hairlines between rows and

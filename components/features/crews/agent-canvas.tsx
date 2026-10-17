@@ -323,7 +323,7 @@ export function AgentCanvas({
       />
       <CanvasShell loading={false} error={null} notLoadedLabel="">
         {agent.crew && (
-          <button type="button" onClick={() => onSelectCrew(agent.crew!.slug)} className="-mb-3 inline-flex items-center gap-1 text-label text-muted-foreground hover:text-foreground coarse:min-h-11">
+          <button type="button" onClick={() => onSelectCrew(agent.crew!.slug)} className="-mb-3 inline-flex items-center gap-1 text-label text-muted-foreground hover:text-foreground coarse:min-h-[44px]">
             <ChevronLeft className="size-3.5" aria-hidden /> {agent.crew.name}
           </button>
         )}

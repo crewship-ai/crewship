@@ -151,13 +151,13 @@ export function RoutineDraftBar({
       </div>
       {canEdit && (
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          <Button type="button" variant="ghost" size="sm" onClick={onDiscard} className="coarse:h-11">
+          <Button type="button" variant="ghost" size="sm" onClick={onDiscard} className="coarse:h-[44px]">
             Discard
           </Button>
-          <Button type="button" variant="outline" size="sm" onClick={onTest} disabled={testing} className="coarse:h-11">
+          <Button type="button" variant="outline" size="sm" onClick={onTest} disabled={testing} className="coarse:h-[44px]">
             {testing ? "Testing…" : draftOnly ? "Test draft" : "Test changes"}
           </Button>
-          <Button type="button" size="sm" onClick={onPublish} className="coarse:h-11" data-testid="routine-publish-button">
+          <Button type="button" size="sm" onClick={onPublish} className="coarse:h-[44px]" data-testid="routine-publish-button">
             {draftOnly ? "Publish" : "Publish changes"}
           </Button>
         </div>
@@ -195,7 +195,7 @@ export function RoutineTabRow({
             aria-selected={tab === t}
             onClick={() => onTab(t)}
             className={cn(
-              "flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm transition-colors coarse:h-11",
+              "flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm transition-colors coarse:h-[44px]",
               tab === t ? "border-primary-hover font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
@@ -205,7 +205,7 @@ export function RoutineTabRow({
         ))}
       </div>
       <div className="order-1 flex shrink-0 items-center justify-between gap-2 pb-1.5 sm:order-2">
-        <Button asChild variant="ghost" size="sm" className="gap-1.5 text-xs coarse:h-11">
+        <Button asChild variant="ghost" size="sm" className="gap-1.5 text-xs coarse:h-[44px]">
           <Link href={routineActivityHref(slug)} title="Every run and change of this routine, in Activity">
             <Activity className="h-3.5 w-3.5" aria-hidden />
             Runs and history
