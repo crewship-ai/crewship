@@ -339,7 +339,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug, addRequest =
   )
 }
 
-function CreatedReveal({
+export function CreatedReveal({
   webhook,
   onDismiss,
   mode = "created",
