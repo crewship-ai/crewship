@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useState } from "react"
-import { Activity, CheckCircle2, CircleAlert, MessageSquare, Sparkles, Users, Inbox, Wallet, Play } from "lucide-react"
+import { Activity, CheckCircle2, CircleAlert, MessageSquare, Sparkles, Inbox, Wallet, Play } from "lucide-react"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { StatusDonut } from "@/components/features/dashboard/status-donut"
@@ -52,9 +52,9 @@ function RunStartBreakdown({ rows }: { rows?: { key: string; total: number }[] }
   </DashboardCard>
 }
 
-export function AgentOverview({ workspaceId, agent, inbox, runs, chats, peerMessages, error, onRetry, onWork, revision }: {
+export function AgentOverview({ workspaceId, agent, inbox, runs, chats, error, onRetry, onWork, revision }: {
   workspaceId: string; agent: AgentRecord; inbox: InboxSummary; runs: RunRow[] | null; chats: ChatRow[] | null;
-  peerMessages: PeerMessageRow[]; error?: string | null; onRetry: () => void; onWork: () => void; revision: number
+  /** Shown by the page's Messages from teammates card, not here. */ peerMessages?: PeerMessageRow[]; error?: string | null; onRetry: () => void; onWork: () => void; revision: number
 }) {
   const active = runs?.filter((run) => run.status === "RUNNING") ?? []
   const outcomes = runs?.filter((run) => run.status !== "RUNNING").slice(0, 5)
@@ -66,7 +66,6 @@ export function AgentOverview({ workspaceId, agent, inbox, runs, chats, peerMess
     <div className="grid gap-4 xl:grid-cols-2">
       <DashboardCard title="Recent outcomes" icon={CheckCircle2} action={<Link className="text-primary" href={`/journal?agent=${encodeURIComponent(agent.slug)}`}>Journal ↗</Link>}>{outcomes === undefined ? <p className="mt-4 text-sm text-muted-foreground">{error ? "Outcomes unavailable." : "Loading outcomes…"}</p> : !outcomes.length ? <WorkspaceEmpty icon={CheckCircle2} title="Completed work will appear here." /> : <ul className="mt-3 divide-y divide-border">{outcomes.map((run) => <li key={run.id} className="py-3 flex items-start gap-3"><WorkspaceGlyph icon={run.status === "COMPLETED" ? CheckCircle2 : CircleAlert} tone={run.status === "COMPLETED" ? "green" : "amber"} /><div className="min-w-0"><Link className="text-sm" href={`/journal?agent=${encodeURIComponent(agent.slug)}&trace_id=${encodeURIComponent(run.id)}`}>{run.trigger_type || "Agent"} run · {run.status.toLowerCase()}</Link>{run.error_message && <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{run.error_message}</p>}<p className="mt-1 text-xs text-muted-foreground">{new Date(run.finished_at ?? run.created_at).toLocaleString()}</p></div></li>)}</ul>}</DashboardCard>
       <DashboardCard title="Recent conversations" icon={MessageSquare}>{chats === null ? <p className="mt-4 text-sm text-muted-foreground">{error ? "Conversations unavailable." : "Loading conversations…"}</p> : !chats.length ? <WorkspaceEmpty icon={MessageSquare} title="Conversations with this agent will appear here." /> : <ul className="mt-3 divide-y divide-border">{chats.slice(0, 5).map((chat) => <li key={chat.id} className="py-3 flex items-start gap-3"><WorkspaceGlyph icon={MessageSquare} /><div className="min-w-0"><Link href={`/chat/${encodeURIComponent(agent.slug)}?session=${encodeURIComponent(chat.id)}`} className="text-sm">{chat.title || "Conversation"}</Link><p className="mt-1 text-xs text-muted-foreground">{chat.message_count} messages · {new Date(chat.last_activity_at ?? chat.created_at).toLocaleString()}</p></div></li>)}</ul>}
-        {!!peerMessages.length && <details className="mt-4 border-t border-border pt-3"><summary className="text-sm cursor-pointer"><Users className="inline h-4 w-4 mr-2" />Recent agent collaboration</summary>{peerMessages.slice(0, 3).map((message, index) => <div key={message.id ?? index} className="mt-3"><p className="text-xs text-muted-foreground">{message.direction === "outgoing" ? `To ${message.to_agent_name ?? message.to_agent_slug ?? "agent"}` : `From ${message.from_agent_name ?? message.from_agent_slug ?? "agent"}`}</p><p className="text-sm line-clamp-2">{message.response || message.question}</p></div>)}</details>}
       </DashboardCard>
     </div>
     <AssignedConnected workspaceId={workspaceId} agentId={agent.id} crewId={agent.crew_id ?? undefined} slug={agent.slug} name={agent.name} revision={revision} />

@@ -34,6 +34,7 @@ import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
 import { CreateAgentDialog } from "./create-agent/create-agent-dialog"
 import { AgentOverview } from "./workspace-overview"
 import { MemoryWorkspace } from "./memory-workspace"
+import { TeammateMessages } from "./agent-teammate-messages"
 import { AgentPageBar } from "./crews-bar"
 import { CrCard, CrLine, HeadChip, LeadMark, LeadStar } from "./cr-card"
 import { TOOL_ACCESS_LABEL } from "./crew-team"
@@ -117,6 +118,7 @@ export function AgentCanvas({
   // Inbox + cost summary (used by stats strip + InboxBanner).
   const [inbox, setInbox] = useState<InboxSummary>({ count: 0 })
   const [peerMessages, setPeerMessages] = useState<PeerMessageRowType[]>([])
+  const [peersUnavailable, setPeersUnavailable] = useState(false)
   const agentId = agent?.id
   useEffect(() => {
     if (!agentId) return
@@ -126,6 +128,7 @@ export function AgentCanvas({
     setInbox({ count: 0 })
     setInboxError(null)
     setPeerMessages([])
+    setPeersUnavailable(false)
     apiFetch(`/api/v1/agents/${agentId}/inbox?workspace_id=${workspaceId}`)
       .then((r) => { if (!r.ok) throw new Error(`Activity could not be loaded (${r.status}).`); return r.json() })
       .then((data) => {
@@ -139,8 +142,9 @@ export function AgentCanvas({
         if (approvals) parts.push(`${approvals} approval${approvals === 1 ? "" : "s"} pending`)
         setInbox({ count: total, summary: parts.join(" · "), cost: !unavailable.includes("cost") && typeof data.cost_usd_this_month === "number" ? data.cost_usd_this_month : undefined })
         setPeerMessages(peers)
+        setPeersUnavailable(unavailable.includes("peers"))
       })
-      .catch(() => { if (!cancelled) setInboxError("Approvals and activity summary could not be loaded.") })
+      .catch(() => { if (!cancelled) { setInboxError("Approvals and activity summary could not be loaded."); setPeersUnavailable(true) } })
     return () => { cancelled = true }
   }, [agentId, workspaceId, revision])
 
@@ -385,6 +389,7 @@ export function AgentCanvas({
                 </CrCard>
               )}
               <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onWork={() => onTabChange("tools")} revision={revision} />
+              <TeammateMessages messages={peerMessages} unavailable={peersUnavailable} />
             </>
           )}
           {tab === "persona" && <CreateAgentDialog key={`persona:${editorKey}`} {...editorProps} inlineSections={["instructions", "chat"]} inlineLabel="Instructions" />}

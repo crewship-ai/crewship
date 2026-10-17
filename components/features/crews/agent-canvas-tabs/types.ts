@@ -107,6 +107,8 @@ export interface PeerMessageRow {
   direction?: string
   to_agent_name?: string
   to_agent_slug?: string
+  /** RUNNING | COMPLETED | FAILED (peer_conversations.status). */
+  status?: string
   created_at?: string
 }
 
