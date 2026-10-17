@@ -338,3 +338,55 @@ describe.each(["day", "night"] as const)("Harbor 2 %s contrast matrix", (theme) 
     expect(contrast(lum(`chip-${tone}-fg`), lum("card"))).toBeGreaterThanOrEqual(4.5)
   })
 })
+
+// COM-04 (#3481, PRD TOK-08): charts by crew or agent need more than the five
+// --chart-* slots. --series-1..8 is the validated set: slots 1–5 are the
+// chart slots unchanged (a series keeps its colour), every slot is ≥ 3:1
+// (WCAG 1.4.11) on every surface in both schemes, and no two slots are
+// closer than ΔE 10 (OKLab ×100), so neighbours in a legend stay apart.
+function oklabOf(theme: Theme, name: string): [number, number, number] {
+  const value = token(theme, name)
+  const ok = value.match(/^oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)$/)
+  if (ok) {
+    const [l, c, h] = [Number(ok[1]), Number(ok[2]), (Number(ok[3]) * Math.PI) / 180]
+    return [l, c * Math.cos(h), c * Math.sin(h)]
+  }
+  // sRGB hex → OKLab
+  const [r, g, b] = hexToRgb(value).map(srgbChannelToLinear)
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ]
+}
+
+describe.each(["day", "night"] as const)("%s chart series palette", (theme) => {
+  const SERIES = Array.from({ length: 8 }, (_, i) => `series-${i + 1}`)
+  const SURFACES = ["background", "sidebar", "card", "muted", "surface-subtle", "surface-raised"]
+  const lum = (name: string) => luminanceFromRgb(tokenRgb(theme, name))
+
+  it.each([1, 2, 3, 4, 5])("series-%i is chart-%i", (n) => {
+    expect(token(theme, `series-${n}`)).toBe(token(theme, `chart-${n}`))
+  })
+
+  it.each(SERIES)("%s ≥ 3:1 on every surface", (series) => {
+    for (const s of SURFACES) expect(contrast(lum(series), lum(s)), `${series} on ${s}`).toBeGreaterThanOrEqual(3)
+  })
+
+  it("no two series are closer than ΔE 10", () => {
+    for (let i = 0; i < SERIES.length; i++) {
+      for (let j = i + 1; j < SERIES.length; j++) {
+        const [a, b] = [oklabOf(theme, SERIES[i]), oklabOf(theme, SERIES[j])]
+        const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 100
+        expect(d, `${SERIES[i]} vs ${SERIES[j]}`).toBeGreaterThanOrEqual(10)
+      }
+    }
+  })
+
+  it("the series are Tailwind colours (bg-series-1 …)", () => {
+    for (const series of SERIES) expect(css).toContain(`--color-${series}: var(--${series});`)
+  })
+})
