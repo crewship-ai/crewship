@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { ChevronDown, Play, Volume2 } from "lucide-react"
+import Link from "next/link"
+import { ChevronDown, Gauge, Inbox, Info, MessageSquare, Moon, Play, Volume2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { SettingsCard, SettingsRow } from "../shared"
@@ -68,12 +69,24 @@ function ScopedSoundSettings({ scope }: { scope: string }) {
   }
   const statusText = busy ? "Preparing audio…" : !preferences.enabled ? "Notification sounds are off." : preferences.dnd ? "Do not disturb is on. Notifications are silent." : capability && capability !== "available" ? "Automatic notifications are unavailable: this browser needs shared storage and tab coordination. You can still preview sounds." : ready && capability === "available" ? "Audio is ready. Your device and browser volume still apply." : "Audio needs a click on Activate audio or Preview. Your browser may require this again after a reload."
   return (
+    <>
+    {/* No card header: the section head above already says what this is.
+        The title stays as the region's accessible name. */}
     <SettingsCard
+      hideHeader
       icon={Volume2}
       title="Notification sounds"
-      description="Your Chat and Inbox sounds for this account and workspace, saved in this browser."
+      footer={<>
+        <p role="status" className="inline-flex min-w-0 flex-1 items-start gap-1.5">
+          <Info className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />
+          <span>{statusText}</span>
+        </p>
+        {preferences.enabled && !ready && (
+          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { void activate() }}>Activate audio</Button>
+        )}
+      </>}
     >
-      <SettingsRow label="Play notification sounds" description="Chat replies and new Inbox items make a sound.">
+      <SettingsRow lead={Volume2} label="Play notification sounds" description="Chat replies and new Inbox items make a sound.">
         <Switch
           aria-label="Notification sounds"
           checked={preferences.enabled}
@@ -81,10 +94,10 @@ function ScopedSoundSettings({ scope }: { scope: string }) {
           onCheckedChange={(on) => { if (on) enable(); else update({ enabled: false }) }}
         />
       </SettingsRow>
-      <SettingsRow label="Do not disturb" description="Silences notifications. Previews still play the sound you choose.">
+      <SettingsRow lead={Moon} label="Do not disturb" description="Silences notifications. Previews still play the sound you choose.">
         <Switch aria-label="Do not disturb" checked={preferences.dnd} onCheckedChange={(dnd) => update({ dnd })} />
       </SettingsRow>
-      <SettingsRow label="Volume" description={preferences.volume === 0 ? "Volume is 0%. Raise it to hear previews and notifications." : undefined}>
+      <SettingsRow lead={Gauge} label="Volume" description={preferences.volume === 0 ? "Volume is 0%. Raise it to hear previews and notifications." : undefined}>
         <div className="flex w-56 items-center gap-3">
           <input
             aria-label="Notification volume"
@@ -99,7 +112,7 @@ function ScopedSoundSettings({ scope }: { scope: string }) {
       {(["chat", "inbox"] as const).map((kind) => {
         const name = kind === "chat" ? "Chat" : "Inbox"
         return (
-          <SettingsRow key={kind} label={`${name} sound`} description={kind === "chat" ? "When an agent replies to you." : "When something new lands in your Inbox."}>
+          <SettingsRow key={kind} lead={kind === "chat" ? MessageSquare : Inbox} label={`${name} sound`} description={kind === "chat" ? "When an agent replies to you." : "When something new lands in your Inbox."}>
             <div className="flex items-center gap-1.5">
               <NativeSelect
                 aria-label={`${name} sound`}
@@ -120,14 +133,13 @@ function ScopedSoundSettings({ scope }: { scope: string }) {
           </SettingsRow>
         )
       })}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-        <p role="status" className="text-label text-muted-foreground">{statusText}</p>
-        {preferences.enabled && !ready && (
-          <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy} onClick={() => { void activate() }}>Activate audio</Button>
-        )}
-      </div>
-      {error && <p role="alert" className="px-4 pb-3 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="px-4 py-3 text-label text-destructive">{error}</p>}
     </SettingsCard>
+    <p className="mt-3 text-label text-muted-foreground">
+      Which events reach you by email, Slack or phone is set per channel in{" "}
+      <Link href="/integrations?tab=notifications&section=connections" className="text-primary-hover hover:underline underline-offset-2">Integrations › Channels</Link>.
+    </p>
+    </>
   )
 }
 

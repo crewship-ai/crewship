@@ -169,9 +169,26 @@ interface SettingsNavProps {
   /** Caller's workspace role. The nav owns the per-section rule; the layout
    *  passes the raw role rather than one boolean per gated section. */
   role?: string | null
+  /** Phone, nothing open yet: the list is the page (list → detail → back). */
+  phoneInline?: boolean
 }
 
-export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: SettingsNavProps) {
+/** The 24 px tile a section row's icon sits in; the open section's is in the accent. */
+function NavTile({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "grid h-6 w-6 shrink-0 place-items-center rounded-md border",
+        active ? "icon-tile" : "border-border bg-surface-subtle text-muted-foreground",
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+    </span>
+  )
+}
+
+export function SettingsNav({ activeTab, onTabChange, workspaceName, role, phoneInline = false }: SettingsNavProps) {
   const router = useRouter()
   // Switching section unmounts the cards; with edits pending, ask first.
   const guard = usePageSaveGuard()
@@ -199,7 +216,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
   return (
     // The one secondary panel (Harbor 2): a 272 px column with a remembered
     // collapse, and a bottom sheet from the top bar's panel button on a phone.
-    <SecondaryPanel id="settings" label="Settings navigation">
+    <SecondaryPanel id="settings" label="Settings navigation" phoneInline={phoneInline}>
       <SidebarToolbar>
         <SidebarSearch
           value={query}
@@ -217,14 +234,9 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
         {filtered.map((section) => (
           <SidebarSection
             key={section.label}
-            label={section.label}
-            actions={
-              section.label === "Workspace" && workspaceName ? (
-                <span className="ml-1 truncate font-mono text-micro normal-case tracking-normal text-sidebar-foreground/70">
-                  {workspaceName}
-                </span>
-              ) : undefined
-            }
+            // The workspace group is named after the workspace (Harbor 2), so
+            // the panel says WHICH workspace these settings change.
+            label={section.label === "Workspace" && workspaceName ? workspaceName : section.label}
           >
             {section.items.map((item) => {
               const isActive = item.key === activeTab
@@ -235,7 +247,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
                   onSelect={() => guard(() => (item.href ? router.push(item.href) : onTabChange(item.key)))}
                   aria-label={item.label}
                 >
-                  <item.icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
+                  <NavTile icon={item.icon} active={isActive} />
                   <span className="truncate flex-1">{item.label}</span>
                   {item.badge === "P2" && (
                     <span className="ml-auto shrink-0 font-mono text-micro text-sidebar-foreground/40">P2</span>

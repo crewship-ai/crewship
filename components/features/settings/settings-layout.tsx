@@ -3,10 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
-import { Settings as SettingsIcon } from "lucide-react"
+import {
+  Activity, ArrowLeft, Building, KeyRound, Link2, MonitorSmartphone, Palette, Settings as SettingsIcon, Shield, User, Volume2,
+  type LucideIcon,
+} from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
+import { PageError } from "@/components/layout/page-state"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { SettingsPageHead } from "./shared"
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode, useRestrictedSurfaces } from "@/hooks/use-access-mode"
@@ -43,20 +49,18 @@ interface Member {
   user: { id: string; email: string; full_name: string | null; avatar_url: string | null }
 }
 
-// Section titles for the content area header
-const sectionTitles: Record<string, { title: string; description?: string }> = {
-  profile: { title: "Profile", description: "Your account details" },
-  appearance: { title: "Appearance", description: "Theme, accent colour, density and motion" },
-  sounds: { title: "Notification sounds", description: "Personal Chat and Inbox audio" },
-  sessions: { title: "Sessions & tokens", description: "Browser sessions and CLI tokens that can act as you" },
-  privacy: { title: "Privacy", description: "Agent memory about you (peer cards, opt-out, deletion)" },
-  general: { title: "General", description: "Workspace identity, usage and settings" },
-  connections: { title: "Crew links", description: "Cross-crew communication links" },
-  "access-secrets": {
-    title: "Access & Secrets",
-    description: "Who may read a stored secret in plaintext, and what each classification means",
-  },
-  audit: { title: "Audit Log", description: "Track workspace activity" },
+// The head of each section (Harbor 2): the nav row's icon in a 40 px tile,
+// the title, and one sentence saying what the section is for.
+const sectionTitles: Record<string, { title: string; description?: string; icon: LucideIcon }> = {
+  profile: { title: "Profile", icon: User, description: "Your name, picture and password. Visible to everyone in your workspaces." },
+  appearance: { title: "Appearance", icon: Palette, description: "Applies in this browser at once. With Sync on, the same choices follow you to every device." },
+  sounds: { title: "Notification sounds", icon: Volume2, description: "Your Chat and Inbox sounds for this account and workspace, saved in this browser." },
+  sessions: { title: "Sessions & tokens", icon: MonitorSmartphone, description: "Everything that can sign in as you right now. Don’t recognise something? End it." },
+  privacy: { title: "Privacy", icon: Shield, description: "Agent memory about you (peer cards, opt-out, deletion)" },
+  general: { title: "General", icon: Building, description: "Workspace identity and defaults. Admins and owners can change them." },
+  connections: { title: "Crew links", icon: Link2, description: "Cross-crew communication links" },
+  "access-secrets": { title: "Access & Secrets", icon: KeyRound, description: "Who may see secret values. Only an owner can turn reveal on." },
+  audit: { title: "Audit Log", icon: Activity, description: "Track workspace activity" },
 }
 
 /**
@@ -153,7 +157,7 @@ function RestrictedAccountSettings() {
   const { session, signOut } = useAuth()
   return (
     <div key={session?.user?.id} className="mx-auto w-full max-w-3xl space-y-4 p-4 md:p-6">
-      <h1 className="text-xl font-semibold">Account security</h1>
+      <SettingsPageHead level={1} icon={Shield} title="Account security" description="Your password, the devices signed in as you and your CLI tokens." />
       {/* One page, as before the Sessions split: password, then sessions and
           token revoke. space-y-5 is the gap ProfileSection used between the
           same cards when they lived in one component. The ?tab= param is
@@ -211,6 +215,17 @@ function SettingsPage() {
 
   const closePanelSheet = useCloseSecondaryPanelSheet()
 
+  // Phone (PNL-05): /settings is the list of sections; a pick opens that
+  // section with a Back to the list. A link that names a section (?tab=)
+  // opens it straight away. Desktop and tablet keep list and section side by
+  // side and never look at this.
+  const isMobile = useIsMobile()
+  const [phoneDetail, setPhoneDetail] = useState(() => new URLSearchParams(search).has("tab"))
+  useEffect(() => {
+    if (new URLSearchParams(search).has("tab")) setPhoneDetail(true)
+  }, [search])
+  const phoneList = isMobile && !phoneDetail
+
   // A deep link can name a section this role cannot see (/settings?tab=audit
   // as a MEMBER). Rendering it gives a blank pane with no nav row to escape
   // from, so fall back to Profile — the one section every role owns. Derived
@@ -252,6 +267,8 @@ function SettingsPage() {
   const [members, setMembers] = useState<Member[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Bumped by the error state's Retry: the workspace read runs again.
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     // No workspace fetch for a tab we are already leaving.
@@ -266,7 +283,7 @@ function SettingsPage() {
           apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/workspaces/${workspaceId}/members?workspace_id=${workspaceId}`),
         ])
-        if (!orgRes.ok) { setError("Failed to load workspace"); return }
+        if (!orgRes.ok) { setError("Couldn’t load this workspace"); return }
         const orgData = (await orgRes.json()) as Org
         if (!cancelled) setOrg(orgData)
         if (membersRes.ok) {
@@ -274,7 +291,7 @@ function SettingsPage() {
           if (!cancelled) setMembers(membersData)
         }
       } catch {
-        if (!cancelled) setError("Failed to load settings")
+        if (!cancelled) setError("Couldn’t load settings")
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -282,7 +299,7 @@ function SettingsPage() {
 
     fetchData()
     return () => { cancelled = true }
-  }, [workspaceId, wsLoading, moved])
+  }, [workspaceId, wsLoading, moved, reloadKey])
 
   const handleOrgUpdated = useCallback((updated: { name: string; slug: string; preferred_language: string | null }) => {
     setOrg((prev) => prev ? { ...prev, ...updated } : prev)
@@ -308,20 +325,16 @@ function SettingsPage() {
       )
     }
 
-    if (isLoading) {
-      return (
-        <div className="space-y-4">
-          <Skeleton className="h-[60px] rounded-lg" />
-          <Skeleton className="h-[200px] rounded-lg" />
-        </div>
-      )
-    }
+    if (isLoading) return <SettingsCardsSkeleton />
 
     if (error) {
       return (
-        <div className="bg-card border border-destructive/40 rounded-lg p-6">
-          <p className="text-body text-destructive">{error}</p>
-        </div>
+        <PageError
+          className="px-0 py-0"
+          title={error}
+          description="Your account sections (Appearance, Notification sounds, Sessions & tokens) still work."
+          onRetry={() => setReloadKey((k) => k + 1)}
+        />
       )
     }
 
@@ -367,9 +380,26 @@ function SettingsPage() {
 
   function handleTabChange(tab: string) {
     setActiveTab(tab)
+    setPhoneDetail(true)
     // On a phone the pick closes the panel sheet: the section is what comes next.
     closePanelSheet()
   }
+
+  // Phone: back from a section to the list of sections, dropping ?tab= so a
+  // reload stays on the list.
+  function backToList() {
+    setPhoneDetail(false)
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href)
+      url.searchParams.delete("tab")
+      url.searchParams.delete("card")
+      window.history.replaceState(null, "", url.toString())
+    }
+  }
+
+  // A moved section shows its one-line notice while the redirect lands; it has
+  // no head of its own.
+  const showHead = section != null && !moved
 
   return (
     <div className="flex flex-col h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))]">
@@ -380,28 +410,38 @@ function SettingsPage() {
       <SubBar
         icon={SettingsIcon}
         title="Settings"
-        section={section?.title}
+        section={phoneList ? undefined : section?.title}
         ariaLabel="Settings"
+        leading={isMobile && !phoneList ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="kit-tap -ml-1"
+            aria-label="Back to Settings"
+            onClick={backToList}
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </Button>
+        ) : undefined}
       />
 
       <div className="flex flex-1 min-h-0">
-      {/* The sections panel (SecondaryPanel): a column on a desktop, a bottom
-          sheet from the top bar's panel button on a phone. */}
+      {/* The sections panel (SecondaryPanel): a column on a desktop; on a
+          phone the page itself while no section is open (list → detail). */}
       <SettingsNav
-        activeTab={activeTab}
+        activeTab={phoneList ? "" : activeTab}
         onTabChange={handleTabChange}
         workspaceName={org?.name}
         role={role}
+        phoneInline={phoneList}
       />
 
       {/* Content */}
+      {!phoneList && (
       <div className="relative flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
           {/* pb-24: room under the last card for the floating Save bar. */}
-          <div className="max-w-3xl mx-auto p-4 pb-24 md:p-6 md:pb-24 space-y-4">
-            {/* The mobile nav trigger used to live here, above the content, and
-                doubled as the section label. Both jobs moved to the sub-bar. */}
-
+          <div className="max-w-3xl mx-auto p-4 pb-24 md:p-6 md:pb-24">
             {/* Section content */}
             <AnimatePresence mode="wait">
               <motion.div
@@ -410,7 +450,11 @@ function SettingsPage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.12, ease: "easeOut" }}
+                className="space-y-4"
               >
+                {showHead && (
+                  <SettingsPageHead icon={section.icon} title={section.title} description={section.description} className="mb-5" />
+                )}
                 {renderContent()}
               </motion.div>
             </AnimatePresence>
@@ -418,7 +462,34 @@ function SettingsPage() {
         </ScrollArea>
         <PageSaveBar />
       </div>
+      )}
       </div>
+    </div>
+  )
+}
+
+/** Loading: the shape of what is coming — a card header and its rows, twice. */
+function SettingsCardsSkeleton() {
+  return (
+    <div className="space-y-4" role="status" aria-busy="true" aria-label="Loading settings">
+      {[3, 2].map((rows, i) => (
+        <div key={i} className="overflow-hidden rounded-card border border-border bg-card">
+          <div className="flex items-center gap-3 border-b border-border px-4 py-2.5">
+            <Skeleton className="h-8 w-8 rounded-lg" />
+            <div className="flex-1 space-y-1.5">
+              <Skeleton className="h-3 w-32" />
+              <Skeleton className="h-2.5 w-48" />
+            </div>
+          </div>
+          {Array.from({ length: rows }, (_, r) => (
+            <div key={r} className="flex items-center gap-4 border-b border-border px-4 py-3 last:border-b-0">
+              <Skeleton className="h-3 w-28" />
+              <span className="flex-1" />
+              <Skeleton className="h-8 w-40" />
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   )
 }

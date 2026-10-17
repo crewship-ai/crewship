@@ -42,21 +42,43 @@ beforeEach(() => {
 // The write path the Crew links page shares across its three views — moved
 // from the old settings card with its guarantees intact.
 describe("useCrewLinks writes", () => {
-  it("unlinks by deleting the stored row with its version, once confirmed", async () => {
+  it("unlink uses the shared confirmation, never window.confirm", async () => {
     serve([conn("c-eng", "c-ops", "bidirectional")])
-    vi.stubGlobal("confirm", vi.fn(() => true))
+    const confirm = vi.fn(() => true)
+    vi.stubGlobal("confirm", confirm)
     const { result } = await mount()
     await act(() => result.current.setPair(ENG, OPS, "none"))
-    expect(writes()).toHaveLength(1)
-    expect(String(writes()[0][0])).toContain("/crew-connections/cc-c-eng-c-ops?workspace_id=ws1&expected_version=1")
+    expect(confirm).not.toHaveBeenCalled()
+    expect(writes()).toHaveLength(0)
+    expect(result.current.pendingUnlink).toEqual({ self: ENG, other: OPS })
   })
 
-  it("does not unlink when the confirmation is declined", async () => {
+  it("unlinks by deleting the stored row with its version, once confirmed", async () => {
     serve([conn("c-eng", "c-ops", "bidirectional")])
-    vi.stubGlobal("confirm", vi.fn(() => false))
     const { result } = await mount()
     await act(() => result.current.setPair(ENG, OPS, "none"))
+    await act(() => result.current.confirmUnlink())
+    expect(writes()).toHaveLength(1)
+    expect(String(writes()[0][0])).toContain("/crew-connections/cc-c-eng-c-ops?workspace_id=ws1&expected_version=1")
+    expect(result.current.pendingUnlink).toBeNull()
+  })
+
+  it("does not unlink when the confirmation is cancelled", async () => {
+    serve([conn("c-eng", "c-ops", "bidirectional")])
+    const { result } = await mount()
+    await act(() => result.current.setPair(ENG, OPS, "none"))
+    act(() => result.current.cancelUnlink())
     expect(writes()).toHaveLength(0)
+    expect(result.current.pendingUnlink).toBeNull()
+  })
+
+  it("keeps the confirmation when the server refuses the unlink", async () => {
+    serve([conn("c-eng", "c-ops", "bidirectional")], (_u, init) => (init?.method === "DELETE" ? json({ detail: "Connection changed" }, 409) : undefined))
+    const { result } = await mount()
+    await act(() => result.current.setPair(ENG, OPS, "none"))
+    await act(async () => { await expect(result.current.confirmUnlink()).rejects.toThrow() })
+    expect(toast.error).toHaveBeenCalled()
+    expect(result.current.pendingUnlink).toEqual({ self: ENG, other: OPS })
   })
 
   it("re-points a link stored the other way round, carrying each side's file level", async () => {

@@ -199,6 +199,7 @@ export const PrivilegedCredentialsCard = React.memo(function PrivilegedCredentia
             {SHORT_DESCRIPTION}
           </span>
         }
+        lock="Owners and admins"
         border={false}
       >
         <Switch
