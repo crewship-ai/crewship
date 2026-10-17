@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { createContext, useContext, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import Link from "next/link"
 import { CheckCircle2, Clock3, Lock, type LucideIcon } from "lucide-react"
 
@@ -96,6 +97,41 @@ export function DetailHead({ entry, lookup, attention: override }: { entry: Inbo
   )
 }
 
+/* ---------------------------------------------------------------- the rail */
+
+/**
+ * Wide desktop (≥ 1536 px, ODCH-07; v67 `ib-rail`): what v67 marks
+ * `data-rail` — "Where this came from" and the expandable run context —
+ * leaves the middle column for the right rail, opened. The page provides the
+ * rail's slot while the rail is shown; a RailPart renders into it then and
+ * in place otherwise, so each part exists once and never twice.
+ */
+export const WIDE_DETAIL_QUERY = "(min-width: 1536px)"
+const RailSlot = createContext<HTMLElement | null>(null)
+const InRail = createContext(false)
+export const RailSlotProvider = RailSlot.Provider
+
+/** True at the width where the Inbox shows its rail. */
+export function useWideDetail(): boolean {
+  const [wide, setWide] = useState(false)
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
+    const mql = window.matchMedia(WIDE_DETAIL_QUERY)
+    const update = () => setWide(mql.matches)
+    update()
+    mql.addEventListener?.("change", update)
+    return () => mql.removeEventListener?.("change", update)
+  }, [])
+  return wide
+}
+
+/** A part of the detail that moves into the rail on a wide desktop. */
+export function RailPart({ children }: { children: React.ReactNode }) {
+  const slot = useContext(RailSlot)
+  if (!slot) return <>{children}</>
+  return createPortal(<InRail.Provider value>{children}</InRail.Provider>, slot)
+}
+
 export type DecisionTone = "default" | "warn" | "danger"
 
 /**
@@ -161,12 +197,20 @@ export function Dock({ note, children, standalone = false }: { note?: React.Reac
 
 /** "Where this came from": the objects that raised this, as chips. */
 export function OriginChips({ links }: { links: { label: string; href: string; icon: LucideIcon }[] }) {
+  const inRail = useContext(InRail)
   if (links.length === 0) return null
   return (
-    <nav aria-label="Where this came from" className="flex flex-wrap items-center gap-1.5">
+    <nav
+      aria-label="Where this came from"
+      className={cn(
+        "flex flex-wrap items-center gap-1.5",
+        // In the rail (v67 `.ib-rail .ib-ctx`): a card, one chip per line.
+        inRail && "flex-col items-stretch rounded-xl border border-border bg-card p-3",
+      )}
+    >
       <span className="mr-1 text-label text-muted-foreground">Where this came from</span>
       {links.map((l) => (
-        <Button key={l.href} asChild size="xs" variant="outline" className="gap-1.5 rounded-full">
+        <Button key={l.href} asChild size="xs" variant="outline" className={cn("gap-1.5 rounded-full", inRail && "justify-start")}>
           <Link href={l.href}><l.icon className="h-3 w-3" aria-hidden />{l.label}</Link>
         </Button>
       ))}
@@ -176,8 +220,10 @@ export function OriginChips({ links }: { links: { label: string; href: string; i
 
 /** Expandable context ("How the run got here", "Additional context"). */
 export function DetailExpand({ title, meta, open, children }: { title: string; meta?: React.ReactNode; open?: boolean; children: React.ReactNode }) {
+  // v67 opens every <details> it moves into the rail.
+  const inRail = useContext(InRail)
   return (
-    <details open={open} className="group rounded-lg border border-border bg-card">
+    <details open={inRail || open} className="group rounded-lg border border-border bg-card">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 font-medium [&::-webkit-details-marker]:hidden">
         <span aria-hidden className="text-muted-foreground transition-transform group-open:rotate-90">›</span>
         {title}
@@ -244,24 +290,28 @@ export function outcomeLabel(action: string | null | undefined): string {
  * things they sent, beside the decision — so the middle column carries only
  * the message and the ask.
  */
-export function DetailRail({ entry, lookup, earlier, onOpen }: {
+export function DetailRail({ entry, lookup, earlier, onOpen, slotRef }: {
   entry: InboxV2Entry
   lookup: InboxLookup
   earlier: InboxV2Entry[]
   onOpen: (entry: InboxV2Entry) => void
+  /** Where RailPart content lands (sender card above, Earlier from below). */
+  slotRef?: (element: HTMLElement | null) => void
 }) {
   const { agent, crew, name } = entryIdentity(entry, lookup)
   return (
     <aside aria-label="About the sender" data-testid="inbox-rail" className="sticky top-0 hidden content-start gap-3 pt-5 2xl:grid">
-      <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card p-3">
+      <div data-rail-part="sender" className="flex items-center gap-2.5 rounded-xl border border-border bg-card p-3">
         <EntryAvatar entry={entry} lookup={lookup} size={32} />
         <div className="min-w-0">
           <b className="block truncate font-semibold">{agent?.name ?? name}</b>
           <small className="block truncate text-label text-muted-foreground">{crew?.name ?? agent?.crew?.name ?? entryKindPill(entry).label}</small>
         </div>
       </div>
+      {/* display: contents, so the moved parts are rail rows like the cards around them. */}
+      {slotRef && <div ref={slotRef} data-rail-part="moved" className="contents" />}
       {earlier.length > 0 && (
-        <section aria-label={`Earlier from ${agent?.name ?? name}`} className="grid gap-1.5 rounded-xl border border-border bg-card p-3">
+        <section data-rail-part="earlier" aria-label={`Earlier from ${agent?.name ?? name}`} className="grid gap-1.5 rounded-xl border border-border bg-card p-3">
           <h2 className="m-0 text-label font-semibold text-muted-foreground">Earlier from {agent?.name ?? name}</h2>
           {earlier.map((e) => (
             <button key={e.key} type="button" onClick={() => onOpen(e)} className="row-hover flex w-full justify-between gap-2.5 rounded-md px-1 py-1.5 text-left text-body">

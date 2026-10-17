@@ -33,7 +33,7 @@ import {
 import { requestedAgentOf, useInboxV2DeepLink } from "./inbox-v2-deeplink"
 import { ATTENTION_LABELS, matchesInboxAttention, parseInboxAttention } from "./inbox-v2-attention"
 import { entryIdentity, filterInboxEntries } from "./inbox-entry-identity"
-import { DetailRail } from "./inbox-detail-frame"
+import { DetailRail, RailSlotProvider, useWideDetail } from "./inbox-detail-frame"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
 import { useInboxLookup } from "@/components/features/inbox/use-inbox-lookup"
@@ -62,6 +62,8 @@ export function InboxV2() {
   const [confirmation, setConfirmation] = useState<InboxV2Confirmation | null>(null)
   const [filters, setFilters] = useState<InboxV2Filters>({ ...EMPTY_INBOX_V2_FILTERS, search: requestedSearch, agent: requestedAgent })
   const isMobile = useIsMobile()
+  const wide = useWideDetail()
+  const [railSlot, setRailSlot] = useState<HTMLElement | null>(null)
   // View › Sort, remembered per user (PNL-04).
   const [storedSort, setSort] = useUserPreference<InboxSort>("inbox.sort", "urgency")
   const sort: InboxSort = INBOX_SORTS.some((s) => s.key === storedSort) ? storedSort : "urgency"
@@ -657,6 +659,8 @@ export function InboxV2() {
             />
           ) : (
             <div className={cn(displayed && !confirmation && "2xl:grid 2xl:grid-cols-[minmax(0,860px)_minmax(260px,300px)] 2xl:items-start 2xl:justify-center 2xl:gap-6 2xl:px-6")}>
+            {/* Wide desktop: context chips and run steps render into the rail (INB-02). */}
+            <RailSlotProvider value={wide && displayed && !confirmation ? railSlot : null}>
             <InboxV2Detail
               key={displayed?.key || "overview"}
               entry={displayed}
@@ -697,7 +701,8 @@ export function InboxV2() {
               lookup={lookup}
               onDenyHire={hireTwin ? denyHire : undefined}
             />
-            {displayed && !confirmation && <DetailRail entry={displayed} lookup={lookup} earlier={earlier} onOpen={openEntry} />}
+            </RailSlotProvider>
+            {displayed && !confirmation && <DetailRail entry={displayed} lookup={lookup} earlier={earlier} onOpen={openEntry} slotRef={setRailSlot} />}
             </div>
           )}
         </main>}

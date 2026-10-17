@@ -24,7 +24,7 @@ import { isAdminTier } from "@/lib/permissions/tiers"
 import { formatDateTime } from "@/lib/time"
 
 import { outcomeStatus } from "./inbox-v2-derive"
-import { DecisionBlock, DetailExpand, DetailFrame, Dock, OriginChips, RoleNote, outcomeLabel } from "./inbox-detail-frame"
+import { DecisionBlock, DetailExpand, DetailFrame, Dock, OriginChips, RailPart, RoleNote, outcomeLabel } from "./inbox-detail-frame"
 import { InboxOverview, type InboxOverviewProps } from "./inbox-v2-overview"
 import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Confirmation, type InboxV2Entry } from "./inbox-v2-types"
 
@@ -236,7 +236,7 @@ function ApprovalDetail({
           </div>
         )}
       </DecisionBlock>
-      <OriginChips links={origin} />
+      <RailPart><OriginChips links={origin} /></RailPart>
     </DetailFrame>
   )
 }
