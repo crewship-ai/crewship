@@ -180,17 +180,64 @@ export function useGenerateSkill(workspaceId: string | null | undefined) {
 export function useImportSkill(workspaceId: string | null | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async ({ content }: { content: string }) => {
+    mutationFn: async ({ content, allowUnsafeLicense }: { content: string; allowUnsafeLicense?: boolean }) => {
       const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId!)}/skills/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(allowUnsafeLicense ? { content, allow_unsafe_license: true } : { content }),
       })
       if (!res.ok) throw new Error(await skillsErrorMessage(res, "Could not save the skill"))
       return (await res.json()) as { skill_id: string; slug: string; name: string; created: boolean }
     },
     onSuccess: () => {
       if (workspaceId) void queryClient.invalidateQueries({ queryKey: skillsKeys.all(workspaceId) })
+    },
+  })
+}
+
+export interface BulkImportRequest {
+  gitUrl: string
+  gitRef?: string
+  paths?: string[]
+  allowUnsafeLicense?: boolean
+  dryRun?: boolean
+}
+
+export interface BulkImportResult {
+  source: string
+  total_found: number
+  total_imported: number
+  imported: { skill_id: string; slug: string; created: boolean }[]
+  skipped: { path: string; slug?: string; reason: string }[]
+  truncated?: boolean
+}
+
+/**
+ * Walk a git repository for SKILL.md files (POST …/skills/bulk-import). With
+ * `dryRun` nothing is written: every skill the licence gate lets through comes
+ * back in `skipped` with the reason "dry-run", the refused ones with theirs.
+ */
+export function useBulkImportSkills(workspaceId: string | null | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (req: BulkImportRequest) => {
+      const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId!)}/skills/bulk-import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          git_url: req.gitUrl,
+          ...(req.gitRef ? { git_ref: req.gitRef } : {}),
+          ...(req.paths?.length ? { paths: req.paths } : {}),
+          ...(req.allowUnsafeLicense ? { allow_unsafe_license: true } : {}),
+          ...(req.dryRun ? { dry_run: true } : {}),
+        }),
+      })
+      if (!res.ok) throw new Error(await skillsErrorMessage(res, `The repository could not be read (HTTP ${res.status})`))
+      const body = (await res.json()) as BulkImportResult
+      return { ...body, imported: body.imported ?? [], skipped: body.skipped ?? [] }
+    },
+    onSuccess: (_r, req) => {
+      if (workspaceId && !req.dryRun) void queryClient.invalidateQueries({ queryKey: skillsKeys.all(workspaceId) })
     },
   })
 }
