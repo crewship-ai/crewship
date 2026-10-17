@@ -11,7 +11,7 @@ describe("Harbor 2 navigation", () => {
   it("groups and orders the destinations like the design", () => {
     expect(shape).toEqual([
       { label: "", placement: "main", items: ["Dashboard /", "Inbox /inbox", "Chat /chat", "Activity /activity", "Journal /journal"] },
-      { label: "Work", placement: "main", items: ["Issues /issues", "Routines /routines", "Pages /pages"] },
+      { label: "Work", placement: "main", items: ["Issues /issues", "Routines /routines", "Pages /pages", "Calendar /calendar"] },
       { label: "Build", placement: "main", items: ["Crews /crews", "Skills /skills", "Vault /credentials", "Integrations /integrations"] },
       { label: "", placement: "footer", items: ["Settings /settings", "Admin /admin"] },
     ])
