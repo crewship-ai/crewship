@@ -1,0 +1,86 @@
+---
+title: "Calendar"
+description: "The workspace's dates in one place — routine starts and runs by week, agenda or month, with the action each one needs. A view, not a store: every date lives on its routine."
+icon: "calendar"
+stability: experimental
+tag: Experimental
+---
+
+# Calendar
+
+`/calendar` shows dated work across the workspace. The calendar has no events of
+its own: each date belongs to something that already exists, changes there, and
+shows only to people who can open it.
+
+## What it shows
+
+| Layer | Source | Kinds |
+|---|---|---|
+| Routine starts and runs | the routine calendar (`GET /api/v1/workspaces/{ws}/pipelines/calendar`) | the next starts of each enabled repeating schedule, one-time starts waiting in the queue, and recorded runs |
+
+Issue due dates, milestones and decision deadlines are not on the calendar yet;
+they join when the API serves them by date range.
+
+A date is shown only when its routine is in your routine list. Times are in your
+browser's time zone; a schedule that runs in another zone shows both times in
+its peek.
+
+## Views
+
+- **Week** (default on a desktop) — the seven days with only the hours that have
+  something in them, and a line at the current time this week. A busy hour
+  shows three items and `+N`, which opens that day's agenda.
+- **Agenda** (default on a phone) — the next two weeks from the chosen day,
+  Today and Tomorrow first; empty days are left out, and a routine with many
+  planned starts in a day reads as one row (`×N`, first–last time).
+- **Month** — whole weeks; three items a day, `+N more`, and a red dot on a day
+  where a run could not finish.
+
+`‹ Today ›` moves by the view. The view and the day are in the URL
+(`/calendar?view=month&date=2026-10-15`), so a reload or a shared link opens the
+same page.
+
+## Panel
+
+- **Views** — **Mine** (routines you published) or **Workspace**; keys `1` and
+  `2`. The choice is remembered for you (`calendar.view` preference).
+- **Crews** — narrows to the routines a crew authored.
+- **Filter › Status** — At risk (a run that could not finish), Waiting for
+  someone, Planned, Done. Nothing checked means everything; active filters show
+  as chips you can remove.
+- **Search** (`/`) looks through the dates already loaded.
+
+Above the views, **Need you soon** lists up to four runs that wait for a person
+or failed today.
+
+## Peek and actions
+
+Click an item to open its peek (`J` / `K` move, `Esc` closes): when it is, why
+you see it, and where the date comes from.
+
+| Item | Main action | Also |
+|---|---|---|
+| Planned start of a repeating schedule | Open routine | **Run now** (anyone who may run routines) |
+| One-time start | Open routine | **Cancel start** (Manager and above), with a confirmation |
+| Run | Open run — **Decide** when it waits for a person and you are Manager or above | — |
+
+## Add a date
+
+**Add a date › A routine start** (or a click on an empty hour in Week) opens
+**Schedule a start**:
+
+- **One time** — a day and a time; the start joins the routine's queue
+  (`POST …/pipelines/{slug}/run` with `fire_at`) and uses the published version.
+- **Repeating** — a schedule with presets or a cron expression and a time zone;
+  the next three starts come from the server
+  (`GET …/pipeline-schedules/preview`). Only Owner, Admin, Manager or members
+  with the `routine.create` capability can add one; everyone else sees why.
+
+## From the command line
+
+```bash
+crewship routine calendar --from 2026-10-12T00:00:00Z --to 2026-10-19T00:00:00Z
+```
+
+Routines › Calendar keeps its own view and links to this page with
+**Open in Calendar**.
