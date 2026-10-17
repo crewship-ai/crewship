@@ -65,9 +65,10 @@ export const navSections: NavSection[] = [
     items: [
       { title: "Issues", href: "/issues", icon: CONCEPT_ICON.issues },
       { title: "Routines", href: "/routines", icon: CONCEPT_ICON.routines },
-      // F-01: the item arrives with the Calendar page itself (ODCH-12).
-      { title: "Calendar", href: "/calendar", icon: CONCEPT_ICON.calendar },
       { title: "Pages", href: "/pages", icon: CONCEPT_ICON.pages },
+      // F-01: the item arrives with the Calendar page itself (ODCH-12), last
+      // in Work as SHL-01 orders it.
+      { title: "Calendar", href: "/calendar", icon: CONCEPT_ICON.calendar },
     ],
   },
   {
