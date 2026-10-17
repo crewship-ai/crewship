@@ -193,7 +193,7 @@ describe("the preview's empty state is a promise, not a gap", () => {
 describe("the unauthenticated forms are usable with a thumb", () => {
   const CSS = readFileSync(join(process.cwd(), "app", "globals.css"), "utf8")
   const SHELL = readFileSync(
-    join(process.cwd(), "components", "branding", "auth-split-shell.tsx"),
+    join(process.cwd(), "components", "branding", "auth-card.tsx"),
     "utf8"
   )
 

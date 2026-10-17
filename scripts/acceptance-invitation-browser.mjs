@@ -13,19 +13,19 @@ try {
       const page = await context.newPage()
       const token = fixture[`${kind}_token`]
       await page.goto(`${fixture.server}/join#invitation_token=${encodeURIComponent(token)}`)
-      await expect(page.getByRole('heading', { name: 'Accept invitation' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Accept the invitation' })).toBeVisible()
       // The heading can be server-rendered before the capture effect hydrates.
       await expect(page).toHaveURL(url => !url.href.includes(token))
       await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible()
       for (const href of await page.locator('a[href]').evaluateAll(nodes => nodes.map(n => n.getAttribute('href')))) expect(href).not.toContain(token)
       if (kind === 'new') {
         await page.getByRole('link', { name: 'Create an account' }).click()
-        await page.getByLabel('Full Name').fill('New invited reader')
+        await page.getByLabel('Full name').fill('New invited reader')
         await page.getByLabel('Email', { exact: true }).fill(fixture.new_email)
         await page.getByLabel('Password', { exact: true }).fill(fixture.password)
-        await page.getByLabel('Confirm Password', { exact: true }).fill(fixture.password)
+        await page.getByLabel('Confirm password', { exact: true }).fill(fixture.password)
         const signup = page.waitForResponse(r => r.url().endsWith('/api/v1/auth/signup') && r.request().method() === 'POST')
-        await page.getByRole('button', { name: 'Sign Up' }).click()
+        await page.getByRole('button', { name: 'Create account' }).click()
         expect((await signup).status()).toBe(202)
         await expect(page).toHaveURL(url => url.pathname === "/login")
       } else {
@@ -33,14 +33,15 @@ try {
       }
       await page.getByLabel('Email', { exact: true }).fill(fixture[`${kind}_email`])
       await page.getByLabel('Password', { exact: true }).fill(fixture.password)
-      await page.getByRole('button', { name: 'Sign In', exact: true }).click()
-      await expect(page.getByRole('heading', { name: 'Accept invitation' })).toBeVisible()
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await expect(page.getByRole('heading', { name: 'Accept the invitation' })).toBeVisible()
       const accepted = page.waitForResponse(r => r.url().endsWith('/api/v1/auth/invitation/accept') && r.request().method() === 'POST')
       await page.getByRole('button', { name: 'Accept invitation' }).click()
       const initialStatus=(await accepted).status()
       if(kind==='existing'){
         expect(initialStatus).toBe(400)
         await expect(page.getByRole('status')).toContainText('entire account across all workspaces')
+        await page.getByRole('checkbox',{name:'I understand this applies to the whole account'}).check()
         const confirmed=page.waitForResponse(r=>r.url().endsWith('/api/v1/auth/invitation/accept')&&r.request().method()==='POST')
         await page.getByRole('button',{name:'Accept Guest restrictions'}).click()
         expect((await confirmed).status()).toBe(200)
