@@ -15,7 +15,7 @@ const issue = {
   id: "issue", identifier: "ENG-1", workspace_id: "ws", crew_id: "crew", title: "Goal", status: "REVIEW",
   work_mode: "agent", work_revision: 3, delegate: { id: "agent", name: "Jordan" },
   execution: { id: "x", stage: "accepted", attempt: 1, reviewer: "Lead", note: "", workers: [] },
-} as Mission
+} as unknown as Mission
 const agents = [{ id: "agent", name: "Jordan", slug: "jordan" }, { id: "agent2", name: "Scout", slug: "scout" }]
 
 function Harness({ open, changed, runWorkflow }: { open: Exclude<WorkDialog, null>; changed?: () => Promise<void>; runWorkflow?: (a: string, c?: string) => Promise<boolean> }) {
