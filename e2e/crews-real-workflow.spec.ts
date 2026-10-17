@@ -137,7 +137,7 @@ test.describe("New ▾ create dialogs", () => {
     await page.goto(`/crews?crew=${CREW}`)
     await page.getByRole("button", { name: "New", exact: true }).click()
     await page.getByRole("menuitem", { name: /^New crew/ }).click()
-    const dialog = page.getByRole("dialog", { name: /^New crew/ })
+    const dialog = page.getByRole("dialog", { name: /New crew/ })
     await expect(dialog).toBeVisible()
     const start = dialog.getByRole("radiogroup", { name: "Start with" })
     for (const way of ["Suggest a team", "From a template", "Import crewship.yaml", "Empty crew"]) {
@@ -149,7 +149,7 @@ test.describe("New ▾ create dialogs", () => {
     await page.goto(`/crews?crew=${CREW}`)
     await page.getByRole("button", { name: "New", exact: true }).click()
     await page.getByRole("menuitem", { name: /^New agent/ }).click()
-    const dialog = page.getByRole("dialog", { name: /^New agent in / })
+    const dialog = page.getByRole("dialog", { name: /New agent in / })
     await expect(dialog).toBeVisible()
     await expect(dialog.getByRole("navigation", { name: "Steps" }).getByRole("listitem")).toHaveText([/Who/, /Model/, /Access/, /Instructions/])
     await expect(dialog.getByPlaceholder("Filip", { exact: true })).toBeVisible()
