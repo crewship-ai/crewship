@@ -61,6 +61,19 @@ test.describe("desktop", () => {
     await expect(page).not.toHaveURL(/run=/)
   })
 
+  // RT-07 (#3492): an Activity row of a routine run opens the run peek in place.
+  test("RT-07 a routine-run row opens the run peek with Open run", async ({ page }) => {
+    await seed(page)
+    await page.goto("/activity")
+    await expect(page.getByTestId("activity-summary")).toBeVisible()
+    const rows = page.getByRole("table", { name: "Activity" }).locator("[data-row-id^=run_], [data-row-id^=run-]")
+    test.skip((await rows.count()) === 0, "needs a recorded routine run")
+    await rows.first().click()
+    await expect(page.getByTestId("activity-peek-work")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Open run" })).toBeVisible()
+    await expect(page).toHaveURL(/\/activity\?.*run=/)
+  })
+
   test("key 1–4 switch views", async ({ page }) => {
     await seed(page)
     await page.goto("/activity")

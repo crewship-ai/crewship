@@ -166,6 +166,7 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
   const [draft, setDraft] = React.useState<Record<string, number | null>>({})
   const [preview, setPreview] = React.useState<RetentionPreview | null>(null)
   const [busy, setBusy] = React.useState(false)
+  const [nothing, setNothing] = React.useState(false)
   const [stale, setStale] = React.useState(false)
   const diff = retentionDiff(rows, draft)
   const editable = rows.filter((r) => !r.housekeeping)
@@ -219,7 +220,7 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
     const r = await putRetention(snap.targets, snap.changes, true)
     // An answer for a selection or a draft that is no longer on screen is dropped.
     if (epoch.current !== asked) return
-    if (r.ok && r.data.changes.length === 0) toast.info(NOTHING_TO_CHANGE)
+    if (r.ok && r.data.changes.length === 0) setNothing(true)
     else if (r.ok) setPreview({ ...snap, plan: r.data.changes, previewId: r.data.preview_id })
     else if (r.unavailable) toast.message("Data retention: not available on this server yet")
     else toast.error(`The change could not be checked: ${r.error}`)
@@ -243,7 +244,7 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
       }
       // The other change already did what this one asked: nothing is left.
       setPreview(null)
-      if (again.ok) toast.info(NOTHING_TO_CHANGE)
+      if (again.ok) setNothing(true)
       return
     }
     if (!r.ok) { toast.error(`The change could not be saved: ${r.error}`); throw new Error(r.error) }
@@ -298,6 +299,9 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
         consequences={consequences}
         confirmLabel="Apply"
         onConfirm={apply} />
+      {/* A dry run that changes nothing is a notice, not a decision: Close only. */}
+      <ConfirmDialog open={nothing} onOpenChange={setNothing} closeOnly
+        title="Nothing to change" description={NOTHING_TO_CHANGE} />
       <RetentionDefaultsCard rows={editable} demo={ctx.demo} />
       {housekeeping.length > 0 && (
         <SettingsCard icon={RefreshCw} title="Housekeeping" description="Runs by itself; not adjustable">

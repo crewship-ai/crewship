@@ -195,6 +195,23 @@ describe("ActivityStreamView", () => {
     expect(window.location.search).toBe("?entry=e1")
   })
 
+  // RT-07 (#3492): a click on an Activity row of a routine run opens the run
+  // peek in place (no navigation); the run's own page is one click further.
+  it("RT-07 a click on a routine-run row opens the run peek in place, with its status, duration and Open run", async () => {
+    show()
+    await screen.findByTestId("activity-summary")
+    const row = table().querySelector<HTMLElement>("[data-row-id=run_bad]")!
+    fireEvent.click(row)
+    const peek = await screen.findByTestId("activity-peek-work")
+    expect(peek).toHaveTextContent("Could not finish")
+    expect(peek).toHaveTextContent("Took")
+    expect(screen.getByText("Routine run")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Open run" })).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/activity")
+    expect(window.location.search).toBe("?run=run_bad")
+    expect(table().querySelector("[data-selected=true]")).toHaveAttribute("data-row-id", "run_bad")
+  })
+
   it("?run=<id> opens the Peek and closing it drops run from the URL", async () => {
     window.history.replaceState(null, "", "/activity?run=run_bad")
     show()

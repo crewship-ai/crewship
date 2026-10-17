@@ -1639,46 +1639,10 @@ body {
 }
 
 /*
- * Onboarding preview pane.
- *
- * A raised surface, not a hole: one pixel of light along the top edge and
- * the ground falling away beneath it. That is the entire treatment — no
- * colour, no texture, nothing that moves.
- *
- * It replaced a pair of drifting blue radial glows, which is worth saying
- * out loud because the glow is the default reach here and it was wrong:
- * a large soft brand-coloured blob is what every AI product has shipped
- * since 2024, and it read as unserious next to a form people are meant to
- * fill in carefully. What makes a split read as two panes is depth, and
- * depth is an inset highlight plus a falloff.
- *
- * The bottom inset is deliberately huge and heavily negative-spread so it
- * is a gradient falloff rather than a visible shadow edge.
- */
-.onboarding-pane {
-  background: linear-gradient(180deg, #12141b 0%, #0b0c11 58%, #090a0e 100%);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.07),
-    inset 0 -80px 90px -70px rgb(0 0 0 / 0.9);
-}
-
-/*
- * Stacked under lg the pane sits ABOVE the form rather than beside it, so
- * the light belongs on the edge the two share — otherwise the highlight
- * runs along the top of the viewport where there is no seam to describe.
- */
-@media (max-width: 1023px) {
-  .onboarding-pane {
-    background: linear-gradient(180deg, #0b0c11 0%, #12141b 100%);
-    box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.07);
-  }
-}
-
-/*
  * .surface-pane — the onboarding pane's treatment, restated so it can be
  * worn by any surface in the product instead of only by /onboarding.
  *
- * Same idea, different arithmetic. `.onboarding-pane` above is three literal
+ * Same idea, different arithmetic. The onboarding pane it came from was three literal
  * dark hex stops, which is exactly right for a screen that only ever renders
  * dark and wrong for anything reused. Converting those stops to OKLCH shows
  * what they actually are: the middle one (#0b0c11) IS dark `--card`, and the
@@ -1709,7 +1673,7 @@ body {
  *
  * ABOVE it rather than straddling it: every stop is lifted, so the foot of
  * the pane is still lighter than the frame. Straddling — the first cut, taken
- * straight from `.onboarding-pane`, whose middle stop IS card — meant the
+ * straight from the original onboarding pane, whose middle stop IS card — meant the
  * centre of the conversation matched the column exactly, and the two ran
  * together across the middle third of the screen where most of the reading
  * happens.
