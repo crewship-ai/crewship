@@ -35,6 +35,7 @@ import { CreateAgentDialog } from "./create-agent/create-agent-dialog"
 import { AgentOverview } from "./workspace-overview"
 import { MemoryWorkspace } from "./memory-workspace"
 import { TeammateMessages } from "./agent-teammate-messages"
+import { AgentInstructionsExtras } from "./agent-instructions-extras"
 import { AgentPageBar } from "./crews-bar"
 import { CrCard, CrLine, HeadChip, LeadMark, LeadStar } from "./cr-card"
 import { TOOL_ACCESS_LABEL } from "./crew-team"
@@ -103,6 +104,9 @@ export function AgentCanvas({
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
   const { abilities } = useAbilities()
   const canDelete = abilities.can("delete", "Agent")
+  // Persona PUT/DELETE are roleCreate (MANAGER+), like creating an agent.
+  const canEditPersona = abilities.can("create", "Agent")
+  const [personaRev, setPersonaRev] = useState(0)
   const [revision, setRevision] = useState(0)
   const [inboxError, setInboxError] = useState<string | null>(null)
   const [activityError, setActivityError] = useState<string | null>(null)
@@ -392,7 +396,19 @@ export function AgentCanvas({
               <TeammateMessages messages={peerMessages} unavailable={peersUnavailable} />
             </>
           )}
-          {tab === "persona" && <CreateAgentDialog key={`persona:${editorKey}`} {...editorProps} inlineSections={["instructions", "chat"]} inlineLabel="Instructions" />}
+          {tab === "persona" && (
+            <>
+              <CreateAgentDialog key={`persona:${editorKey}:${personaRev}`} {...editorProps} inlineSections={["instructions", "chat"]} inlineLabel="Instructions" />
+              <AgentInstructionsExtras
+                workspaceId={workspaceId}
+                agentId={agent.id}
+                agentName={agent.name}
+                crew={agent.crew_id && agent.crew ? { id: agent.crew_id, name: agent.crew.name } : null}
+                canEdit={canEditPersona}
+                onReset={() => setPersonaRev((n) => n + 1)}
+              />
+            </>
+          )}
           {tab === "model" && (
             <>
               <CreateAgentDialog key={`model:${editorKey}`} {...editorProps} inlineSections={["model", "access"]} inlineLabel="Model and limits" />
