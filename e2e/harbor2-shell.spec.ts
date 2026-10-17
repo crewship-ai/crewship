@@ -94,7 +94,7 @@ test.describe("touch", () => {
     test("buttons keep the Harbor 2 sizes (no forced 44 px)", async ({ page }) => {
       await seed(page, PINNED)
       await page.goto("/issues")
-      const h = (await box(page, "header button:has-text('New Issue')")).height
+      const h = (await box(page, "header button:has-text('New issue')")).height
       expect(h).toBeLessThan(40)
     })
   })

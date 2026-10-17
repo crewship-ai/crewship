@@ -15,7 +15,7 @@ import { useAccessMode } from "@/hooks/use-access-mode"
 import { RestrictedIssues } from "@/components/features/issues/restricted-issues"
 import { useCallback } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, ChevronRight, Link2 } from "lucide-react"
+import { ArrowLeft, CircleDot, Link2 } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { useShallowSearchParam } from "@/hooks/use-shallow-search-param"
@@ -23,9 +23,8 @@ import { parseReturnTo } from "@/lib/return-to"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useSession } from "@/hooks/use-auth"
 import { useUrlSegment } from "@/lib/use-url-segment"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Skeleton } from "@/components/ui/skeleton"
+import { SubBar, SubBarIconButton } from "@/components/layout/sub-bar"
+import { PageLoading } from "@/components/layout/page-state"
 import { IssueDetailSurface } from "@/components/features/issues/issue-detail-surface"
 import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 
@@ -67,57 +66,30 @@ function IssuePage() {
   const copyLink = useCallback(() => {
     navigator.clipboard
       .writeText(window.location.href)
-      .then(() => toast.success("Link copied to clipboard"))
-      .catch(() => toast.error("Failed to copy link"))
+      .then(() => toast.success("Link copied"))
+      .catch(() => toast.error("Could not copy the link"))
   }, [])
 
   return (
     <div className="flex h-full flex-col bg-background">
-      {/* One line of page chrome: where Back goes, and the link to share. The
-          issue's own identity — title, identifier, crew, status — is the
-          first card below, so the header does not repeat it. */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-foreground"
-          onClick={back}
-          aria-label={origin ? `Back to ${origin.label}` : "Back to issues"}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <nav className="flex min-w-0 items-center gap-1 text-[12px] text-muted-foreground">
-          <button className="transition-colors hover:text-foreground" onClick={back}>
-            {origin?.label ?? "Issues"}
-          </button>
-          <ChevronRight className="h-3 w-3 shrink-0" />
-          <span className="truncate font-mono text-foreground/85">{identifier ?? "…"}</span>
-        </nav>
-        <div className="ml-auto flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                onClick={copyLink}
-                aria-label="Copy link"
-              >
-                <Link2 className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Copy link</TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
+      {/* The page's chrome is the top bar: where Back goes, the issue's ID as
+          the last crumb, and the link to share. The issue's own identity —
+          title, crew, status — is the first card below. */}
+      <SubBar
+        icon={CircleDot}
+        title={origin?.label ?? "Issues"}
+        section={<span className="font-mono">{identifier ?? "…"}</span>}
+        ariaLabel="Issue"
+        leading={
+          <SubBarIconButton icon={ArrowLeft} onClick={back} aria-label={origin ? `Back to ${origin.label}` : "Back to issues"} />
+        }
+        actions={<SubBarIconButton icon={Link2} onClick={copyLink} aria-label="Copy link" title="Copy link" />}
+      />
 
       <div className="relative min-h-0 flex-1">
       <div className="h-full overflow-y-auto pb-20">
         {wsLoading || !workspaceId || !identifier ? (
-          <div className="flex flex-col gap-4 p-4">
-            <Skeleton className="h-[132px] w-full rounded-xl" />
-            <Skeleton className="h-[64px] w-full rounded-xl" />
-          </div>
+          <PageLoading variant="list" rows={4} />
         ) : (
           <IssueDetailSurface
             workspaceId={workspaceId}

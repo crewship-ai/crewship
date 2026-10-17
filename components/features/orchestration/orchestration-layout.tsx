@@ -1,52 +1,29 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
-import { motion, AnimatePresence } from "motion/react"
-import { panel } from "@/lib/motion"
-import {
-  Workflow, Clock, Activity, GitBranch,
-  FileCode2, Container,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
-  CircleDot, FolderKanban, ScrollText,
-  Play, GitCompareArrows, MessageCircle,
-  AlertTriangle,
-} from "lucide-react"
-// Tabs replaced with custom nav for orchestration toolbar
-import { Button } from "@/components/ui/button"
-import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
-import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
-import { cn } from "@/lib/utils"
-import dynamic from "next/dynamic"
+import { useRouter, useSearchParams } from "next/navigation"
+import { CircleDot, FolderKanban, Kanban, List, Plus, X } from "lucide-react"
 
-// React Flow (~200 KB+) only loads when the user opens the graph tab —
-// keeps @xyflow/react out of the initial orchestration-route chunk.
-const WorkflowGraph = dynamic(
-  () =>
-    import("@/components/features/orchestration/workflow-graph").then(
-      (m) => m.WorkflowGraph
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading graph…
-      </div>
-    ),
-  }
-)
-import { PipelineDetailSheet } from "@/components/features/orchestration/pipeline-detail-sheet"
-import { usePipelines } from "@/hooks/use-pipelines"
-import { MissionTimeline } from "@/components/features/orchestration/mission-timeline"
-import { OrchestrationActivity } from "@/components/features/orchestration/orchestration-activity"
-// TemplateGallery removed — workflow templates not needed in orchestration UI yet
-// MissionControlBar replaced by inline info strip in unified toolbar
-// CrewConnections moved to Settings
-import { type DetailContext } from "@/components/features/orchestration/context-detail-panel"
-import { MissionYamlEditor } from "@/components/features/orchestration/mission-yaml-editor"
-import { DockerOverview } from "@/components/features/orchestration/docker-overview"
-import type { Mission, MissionTask, IssueLabel, Project, SavedView } from "@/lib/types/mission"
-import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
+import { apiFetch } from "@/lib/api-fetch"
+import { toast } from "@/lib/toast"
+import { useAppStore } from "@/lib/store"
+import { buildReturnTo } from "@/lib/return-to"
+import { Button } from "@/components/ui/button"
+import { SubBar, SubBarIconButton, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
+import { OfflineBanner, PageEmpty, PageError, PageLoading, PageNoResults, StaleData } from "@/components/layout/page-state"
+import {
+  CreateSurface,
+  CreateSurfaceBody,
+  CreateSurfaceField,
+  CreateSurfaceFooter,
+  CreateSurfaceHeader,
+  CreateSurfaceToggleRow,
+} from "@/components/layout/create-surface"
+import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
+import type { IssueLabel, Mission, Project, SavedView } from "@/lib/types/mission"
+import type { CrewSummary } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useFilteredIssues } from "@/hooks/use-filtered-issues"
@@ -54,283 +31,261 @@ import { useIssueDetail } from "@/hooks/use-issue-detail"
 import { useIssuesList } from "@/hooks/use-issues-list"
 import { useIssueBoardRealtime } from "@/hooks/use-issue-board-realtime"
 import { useProjectDetail } from "@/hooks/use-project-detail"
-import { parseSavedViews, applySavedView, issueViews } from "@/lib/saved-views"
-import { IssuesBoardInline, IssuesListInline } from "@/components/features/orchestration/issues-inline"
-import { IssueDetailSurface } from "@/components/features/issues/issue-detail-surface"
+import { useIssueFilters, activeFilterCount, filtersFromSavedView, savedViewPayload, NO_FILTERS } from "@/hooks/use-issue-filters"
+import { useRealtimeStatusSafe } from "@/hooks/use-realtime"
+import { useSessionSafe } from "@/hooks/use-auth"
+import { usePipelines } from "@/hooks/use-pipelines"
+import { parseSavedViews, issueViews } from "@/lib/saved-views"
+import { IssuesListView } from "@/components/features/issues/issues-list-view"
+import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
+import { IssuePeek } from "@/components/features/issues/issue-peek"
+import { IssuesDisplayOptions, Segmented } from "@/components/features/issues/issues-display-options"
+import {
+  DEFAULT_ROW_FIELDS,
+  PRIORITY_TEXT,
+  QUICK_VIEWS,
+  STATUS_TEXT,
+  applyQuickView,
+  groupIssues,
+  orderIssues,
+  type GroupBy,
+  type OrderBy,
+  type QuickView,
+  type RowFields,
+} from "@/components/features/issues/issues-view-model"
 import { ProjectDetailSurface } from "@/components/features/issues/project-detail-surface"
-import { IssuesStatusChips } from "@/components/features/issues/issues-status-chips"
-import type { IssuePriority, MissionStatus } from "@/lib/types/mission"
-import { UnifiedExplorer } from "@/components/features/orchestration/unified-explorer"
 import { CreateIssueModal } from "@/components/features/orchestration/create-issue-modal"
 import { CreateProjectModal } from "@/components/features/orchestration/create-project-modal"
-
-import { apiFetch } from "@/lib/api-fetch"
-import { runTaskAction } from "@/components/features/orchestration/task-actions"
-import { useAppStore } from "@/lib/store"
-import type { BreadcrumbItem } from "@/lib/store"
-import { ActivityTab } from "@/components/features/crews/bottom-panel/activity-tab"
-import { RunsTab } from "@/components/features/crews/bottom-panel/runs-tab"
-import { ChangesTab } from "@/components/features/crews/bottom-panel/changes-tab"
-import { CommentsTab } from "@/components/features/crews/bottom-panel/comments-tab"
-import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
-import { RightPanelContent } from "@/components/features/orchestration/right-panel-content"
+import { IssuesPanel, panelKeyOrder, selectionLabel, type IssuesPanelSelection } from "@/components/features/orchestration/issues-panel"
 import { IssuesToolbarStrip } from "@/components/features/orchestration/issues-toolbar-strip"
-import { RoutinesTab } from "@/components/features/routines/routines-tab"
-import { RunsView } from "@/components/features/activity/runs-view"
-import { PageSaveBar, PageSaveProvider, usePageSaveGuard } from "@/components/ui/page-save-bar"
 
-// Issue-scoped drawer tabs. The old set (messages/exec) was agent-scoped
-// and showed nothing on an issue with no agent selected; these are the
-// entity the page is actually about — the issue/mission in focus.
-type DrawerTab = "activity" | "runs" | "changes" | "comments" | "spec" | "docker"
-
-// Page mode controls which top-level tabs are visible. Issues and
-// Routines now live as their own top-level pages (/issues, /routines);
-// /activity is the live observability surface (Graph + Timeline + Feed).
-// "default" keeps the legacy 5-tab container — nothing in-tree links to
-// it after the IA refactor, but it stays so /orchestration → /activity
-// can be a soft redirect rather than a hard breaking change.
-export type OrchestrationMode = "issues" | "activity" | "default"
 
 export interface OrchestrationLayoutProps {
-  missions: Mission[]
   crews: CrewSummary[]
-  agents: AgentSummary[]
-  connections: CrewConnection[]
   workspaceId: string
-  selectedMissionId: string
-  onMissionChange: (missionId: string) => void
+  /** Re-fetch the shell's own data (crews). */
   onRefresh: () => void
-  onMissionCreated: () => void
-  mode?: OrchestrationMode
-  /** The shell's fetch failed; rendered in place of the board with a retry, never as "no issues". */
+  /** The shell's fetch failed; said above the list with a retry, never as "no issues". */
   loadError?: string | null
 }
 
-const ORCH_DRAWER_TABS = [
-  { id: "activity" as const, label: "Activity", icon: Activity },
-  { id: "runs" as const, label: "Runs", icon: Play },
-  { id: "changes" as const, label: "Changes", icon: GitCompareArrows },
-  { id: "comments" as const, label: "Comments", icon: MessageCircle },
-  { id: "spec" as const, label: "Spec", icon: FileCode2 },
-  { id: "docker" as const, label: "Docker", icon: Container },
-]
+// Stable: the realtime hook cancels its pending refetch when this changes.
+const NOOP = () => {}
 
-const ORCH_TABS = [
-  { id: "issues", label: "Issues", icon: CircleDot },
-  { id: "runs", label: "Runs", icon: GitBranch },
-  { id: "graph", label: "Graph", icon: Workflow },
-  { id: "timeline", label: "Timeline", icon: Clock },
-  { id: "activity", label: "Feed", icon: Activity },
-  { id: "routines", label: "Routines", icon: ScrollText },
-] as const
-
-// Tabs visible in each mode. /issues hides everything except its own
-// content (no tab bar at all). /activity exposes "Runs" as the
-// primary surface (the issue→routine→steps→agent tree) with the
-// older Graph/Timeline/Feed kept as secondary observability views
-// until they're either folded into Runs or retired.
-const TAB_IDS_BY_MODE: Record<OrchestrationMode, ReadonlyArray<typeof ORCH_TABS[number]["id"]>> = {
-  issues: [],
-  activity: ["runs", "graph", "timeline", "activity"],
-  default: ORCH_TABS.map((t) => t.id),
-}
-
-const DEFAULT_TAB_BY_MODE: Record<OrchestrationMode, typeof ORCH_TABS[number]["id"]> = {
-  issues: "issues",
-  activity: "runs",
-  default: "issues",
+const isTyping = (t: EventTarget | null) => {
+  const el = t as HTMLElement | null
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)
 }
 
 /**
- * The issues page holds one page Save bar: an open issue's edits wait for it,
- * and opening another issue or closing this one asks first while any wait.
+ * /issues (Harbor 2): the secondary panel with views, projects, saved views
+ * and the filter; the list or the board; a peek for the issue in focus; a
+ * project's page when one is open. The bottom drawer the old orchestration
+ * container carried is gone — its contents live in Activity and on the
+ * issue's own page.
  */
-export function OrchestrationLayout(props: OrchestrationLayoutProps) {
-  return (
-    <PageSaveProvider>
-      <OrchestrationLayoutInner {...props} />
-    </PageSaveProvider>
-  )
-}
-
-function OrchestrationLayoutInner({
-  missions,
-  crews,
-  agents,
-  connections,
-  workspaceId,
-  selectedMissionId,
-  onMissionChange: _onMissionChange,
-  onRefresh,
-  onMissionCreated: _onMissionCreated,
-  mode = "default",
-  loadError = null,
-}: OrchestrationLayoutProps) {
+export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError = null }: OrchestrationLayoutProps) {
+  const router = useRouter()
   const isMobile = useIsMobile()
   const closePanelSheet = useCloseSecondaryPanelSheet()
+  const openPanelSheet = useAppStore((s) => s.setSecondaryPanelOpen)
+  const params = useSearchParams()
+  const missionType = params.get("mission_type") ?? "issue"
+  const me = useSessionSafe().data?.user.id ?? null
 
-  // Panel state
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [drawerTab, setDrawerTab] = useState<DrawerTab>("activity")
+  /* ------------------------------------------------------------ display */
+  const [viewMode, setViewMode] = useUserPreference<"board" | "list">("orchestration.issues.viewMode", "list")
+  const [groupBy, setGroupBy] = useUserPreference<GroupBy>("issues.list.groupBy", "status")
+  const [orderBy, setOrderBy] = useUserPreference<OrderBy>("issues.list.order", "manual")
+  const [storedFields, setFields] = useUserPreference<RowFields>("issues.list.fields", DEFAULT_ROW_FIELDS)
+  const fields = useMemo(() => ({ ...DEFAULT_ROW_FIELDS, ...storedFields }), [storedFields])
+  const [displayOpen, setDisplayOpen] = useState(false)
 
-  // Content state — initial active tab depends on the page mode.
-  // /issues opens on Issues; /activity opens on Graph; /orchestration
-  // (legacy) opens on Issues for backwards compatibility.
-  const [activeTab, setActiveTab] = useState<typeof ORCH_TABS[number]["id"]>(DEFAULT_TAB_BY_MODE[mode])
-
-  // Visible tabs filtered by mode. Issues mode hides the tab bar
-  // entirely (length 0); activity mode shows only the three observability
-  // sub-tabs; default mode shows everything.
-  const visibleTabs = useMemo(
-    () => ORCH_TABS.filter((t) => TAB_IDS_BY_MODE[mode].includes(t.id)),
-    [mode],
-  )
-
-  // If the URL switches between modes mid-session (router back/forward),
-  // make sure activeTab settles on a tab that's actually visible.
-  useEffect(() => {
-    if (visibleTabs.length === 0) {
-      setActiveTab(DEFAULT_TAB_BY_MODE[mode])
-      return
-    }
-    if (!visibleTabs.some((t) => t.id === activeTab)) {
-      setActiveTab(DEFAULT_TAB_BY_MODE[mode])
-    }
-  }, [mode, visibleTabs, activeTab])
-  const [_selectedTask, setSelectedTask] = useState<MissionTask | null>(null)
-  const [selectedCrewId] = useState<string | null>(null)
-  const [selectedAgentSlug] = useState<string | null>(null)
-  const [detailContext, setDetailContext] = useState<DetailContext>({ type: "none" })
-
-  // Issues state. #2286/#2285: the fetch itself — loading, error
-  // classification, and total/has-more pagination — lives in
-  // useIssuesList (hooks/use-issues-list.ts) so it's unit-testable without
-  // mounting this ~1200-line component. See that file's doc comment for
-  // the degradation contract.
-  // The search box commits to the server (`?q=`, title and identifier), so a
-  // match outside the loaded page is found — S1 on docs/ux/audit-work.md.
+  /* ------------------------------------------------------------ filters */
+  const { filters, setFilters, patch: patchFilters, clear: clearFacets } = useIssueFilters()
+  const [search, setSearch] = useState("")
   const [committedSearch, setCommittedSearch] = useState("")
-
-  const [issueLabels, setIssueLabels] = useState<IssueLabel[]>([])
-  // Persisted per-user — most teams stick with one of board/list and a
-  // refresh shouldn't bounce them back to board if they prefer list.
-  const [issueViewMode, setIssueViewMode] = useUserPreference<"board" | "list">(
-    "orchestration.issues.viewMode",
-    "board",
-  )
-  const [issueSearch, setIssueSearch] = useState("")
-  // The search the SERVER runs (`?q=`), committed after a pause. The box
-  // filters the loaded page instantly; the server filters the workspace,
-  // so an issue outside the page can still be found.
   useEffect(() => {
-    const t = setTimeout(() => setCommittedSearch(issueSearch.trim()), 300)
+    const t = setTimeout(() => setCommittedSearch(search.trim()), 300)
     return () => clearTimeout(t)
-  }, [issueSearch])
-  const [projects, setProjects] = useState<Project[]>([])
-  // Project filter applied via saved views — does NOT open the detail panel.
-  // `selectedProjectId` is the authoritative "user navigated to this project"
-  // state and is the only thing that opens the right-hand detail panel.
-  // `filterProjectId` is the saved-view-scoped filter and feeds only
-  // `useFilteredIssues`. Keeping them separate (issue #320) means applying
-  // or clearing a saved view's project filter never opens or closes the
-  // detail panel, and explicitly clicking a project never leaks back into
-  // the saved-view's filter state.
-  // /issues?project=<id> — the ⌘K palette's Projects rows, a bookmark, or a
-  // project opened in this page — is read AND written by useProjectDetail.
+  }, [search])
+  const [quick, setQuick] = useState<QuickView>("all")
+  const [savedViewId, setSavedViewId] = useState<string | null>(null)
   const [filterProjectId, setFilterProjectId] = useState<string | null>(null)
-  const workParams = useSearchParams()
-  const [filterCrewId, setFilterCrewId] = useState<string | null>(workParams.get("crew_id"))
-  const [filterAgentId, setFilterAgentId] = useState<string | null>(workParams.get("assignee_id"))
-  const scopedCrew = workParams.get("crew_id")
-  const scopedAgent = workParams.get("assignee_id")
-  useEffect(() => { setFilterCrewId(scopedCrew); setFilterAgentId(scopedAgent) }, [scopedCrew, scopedAgent])
-  // Multi-select status filter (empty = show all). Priority filter is
-  // single-select because issues only have one priority value.
-  const [filterStatuses, setFilterStatuses] = useState<MissionStatus[]>([])
-  const [filterPriority, setFilterPriority] = useState<IssuePriority | null>(null)
 
   const {
     issues,
     loading: issuesLoading,
     error: issuesError,
     total: issuesTotal,
-    hasMore: issuesHasMore,
-    loadingMore: issuesLoadingMore,
+    hasMore,
+    loadingMore,
     refetch: fetchIssues,
-    loadMore: loadMoreIssues,
-  } = useIssuesList(workspaceId, { search: committedSearch, crewId: filterCrewId, assigneeId: filterAgentId, missionType: workParams.get("mission_type") ?? "issue" })
+    loadMore,
+  } = useIssuesList(workspaceId, { search: committedSearch, crewId: filters.crewId, assigneeId: filters.agentId, missionType })
 
-  // Realtime: agents create and advance issues live. #2257 (PR #2310)
-  // registered the issue.* subscriptions for the first time, but its client
-  // half was incomplete — the debounced refetch called `onRefresh`
-  // (missions/crews/agents/connections), never the board's own separate
-  // `issues` state, so a live issue.created never actually repainted the
-  // board. useIssueBoardRealtime (hooks/use-issue-board-realtime.ts) is the
-  // fix, and carries the full reasoning + the realtime.reconnected half.
-  useIssueBoardRealtime({ filterCrewId, fetchIssues, onRefresh })
+  // Agents create and advance issues live; every issue.* event (and a
+  // reconnect) refetches the list, debounced.
+  useIssueBoardRealtime({ filterCrewId: filters.crewId, fetchIssues, onRefresh: NOOP })
 
+  /* ------------------------------------------------- workspace lookups */
+  const [labels, setLabels] = useState<IssueLabel[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [savedViews, setSavedViews] = useState<SavedView[]>([])
+  const { pipelines } = usePipelines(workspaceId)
+
+  const fetchLabels = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`)
+      if (res.ok) setLabels(await res.json())
+    } catch { /* the pickers show none */ }
+  }, [workspaceId])
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`)
+      if (res.ok) setProjects(await res.json())
+    } catch { /* the Projects section stays as it was */ }
+  }, [workspaceId])
+  const fetchSavedViews = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/api/v1/saved-views?workspace_id=${encodeURIComponent(workspaceId)}`)
+      // Journal views share the endpoint; applied here they would set nothing.
+      if (res.ok) setSavedViews(issueViews(parseSavedViews(await res.json())))
+    } catch { /* the Saved views section stays as it was */ }
+  }, [workspaceId])
+  useEffect(() => {
+    void fetchLabels()
+    void fetchProjects()
+    void fetchSavedViews()
+  }, [fetchLabels, fetchProjects, fetchSavedViews])
+
+  /* ----------------------------------------------------------- selection */
+  const issueDetail = useIssueDetail({ issues })
+  const { selectedIdentifier, selectedIssue, handleIssueSelect, handleIssueClose } = issueDetail
+  const { selectedProjectId, setSelectedProjectId, selectedProject, handleProjectClose } = useProjectDetail({ projects })
+
+  const selection: IssuesPanelSelection = selectedProjectId
+    ? { kind: "project", id: selectedProjectId }
+    : savedViewId
+      ? { kind: "saved", id: savedViewId }
+      : { kind: "quick", id: quick }
+
+  const select = useCallback(
+    (s: IssuesPanelSelection) => {
+      closePanelSheet()
+      if (s.kind === "project") {
+        setSelectedProjectId(s.id)
+        return
+      }
+      if (selectedProjectId) handleProjectClose()
+      if (s.kind === "quick") {
+        setSavedViewId(null)
+        setQuick(s.id)
+        if (savedViewId) {
+          setFilters(NO_FILTERS)
+          setFilterProjectId(null)
+          setSearch("")
+        }
+        return
+      }
+      const view = savedViews.find((v) => v.id === s.id)
+      if (!view) return
+      const applied = filtersFromSavedView(view)
+      setSavedViewId(view.id)
+      setQuick("all")
+      setFilters(applied.filters)
+      setFilterProjectId(applied.projectId)
+      setSearch(applied.search)
+      if (view.view_type === "board" || view.view_type === "list") setViewMode(view.view_type)
+    },
+    [closePanelSheet, setSelectedProjectId, selectedProjectId, handleProjectClose, savedViewId, savedViews, setFilters, setViewMode],
+  )
+
+  /* -------------------------------------------------------------- data */
+  const { visible: facetVisible } = useFilteredIssues({
+    issues,
+    search,
+    selectedProjectId: null,
+    filterProjectId,
+    filterCrewId: filters.crewId,
+    filterAgentId: filters.agentId,
+    filterStatuses: filters.statuses,
+    filterPriority: filters.priority,
+    filterOwnerId: filters.ownerId,
+    filterHolder: filters.holder,
+    filterLabel: filters.label,
+  })
+  const visible = useMemo(() => orderIssues(applyQuickView(facetVisible, quick, me), orderBy), [facetVisible, quick, me, orderBy])
+  const quickCounts = useMemo(
+    () => Object.fromEntries(QUICK_VIEWS.map((v) => [v.id, applyQuickView(issues, v.id, me).length])) as Record<QuickView, number>,
+    [issues, me],
+  )
+  // J / K follow what is on screen, group by group.
+  const sequence = useMemo(
+    () => groupIssues(visible, viewMode === "board" ? "status" : groupBy).flatMap((g) => g.issues),
+    [visible, viewMode, groupBy],
+  )
+  const peekIndex = selectedIdentifier ? sequence.findIndex((i) => (i.identifier ?? i.id) === selectedIdentifier) : -1
+
+  /* ------------------------------------------------------------ actions */
   const [showCreateIssue, setShowCreateIssue] = useState(false)
   const [showCreateProject, setShowCreateProject] = useState(false)
+  const [saveViewOpen, setSaveViewOpen] = useState(false)
 
-  // Cross-surface create affordance. The dashboard's "New issue" CTA lands
-  // here with ?create=1 so it opens the existing full composer instead of
-  // dropping the user on the board and making them click a second time.
-  // The param is consumed once: without the strip-back, a plain reload (or
-  // dismissing the composer and navigating back) reopens it forever (#2187).
+  // The dashboard's "New issue" lands here with ?create=1. Consumed once:
+  // without the strip-back a reload reopens the composer forever (#2187).
   useEffect(() => {
-    if (mode !== "issues" || typeof window === "undefined") return
+    if (typeof window === "undefined") return
     const search = new URLSearchParams(window.location.search)
     if (search.get("create") === "1") {
       setShowCreateIssue(true)
       search.delete("create")
       const query = search.toString()
-      // replaceState, not router.replace: this is URL hygiene, not
-      // navigation — no re-render, no history entry, nothing remounts.
-      window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`)
+      window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`)
     }
-  }, [mode])
+  }, [])
 
-  // Saved views
-  const [savedViews, setSavedViews] = useState<SavedView[]>([])
-  const [activeViewId, setActiveViewId] = useState<string | null>(null)
-  const [savedViewsOpen, setSavedViewsOpen] = useState(false)
+  const fullHref = useCallback((issue: Pick<Mission, "identifier" | "id">) => {
+    const here = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search)
+    here.delete("issue")
+    const from = `/issues${here.toString() ? `?${here}` : ""}`
+    return `/issues/${encodeURIComponent(issue.identifier ?? issue.id)}?${buildReturnTo(from, "Issues")}`
+  }, [])
 
-  // graphRef removed — was unused
+  // A row opens the peek; on a phone the peek would be a sheet over a list
+  // the reader cannot see, so it is the full page instead.
+  const openIssue = useCallback(
+    (issue: Mission) => {
+      if (isMobile) {
+        router.push(fullHref(issue))
+        return
+      }
+      if ((issue.identifier ?? issue.id) === selectedIdentifier) return
+      handleIssueSelect(issue)
+    },
+    [isMobile, router, fullHref, selectedIdentifier, handleIssueSelect],
+  )
+  const stepPeek = (delta: number) => {
+    if (peekIndex < 0 || sequence.length === 0) return
+    handleIssueSelect(sequence[(peekIndex + delta + sequence.length) % sequence.length])
+  }
 
-  // Pipelines surface in the Graph tab as a registry row of
-  // pipelineRun nodes along the bottom. Fetched once on mount + on
-  // refresh; the WS hub will eventually push pipeline.run.* events
-  // to update node status live, but for MVP polling on-demand is
-  // enough — pipelines change rarely (agent saves, user invokes).
-  const { pipelines } = usePipelines(workspaceId)
+  const clearEverything = useCallback(() => {
+    clearFacets()
+    setSearch("")
+    setQuick("all")
+    setSavedViewId(null)
+    setFilterProjectId(null)
+  }, [clearFacets])
 
-  // Pipeline detail side-sheet state. Opened by clicking a
-  // PipelineRunNode in the graph; carries the slug so the sheet
-  // can fetch detail + versions + runs against the public API.
-  const [selectedPipelineSlug, setSelectedPipelineSlug] = useState<string | null>(null)
-  const [pipelineSheetOpen, setPipelineSheetOpen] = useState(false)
-
-
-  // Keyboard shortcuts. The shortcuts are scoped to the issues page —
-  // they fire on any keystroke that isn't typed into a form control,
-  // so the user can press `/` from the list and land in the search box
-  // without picking up shortcuts while editing an inbox comment etc.
+  /* ----------------------------------------------------------- keyboard */
   useEffect(() => {
-    if (activeTab !== "issues") return
     const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null
-      const isInputContext =
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
-
-      // `/` — focus the issues search input (works only outside inputs)
-      if (e.key === "/" && !isInputContext) {
-        const el = document.querySelector<HTMLInputElement>(
-          "[data-issues-search] input",
-        )
+      if (e.defaultPrevented || isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return
+      // A dialog, menu or the peek owns its keys.
+      if (document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"], [role="menu"]')) return
+      if (e.key === "/") {
+        const el = document.querySelector<HTMLInputElement>("[data-issues-search] input")
         if (el) {
           e.preventDefault()
           el.focus()
@@ -338,884 +293,351 @@ function OrchestrationLayoutInner({
         }
         return
       }
-      // Esc — clear active filters (status/priority/crew/agent/search).
-      // Does NOT clear the saved-view choice; that's an explicit action.
-      if (e.key === "Escape" && !isInputContext) {
-        if (
-          filterStatuses.length > 0 ||
-          filterPriority ||
-          filterCrewId ||
-          filterAgentId ||
-          issueSearch
-        ) {
+      if (e.key === "Escape") {
+        if (activeFilterCount(filters) > 0 || search) {
           e.preventDefault()
-          setFilterStatuses([])
-          setFilterPriority(null)
-          setFilterCrewId(null)
-          setFilterAgentId(null)
-          setIssueSearch("")
+          clearFacets()
+          setSearch("")
         }
         return
       }
-      // `c` — open the create-issue modal
-      if (e.key === "c" && !isInputContext && !e.metaKey && !e.ctrlKey) {
+      if (e.key === "c" || e.key === "C") {
+        if (e.shiftKey) return
         e.preventDefault()
         setShowCreateIssue(true)
+        return
+      }
+      if (e.key === "V" && e.shiftKey) {
+        e.preventDefault()
+        setDisplayOpen((o) => !o)
+        return
+      }
+      if (/^[1-9]$/.test(e.key)) {
+        const target = panelKeyOrder(projects, savedViews)[Number(e.key) - 1]
+        if (target) {
+          e.preventDefault()
+          select(target)
+        }
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [
-    activeTab,
-    filterStatuses.length,
-    filterPriority,
-    filterCrewId,
-    filterAgentId,
-    issueSearch,
-  ])
+  }, [filters, search, clearFacets, projects, savedViews, select])
 
-  // Left panel filtered by selected mission
-  const panelCrews = useMemo(() => {
-    if (selectedMissionId === "all") return crews
-    const mission = missions.find((m) => m.id === selectedMissionId)
-    if (!mission) return crews
-    const crewIds = new Set<string>()
-    crewIds.add(mission.crew_id)
-    for (const task of mission.tasks || []) {
-      const agent = agents.find((a) => a.slug === task.agent_slug)
-      if (agent?.crew_id) crewIds.add(agent.crew_id)
-    }
-    return crews.filter((c) => crewIds.has(c.id))
-  }, [selectedMissionId, missions, crews, agents])
-
-
-  const panelMissions = useMemo(() => {
-    if (selectedMissionId === "all") return missions
-    return missions.filter((m) => m.id === selectedMissionId)
-  }, [selectedMissionId, missions])
-
-  // Issue data fetching — the issues list itself is useIssuesList (above);
-  // it fetches its own first page on mount, so it is deliberately absent
-  // from the effect below.
-  const fetchIssueLabels = useCallback(async () => {
-    if (!workspaceId) return
-    try {
-      const res = await apiFetch(`/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`)
-      if (res.ok) setIssueLabels(await res.json())
-    } catch { /* ignore */ }
-  }, [workspaceId])
-
-  const fetchProjects = useCallback(async () => {
-    if (!workspaceId) return
-    try {
-      const res = await apiFetch(`/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`)
-      if (res.ok) setProjects(await res.json())
-    } catch { /* ignore */ }
-  }, [workspaceId])
-
-  const fetchSavedViews = useCallback(async () => {
-    if (!workspaceId) return
-    try {
-      const res = await apiFetch(`/api/v1/saved-views?workspace_id=${encodeURIComponent(workspaceId)}`)
-      // The endpoint returns every saved view in the workspace, /journal's
-      // included. Applying one of those here sets no issue filter at all, so
-      // the dropdown entry reads as broken — drop them by their surface
-      // marker (lib/saved-views.ts).
-      if (res.ok) setSavedViews(issueViews(parseSavedViews(await res.json())))
-    } catch { /* ignore */ }
-  }, [workspaceId])
-
+  /* ------------------------------------------------------------ offline */
+  const ws = useRealtimeStatusSafe()
+  const [offline, setOffline] = useState(false)
   useEffect(() => {
-    fetchIssueLabels()
-    fetchProjects()
-    fetchSavedViews()
-  }, [fetchIssueLabels, fetchProjects, fetchSavedViews])
+    if (ws !== "disconnected" && ws !== "error") {
+      setOffline(false)
+      return
+    }
+    const t = setTimeout(() => setOffline(true), 3000)
+    return () => clearTimeout(t)
+  }, [ws])
 
-  // Both selections live in the URL now — /issues?issue=ENG-4&project=p_1.
-  // They used to be component state, so the open issue could not be shared,
-  // a refresh lost it, and Back left the page instead of closing the detail.
-  const issueDetail = useIssueDetail({
-    issues,
-    onIssueSelected: () => setDetailContext({ type: "none" }),
-  })
-  const { selectedIdentifier, selectedIssue } = issueDetail
-  // Switching or closing the open issue throws its unsaved edits away, so it
-  // goes through the Save bar's question first.
-  const saveGuard = usePageSaveGuard()
-  const pickIssue = issueDetail.handleIssueSelect
-  const closeIssue = issueDetail.handleIssueClose
-  const handleIssueSelect = useCallback(
-    (...args: Parameters<typeof pickIssue>) => saveGuard(() => pickIssue(...args)),
-    [saveGuard, pickIssue],
+  /* ------------------------------------------------------------- render */
+  const sectionTitle = selectedProject
+    ? selectedProject.name
+    : missionType === "mission"
+      ? "Missions"
+      : selectionLabel(selection, projects, savedViews)
+  const nFilters = activeFilterCount(filters)
+  const filteredAway = issues.length > 0 && visible.length === 0
+  const nothingYet =
+    !issuesLoading && !issuesError && issues.length === 0 && nFilters === 0 && !committedSearch && (issuesTotal ?? 0) === 0
+
+  const filterWords = [
+    quick === "mine" && "View: My work",
+    filters.statuses.length > 0 && `Status: ${filters.statuses.map((s) => STATUS_TEXT[s] ?? s).join(", ")}`,
+    filters.priority && `Priority: ${PRIORITY_TEXT[filters.priority]}`,
+    filters.crewId && `Crew: ${crews.find((c) => c.id === filters.crewId)?.name ?? "one crew"}`,
+    filters.agentId && "Delegate: one agent",
+    filters.ownerId && "Owner: one person",
+    filters.holder && `Held by ${filters.holder === "agent" ? "an agent" : "a person"}`,
+    filters.label && `Label: ${filters.label}`,
+    filterProjectId && `Project: ${projects.find((p) => p.id === filterProjectId)?.name ?? "one project"}`,
+    search && `Search: “${search}”`,
+  ].filter(Boolean) as string[]
+
+  const actions = isMobile ? (
+    <SubBarIconButton icon={Plus} aria-label="New issue" onClick={() => setShowCreateIssue(true)} />
+  ) : selectedProject ? (
+    <>
+      <SubBarPrimary icon={Plus} title="C" aria-keyshortcuts="c" onClick={() => setShowCreateIssue(true)}>New issue</SubBarPrimary>
+      <SubBarIconButton icon={X} aria-label="Close project" onClick={handleProjectClose} />
+    </>
+  ) : (
+    <>
+      <Segmented
+        label="View"
+        value={viewMode}
+        onChange={setViewMode}
+        options={[
+          { id: "list", label: <><List className="size-3.5" aria-hidden />List</> },
+          { id: "board", label: <><Kanban className="size-3.5" aria-hidden />Board</> },
+        ]}
+      />
+      <IssuesDisplayOptions
+        open={displayOpen}
+        onOpenChange={setDisplayOpen}
+        groupBy={groupBy}
+        onGroupBy={setGroupBy}
+        orderBy={orderBy}
+        onOrderBy={setOrderBy}
+        fields={fields}
+        onFields={setFields}
+        board={viewMode === "board"}
+      />
+      <SubBarSecondary icon={FolderKanban} onClick={() => setShowCreateProject(true)}>New project</SubBarSecondary>
+      <SubBarPrimary icon={Plus} title="C" aria-keyshortcuts="c" onClick={() => setShowCreateIssue(true)}>New issue</SubBarPrimary>
+    </>
   )
-  const handleIssueClose = useCallback(() => saveGuard(() => closeIssue()), [saveGuard, closeIssue])
 
-  const handleIssueUpdated = useCallback(async () => {
-    await fetchIssues()
-    await fetchProjects()
-  }, [fetchIssues, fetchProjects])
-
-  const {
-    selectedProjectId,
-    setSelectedProjectId,
-    selectedProject,
-    handleProjectClose,
-  } = useProjectDetail({ projects })
-
-  // Derived data — defined after useIssueDetail so the selectedIssue
-  // dependency resolves; when an issue is selected the Graph/Timeline/
-  // Activity tabs focus on its single mission.
-  const filteredMissions = useMemo(() => {
-    if (selectedIssue) {
-      const match = missions.find((m) => m.id === selectedIssue.id)
-      return match ? [match] : missions
-    }
-    if (selectedMissionId === "all") return missions
-    return missions.filter((m) => m.id === selectedMissionId)
-  }, [missions, selectedMissionId, selectedIssue])
-
-  const selectedMission = useMemo(() => {
-    if (selectedIssue) {
-      return missions.find((m) => m.id === selectedIssue.id) || null
-    }
-    if (selectedMissionId === "all") return null
-    return missions.find((m) => m.id === selectedMissionId) || null
-  }, [missions, selectedMissionId, selectedIssue])
-
-  // Bottom-drawer context for the shared dock tabs (Activity / Runs /
-  // Changes / Comments). Prefer `selectedIssue` (the fully-loaded issue
-  // detail — always has crew_id + identifier) over `selectedMission`, which
-  // is resolved via missions.find() against the limit-50 list and is null
-  // whenever the issue isn't in that page (or the list row omits crew_id).
-  // That mismatch left every issue tab stuck on "Select an issue…" even with
-  // an issue open. crew_id + identifier are required — the issue
-  // sub-resource routes are nested under the crew and keyed by identifier.
-  const missionCtx = useMemo<BottomPanelContext>(() => {
-    const m = selectedIssue ?? selectedMission
-    if (!m || !m.identifier || !m.crew_id) return null
-    return {
-      kind: "mission",
-      missionId: m.id,
-      identifier: m.identifier,
-      title: m.title,
-      crewId: m.crew_id,
-      crewSlug: m.crew_slug ?? m.crew_id,
-    }
-  }, [selectedIssue, selectedMission])
-
-  // The selection takes over the middle pane (same pattern as /routines):
-  // the board/list is hidden and the detail renders full-width with a
-  // back-arrow on top. The right panel is suppressed for these selections.
-  //
-  // Gated on the IDENTIFIER, not on `selectedIssue`. The list is capped at 100
-  // rows, so an identifier the URL names but the page has not loaded resolves
-  // to null — and gating on the row would leave a shared link on an empty
-  // board. The detail fetches by identifier and does not need the row at all.
-  const issueDetailFullWidth = selectedIdentifier !== null && activeTab === "issues"
-  const projectDetailFullWidth =
-    selectedProjectId !== null && !selectedIdentifier && activeTab === "issues"
-
-  const { visible: filteredIssues, statusFacet: statusChipIssues } = useFilteredIssues({
-    issues,
-    search: issueSearch,
-    selectedProjectId,
-    filterProjectId,
-    filterCrewId,
-    filterAgentId,
-    filterStatuses,
-    filterPriority,
-  })
-
-  // Handlers
-  const handleNodeClick = useCallback((task: MissionTask) => {
-    setSelectedTask(task)
-    const mission = missions.find((m) => m.tasks?.some((t) => t.id === task.id))
-    if (mission) {
-      setDetailContext({
-        type: "task",
-        task,
-        mission,
-        allTasks: mission.tasks || [],
-      })
-    }
-  }, [missions])
-
-  // Computed: which agent slugs are highlighted (agent click or crew click)
-  const highlightSlugs = useMemo<Set<string> | null>(() => {
-    if (selectedAgentSlug) return new Set([selectedAgentSlug])
-    if (selectedCrewId) {
-      const crewAgentSlugs = agents.filter((a) => a.crew_id === selectedCrewId).map((a) => a.slug)
-      return crewAgentSlugs.length > 0 ? new Set(crewAgentSlugs) : null
-    }
-    return null
-  }, [selectedAgentSlug, selectedCrewId, agents])
-
-  const handleInboxTaskSelect = useCallback((task: MissionTask, mission: Mission) => {
-    setSelectedTask(task)
-    setDetailContext({
-      type: "task",
-      task,
-      mission,
-      allTasks: mission.tasks || [],
-    })
-  }, [])
-
-  const handleDetailClose = useCallback(() => {
-    setDetailContext({ type: "none" })
-    setSelectedTask(null)
-  }, [])
-
-  const handleTaskAction = useCallback(async (action: "edit" | "retry" | "skip", taskId: string, missionId: string) => {
-    // Resolving the crew, deciding that "edit" writes nothing and mapping the
-    // action onto a status all live in task-actions, where a test can reach
-    // them: this component is 1000 lines of layout that no unit test renders,
-    // so anything decided here would be decided unwatched.
-    if (await runTaskAction(action, taskId, missionId, { missions, workspaceId })) onRefresh()
-  }, [missions, workspaceId, onRefresh])
-
-  const handleDrawerTabClick = useCallback((tab: DrawerTab) => {
-    if (drawerOpen && drawerTab === tab) {
-      setDrawerOpen(false)
-    } else {
-      setDrawerTab(tab)
-      setDrawerOpen(true)
-    }
-  }, [drawerOpen, drawerTab])
-
-  // Routines tab manages its own right-side detail (RoutinesDetailPanel
-  // inside RoutinesTab). Suppress the orchestration-level detail pane
-  // there so an issue/task selected from a previous tab doesn't bleed
-  // into the routines layout and shrink the routines list view.
-  // Right panel still shows for task drilldowns, but issue + project
-  // detail both moved into the middle pane (full-width) — same pattern
-  // as /routines. The right rail was cramped (520px); the editor /
-  // activity / properties all benefit from real horizontal space.
-  const showRightPanel =
-    activeTab !== "routines" &&
-    !issueDetailFullWidth &&
-    !projectDetailFullWidth &&
-    detailContext.type !== "none"
-
-  // Mobile back button: close whichever detail view is currently visible so that
-  // showRightPanel ends up false and the overlay sheet actually dismisses.
-  const closeMobileDetail = useCallback(() => {
-    if (selectedIdentifier) {
-      handleIssueClose()
-    } else if (selectedProjectId) {
-      handleProjectClose()
-    } else {
-      handleDetailClose()
-    }
-  }, [selectedIdentifier, selectedProjectId, handleIssueClose, handleProjectClose, handleDetailClose])
-
-  // Sync breadcrumbs to global store (rendered in app-toolbar)
-  const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
-  useEffect(() => {
-    const items: BreadcrumbItem[] = []
-    if (selectedProject) {
-      items.push({ label: selectedProject.name, onClick: handleIssueClose })
-    }
-    if (selectedIdentifier) {
-      items.push({ label: selectedIdentifier })
-    }
-    setBreadcrumbs(items)
-    return () => setBreadcrumbs([])
-  }, [selectedProject, selectedIdentifier, setBreadcrumbs, handleIssueClose])
-
-  // Toolbar surfaces are mode-dependent:
-  //   - issues: hide tab bar, show New Issue + New Project buttons
-  //   - activity: show Graph/Timeline/Feed sub-tabs, no create buttons
-  //   - default: legacy — everything visible
-  const showCreateButtons = mode === "issues" || mode === "default"
-  const showToolbar = visibleTabs.length > 0 || showCreateButtons
+  let body: React.ReactNode
+  if (selectedProject) {
+    body = (
+      <div className="h-full overflow-y-auto">
+        <ProjectDetailSurface workspaceId={workspaceId} project={selectedProject} issues={issues} onChanged={fetchProjects} />
+      </div>
+    )
+  } else if (issuesLoading && issues.length === 0) {
+    body = <PageLoading variant="list" />
+  } else if (issuesError && issues.length === 0) {
+    body = (
+      <PageError
+        title="Issues could not load"
+        description={`${issuesError.message} Your filters are kept.`}
+        onRetry={() => void fetchIssues()}
+        detail={issuesError.status ? <>HTTP {issuesError.status} from <span className="font-mono">GET /api/v1/issues</span></> : undefined}
+      />
+    )
+  } else if (nothingYet) {
+    body = (
+      <PageEmpty
+        icon={CircleDot}
+        title="No issues yet"
+        description="Write a brief, delegate it to an agent and review the result."
+        primary={{ label: "New issue", onClick: () => setShowCreateIssue(true) }}
+        cli="crewship issue create"
+      />
+    )
+  } else {
+    body = (
+      <div className="flex h-full min-h-0 flex-col">
+        <IssuesToolbarStrip
+          statuses={filters.statuses}
+          onToggleStatus={(s) =>
+            patchFilters({ statuses: filters.statuses.includes(s) ? filters.statuses.filter((x) => x !== s) : [...filters.statuses, s] })
+          }
+          onClearStatuses={() => patchFilters({ statuses: [] })}
+          shown={visible.length}
+          groupBy={groupBy}
+          board={viewMode === "board"}
+          onOpenFilters={isMobile ? () => openPanelSheet(true) : undefined}
+          activeFilters={nFilters}
+          loaded={issues.length}
+          total={issuesTotal}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          onLoadMore={() => void loadMore()}
+        />
+        {offline && <OfflineBanner className="mx-4 mt-3" onRetry={() => void fetchIssues()} />}
+        {loadError && !issuesError && (
+          <div role="alert" className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-card border border-destructive/40 bg-destructive/10 px-3 py-2 text-label text-destructive">
+            <span className="min-w-0 flex-1">{loadError}</span>
+            <Button size="sm" variant="outline" onClick={() => { void fetchIssues(); onRefresh() }}>Try again</Button>
+          </div>
+        )}
+        {/* Reachable only from a failed loadMore: what is loaded stays, and the
+            retry re-requests that page rather than resetting to page 1. */}
+        {issuesError && issues.length > 0 && (
+          <div role="alert" className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-card border border-destructive/30 bg-destructive/10 px-3 py-2 text-label text-destructive">
+            <span>{issuesError.message}</span>
+            <Button variant="ghost" size="xs" onClick={() => void loadMore()} disabled={loadingMore}>
+              {loadingMore ? "Retrying…" : "Retry"}
+            </Button>
+          </div>
+        )}
+        <div className="relative min-h-0 flex-1 overflow-auto" data-slot="issues-scroll">
+          <StaleData stale={offline}>
+            {filteredAway || (visible.length === 0 && (nFilters > 0 || committedSearch || quick !== "all")) ? (
+              <PageNoResults filters={filterWords.join(" · ") || undefined} onClear={clearEverything} />
+            ) : viewMode === "board" ? (
+              <IssuesBoardView
+                issues={visible}
+                onIssueClick={openIssue}
+                selectedIssueId={selectedIssue?.id}
+                onCreateClick={() => setShowCreateIssue(true)}
+                workspaceId={workspaceId}
+                onMoved={() => void fetchIssues()}
+              />
+            ) : (
+              <IssuesListView
+                issues={visible}
+                onIssueClick={openIssue}
+                selectedIssueId={selectedIssue?.id}
+                workspaceId={workspaceId}
+                groupBy={groupBy}
+                fields={fields}
+                projects={projects}
+                onCreate={() => setShowCreateIssue(true)}
+                onBulkApplied={() => void fetchIssues()}
+              />
+            )}
+          </StaleData>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] bg-background">
-      {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
-      {showToolbar && (
-        <SubBar
-          icon={mode === "issues" ? CircleDot : undefined}
-          title={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : workParams.get("mission_type") === "mission" ? "Missions" : "Issues"}
-          description={
-            mode === "issues"
-              ? `${(issuesTotal ?? issues.length).toLocaleString()} ${(issuesTotal ?? issues.length) === 1 ? "issue" : "issues"}`
-              : `${missions.length} ${missions.length === 1 ? "issue" : "issues"}`
-          }
-          ariaLabel={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : workParams.get("mission_type") === "mission" ? "Missions" : "Issues"}
-          tabs={visibleTabs.map(({ id, label, icon }) => ({ id, label, icon }))}
-          activeTab={activeTab}
-          onTabChange={(id) => setActiveTab(id)}
-          actions={
-            showCreateButtons ? (
-              <>
-                <SubBarSecondary icon={FolderKanban} onClick={() => setShowCreateProject(true)}>
-                  New Project
-                </SubBarSecondary>
-                <SubBarPrimary icon={CircleDot} onClick={() => setShowCreateIssue(true)}>
-                  New Issue
-                </SubBarPrimary>
-              </>
-            ) : undefined
-          }
+    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+      <SubBar icon={CircleDot} title="Issues" section={sectionTitle} ariaLabel="Issues" actions={actions} />
+      <div className="relative flex min-h-0 flex-1">
+        <SecondaryPanel id="issues" label="Issues views">
+          <IssuesPanel
+            issues={issues}
+            quickCounts={quickCounts}
+            projects={projects}
+            savedViews={savedViews}
+            crews={crews}
+            search={search}
+            onSearchChange={setSearch}
+            filters={filters}
+            onFilters={patchFilters}
+            onClearFilters={clearFacets}
+            selection={selection}
+            onSelect={select}
+            onNewProject={() => setShowCreateProject(true)}
+            onSaveView={() => setSaveViewOpen(true)}
+          />
+        </SecondaryPanel>
+        <section className="relative min-w-0 flex-1 overflow-hidden" aria-label={sectionTitle}>
+          {body}
+        </section>
+      </div>
+
+      {!isMobile && (
+        <IssuePeek
+          open={selectedIdentifier !== null && !selectedProject}
+          onOpenChange={(o) => {
+            if (!o) handleIssueClose()
+          }}
+          identifier={selectedIdentifier}
+          row={selectedIssue}
+          workspaceId={workspaceId}
+          onPrev={sequence.length > 1 && peekIndex >= 0 ? () => stepPeek(-1) : undefined}
+          onNext={sequence.length > 1 && peekIndex >= 0 ? () => stepPeek(1) : undefined}
+          onOpenFull={() => selectedIdentifier && router.push(fullHref({ identifier: selectedIdentifier, id: selectedIdentifier }))}
         />
       )}
 
-      {/* ---- Main 3-column layout ---- */}
-      <div
-        className="flex-1 min-h-0 grid transition-all duration-200 relative"
-        style={{
-          gridTemplateColumns: isMobile
-            ? "1fr"
-            : `auto 1fr ${showRightPanel ? "360px" : "0px"}`,
-          gridTemplateRows: "1fr auto",
-        }}
-      >
-        {/* ---- Left panel: the one SecondaryPanel (Harbor 2). On a phone it is a
-             sheet opened from the top bar; the explorer's own toolbar becomes the
-             panel toolbar, so collapse is the panel's. ---- */}
-        <SecondaryPanel id="issues" label="Issues views" className="row-span-1">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={selectedMissionId}
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -8 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              className="flex-1 min-h-0 flex flex-col"
-            >
-              <UnifiedExplorer
-                              issues={issues}
-                              projects={projects}
-                              search={issueSearch}
-                              onSearchChange={setIssueSearch}
-                              selectedIssue={selectedIssue}
-                              selectedProjectId={selectedProjectId}
-                              onProjectSelect={(id) => {
-                                const newId = id === selectedProjectId ? null : id
-                                setSelectedProjectId(newId)
-                                handleIssueClose()
-                              }}
-                              onIssueSelect={(issue) => {
-                                closePanelSheet()
-                                handleIssueSelect(issue)
-                              }}
-                              crews={panelCrews}
-                              missions={panelMissions}
-                              onTaskSelect={handleInboxTaskSelect}
-                              filterCrewId={filterCrewId}
-                              onCrewFilter={setFilterCrewId}
-                              filterAgentId={filterAgentId}
-                              onAgentFilter={setFilterAgentId}
-                              filterPriority={filterPriority}
-                              onPriorityFilter={setFilterPriority}
-                              // Status is the same state the chip row over the board
-                              // owns (`filterStatuses`), surfaced in the explorer too:
-                              // one filter, two affordances, rather than two filtering
-                              // surfaces that disagree. The chips carry the live counts
-                              // and are gone the moment an issue detail takes the pane;
-                              // the dropdown is always reachable.
-                              filterStatuses={filterStatuses}
-                              onStatusFilter={setFilterStatuses}
-                              total={issuesTotal}
-                            />
-            </motion.div>
-          </AnimatePresence>
-        </SecondaryPanel>
-
-        {/* ---- Center content area ---- */}
-        <div className="row-span-1 relative overflow-hidden min-h-0">
-          {activeTab === "issues" && issueDetailFullWidth && selectedIdentifier && (
-            <div className="flex h-full flex-col overflow-hidden">
-              {/* Breadcrumb back-bar — clicking 'Issues' or the X closes
-                  the detail and returns to the board/list. */}
-              <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2">
-                <button
-                  type="button"
-                  onClick={handleIssueClose}
-                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  Back to issues
-                </button>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-                {/* The identifier and nothing else. The title used to be here
-                    AND in the card below it AND in the global breadcrumb —
-                    three copies of one string down the left of the screen. */}
-                <span className="truncate font-mono text-xs text-muted-foreground">
-                  {selectedIdentifier}
-                </span>
-              </div>
-              {/* Full-width issue detail — slides + fades when switching
-                  between issues (key on the identifier) so the navigation
-                  feels continuous instead of a hard swap. */}
-              <div className="relative flex-1 overflow-hidden">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={`issue-${selectedIdentifier}`}
-                    initial={{ opacity: 0, x: 12 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -12 }}
-                    transition={{ duration: 0.18, ease: "easeOut" }}
-                    className="absolute inset-0 overflow-hidden"
-                  >
-                    {/* The same component /issues/<identifier> renders.
-                        pb-20: room under the last card for the Save bar. */}
-                    <div className="h-full overflow-y-auto pb-20">
-                      <IssueDetailSurface
-                        workspaceId={workspaceId}
-                        identifier={selectedIdentifier}
-                        onChanged={handleIssueUpdated}
-                      />
-                    </div>
-                  </motion.div>
-                </AnimatePresence>
-                <PageSaveBar />
-              </div>
-            </div>
-          )}
-          {activeTab === "issues" && projectDetailFullWidth && selectedProject && (
-            <div className="flex h-full flex-col overflow-hidden">
-              {/* Breadcrumb back-bar — matches the issue detail pattern. */}
-              <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2">
-                <button
-                  type="button"
-                  onClick={handleProjectClose}
-                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  Back to issues
-                </button>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-                {/* "Project", once. The name is the card's headline — saying
-                    it here as well was two of the three headers this
-                    redesign removed. */}
-                <span className="truncate font-mono text-xs text-muted-foreground">
-                  {selectedProject.slug}
-                </span>
-              </div>
-              <div className="relative flex-1 overflow-hidden">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={`project-${selectedProject.id}`}
-                    initial={{ opacity: 0, x: 12 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -12 }}
-                    transition={{ duration: 0.18, ease: "easeOut" }}
-                    className="absolute inset-0 overflow-hidden"
-                  >
-                    <div className="h-full overflow-y-auto">
-                      <ProjectDetailSurface
-                        workspaceId={workspaceId}
-                        project={selectedProject}
-                        issues={issues}
-                        onChanged={fetchProjects}
-                      />
-                    </div>
-                  </motion.div>
-                </AnimatePresence>
-              </div>
-            </div>
-          )}
-          {activeTab === "issues" && !issueDetailFullWidth && !projectDetailFullWidth && (
-            <div className="h-full overflow-auto">
-              <IssuesToolbarStrip
-                loaded={issues.length}
-                total={issuesTotal}
-                hasMore={issuesHasMore}
-                loadingMore={issuesLoadingMore}
-                onLoadMore={() => void loadMoreIssues()}
-                issueViewMode={issueViewMode}
-                onViewModeChange={setIssueViewMode}
-                savedViews={savedViews}
-                savedViewsOpen={savedViewsOpen}
-                onSavedViewsOpenChange={setSavedViewsOpen}
-                activeViewId={activeViewId}
-                onActiveViewChange={(id, viewType) => {
-                  setActiveViewId(id)
-                  if (viewType) setIssueViewMode(viewType)
-
-                  // Clearing the selected view ("All Issues"): reset filters
-                  // to the same defaults used when the page initialises.
-                  // We deliberately clear `filterProjectId` (the saved-view
-                  // filter) but leave `selectedProjectId` alone — explicit
-                  // project-detail navigation should survive a saved-view
-                  // change. The user can close the detail panel separately.
-                  if (id === null) {
-                    setFilterProjectId(null)
-                    setFilterCrewId(null)
-                    setFilterAgentId(null)
-                    setFilterStatuses([])
-                    setFilterPriority(null)
-                    setIssueSearch("")
-                    return
-                  }
-
-                  // Look up the saved view and apply any filter fields that
-                  // map onto the state consumed by `filteredIssues`.
-                  //
-                  // Issue #320: write the view's project_id to
-                  // `filterProjectId`, NOT `selectedProjectId`. Conflating
-                  // the two (the pre-#318 behaviour) caused saved-view
-                  // application to silently open the detail panel for the
-                  // view's project, and explicit project clicks to leak
-                  // back into the saved view's filter set.
-                  //
-                  // TODO: wire up status/label/priority filters and
-                  // sort_json once the issue list supports them.
-                  const view = savedViews.find((v) => v.id === id)
-                  if (!view) return
-                  const f = applySavedView(view)
-                  setFilterProjectId(f.projectId)
-                  setFilterCrewId(f.crewId)
-                  setFilterAgentId(f.agentId)
-                  setIssueSearch(f.search)
-                }}
-              />
-              {/* Status filter chips — multi-select row over the list.
-                  Counts derive from the pre-status-filter set so the
-                  user can see how many issues are in each status without
-                  losing the current crew/agent/project filter context. */}
-              <IssuesStatusChips
-                issues={statusChipIssues}
-                total={issuesTotal}
-                selected={filterStatuses}
-                onToggle={(s) =>
-                  setFilterStatuses((prev) =>
-                    prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
-                  )
-                }
-                onClear={() => setFilterStatuses([])}
-              />
-              {/* The shell's own fetches (missions, crews, agents, connections)
-                  failing is not an empty board either (S6): name it, keep the
-                  filters, offer a retry. The issue list's own failure is the
-                  panel or banner below. */}
-              {loadError && !issuesError && (
-                <div
-                  role="alert"
-                  className="mx-4 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-label text-destructive"
-                >
-                  <span className="min-w-0 flex-1">{loadError}</span>
-                  <Button size="sm" variant="outline" className="h-7" onClick={() => { void fetchIssues(); onRefresh() }}>
-                    Try again
-                  </Button>
-                </div>
-              )}
-              {/* #2286: a fetch error must render as an error, never as an
-                  empty board — an empty board and a broken fetch used to be
-                  indistinguishable. With nothing loaded at all, the error
-                  replaces the board outright; if a later page (loadMore)
-                  fails, the issues already on screen stay put and the error
-                  becomes a dismissible-by-retry banner above them instead —
-                  see useIssuesList's doc comment (hooks/use-issues-list.ts)
-                  for the #2285 agent-token-403 case this also covers. */}
-              {issuesError && issues.length === 0 ? (
-                <div className="flex h-[calc(100%-90px)] flex-col items-center justify-center gap-3 px-6 text-center">
-                  <AlertTriangle className="h-8 w-8 text-destructive" />
-                  <p className="text-sm font-medium">Couldn't load issues</p>
-                  <p className="max-w-md text-sm text-muted-foreground">{issuesError.message}</p>
-                  <Button variant="outline" size="sm" onClick={() => fetchIssues()} disabled={issuesLoading}>
-                    {issuesLoading ? "Retrying…" : "Retry"}
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  {/* Reachable only from a failed loadMore — a failed
-                      initial/refetch always clears `issues` to [] and takes
-                      the full-panel branch above instead. So the retry here
-                      must re-request the page that failed (loadMoreIssues),
-                      NOT fetchIssues/refetch — refetch would reset to page 1
-                      and silently drop whatever loadMore had already added. */}
-                  {issuesError && (
-                    <div className="mx-4 mb-2 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                      <span className="flex items-center gap-1.5">
-                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                        {issuesError.message}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => loadMoreIssues()}
-                        disabled={issuesLoadingMore}
-                      >
-                        {issuesLoadingMore ? "Retrying…" : "Retry"}
-                      </Button>
-                    </div>
-                  )}
-                  {/* Board or List view */}
-                  <div className="px-4 pb-2 h-[calc(100%-90px)]">
-                    <AnimatePresence mode="wait">
-                      <motion.div
-                        key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || filterProjectId || "all"}-${filterStatuses.join(",") || "all"}-${filterPriority || "all"}`}
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -6 }}
-                        transition={{ duration: 0.15, ease: "easeOut" }}
-                        className="h-full"
-                      >
-                        {issueViewMode === "board" ? (
-                          <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} />
-                        ) : (
-                          <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} workspaceId={workspaceId} />
-                        )}
-                      </motion.div>
-                    </AnimatePresence>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {activeTab === "runs" && (
-            <RunsView workspaceId={workspaceId} />
-          )}
-
-          {activeTab === "graph" && (
-            <>
-              <WorkflowGraph
-                missions={filteredMissions}
-                crews={crews}
-                agents={agents}
-                connections={connections}
-                // When the user has narrowed to one issue, the pipeline
-                // strip narrows with it: show only the bound routine
-                // (if any), not every routine in the workspace. The
-                // un-narrowed strip was the noise the user kept
-                // calling out.
-                pipelines={
-                  selectedIssue
-                    ? pipelines.filter((p) => p.id === selectedIssue.routine_id)
-                    : pipelines
-                }
-                onPipelineClick={(id) => {
-                  // The graph node carries the pipeline ID, but the
-                  // detail sheet fetches by slug (public API path
-                  // shape). Cross-reference via the pipelines list
-                  // we already loaded above.
-                  const p = pipelines.find((x) => x.id === id)
-                  if (p) {
-                    setSelectedPipelineSlug(p.slug)
-                    setPipelineSheetOpen(true)
-                  }
-                }}
-                onTaskClick={handleNodeClick}
-                highlightAgentSlug={selectedAgentSlug}
-              />
-              <PipelineDetailSheet
-                workspaceId={workspaceId}
-                slug={selectedPipelineSlug}
-                open={pipelineSheetOpen}
-                onClose={() => setPipelineSheetOpen(false)}
-              />
-
-            </>
-          )}
-
-          <AnimatePresence mode="wait">
-            {activeTab === "timeline" && (
-              <motion.div key="timeline" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
-                <MissionTimeline missions={filteredMissions} highlightSlugs={highlightSlugs} />
-              </motion.div>
-            )}
-
-            {activeTab === "activity" && (
-              <motion.div key="activity" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
-                <OrchestrationActivity missions={filteredMissions} highlightSlugs={highlightSlugs} />
-              </motion.div>
-            )}
-
-            {activeTab === "routines" && (
-              <motion.div key="routines" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="h-full overflow-hidden">
-                <RoutinesTab workspaceId={workspaceId} />
-              </motion.div>
-            )}
-
-          </AnimatePresence>
-        </div>
-
-        {/* ---- Right panel ---- */}
-        {(() => {
-          // RightPanelContent is rendered identically in mobile and desktop
-          // layouts; bundling its props once avoids two duplicate 12-prop
-          // call sites.
-          const rightPanelProps = {
-            selectedIssue,
-            issues,
-            selectedProject,
-            workspaceId,
-            detailContext,
-            onIssueUpdated: handleIssueUpdated,
-            onProjectUpdated: fetchProjects,
-            onDetailClose: handleDetailClose,
-            onTaskAction: handleTaskAction,
-          } as const
-
-          return isMobile ? (
-            <AnimatePresence>
-              {showRightPanel && (
-                <motion.div
-                  className="fixed inset-0 z-40 bg-card flex flex-col"
-                  initial={{ x: "100%" }}
-                  animate={{ x: 0 }}
-                  exit={{ x: "100%" }}
-                  transition={panel.sideLeft.transition}
-                >
-                  <div className="flex items-center gap-2 px-3 py-2 border-b border-foreground/[0.1] shrink-0">
-                    <button
-                      onClick={closeMobileDetail}
-                      aria-label="Back"
-                      className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
-                    >
-                      <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Detail</span>
-                  </div>
-                  <div className="flex-1 overflow-y-auto">
-                    <RightPanelContent {...rightPanelProps} />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          ) : (
-            <div className={cn(
-              "row-span-1 transition-all duration-200 overflow-hidden min-h-0",
-              showRightPanel ? "w-full" : "w-0",
-            )}>
-              <AnimatePresence mode="wait">
-                {showRightPanel && (
-                  <motion.div
-                    key={detailContext.type === "task" ? `task-${(detailContext as { task: MissionTask }).task.id}` : detailContext.type}
-                    initial={{ opacity: 0, x: 12 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 12 }}
-                    transition={{ duration: 0.15, ease: "easeOut" }}
-                    className="h-full"
-                  >
-                    <RightPanelContent {...rightPanelProps} />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )
-        })()}
-
-        {/* ---- Bottom drawer ---- */}
-        <motion.div
-          className={cn("border-t border-border bg-card flex flex-col overflow-hidden", isMobile ? "col-span-1" : "col-span-3")}
-          animate={{ height: drawerOpen ? 240 : 32 }}
-          transition={{ duration: 0.2, ease: "easeInOut" }}
-        >
-          {/* Drawer tab bar */}
-          <div
-            className="flex items-center gap-0 px-2 shrink-0 h-8 cursor-pointer select-none"
-            onClick={() => {
-              if (!drawerOpen) setDrawerOpen(true)
-            }}
-          >
-            {ORCH_DRAWER_TABS.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                className={cn(
-                  "flex h-8 items-center gap-1.5 px-3 text-[11px] font-medium transition-colors",
-                  // Harbor tab: the open one carries a brand underline, not a fill.
-                  drawerOpen && drawerTab === id
-                    ? "text-foreground shadow-[inset_0_-2px_0_var(--primary)]"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleDrawerTabClick(id)
-                }}
-              >
-                <Icon className="h-3 w-3" />
-                {!isMobile && label}
-              </button>
-            ))}
-
-            <div className="ml-auto">
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="text-muted-foreground/70 hover:text-foreground/70"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setDrawerOpen(!drawerOpen)
-                }}
-              >
-                {drawerOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
-              </Button>
-            </div>
-          </div>
-
-          {/* Drawer content */}
-          <AnimatePresence mode="wait">
-            {drawerOpen && (
-              <motion.div
-                key={drawerTab}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 8 }}
-                transition={{ duration: 0.15 }}
-                className="flex-1 min-h-0 border-t border-border"
-              >
-                {!missionCtx && drawerTab !== "docker" && (
-                  <div className="h-full grid place-items-center text-xs text-muted-foreground p-4 text-center">
-                    Select an issue to inspect its {drawerTab}.
-                  </div>
-                )}
-
-                {missionCtx && drawerTab === "activity" && (
-                  <ActivityTab workspaceId={workspaceId} context={missionCtx} />
-                )}
-
-                {missionCtx && drawerTab === "runs" && (
-                  <RunsTab workspaceId={workspaceId} context={missionCtx} />
-                )}
-
-                {missionCtx && drawerTab === "changes" && (
-                  <ChangesTab workspaceId={workspaceId} context={missionCtx} />
-                )}
-
-                {missionCtx && drawerTab === "comments" && (
-                  <CommentsTab workspaceId={workspaceId} context={missionCtx} />
-                )}
-
-                {drawerTab === "spec" && (
-                  <MissionYamlEditor
-                    mission={selectedIssue ?? selectedMission}
-                    readOnly
-                  />
-                )}
-
-                {drawerTab === "docker" && (
-                  <DockerOverview crews={crews} />
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-      </div>
-
-      {/* Create modals */}
       <CreateIssueModal
         open={showCreateIssue}
         onOpenChange={setShowCreateIssue}
         crews={crews}
-        labels={issueLabels}
+        labels={labels}
         projects={projects}
         routines={pipelines}
         workspaceId={workspaceId}
-        onCreated={() => { fetchIssues(); fetchProjects() }}
-        onLabelsChanged={fetchIssueLabels}
+        onCreated={() => {
+          void fetchIssues()
+          void fetchProjects()
+        }}
+        onLabelsChanged={fetchLabels}
       />
       <CreateProjectModal
         open={showCreateProject}
         onOpenChange={setShowCreateProject}
         crews={crews}
-        labels={issueLabels}
+        labels={labels}
         workspaceId={workspaceId}
         onCreated={fetchProjects}
       />
+      <SaveViewDialog
+        open={saveViewOpen}
+        onOpenChange={setSaveViewOpen}
+        workspaceId={workspaceId}
+        filters={savedViewPayload(filters, filterProjectId, search)}
+        viewType={viewMode}
+        onSaved={(view) => {
+          void fetchSavedViews()
+          setSavedViewId(view.id)
+        }}
+      />
     </div>
+  )
+}
+
+/** Save the current filters as a named view. */
+export function SaveViewDialog({
+  open,
+  onOpenChange,
+  workspaceId,
+  filters,
+  viewType,
+  onSaved,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  workspaceId: string
+  filters: Record<string, unknown>
+  viewType: "board" | "list"
+  onSaved: (view: SavedView) => void
+}) {
+  const [name, setName] = useState("")
+  const [shared, setShared] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (open) {
+      setName("")
+      setShared(false)
+      setError(null)
+    }
+  }, [open])
+
+  const save = async () => {
+    if (!name.trim() || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await apiFetch(`/api/v1/saved-views?workspace_id=${encodeURIComponent(workspaceId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), filters_json: JSON.stringify(filters), view_type: viewType, shared }),
+      })
+      if (!res.ok) {
+        const b = (await res.json().catch(() => null)) as { error?: string; detail?: string } | null
+        setError(b?.detail || b?.error || `The view was not saved (HTTP ${res.status}).`)
+        return
+      }
+      const view = (await res.json()) as SavedView
+      toast.success(shared ? "View saved · shared with the workspace" : "View saved")
+      onOpenChange(false)
+      onSaved(view)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reach the server")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <CreateSurface open={open} onOpenChange={(o) => !busy && onOpenChange(o)} size="sm" onSubmit={() => void save()} dirty={name.trim() !== ""}>
+      <CreateSurfaceHeader concept="issues" title="Save view" description="Keeps the current filters and layout under a name in the panel." onClose={() => !busy && onOpenChange(false)} />
+      <CreateSurfaceBody>
+        <CreateSurfaceField label="Name" htmlFor="save-view-name" error={error ?? undefined}>
+          <Input id="save-view-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Launch blockers" />
+        </CreateSurfaceField>
+        <CreateSurfaceToggleRow
+          label="Share with the workspace"
+          hint="Everyone in the workspace sees it under Saved views."
+          control={<Switch checked={shared} onCheckedChange={setShared} aria-label="Share with the workspace" />}
+        />
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter onCancel={() => onOpenChange(false)} primaryLabel={busy ? "Saving…" : "Save view"} onPrimary={() => void save()} primaryDisabled={!name.trim()} busy={busy} />
+    </CreateSurface>
   )
 }

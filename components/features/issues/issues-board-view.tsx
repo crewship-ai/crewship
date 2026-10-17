@@ -1,39 +1,50 @@
 "use client"
 
 import { useCallback, useMemo, useState, type CSSProperties } from "react"
-import { IssueCard } from "./issue-card"
-import { StatusIcon, statusLabel } from "./status-icon"
-import { InlineEmpty } from "@/components/ui/inline-empty"
-import { Button } from "@/components/ui/button"
+import { Plus } from "lucide-react"
+
 import { cn } from "@/lib/utils"
-import { CirclePlus } from "lucide-react"
-import type { Mission, MissionStatus } from "@/lib/types/mission"
+import { apiFetch } from "@/lib/api-fetch"
+import { toast } from "@/lib/toast"
+import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import type { Mission } from "@/lib/types/mission"
+import { IssueCard } from "./issue-card"
+import { StatusIcon } from "./status-icon"
+import { BOARD_STATUSES, STATUS_TEXT, normalStatus } from "./issues-view-model"
 
 interface IssuesBoardViewProps {
   issues: Mission[]
   onIssueClick: (issue: Mission) => void
-  onCreateClick?: () => void
+  /** A column's +. Gets the column's status. */
+  onCreateClick?: (status?: string) => void
   selectedIssueId?: string | null
+  /** Enables drag and drop between columns; the move is a PATCH of the issue's status. */
+  workspaceId?: string | null
+  /** After the server accepted a move. */
+  onMoved?: () => void
 }
 
-const MAIN_STATUSES: MissionStatus[] = ["BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "COMPLETED"]
-const SECONDARY_STATUSES: MissionStatus[] = ["FAILED", "CANCELLED", "DUPLICATE"]
-
 /**
- * How many cards a column shows before it folds (README §4: priority, cap,
- * fold). A backlog of 982 is not five screens of cards; it is six and a
- * count.
+ * How many cards a column shows before it folds. A backlog of 982 is not
+ * five screens of cards; it is six and a count.
  */
 export const BOARD_COLUMN_CAP = 6
 
-/**
- * The columns, and what each shows: the first `cap` cards and how many are
- * behind the fold. Pure, so the fold is testable without a render.
- */
-export function foldColumns(issues: Mission[], statuses: MissionStatus[], cap: number, open: ReadonlySet<string>) {
+/** Statuses that set something off (automations, a review): a drop asks first, as the detail does. */
+const ASKING = new Set(["DONE", "REVIEW"])
+
+/** Which column an issue sits in. Planning is Todo; the retired COMPLETED is Done. */
+function columnOf(i: Mission): string {
+  const s = normalStatus(i.status)
+  return s === "PLANNING" ? "TODO" : s
+}
+
+/** The columns, and what each shows: the first `cap` cards and how many are behind the fold. */
+export function foldColumns(issues: Mission[], statuses: readonly string[], cap: number, open: ReadonlySet<string>) {
   const byStatus = new Map<string, Mission[]>()
   for (const s of statuses) byStatus.set(s, [])
-  for (const i of issues) byStatus.get(i.status)?.push(i)
+  for (const i of issues) byStatus.get(columnOf(i))?.push(i)
   return statuses.map((status) => {
     const all = byStatus.get(status) ?? []
     const shown = open.has(status) ? all : all.slice(0, cap)
@@ -44,7 +55,7 @@ export function foldColumns(issues: Mission[], statuses: MissionStatus[], cap: n
 /**
  * The wide-screen grid template: a column with cards takes a share of the
  * width, an empty one narrows to a 9rem rail that still shows its head and
- * count. With nothing or everything populated the columns stay equal.
+ * drop target. With nothing or everything populated the columns stay equal.
  */
 export function boardColumnTemplate(counts: number[]): string {
   const populated = counts.filter((n) => n > 0).length
@@ -52,9 +63,10 @@ export function boardColumnTemplate(counts: number[]): string {
   return counts.map((n) => (n > 0 ? "minmax(0,1fr)" : "minmax(0,9rem)")).join(" ")
 }
 
-export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedIssueId }: IssuesBoardViewProps) {
-  const hasIssues = issues.length > 0
+export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedIssueId, workspaceId, onMoved }: IssuesBoardViewProps) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set())
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [pending, setPending] = useState<{ issue: Mission; status: string } | null>(null)
   const toggleOpen = useCallback((status: string) => {
     setOpen((prev) => {
       const next = new Set(prev)
@@ -64,120 +76,118 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
     })
   }, [])
 
-  const main = useMemo(() => foldColumns(issues, MAIN_STATUSES, BOARD_COLUMN_CAP, open), [issues, open])
-  const secondary = useMemo(
-    () => foldColumns(issues, SECONDARY_STATUSES, BOARD_COLUMN_CAP, open).filter((c) => c.all.length > 0),
-    [issues, open],
+  const cols = useMemo(() => foldColumns(issues, BOARD_STATUSES, BOARD_COLUMN_CAP, open), [issues, open])
+  const template = useMemo(() => boardColumnTemplate(cols.map((c) => c.all.length)), [cols])
+  const canDrag = Boolean(workspaceId)
+
+  const move = useCallback(
+    async (issue: Mission, status: string) => {
+      if (!workspaceId || !issue.identifier || !issue.crew_id) return
+      try {
+        const res = await apiFetch(
+          `/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+          { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) },
+        )
+        if (!res.ok) {
+          // The card stays where it was; the server says why (open sub-issues, a running mission…).
+          const b = (await res.json().catch(() => null)) as { error?: string; detail?: string } | null
+          toast.error(`${issue.identifier} stays in ${STATUS_TEXT[columnOf(issue)]}: ${b?.detail || b?.error || `HTTP ${res.status}`}`)
+          return
+        }
+        onMoved?.()
+      } catch (e) {
+        toast.error(`${issue.identifier} was not moved: ${e instanceof Error ? e.message : "the server could not be reached"}`)
+      }
+    },
+    [workspaceId, onMoved],
   )
 
-  const template = useMemo(() => boardColumnTemplate(main.map((c) => c.all.length)), [main])
-
-  const handleIssueClick = useCallback((issue: Mission) => onIssueClick(issue), [onIssueClick])
-
-  if (!hasIssues) {
-    return (
-      <div className="p-2">
-        <InlineEmpty
-          icon={CirclePlus}
-          text="No issues yet. Create one here, or `crewship issue create --crew <slug> --title …`."
-          action={
-            onCreateClick ? (
-              <Button type="button" variant="link" size="xs" onClick={onCreateClick} className="h-auto p-0 text-label text-primary-hover">
-                New issue →
-              </Button>
-            ) : undefined
-          }
-        />
-      </div>
-    )
+  const onDrop = (status: string, e: React.DragEvent) => {
+    e.preventDefault()
+    setDropTarget(null)
+    const id = e.dataTransfer.getData("text/x-crewship-issue")
+    const issue = issues.find((i) => i.id === id)
+    if (!issue || columnOf(issue) === status) return
+    if (ASKING.has(status)) setPending({ issue, status })
+    else void move(issue, status)
   }
-
-  const renderCard = (issue: Mission, width?: string) => {
-    const isDimmed = selectedIssueId != null && issue.id !== selectedIssueId
-    const isHighlighted = selectedIssueId != null && issue.id === selectedIssueId
-    return (
-      <div
-        key={issue.id}
-        className={cn(
-          "transition-all duration-200",
-          width,
-          isDimmed && "opacity-40",
-          isHighlighted && "ring-1 ring-primary/50 rounded-2xl",
-        )}
-      >
-        <IssueCard issue={issue} onClick={() => handleIssueClick(issue)} />
-      </div>
-    )
-  }
-
-  const renderFold = (col: { status: MissionStatus; all: Mission[]; hidden: number }) =>
-    col.all.length > BOARD_COLUMN_CAP ? (
-      <button
-        type="button"
-        onClick={() => toggleOpen(col.status)}
-        className="mt-1 w-full rounded-lg py-2 text-center font-mono text-[11px] text-primary-hover hover:bg-foreground/[0.04]"
-        data-testid={`board-fold-${col.status}`}
-      >
-        {col.hidden > 0 ? `${col.hidden} more · Show all` : "Show fewer"}
-      </button>
-    ) : null
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Five columns that FIT: `minmax(0,1fr)` at 1440 so Done is on screen
-          (five fixed 280px columns hid it behind a scroller), one column
-          per status stacked below md (README §6: no horizontal overflow at
-          390). Each column folds at six cards. */}
+    <>
+      <ConfirmDialog
+        open={pending !== null}
+        onOpenChange={(o) => {
+          if (!o) setPending(null)
+        }}
+        title={pending ? `Move ${pending.issue.identifier} to ${STATUS_TEXT[pending.status]}?` : ""}
+        description="Automations that react to a status change may run, and the issue's people are notified."
+        confirmLabel={pending ? `Move to ${STATUS_TEXT[pending.status]}` : "Move"}
+        onConfirm={() => {
+          const p = pending
+          setPending(null)
+          if (p) void move(p.issue, p.status)
+        }}
+      />
+      {/* Six columns that FIT: `minmax(0,1fr)` at 1440, one column per status
+          stacked below md. Each column folds at six cards. */}
       <div
         data-slot="issues-board-grid"
-        className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:[grid-template-columns:var(--board-cols)]"
+        className="grid grid-cols-1 gap-3 px-4 py-3.5 md:grid-cols-3 lg:[grid-template-columns:var(--board-cols)]"
         style={{ "--board-cols": template } as CSSProperties}
       >
-        {main.map((col) => (
+        {cols.map((col) => (
           <section
             key={col.status}
-            className="flex min-w-0 flex-col"
-            aria-label={statusLabel[col.status]}
+            className={cn("flex min-w-0 flex-col gap-2 rounded-card transition-colors", dropTarget === col.status && "bg-primary/[0.06]")}
+            aria-label={STATUS_TEXT[col.status]}
             data-empty={col.all.length === 0 ? "true" : "false"}
+            onDragOver={canDrag ? (e) => { e.preventDefault(); setDropTarget(col.status) } : undefined}
+            onDragLeave={canDrag ? () => setDropTarget((t) => (t === col.status ? null : t)) : undefined}
+            onDrop={canDrag ? (e) => onDrop(col.status, e) : undefined}
           >
-            <ColumnHead status={col.status} count={col.all.length} />
-            <div className="flex flex-col gap-2 px-0.5">
-              {col.shown.length === 0 ? (
-                <p className="px-1.5 font-mono text-[11px] text-muted-foreground-soft">Nothing here</p>
-              ) : (
-                col.shown.map((issue) => renderCard(issue))
+            <div className="flex items-center gap-2 px-0.5 pb-1 pt-0.5">
+              <StatusIcon status={col.status} className="size-3.5 shrink-0" />
+              <b className="truncate text-label font-semibold text-foreground">{STATUS_TEXT[col.status]}</b>
+              <span className="font-mono text-label tabular-nums text-muted-foreground-soft">{col.all.length}</span>
+              <span className="flex-1" />
+              {onCreateClick && (
+                <Button variant="ghost" size="icon-xs" aria-label={`New issue in ${STATUS_TEXT[col.status]}`} onClick={() => onCreateClick(col.status)}>
+                  <Plus className="size-3.5" />
+                </Button>
               )}
-              {renderFold(col)}
             </div>
+            {col.shown.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-border p-2.5 text-center text-label text-muted-foreground-soft">
+                Drop issues here
+              </p>
+            ) : (
+              col.shown.map((issue) => (
+                <IssueCard
+                  key={issue.id}
+                  issue={issue}
+                  active={selectedIssueId === issue.id}
+                  onClick={() => onIssueClick(issue)}
+                  draggable={canDrag}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/x-crewship-issue", issue.id)
+                    e.dataTransfer.effectAllowed = "move"
+                  }}
+                />
+              ))
+            )}
+            {col.all.length > BOARD_COLUMN_CAP && (
+              <button
+                type="button"
+                onClick={() => toggleOpen(col.status)}
+                className="w-full rounded-lg py-2 text-center font-mono text-label text-primary-hover hover:bg-[var(--row-hover-bg)]"
+                data-testid={`board-fold-${col.status}`}
+              >
+                {col.hidden > 0 ? `${col.hidden} more · Show all` : "Show fewer"}
+              </button>
+            )}
           </section>
         ))}
       </div>
-
-      {/* Failed / Cancelled / Duplicate: a second row, only when non-empty. */}
-      {secondary.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 border-t border-border pt-4 md:grid-cols-3">
-          {secondary.map((col) => (
-            <section key={col.status} className="min-w-0" aria-label={statusLabel[col.status]}>
-              <ColumnHead status={col.status} count={col.all.length} />
-              <div className="flex flex-col gap-2">
-                {col.shown.map((issue) => renderCard(issue))}
-                {renderFold(col)}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** Column head: status glyph, the name as an eyebrow, the count in mono. */
-function ColumnHead({ status, count }: { status: MissionStatus; count: number }) {
-  return (
-    <div className="flex items-center gap-2 px-1 pb-2.5">
-      <StatusIcon status={status} className="h-3.5 w-3.5 shrink-0" />
-      <span className="eyebrow truncate">{statusLabel[status]}</span>
-      <span className="ml-auto font-mono text-[11px] tabular-nums text-muted-foreground-soft">{count}</span>
-    </div>
+    </>
   )
 }
