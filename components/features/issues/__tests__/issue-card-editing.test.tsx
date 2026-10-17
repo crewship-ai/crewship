@@ -170,7 +170,7 @@ describe("IssueCardDetail — every editor survives the promotion", () => {
       /change project/i,
       /change routine/i,
       /add label/i,
-      /add link/i,
+      /add relation/i,
       /edit title/i,
     ]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument()
@@ -306,13 +306,46 @@ describe("IssueCardDetail — the editors write", () => {
         edit={e}
       />,
     )
-    const menu = openPicker(/add link/i)
-    fireEvent.change(within(menu).getByLabelText(/target issue/i), { target: { value: "ENG-9" } })
-    fireEvent.click(within(menu).getByRole("button", { name: /^add link$/i }))
+    const menu = openPicker(/add relation/i)
+    fireEvent.change(within(menu).getByLabelText(/^issue$/i), { target: { value: "ENG-9" } })
+    fireEvent.click(within(menu).getByRole("button", { name: /^add relation$/i }))
     expect(e.addRelation).toHaveBeenCalledWith("ENG-9", "relates_to")
 
     fireEvent.click(screen.getByRole("button", { name: /remove link to ENG-9/i }))
     expect(e.removeRelation).toHaveBeenCalledWith("rel1")
+  })
+
+  it("Add relation is a popover at the Relations field: a type choice, an issue picker, Cancel and Add relation", async () => {
+    const searchIssues = vi.fn(async () => [{ identifier: "ENG-12", title: "Replace the Linear token", status: "IN_PROGRESS" }])
+    const e = edit({ searchIssues })
+    renderCard({ edit: e })
+    const trigger = screen.getByRole("button", { name: "Add relation" })
+    // A labelled button in the section header, not a bare plus.
+    expect(trigger).toHaveTextContent("Add")
+    fireEvent.click(trigger)
+    const pop = screen.getByRole("dialog")
+    expect(within(pop).getByRole("heading", { name: "Add relation" })).toBeInTheDocument()
+    const kinds = within(pop).getByRole("radiogroup", { name: "Relation" })
+    expect(within(kinds).getAllByRole("radio").map((r) => r.textContent)).toEqual(["Blocks", "Blocked by", "Related", "Duplicate of"])
+    fireEvent.click(within(kinds).getByRole("radio", { name: "Blocked by" }))
+    expect(within(kinds).getByRole("radio", { name: "Blocked by" })).toHaveAttribute("aria-checked", "true")
+
+    fireEvent.change(within(pop).getByLabelText(/^issue$/i), { target: { value: "linear" } })
+    const option = await within(pop).findByRole("option", { name: /ENG-12/ })
+    expect(searchIssues).toHaveBeenCalledWith("linear")
+    fireEvent.click(option)
+    expect(within(pop).getByLabelText(/^issue$/i)).toHaveValue("ENG-12")
+    fireEvent.click(within(pop).getByRole("button", { name: "Add relation" }))
+    expect(e.addRelation).toHaveBeenCalledWith("ENG-12", "blocked_by")
+  })
+
+  it("Cancel closes Add relation without adding anything", () => {
+    const e = edit()
+    renderCard({ edit: e })
+    fireEvent.click(screen.getByRole("button", { name: "Add relation" }))
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }))
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(e.addRelation).not.toHaveBeenCalled()
   })
 
   it("saves an edited title on Enter and abandons it on Escape", () => {
@@ -362,6 +395,6 @@ it("gates each issue property with the viewer's concrete actions", () => {
   expect(screen.getByRole("button", { name: "Change assignee" })).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Edit title" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Change priority" })).toBeNull()
-  expect(screen.queryByRole("button", { name: "Add link" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Add relation" })).toBeNull()
   expect(screen.queryByLabelText("Description")).toBeNull()
 })
