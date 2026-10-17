@@ -390,3 +390,25 @@ describe.each(["day", "night"] as const)("%s chart series palette", (theme) => {
     for (const series of SERIES) expect(css).toContain(`--color-${series}: var(--${series});`)
   })
 })
+
+// App banners (components/layout/app-banners.tsx, Harbor 2 G09): the sentence
+// is --foreground on the tone's chip fill in both themes, and the icon is the
+// chip's own ink. The runtime banner used to paint --warn text on a --warn
+// fill, which reads as nothing at all.
+describe.each(["day", "night"] as const)("app banner tones — %s theme", (theme) => {
+  it.each(ACCENT_IDS)("banner text ≥ 4.5:1 and icon ≥ 3:1 on every tone (accent %s)", (accent) => {
+    const lum = (name: string) => luminanceFromRgb(tokenRgb(theme, name, accent))
+    for (const tone of ["warn", "ok", "info"]) {
+      expect(contrast(lum("foreground"), lum(`chip-${tone}-bg`)), `foreground on ${tone} banner`).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(lum(`chip-${tone}-fg`), lum(`chip-${tone}-bg`)), `${tone} icon on its banner`).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  it("the banner rules in globals.css use exactly those pairs", () => {
+    expect(css).toMatch(/\.page-banner\s*\{[^}]*color:\s*var\(--foreground\)/)
+    for (const tone of ["warn", "ok", "info"]) {
+      expect(css).toMatch(new RegExp(`\\.page-banner-${tone}\\s*\\{\\s*background:\\s*var\\(--chip-${tone}-bg\\);\\s*\\}`))
+      expect(css).toMatch(new RegExp(`\\.page-banner-${tone} > svg\\s*\\{\\s*color:\\s*var\\(--chip-${tone}-fg\\);\\s*\\}`))
+    }
+  })
+})
