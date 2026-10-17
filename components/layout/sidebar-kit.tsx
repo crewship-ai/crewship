@@ -427,13 +427,19 @@ export function SidebarCollapseButton({
 /** Removable active-filter chip, shown under the toolbar when filters apply. */
 export function SidebarActiveChip({
   onRemove,
+  label,
   className,
   children,
 }: {
   onRemove?: () => void
+  /** What the chip filters by, for the remove button's name; defaults to a text child. */
+  label?: string
   className?: string
   children: React.ReactNode
 }) {
+  // Every chip's × must say which filter it removes, or a row of chips is a
+  // row of identical "Remove filter" buttons to a screen reader.
+  const name = label ?? (typeof children === "string" || typeof children === "number" ? String(children) : undefined)
   return (
     <span
       className={cn(
@@ -444,7 +450,7 @@ export function SidebarActiveChip({
     >
       {children}
       {onRemove && (
-        <button type="button" onClick={onRemove} aria-label="Remove filter" className="opacity-70 hover:opacity-100">
+        <button type="button" onClick={onRemove} aria-label={name ? `Remove filter ${name}` : "Remove filter"} className="opacity-70 hover:opacity-100">
           <X className="h-2.5 w-2.5" />
         </button>
       )}
