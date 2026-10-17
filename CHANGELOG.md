@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Prepare host-only exact grant provenance for bounded routine publication: selected grant and publisher/issuer membership identities survive unrelated policy saves but cannot be replaced by trusted-mode bypass or reissued shares. No publication endpoint, permission or runtime is enabled.
+
 - Invalidate protected editor reads and pending saves when switching members or resources, so returning to a cached scope requires a fresh read.
 
 - Clear reviewed member preset consent on access loss and ignore late mutation responses from an older verified policy read.

@@ -24,6 +24,8 @@ public contract here. Superseded a spec? Move it to
 
 ## Runtime, authority and budgets
 
+- [Publication grant provenance](routine-publication-grant-bindings.md): host-only exact selected-grant and issuer membership bindings; no publication or execution activation.
+
 - [Restricted context](restricted-context.md): scoped chat, CLI execution, memory,
   files, profiles and content-free attempt records.
 - [Member resource policy](member-resource-policy.md): the administration API/CLI
