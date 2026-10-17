@@ -145,7 +145,17 @@ describe("Audit log page", () => {
   it("says who can read it instead of loading a 403", () => {
     role = "MANAGER"
     render(<AuditLogPage />)
-    expect(screen.getByText(/readable by workspace Admins/)).toBeInTheDocument()
+    // The shared no-access state: which role is needed, and the way back.
+    expect(document.querySelector("[data-state=no-access]")).not.toBeNull()
+    expect(screen.getByText(/You can’t open Audit log/)).toBeInTheDocument()
+    expect(screen.getByText(/Audit log needs Admin or above/)).toBeInTheDocument()
     expect(auditCalls()).toHaveLength(0)
+  })
+
+  it("opens with the section head and offers to verify the journal chain", () => {
+    render(<AuditLogPage />)
+    expect(screen.getByRole("heading", { level: 2, name: "Audit log" })).toBeInTheDocument()
+    expect(document.querySelector("[data-slot=journal-verify]")).not.toBeNull()
+    expect(screen.getByRole("button", { name: "Verify now" })).toBeInTheDocument()
   })
 })

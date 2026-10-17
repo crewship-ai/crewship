@@ -70,16 +70,15 @@ function renderTab() {
 const calls = (pred: (u: string, init?: RequestInit) => boolean) =>
   h.apiFetch.mock.calls.filter(([u, init]) => pred(String(u), init as RequestInit | undefined))
 
-describe("Runtime — summary", () => {
-  it("says in one line what runs the agents, the daemon, agents and the log level", async () => {
+describe("Runtime — strip", () => {
+  it("shows the runtime, the daemon, agents and the log level as four figures", async () => {
     renderTab()
-    const line = document.querySelector("[data-slot=runtime-summary]") as HTMLElement
-    expect(line).toHaveTextContent("Docker 29.3.0 in use")
-    await waitFor(() => expect(line).toHaveTextContent("Daemon healthy · up 1h 2m"))
-    expect(line).toHaveTextContent("3 running · 13 idle · 1 queued")
-    expect(line).toHaveTextContent("Log info")
-    // The figures row is gone: one line, not four tiles.
-    expect(document.querySelector("[data-slot=admin-kpi]")).toBeNull()
+    const strip = screen.getByRole("list", { name: "Runtime at a glance" })
+    const item = (slot: string) => strip.querySelector(`[data-strip=${slot}]`) as HTMLElement
+    expect(item("runtime")).toHaveTextContent("Docker 29.3.0")
+    await waitFor(() => expect(item("daemon")).toHaveTextContent("healthy · up 1h 2m"))
+    expect(item("agents")).toHaveTextContent("3 running · 13 idle · 1 queued")
+    expect(item("log")).toHaveTextContent("info")
   })
 })
 
@@ -146,7 +145,7 @@ describe("Runtime — logging", () => {
 })
 
 describe("Runtime — maintenance", () => {
-  it("checks for orphaned containers first and removes them only when asked", async () => {
+  it("checks for orphaned containers first and removes them only after the confirmation", async () => {
     renderTab()
     fireEvent.click(screen.getByRole("button", { name: "Check" }))
     const remove = await screen.findByRole("button", { name: "Remove 1" })
@@ -155,6 +154,11 @@ describe("Runtime — maintenance", () => {
     expect(first[0][0]).not.toContain("apply=true")
     expect(first[0][1]).toMatchObject({ method: "POST" })
     fireEvent.click(remove)
+    // Asks first, and says what stays.
+    const dialog = await screen.findByRole("alertdialog", { name: "Remove 1 orphaned container?" })
+    expect(dialog).toHaveTextContent("Volumes and images stay")
+    expect(calls((u) => u.includes("reap-orphan-containers?apply=true"))).toHaveLength(0)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove 1" }))
     await waitFor(() => expect(calls((u) => u.includes("reap-orphan-containers?apply=true"))).toHaveLength(1))
     expect(await screen.findByText(/Removed 1 of 1 orphaned container/)).toBeInTheDocument()
   })
@@ -169,18 +173,30 @@ describe("Runtime — maintenance", () => {
     expect(await screen.findByTestId("legacy-remove")).toBeInTheDocument()
   })
 
-  it("removes every crew runtime from the Danger zone, only after the word is typed", async () => {
+  it("remove every runtime needs typed phrase, dialog stays open on error", async () => {
+    let fail = true
+    h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) =>
+      String(u).startsWith("/api/v1/admin/prune-crew-runtimes") && fail
+        ? { ok: false, status: 500, json: async () => ({ error: "docker is busy" }), text: async () => JSON.stringify({ error: "docker is busy" }) }
+        : routes(u, init))
     renderTab()
     const zone = screen.getByRole("region", { name: "Danger zone" })
-    fireEvent.click(within(zone).getByRole("button", { name: /remove runtimes/i }))
-    const go = within(zone).getByRole("button", { name: "Remove every runtime" })
+    fireEvent.click(within(zone).getByRole("button", { name: "Remove every runtime…" }))
+    const dialog = await screen.findByRole("alertdialog", { name: "Remove every crew runtime?" })
+    const go = within(dialog).getByRole("button", { name: "Remove every runtime" })
     expect(go).toBeDisabled()
-    fireEvent.change(within(zone).getByLabelText(/type/i), { target: { value: "remov" } })
+    fireEvent.change(within(dialog).getByLabelText(/type/i), { target: { value: "remov" } })
     expect(go).toBeDisabled()
-    fireEvent.change(within(zone).getByLabelText(/type/i), { target: { value: "remove" } })
+    fireEvent.change(within(dialog).getByLabelText(/type/i), { target: { value: "remove" } })
     expect(go).toBeEnabled()
     fireEvent.click(go)
     await waitFor(() => expect(calls((u, i) => u.startsWith("/api/v1/admin/prune-crew-runtimes") && i?.method === "POST")).toHaveLength(1))
+    // Refused: the dialog stays where it was, with the reason in a toast.
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(screen.getByRole("alertdialog", { name: "Remove every crew runtime?" })).toBeInTheDocument()
+    fail = false
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove every runtime" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(await screen.findByText(/Removed the runtime of 2 crews/)).toBeInTheDocument()
   })
 

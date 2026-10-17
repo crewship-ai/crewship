@@ -37,6 +37,13 @@ export function useCrewLinks(workspaceId: string | null) {
   // Writes chain (link, then its file level); each step needs the rows the
   // previous one produced, not the ones this render closed over.
   const latest = useRef<Connection[]>([])
+  // The unlink the page is asking about (ConfirmDialog), or null.
+  const [pendingUnlink, setPendingUnlinkState] = useState<{ self: Crew; other: Crew } | null>(null)
+  const pendingUnlinkRef = useRef<{ self: Crew; other: Crew } | null>(null)
+  const setPendingUnlink = useCallback((v: { self: Crew; other: Crew } | null) => {
+    pendingUnlinkRef.current = v
+    setPendingUnlinkState(v)
+  }, [])
 
   const reload = useCallback(async () => {
     if (!workspaceId) return
@@ -119,15 +126,11 @@ export function useCrewLinks(workspaceId: string | null) {
 
     try {
       // Removing the link severs every dispatch, message and shared-file path
-      // between two crews — it keeps its question.
+      // between two crews — it keeps its question, asked by the page's
+      // ConfirmDialog (pendingUnlink → confirmUnlink), never window.confirm.
       if (next === "none") {
-        if (!existing) return true
-        if (!window.confirm(`Unlink ${self.name} and ${other.name}? Agents will no longer be able to hand work between them.`)) return false
-        const res = await apiFetch(`/api/v1/crew-connections/${existing.id}?workspace_id=${workspaceId}${version(existing)}`, { method: "DELETE" })
-        if (!res.ok) { toast.error(await readApiError(res, "Failed to unlink")); await reload(); return false }
-        toast.success(`${self.name} and ${other.name} unlinked`)
-        await reload()
-        return true
+        if (existing) setPendingUnlink({ self, other })
+        return !existing
       }
 
       const from = next === "in" ? other.id : self.id
@@ -167,7 +170,7 @@ export function useCrewLinks(workspaceId: string | null) {
     } finally {
       setPending(false)
     }
-  }, [workspaceId, canManage, reload])
+  }, [workspaceId, canManage, reload, setPendingUnlink])
 
   /** What `requester` may do with `target`'s shared files. */
   const setFileAccess = useCallback(async (requester: Crew, target: Crew, level: FileAccess): Promise<boolean> => {
@@ -196,5 +199,44 @@ export function useCrewLinks(workspaceId: string | null) {
     }
   }, [workspaceId, canManage, reload])
 
-  return { crews, connections, agentsByCrew, loading, loadError, pending, canManage, reload, setPair, setFileAccess }
+  /**
+   * Remove the link the page is asking about. Throws on a refusal, so the
+   * ConfirmDialog stays open where the person can retry or cancel; the
+   * reason is the error toast.
+   */
+  const confirmUnlink = useCallback(async (): Promise<void> => {
+    const ask = pendingUnlinkRef.current
+    if (!workspaceId || !canManage || !ask) return
+    const existing = connectionBetween(latest.current, ask.self.id, ask.other.id)
+    if (!existing) { setPendingUnlink(null); return }
+    const version = existing.access_version ? `&expected_version=${existing.access_version}` : ""
+    setPending(true)
+    try {
+      let res: Response
+      try {
+        res = await apiFetch(`/api/v1/crew-connections/${existing.id}?workspace_id=${workspaceId}${version}`, { method: "DELETE" })
+      } catch (e) {
+        toast.error("Failed to unlink")
+        throw e
+      }
+      if (!res.ok) {
+        const reason = await readApiError(res, "Failed to unlink")
+        toast.error(reason)
+        await reload()
+        throw new Error(reason)
+      }
+      toast.success(`${ask.self.name} and ${ask.other.name} unlinked`)
+      setPendingUnlink(null)
+      await reload()
+    } finally {
+      setPending(false)
+    }
+  }, [workspaceId, canManage, reload, setPendingUnlink])
+
+  const cancelUnlink = useCallback(() => setPendingUnlink(null), [setPendingUnlink])
+
+  return {
+    crews, connections, agentsByCrew, loading, loadError, pending, canManage, reload, setPair, setFileAccess,
+    pendingUnlink, confirmUnlink, cancelUnlink,
+  }
 }

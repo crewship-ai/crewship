@@ -5,7 +5,7 @@
 // who is offered it gets a 403.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { AccessSecretsSection } from "../access-secrets-section"
 import { isSettingsSectionVisible } from "../../settings-nav"
 
@@ -182,20 +182,21 @@ describe("who holds credentials:reveal", () => {
 })
 
 describe("classification reference", () => {
-  it("states that SEALED has no reveal path for anyone", async () => {
+  it("states that SEALED values have no reveal path for anyone", async () => {
     renderSection("OWNER")
-    expect(await screen.findByText(/never revealable — rotate instead/i)).toBeInTheDocument()
-  })
-
-  it("names the two different tiers for raising and lowering", async () => {
-    renderSection("OWNER")
-    expect(await screen.findByText(/manager and up can raise · owner or admin can lower/i)).toBeInTheDocument()
+    expect(await screen.findByText(/sealed values are never revealed or exported/i)).toBeInTheDocument()
   })
 
   // No control that saves nowhere: the card points to where a class is set.
   it("points to where a credential's class is set", async () => {
     renderSection("OWNER")
-    expect(await screen.findByText(/open a credential to change its class/i)).toBeInTheDocument()
+    expect(await screen.findByText(/change it on each secret in vault/i)).toBeInTheDocument()
+  })
+
+  it("says only an owner can move the reveal switch, beside its label", async () => {
+    renderSection("ADMIN")
+    const lock = await screen.findByTitle(/only a workspace owner can move this switch/i)
+    expect(lock).toHaveTextContent("Owner")
   })
 })
 
@@ -236,22 +237,26 @@ describe("acting on who may reveal", () => {
     expect(h.apiFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")).toBe(false)
   })
 
-  it("counts credentials per class and per crew, linking to each", async () => {
+  it("classification counts link to the Vault", async () => {
     route()
     routeWith((url) => {
       if (url.startsWith("/api/v1/credentials?")) return ok([
         { id: "c1", name: "GITHUB_TOKEN", scope: "WORKSPACE", sensitivity: "STANDARD" },
         { id: "c2", name: "PROD_DB", scope: "CREW", crew_ids: ["cr1"], sensitivity: "SEALED" },
         { id: "c3", name: "STRIPE_KEY", scope: "CREW", crew_ids: ["cr1"], sensitivity: "RESTRICTED" },
+        { id: "c4", name: "OLD_KEY", scope: "CREW", crew_ids: [], sensitivity: "STANDARD" },
       ])
-      if (url.startsWith("/api/v1/crews?")) return ok([{ id: "cr1", name: "Finance", slug: "finance" }])
       return undefined
     })
     renderSection("OWNER")
-    const prod = await screen.findAllByRole("link", { name: "PROD_DB" })
-    expect(prod[0]).toHaveAttribute("href", "/credentials?id=c2")
-    expect(screen.getByText("Finance")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /members of this crew/i })).toHaveAttribute("href", "/crews?crew=finance")
-    expect(screen.getAllByRole("link", { name: "GITHUB_TOKEN" }).length).toBeGreaterThan(0)
+    const classification = await screen.findByRole("region", { name: "Classification" })
+    await waitFor(() => expect(within(classification).getByRole("link", { name: /2\s*Standard/ })).toHaveAttribute("href", "/credentials"))
+    expect(within(classification).getByRole("link", { name: /1\s*Restricted/ })).toBeInTheDocument()
+    expect(within(classification).getByRole("link", { name: /1\s*Sealed/ })).toBeInTheDocument()
+
+    const where = screen.getByRole("region", { name: "Where credentials live" })
+    expect(within(where).getByRole("link", { name: /1\s*Workspace-wide/ })).toBeInTheDocument()
+    expect(within(where).getByRole("link", { name: /2\s*Per crew/ })).toBeInTheDocument()
+    expect(within(where).getByRole("link", { name: /1\s*Crew-scoped, no crew/ })).toBeInTheDocument()
   })
 })

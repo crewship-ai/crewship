@@ -17,6 +17,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock("next/link", () => ({ default: ({ href, children, ...p }: { href: string; children: React.ReactNode }) => <a href={href} {...p}>{children}</a> }))
 
 import { BackupsConsole } from "../backups-console"
+import { RetentionPage } from "../data-retention"
 import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
 import { SpaceCard, attentionItems } from "../backups-overview"
 import { overviewFixture } from "../__fixtures__/backups"
@@ -36,6 +37,17 @@ function show(page: BackupsSection | "retention", search = "?demo=1") {
     </PageSaveProvider>,
   )
   return { ...utils, onNavigate }
+}
+
+/** Data retention, as Admin › Data retention mounts it. */
+function showRetention(search = "?demo=1") {
+  window.history.replaceState(null, "", `/admin?tab=retention${search ? `&${search.slice(1)}` : ""}`)
+  return render(
+    <PageSaveProvider>
+      <RetentionPage />
+      <PageSaveBar />
+    </PageSaveProvider>,
+  )
 }
 
 beforeEach(() => {
@@ -418,6 +430,34 @@ describe("Storage", () => {
     expect(screen.queryByText(/Local copy only/)).toBeNull()
   })
 
+  it("storage remove keeps dialog on error", async () => {
+    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") return new Response(JSON.stringify({ error: "a plan still copies there" }), { status: 409 })
+      if (url.endsWith("/backups/settings")) {
+        return new Response(JSON.stringify({
+          limits: { concurrency: 1, cpu_cores: 2, disk_mbps: 0, upload_mbps: 0 }, heartbeat_url: null, recovery_kit_enabled: false, channels: [],
+          events: { failed: true, incomplete: true, stale: true, offsite: true, drill: true }, stale_alert_hours: 36, drill_reminder: "monthly",
+          instance_admins: 1, local_path: "/b",
+          destinations: [{ id: "local", kind: "local", label: "This server", path: "/b", used_bytes: 1, verified: true, available: true }],
+        }), { status: 200 })
+      }
+      if (url.endsWith("/backups/destinations")) {
+        return new Response(JSON.stringify({ data: [{
+          id: "bdst_1", name: "r2", kind: "s3", endpoint: "https://acct.r2.cloudflarestorage.com", region: "auto", bucket: "crewship-backups",
+          prefix: "prod", access_key_id: "AKID", path_style: false, allow_private_network: false, last_test_at: null, last_test_error: null,
+          created_at: "2026-09-30T08:00:00Z", copies: 0, copy_bytes: 0, last_verified_at: null, used_by: [],
+        }] }), { status: 200 })
+      }
+      return new Response("{}", { status: 404 })
+    })
+    show("storage", "")
+    fireEvent.click(await screen.findByRole("button", { name: "Remove" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }))
+    await waitFor(() => expect(h.toast.error).toHaveBeenCalled())
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+  })
+
   it.each([
     ["provider_checksum", /last checked .* · verified by the provider's checksum/],
     ["download_rehash", /last checked .* · downloaded and re-hashed/],
@@ -483,7 +523,15 @@ describe("Recovery", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Restore…" }))
     const dialog = await screen.findByTestId("confirm-dialog")
     expect(within(dialog).getByText("Everything in the workspace now is replaced by the backup.")).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole("button", { name: "Restore" }))
+    // replace requires typed slug: the most destructive restore asks for the
+    // workspace's slug back before it runs.
+    const go = within(dialog).getByRole("button", { name: "Restore" })
+    expect(go).toBeDisabled()
+    const slug = dialog.querySelector("label code")?.textContent ?? ""
+    expect(slug).not.toBe("")
+    fireEvent.change(within(dialog).getByLabelText(/Type/), { target: { value: slug } })
+    expect(go).toBeEnabled()
+    fireEvent.click(go)
     expect(await screen.findByText("Restoring")).toBeInTheDocument()
     expect(screen.getByText("1 · Database")).toBeInTheDocument()
   })
@@ -658,45 +706,62 @@ describe("Keys & alerts", () => {
 
 describe("Data retention", () => {
   it("offers 7 d / 30 d / 90 d / 1 y / Forever per row and keeps housekeeping read-only", async () => {
-    const { container } = show("retention")
+    const { container } = showRetention()
     await screen.findAllByText("Approvals")
     const table = container.querySelector("[data-slot=retention-table]") as HTMLElement
-    const row = within(table).getByText("Approvals").closest("tr") as HTMLElement
+    const row = within(table).getByText("Approvals").closest("[data-key]") as HTMLElement
     expect(within(row).getByRole("button", { name: "90 d" })).toHaveAttribute("aria-pressed", "true")
     for (const o of ["7 d", "30 d", "1 y", "Forever"]) expect(within(row).getByRole("button", { name: o })).toBeInTheDocument()
     // Routine runs cannot be kept forever: its sweep always needs a limit.
-    const runs = within(table).getByText("Routine runs").closest("tr") as HTMLElement
+    const runs = within(table).getByText("Routine runs").closest("[data-key]") as HTMLElement
     expect(within(runs).queryByRole("button", { name: "Forever" })).toBeNull()
-    const hk = container.querySelector("tr[data-key=orphans]") as HTMLElement
+    // Housekeeping is its own card, read-only.
+    const hk = container.querySelector("[data-slot=retention-housekeeping] [data-key=orphans]") as HTMLElement
     expect(within(hk).queryByRole("button")).toBeNull()
     expect(within(hk).getByText("hourly sweep")).toBeInTheDocument()
   })
 
-  it("warns about several workspaces and confirms a dry run before saving", async () => {
-    const { container } = show("retention")
-    expect(await screen.findByText("5 workspaces selected.")).toBeInTheDocument()
+  it("applies to all workspaces by default and confirms a dry run before saving", async () => {
+    const { container } = showRetention()
+    await screen.findAllByText("Chats")
+    const scope = container.querySelector("[data-slot=retention-scope]") as HTMLElement
+    expect(within(scope).getByRole("button", { name: "All workspaces · 5" })).toHaveAttribute("aria-pressed", "true")
+    expect(scope).toHaveTextContent("One policy for the whole Crewship")
     const table = container.querySelector("[data-slot=retention-table]") as HTMLElement
-    const row = within(table).getByText("Chats").closest("tr") as HTMLElement
+    const row = within(table).getByText("Chats").closest("[data-key]") as HTMLElement
     fireEvent.click(within(row).getByRole("button", { name: "90 d" }))
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     const dialog = await screen.findByTestId("confirm-dialog")
     expect(within(dialog).getByText(/Apply 1 limit to every existing workspace\?/)).toBeInTheDocument()
     expect(within(dialog).getByText(/Dess · Chats: Forever → 90 d · 120 rows go at the next sweep/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/600 rows go at the next sweep; older backups still hold them/)).toBeInTheDocument()
+    // Rows that go are a loss, in the loss tone; only what stays is green.
+    expect(within(dialog).getByText("600 rows go at the next sweep.").closest("li")).toHaveAttribute("data-tone", "lost")
+    expect(within(dialog).getByText(/Older backups still hold them/).closest("li")).toHaveAttribute("data-tone", "kept")
   })
 
-  it("with one workspace ticked there is no warning", async () => {
-    show("retention", "?demo=1&ws=dess")
+  it("M05 chosen workspaces come from ?ws= and stay in the URL", async () => {
+    const { container } = showRetention("?demo=1&ws=dess")
     await screen.findAllByText("Routine runs")
-    expect(screen.queryByText(/workspaces selected/)).toBeNull()
+    const scope = container.querySelector("[data-slot=retention-scope]") as HTMLElement
+    expect(within(scope).getByRole("button", { name: "Chosen workspaces" })).toHaveAttribute("aria-pressed", "true")
+    const chosen = within(scope).getByRole("group", { name: "Chosen workspaces" })
+    const dess = chosen.querySelector("[data-ws=dess]") as HTMLElement
+    expect(dess).toHaveAttribute("aria-pressed", "true")
+    // Ticking one more writes both into ?ws=.
+    const other = [...chosen.querySelectorAll<HTMLElement>("[data-ws]")].find((b) => b.getAttribute("aria-pressed") === "false")!
+    fireEvent.click(other)
+    const ws = new URLSearchParams(window.location.search).get("ws")!.split(",")
+    expect(ws).toEqual(expect.arrayContaining(["dess", other.getAttribute("data-ws")!]))
   })
 
   it("sets defaults for new workspaces as a separate save that touches no existing workspace", async () => {
-    const { container } = show("retention")
+    const { container } = showRetention()
     await screen.findAllByText("Chats")
     const card = container.querySelector("[data-slot=retention-defaults]") as HTMLElement
     expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull()
-    const row = within(card).getByText("Chats").closest("tr") as HTMLElement
+    // Four rows first; the rest behind "Show all".
+    fireEvent.click(within(card).getByRole("button", { name: /^Show all \d+$/ }))
+    const row = within(card).getByText("Chats").closest("[data-key]") as HTMLElement
     fireEvent.click(within(row).getByRole("button", { name: "30 d" }))
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     const dialog = await screen.findByTestId("confirm-dialog")
