@@ -9,7 +9,6 @@ import type {
   NotificationProvider,
   NotificationProviderCategory,
 } from "@/hooks/use-notification-channels"
-import type { ServiceOption } from "./add-integration-dialog"
 
 /** Section for the transports that are not third-party providers. */
 export const BUILTIN_SECTION = "builtin"
@@ -88,4 +87,14 @@ export function buildServiceOptions(
       used: usage.webhook ?? 0,
     },
   ]
+}
+
+/** A service the notification step can offer. */
+export interface ServiceOption {
+  key: string
+  label: string
+  blurb: string
+  section: string
+  available: boolean
+  used: number
 }

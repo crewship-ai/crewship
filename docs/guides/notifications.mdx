@@ -8,63 +8,47 @@ tag: Experimental
 
 ## Where this lives
 
-**Integrations** (`/integrations`) — two tabs, because there are exactly two kinds of thing here:
+**Integrations** (`/integrations`) has four spaces in its side panel, named by who starts and who receives:
 
-| Tab | Is | Sections in the left panel |
-| --- | --- | --- |
-| **Notifications** | Where Crewship reaches a *human* | Connections · My preferences · Deliveries |
-| **Tools (MCP)** | What an *agent* can act through | App catalog · Connected accounts · Agent access · Tools · Triggers · MCP endpoints |
+| Space | Is | Views in the panel |
+|---|---|---|
+| **Tools** | Apps an *agent* acts in (Composio) | Connected · Needs attention · Not used · Catalog |
+| **Triggers** | Something outside that *starts work* | All triggers · Failing · Turned off; Starts: Routines · Agents · Artifacts |
+| **Channels** | Where Crewship reaches a *person* | All channels · Failing · Paused · Mine · My notifications · Deliveries (admins) |
+| **Webhooks** | Signed JSON Crewship sends to *your systems* | All webhooks · Failing · Paused |
 
-Everything else is a **section inside a tab**, in the left panel — not another top-level tab. Both panels are the same component with different inputs: the same toolbar (search + **Filter**), the same popover, the same section rows, the same active-filter chips. A page with five top tabs and two differently-behaving rails is not simpler for having more entry points.
+Channels and Webhooks are the same notification channels underneath; a channel of type `webhook` is listed under Webhooks, everything else under Channels. The keys **1–4** switch spaces; on a phone the spaces are a segment above the list, and lists become rows instead of scrolling sideways.
 
-Under the sections, each panel **lists the things themselves** — your connections, your connected tool accounts — the way `/routines` lists routines. A rail that only holds section links makes you open a section to find out what is in it. Search and the Filter popover narrow that list, so what the panel shows is what the main column is showing.
+Each space has one primary action in the top bar — **Connect an app**, **New trigger**, **Add channel**, **Add webhook** — and a terminal button with the matching CLI commands. Opening a row gives the object its own page with a back link to its space and tabs (a channel: Overview · Events · Deliveries · Settings), and the URL names it, so it can be shared and survives a reload:
 
-Picking one opens its **detail**: for a connection, which categories it may carry, which agents may post to it, and its own recent deliveries; for a tool account, whose it is, whether its authorisation still works, and which agents can act through it. Those answers used to be spread across a row, an admin-only overview and the delivery log, so nobody could see one connection whole.
-
-The **Filter** popover is the one every faceted page in the app uses (`sidebar-kit`'s `SidebarFilterButton`, as on /issues and /routines). Facet counts are computed against the rows the *other* facets already allow, so a bucket never offers a filter that comes back empty — and a facet never narrows its own counts to zero.
-
-Managed tool accounts are **not** in the Notifications connection list. They were, and it was the most confusing thing on the page: a Discord webhook and a Gmail tool account sat in one table under one word, with different owners, different lifecycles and different meanings of "connected".
-
-It used to live under Settings. That door reads as "my personal preferences", which is wrong for a set of connections a whole org depends on, and it made the thing an admin most needs — one view of everything this instance is wired into — impossible to build. Settings no longer carries a Notifications row at all (a nav row promises a pane; a row that only bounces you elsewhere does not), but the old links still resolve: `/settings?tab=notifications` forwards to the connection list and `/settings?tab=notification-prefs` to the preference matrix. So there is exactly one place rather than two that drift apart. **Notifications** and **Deliveries** stay here rather than moving back: the preference matrix is a grid *over these connections*, and "why didn't it arrive" is a question about them — splitting either from the list it refers to is the same two-places-for-one-thing this page was built to undo.
-
-### Linking to a view
-
-Every tab and section is addressable, so a view can be shared, bookmarked or linked to from elsewhere in the app:
-
-```
-/integrations?tab=notifications&section=connections   # what is hooked up
-/integrations?tab=notifications&section=preferences   # your preference matrix
-/integrations?tab=notifications&section=deliveries    # why it did or did not arrive
-/integrations?tab=tools&section=accounts              # Composio connected accounts
+```text
+/integrations?space=channels                       # the channel list
+/integrations?space=channels&view=preferences      # your notification matrix
+/integrations?space=channels&view=deliveries       # why it did or did not arrive (admins)
+/integrations?space=channels&id=<channel>&pane=events
+/integrations?space=triggers&starts=routine&target=<routine>
+/integrations?space=tools&view=catalog
 ```
 
-The URL is rewritten as you move, and an unknown or cross-tab `section` falls back to that tab's default rather than leaving the panel pointing at a section it does not own.
+The old `?tab=notifications|incoming|tools&section=…` links still land on the matching space and view, and `/settings?tab=notifications` and `/settings?tab=notification-prefs` still forward here. A link without a space opens the space you used last (Tools for a new user).
 
-### Adding something: one door
+### Add channel
 
-There is no Catalog tab. Browsing what you *could* connect is a question you ask while adding, not a place you work in, and as a tab it sat at the same weight as the four you actually use.
+**Add channel** is three steps — **App** (chat apps, email, push, incident tools), **Where it posts** (the provider's own fields, *Whose*: Workspace or Only mine, and **Send test** for the unsaved draft) and **What it sends** (the lowest priority and the kinds of events) — with a preview of a message beside it. **Add webhook** is the same dialog from the second step. Only services the server offers and an admin has left on (Admin › Notifications) are listed. A webhook's signing secret is shown once after saving, with **Done** in the footer.
 
-**+ Add integration** asks the kind first — **Notifications** (somewhere Crewship reaches a person) or **Tools & MCP** (something an agent can act through) — then the service, then its form. The kinds are a list in the code, so a third one later is one entry rather than a new tab and a second grid to reconcile with the first.
+A member without workspace management rights can add personal channels; the *Workspace* choice is locked for them, and workspace channels open read-only.
 
-Picking Tools jumps straight to that tab's app catalog, or to the API-key dialog when no key is set yet: browsing a catalog you cannot connect from is a dead end.
+Each service carries its own brand mark in its own colour. The artwork is vendored — CC0 SVG Logos for the full-colour marks, CC0 Simple Icons and MIT Tabler for the monochrome ones, and CC BY-SA Arcticons for Gotify. A brand whose official colour is black (Matrix) is lifted for display.
 
-### Finding a service you have not connected yet
+### A channel's page
 
-Search on **Connections** only searches what exists. When it comes back empty but a service matches, the empty state says how many and opens **Add integration** — searching for `telegram` before you own a Telegram channel is a question the page can answer rather than a blank list.
+**Overview** shows what the channel does as four steps — *When* (its kinds of events), *Only if* (the lowest priority), *Message*, *Sends to* — a banner when deliveries fail or when an admin turned the service off for this server, the last messages (or, for a webhook, what your system receives), and the agents that may post here. **Events** switches kinds of events on and off and sets the lowest priority; each switch saves at once. **Deliveries** lists what was sent and why something did not arrive; Crewship tries each delivery up to 3 times, and there is no manual resend. **Settings** has the destination, **Send test**, **Paused**, the CLI and **Remove…**, which asks first and stays open if the server refuses.
 
-The service list inside that flow is grouped into **Chat**, **Push**, **Incident** and **E-mail & webhook**. The grouping comes from the server (`GET /api/v1/notification-providers` returns a `category` per provider), so a provider added on the backend appears in the right section without a frontend change. A provider an admin has disabled is shown greyed out and unpickable — visible, and visibly unavailable, rather than missing.
+### Tools
 
-Each service carries its own brand mark in its own colour: you recognise Slack by its aubergine long before you read the label, and a column of identical grey glyphs is not something you can scan. The artwork is vendored — CC0 SVG Logos for the full-colour marks, CC0 Simple Icons and MIT Tabler for the monochrome ones, and CC BY-SA Arcticons for Gotify, which exists nowhere under a more permissive licence. A brand whose official colour is black (Matrix) is lifted for display, because rendering it faithfully on a dark-first UI means rendering it invisible.
+Tools lists each connected Composio account with the agents that hold it, grouped by crew ("Code review: 2 agents Full"). Access is given **per agent** — that is what the server binds — on the app's **Access** tab: Off, Read-only or Full (a custom tool list is picked on the agent and kept here). The app page also has the app's tools (read-only), its Composio triggers (listed only: Crewship cannot receive app events yet, so new ones are not created here), and **Sign in again**, **Revoke** and **Disconnect**. Without a Composio key, Tools and the Catalog say so and offer **Add key** to managers; removing the key asks first. Crew MCP servers and MCP endpoints stay reachable under *More* in the panel.
 
-### Tools (MCP)
-
-Composio's six views are rows in the **left panel**, not a second tab strip inside the page's own. Its facets are Toolkit and User — Kind/Status/Scope/Service filter nothing here. The page owns the heading, the KPI row and the actions. The **API key** sits at the foot of the left panel, showing which key is in use rather than being a button in the action bar — it configures the instance once, and does not belong beside *Add integration*.
-
-Its four reads — inventory, the app catalog, settings and every agent's bindings — are cached for 30 s with stale-while-revalidate (`lib/stale-cache.ts`). Leaving and re-entering the tab used to pay the full round trip again and show skeletons for it, including an N+1 fan-out over every agent. A cached surface now paints immediately and refreshes behind; **Refresh** drops the cache first, so it means refresh.
-
-The search box in the left panel drives this tab too — Composio's own three inner search boxes are suppressed while it is, so one list never has two inputs where only one works.
-
-Before a key is saved the panel shows a single **Setup** row and says the sections appear once there is a key. Six empty sections would be six dead ends.
+Composio's reads are cached for 30 s with stale-while-revalidate (`lib/stale-cache.ts`), so returning to Tools paints at once and refreshes behind.
 
 ### Where else this shows up
 
@@ -78,9 +62,9 @@ The connections are configured here, but the two questions they raise are asked 
 crewship agent channels <agent-id>
 ```
 
-### Seeing everyone's connections (admins)
+### Seeing everyone's channels (admins)
 
-On **Connections**, ADMIN/OWNER get an **Everyone's connections** toggle in the tab row. It widens the list to include other members' personal channels — but it shows *that* a member has a channel and of what kind, never *where it points*: a Telegram chat id is a contact detail, not workspace configuration. Those rows are read-only; only their owner can test, disable or delete them.
+In **Channels**, ADMIN/OWNER get **Whose › Everyone's personal** in the panel. It widens the list to other members' personal channels — showing *that* a member has a channel and of what kind, never *where it points*: a Telegram chat id is a contact detail, not workspace configuration. Those rows are read-only; only their owner can test, pause or remove them.
 
 ### Delivery status
 
@@ -417,7 +401,7 @@ crewship notifychannel deliveries --status failed
 crewship notifychannel deliveries --category agents.approval --channel nch_abc123
 ```
 
-Reading the log is **admin-only** (`GET /api/v1/notification-deliveries`, ADMIN/OWNER) since it spans every recipient in the workspace, not just the caller. The **Deliveries** tab on `/integrations` renders the same rows, with each status translated into a reason — `dropped_pref` reads as *recipient has this category muted*, `dropped_rate` as *rate limit overflow; not delivered* — because the whole point is telling a quiet channel apart from a broken one.
+Reading the log is **admin-only** (`GET /api/v1/notification-deliveries`, ADMIN/OWNER) since it spans every recipient in the workspace, not just the caller. **Channels › Deliveries** on `/integrations` renders the same rows, with each status translated into a reason — `dropped_pref` reads as *recipient has this category muted*, `dropped_rate` as *rate limit overflow; not delivered* — because the whole point is telling a quiet channel apart from a broken one.
 
 <Note>
 The API serves this log with snake_case keys (`channel_id`, `created_at`, …). Until 2026-07 the fields carried no JSON tags at all, so the server emitted Go field names and any client asking for `channel_id` got nothing: `crewship notifychannel deliveries` printed blank CHANNEL, USER and CREATED columns. If you are scripting against an older instance, that is why.

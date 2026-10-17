@@ -10,13 +10,13 @@ tag: Experimental
 
 <Note>
 **The managed Composio UI is now the default.** The `/integrations` page has
-three tabs — **Outgoing notifications**, **Incoming webhooks** and
-**Tools (MCP)**. Tools (MCP) is the managed integration platform (Composio):
-a KPI header plus sections for App catalog, Connected accounts, Agent access,
-Tools, Triggers, and MCP endpoints — so you can connect apps via OAuth without
-standing up and maintaining your own MCP servers. Incoming webhooks is where
-routine, agent and Page endpoints that *receive* HTTP requests are created
-(see [Incoming webhooks](#incoming-webhooks) below).
+four spaces — **Tools**, **Triggers**, **Channels** and **Webhooks** (see the
+[notifications guide](/guides/notifications#where-this-lives)). Tools is the
+managed integration platform (Composio): connected apps, the catalog and, per
+app, which agents may use it — so you can connect apps via OAuth without
+standing up and maintaining your own MCP servers. Triggers is where routine,
+agent and artifact endpoints that *receive* HTTP requests live (see
+[Incoming webhooks](#incoming-webhooks) below).
 
 The legacy self-hosted MCP connector management UI is restorable by building the
 dashboard with `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS=true`. No legacy code or API
@@ -28,19 +28,22 @@ Crewship supports two integration mechanisms: **OAuth 2.0 connections** for serv
 
 ## Incoming webhooks
 
-**Integrations → Incoming webhooks** lists every endpoint an outside service
-can POST to, grouped by target: **Endpoints** (all of them), then
-**Routines**, **Agents** and **Pages**. A routine endpoint runs a saved
-routine with the request body as its `event` input; an agent endpoint starts
-a background run; a Page endpoint writes a webhook or script panel. Select a
-target to see its endpoints and, for routines and agents, its **Recent
-receipts** — the deliveries the server accepted, with the run or work item
-each produced. The selection is linkable
-(`/integrations?tab=incoming&section=routine&target=<id>`).
+**Integrations → Triggers** lists every endpoint an outside service can POST
+to in one table — *Trigger*, *Starts*, *Checks the sender*, *Last call*,
+*State* — with **Starts** (Routines, Agents, Artifacts) in the panel. A routine
+trigger runs a saved routine with the request body as its `event` input; an
+agent trigger starts a background run; an artifact trigger writes a webhook or
+script panel (artifacts keep theirs per artifact). Opening a trigger gives it
+a page — Overview (Sender → Checks → Becomes → Starts, the URL, recent calls),
+Mapping (routine inputs), Calls and Settings (point it at another routine,
+calls per minute, on/off, **Rotate…**, which stops the old secret at once, and
+**Delete…**). Call counts exist only for routine triggers. The filter is
+linkable (`/integrations?space=triggers&starts=routine&target=<id>`; the old
+`?tab=incoming&section=routine&target=<id>` still works).
 
-**Creating one.** Click **Add integration → Incoming webhook** (or **Add
-endpoint** inside a target), pick the target kind and target, and name the
-endpoint. Routine endpoints have an **Advanced settings → Webhook format**
+**Creating one.** Click **New trigger**, pick the target kind and target, and
+name the endpoint. The URL and secret are shown once; the dialog closes with
+**Done**, not with Esc. Routine endpoints have an **Advanced settings → Webhook format**
 selector:
 
 | Format | Use it for | Signature the sender must provide |
@@ -289,7 +292,7 @@ External Service (GitHub, Slack, etc.)
 
 ### Crew tools on /integrations
 
-**Integrations → Tools (MCP) → Crew tools** lists every crew-scoped MCP server
+**Integrations → Tools → Crew MCP servers** (under *More*) lists every crew-scoped MCP server
 in the workspace: the crew it belongs to (a link to that crew's Settings), how
 many agents may call it, and its auth state as a pill — *Connected*, *No
 credential*, *Expired*, or *No auth needed* for a `stdio` server that takes

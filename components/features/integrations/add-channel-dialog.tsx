@@ -1,12 +1,14 @@
 "use client"
 
 import * as React from "react"
-import { Copy, Plus, User } from "lucide-react"
+import { Check, Copy, Eye, Mail, Plus, Send, Webhook } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
+import { Switch } from "@/components/ui/switch"
 import {
   CREATE_SURFACE_INPUT,
   CreateSurface,
@@ -15,19 +17,13 @@ import {
   CreateSurfaceFooter,
   CreateSurfaceHeader,
   CreateSurfaceRefusal,
-  CreateSurfaceSection,
-  CreateSurfaceToggleRow,
+  CreateSurfaceSteps,
 } from "@/components/layout/create-surface"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { SettingsSegmented } from "@/components/features/settings/shared"
 import { cn } from "@/lib/utils"
 import { NOTIFICATION_CATEGORY_GROUPS } from "@/lib/notification-categories"
 import { ProviderForm } from "./provider-form"
+import { ProviderMark } from "./provider-marks"
 import type {
   ChannelCreateBody,
   ChannelDraftTestBody,
@@ -36,163 +32,146 @@ import type {
 } from "@/hooks/use-notification-channels"
 
 /**
- * Add a connection — the form, reached by picking a service in the catalog.
+ * Add channel (Harbor 2, round 58): App → Where it posts → What it sends, with
+ * a preview of a message on the right. Add webhook is the same dialog from
+ * step two with the webhook transport chosen.
  *
- * On the previous page this lived in an always-open card at the top, with a
- * <Select> of every provider inside it. That put the least-used control (a
- * blank creation form) above the most-used one (the list of what you already
- * have), and it meant the only way to see the available services was to open
- * a dropdown mid-form. Here the catalog answers "what can I connect", and this
- * dialog answers "connect this one" — with the service already chosen, so the
- * first question is never "which of these 11 do I want".
+ * Only services the server offers AND has turned on (Admin › Notifications)
+ * are listed. A webhook's signing secret is shown once after saving; that state
+ * keeps the footer, with Done, so it can only be left on purpose.
  *
- * The chrome is `CreateSurface` (components/layout/create-surface.tsx), at
- * size `md`. It used to be a bare `sm:max-w-lg` DialogContent with its own
- * `max-h-[85vh] overflow-y-auto` — which put the FOOTER INSIDE THE SCROLLPORT,
- * so on a short viewport "Connect" was below the 18-checkbox category matrix
- * and you had to scroll past everything to find it. That is the defect the
- * shell's fixed footer exists to prevent.
- *
- * This is the step the catalog hands off to, and until now only the catalog
- * had been migrated: picking Slack in a unified surface opened an old-style
- * one, which is worse than not having migrated either. Notes on the parts that
- * are not a straight swap:
- *
- *  · SEND TEST STAYS IN THE BODY. It belongs to the provider's fields (it
- *    tests exactly those, unsaved) and it is not this surface's primary —
- *    `Connect` is. Promoting it to the footer's `secondary` would put a
- *    non-committing action next to the committing one.
- *  · EVERY CHECKBOX IS NAMED BY ITS OWN `<label htmlFor>` — the eighteen
- *    category cells and the personal-connection row alike.
- *    `CreateSurfaceToggleRow` renders its label as plain text in a `<div>`, so
- *    a bare Checkbox in its `control` slot has no accessible name at all, and
- *    the words beside it are not a tap target either.
- *  · THE FAILURE PATH keeps its toast AND gains the refusal band. The toast is
- *    the notification the rest of the app uses; the band is the one that does
- *    not fade while you are still reading the form it refused.
- *  · THE ONE-TIME SECRET REVEAL replaces the body and hides the footer, as it
- *    did before: at that point there is nothing left to submit, and `Done` is
- *    the only way forward.
+ * Not drawn, because the server has none: a "Name in Crewship" (a channel is
+ * named by its destination) and replying to agents from a chat app.
  */
 
-export type ChannelKindChoice = "shoutrrr" | "email" | "webhook"
+export type AddChannelMode = "channel" | "webhook"
 
-export interface AddChannelTarget {
-  /** "shoutrrr" plus a provider, or one of the built-in transports. */
-  kind: ChannelKindChoice
-  provider?: string
-  label: string
-}
+type Kind = { kind: "shoutrrr"; provider: string; label: string } | { kind: "email"; label: string } | { kind: "webhook"; label: string }
+type Priority = "low" | "medium" | "high" | "urgent"
+
+const STEPS = [
+  { id: "app", label: "App" },
+  { id: "where", label: "Where it posts" },
+  { id: "what", label: "What it sends" },
+]
+const GROUPS: { key: string; label: string }[] = [
+  { key: "chat", label: "Chat apps" },
+  { key: "email", label: "Email" },
+  { key: "push", label: "Push" },
+  { key: "incident", label: "Incident" },
+]
+const PRIORITIES: { value: Priority; label: string }[] = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Normal" },
+  { value: "high", label: "High" },
+  { value: "urgent", label: "Urgent" },
+]
 
 interface AddChannelDialogProps {
-  target: AddChannelTarget | null
+  /** null = closed. */
+  mode: AddChannelMode | null
   onClose: () => void
   providers: NotificationProvider[]
-  /** false = this visitor may only create PERSONAL channels. */
+  /** false = this visitor may only create personal channels. */
   canCreateWorkspace: boolean
   create: (body: ChannelCreateBody) => Promise<CreatedChannel | null>
   sendDraftTest: (body: ChannelDraftTestBody) => Promise<unknown>
+  /** The new channel's id, so the host can open its page. */
+  onCreated?: (id: string, webhook: boolean) => void
 }
 
-export function AddChannelDialog({
-  target,
-  onClose,
-  providers,
-  canCreateWorkspace,
-  create,
-  sendDraftTest,
-}: AddChannelDialogProps) {
+export function AddChannelDialog({ mode, onClose, providers, canCreateWorkspace, create, sendDraftTest, onCreated }: AddChannelDialogProps) {
+  if (!mode) return null
+  return (
+    <AddChannelSurface
+      key={mode}
+      mode={mode}
+      onClose={onClose}
+      providers={providers}
+      canCreateWorkspace={canCreateWorkspace}
+      create={create}
+      sendDraftTest={sendDraftTest}
+      onCreated={onCreated}
+    />
+  )
+}
+
+function AddChannelSurface({ mode, onClose, providers, canCreateWorkspace, create, sendDraftTest, onCreated }: AddChannelDialogProps & { mode: AddChannelMode }) {
+  const offered = React.useMemo(() => providers.filter((p) => p.enabled), [providers])
+  const [step, setStep] = React.useState(mode === "webhook" ? 1 : 0)
+  const [kind, setKind] = React.useState<Kind | null>(mode === "webhook" ? { kind: "webhook", label: "Webhook" } : null)
   const [fields, setFields] = React.useState<Record<string, string>>({})
   const [destination, setDestination] = React.useState("")
   const [secret, setSecret] = React.useState("")
-  // Default to a personal channel when that is the only thing this visitor may
-  // create — offering a workspace channel they cannot save is a form that
-  // fails on submit for a reason it knew about the whole time.
   const [personal, setPersonal] = React.useState(!canCreateWorkspace)
   const [categories, setCategories] = React.useState<string[]>([])
-  const [minPriority, setMinPriority] = React.useState<"low" | "medium" | "high" | "urgent">("low")
+  const [minPriority, setMinPriority] = React.useState<Priority>("low")
   const [creating, setCreating] = React.useState(false)
+  const [testing, setTesting] = React.useState(false)
+  const [tested, setTested] = React.useState<{ ok: boolean; message: string } | null>(null)
   const [revealed, setRevealed] = React.useState<string | null>(null)
-  // What the server said when it said no. Shown in the shell's band, which
-  // sits outside the scrollport; the toast below it is kept because it is the
-  // notification the rest of the app uses, but the toast is what fades.
   const [refusal, setRefusal] = React.useState<string | null>(null)
-
   const ids = React.useId()
-  const destinationId = `${ids}-destination`
-  const secretId = `${ids}-secret`
-  const personalId = `${ids}-personal`
-  const priorityId = `${ids}-priority`
+  const webhook = kind?.kind === "webhook"
+  const spec = kind?.kind === "shoutrrr" ? offered.find((p) => p.provider === kind.provider) : undefined
 
-  // Reset every time a different service is picked: field keys differ per
-  // provider, and carrying a stale webhook_url into Telegram would submit a
-  // value the user never typed for it.
-  React.useEffect(() => {
-    if (!target) return
+  const pick = (next: Kind) => {
+    setKind(next)
     setFields({})
     setDestination("")
     setSecret("")
-    setCategories([])
-    setMinPriority("low")
-    setPersonal(!canCreateWorkspace)
-    setRevealed(null)
-    setRefusal(null)
-  }, [target, canCreateWorkspace])
+    setTested(null)
+  }
 
-  const spec = target?.provider ? providers.find((p) => p.provider === target.provider) : undefined
-
-  const ready = target
-    ? target.kind === "shoutrrr"
-      ? spec !== undefined &&
-        spec.fields.every((f) => !f.required || (fields[f.key] ?? "").trim() !== "")
+  const whereReady = kind
+    ? kind.kind === "shoutrrr"
+      ? spec !== undefined && spec.fields.every((f) => !f.required || (fields[f.key] ?? "").trim() !== "")
       : destination.trim() !== ""
     : false
+  const ready = step === 0 ? kind !== null : step === 1 ? whereReady : whereReady
 
-  // Only what the person typed or ticked counts. The reveal is NOT dirty: the
-  // channel is already saved by then, so prompting to "discard" it on Esc
-  // would name something that no longer exists.
+  // Only typed or ticked input counts; after the reveal the channel is saved.
   const dirty =
     revealed === null &&
-    (Object.values(fields).some((v) => v.trim() !== "") ||
-      destination.trim() !== "" ||
-      secret.trim() !== "" ||
-      categories.length > 0 ||
-      minPriority !== "low" ||
-      personal !== !canCreateWorkspace)
+    (Object.values(fields).some((v) => v.trim() !== "") || destination.trim() !== "" || secret.trim() !== "" || categories.length > 0 || minPriority !== "low")
+
+  const draft = (): ChannelDraftTestBody =>
+    kind?.kind === "shoutrrr"
+      ? { type: "shoutrrr", provider: kind.provider, fields }
+      : kind?.kind === "webhook"
+        ? { type: "webhook", url: destination.trim(), ...(secret.trim() ? { secret: secret.trim() } : {}) }
+        : { type: "email", to: destination.trim() }
+
+  const testDraft = async () => {
+    setTesting(true)
+    setTested(null)
+    try {
+      await sendDraftTest(draft())
+      setTested({ ok: true, message: "Test delivered" })
+    } catch (e) {
+      setTested({ ok: false, message: e instanceof Error ? e.message : "Test send failed" })
+    } finally {
+      setTesting(false)
+    }
+  }
 
   const submit = async () => {
-    if (!target || !ready || creating) return
+    if (!kind || !whereReady || creating) return
     setCreating(true)
     setRefusal(null)
     try {
-      const body: ChannelCreateBody =
-        target.kind === "shoutrrr"
-          ? { type: "shoutrrr", provider: target.provider, fields }
-          : target.kind === "webhook"
-            ? {
-                type: "webhook",
-                url: destination.trim(),
-                ...(secret.trim() ? { secret: secret.trim() } : {}),
-              }
-            : { type: "email", to: destination.trim() }
-
       const created = await create({
-        ...body,
+        ...draft(),
         personal,
-        ...(categories.length > 0 ? { categories } : {}),
+        ...(!personal && categories.length > 0 ? { categories } : {}),
         ...(minPriority !== "low" ? { min_priority: minPriority } : {}),
       })
-      toast.success(`${target.label} connected`)
-      // Only the webhook signing secret is worth revealing — the caller needs
-      // it to verify our HMAC. A composed chat URL is built from values the
-      // user already holds, so echoing it just puts a token on screen.
-      if (created?.secret && target.kind === "webhook") {
-        setRevealed(created.secret)
-      } else {
-        onClose()
-      }
+      toast.success(`${kind.label} connected`)
+      if (created?.id) onCreated?.(created.id, webhook)
+      if (created?.secret && webhook) setRevealed(created.secret)
+      else onClose()
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to add the connection"
+      const message = e instanceof Error ? e.message : "The channel was not added"
       setRefusal(message)
       toast.error(message)
     } finally {
@@ -200,219 +179,189 @@ export function AddChannelDialog({
     }
   }
 
-  if (!target) return null
+  const next = () => {
+    if (!ready) return
+    if (step < 2) setStep(step + 1)
+    else void submit()
+  }
 
+  const toggle = (key: string) => setCategories((prev) => (prev.includes(key) ? prev.filter((c) => c !== key) : [...prev, key]))
+
+  let body: React.ReactNode
+  if (revealed) {
+    body = <SecretReveal secret={revealed} />
+  } else if (step === 0) {
+    body = (
+      <div className="flex flex-col gap-4">
+        {GROUPS.map((g) => {
+          const options: Kind[] =
+            g.key === "email"
+              ? [{ kind: "email", label: "Email" }]
+              : offered.filter((p) => (p.category ?? "chat") === g.key).map((p) => ({ kind: "shoutrrr", provider: p.provider, label: p.label }))
+          if (options.length === 0) return null
+          return (
+            <section key={g.key} aria-labelledby={`${ids}-${g.key}`} className="flex flex-col gap-1.5">
+              <h3 id={`${ids}-${g.key}`} className="text-label font-medium text-muted-foreground">{g.label}</h3>
+              <div role="radiogroup" aria-labelledby={`${ids}-${g.key}`} className="grid gap-1.5 sm:grid-cols-2">
+                {options.map((o) => {
+                  const key = o.kind === "shoutrrr" ? o.provider : o.kind
+                  const on = kind !== null && (kind.kind === "shoutrrr" ? kind.provider : kind.kind) === key
+                  const blurb = o.kind === "shoutrrr" ? offered.find((p) => p.provider === o.provider)?.blurb : "Address or list"
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      onClick={() => pick(o)}
+                      className={cn("kit-tap flex min-w-0 items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors", on ? "border-primary bg-primary/10" : "border-border bg-card hover:border-line-strong")}
+                    >
+                      {o.kind === "email" ? <Mail className="size-5 shrink-0 text-muted-foreground" aria-hidden /> : <ProviderMark provider={key} label={o.label} className="size-7" />}
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <b className="truncate text-body font-semibold text-foreground">{o.label}</b>
+                        {blurb && <small className="truncate text-label text-muted-foreground">{blurb}</small>}
+                      </span>
+                      {on && <Check className="size-4 shrink-0 text-primary" aria-hidden />}
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          )
+        })}
+        <p className="flex items-center gap-1.5 text-label text-muted-foreground">
+          <Webhook className="size-3.5" aria-hidden />
+          Sending signed JSON to your own systems? That is a
+          <button type="button" className="font-medium text-primary-hover hover:underline" onClick={() => { pick({ kind: "webhook", label: "Webhook" }); setStep(1) }}>
+            Webhook
+          </button>
+          , not a channel.
+        </p>
+      </div>
+    )
+  } else if (step === 1 && kind) {
+    body = (
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-2.5">
+          {kind.kind === "email" ? <Mail className="size-5 text-muted-foreground" aria-hidden /> : kind.kind === "webhook" ? <Webhook className="size-5 text-muted-foreground" aria-hidden /> : <ProviderMark provider={kind.provider} label={kind.label} className="size-7" />}
+          <span className="flex min-w-0 flex-col">
+            <b className="text-body font-semibold text-foreground">{kind.label}</b>
+            {spec?.blurb && <small className="text-label text-muted-foreground">{spec.blurb}</small>}
+          </span>
+        </div>
+        {kind.kind === "shoutrrr" && spec ? (
+          <ProviderForm provider={spec} values={fields} onChange={(key, value) => setFields((p) => ({ ...p, [key]: value }))} onTest={async () => { await sendDraftTest(draft()) }} />
+        ) : (
+          <>
+            <CreateSurfaceField label={webhook ? "URL" : "Email address"} htmlFor={`${ids}-dest`} hint={webhook ? "https only; private addresses are refused. Every POST is signed with an HMAC." : "Where the notification is delivered."}>
+              <Input id={`${ids}-dest`} autoFocus value={destination} onChange={(e) => setDestination(e.target.value)} type={webhook ? "url" : "email"} placeholder={webhook ? "https://example.com/hooks/crewship" : "ops@example.com"} className={CREATE_SURFACE_INPUT} />
+            </CreateSurfaceField>
+            {webhook && (
+              <CreateSurfaceField label="Signing secret" htmlFor={`${ids}-secret`} hint="Leave blank and one is made for you, shown once after you save.">
+                <Input id={`${ids}-secret`} value={secret} onChange={(e) => setSecret(e.target.value)} type="password" autoComplete="off" placeholder="(made for you)" className={CREATE_SURFACE_INPUT} />
+              </CreateSurfaceField>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" size="sm" disabled={testing || !whereReady} onClick={() => void testDraft()}>
+                {testing ? <Spinner className="size-3" /> : <Send className="size-3.5" aria-hidden />}
+                Send test
+              </Button>
+              {tested && <span role="status" className={cn("text-label", tested.ok ? "text-success" : "text-destructive")}>{tested.message}</span>}
+            </div>
+          </>
+        )}
+        <CreateSurfaceField label="Whose" hint={canCreateWorkspace ? "Workspace channels can receive anyone's notifications. Only mine sends just your own." : "Workspace channels need a Manager or Admin; this one is yours alone."}>
+          <SettingsSegmented
+            label="Whose"
+            options={[
+              { value: "workspace", label: "Workspace" },
+              { value: "mine", label: "Only mine" },
+            ]}
+            value={personal ? "mine" : "workspace"}
+            disabled={!canCreateWorkspace}
+            onChange={(v) => {
+              setPersonal(v === "mine")
+              if (v === "mine") setCategories([])
+            }}
+          />
+        </CreateSurfaceField>
+      </div>
+    )
+  } else {
+    body = (
+      <div className="flex flex-col gap-4">
+        <CreateSurfaceField label="Send only when priority is at least">
+          <SettingsSegmented label="Lowest priority" options={PRIORITIES} value={minPriority} onChange={setMinPriority} />
+        </CreateSurfaceField>
+        {personal ? (
+          <p className="text-label text-muted-foreground">A personal channel carries what you choose in Channels › My notifications.</p>
+        ) : (
+          <CreateSurfaceField label="What goes there" hint="Leave everything off to allow every kind of event.">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {NOTIFICATION_CATEGORY_GROUPS.map((g) => {
+                const all = g.categories.every((c) => categories.includes(c.key))
+                return (
+                  <section key={g.key} className="rounded-lg border border-border bg-card">
+                    <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+                      <b className="flex-1 text-body font-semibold text-foreground">{g.label}</b>
+                      <Switch
+                        size="sm"
+                        checked={all}
+                        aria-label={`All ${g.label} events`}
+                        onCheckedChange={(on) =>
+                          setCategories((prev) => (on ? Array.from(new Set([...prev, ...g.categories.map((c) => c.key)])) : prev.filter((k) => !g.categories.some((c) => c.key === k))))
+                        }
+                      />
+                    </header>
+                    <ul className="flex flex-col gap-1.5 px-3 py-2">
+                      {g.categories.map((c) => {
+                        const id = `${ids}-cat-${c.key}`
+                        return (
+                          <li key={c.key} className="flex items-center gap-2" title={c.hint}>
+                            <Checkbox id={id} checked={categories.includes(c.key)} onCheckedChange={() => toggle(c.key)} />
+                            <label htmlFor={id} className="cursor-pointer text-label text-foreground">{c.label}</label>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </section>
+                )
+              })}
+            </div>
+          </CreateSurfaceField>
+        )}
+      </div>
+    )
+  }
+
+  const title = webhook ? "Add webhook" : "Add channel"
   return (
-    <CreateSurface
-      open
-      onOpenChange={(open) => !open && onClose()}
-      size="md"
-      dirty={dirty}
-      discardLabel="this connection"
-      // ⌘↵ comes from the shell. `submit` keeps its own readiness guard because
-      // the keyboard route reaches it while the footer's primary is disabled.
-      onSubmit={() => void submit()}
-    >
+    <CreateSurface open onOpenChange={(open) => !open && onClose()} size="lg" dirty={dirty} discardLabel={webhook ? "this webhook" : "this channel"} onSubmit={() => (revealed ? onClose() : next())}>
       <CreateSurfaceHeader
         concept="integrations"
         context="Integrations"
-        title={`Connect ${target.kind === "webhook" ? "outgoing webhook" : target.label}`}
-        description={
-          spec?.blurb ??
-          (target.kind === "webhook"
-            ? "Crewship POSTs a signed payload to an endpoint you control."
-            : "Crewship sends to this address using the instance's mail transport.")
-        }
+        title={title}
+        description={webhook ? "Crewship sends events to your system as signed JSON." : "Where Crewship reaches people: pick the app, where it posts and what it sends."}
         onClose={onClose}
       />
-
-      <CreateSurfaceBody className="flex flex-col gap-4">
-        {revealed ? (
-          <SecretReveal secret={revealed} onDone={onClose} />
-        ) : (
-          <>
-            {target.kind === "shoutrrr" && spec && (
-              <ProviderForm
-                provider={spec}
-                values={fields}
-                onChange={(key, value) => setFields((p) => ({ ...p, [key]: value }))}
-                onTest={async () => {
-                  await sendDraftTest({ type: "shoutrrr", provider: target.provider, fields })
-                }}
-              />
-            )}
-
-            {target.kind !== "shoutrrr" && (
-              <CreateSurfaceField
-                label={target.kind === "webhook" ? "Endpoint URL" : "Email address"}
-                htmlFor={destinationId}
-                hint={
-                  target.kind === "webhook"
-                    ? "Must be reachable from this instance. We sign every POST with an HMAC."
-                    : "Where the notification is delivered."
-                }
-              >
-                <Input
-                  id={destinationId}
-                  value={destination}
-                  onChange={(e) => setDestination(e.target.value)}
-                  type={target.kind === "email" ? "email" : "url"}
-                  placeholder={
-                    target.kind === "webhook"
-                      ? "https://example.com/hooks/crewship"
-                      : "ops@example.com"
-                  }
-                  className={CREATE_SURFACE_INPUT}
-                />
-              </CreateSurfaceField>
-            )}
-
-            {target.kind === "webhook" && (
-              <CreateSurfaceField
-                label="Signing secret"
-                htmlFor={secretId}
-                hint="Leave blank and we generate one, shown once after you save."
-              >
-                <Input
-                  id={secretId}
-                  value={secret}
-                  onChange={(e) => setSecret(e.target.value)}
-                  type="password"
-                  autoComplete="off"
-                  placeholder="(auto-generate)"
-                  className={CREATE_SURFACE_INPUT}
-                />
-              </CreateSurfaceField>
-            )}
-
-            {/* The label is a real <label htmlFor> inside the row's label
-                slot, which is the same workaround skills/import-dialog.tsx
-                landed on: CreateSurfaceToggleRow renders its label as plain
-                text in a <div>, so a bare Checkbox in `control` has no
-                accessible name and the words are not a tap target. */}
-            <CreateSurfaceToggleRow
-              icon={User}
-              accent="teal"
-              label={
-                <label htmlFor={personalId} className="cursor-pointer">
-                  Personal connection
-                </label>
-              }
-              hint={
-                canCreateWorkspace
-                  ? "Only you can route to it, and only you see it. Leave unchecked to share it with the workspace."
-                  : "Workspace-wide connections need the ADMIN or OWNER role, so this one is yours alone."
-              }
-              control={
-                <Checkbox
-                  id={personalId}
-                  checked={personal}
-                  disabled={!canCreateWorkspace}
-                  onCheckedChange={(c) => {
-                    const next = c === true
-                    setPersonal(next)
-                    // An admin allowlist is meaningless on a channel only its
-                    // owner can route to.
-                    if (next) setCategories([])
-                  }}
-                />
-              }
-            />
-
-            {!personal && (
-              <>
-                <CreateSurfaceField
-                  label="Categories"
-                  hint="Which categories anyone may route here. Leave empty to allow every category."
-                >
-                  {/* A nested scrollport, as before: eighteen cells unrolled
-                      into the body push the rest of the form off the surface,
-                      and the footer no longer moves with it. */}
-                  <div className="flex max-h-44 flex-col gap-3 overflow-y-auto overscroll-contain rounded-md border border-hairline p-2">
-                    {NOTIFICATION_CATEGORY_GROUPS.map((group) => (
-                      <CreateSurfaceSection key={group.key} title={group.label} className="gap-1.5">
-                        <div className="flex flex-wrap gap-x-3 gap-y-2">
-                          {group.categories.map((cat) => {
-                            const id = `${ids}-cat-${cat.key}`
-                            return (
-                              <div key={cat.key} className="flex items-center gap-1.5" title={cat.hint}>
-                                <Checkbox
-                                  id={id}
-                                  checked={categories.includes(cat.key)}
-                                  onCheckedChange={() =>
-                                    setCategories((prev) =>
-                                      prev.includes(cat.key)
-                                        ? prev.filter((c) => c !== cat.key)
-                                        : [...prev, cat.key],
-                                    )
-                                  }
-                                />
-                                <label
-                                  htmlFor={id}
-                                  className="cursor-pointer text-[11px] text-muted-foreground"
-                                >
-                                  {cat.label}
-                                </label>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </CreateSurfaceSection>
-                    ))}
-                  </div>
-                </CreateSurfaceField>
-
-                <CreateSurfaceField
-                  label="Priority floor"
-                  htmlFor={priorityId}
-                  hint="Skip anything below this priority."
-                >
-                  <Select
-                    value={minPriority}
-                    onValueChange={(v) => setMinPriority(v as typeof minPriority)}
-                  >
-                    {/* aria-label as well as the field's <label htmlFor>: the
-                        trigger is a <button>, and HTML-AAM does not name a
-                        button from an associated label the way it does an
-                        <input>. Without this the combobox is anonymous. */}
-                    <SelectTrigger
-                      id={priorityId}
-                      aria-label="Priority floor"
-                      className={cn(CREATE_SURFACE_INPUT, "w-[180px]")}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low" className="text-xs">
-                        Low — no floor
-                      </SelectItem>
-                      <SelectItem value="medium" className="text-xs">
-                        Medium
-                      </SelectItem>
-                      <SelectItem value="high" className="text-xs">
-                        High
-                      </SelectItem>
-                      <SelectItem value="urgent" className="text-xs">
-                        Urgent
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </CreateSurfaceField>
-              </>
-            )}
-          </>
-        )}
+      {!revealed && <CreateSurfaceSteps ariaLabel="Add channel steps" steps={STEPS} current={step} onJump={(i) => setStep(i)} />}
+      <CreateSurfaceBody>
+        <div className={cn("grid gap-5", !revealed && "md:grid-cols-[minmax(0,1fr)_minmax(0,260px)]")}>
+          <div className="min-w-0">{body}</div>
+          {!revealed && <Preview kind={kind} />}
+        </div>
       </CreateSurfaceBody>
-
       <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
-
-      {!revealed && (
+      {revealed ? (
+        <CreateSurfaceFooter onCancel={onClose} guardCancel={false} cancelLabel="Close" primaryLabel="Done" onPrimary={onClose} hint="Copy the secret before you close" />
+      ) : (
         <CreateSurfaceFooter
           onCancel={onClose}
-          guardCancel
-          primaryLabel="Connect"
-          primaryIcon={Plus}
-          onPrimary={() => void submit()}
+          secondary={step > (mode === "webhook" ? 1 : 0) ? <Button variant="ghost" size="sm" onClick={() => setStep(step - 1)}>Back</Button> : undefined}
+          hint={step < 2 ? "⌘+Enter to continue · Esc cancel" : "⌘+Enter to connect · Esc cancel"}
+          primaryLabel={step < 2 ? "Continue" : webhook ? "Add webhook" : `Connect ${kind?.label ?? ""}`.trim()}
+          primaryIcon={step < 2 ? undefined : Plus}
+          onPrimary={next}
           primaryDisabled={!ready}
           busy={creating}
         />
@@ -421,41 +370,73 @@ export function AddChannelDialog({
   )
 }
 
-function SecretReveal({ secret, onDone }: { secret: string; onDone: () => void }) {
+/** How a message looks at the destination — an example, labelled as one. */
+function Preview({ kind }: { kind: Kind | null }) {
+  const where = kind?.label ?? "the app"
+  const content = (
+    <div className="flex flex-col gap-2">
+      {[
+        { tone: "bg-destructive", title: "A routine could not finish", text: "Missing credential · the token was rejected. The crew stopped after step 2 of 5." },
+        { tone: "bg-warn", title: "An agent waits for you", text: "Approve publishing the report · due in 3 h" },
+      ].map((m) => (
+        <div key={m.title} className="flex gap-2.5 rounded-lg border border-border bg-card p-2.5">
+          <span className={cn("w-1 shrink-0 rounded-full", m.tone)} aria-hidden />
+          <div className="min-w-0">
+            <b className="block text-label font-semibold text-foreground">{m.title}</b>
+            <p className="text-label text-muted-foreground">{m.text}</p>
+            <span className="mt-1 inline-block text-label font-medium text-primary-hover">Open in Crewship</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
   return (
-    <div className="space-y-2 rounded-lg border border-warn/40 bg-warn/[0.05] px-3 py-3">
-      <div className="text-xs font-medium text-foreground/90">
-        Signing secret — shown only once
+    <aside aria-label="Message preview" className="min-w-0 rounded-card border border-border bg-surface-subtle p-3">
+      <details className="md:hidden">
+        <summary className="flex cursor-pointer items-center gap-1.5 text-label font-medium text-muted-foreground">
+          <Eye className="size-3.5" aria-hidden /> How it looks in {where}
+        </summary>
+        <div className="mt-2">{content}</div>
+      </details>
+      <div className="hidden md:block">
+        <small className="mb-2 flex items-center gap-1.5 text-label font-medium text-muted-foreground">
+          <Eye className="size-3.5" aria-hidden /> How it looks in {where}
+        </small>
+        {kind?.kind === "webhook" ? (
+          <pre className="overflow-x-auto rounded-lg border border-border bg-card p-2.5 font-mono text-label text-foreground">{`{
+  "event": "routines.failed",
+  "priority": "high",
+  "message": "…"
+}`}</pre>
+        ) : (
+          content
+        )}
       </div>
+    </aside>
+  )
+}
+
+function SecretReveal({ secret }: { secret: string }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-warn/40 bg-chip-warn-bg px-3 py-3" data-slot="secret-reveal">
+      <b className="text-body font-semibold text-chip-warn-fg">Copy the signing secret now — it is shown only once</b>
       <div className="flex items-center gap-2">
-        <code className="break-all rounded bg-black/30 px-1.5 py-0.5 font-mono text-[11px]">
-          {secret}
-        </code>
+        <code className="break-all rounded bg-card px-1.5 py-0.5 font-mono text-label text-foreground">{secret}</code>
         <Button
           variant="ghost"
-          size="icon"
-          className="h-6 w-6 shrink-0"
+          size="icon-sm"
           aria-label="Copy signing secret"
           onClick={() => {
-            navigator.clipboard?.writeText(secret)
+            void navigator.clipboard?.writeText(secret)
             toast.success("Secret copied")
           }}
         >
-          <Copy className="size-3" />
+          <Copy className="size-3.5" />
         </Button>
       </div>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
-        Verify the <code className="font-mono">X-Crewship-Signature</code> HMAC with this secret.
-        We cannot show it again.
+      <p className="text-label text-muted-foreground">
+        Verify the <code className="font-mono">X-Crewship-Signature</code> HMAC with this secret. It cannot be shown again.
       </p>
-      <Button
-        variant="soft"
-        size="sm"
-        className="h-8 text-xs coarse:h-12 coarse:text-sm"
-        onClick={onDone}
-      >
-        Done
-      </Button>
     </div>
   )
 }
