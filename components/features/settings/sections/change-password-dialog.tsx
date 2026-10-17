@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 import { CircleCheck, KeyRound } from "lucide-react"
 
 import { apiFetch } from "@/lib/api-fetch"
@@ -56,11 +56,17 @@ export function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; on
 
   const dirty = !done && (current !== "" || next !== "" || confirm !== "")
 
+  // The footer's primary sits inside the form, so one click is both its
+  // onClick and the form's submit event — in the same tick, before `saving`
+  // re-renders. The ref makes the second one a no-op.
+  const inFlight = useRef(false)
+
   async function submit(e?: FormEvent) {
     e?.preventDefault()
-    if (saving || done) return
+    if (inFlight.current || saving || done) return
     if (next.length < 8) { setError({ field: "next", message: "New password must be at least 8 characters" }); return }
     if (next !== confirm) { setError({ field: "confirm", message: "New passwords do not match" }); return }
+    inFlight.current = true
     setSaving(true)
     setError(null)
     try {
@@ -79,6 +85,7 @@ export function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; on
     } catch {
       setError({ field: null, message: "Couldn’t reach the server. Your password was not changed." })
     } finally {
+      inFlight.current = false
       setSaving(false)
     }
   }

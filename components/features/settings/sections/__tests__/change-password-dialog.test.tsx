@@ -44,6 +44,15 @@ describe("ChangePasswordDialog", () => {
     })
   })
 
+  it("one click on Change password sends one request", async () => {
+    apiFetch.mockResolvedValue(json(200, { success: true, sessions_revoked: 1, cli_tokens_revoked: 0 }))
+    renderDialog()
+    fill("oldpassword1", "brandnew123")
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }))
+    await screen.findByText(/Password changed/)
+    expect(passwordCalls()).toHaveLength(1)
+  })
+
   it("a field error stays in the dialog, under its field", async () => {
     apiFetch.mockResolvedValue(json(401, { error: "Current password is incorrect" }))
     const { onOpenChange } = renderDialog()
