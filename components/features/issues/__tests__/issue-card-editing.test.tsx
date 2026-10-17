@@ -339,6 +339,21 @@ describe("IssueCardDetail — the editors write", () => {
     expect(e.addRelation).toHaveBeenCalledWith("ENG-12", "blocked_by")
   })
 
+  it("Owner is a picker of workspace people when the host supplies them, and stages owner_user_id", () => {
+    const e = edit({ people: [{ id: "u1", name: "Pavel Srba" }, { id: "u2", name: "Jana Nováková" }] })
+    renderCard({ edit: e })
+    const menu = openPicker("Change owner")
+    fireEvent.change(within(menu).getByRole("searchbox"), { target: { value: "jana" } })
+    expect(within(menu).queryByRole("button", { name: /Pavel Srba/ })).toBeNull()
+    fireEvent.click(within(menu).getByRole("button", { name: /Jana Nováková/ }))
+    expect(e.patch).toHaveBeenCalledWith({ owner_user_id: "u2", owner_name: "Jana Nováková" })
+  })
+
+  it("Owner stays text when the host offers no people (an embed, or no assign right)", () => {
+    renderCard({ edit: edit() })
+    expect(screen.queryByRole("button", { name: "Change owner" })).toBeNull()
+  })
+
   it("Cancel closes Add relation without adding anything", () => {
     const e = edit()
     renderCard({ edit: e })
