@@ -146,6 +146,17 @@ export function SubBar<T extends string = string>({
     )
   }
 
+  // On a phone a row whose only content is the hidden title would be an
+  // empty 36 px strip; keep just the heading for assistive technology.
+  if (isMobile && repeatsArea && section == null && !leading && !actions && meta == null) {
+    return (
+      <div className={cn("shrink-0", className)}>
+        <h1 className="sr-only">{title}</h1>
+        {hasRow2 && <SubBarRow2 tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} tools={tools} ariaLabel={ariaLabel} />}
+      </div>
+    )
+  }
+
   return (
     <div className={cn("shrink-0", className)}>
       {/* ---- Row 1: identity + actions ---- */}
