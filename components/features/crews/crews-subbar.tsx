@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Menu, Plus, Users } from "lucide-react"
+import { Plus, Users } from "lucide-react"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { CreateCrewDialog } from "./create-crew-dialog"
 import { CreateAgentDialog } from "./create-agent"
@@ -16,8 +16,6 @@ export interface CrewsSubbarProps {
   agentName: string | null
   onCrewCreated: () => void
   onAgentCreated: (slug: string) => void
-  /** Optional: shown only on mobile to open the explorer drawer. */
-  onOpenExplorer?: () => void
   /** Crews list for the agent-creation form. */
   /** Carries the crew's face and agent count through to New agent's picker:
    *  narrowing to {id, name, slug} here is what left that picker with a
@@ -44,7 +42,6 @@ export function CrewsSubbar({
   agentName,
   onCrewCreated,
   onAgentCreated,
-  onOpenExplorer,
   crews,
   crewsTotal = null,
   agentsTotal = null,
@@ -102,18 +99,6 @@ export function CrewsSubbar({
         title="Crews & Agents"
         description={description}
         ariaLabel="Crews & Agents"
-        leading={
-          onOpenExplorer && (
-            <button
-              type="button"
-              className="md:hidden p-1 rounded hover:bg-foreground/5 text-foreground/80"
-              onClick={onOpenExplorer}
-              aria-label="Open explorer"
-            >
-              <Menu className="h-3.5 w-3.5" />
-            </button>
-          )
-        }
         actions={
           <>
             <SubBarSecondary icon={Plus} onClick={() => setCreateCrewOpen(true)}>

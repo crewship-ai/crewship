@@ -297,10 +297,10 @@ describe("left rail filtering", () => {
     routeApi({ credentials: [makeCredential()] })
     render(<CredentialsPage />)
 
-    fireEvent.click(await screen.findByRole("button", { name: /collapse sidebar/i }))
+    fireEvent.click(await screen.findByRole("button", { name: "Hide Vault" }))
     expect(screen.queryByPlaceholderText(/search a secret or tool/i)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: /expand sidebar/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Show Vault" }))
     expect(screen.getByPlaceholderText(/search a secret or tool/i)).toBeInTheDocument()
   })
 })

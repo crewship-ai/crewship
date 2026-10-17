@@ -15,7 +15,13 @@
  *   30 s and 2 min, then waits for a kick (page load, focus, back online).
  * - Any other 4xx is permanent: the entry stays, flagged, the status becomes
  *   "failed" ("Not synced · Retry") and the local look is NOT rolled back.
- * - On unload whatever is left goes out with `keepalive`.
+ *   A failed entry blocks every entry after it: `appearance.style` is never
+ *   written over an `appearance` the server refused.
+ * - The queue is read afresh after every request, so a value picked while a
+ *   request is on the wire goes out in the same run.
+ * - `pause()` (sync switched off) cancels a scheduled retry and stops the run
+ *   after the request already on the wire; nothing is sent until `resume()`.
+ * - On unload whatever is left goes out with `keepalive` (not while paused).
  */
 
 export const OUTBOX_STORAGE_KEY = "crewship-appearance-outbox"
@@ -40,7 +46,8 @@ interface StorageLike {
 export interface OutboxDeps {
   storage: StorageLike
   send: (key: string, body: string, keepalive: boolean) => Promise<{ ok: boolean; status: number }>
-  schedule: (fn: () => Promise<void>, ms: number) => void
+  /** Runs `fn` after `ms`; returns a function that cancels it. */
+  schedule: (fn: () => Promise<void>, ms: number) => (() => void) | void
   onStatus: (s: OutboxStatus) => void
 }
 
@@ -52,6 +59,8 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
   let entries: Entry[] = load()
   let attempt = 0
   let running: Promise<void> | null = null
+  let paused = false
+  let cancelRetry: (() => void) | null = null
   let last: OutboxStatus = entries.length ? (entries.some((e) => e.failed) ? "failed" : "pending") : "synced"
 
   function load(): Entry[] {
@@ -85,9 +94,22 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
     }
   }
 
+  function scheduleRetry(): void {
+    if (attempt >= RETRY_DELAYS_MS.length) return
+    cancelRetry?.()
+    cancelRetry = deps.schedule(() => {
+      cancelRetry = null
+      return flush()
+    }, RETRY_DELAYS_MS[attempt++]) || null
+  }
+
   async function run(): Promise<void> {
-    for (const e of [...entries]) {
-      if (e.failed) continue
+    // Always the head of the (sorted) queue, re-read after every request.
+    for (;;) {
+      if (paused) break
+      const e = entries[0]
+      // Nothing left, or the head was refused: it blocks everything after it.
+      if (!e || e.failed) break
       let res: { ok: boolean; status: number }
       try {
         res = await deps.send(e.key, e.body, false)
@@ -95,24 +117,30 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
         res = { ok: false, status: 0 }
       }
       if (res.ok) {
+        // A newer body for the same key may have replaced `e` meanwhile; it
+        // stays queued and goes out on the next turn of this loop.
         entries = entries.filter((x) => x !== e)
         save()
         continue
       }
       if (res.status === 0 || transient(res.status)) {
-        // Stop here so the order holds: a later key never overtakes an earlier one.
-        if (attempt < RETRY_DELAYS_MS.length) deps.schedule(() => flush(), RETRY_DELAYS_MS[attempt++])
+        if (!paused) scheduleRetry()
         report()
         return
       }
-      e.failed = true
-      save()
+      // The server refused this exact body. A newer one for the key still
+      // deserves a try; only the refused body is flagged.
+      if (entries.includes(e)) {
+        e.failed = true
+        save()
+      }
     }
     attempt = 0
     report()
   }
 
   function flush(): Promise<void> {
+    if (paused) return Promise.resolve()
     if (!running) running = run().finally(() => (running = null))
     return running
   }
@@ -139,7 +167,22 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
       return flush()
     },
     flushKeepalive(): void {
-      for (const e of entries) if (!e.failed) void deps.send(e.key, e.body, true).catch(() => undefined)
+      if (paused) return
+      // Same order rule as a run: stop at the first refused entry.
+      for (const e of entries) {
+        if (e.failed) break
+        void deps.send(e.key, e.body, true).catch(() => undefined)
+      }
+    },
+    /** Sync switched off: no request leaves until `resume()`. */
+    pause(): void {
+      paused = true
+      cancelRetry?.()
+      cancelRetry = null
+    },
+    /** Sync switched on again; call `kick()` to send what is owed. */
+    resume(): void {
+      paused = false
     },
     pending(key: string): boolean {
       return entries.some((e) => e.key === key)

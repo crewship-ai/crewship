@@ -17,9 +17,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { useRoutinePurposes } from "@/hooks/use-routine-purposes"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
-import { cn } from "@/lib/utils"
-import { useIsMobile } from "@/hooks/use-mobile"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { RoutinesExplorer } from "./routines-explorer"
 import { isRoutineTestFixture, type RoutineFilterState as RoutineFilters } from "@/lib/routine-filters"
 import { RoutineRunDetail } from "./routine-run-detail"
@@ -41,14 +39,9 @@ const ROUTINE_SLUG_OPTIONS = { aliases: ["routine"] as const }
 export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const { pipelines: loadedPipelines, loading, error, refresh } = usePipelines(workspaceId)
   const pipelines = useRoutinePurposes(workspaceId, loadedPipelines)
-  const isMobile = useIsMobile()
-  const [leftCollapsed, setLeftCollapsed] = useState(false)
-  // On a phone the sidebar is 280px of a 390px screen — it does not sit
-  // BESIDE the content, it replaces it. Collapse it when the viewport
-  // narrows, and let it open as an overlay instead of a column.
-  useEffect(() => {
-    if (isMobile) setLeftCollapsed(true)
-  }, [isMobile])
+  // The explorer lives in the shared SecondaryPanel: a column on desktop, a
+  // bottom sheet from the top bar on a phone. Picking a routine closes it.
+  const closePanelSheet = useCloseSecondaryPanelSheet()
   const [search, setSearch] = useState("")
   const [filters, setFilters] = useState<RoutineFilters>({
     status: "all",
@@ -170,9 +163,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     setSelectedRun(null, { replace: true })
     setDetailView(null, { replace: true })
     setSelectedSlug(selectedSlug === slug && !selectedRun ? null : slug)
-    // Picking a routine on a phone means "show me that", and the overlay
+    // Picking a routine on a phone means "show me that", and the sheet
     // covering it would be the opposite.
-    if (isMobile) setLeftCollapsed(true)
+    closePanelSheet()
   }
 
   // Selected routine — looked up from the loaded pipeline list so the
@@ -225,38 +218,17 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             has the same one): search, status buckets and the routine list.
             The main panel does not repeat its controls — it answers what
             each routine does and how it went (#2519). */}
-        {isMobile && !leftCollapsed && (
-          <button
-            type="button"
-            aria-label="Close routine list"
-            onClick={() => setLeftCollapsed(true)}
-            className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
+        <SecondaryPanel id="routines" label="Routine list">
+          <RoutinesExplorer
+            routines={visiblePipelines}
+            search={search}
+            onSearchChange={setSearch}
+            selectedSlug={selectedSlug}
+            onSelectRoutine={handleSelect}
+            filters={filters}
+            onChange={setFilters}
           />
-        )}
-        <aside
-          className={cn(
-            "shrink-0 border-r border-foreground/[0.06] bg-card transition-all overflow-hidden",
-            leftCollapsed ? "w-9" : "w-[280px]",
-            isMobile && !leftCollapsed && "fixed inset-y-0 left-0 z-50 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl",
-          )}
-        >
-          {leftCollapsed ? (
-            <div className="flex h-full flex-col items-center pt-1.5">
-              <SidebarCollapseButton collapsed onToggle={() => setLeftCollapsed(false)} />
-            </div>
-          ) : (
-            <RoutinesExplorer
-              routines={visiblePipelines}
-              search={search}
-              onSearchChange={setSearch}
-              selectedSlug={selectedSlug}
-              onSelectRoutine={handleSelect}
-              filters={filters}
-              onChange={setFilters}
-              onToggleCollapse={() => setLeftCollapsed(true)}
-            />
-          )}
-        </aside>
+        </SecondaryPanel>
 
         {/* Overview, definition or historical run beside the explorer. */}
         <div className="min-w-0 flex-1 overflow-hidden bg-background relative">

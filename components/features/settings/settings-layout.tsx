@@ -3,18 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
-import { Menu, Settings as SettingsIcon } from "lucide-react"
+import { Settings as SettingsIcon } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode, useRestrictedSurfaces } from "@/hooks/use-access-mode"
 import { OwnAccessCard } from "@/components/features/settings/own-access"
-import { useIsMobile } from "@/hooks/use-mobile"
 import { apiFetch } from "@/lib/api-fetch"
 import { SubBar } from "@/components/layout/sub-bar"
+import { useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { SettingsNav, isSettingsSectionVisible } from "./settings-nav"
 import { NotificationSoundSettings } from "./sections/notification-sounds-section"
 import { ProfileSection } from "./sections/profile-section"
@@ -177,8 +176,6 @@ function SettingsPage() {
   const { session, signOut } = useAuth()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
 
-  const isMobile = useIsMobile()
-
   // Read from useSearchParams, NOT window.location.search.
   //
   // The two disagree during a client-side navigation: the App Router renders
@@ -212,7 +209,7 @@ function SettingsPage() {
     setFocusedCard(initialFocusedCard(search))
   }, [search])
 
-  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const closePanelSheet = useCloseSecondaryPanelSheet()
 
   // A deep link can name a section this role cannot see (/settings?tab=audit
   // as a MEMBER). Rendering it gives a blank pane with no nav row to escape
@@ -370,7 +367,8 @@ function SettingsPage() {
 
   function handleTabChange(tab: string) {
     setActiveTab(tab)
-    setMobileNavOpen(false)
+    // On a phone the pick closes the panel sheet: the section is what comes next.
+    closePanelSheet()
   }
 
   return (
@@ -384,48 +382,17 @@ function SettingsPage() {
         title="Settings"
         section={section?.title}
         ariaLabel="Settings"
-        leading={
-          isMobile ? (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="h-7 w-7 -ml-1 coarse:relative coarse:after:absolute coarse:after:-inset-2.5 coarse:after:content-['']"
-              aria-label="Open settings navigation"
-              onClick={() => setMobileNavOpen(true)}
-            >
-              <Menu className="h-3.5 w-3.5" />
-            </Button>
-          ) : undefined
-        }
       />
 
       <div className="flex flex-1 min-h-0">
-      {/* Desktop sidebar nav */}
-      {!isMobile && (
-        <SettingsNav
-          activeTab={activeTab}
-          onTabChange={handleTabChange}
-          workspaceName={org?.name}
-          role={role}
-        />
-      )}
-
-      {/* Mobile nav sheet */}
-      {isMobile && (
-        <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
-          <SheetContent side="left" className="w-[260px] p-0">
-            <SheetHeader className="sr-only">
-              <SheetTitle>Settings Navigation</SheetTitle>
-            </SheetHeader>
-            <SettingsNav
-              activeTab={activeTab}
-              onTabChange={handleTabChange}
-              workspaceName={org?.name}
-              role={role}
-            />
-          </SheetContent>
-        </Sheet>
-      )}
+      {/* The sections panel (SecondaryPanel): a column on a desktop, a bottom
+          sheet from the top bar's panel button on a phone. */}
+      <SettingsNav
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        workspaceName={org?.name}
+        role={role}
+      />
 
       {/* Content */}
       <div className="relative flex-1 min-h-0 overflow-hidden">

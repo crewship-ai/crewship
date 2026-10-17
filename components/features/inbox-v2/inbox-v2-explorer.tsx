@@ -10,7 +10,7 @@ import {
 
 import { remainingLabel, since } from "@/components/features/inbox/inbox-derive"
 import {
-  SidebarActiveChip, SidebarActiveChips, SidebarCollapseButton, SidebarFacet,
+  SidebarActiveChip, SidebarActiveChips, SidebarFacet,
   SidebarFacetOption, SidebarFilterPopover, SidebarRow, SidebarSearch,
   SidebarSection, SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
@@ -90,7 +90,6 @@ interface Props {
   onFilters: (filters: InboxV2Filters) => void
   selectedKey: string | null
   onOpen: (entry: InboxV2Entry) => void
-  onToggleCollapse?: () => void
   /** Rendered as a section action, the way SidebarSection takes them. */
   onMarkAllRead?: () => void
   /** Crews and agents by id/slug, so rows can name them. */
@@ -99,7 +98,7 @@ interface Props {
 
 export function InboxV2Explorer({
   view, onView, viewCounts, entries, visible, filters, onFilters, attention, onClearAttention,
-  selectedKey, onOpen, onToggleCollapse, onMarkAllRead, lookup = EMPTY_INBOX_LOOKUP,
+  selectedKey, onOpen, onMarkAllRead, lookup = EMPTY_INBOX_LOOKUP,
 }: Props) {
   // Memoised on the feed, not on the render: the explorer re-renders on every
   // keystroke in search, and the counts do not depend on the filters at all.
@@ -129,7 +128,9 @@ export function InboxV2Explorer({
         ]
 
   return (
-    <div className="flex h-full flex-col">
+    // Inside SecondaryPanel: its kit toolbar is the panel toolbar, which
+    // carries the collapse button; the panel owns width and the phone sheet.
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       <SidebarToolbar>
         <div data-inbox-search className="min-w-0 flex-1">
           <SidebarSearch
@@ -198,7 +199,6 @@ export function InboxV2Explorer({
             </SidebarFacet>
           </details>
         </SidebarFilterPopover>
-        {onToggleCollapse && <span className="hidden lg:inline-flex"><SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} /></span>}
       </SidebarToolbar>
 
       <div className="shrink-0 border-b border-border/60 pb-1" aria-label="Inbox views">

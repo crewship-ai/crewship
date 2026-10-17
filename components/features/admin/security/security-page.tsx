@@ -360,6 +360,7 @@ export function SecurityPage() {
   return (
     <DrillPage
       parent={{ href: "/admin", label: "Admin", icon: Shield }}
+      panelId="drill-security"
       title="Security"
       icon={Shield}
       description="Who may read a secret, and how every workspace is watched"

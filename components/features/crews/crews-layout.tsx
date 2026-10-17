@@ -1,8 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { duration, panel } from "@/lib/motion"
 import { CrewsExplorer } from "@/components/features/crews/crews-explorer"
 import { CrewsSubbar } from "@/components/features/crews/crews-subbar"
 import type { AgentRecord } from "./agent-canvas-tabs/types"
@@ -11,7 +10,7 @@ import { AgentCanvas } from "@/components/features/crews/agent-canvas"
 import { CrewCanvas } from "@/components/features/crews/crew-canvas"
 import { CrewCatalog } from "@/components/features/crews/crew-catalog"
 import { BottomPanel, type BottomTab } from "@/components/features/crews/bottom-panel"
-import { useIsMobile } from "@/hooks/use-mobile"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { useCrewsSelection } from "@/hooks/use-crews-selection"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
@@ -128,7 +127,7 @@ export function CrewsLayout({
   onLoadMore,
   onRefresh,
 }: CrewsLayoutProps) {
-  const isMobile = useIsMobile()
+  const closePanelSheet = useCloseSecondaryPanelSheet()
   // One provisioning read for the whole explorer: a crew whose image needs a
   // rebuild or whose last build failed sorts into "Needs attention".
   const provisioning = useProvisioningStatus(workspaceId)
@@ -167,14 +166,8 @@ export function CrewsLayout({
     selectCrew,
   } = useCrewsSelection()
 
-  const [explorerCollapsed, setExplorerCollapsed] = useState(false)
-  const [explorerOverlayOpen, setExplorerOverlayOpen] = useState(false)
   const [bottomTab, setBottomTab] = useState<BottomTab>("messages")
   const [bottomOpen, setBottomOpen] = useState(false)
-
-  useEffect(() => {
-    if (isMobile) setExplorerCollapsed(true)
-  }, [isMobile])
 
   // Detail loaders resolve deep links on the server. A paginated sidebar
   // cannot decide whether a selected entity exists.
@@ -263,97 +256,41 @@ export function CrewsLayout({
           onRefresh()
           handleAgentSelectBySlug(slug)
         }}
-        onOpenExplorer={() => setExplorerOverlayOpen(true)}
         crews={crews}
         crewsTotal={crewsTotal}
         agentsTotal={agentsTotal ?? agents.length}
         addAgentRequest={addAgentRequest}
       />
 
-      {/* Main grid: explorer | canvas */}
-      <div
-        className="flex-1 min-h-0 grid relative"
-        style={{
-          gridTemplateColumns: isMobile
-            ? "1fr"
-            : `${explorerCollapsed ? "48px" : "280px"} 1fr`,
-        }}
-      >
-        {/* Explorer */}
-        {isMobile ? (
-          <AnimatePresence>
-            {explorerOverlayOpen && (
-              <>
-                <motion.div
-                  className="fixed inset-0 bg-black/50 z-30"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                    transition={{ duration: duration.short }}
-                  onClick={() => setExplorerOverlayOpen(false)}
-                />
-                <motion.div
-                  className="fixed left-0 top-0 bottom-0 w-[280px] z-40"
-                  initial={{ x: -280 }}
-                  animate={{ x: 0 }}
-                  exit={{ x: -280 }}
-                  transition={panel.sideLeft.transition}
-                >
-                  <CrewsExplorer
-              workspaceId={workspaceId}
-              onAgentSlugSelect={(slug) => selectAgent(slug)}
-              onCrewSlugSelect={(slug) => selectCrew(slug)}
-                    crews={crews}
-                    agents={agents}
-                    selectedCrewId={selectedCrew?.id ?? null}
-                    selectedAgentId={selectedAgent?.id ?? null}
-                    collapsed={false}
-                    onToggleCollapse={() => setExplorerOverlayOpen(false)}
-                    onCrewSelect={(id) => { handleCrewSelect(id); setExplorerOverlayOpen(false) }}
-                    onAgentSelect={(id) => { handleAgentSelect(id); setExplorerOverlayOpen(false) }}
-                    crewsTotal={crewsTotal}
-                    agentsTotal={agentsTotal}
-                    hasMore={hasMore}
-                    loadingMore={loadingMore}
-                    onLoadMore={onLoadMore}
-                    provisioningByCrew={provisioningByCrew}
-                    gapsByCrew={gapsByCrew}
-                    runningMissionsByCrew={runningMissionsByCrew}
-                    onAddAgent={(crewSlug) => { setExplorerOverlayOpen(false); setAddAgentRequest({ crewSlug, at: Date.now() }) }}
-                  />
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-        ) : (
-          <div className="min-h-0 overflow-hidden">
-            <CrewsExplorer
-              workspaceId={workspaceId}
-              onAgentSlugSelect={(slug) => selectAgent(slug)}
-              onCrewSlugSelect={(slug) => selectCrew(slug)}
-              crews={crews}
-              agents={agents}
-              selectedCrewId={selectedCrew?.id ?? null}
-              selectedAgentId={selectedAgent?.id ?? null}
-              collapsed={explorerCollapsed}
-              onToggleCollapse={() => setExplorerCollapsed(!explorerCollapsed)}
-              onCrewSelect={handleCrewSelect}
-              onAgentSelect={handleAgentSelect}
-              crewsTotal={crewsTotal}
-              agentsTotal={agentsTotal}
-              hasMore={hasMore}
-              loadingMore={loadingMore}
-              onLoadMore={onLoadMore}
-              provisioningByCrew={provisioningByCrew}
-              gapsByCrew={gapsByCrew}
-              runningMissionsByCrew={runningMissionsByCrew}
-              onAddAgent={(crewSlug) => setAddAgentRequest({ crewSlug, at: Date.now() })}
-            />
-          </div>
-        )}
+      {/* Main row: the one SecondaryPanel (Harbor 2) | canvas. The explorer's
+          own toolbar becomes the panel toolbar, so collapse is the panel's; on
+          a phone the explorer is the sheet opened from the top bar. */}
+      <div className="flex-1 min-h-0 flex relative">
+        <SecondaryPanel id="crews" label="Crews and agents">
+          <CrewsExplorer
+            workspaceId={workspaceId}
+            onAgentSlugSelect={(slug) => { closePanelSheet(); selectAgent(slug) }}
+            onCrewSlugSelect={(slug) => { closePanelSheet(); selectCrew(slug) }}
+            crews={crews}
+            agents={agents}
+            selectedCrewId={selectedCrew?.id ?? null}
+            selectedAgentId={selectedAgent?.id ?? null}
+            onCrewSelect={(id) => { closePanelSheet(); handleCrewSelect(id) }}
+            onAgentSelect={(id) => { closePanelSheet(); handleAgentSelect(id) }}
+            crewsTotal={crewsTotal}
+            agentsTotal={agentsTotal}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={onLoadMore}
+            provisioningByCrew={provisioningByCrew}
+            gapsByCrew={gapsByCrew}
+            runningMissionsByCrew={runningMissionsByCrew}
+            onAddAgent={(crewSlug) => { closePanelSheet(); setAddAgentRequest({ crewSlug, at: Date.now() }) }}
+          />
+        </SecondaryPanel>
 
         {/* Canvas — animated cross-fade on selection change */}
-        <div className="overflow-y-auto min-h-0 min-w-0">
+        <div className="flex-1 overflow-y-auto min-h-0 min-w-0">
           <AnimatePresence mode="wait">
             <motion.div
               key={canvasKey(selectedAgentSlug, selectedCrewSlug)}

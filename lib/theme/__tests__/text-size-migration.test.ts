@@ -101,7 +101,8 @@ describe("boot script (before first paint)", () => {
   })
 
   it("matches migrateDeviceAppearance on the same storage", () => {
-    for (const initial of [{}, { "crewship-accent": "teal" }, { [TEXT_SIZE_STORAGE_KEY]: "large", theme: "light" }]) {
+    const cases: Record<string, string>[] = [{}, { "crewship-accent": "teal" }, { [TEXT_SIZE_STORAGE_KEY]: "large", theme: "light" }]
+    for (const initial of cases) {
       stubStorage(initial)
       migrateDeviceAppearance()
       const viaFn = new Map(store)
