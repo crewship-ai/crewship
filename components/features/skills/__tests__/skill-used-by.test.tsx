@@ -40,6 +40,25 @@ function renderUsedBy(mutate: typeof h.mutate) {
   render(<SkillPage {...props} />)
 }
 
+describe("Activity button", () => {
+  it("has its own name next to the shell's Activity button and opens Used by", () => {
+    h.mutate = () => Promise.resolve()
+    h.detail = {
+      id: "sk", name: "web", slug: "web", display_name: "Web", description: null, version: null, author: null, category: "RESEARCH",
+      source: "BUNDLED", icon: null, scan_status: "CLEAN", verification: "VERIFIED", content: "", license: null, agent_count: 0, installed_on: [],
+    } satisfies SkillDetail
+    const onTab = vi.fn()
+    render(
+      <SkillPage workspaceId="ws" skillId="sk" agents={agents} crews={crews} tab="overview" onTab={onTab} onBack={vi.fn()} onGive={vi.fn()}
+        onDeleted={vi.fn()} onEditor={vi.fn()} canGive canManage />,
+    )
+    // The top bar already has the shell's "Activity" (live runs) button.
+    expect(screen.queryByRole("button", { name: "Activity" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Skill activity" }))
+    expect(onTab).toHaveBeenCalledWith("used")
+  })
+})
+
 describe("Used by tab", () => {
   it("grouped by crew; whole-crew toggle is tri-state", () => {
     renderUsedBy(() => Promise.resolve())

@@ -65,6 +65,9 @@ export function useSkillDetail(workspaceId: string | null | undefined, skillId: 
     enabled: !!workspaceId && !!skillId,
     queryFn: ({ signal }) =>
       getJSON<SkillDetail>(`/api/v1/skills/${encodeURIComponent(skillId!)}?${ws(workspaceId!)}`, signal),
+    // A missing skill is gone, not slow: say so at once instead of showing a
+    // skeleton through three back-off retries. Other failures still retry.
+    retry: (count, err) => !/\bHTTP 404\b/.test(err instanceof Error ? err.message : "") && count < 3,
   })
 }
 
