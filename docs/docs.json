@@ -337,6 +337,7 @@
               "cli/mission",
               "cli/routine",
               "cli/page",
+              "cli/doc",
               "cli/pipeline",
               "cli/webhook",
               "cli/waitpoint",
