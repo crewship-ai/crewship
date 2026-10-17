@@ -11,16 +11,7 @@ vi.mock("next/navigation", () => ({ usePathname: () => pathname }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile }))
 
 import { useAppStore } from "@/lib/store"
-import * as SubBarKit from "../sub-bar"
-
-const { SubBar, SubBarPrimary } = SubBarKit
-// COM-12: read through the namespace so the file still loads, and the cases
-// fail one by one, before the export exists.
-function SubBarActions({ children }: { children: React.ReactNode }) {
-  const Actions = (SubBarKit as unknown as { SubBarActions?: React.ComponentType<{ children: React.ReactNode }> }).SubBarActions
-  if (!Actions) throw new Error("SubBarActions is not exported from sub-bar")
-  return <Actions>{children}</Actions>
-}
+import { SubBar, SubBarActions, SubBarPrimary } from "../sub-bar"
 
 function withSlot(area = "Issues") {
   const slot = document.createElement("div")
@@ -108,7 +99,9 @@ describe("SubBar in the top bar", () => {
     expect(row).toHaveAttribute("data-empty")
     expect(row?.className).toMatch(/data-\[empty\]:hidden/)
     expect(screen.getByRole("heading", { level: 1, name: "Dashboard", hidden: true })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Last 7 days", hidden: true })).toBeInTheDocument()
+    // A display:none button has no accessible name to query by; its text is
+    // still in the document, so it stays mounted.
+    expect(screen.getByText("Last 7 days").closest("[data-slot=sub-bar-actions]")).not.toBeNull()
   })
 
   it("on a phone keeps the row while one action is visible", () => {
