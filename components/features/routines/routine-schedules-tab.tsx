@@ -37,6 +37,7 @@ import {
 import { inputsSubmitContent, submitInputsForm } from "./routine-run-inputs-dialog"
 import { RoutinePresetForm } from "./routine-preset-form"
 import { RoutineScheduleEditorDialog } from "./routine-schedule-editor-dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 // RoutineSchedulesTab — the Plan: a Repeating card and a One-time starts card
 // (operator console proposal, screen 2 · Plan). Each row says in one line
@@ -65,6 +66,8 @@ interface Props {
   /** Webhooks and automations, rendered by the detail page, fold under the
    * "Other ways this routine starts" disclosure at the bottom. */
   otherWays?: ReactNode
+  /** Add opens the page's Add trigger dialog instead of the inline form. */
+  onAdd?: () => void
 }
 
 /** "Weekdays at 08:00" — the words a person would use, so a new schedule is
@@ -95,6 +98,7 @@ export function RoutineSchedulesTab({
   concurrencyKey,
   maxConcurrent,
   otherWays,
+  onAdd,
 }: Props) {
   const { role, capabilities } = useAbilities()
   const permissions = routinePermissions(role, capabilities)
@@ -191,13 +195,14 @@ export function RoutineSchedulesTab({
     }
   }
 
+  const [deleting, setDeleting] = useState<PipelineSchedule | null>(null)
   const del = async (s: PipelineSchedule) => {
-    if (!confirm(`Delete schedule "${s.name}"?`)) return
     try {
       await remove(s.id)
       toast.success("Schedule deleted")
     } catch (e) {
       toast.error("Delete failed", { description: e instanceof Error ? e.message : String(e) })
+      throw e
     }
   }
 
@@ -217,7 +222,7 @@ export function RoutineSchedulesTab({
       variant="outline"
       disabled={!permissions.createSchedule}
       title={!permissions.createSchedule ? "Creating a repeating plan requires permission to create routines" : undefined}
-      onClick={() => setFormOpen(true)}
+      onClick={() => (onAdd ? onAdd() : setFormOpen(true))}
       className="h-8 gap-1.5 text-xs"
     >
       <Plus className="h-3 w-3" />
@@ -406,7 +411,7 @@ export function RoutineSchedulesTab({
                         variant="ghost"
                         disabled={!permissions.manage}
                         title={!permissions.manage ? "Managing existing plans requires an admin role" : undefined}
-                        onClick={() => del(s)}
+                        onClick={() => setDeleting(s)}
                         className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
                         aria-label={`Delete schedule ${s.name}`}
                       >
@@ -512,6 +517,7 @@ export function RoutineSchedulesTab({
           </CreateSurface>
         )}
 
+        <div id="routine-once-starts" tabIndex={-1} className="scroll-mt-4 outline-none">
         <RoutineOnceSchedule
           key={slug}
           workspaceId={workspaceId}
@@ -519,7 +525,9 @@ export function RoutineSchedulesTab({
           headVersion={headVersion}
           draft={draft}
         />
+        </div>
       </section>
+      {otherWays !== undefined && (
       <details className="rounded-xl border border-dashed border-border/60 bg-card px-4 py-2">
         <summary className="cursor-pointer py-1 text-xs font-medium text-muted-foreground">
           Other ways this routine starts · webhooks, automations, overlap rules
@@ -557,6 +565,23 @@ export function RoutineSchedulesTab({
           </Card>
         </div>
       </details>
+      )}
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title={`Delete schedule “${deleting?.name ?? ""}”?`}
+        description="It stops starting this routine."
+        consequences={[
+          { tone: "lost", text: "Future starts of this schedule and its saved answers." },
+          { tone: "kept", text: "Runs it already started stay in the history." },
+        ]}
+        confirmLabel="Delete schedule"
+        destructive
+        onConfirm={async () => {
+          if (deleting) await del(deleting)
+        }}
+      />
 
       <RoutineScheduleEditorDialog
         schedule={editing}

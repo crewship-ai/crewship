@@ -25,6 +25,8 @@ import { isRecord } from "@/lib/routine-step-describe"
 import { usePipelineSchedules, type PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { draftAuthorLabel } from "./routine-identity-header"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { requiresReview } from "@/lib/routine-wizard"
 import type { RoutineDetail } from "./routines-detail-panel"
 
 // routine-publish-dialog — "Publish draft rM as vN+1".
@@ -34,10 +36,11 @@ import type { RoutineDetail } from "./routines-detail-panel"
 // affected once it is live. It uses the same two server calls the old
 // editor used for a stored draft: POST …/pipelines/test_run for the static
 // check (it mints the save_token the publication needs) and POST
-// …/pipelines/{slug}/publish with the draft's exact id and revision. The
-// "Approve capability changes" question appears only when the server says
-// the draft needs it (409 with risk_reasons) — a technical term stays off
-// the main path.
+// …/pipelines/{slug}/publish with the draft's exact id and revision. A draft
+// that reaches further than the live version (new credentials or hosts, a web
+// call or code where there was none) says so BEFORE the first attempt and
+// asks for "I approve these for this routine"; a 409 with risk_reasons asks
+// the same question when the server finds more.
 
 type ScheduleRow = PipelineSchedule & { version_pinned?: boolean; effective_version?: number }
 
@@ -131,6 +134,7 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
   const [refusal, setRefusal] = React.useState<string | null>(null)
   const [riskReasons, setRiskReasons] = React.useState<string[] | null>(null)
   const [approveRisk, setApproveRisk] = React.useState(false)
+  const [confirmDiscard, setConfirmDiscard] = React.useState(false)
   const base = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines`
 
   React.useEffect(() => {
@@ -180,6 +184,16 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
     return publicationSummary(published, draftDefinition)
   }, [draftDefinition, routine.definition, routine.head_version])
   const impact = scheduleImpact(schedules as ScheduleRow[], routine)
+  // What the draft adds to what the routine can reach, known before publishing.
+  const newRisk = React.useMemo(() => {
+    if (!draftDefinition || !summary) return null
+    const published = routine.head_version && isRecord(routine.definition) ? routine.definition : {}
+    const access = summary.rows.find(([label]) => label === "Access")?.[1] ?? ""
+    const reasons: string[] = []
+    if (access.startsWith("Changed")) reasons.push(access.replace(/^Changed · /, ""))
+    if (requiresReview(draftDefinition) && !requiresReview(published)) reasons.push("it now calls outside services or runs code")
+    return reasons.length ? reasons : null
+  }, [draftDefinition, summary, routine.head_version, routine.definition])
   const next = (routine.head_version ?? 0) + 1
   const revision = draft?.revision ?? routine.draft?.revision
   const author = draftAuthorLabel(draft?.updated_by ?? routine.draft?.updated_by, session?.user?.id)
@@ -226,7 +240,6 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
 
   const discard = async () => {
     if (!draft || busy) return
-    if (!window.confirm(`Discard draft r${draft.revision}? v${routine.head_version ?? 0} stays as it is.`)) return
     setBusy("discard")
     setRefusal(null)
     try {
@@ -241,7 +254,8 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
     }
   }
 
-  const canPublish = !!draft && !!check?.passed && !busy && (!riskReasons || approveRisk)
+  const needsRiskApproval = !!riskReasons || !!newRisk
+  const canPublish = !!draft && !!check?.passed && !busy && (!needsRiskApproval || approveRisk)
 
   return (
     <CreateSurface open={open} onOpenChange={onOpenChange} size="md" onSubmit={() => void publish()} ariaLabel="Publish the draft">
@@ -313,19 +327,19 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
                   ? `• ${activeRuns > 0 ? `${activeRuns} running or waiting ${activeRuns === 1 ? "run keeps" : "runs keep"}` : "Running or waiting runs keep"} v${routine.head_version}; nothing in progress changes.`
                   : "• Nothing has run yet, so nothing in progress is affected."}
               </li>
-              {routine.head_version ? <li>• v{routine.head_version} stays in Versions and can be restored as a draft.</li> : null}
+              {routine.head_version ? <li>• v{routine.head_version} stays in Versions.</li> : null}
             </ul>
           </DetailCard>
         )}
-        {riskReasons && (
+        {needsRiskApproval && (
           <CreateSurfaceNotice tone="warn">
-            <div className="space-y-1.5">
+            <div className="space-y-1.5" data-testid="publish-new-risk">
               <p>
-                This draft changes what the routine can reach: {riskReasons.join(", ")}. A manager has to approve that before it goes live.
+                New risk · this draft changes what the routine can reach: {(riskReasons ?? newRisk ?? []).join(", ")}. A Manager or above approves that before it goes live.
               </p>
               <label className="flex items-center gap-2 text-xs font-medium">
                 <input type="checkbox" checked={approveRisk} onChange={(e) => setApproveRisk(e.target.checked)} />
-                Approve capability changes
+                I approve these for this routine
               </label>
             </div>
           </CreateSurfaceNotice>
@@ -343,10 +357,10 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
       <CreateSurfaceFooter
         hint="Nothing runs on publish"
         onCancel={() => onOpenChange(false)}
-        cancelLabel="Not now"
+        cancelLabel="Cancel"
         guardCancel={false}
         secondary={
-          <CreateSurfaceSecondaryAction onClick={() => void discard()} disabled={!draft || !!busy}>
+          <CreateSurfaceSecondaryAction onClick={() => setConfirmDiscard(true)} disabled={!draft || !!busy}>
             {busy === "discard" ? "Discarding…" : "Discard draft"}
           </CreateSurfaceSecondaryAction>
         }
@@ -355,6 +369,16 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
         onPrimary={() => void publish()}
         primaryDisabled={!canPublish}
         busy={busy === "publish"}
+      />
+      <ConfirmDialog
+        open={confirmDiscard}
+        onOpenChange={setConfirmDiscard}
+        title={`Discard draft r${draft?.revision ?? revision ?? "?"}?`}
+        description={routine.head_version ? `v${routine.head_version} stays as it is.` : "The routine has never been published, so this removes it."}
+        consequences={[{ tone: "lost", text: "Every change saved in this draft." }]}
+        confirmLabel="Discard draft"
+        destructive
+        onConfirm={discard}
       />
     </CreateSurface>
   )
