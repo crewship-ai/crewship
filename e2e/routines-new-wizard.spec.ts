@@ -14,8 +14,18 @@ function uniqueName(prefix: string) {
 }
 const slugOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
 
+/** The workspace the app is showing. hooks/use-workspace.ts stores it under
+ *  `crewship.workspaceId:<session identity>` (the bare key is the legacy one),
+ *  so read whichever is present; fall back to the first workspace. */
 async function workspaceId(page: Page): Promise<string> {
-  const id = await page.evaluate(() => window.localStorage.getItem("crewship.workspaceId"))
+  const id = await page.evaluate(async () => {
+    const keys = Object.keys(window.localStorage).filter((k) => k === "crewship.workspaceId" || k.startsWith("crewship.workspaceId:"))
+    const stored = keys.map((k) => window.localStorage.getItem(k)).find(Boolean)
+    if (stored) return stored
+    const list = await (await fetch("/api/v1/workspaces")).json()
+    const rows = Array.isArray(list) ? list : (list?.data ?? [])
+    return (rows[0]?.id as string | undefined) ?? null
+  })
   expect(id, "the signed-in session has a workspace").toBeTruthy()
   return id!
 }
@@ -57,8 +67,8 @@ test("F03 build a weekly routine with one agent step, test and turn on; it appea
   try {
     await basics(page, name)
     await dialog.getByRole("radio", { name: /^On a schedule/ }).click()
-    await dialog.getByRole("radio", { name: "Weekly" }).click()
-    await dialog.getByRole("radio", { name: "Th" }).click()
+    await dialog.getByRole("radio", { name: "Weekly", exact: true }).click()
+    await dialog.getByRole("radio", { name: "Th", exact: true }).click()
     await expect(dialog.getByTestId("routine-cron")).toHaveText("0 8 * * 4")
     await expect(dialog.getByTestId("routine-next-start")).toHaveCount(3, { timeout: TIMEOUT })
     await dialog.getByRole("button", { name: "Continue" }).click()

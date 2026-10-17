@@ -25,7 +25,7 @@ test("R01 panel order Views→crews, keys 1-5 switch views and keep ?view=", asy
   await page.locator("body").press("5")
   await expect(page).toHaveURL(/view=drafts/)
   await page.reload()
-  await expect(page.getByRole("heading", { name: "Drafts", level: 2 })).toBeVisible({ timeout: TIMEOUT })
+  await expect(page.getByRole("heading", { name: "Drafts", level: 2, exact: true })).toBeVisible({ timeout: TIMEOUT })
   await page.locator("body").press("1")
   await expect(page).not.toHaveURL(/view=/)
 })
@@ -43,11 +43,24 @@ test("R01 a Member gets New routine disabled with the reason", async ({ browser,
   test.skip(!email || !password, "set E2E_MEMBER_EMAIL / E2E_MEMBER_PASSWORD to a MEMBER account")
   const context = await browser.newContext({ storageState: { cookies: [], origins: [] } })
   const page = await context.newPage()
+  // Sign in the way global-setup does, and only then open the page: a
+  // goto racing the form submit lands back on /login.
   await page.goto(`${baseURL}/login`)
-  await page.getByLabel(/email/i).fill(email!)
-  await page.getByLabel(/password/i).fill(password!)
-  await page.getByRole("button", { name: /sign in|log in/i }).click()
+  const result = await page.evaluate(
+    async ({ email, password }) => {
+      const csrf = (await (await fetch("/api/auth/csrf")).json()).csrfToken as string
+      const res = await fetch("/api/auth/callback/credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, csrfToken: csrf, redirect: "false" }),
+      })
+      return res.json()
+    },
+    { email: email!, password: password! },
+  )
+  expect(result?.error, "member sign-in").toBeFalsy()
   await page.goto(`${baseURL}/routines`)
+  await expect(page.locator('[data-slot="secondary-panel"][data-panel-id="routines"]')).toBeVisible({ timeout: TIMEOUT })
   const create = page.getByRole("button", { name: "New routine" }).first()
   await expect(create).toBeDisabled({ timeout: TIMEOUT })
   await expect(create).toHaveAccessibleDescription(/Manager or above/)
