@@ -181,7 +181,8 @@ test.describe("desktop", () => {
     await expect(dialog).toBeVisible()
     await expect(dialog).toContainText("The other direction is set separately.")
     expect((await dialog.boundingBox())!.width).toBeLessThanOrEqual(480)
-    await dialog.getByRole("button", { name: /^(Cancel|Close)$/ }).click()
+    // The kit dialog has a header ✕ (Close) and a footer Cancel; either dismisses.
+    await dialog.getByRole("button", { name: /^(Cancel|Close)$/ }).last().click()
     await expect(dialog).toBeHidden()
     await page.keyboard.press("1")
     await expect(page).not.toHaveURL(/view=/)

@@ -50,8 +50,19 @@ async function fixtures(page: Page, opts: { failCalendar?: boolean } = {}) {
 // have no author, so under Mine they are all filtered away; a test that needs
 // the grid picks Workspace itself instead of inheriting it.
 async function workspaceScope(page: Page) {
-  await page.getByRole("button", { name: /^Workspace/ }).first().click()
+  // COM-05: at tablet width the panel starts closed; open it, pick the scope,
+  // and let it float away again (Escape inside it closes it).
+  const opener = page.getByTestId("secondary-panel-button")
+  const scope = page.getByRole("button", { name: /^Workspace/ }).first()
+  await expect(opener.or(scope).first()).toBeVisible()
+  const floating = await opener.isVisible()
+  if (floating) await opener.click()
+  await scope.click()
   await expect(page.getByTestId("calendar-summary")).toContainText("Workspace")
+  if (floating) {
+    await page.keyboard.press("Escape")
+    await expect(page.locator("[data-slot=secondary-panel][data-float=true]")).toHaveCount(0)
+  }
 }
 
 test.describe("desktop", () => {
@@ -170,7 +181,9 @@ test.describe("desktop", () => {
     await page.goto("/calendar?view=week")
     await workspaceScope(page)
     const panel = page.locator("[data-slot=secondary-panel]")
-    const filter = panel.getByRole("button", { name: "Filter" })
+    // Not "Hide Calendar views and filters" (the panel's own button); the
+    // trigger carries the active count once a facet is set ("Filter 1").
+    const filter = panel.getByRole("button", { name: /^Filter( \d+)?$/ })
     await filter.click()
     await expect(filter).toHaveAttribute("aria-expanded", "true")
     const block = panel.getByRole("group", { name: "Filter calendar" })

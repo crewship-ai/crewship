@@ -132,9 +132,13 @@ test.describe("tablet 1024", () => {
   test("tablet 1024 shows panel + detail", async ({ page }) => {
     await seed(page)
     await page.goto("/inbox")
-    await expect(panel(page)).toBeVisible()
     await expect(page.getByRole("main", { name: "Inbox detail" })).toBeVisible()
     await expect(page.getByTestId("inbox-rail")).toBeHidden()
+    // COM-05: at tablet width the panel starts closed and the top bar's panel
+    // button floats it over the detail.
+    await expect(panel(page)).toHaveCount(0)
+    await page.getByTestId("secondary-panel-button").click()
+    await expect(panel(page)).toBeVisible()
   })
 })
 
