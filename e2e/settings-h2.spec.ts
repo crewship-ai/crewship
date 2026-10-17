@@ -147,8 +147,10 @@ test.describe("desktop", () => {
   })
 
   const MOVED: [string, RegExp][] = [
-    ["notifications", /\/integrations\?tab=notifications&section=connections/],
-    ["notification-prefs", /\/integrations\?tab=notifications&section=preferences/],
+    // Integrations rewrites its old ?tab=&section= links to ?space=&view=
+    // once its Harbor 2 layout is in (#3400); either form is the same place.
+    ["notifications", /\/integrations\?(tab=notifications&section=connections|space=channels(?!&view=)(&|$))/],
+    ["notification-prefs", /\/integrations\?(tab=notifications&section=preferences|space=channels&view=preferences)/],
     ["crews", /\/crews/],
     ["connections", /\/settings\/crew-links/],
     ["members", /\/settings\/members/],
