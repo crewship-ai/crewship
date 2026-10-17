@@ -86,8 +86,16 @@ describe("IssuesBoardView", () => {
   it("a column's + opens New issue with its status", () => {
     const create = vi.fn()
     render(<IssuesBoardView issues={[]} onIssueClick={() => {}} onCreateClick={create} />)
-    fireEvent.click(screen.getByRole("button", { name: "New issue in In review" }))
-    expect(create).toHaveBeenCalledWith("REVIEW")
+    fireEvent.click(screen.getByRole("button", { name: "New issue in In progress" }))
+    expect(create).toHaveBeenCalledWith("IN_PROGRESS")
+  })
+
+  // POST /crews/{c}/issues takes BACKLOG or one step from it; a + on In
+  // review, Done or Failed would make a Backlog issue in disguise.
+  it("offers + only on columns an issue can be created in", () => {
+    render(<IssuesBoardView issues={[]} onIssueClick={() => {}} onCreateClick={vi.fn()} />)
+    for (const name of ["Backlog", "Todo", "In progress"]) expect(screen.getByRole("button", { name: `New issue in ${name}` })).toBeInTheDocument()
+    for (const name of ["In review", "Done", "Failed"]) expect(screen.queryByRole("button", { name: `New issue in ${name}` })).toBeNull()
   })
 })
 

@@ -11,6 +11,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import type { Mission } from "@/lib/types/mission"
 import { IssueCard } from "./issue-card"
 import { StatusIcon } from "./status-icon"
+import { isCreatableStatus } from "./issue-constants"
 import { BOARD_STATUSES, STATUS_TEXT, normalStatus } from "./issues-view-model"
 
 interface IssuesBoardViewProps {
@@ -150,7 +151,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
               <b className="truncate text-label font-semibold text-foreground">{STATUS_TEXT[col.status]}</b>
               <span className="font-mono text-label tabular-nums text-muted-foreground-soft">{col.all.length}</span>
               <span className="flex-1" />
-              {onCreateClick && (
+              {onCreateClick && isCreatableStatus(col.status) && (
                 <Button variant="ghost" size="icon-xs" aria-label={`New issue in ${STATUS_TEXT[col.status]}`} onClick={() => onCreateClick(col.status)}>
                   <Plus className="size-3.5" />
                 </Button>

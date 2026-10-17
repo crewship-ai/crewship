@@ -102,6 +102,35 @@ describe("CreateIssueModal", () => {
     expect(screen.getByText("Backlog")).toBeInTheDocument()
   })
 
+  it("starts in the status it was opened from and sends it", async () => {
+    const mockFetch = vi.fn<FetchStub>().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
+    global.fetch = mockFetch as unknown as typeof fetch
+    render(<CreateIssueModal {...defaultProps} initialStatus="TODO" />)
+    expect(screen.getByText("Todo")).toBeInTheDocument()
+    expect(screen.queryByText("Backlog")).toBeNull()
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "From a group" } })
+    fireEvent.click(screen.getByText("Create issue"))
+    await waitFor(() => {
+      const post = mockFetch.mock.calls.find((c) => c[1]?.method === "POST")
+      expect(post).toBeDefined()
+      expect(JSON.parse(post![1]!.body as string).status).toBe("TODO")
+    })
+  })
+
+  it("falls back to Backlog for a status a new issue cannot start in, and leaves it off the wire", async () => {
+    const mockFetch = vi.fn<FetchStub>().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
+    global.fetch = mockFetch as unknown as typeof fetch
+    render(<CreateIssueModal {...defaultProps} initialStatus="REVIEW" />)
+    expect(screen.getByText("Backlog")).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Plain" } })
+    fireEvent.click(screen.getByText("Create issue"))
+    await waitFor(() => {
+      const post = mockFetch.mock.calls.find((c) => c[1]?.method === "POST")
+      expect(post).toBeDefined()
+      expect(JSON.parse(post![1]!.body as string)).not.toHaveProperty("status")
+    })
+  })
+
   it("shows No priority pill by default", () => {
     render(<CreateIssueModal {...defaultProps} />)
     expect(screen.getByText("No priority")).toBeInTheDocument()

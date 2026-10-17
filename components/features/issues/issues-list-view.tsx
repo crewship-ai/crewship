@@ -18,6 +18,7 @@ import type { IssuePriority, Mission, Project } from "@/lib/types/mission"
 import { IssueRow } from "./issue-row"
 import { PriorityIcon } from "./priority-icon"
 import { StatusIcon } from "./status-icon"
+import { isCreatableStatus } from "./issue-constants"
 import {
   DEFAULT_ROW_FIELDS,
   PRIORITY_TEXT,
@@ -186,7 +187,7 @@ export function IssuesListView({
             <b className="truncate text-label font-semibold text-foreground">{g.label}</b>
             <span className="font-mono text-label tabular-nums text-muted-foreground-soft">{g.issues.length}</span>
             <span className="flex-1" />
-            {onCreate && (
+            {onCreate && (!g.status || isCreatableStatus(g.status)) && (
               <Button
                 variant="ghost"
                 size="icon-xs"

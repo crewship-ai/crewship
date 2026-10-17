@@ -229,6 +229,12 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
 
   /* ------------------------------------------------------------ actions */
   const [showCreateIssue, setShowCreateIssue] = useState(false)
+  /** The status a group's / column's + opened New issue with; cleared on close. */
+  const [createStatus, setCreateStatus] = useState<string | null>(null)
+  const openCreate = useCallback((status?: string) => {
+    setCreateStatus(status ?? null)
+    setShowCreateIssue(true)
+  }, [])
   const [showCreateProject, setShowCreateProject] = useState(false)
   const [saveViewOpen, setSaveViewOpen] = useState(false)
 
@@ -468,7 +474,7 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
                 issues={visible}
                 onIssueClick={openIssue}
                 selectedIssueId={selectedIssue?.id}
-                onCreateClick={() => setShowCreateIssue(true)}
+                onCreateClick={openCreate}
                 workspaceId={workspaceId}
                 onMoved={() => void fetchIssues()}
               />
@@ -481,7 +487,7 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
                 groupBy={groupBy}
                 fields={fields}
                 projects={projects}
-                onCreate={() => setShowCreateIssue(true)}
+                onCreate={openCreate}
                 onBulkApplied={() => void fetchIssues()}
               />
             )}
@@ -535,7 +541,10 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
 
       <CreateIssueModal
         open={showCreateIssue}
-        onOpenChange={setShowCreateIssue}
+        onOpenChange={(o) => {
+          setShowCreateIssue(o)
+          if (!o) setCreateStatus(null)
+        }}
         crews={crews}
         labels={labels}
         projects={projects}
@@ -546,6 +555,7 @@ export function OrchestrationLayout({ crews, workspaceId, onRefresh, loadError =
           void fetchProjects()
         }}
         onLabelsChanged={fetchLabels}
+        initialStatus={createStatus}
       />
       <CreateProjectModal
         open={showCreateProject}
