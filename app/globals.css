@@ -580,8 +580,9 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  /* rounded-card: every card, panel and dialog surface. */
-  --radius-card: 0.625rem;
+  /* rounded-card: every card, panel and dialog surface. In px: a radius is
+     drawn, not read, so it stays 10 px at every text size. */
+  --radius-card: 10px;
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);

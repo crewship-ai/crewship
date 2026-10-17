@@ -613,9 +613,8 @@ func TestParseJournalQuery_TrimsWhitespace(t *testing.T) {
 // the seed must skip everything older than (and including) that
 // entry so the client doesn't replay history it already processed.
 //
-// We cancel the request context after the seed lands but before the
-// poll ticker fires so the test exits deterministically without
-// waiting on the 1-second tick.
+// Initial Flush cancels the request after the complete seed, before live
+// polling begins; the test does not assume a fixed seed delivery duration.
 func TestJournalHandler_Stream_LastEventIDResume(t *testing.T) {
 	h, userID, wsID, _ := newJournalHandlerTest(t)
 
@@ -641,6 +640,7 @@ func TestJournalHandler_Stream_LastEventIDResume(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 			req := httptest.NewRequestWithContext(ctx, "GET", "/api/v1/journal/stream", nil)
 			req = withWorkspaceUser(req, userID, wsID, "OWNER")
 			if c.header != "" {
@@ -648,22 +648,9 @@ func TestJournalHandler_Stream_LastEventIDResume(t *testing.T) {
 			}
 			rr := httptest.NewRecorder()
 
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				h.Stream(rr, req)
-			}()
-
-			// Give the seed a short window to land. The poll ticker
-			// runs every second, so 100ms is far inside the seed
-			// phase.  Then cancel so Stream returns.
-			time.Sleep(100 * time.Millisecond)
-			cancel()
-			select {
-			case <-done:
-			case <-time.After(2 * time.Second):
-				t.Fatal("Stream did not return after ctx cancel")
-			}
+			// Initial Flush marks a complete seed, including an empty one.
+			// Cancel there rather than racing seed delivery against a sleep.
+			h.Stream(&authorityStreamWriter{ResponseRecorder: rr, afterFlush: cancel}, req)
 
 			// Parse the SSE body for `id:` lines so we can compare
 			// the seed batch ids without depending on event ordering
@@ -707,25 +694,15 @@ func TestJournalHandler_Stream_ResumePagingBeyondSeedCap(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	req := httptest.NewRequestWithContext(ctx, "GET", "/api/v1/journal/stream", nil)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	req.Header.Set("Last-Event-ID", "j_anchor")
 	rr := httptest.NewRecorder()
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		h.Stream(rr, req)
-	}()
-
-	// Allow time for both seed pages to land before cancelling.
-	time.Sleep(200 * time.Millisecond)
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Stream did not return after ctx cancel")
-	}
+	// Flush occurs only after all collected replay pages are emitted.
+	// Per-entry authority checks may take longer under the race detector.
+	h.Stream(&authorityStreamWriter{ResponseRecorder: rr, afterFlush: cancel}, req)
 
 	// Every j_post* id must appear exactly once in the seed; the
 	// anchor itself must not (the resume contract is "give me what I
@@ -776,24 +753,14 @@ func TestJournalHandler_Stream_FreshClient_BoundedSeed(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	req := httptest.NewRequestWithContext(ctx, "GET", "/api/v1/journal/stream", nil)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	// Deliberately NO Last-Event-ID header.
 	rr := httptest.NewRecorder()
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		h.Stream(rr, req)
-	}()
-
-	time.Sleep(200 * time.Millisecond)
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Stream did not return after ctx cancel")
-	}
+	// Check the completed bounded seed, independent of machine speed.
+	h.Stream(&authorityStreamWriter{ResponseRecorder: rr, afterFlush: cancel}, req)
 
 	body := rr.Body.String()
 	gotIDs := []string{}

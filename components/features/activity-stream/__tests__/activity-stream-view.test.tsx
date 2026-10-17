@@ -133,9 +133,9 @@ it("combines server facets, debounces search and removes individual chips", asyn
   fireEvent.change(screen.getByRole("textbox", { name: "Activity search" }), { target: { value: " needle " } })
   await waitFor(() => expect(mock.list.mock.calls.at(-1)![0].params.q).toBe("needle"))
   expect(mock.list.mock.calls.at(-1)![0].params).toMatchObject({ crew_ids: "c1", agent_ids: "a1", severity: "warn", exclude_entry_type: undefined })
-  fireEvent.click(screen.getAllByRole("button", { name: "Remove filter" })[0])
+  fireEvent.click(screen.getAllByRole("button", { name: /^Remove filter/ })[0])
   await waitFor(() => expect(mock.list.mock.calls.at(-1)![0].params.q).toBeUndefined())
-  for (let i = 0; i < 5; i++) fireEvent.click(screen.getAllByRole("button", { name: "Remove filter" })[0])
+  for (let i = 0; i < 5; i++) fireEvent.click(screen.getAllByRole("button", { name: /^Remove filter/ })[0])
   await waitFor(() => expect(mock.list.mock.calls.at(-1)![0].params.q).toBeUndefined())
   expect(sidebar().facets).toMatchObject({ crewIDs: [], agentIDs: [], severities: [], sources: [], range: "24h" })
 })
@@ -152,7 +152,7 @@ it.each(["routine", "run", "step", "issue"] as const)("pins a %s crumb and clear
     expect(screen.queryByText("Row e2")).toBeNull()
   }
   expect(screen.queryByText("Activity home")).toBeNull()
-  fireEvent.click(screen.getByRole("button", { name: "Remove filter" }))
+  fireEvent.click(screen.getByRole("button", { name: /^Remove filter/ }))
   expect(screen.getByText("Activity home")).toBeVisible()
 })
 it("clears intersecting filters atomically instead of showing reassuring empty totals", () => {
