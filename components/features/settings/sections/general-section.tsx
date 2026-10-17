@@ -1,26 +1,22 @@
 "use client"
 
 import { useState } from "react"
-import { Check, X, ChevronsUpDown, AlertTriangle, BarChart3, Fingerprint } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
+import { Check, X, ChevronsUpDown, AlertTriangle, Bot, Building, Gauge, User, Users } from "lucide-react"
+import { toast } from "@/lib/toast"
 import { Input } from "@/components/ui/input"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { SaveFooter } from "@/components/ui/save-footer"
 import { useDirtyForm } from "@/hooks/use-dirty-form"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { Button } from "@/components/ui/button"
 import { LANGUAGES } from "@/lib/languages"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier, isOwner } from "@/lib/permissions/tiers"
-import { SettingsCard, SettingsRow, SettingsDangerCard, settingsControl, settingsPickerButton, controlHeight } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsCounts, SettingsRow, SettingsDangerCard, settingsControl, settingsPickerButton } from "@/components/features/settings/shared"
 import { PagesAppearanceCard } from "./pages-appearance-card"
 import { WorkspaceLogoRow } from "./workspace-logo-row"
 import { cn } from "@/lib/utils"
@@ -57,13 +53,7 @@ export function GeneralSection({
   // invites an edit the server answers with a 403.
   const canEdit = isAdminTier(role)
   const [langOpen, setLangOpen] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [confirmSlug, setConfirmSlug] = useState("")
-  // The backend requires the caller to re-type the slug (confirm_slug),
-  // so the destructive action stays disabled until it matches exactly.
-  const slugConfirmed = confirmSlug === orgSlug
 
   function handleSave() {
     void form.submit(async (draft) => {
@@ -90,33 +80,32 @@ export function GeneralSection({
     })
   }
 
+  // ConfirmDialog has the slug typed back before it enables the button, and
+  // stays open until this resolves: a refusal throws, the person keeps the
+  // dialog and what they typed, and the reason is the sticky corner toast.
   async function handleDelete() {
-    if (isDeleting || !slugConfirmed) return
-    setIsDeleting(true)
-    setDeleteError(null)
+    let res: Response
     try {
-      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
+      res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        // The server re-validates confirm_slug against the workspace slug.
-        body: JSON.stringify({ confirm_slug: confirmSlug }),
+        // The server re-validates confirm_slug against the workspace slug;
+        // the dialog only enables once the typed text equals it.
+        body: JSON.stringify({ confirm_slug: orgSlug }),
       })
-      if (res.ok) {
-        setDeleteOpen(false)
-        onDelete()
-      } else {
-        const body = await res.json().catch(() => null)
-        // RFC 7807 problems use `detail`; legacy errors use `error`.
-        const msg = body?.detail ?? body?.error
-        setDeleteError(typeof msg === "string" ? msg : "Failed to delete workspace")
-        setDeleteOpen(false)
-      }
-    } catch {
-      setDeleteError("Failed to delete workspace")
-      setDeleteOpen(false)
-    } finally {
-      setIsDeleting(false)
+    } catch (e) {
+      toast.error("Couldn’t delete the workspace", { description: e instanceof Error ? e.message : "Network error." })
+      throw e
     }
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      // RFC 7807 problems use `detail`; legacy errors use `error`.
+      const msg = body?.detail ?? body?.error
+      const description = typeof msg === "string" ? msg : `Request failed (${res.status}).`
+      toast.error("Couldn’t delete the workspace", { description })
+      throw new Error(description)
+    }
+    onDelete()
   }
 
   const draftLanguage = form.draft.language
@@ -134,29 +123,32 @@ export function GeneralSection({
   return (
     <div className="space-y-5">
       {/* ── Identity ── */}
-      <SettingsCard icon={Fingerprint}
+      <SettingsCard icon={Building}
         title="Identity"
+        // Who may change the card, said once on the right of its header.
+        actions={<span className="text-label text-muted-foreground">Admins and owners</span>}
         description={
           canEdit
-            ? "Your workspace name, slug, and default agent language"
+            ? undefined
             // Stated once, in the description, in the same muted type as every
             // other hint — a non-admin viewing their own workspace is normal,
             // so it must not read like a permission error.
-            : "Your workspace name, slug, and default agent language. Only workspace admins can change these."
+            : "Only workspace admins can change these."
         }
       >
         <WorkspaceLogoRow workspaceId={workspaceId} name={orgName} logoUrl={logoUrl} canEdit={canEdit} onChange={(u) => onLogoChange?.(u)} />
         {!canEdit ? (
           <>
-            <SettingsRow label="Workspace name">
-              <span className="text-xs text-foreground truncate">{orgName}</span>
+            <SettingsRow label="Workspace name" lock="Admins and owners">
+              <span className="text-control text-foreground truncate">{orgName}</span>
             </SettingsRow>
-            <SettingsRow label="Slug" description="Used in URLs and CLI commands">
-              <span className="text-xs font-mono text-foreground truncate">{orgSlug}</span>
+            <SettingsRow label="Slug" description="Used in URLs and CLI commands" lock="Admins and owners">
+              <span className="text-control font-mono text-foreground truncate">{orgSlug}</span>
             </SettingsRow>
             <SettingsRow
               label="Agent language"
               description="Agents will respond in this language"
+              lock="Admins and owners"
               border={false}
             >
               {preferredLanguage ? (
@@ -247,52 +239,19 @@ export function GeneralSection({
       </SettingsCard>
 
       {/* ── Usage ── */}
-      <SettingsCard icon={BarChart3} title="Usage" description="Resource counts for this workspace">
-        <SettingsRow
-          label={
-            <span className="inline-flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
-              Agents
-            </span>
-          }
-        >
-          <span className="text-xs font-mono font-semibold text-foreground tabular-nums">
-            <AnimatedNumber value={agentCount} />
-          </span>
-        </SettingsRow>
+      <SettingsCard icon={Gauge} title="Usage" description="Resource counts for this workspace">
+        <SettingsCounts
+          items={[
+            { icon: Bot, label: "Agents", value: <AnimatedNumber value={agentCount} /> },
+            { icon: Users, label: "Crews", value: <AnimatedNumber value={crewCount} /> },
+            { icon: User, label: "Members", value: <AnimatedNumber value={memberCount} /> },
+          ]}
+        />
         {canEdit && agentCount > 0 && (
-          <SettingsRow
-            label="Agent avatars"
-            description="Freeze each agent's face so a generator upgrade cannot repaint it. New and edited agents are stored automatically; this stores the rest."
-          >
+          <SettingsRow label="Agent avatars" description="For agents created before avatars existed">
             <AvatarBackfillButton workspaceId={workspaceId} />
           </SettingsRow>
         )}
-        <SettingsRow
-          label={
-            <span className="inline-flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-success" />
-              Crews
-            </span>
-          }
-        >
-          <span className="text-xs font-mono font-semibold text-foreground tabular-nums">
-            <AnimatedNumber value={crewCount} />
-          </span>
-        </SettingsRow>
-        <SettingsRow
-          label={
-            <span className="inline-flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-purple" />
-              Members
-            </span> as unknown as string
-          }
-          border={false}
-        >
-          <span className="text-xs font-mono font-semibold text-foreground tabular-nums">
-            <AnimatedNumber value={memberCount} />
-          </span>
-        </SettingsRow>
       </SettingsCard>
 
       {/* Below identity and usage: it themes Page applications only. */}
@@ -310,67 +269,28 @@ export function GeneralSection({
       {isOwner(role) && (
         <SettingsDangerCard icon={AlertTriangle}
           title="Danger zone"
-          description="Irreversible actions that affect the whole workspace"
+          description="Owner only"
         >
-          {deleteError && (
-            <div className="px-4 py-2 border-b border-destructive/20">
-              <span className="text-label text-destructive">{deleteError}</span>
-            </div>
-          )}
-          <div className="flex items-center justify-between gap-4 px-4 py-2.5">
-            <div className="min-w-0 shrink-0">
-              <div className="text-xs text-foreground">Delete workspace</div>
-              <div className="text-label text-muted-foreground-soft mt-0.5">
-                Permanently delete all crews, agents, and data
-              </div>
-            </div>
-            <AlertDialog
-              open={deleteOpen}
-              onOpenChange={(o) => { setDeleteOpen(o); if (!o) setConfirmSlug("") }}
-            >
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive" size="sm" className="h-7 px-2.5 text-xs">
-                  Delete workspace
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle className="text-sm">Delete workspace</AlertDialogTitle>
-                  <AlertDialogDescription className="text-xs">
-                    This will permanently delete all crews, agents, credentials, and data. This cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <div className="space-y-1.5 py-1">
-                  <label htmlFor="confirm-slug" className="text-label text-muted-foreground">
-                    Type <span className="font-mono font-medium text-foreground">{orgSlug}</span> to confirm
-                  </label>
-                  <Input
-                    id="confirm-slug"
-                    value={confirmSlug}
-                    onChange={(e) => setConfirmSlug(e.target.value)}
-                    autoComplete="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    aria-label="Confirm workspace slug"
-                    placeholder={orgSlug}
-                    className={cn(controlHeight, "font-mono")}
-                    disabled={isDeleting}
-                  />
-                </div>
-                <AlertDialogFooter>
-                  <AlertDialogCancel className="h-7 text-xs" disabled={isDeleting}>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={(e) => { e.preventDefault(); void handleDelete() }}
-                    className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    disabled={isDeleting || !slugConfirmed}
-                  >
-                    {isDeleting && <Spinner className="h-3 w-3 mr-1.5" />}
-                    {isDeleting ? "Deleting…" : "Delete workspace"}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
+          <SettingsRow label="Delete workspace" description="Permanently delete all crews, agents, and data" border={false}>
+            <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
+              Delete workspace…
+            </Button>
+          </SettingsRow>
+          <ConfirmDialog
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            title={`Delete ${orgName}?`}
+            description="The workspace and everything in it are deleted for every member."
+            consequences={[
+              { tone: "lost", text: "All crews, agents, credentials, routines, pages and their history" },
+              { tone: "lost", text: "Every member loses access; the slug and its URLs stop working" },
+              { tone: "warn", text: "This cannot be undone." },
+            ]}
+            typeToConfirm={orgSlug}
+            confirmLabel="Delete workspace"
+            destructive
+            onConfirm={handleDelete}
+          />
         </SettingsDangerCard>
       )}
     </div>

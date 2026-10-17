@@ -24,7 +24,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
 import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
-import { SettingsCard, SettingsSummary, SummaryItem, selectionBar, selectionBarButton } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsPageHead, SettingsSummary, SummaryItem, selectionBar, selectionBarButton } from "@/components/features/settings/shared"
+import { PageError } from "@/components/layout/page-state"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { HIGH_STAKES_CAPABILITIES, useMemberCapabilities } from "@/components/admin/member-capabilities"
 import { PageSaveBar, usePageSave } from "@/components/ui/page-save-bar"
@@ -424,6 +425,7 @@ export function MembersPage() {
         <div className="space-y-3 p-4 md:p-6"><Skeleton className="h-6 w-80 rounded-md" /><Skeleton className="h-[420px] rounded-card" /></div>
       ) : (
         <div className={cn("space-y-4 p-4 md:p-6", selected.size > 0 && "pb-24")}>
+          <SettingsPageHead icon={Users} title="Members" description="Who is in this workspace, what each person manages and what they may do." />
           {isMobile && addMember && <div className="flex flex-wrap gap-2" data-slot="members-actions">{addMember}</div>}
           {chips.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -459,9 +461,7 @@ export function MembersPage() {
           </SettingsSummary>
 
           {roster.error && (
-            <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              {roster.error}. <button type="button" className="underline" onClick={roster.refresh}>Retry</button>
-            </p>
+            <PageError className="max-w-none px-0 py-0" title="Couldn’t load the members" description={`${roster.error}.`} onRetry={roster.refresh} />
           )}
 
           {capsFailed && (
@@ -480,7 +480,7 @@ export function MembersPage() {
 
           {filters.status === "invited" ? (
             <SettingsCard icon={Mail} title="Invitations" description="Sent, not accepted yet. An expired one cannot be accepted — invite again.">
-              {invitationsQuery.isLoading ? <div className="p-4"><Skeleton className="h-10 w-full" /></div> : <InvitationList invitations={invitations} />}
+              {invitationsQuery.isLoading ? <div className="p-4"><Skeleton className="h-10 w-full" /></div> : <InvitationList invitations={invitations} workspaceId={ws} manage={isAdmin} callerRole={role} onChanged={() => void invitationsQuery.refetch()} />}
             </SettingsCard>
           ) : (
             <SettingsCard icon={Users} title="People"

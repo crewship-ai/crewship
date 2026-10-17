@@ -93,7 +93,7 @@ describe("CommandPalette — every place in the app", () => {
     type("backups")
     expect(screen.queryByRole("option", { name: /Backup/ })).not.toBeInTheDocument()
     type("token")
-    expect(hrefOf(/Create CLI token/)).toBe("/settings?tab=profile&card=sessions-and-access")
+    expect(hrefOf(/Create CLI token/)).toBe("/settings?tab=sessions&card=cli-tokens")
   })
 
   it("finds missions, schedules, automations and crew tools, each linked to itself", async () => {

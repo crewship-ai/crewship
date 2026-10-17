@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { createElement } from "react"
-import { render, screen, fireEvent, within, waitFor, act } from "@testing-library/react"
+import { renderHook, waitFor, act } from "@testing-library/react"
 import { toast } from "sonner"
 
 import { useCrewLinks } from "../use-crew-links"
@@ -28,17 +27,10 @@ function serve(connections: unknown[], overrides: (url: string, init?: RequestIn
   })
 }
 
-// The hook owns its unlink question; the harness renders it the way the page does.
 async function mount() {
-  const result = { current: null as unknown as ReturnType<typeof useCrewLinks> }
-  function Harness() {
-    const links = useCrewLinks("ws1")
-    result.current = links
-    return links.confirmDialog
-  }
-  render(createElement(Harness))
-  await waitFor(() => expect(result.current.loading).toBe(false))
-  return { result }
+  const hook = renderHook(() => useCrewLinks("ws1"))
+  await waitFor(() => expect(hook.result.current.loading).toBe(false))
+  return hook
 }
 
 beforeEach(() => {
@@ -50,29 +42,43 @@ beforeEach(() => {
 // The write path the Crew links page shares across its three views — moved
 // from the old settings card with its guarantees intact.
 describe("useCrewLinks writes", () => {
+  it("unlink uses the shared confirmation, never window.confirm", async () => {
+    serve([conn("c-eng", "c-ops", "bidirectional")])
+    const confirm = vi.fn(() => true)
+    vi.stubGlobal("confirm", confirm)
+    const { result } = await mount()
+    await act(() => result.current.setPair(ENG, OPS, "none"))
+    expect(confirm).not.toHaveBeenCalled()
+    expect(writes()).toHaveLength(0)
+    expect(result.current.pendingUnlink).toEqual({ self: ENG, other: OPS })
+  })
+
   it("unlinks by deleting the stored row with its version, once confirmed", async () => {
     serve([conn("c-eng", "c-ops", "bidirectional")])
     const { result } = await mount()
-    let done: Promise<boolean> = Promise.resolve(false)
-    act(() => { done = result.current.setPair(ENG, OPS, "none") })
-    const dialog = await screen.findByRole("alertdialog", { name: "Unlink Engineering and Ops?" })
-    expect(dialog).toHaveTextContent("Agents will no longer be able to hand work between them.")
-    expect(writes()).toHaveLength(0)
-    fireEvent.click(within(dialog).getByRole("button", { name: "Unlink" }))
-    await act(async () => { expect(await done).toBe(true) })
+    await act(() => result.current.setPair(ENG, OPS, "none"))
+    await act(() => result.current.confirmUnlink())
     expect(writes()).toHaveLength(1)
     expect(String(writes()[0][0])).toContain("/crew-connections/cc-c-eng-c-ops?workspace_id=ws1&expected_version=1")
+    expect(result.current.pendingUnlink).toBeNull()
   })
 
-  it("does not unlink when the confirmation is declined", async () => {
+  it("does not unlink when the confirmation is cancelled", async () => {
     serve([conn("c-eng", "c-ops", "bidirectional")])
     const { result } = await mount()
-    let done: Promise<boolean> = Promise.resolve(true)
-    act(() => { done = result.current.setPair(ENG, OPS, "none") })
-    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Cancel" }))
-    await act(async () => { expect(await done).toBe(false) })
+    await act(() => result.current.setPair(ENG, OPS, "none"))
+    act(() => result.current.cancelUnlink())
     expect(writes()).toHaveLength(0)
-    expect(result.current.pending).toBe(false)
+    expect(result.current.pendingUnlink).toBeNull()
+  })
+
+  it("keeps the confirmation when the server refuses the unlink", async () => {
+    serve([conn("c-eng", "c-ops", "bidirectional")], (_u, init) => (init?.method === "DELETE" ? json({ detail: "Connection changed" }, 409) : undefined))
+    const { result } = await mount()
+    await act(() => result.current.setPair(ENG, OPS, "none"))
+    await act(async () => { await expect(result.current.confirmUnlink()).rejects.toThrow() })
+    expect(toast.error).toHaveBeenCalled()
+    expect(result.current.pendingUnlink).toEqual({ self: ENG, other: OPS })
   })
 
   it("re-points a link stored the other way round, carrying each side's file level", async () => {
