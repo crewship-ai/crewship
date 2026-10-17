@@ -40,7 +40,9 @@ export function Segmented<T extends string>({
           title={o.title}
           onClick={() => onChange(o.id)}
           className={cn(
-            "inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-label transition-colors",
+            // kit-tap: 44 px under a coarse pointer. The shell's touch rule
+            // skips role="radio" (meant for drawn radios), so opt in here.
+            "kit-tap inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-label transition-colors",
             value === o.id ? "bg-card font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
           )}
         >
