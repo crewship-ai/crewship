@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { SkillsExplorer } from "@/components/features/skills/skills-explorer"
-import { EMPTY_SKILL_FILTERS, type SkillRow, type SkillsAgent, type SkillsCrew } from "@/components/features/skills/skills-model"
+import { EMPTY_SKILL_FILTERS, type SkillFilters, type SkillRow, type SkillsAgent, type SkillsCrew } from "@/components/features/skills/skills-model"
 
 vi.mock("@/components/ui/agent-avatar", () => ({ AgentAvatar: () => <span /> }))
 
@@ -20,43 +20,55 @@ const holder = (id: string, slug: string, crew: string) => ({
 const base = { name: "", display_name: null, description: null, version: null, author: null, source: "BUNDLED", icon: null, scan_status: "CLEAN", verification: "VERIFIED" }
 const skills: SkillRow[] = [
   { ...base, id: "s1", slug: "s1", category: "CODING", installed_on: [holder("a-riley", "riley", "c-ops"), holder("a-jamie", "jamie", "c-sales")] },
-  { ...base, id: "s2", slug: "s2", category: "DEVOPS", installed_on: [holder("a-riley", "riley", "c-ops")] },
+  { ...base, id: "s2", slug: "s2", category: "DEVOPS", source: "CUSTOM", homepage: "https://github.com/acme/skills", installed_on: [holder("a-riley", "riley", "c-ops")] },
   { ...base, id: "s3", slug: "s3", category: "DESIGN", installed_on: [] },
 ]
 
-function renderExplorer(onChange = vi.fn(), filters = EMPTY_SKILL_FILTERS) {
-  render(<SkillsExplorer skills={skills} agents={agents} crews={crews} proposedCount={1} filters={filters} onChange={onChange} />)
+function renderExplorer(over: Partial<SkillFilters> = {}, canReview = true) {
+  const onChange = vi.fn()
+  render(<SkillsExplorer skills={skills} agents={agents} crews={crews} proposedCount={1} canReview={canReview} filters={{ ...EMPTY_SKILL_FILTERS, ...over }} onChange={onChange} />)
   return onChange
 }
 
 describe("SkillsExplorer", () => {
-  it("counts the View buckets and the proposals", () => {
+  it("lists the v67 views with counts, Proposed only for reviewers", () => {
     renderExplorer()
-    expect(within(screen.getByTestId("skills-view-all")).getByText("3")).toBeDefined()
-    expect(within(screen.getByTestId("skills-view-assigned")).getByText("2")).toBeDefined()
-    expect(within(screen.getByTestId("skills-view-unassigned")).getByText("1")).toBeDefined()
-    expect(within(screen.getByTestId("skills-view-proposed")).getByText("1")).toBeDefined()
+    const views = screen.getByRole("navigation", { name: "Skill views" })
+    expect(views.textContent).toMatch(/Library3On agents2Not on any agent1Needs attention0Proposed by agents1Archived0/)
+    cleanup()
+    renderExplorer({}, false)
+    expect(screen.queryByText("Proposed by agents")).not.toBeInTheDocument()
   })
 
-  it("lists each crew's agents with how many skills they hold", () => {
-    renderExplorer()
-    expect(within(screen.getByTestId("skills-agent-riley")).getByText("2")).toBeDefined()
-    expect(within(screen.getByTestId("skills-agent-jamie")).getByText("1")).toBeDefined()
+  it("orders the panel: active filters, then Views, then the facets", () => {
+    renderExplorer({ agentId: "a-riley" })
+    const text = document.body.textContent ?? ""
+    expect(text.indexOf("Agent: Riley")).toBeLessThan(text.indexOf("Views"))
+    expect(text.indexOf("Views")).toBeLessThan(text.indexOf("Source"))
+    for (const facet of ["Source", "Domain", "Trust", "Status", "Used by crew"]) expect(screen.getByText(facet)).toBeInTheDocument()
+    expect(screen.queryByText("Crews & agents")).not.toBeInTheDocument()
+    expect(screen.queryByText("Folders")).not.toBeInTheDocument()
   })
 
-  it("filters by agent, and by crew", () => {
-    const onChange = renderExplorer()
-    fireEvent.click(screen.getByTestId("skills-agent-jamie"))
-    expect(onChange).toHaveBeenLastCalledWith({ agentId: "a-jamie", crewId: "c-sales" })
+  it("the agent chip removes the agent filter", () => {
+    const onChange = renderExplorer({ agentId: "a-riley" })
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter Agent: Riley" }))
+    expect(onChange).toHaveBeenCalledWith({ agentId: null })
+  })
+
+  it("a facet picks one value and picking it again clears it", () => {
+    const onChange = renderExplorer({ crewId: "c-ops" })
+    // A facet with a pick starts open.
     fireEvent.click(screen.getByTestId("skills-crew-ops"))
-    expect(onChange).toHaveBeenLastCalledWith({ crewId: "c-ops", agentId: null })
+    expect(onChange).toHaveBeenLastCalledWith({ crewId: null })
+    fireEvent.click(screen.getByTestId("skills-crew-sales"))
+    expect(onChange).toHaveBeenLastCalledWith({ crewId: "c-sales" })
   })
 
-  it("shows only the domains in use", () => {
-    renderExplorer()
-    expect(screen.getByText("Coding")).toBeDefined()
-    expect(screen.getByText("DevOps")).toBeDefined()
-    expect(screen.getByText("Design")).toBeDefined()
-    expect(screen.queryByText("Finance")).toBeNull()
+  it("Source shows where skills come from", () => {
+    renderExplorer({ source: "acme/skills" })
+    // The facet row and the active chip.
+    expect(screen.getAllByText("acme/skills")).toHaveLength(2)
+    expect(screen.getByText("Crewship built-in")).toBeInTheDocument()
   })
 })
