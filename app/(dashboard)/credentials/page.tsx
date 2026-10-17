@@ -12,7 +12,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Card } from "@/components/ui/card"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { SecondaryPanel, useCloseSecondaryPanelSheet } from "@/components/layout/secondary-panel"
 import { AddSecretSheet } from "@/components/features/credentials/add-secret-sheet"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
 import { CredentialsSidebar } from "@/components/features/credentials/credentials-sidebar"
@@ -42,7 +42,6 @@ import {
 import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useIsMobile } from "@/hooks/use-mobile"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
 import {
   EMPTY_CREDENTIAL_FILTERS,
@@ -142,16 +141,10 @@ export default function CredentialsPage() {
   // slot step and the seat's Assign use.
   const canBind = abilities.can("manage", "Credential")
   const [filters, setFilters] = React.useState<CredentialFilters>(EMPTY_CREDENTIAL_FILTERS)
-  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
-  // On a phone the rail is 280px of a 390px screen — it does not sit BESIDE the
-  // content, it replaces it, and the detail beside it renders one word per line.
-  // Collapse it when the viewport narrows and let it open as an overlay instead
-  // of a column, so the page keeps the full width it was designed for. Same
-  // treatment /routines gives its explorer.
-  const isMobile = useIsMobile()
-  React.useEffect(() => {
-    if (isMobile) setSidebarCollapsed(true)
-  }, [isMobile])
+  // The rail is the shared SecondaryPanel ("vault"): a column on desktop that
+  // remembers its collapse, a bottom sheet from the top bar on a phone. A pick
+  // that opens a credential closes the sheet, as on /routines.
+  const closePanelSheet = useCloseSecondaryPanelSheet()
   const [sortKey, setSortKey] = React.useState<SortKey>("last_used")
   const [selectedDetailCredential, setDetailCredential] = React.useState<Credential | null>(null)
   // Selection identifies the row; refreshed lists own its current metadata.
@@ -563,6 +556,25 @@ export default function CredentialsPage() {
   // asking the user to do something else.
   const showSidebar = !loadError
 
+  // The selection bar's green, as in Members and Admin › People. It is the
+  // panel footer now (PNL-02), not a bar floating over the page.
+  const bulkBar = canDelete && selectMode && selectedIds.size > 0 ? (
+    <div role="toolbar" aria-label="Change the selected credentials" data-slot="credentials-bulk"
+      className={cn(selectionBar, "w-full whitespace-nowrap")}>
+      <span className="px-1 font-medium tabular-nums">{selectedIds.size} selected</span>
+      <Button type="button" variant="outline" size="sm" className={cn(selectionBarButton, "text-destructive hover:text-destructive")} onClick={() => setBulkDeleteOpen(true)}>
+        <Trash2 />Delete
+      </Button>
+      <Button type="button" variant="ghost" size="sm" className={cn(selectionBarButton, "border-transparent px-2.5")}
+        onClick={() => {
+          setSelectedIds(new Set())
+          setSelectMode(false)
+        }}>
+        Cancel
+      </Button>
+    </div>
+  ) : undefined
+
   /** Re-login: the wizard on the sign-in step, this seat's provider and mode chosen. */
   const relogin = (cred: Credential) => {
     const login = cred.login
@@ -582,32 +594,15 @@ export default function CredentialsPage() {
     <div className="flex flex-col h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] bg-background">
       {subBar}
       <div className="relative flex flex-1 overflow-hidden">
-        {/* Tapping away closes the overlay. Without it the only way back to the
-            content on a phone is the collapse button, which the rail is
-            covering. */}
-        {showSidebar && isMobile && !sidebarCollapsed && (
-          <button
-            type="button"
-            aria-label="Close credential list"
-            onClick={() => setSidebarCollapsed(true)}
-            className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
-          />
-        )}
         {showSidebar && (
-          <aside
-            className={cn(
-              "shrink-0 border-r border-foreground/[0.06] bg-card transition-all",
-              sidebarCollapsed ? "w-9 overflow-hidden" : "w-[280px]",
-              // The collapsed rail stays in flow at both sizes, so the expand
-              // button never moves.
-              isMobile && !sidebarCollapsed && "fixed inset-y-0 left-0 z-50 pt-[env(safe-area-inset-top)] shadow-2xl",
-            )}
+          <SecondaryPanel
+            id="vault"
+            label="Vault"
+            // Bulk actions belong to the rows they act on, which are this
+            // panel's list: the bar sits in its footer while rows are ticked.
+            footer={bulkBar}
           >
-            {sidebarCollapsed ? (
-              <div className="flex h-full flex-col items-center pt-1.5">
-                <SidebarCollapseButton collapsed onToggle={() => setSidebarCollapsed(false)} />
-              </div>
-            ) : tab === "providers" ? (
+            {tab === "providers" ? (
               <ProviderLoginsSidebar
                 filters={loginFilters}
                 onFiltersChange={setLoginFilters}
@@ -615,7 +610,6 @@ export default function CredentialsPage() {
                 providers={loginProviders}
                 modes={loginModes}
                 owners={loginOwners}
-                onToggleCollapse={() => setSidebarCollapsed(true)}
               />
             ) : (
               <CredentialsSidebar
@@ -651,7 +645,6 @@ export default function CredentialsPage() {
                 }
                 selectedIds={selectedIds}
                 onToggleSelected={canDelete ? toggleSelected : undefined}
-                onToggleCollapse={() => setSidebarCollapsed(true)}
                 // The rail IS the list now — the table under the dashboard was
                 // the same names a second time. Which is why the sort control
                 // moved here with it: the order belongs to the list, and the
@@ -671,12 +664,12 @@ export default function CredentialsPage() {
                   setDetailCredential(cred)
                   setDetailOpen(true)
                   // Picking a credential on a phone means "show me that", and
-                  // the overlay covering it would be the opposite.
-                  if (isMobile) setSidebarCollapsed(true)
+                  // the sheet covering it would be the opposite.
+                  closePanelSheet()
                 }}
               />
             )}
-          </aside>
+          </SecondaryPanel>
         )}
 
         {/* The detail owns its own scroll and padding — it is a full page in
@@ -742,7 +735,7 @@ export default function CredentialsPage() {
               if (!cred) return
               setDetailCredential(cred)
               setDetailOpen(true)
-              if (isMobile) setSidebarCollapsed(true)
+              closePanelSheet()
             }}
             onSelectStatus={(status) => setLoginFilters((f) => ({ ...f, status }))}
             onAdd={canBind ? () => openAdd({ itemType: "PROVIDER_LOGIN" }) : undefined}
@@ -857,24 +850,6 @@ export default function CredentialsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {canDelete && selectMode && selectedIds.size > 0 && (
-        // The selection bar's green, as in Members and Admin › People.
-        <div role="toolbar" aria-label="Change the selected credentials" data-slot="credentials-bulk"
-          className={cn(selectionBar, "fixed bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap max-sm:bottom-[calc(var(--mobile-tab-bar-h,0px)+0.75rem)]")}>
-          <span className="px-1 font-medium tabular-nums">{selectedIds.size} selected</span>
-          <Button type="button" variant="outline" size="sm" className={cn(selectionBarButton, "text-destructive hover:text-destructive")} onClick={() => setBulkDeleteOpen(true)}>
-            <Trash2 />Delete
-          </Button>
-          <Button type="button" variant="ghost" size="sm" className={cn(selectionBarButton, "border-transparent px-2.5")}
-            onClick={() => {
-              setSelectedIds(new Set())
-              setSelectMode(false)
-            }}>
-            Cancel
-          </Button>
-        </div>
-      )}
 
       {workspaceId && editCredential && (
         <EditCredentialDialog
