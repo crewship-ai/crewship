@@ -210,7 +210,7 @@ export function CrewOverview({
 
         <CrCard title="Works on" concept="routines" data-testid="crew-works-on" id="crew-works-on">
           <CrLine title="Routines" sub="Recurring work this crew runs" right={<Button asChild variant="ghost" size="sm"><Link href={entityHref({ kind: "routines", crewSlug: crew.slug })}>Open</Link></Button>} />
-          <CrLine title="Issues" sub={crew.issue_prefix ? `${crew.issue_prefix}-1, ${crew.issue_prefix}-2 …` : "Issues assigned to this crew"} right={<Button asChild variant="ghost" size="sm"><Link href={entityHref({ kind: "issues", crewSlug: crew.slug })}>Open</Link></Button>} />
+          <CrLine title="Issues" sub={crew.issue_prefix ? `${crew.issue_prefix}-1, ${crew.issue_prefix}-2 …` : "Issues assigned to this crew"} right={<Button asChild variant="ghost" size="sm"><Link href={entityHref({ kind: "issues", crewId: crew.id })}>Open</Link></Button>} />
         </CrCard>
       </div>
     </div>

@@ -18,7 +18,7 @@ import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
 import { CanvasShell, CanvasTabPanel, CanvasTabs, useEntityFetch, usePatchEntity } from "./canvas-base"
 import { CrewPageBar } from "./crews-bar"
 import { useCrewsCreate } from "./crews-create"
-import { CREW_TABS, type CrewTab } from "./crews-tabs"
+import { CREW_TABS, type AgentTab, type CrewTab } from "./crews-tabs"
 import { crewStatus } from "./crews-panel-model"
 import { CrewHeader } from "./crew-header"
 import { CrewOverview } from "./crew-overview"
@@ -28,6 +28,7 @@ import { CrewEnvironment } from "./crew-environment"
 import { CrewSettings } from "./crew-settings"
 import { HireDialog, RehireDialog } from "./crew-hire-dialog"
 import { MemoryWorkspace } from "./memory-workspace"
+import { CrewMemoryCards } from "./crew-memory"
 import { deriveCrewNeeds, withDevcontainerFeature, type CrewNeed, type NeedGap } from "./crew-needs"
 import type { ContainerStatus } from "./bottom-panel/types"
 import type { AgentSummary, CrewIntegration, CrewRecord, MissionData } from "./crew-canvas-tabs/types"
@@ -41,9 +42,12 @@ export interface CrewCanvasProps {
   onTabChange: (tab: CrewTab) => void
   onCrewChanged: () => void
   onLoaded?: (crew: CrewRecord) => void
-  onSelectAgent: (slug: string) => void
+  /** Opens an agent, on `tab` when given (Memory › Open). */
+  onSelectAgent: (slug: string, tab?: AgentTab) => void
   /** Opens the dock on the Terminal tab for this crew. */
   onOpenTerminal: () => void
+  /** Opens the dock on the Files tab (Environment › Folders). */
+  onOpenFiles?: () => void
   /** Back to the crews list after a delete or from "not found". */
   onBackToCrews: () => void
   /** The layout's one provisioning poller; the canvas does not start its own. */
@@ -65,6 +69,7 @@ export function CrewCanvas({
   onLoaded,
   onSelectAgent,
   onOpenTerminal,
+  onOpenFiles,
   onBackToCrews,
   provisioning: provisioningProp,
 }: CrewCanvasProps) {
@@ -318,18 +323,36 @@ export function CrewCanvas({
             </>
           )}
           {tab === "tools" && <CrewTools workspaceId={workspaceId} crewSlug={crew.slug} agents={agents} integrations={integrations} />}
-          {tab === "env" && <CrewEnvironment workspaceId={workspaceId} crew={crew} canEdit={canUpdate} onSaved={() => { void fetchCrew(); onCrewChanged() }} />}
-          {tab === "memory" && <MemoryWorkspace key={crew.id} workspaceId={workspaceId} crewId={crew.id} />}
+          {tab === "env" && (
+            <CrewEnvironment
+              workspaceId={workspaceId}
+              crew={crew}
+              canEdit={canUpdate}
+              isAdmin={isAdmin}
+              containers={containers}
+              runningAgents={agents.filter((a) => a.status === "RUNNING").length}
+              onRestartAgents={() => setConfirmRestart(true)}
+              onOpenTerminal={onOpenTerminal}
+              onOpenFiles={onOpenFiles}
+              onContainersChanged={() => setTick((n) => n + 1)}
+              patch={patch}
+              onSaved={() => { void fetchCrew(); onCrewChanged() }}
+            />
+          )}
+          {tab === "memory" && (
+            <>
+              <CrewMemoryCards workspaceId={workspaceId} crewId={crew.id} agents={agents.filter((a) => !a.expired_at)} onOpenAgent={(slug) => onSelectAgent(slug, "memory")} />
+              <MemoryWorkspace key={crew.id} workspaceId={workspaceId} crewId={crew.id} />
+            </>
+          )}
           {tab === "settings" && (
             <CrewSettings
               workspaceId={workspaceId}
               crew={crew}
               agents={agents}
-              integrations={integrations}
               patch={patch}
               onApplyAvatarStyle={(reset) => setAvatarConfirm({ reset })}
               onDelete={isAdmin ? () => setConfirmDelete(true) : undefined}
-              onSaved={() => { void fetchCrew(); onCrewChanged() }}
             />
           )}
         </CanvasTabPanel>

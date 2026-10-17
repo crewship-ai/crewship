@@ -20,6 +20,8 @@ export function useWorkspaceResource<T>(url: string, revision = 0, cache = false
   useEffect(() => {
     const controller = new AbortController()
     setState({ key: url })
+    // An empty url is "nothing to read yet" (a note without history).
+    if (!url) return () => controller.abort()
     const fetchResource = async () => {
       const response = await apiFetch(url, cache ? undefined : { signal: controller.signal })
       if (!response.ok) throw new Error(`Could not load data (${response.status}).`)
@@ -101,7 +103,7 @@ function DocumentHistory({ path, workspaceId }: { path: string; workspaceId: str
   const [open, setOpen] = useState(false)
   return <details className="mt-6 border-t border-border pt-4" onToggle={(event) => setOpen(event.currentTarget.open)}><summary className="cursor-pointer text-sm">Version history</summary>{open && <HistoryEntries path={path} workspaceId={workspaceId} />}</details>
 }
-function HistoryEntries({ path, workspaceId }: { path: string; workspaceId: string }) {
+export function HistoryEntries({ path, workspaceId }: { path: string; workspaceId: string }) {
   const [version, setVersion] = useState<string | null>(null)
   const { data, error } = useWorkspaceResource<{ entries?: { id: string; written_at: string; written_by: string; sha256: string }[]; projection?: { state: string } }>(`/api/v1/memory/versions?workspace_id=${encodeURIComponent(workspaceId)}&path=${encodeURIComponent(path)}`)
   return <div className="mt-3 text-sm text-muted-foreground">{error ? <p role="alert">History could not be loaded. Current content is unaffected.</p> : !data ? "Loading history…" : data.projection?.state === "unavailable" ? "History is unavailable on this server. You are reading the current file above." : data.projection?.state === "unrecorded" ? "This kind of note does not have version history." : !data.entries?.length ? "No recorded versions. This does not mean the note was never written." : <ul className="space-y-2">{data.entries.map((entry) => <li key={entry.id}><button className="text-primary underline" onClick={() => setVersion(entry.sha256)}>{new Date(entry.written_at).toLocaleString()} · {entry.written_by}</button></li>)}</ul>}{version && <RecordedVersion key={version} sha={version} path={path} workspaceId={workspaceId} />}</div>
