@@ -118,8 +118,14 @@ test.describe("desktop", () => {
     const agent = await firstAgentOf(page, crew)
     await page.goto(`/crews?agent=${agent}&crew=${crew}&tab=persona`)
     await expect(page.getByRole("tab", { name: "Instructions" })).toHaveAttribute("aria-selected", "true")
-    await page.locator("header").first().getByRole("link", { name: "Activity" }).click()
-    await expect(page).toHaveURL(/\/activity\?walk=agent%3A/)
+    const activity = page.locator("header").first().getByRole("link", { name: "Activity" })
+    // The link names the agent by id; the Activity page may rewrite it to its
+    // own canonical filter (?agent=<id>), which must still be this agent.
+    const href = (await activity.getAttribute("href"))!
+    const id = decodeURIComponent(/walk=agent%3A([^&]+)/.exec(href)?.[1] ?? "")
+    expect(id).not.toBe("")
+    await activity.click()
+    await expect(page).toHaveURL(new RegExp(`/activity\\?(?:.*&)?(?:agent=${id}|walk=agent%3A${id})(?:&|$)`))
   })
 
   test("K09 legacy ?tab=skills and ?tab=credentials open Tools and access", async ({ page }) => {
@@ -149,7 +155,9 @@ test.describe("desktop", () => {
     await page.goto("/crews?new=crew")
     const dialog = page.getByRole("dialog", { name: /New crew/ })
     await expect(dialog).toBeVisible()
-    expect(Math.round((await dialog.boundingBox())!.width)).toBe(640)
+    // offsetWidth, not the bounding box: the box is measured mid zoom-in
+    // (scale 0.95 → 1) and reads 636–638 px while the surface is 640 wide.
+    expect(await dialog.evaluate((el) => (el as HTMLElement).offsetWidth)).toBe(640)
     await expect(page).not.toHaveURL(/new=crew/)
     await expect(dialog.getByRole("radiogroup", { name: "Start with" })).toBeVisible()
     await expect(dialog.getByTestId("crew-icon-picker")).toBeVisible()
@@ -238,7 +246,6 @@ test.describe("phone", () => {
     await page.goto("/crews?new=crew")
     const dialog = page.getByRole("dialog", { name: /New crew/ })
     await expect(dialog).toBeVisible()
-    const b = (await dialog.boundingBox())!
-    expect(Math.round(b.width)).toBe(390)
+    expect(await dialog.evaluate((el) => (el as HTMLElement).offsetWidth)).toBe(390)
   })
 })

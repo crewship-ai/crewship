@@ -6,11 +6,15 @@ import { storageFilePath } from "./global-setup"
 //
 // Drives the actual UI in Chromium against a live backend (dev server).
 // Covers:
-//   1. Empty crew flow (Identity → Lineup=Start empty → Review → Create)
-//   2. Browse template flow (Identity → Lineup=Template → Review → Create)
+//   1. Empty crew flow (Name, Start with = Empty crew → Agents → Environment → Create)
+//   2. Browse template flow (covered by unit tests, see below)
 //   3. Step strip jump-back navigation
-//   4. Environment disclosure: image and tooling, sizing folded, no MCP
+//   4. Environment step: image and tooling, sizing folded, no MCP
 //   5. Default environment without an extra step
+//
+// Harbor 2 (#3398): New crew opens from the top bar's New menu, picks icon and
+// colour inline and asks how to start; the steps are Name → (Team | Template |
+// File | Agents) → Environment.
 //
 // Each test creates a crew with a unique slug (timestamp-suffixed) so reruns
 // don't collide on the workspace's UNIQUE(slug) constraint.
@@ -26,13 +30,14 @@ function uniqueSlug(prefix: string): string {
   return `${prefix}-${ts}-${rand}`
 }
 
-async function openCreateCrew(page: import("@playwright/test").Page) {
+async function openCreateCrew(page: import("@playwright/test").Page, start: "Empty crew" | "From a template" | null = "Empty crew") {
   await page.goto("/crews")
-  // Sub-bar exposes a "+ Crew" button; click opens the wizard.
-  await page.getByRole("button", { name: /^Crew$/ }).click()
+  // The top bar's one primary action: New ▾ → New crew.
+  await page.locator("header").first().getByRole("button", { name: "New" }).click()
+  await page.getByRole("menuitem", { name: /^New crew/ }).click()
   await expect(page.getByRole("dialog")).toBeVisible({ timeout: TIMEOUT })
-  // Dialog title is "New crew — step X of 3" — match the prefix only.
-  await expect(page.getByText(/New crew/)).toBeVisible()
+  await expect(page.getByRole("dialog").getByText(/New crew/).first()).toBeVisible()
+  if (start) await page.getByRole("radio", { name: new RegExp(`^${start}`) }).click()
 }
 
 // Serialize this suite — it creates real crews against a shared workspace
@@ -77,13 +82,13 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await page.getByPlaceholder("engineering", { exact: true }).fill(slug)
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    // Step 2 — Lineup → Start empty
+    // Step 2 — Agents: an empty crew has none yet.
     await expect(page.getByText(/step 2 of 3/i).first()).toBeVisible()
-    await page.getByRole("button", { name: /Start empty/ }).click()
+    await expect(page.getByTestId("crew-start-empty")).toBeVisible()
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    // Step 3 — Review; environment remains at its defaults.
-    await expect(page.getByLabel("Step 3: Review")).toHaveAttribute("aria-current", "step")
+    // Step 3 — Environment; it remains at its defaults.
+    await expect(page.getByLabel("Step 3: Environment")).toHaveAttribute("aria-current", "step")
 
     // Review
     await expect(page.getByRole("button", { name: /Create crew/ })).toBeVisible()
@@ -118,8 +123,8 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     // Now on Step 2; Step 1 indicator should be clickable (completed = green check).
     await expect(page.getByText(/step 2 of 3/i).first()).toBeVisible()
 
-    // Click the Step 1 nav button (aria-label "Step 1: Identity").
-    await page.getByLabel("Step 1: Identity").click()
+    // Click the Step 1 nav button (aria-label "Step 1: Name").
+    await page.getByLabel("Step 1: Name").click()
 
     // Back on Step 1 — name preserved.
     await expect(page.getByText(/step 1 of 3/i).first()).toBeVisible()
@@ -131,11 +136,9 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
 
     await page.getByPlaceholder("Engineering", { exact: true }).fill("Container Vis")
     await page.getByRole("button", { name: /Continue/ }).click()
-    await page.getByRole("button", { name: /Start empty/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    await page.getByRole("button", { name: /Environment and runtime/ }).click()
-    // Optional environment contains the same image and tooling controls.
+    // The Environment step carries the same image and tooling controls.
     await expect(page.getByText("Base image").first()).toBeVisible()
     await expect(page.getByText(/^Base Image$/i).first()).toBeVisible({ timeout: TIMEOUT })
 
@@ -183,11 +186,9 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
 
     await page.getByPlaceholder("Engineering", { exact: true }).fill("Reachable")
     await page.getByRole("button", { name: /Continue/ }).click()
-    await page.getByRole("button", { name: /Start empty/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    await expect(page.getByLabel("Step 3: Review")).toHaveAttribute("aria-current", "step")
-    await page.getByRole("button", { name: /Environment and runtime/ }).click()
+    await expect(page.getByLabel("Step 3: Environment")).toHaveAttribute("aria-current", "step")
 
     // This replaces a test that scrolled to find the MCP card. The step used
     // to stack three tall sections and cap the tallest at 280px so the last
@@ -225,7 +226,9 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     // stacked on this one, then an inline block on this step; it is a PANEL
     // now — the surface swaps, the header says where you are, and the footer
     // commits — which is what New project already did.
-    await page.getByLabel("Pick icon and color").click()
+    // Icon and colour are picked inline; "More icons…" opens the full catalogue.
+    await page.getByRole("radio", { name: "violet" }).click()
+    await page.getByRole("button", { name: /More icons/ }).click()
     await expect(page.getByText("Icon — new crew")).toBeVisible({ timeout: TIMEOUT })
     await expect(page.getByPlaceholder(/search icons/i)).toBeVisible({ timeout: TIMEOUT })
     // Still exactly one dialog — that was the whole point of the change.
@@ -236,16 +239,14 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
 
     await page.getByRole("button", { name: /Continue/ }).click()
 
-    // Step 2 — Lineup → Empty (template flow has its own seed-race issues)
+    // Step 2 — Agents (empty; the template flow has its own seed-race issues)
     await expect(page.getByText(/step 2 of 3/i).first()).toBeVisible()
-    await page.getByRole("button", { name: /Start empty/ }).click()
     await page.getByRole("button", { name: /Continue/ }).click()
 
     // Step 3 — Container: turn on the allowlist, list a host, and open the
     // sizing fold to pick a non-default memory and TTL. Sizing is folded by
     // default now, which is the point of the click.
-    await expect(page.getByLabel("Step 3: Review")).toHaveAttribute("aria-current", "step")
-    await page.getByRole("button", { name: /Environment and runtime/ }).click()
+    await expect(page.getByLabel("Step 3: Environment")).toHaveAttribute("aria-current", "step")
     await page.getByRole("radio", { name: /^Selected hosts/ }).check()
     const domainInput = page.locator('input[placeholder*="github.com"]').first()
     await domainInput.fill("github.com")
@@ -271,9 +272,7 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await twentyFourH.click()
     await expect(twentyFourH).toHaveClass(/border-primary/)
 
-    await page.getByRole("button", { name: /Environment and runtime/ }).click()
-
-    // Review reflects the environment values without an extra step.
+    // The step's summary reflects the environment values without an extra step.
     await expect(page.getByRole("button", { name: /Create crew/ })).toBeVisible()
     await expect(page.getByText(name)).toBeVisible()
     await expect(page.getByText("8 GB")).toBeVisible()
