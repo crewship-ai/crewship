@@ -2,7 +2,7 @@ import type { InboxItem } from "@/hooks/use-inbox"
 import type { ApprovalRow } from "@/lib/types/approvals"
 import type { Mission } from "@/lib/types/mission"
 
-import { categoryOf, payloadString, subjectOf } from "../inbox/inbox-derive"
+import { categoryOf, payloadString, since, subjectOf } from "../inbox/inbox-derive"
 import type { InboxV2Entry } from "./inbox-v2-types"
 
 /**
@@ -268,6 +268,8 @@ export type InboxV2DeadlineKey = "hour" | "today" | "none" | "soon"
 export interface InboxV2Filters {
   search: string
   type: InboxV2TypeKey | null
+  /** One of the four attention classes the bell also filters by. */
+  attention: InboxAttentionKey | null
   deadline: InboxV2DeadlineKey | null
   unreadOnly: boolean
   /** One crew, by id — a real field on every source (README §4: a filter has
@@ -278,6 +280,7 @@ export interface InboxV2Filters {
 export const EMPTY_INBOX_V2_FILTERS: InboxV2Filters = {
   search: "",
   type: null,
+  attention: null,
   deadline: null,
   unreadOnly: false,
   crew: null,
@@ -329,17 +332,20 @@ export function facetCounts(entries: InboxV2Entry[], now = Date.now()) {
   const type = {} as Record<InboxV2TypeKey, number>
   for (const t of INBOX_V2_TYPES) type[t.key] = 0
   const deadline: Record<InboxV2DeadlineKey, number> = { hour: 0, today: 0, none: 0, soon: 0 }
+  const attention: Record<InboxAttentionKey, number> = { decision: 0, input: 0, review: 0, repair: 0 }
   let unread = 0
   for (const entry of entries) {
     const t = entryType(entry)
     if (t) type[t] += 1
+    const a = entryAttention(entry)
+    if (a) attention[a] += 1
     const d = deadlineBucket(entry, now)
     if (d !== "later") deadline[d] += 1
     const dueAt = entry.deadlineAt ? Date.parse(entry.deadlineAt) : NaN
     if (Number.isFinite(dueAt) && dueAt >= now && dueAt - now <= 86_400_000) deadline.soon += 1
     if (entry.unread) unread += 1
   }
-  return { type, deadline, unread, total: entries.length }
+  return { type, deadline, attention, unread, total: entries.length }
 }
 
 /**
@@ -391,6 +397,7 @@ export function filterEntries(
   return entries.filter((entry) => {
     if (filters.unreadOnly && !entry.unread) return false
     if (filters.type && entryType(entry) !== filters.type) return false
+    if (filters.attention && entryAttention(entry) !== filters.attention) return false
     if (filters.deadline === "soon") {
       const dueAt = entry.deadlineAt ? Date.parse(entry.deadlineAt) : NaN
       if (!Number.isFinite(dueAt) || dueAt < now || dueAt - now > 86_400_000) return false
@@ -412,6 +419,94 @@ export function sortEntries(entries: InboxV2Entry[]): InboxV2Entry[] {
     }
     return Date.parse(b.createdAt) - Date.parse(a.createdAt)
   })
+}
+
+/** "12m ago" → "12m": a row has room for the figure, not the sentence. */
+export function ageLabel(iso: string): string {
+  return since(iso).replace(/ ago$/, "")
+}
+
+/**
+ * The panel's View › Sort (Harbor 2). Urgency is the inbox's own order —
+ * decisions with a deadline first, nearest first, undated after them, updates
+ * last — so it is the default. Crew groups by the crew name the row shows
+ * (the caller resolves it; rows without a crew sort last) and keeps urgency
+ * inside a crew.
+ */
+export type InboxSort = "urgency" | "newest" | "crew"
+
+export const INBOX_SORTS: { key: InboxSort; label: string }[] = [
+  { key: "urgency", label: "Urgency (expires first)" },
+  { key: "newest", label: "Newest" },
+  { key: "crew", label: "Crew" },
+]
+
+export function sortInboxEntries(
+  entries: InboxV2Entry[],
+  sort: InboxSort,
+  crewName: (entry: InboxV2Entry) => string = () => "",
+): InboxV2Entry[] {
+  if (sort === "newest") return [...entries].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+  const urgent = sortEntries(entries)
+  if (sort === "urgency") return urgent
+  const rank = new Map(urgent.map((entry, index) => [entry.key, index]))
+  return urgent.sort((a, b) => {
+    const ac = crewName(a)
+    const bc = crewName(b)
+    if (ac !== bc) {
+      if (!ac) return 1
+      if (!bc) return -1
+      return ac.localeCompare(bc)
+    }
+    return (rank.get(a.key) ?? 0) - (rank.get(b.key) ?? 0)
+  })
+}
+
+/* --------------------------------------------------------------- attention */
+
+/**
+ * What a row asks of a person, in the four words the bell and the panel both
+ * filter by. The server writes it (`attention_class`, §12) on the kinds that
+ * adopted the contract; the rest are classed by their kind so the facet does
+ * not silently drop them. A row that asks nothing (an update, a resolved
+ * record) has no class.
+ */
+export type InboxAttentionKey = "decision" | "input" | "review" | "repair"
+
+export const INBOX_ATTENTION: { key: InboxAttentionKey; label: string; hint: string; tone: EntryKindPill["tone"] }[] = [
+  { key: "decision", label: "Decision", hint: "Approve or deny", tone: "warn" },
+  { key: "input", label: "Input needed", hint: "Agents wait for an answer", tone: "blue" },
+  { key: "review", label: "Review", hint: "Proposals and finished work", tone: "purple" },
+  { key: "repair", label: "Repair", hint: "Something broke", tone: "danger" },
+]
+
+export function entryAttention(entry: InboxV2Entry): InboxAttentionKey | null {
+  if (entry.historical) return null
+  if (entry.source === "approval") return "decision"
+  if (entry.source === "mission") return entry.task?.needs_review ? "review" : "repair"
+  const item = entry.inboxItem ?? entry.groupedItems?.[0]
+  if (!item || item.state === "resolved") return null
+  if (item.attention_class) return item.attention_class
+  switch (item.kind) {
+    case "waitpoint": return "decision"
+    case "run_needs_human": return "input"
+    case "memory_consolidation": return "review"
+    case "failed_run":
+    case "schedule_missed":
+    case "schedule_circuit_breaker_tripped":
+    case "webhook_fire_failed":
+    case "automation_enqueue_failed":
+      return "repair"
+    case "escalation": {
+      if (!isActionableInboxItem(item)) return null
+      const sub = payloadString(item, "kind")
+      if (sub === "skill_proposal" || sub === "routine_proposal") return "review"
+      const type = payloadString(item, "escalation_type")
+      if (type === "TEXT" || type === "CREDENTIAL") return "input"
+      return "decision"
+    }
+  }
+  return null
 }
 
 /** A schedule can be acted on, but it does not block a person or agent. */

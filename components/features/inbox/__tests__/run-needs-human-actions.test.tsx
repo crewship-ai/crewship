@@ -180,26 +180,38 @@ describe("take_over / dismiss", () => {
     expect(rec).toHaveTextContent("#14")
   })
 
-  it("confirms first when the action is irreversible, and does nothing on cancel", async () => {
-    // The DOM shim here ships no window.confirm at all, so this is an
-    // assignment rather than a spy.
+  it("confirms first in the shared dialog when the action is irreversible, and does nothing on cancel", async () => {
+    // Harbor 2 (POP-02): the browser's confirm() is gone; the kit's
+    // ConfirmDialog says what happens, in the page, and can be tested.
     const original = window.confirm
-    const confirm = vi.fn().mockReturnValue(false)
+    const confirm = vi.fn().mockReturnValue(true)
     window.confirm = confirm
     try {
       mount(card({ actions: [{ ...ACTIONS[2], irreversible: true }] }))
       fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
-      expect(confirm).toHaveBeenCalledTimes(1)
-      expect(confirm.mock.calls[0][0]).toMatch(/cannot be undone/i)
+      expect(confirm).not.toHaveBeenCalled()
+      const dialog = await screen.findByRole("alertdialog")
+      expect(dialog).toHaveTextContent(/cannot be undone/i)
       expect(onAct).not.toHaveBeenCalled()
 
-      confirm.mockReturnValue(true)
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+      expect(onAct).not.toHaveBeenCalled()
+
       onAct.mockResolvedValueOnce(receipt("dismiss"))
       fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
+      await screen.findByRole("alertdialog")
+      fireEvent.click(screen.getAllByRole("button", { name: "Dismiss" }).at(-1)!)
       await waitFor(() => expect(onAct).toHaveBeenCalledWith("dismiss", undefined))
     } finally {
       window.confirm = original
     }
+  })
+
+  it("docks the actions with the answer last, where the primary sits", () => {
+    mount(card())
+    const labels = screen.getAllByRole("button").map((b) => b.textContent?.trim())
+    expect(labels).toEqual(["Dismiss", "Take over", "Answer"])
   })
 })
 

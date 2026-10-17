@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, render } from "@testing-library/react"
 import LegacyInboxPage from "@/app/(dashboard)/inbox-v2/page"
 import { entryIdentity, filterInboxEntries } from "../inbox-entry-identity"
 import { EMPTY_INBOX_V2_FILTERS, inboxEntry, selectEntry } from "../inbox-v2-derive"
-import { InboxTriage } from "../inbox-v2-triage"
 import type { InboxLookup } from "../inbox-v2-types"
 import type { InboxItem } from "@/hooks/use-inbox"
 
@@ -45,9 +44,6 @@ describe("canonical client inbox", () => {
     expect(selectEntry([group], "request:group:curator:ops")).toBe(group)
     expect(selectEntry([entry], "request:missing")).toBeNull()
   })
-  it("does not claim all caught up when a source is unavailable", () => {
-    render(<InboxTriage action={[]} updates={[]} history={[]} lookup={lookup} incomplete onOpen={() => {}} onCrew={() => {}} />)
-    expect(screen.queryByText("All caught up")).toBeNull()
-    expect(screen.getByText("Partial information")).toBeTruthy()
-  })
+  // "does not claim all caught up when a source is unavailable" moved to
+  // inbox-v2-overview.test.tsx with the Overview that replaced the triage.
 })
