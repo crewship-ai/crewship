@@ -167,6 +167,9 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
   const picked = pool.find((r) => r.bundle_path === path) ?? null
   // The workspace a workspace/crew restore acts on, named explicitly.
   const restoreWs = workspaceFor(ctx, picked?.workspace_id)
+  // What a Replace asks to be typed back: the slug of the workspace it
+  // overwrites, or its id when the list does not name it.
+  const replaceSlug = ctx.workspaces.find((w) => w.id === restoreWs)?.slug ?? restoreWs ?? "replace"
   const steps = cliOnly ? CLI_STEPS : STEPS
   const current = cliOnly && held ? 6 : step
 
@@ -332,6 +335,8 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
                   ...report.warnings.map((w) => ({ tone: "warn" as const, text: w })),
                   ...(target !== "replace" ? [{ tone: "kept" as const, text: "Nothing that exists on this server is overwritten." }] : []),
                 ]}
+                // The most destructive restore: the workspace's slug typed back (POP-02).
+                typeToConfirm={target === "replace" ? replaceSlug : undefined}
                 confirmLabel="Restore" onConfirm={doRestore} />
             </>
           )}

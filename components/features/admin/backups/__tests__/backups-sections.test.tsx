@@ -523,7 +523,15 @@ describe("Recovery", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Restore…" }))
     const dialog = await screen.findByTestId("confirm-dialog")
     expect(within(dialog).getByText("Everything in the workspace now is replaced by the backup.")).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole("button", { name: "Restore" }))
+    // replace requires typed slug: the most destructive restore asks for the
+    // workspace's slug back before it runs.
+    const go = within(dialog).getByRole("button", { name: "Restore" })
+    expect(go).toBeDisabled()
+    const slug = dialog.querySelector("label code")?.textContent ?? ""
+    expect(slug).not.toBe("")
+    fireEvent.change(within(dialog).getByLabelText(/Type/), { target: { value: slug } })
+    expect(go).toBeEnabled()
+    fireEvent.click(go)
     expect(await screen.findByText("Restoring")).toBeInTheDocument()
     expect(screen.getByText("1 · Database")).toBeInTheDocument()
   })
