@@ -66,6 +66,25 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// (Router.DrainVerdicts). Otherwise `internal` is local to this func.
 	r.internalHandler = internal
 	internalAuth := func(next http.Handler) http.Handler { return internal.requireInternal(withHostChatOrigin(next)) }
+	// Crew transport authentication is only the outer boundary: the handler
+	// also validates the per-run bearer and a live human artifact delegation.
+	r.mux.Handle("GET /api/v1/internal/artifacts/{slug}/threads", internalAuth(http.HandlerFunc(r.pages.ListArtifactThreadsAgent)))
+	r.mux.Handle("POST /api/v1/internal/artifacts/{slug}/threads/{threadId}/comments", internalAuth(http.HandlerFunc(r.pages.ReplyArtifactThreadAgent)))
+	r.mux.Handle("POST /api/v1/internal/artifacts/{slug}/revisions", internalAuth(http.HandlerFunc(r.pages.PublishArtifactAgent)))
+	r.mux.Handle("POST /api/v1/internal/artifacts/{slug}/restore", internalAuth(http.HandlerFunc(r.pages.RestoreArtifactAgent)))
+	r.mux.Handle("GET /api/v1/internal/artifacts/{slug}/diff", internalAuth(http.HandlerFunc(r.pages.DiffArtifactAgent)))
+	r.mux.Handle("GET /api/v1/internal/artifacts/{slug}", internalAuth(http.HandlerFunc(r.pages.GetArtifactAgent)))
+	r.mux.Handle("GET /api/v1/internal/artifacts", internalAuth(http.HandlerFunc(r.pages.ListArtifactsAgent)))
+	r.mux.Handle("POST /api/v1/internal/artifacts", internalAuth(http.HandlerFunc(r.pages.CreateArtifactAgent)))
+	r.mux.Handle("GET /api/v1/internal/board-requests/{requestId}/preview", internalAuth(http.HandlerFunc(r.pages.GetBoardRequestPreviewAgent)))
+	r.mux.Handle("GET /api/v1/internal/board-requests/{requestId}/files/{fileId}", internalAuth(http.HandlerFunc(r.pages.GetBoardRequestAsset)))
+	r.mux.Handle("GET /api/v1/internal/board-requests/{requestId}/sources/{sourceId}", internalAuth(http.HandlerFunc(r.pages.GetBoardRequestAsset)))
+	r.mux.Handle("GET /api/v1/internal/artifact-requests/{requestId}", internalAuth(http.HandlerFunc(r.pages.GetArtifactRequestAgent)))
+	r.mux.Handle("POST /api/v1/internal/artifact-requests/{requestId}/updates", internalAuth(http.HandlerFunc(r.pages.UpdateArtifactRequestAgent)))
+	r.mux.Handle("GET /api/v1/internal/board-requests/{requestId}", internalAuth(http.HandlerFunc(r.pages.GetBoardRequestAgent)))
+	r.mux.Handle("POST /api/v1/internal/board-requests/{requestId}/mermaid", internalAuth(http.HandlerFunc(r.pages.PublishBoardRequestMermaid)))
+	r.mux.Handle("GET /api/v1/internal/boards/{slug}", internalAuth(http.HandlerFunc(r.pages.GetBoardAgent)))
+	r.mux.Handle("POST /api/v1/internal/boards/{slug}/batches", internalAuth(http.HandlerFunc(r.pages.PublishBoardAgent)))
 	// Pipeline save — sidecar→main forward. Trust comes from
 	// X-Internal-Token (sidecar attaches it via proxyIPCJSON);
 	// regular JWT-authed users hit the public surface instead.

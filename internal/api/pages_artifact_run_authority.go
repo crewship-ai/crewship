@@ -3,11 +3,15 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -90,4 +94,216 @@ func (h *PageHandler) checkArtifactRunPrincipal(ctx context.Context, a *artifact
 		return errors.New("artifact work attempt is not current")
 	}
 	return nil
+}
+
+// checkArtifactRunDelegation is shared by publication and discussion. A live
+// chat principal and a Page grant alone never authorize resource mutations.
+func (h *PageHandler) checkArtifactRunDelegation(ctx context.Context, pageID string, a *artifactRunAuthority) error {
+	if err := h.checkArtifactRunPrincipal(ctx, a); err != nil {
+		return err
+	}
+	q := h.pageAuthReader(ctx)
+	var expiry string
+	var revoked sql.NullString
+	if err := q.QueryRowContext(ctx, `SELECT expires_at,revoked_at,COALESCE(request_id,'') FROM page_artifact_run_delegations WHERE page_id=? AND run_id=? AND granted_by_user_id=?`, pageID, a.RunID, a.HumanUserID).Scan(&expiry, &revoked, &a.RequestID); err != nil {
+		return errors.New("artifact run delegation missing")
+	}
+	limit, e := time.Parse(time.RFC3339Nano, expiry) // tsformat:allow: parsing a stored expiry for time comparison; no timestamp is written
+	if e != nil || !time.Now().Before(limit) || revoked.Valid {
+		return errors.New("artifact run delegation expired or revoked")
+	}
+	if a.RequestID != "" {
+		var state, deadline, updated string
+		if err := q.QueryRowContext(ctx, `SELECT status,deadline_at,updated_at FROM page_artifact_requests WHERE id=? AND page_id=? AND run_id=? AND human_user_id=?`, a.RequestID, pageID, a.RunID, a.HumanUserID).Scan(&state, &deadline, &updated); err != nil || (state != "running" && state != "succeeded") {
+			return errors.New("artifact request is not active")
+		}
+		if state == "running" && !pageRequestWithinDeadline(deadline, updated, time.Now()) {
+			return errors.New("artifact request deadline elapsed")
+		}
+		var role, slug string
+		if q.QueryRowContext(ctx, `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, pageID, a.WorkspaceID).Scan(&slug) != nil {
+			return errors.New("artifact request page missing")
+		}
+		rec, err := h.loadPage(ctx, a.WorkspaceID, slug)
+		if err != nil {
+			return err
+		}
+		if q.QueryRowContext(ctx, `SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, a.WorkspaceID, a.HumanUserID).Scan(&role) != nil || !h.mayEditSpec(ctx, a.WorkspaceID, a.HumanUserID, role, rec) {
+			return errors.New("artifact request editor authority revoked")
+		}
+	}
+	return h.checkArtifactCreationPublication(ctx, pageID, a)
+}
+func (h *PageHandler) checkArtifactRun(ctx context.Context, pageID string, a *artifactRunAuthority) error {
+	if err := h.checkArtifactRunDelegation(ctx, pageID, a); err != nil {
+		return err
+	}
+	q := h.pageAuthReader(ctx)
+	// A delegation is explicit but it does not bypass Pages' agent grant.
+	var slug string
+	if err := q.QueryRowContext(ctx, `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, pageID, a.WorkspaceID).Scan(&slug); err != nil {
+		return err
+	}
+	rec, err := h.loadPage(ctx, a.WorkspaceID, slug)
+	if err != nil {
+		return err
+	}
+	if !h.agentMayEditSpec(ctx, a.WorkspaceID, rec, a.AgentID) {
+		return errors.New("agent page write grant required")
+	}
+	return nil
+}
+
+// The same writer fence used by publication orders grants/revocation and live ACL changes.
+func (h *PageHandler) fencedArtifactOwner(w http.ResponseWriter, r *http.Request) (*sql.Tx, *http.Request, *pageRecord, bool) {
+	rec, ok := h.artifactPage(w, r, true)
+	if !ok {
+		return nil, r, nil, false
+	}
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin artifact delegation", err)
+		return nil, r, nil, false
+	}
+	failed := func() (*sql.Tx, *http.Request, *pageRecord, bool) { tx.Rollback(); return nil, r, nil, false }
+	if _, err = tx.ExecContext(r.Context(), `UPDATE pages SET updated_at=updated_at WHERE id=? AND workspace_id=?`, rec.ID, WorkspaceIDFromContext(r.Context())); err != nil {
+		replyInternalError(w, h.logger, "fence artifact delegation", err)
+		return failed()
+	}
+	var role string
+	if err = tx.QueryRowContext(r.Context(), `SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID).Scan(&role); err != nil {
+		replyError(w, 403, "workspace membership required")
+		return failed()
+	}
+	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
+	ctx = context.WithValue(ctx, ctxRole, role)
+	r = r.WithContext(ctx)
+	rec, ok = h.artifactPage(w, r, true)
+	if !ok {
+		return failed()
+	}
+	if !h.isPageOwner(ctx, WorkspaceIDFromContext(ctx), UserFromContext(ctx).ID, rec) {
+		replyError(w, 403, "only the human page owner may manage publication delegation")
+		return failed()
+	}
+	return tx, r, rec, true
+}
+func (h *PageHandler) GrantArtifactRun(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if json.NewDecoder(r.Body).Decode(&body) != nil || body.RunID == "" {
+		replyError(w, 400, "run_id required")
+		return
+	}
+	tx, r, rec, ok := h.fencedArtifactOwner(w, r)
+	if !ok {
+		return
+	}
+	defer tx.Rollback()
+	var a artifactRunAuthority
+	var expires string
+	err := tx.QueryRowContext(r.Context(), `SELECT workspace_id,agent_id,crew_id,run_id,human_user_id,chat_id,message_id,expires_at FROM artifact_run_principals WHERE run_id=? AND workspace_id=? AND human_user_id=?`, body.RunID, WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID).Scan(&a.WorkspaceID, &a.AgentID, &a.CrewID, &a.RunID, &a.HumanUserID, &a.ChatID, &a.MessageID, &expires)
+	if err != nil {
+		replyError(w, 403, "verified human chat run required")
+		return
+	}
+	if !h.agentMayEditSpec(r.Context(), a.WorkspaceID, rec, a.AgentID) {
+		replyError(w, 403, "grant this agent page write access first")
+		return
+	}
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO page_artifact_run_delegations(page_id,run_id,granted_by_user_id,expires_at,granted_at) VALUES(?,?,?,?,?) ON CONFLICT(page_id,run_id) DO NOTHING`, rec.ID, a.RunID, a.HumanUserID, expires, tsformat.Format(time.Now()))
+	if err != nil {
+		replyInternalError(w, h.logger, "grant artifact run", err)
+		return
+	}
+	if err = h.checkArtifactRun(r.Context(), rec.ID, &a); err != nil {
+		replyError(w, 403, err.Error())
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit artifact delegation", err)
+		return
+	}
+	writeJSON(w, 201, map[string]any{"run_id": a.RunID, "expires_at": expires})
+}
+func (h *PageHandler) RevokeArtifactRun(w http.ResponseWriter, r *http.Request) {
+	tx, r, rec, ok := h.fencedArtifactOwner(w, r)
+	if !ok {
+		return
+	}
+	defer tx.Rollback()
+	_, err := tx.ExecContext(r.Context(), `UPDATE page_artifact_run_delegations SET revoked_at=?,revoked_by_user_id=? WHERE page_id=? AND run_id=?`, tsformat.Format(time.Now().UTC()), UserFromContext(r.Context()).ID, rec.ID, r.PathValue("runId"))
+	if err != nil {
+		replyInternalError(w, h.logger, "revoke artifact run", err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit artifact revocation", err)
+		return
+	}
+	w.WriteHeader(204)
+}
+func (h *PageHandler) artifactAgentRequest(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
+	ws, crew := InternalTokenWorkspaceFromContext(r.Context()), InternalTokenCrewFromContext(r.Context())
+	fields := strings.Fields(r.Header.Get("Authorization"))
+	if ws == "" || crew == "" || h.artifactMasterToken == "" || len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+		replyError(w, 403, "crew transport and run bearer required")
+		return r, false
+	}
+	tw, agent, run, valid := internaltoken.ValidateAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, ws, crew), fields[1])
+	if !valid || tw != ws {
+		replyError(w, 403, "invalid run capability")
+		return r, false
+	}
+	a := &artifactRunAuthority{WorkspaceID: ws, CrewID: crew, AgentID: agent, RunID: run}
+	var role string
+	err := h.db.QueryRowContext(r.Context(), `SELECT p.human_user_id,p.chat_id,p.message_id,m.role FROM artifact_run_principals p JOIN workspace_members m ON m.workspace_id=p.workspace_id AND m.user_id=p.human_user_id WHERE p.run_id=? AND p.workspace_id=? AND p.agent_id=? AND p.crew_id=?`, run, ws, agent, crew).Scan(&a.HumanUserID, &a.ChatID, &a.MessageID, &role)
+	if err != nil {
+		replyError(w, 403, "no_human_principal")
+		return r, false
+	}
+	ctx := context.WithValue(r.Context(), artifactRunKey{}, a)
+	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: a.HumanUserID})
+	ctx = context.WithValue(ctx, ctxWorkspaceID, ws)
+	ctx = context.WithValue(ctx, ctxRole, role)
+	return r.WithContext(ctx), true
+}
+
+func (h *PageHandler) PublishArtifactAgent(w http.ResponseWriter, r *http.Request) {
+	if checked, ok := h.artifactAgentRequest(w, r); ok {
+		h.writeArtifact(w, checked, false)
+	}
+}
+func (h *PageHandler) GetArtifactAgent(w http.ResponseWriter, r *http.Request) {
+	if checked, ok := h.artifactAgentRequest(w, r); ok {
+		h.GetArtifact(w, checked)
+	}
+}
+
+func artifactAgentID(r *http.Request) string {
+	if a, ok := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority); ok {
+		return a.AgentID
+	}
+	return ""
+}
+func artifactRunID(r *http.Request) string {
+	if a, ok := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority); ok {
+		return a.RunID
+	}
+	return ""
+}
+
+func artifactActorType(r *http.Request) journal.ActorType {
+	if artifactAgentID(r) != "" {
+		return journal.ActorAgent
+	}
+	return journal.ActorUser
+}
+func artifactActorID(r *http.Request, human string) string {
+	if id := artifactAgentID(r); id != "" {
+		return id
+	}
+	return human
 }

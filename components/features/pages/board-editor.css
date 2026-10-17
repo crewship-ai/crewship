@@ -1,0 +1,8 @@
+/* Excalidraw 0.18.1 does not gate its native Mermaid menu item on aiEnabled.
+ * Keep it out of keyboard and pointer navigation. The capture guard in the
+ * adapter also prevents activation; browser coverage uses the actual package.
+ * Product Mermaid input goes through the isolated Board converter instead.
+ */
+.crewship-board-editor [data-testid="toolbar-embeddable"] {
+  display: none !important;
+}

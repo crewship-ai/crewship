@@ -164,6 +164,7 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 		"postcss.config.mjs", "prisma.config.ts", "prisma/schema.prisma", "sentry.client.config.ts",
 		"sentry.server.config.ts", "sentry.edge.config.ts", "public/logo.svg",
 		"scripts/prepare-pdf-assets.mjs", "scripts/gen-frontend-licenses.mjs",
+		"scripts/prepare-board-assets.mjs", "scripts/prepare-board-converter.mjs",
 	} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(file))); err != nil {
 			t.Fatal(err)

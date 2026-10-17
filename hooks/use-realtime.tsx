@@ -235,11 +235,13 @@ export type RealtimeEventType =
   // Dispatched by the provider after the socket RE-connects, so pure-WS
   // consumers (no poll backstop — e.g. the file browser) can refetch state
   // whose change events they may have missed during the gap.
+  | "presence.snapshot"
   | "realtime.reconnected"
 
 /** A real-time event received from the WebSocket, with typed payload and timestamp. */
 export interface RealtimeEvent {
   type: RealtimeEventType
+  channel?: string
   payload: Record<string, unknown>
   timestamp: Date
   channel?: string
@@ -247,16 +249,22 @@ export interface RealtimeEvent {
 
 type EventCallback = (event: RealtimeEvent) => void
 
+export interface ContentPresenceCursor { x: number; y: number; coordinate_space: "board" | "viewport"; viewport_width?: number; viewport_height?: number }
+export interface ContentPresenceUpdate { schema_version: 1; revision?: number; board_seq?: number; cursor?: ContentPresenceCursor }
+
 interface RealtimeContextValue {
   status: WSStatus
+  currentUserId?: string
   subscribe: (eventType: RealtimeEventType, callback: EventCallback) => () => void
   subscribeChannel: (channel: string) => () => void
+  sendPresence: (channel: string, payload: ContentPresenceUpdate) => void
 }
 
 // Exported (only) so the guard test can check it against the Go emitters —
 // nothing in the app should read this directly; subscribe via
 // useRealtimeEvent instead.
 export const VALID_REALTIME_TYPES: Set<string> = new Set([
+  "presence.snapshot",
   "chat.entity_refs_changed",
   "issue.revision_changed",
   "conversation.updated",
@@ -542,9 +550,14 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     [],
   )
 
+  const sendPresence = useCallback((channel: string, payload: ContentPresenceUpdate) => {
+    if (status !== "connected" || !/^(artifact|board):[^:]+$/.test(channel)) return
+    send({ type: "presence", channel, payload: { ...payload } })
+  }, [status, send])
+
   const contextValue = useMemo(
-    () => ({ status, subscribe, subscribeChannel }),
-    [status, subscribe, subscribeChannel],
+    () => ({ status, currentUserId: userId, subscribe, subscribeChannel, sendPresence }),
+    [status, userId, subscribe, subscribeChannel, sendPresence],
   )
 
   return (
@@ -640,4 +653,10 @@ export function useRealtimeChannelSafe(channel: string | null): void {
     if (!channel || !subscribeChannel) return
     return subscribeChannel(channel)
   }, [channel, subscribeChannel])
+}
+
+/** Presence can use only content-room heartbeats, not arbitrary socket frames. */
+export function usePresenceTransportSafe() {
+  const context = useContext(RealtimeContext)
+  return { status: context?.status ?? null, sendPresence: context?.sendPresence, currentUserId: context?.currentUserId }
 }

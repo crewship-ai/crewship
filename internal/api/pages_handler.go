@@ -41,6 +41,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -59,6 +60,10 @@ import (
 type PageHandler struct {
 	documentCall                     func(context.Context, string, string, string, string, any) ([]byte, int, error)
 	restrictedWorkflow               func() *restrictedworkflow.Service
+	artifactStoragePath              string
+	artifactMasterToken              string
+	artifactRequestCancels           sync.Map
+	artifactDispatch                 func(context.Context, string, string, string, ws.ChatMessageOption) error
 	projectStore                     *pages.ProjectStore
 	builds                           *pageBuildCoordinator
 	pageArtifacts                    *pagebuild.Store
@@ -258,6 +263,8 @@ type pageWire struct {
 	//
 	// Neither carries omitempty: a client must not have to treat an absent
 	// field as a third state.
+	HasBoard           bool   `json:"has_board"`
+	HasArtifact        bool   `json:"has_artifact"`
 	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
 	PublicationVersion int64  `json:"publication_version"`
@@ -314,8 +321,11 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
-	HasDocument bool `json:"has_document"`
+	HasDocument     bool                 `json:"has_document"`
+	ArtifactSummary *pageArtifactSummary `json:"artifact_summary,omitempty"`
 	// See pageWire.HasProject: source that exists versus source that is live.
+	HasBoard           bool   `json:"has_board"`
+	HasArtifact        bool   `json:"has_artifact"`
 	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
 	PublicationVersion int64  `json:"publication_version"`
@@ -397,6 +407,9 @@ type pageWriteRequest struct {
 
 type pageRecord struct {
 	HasDocument        bool
+	ArtifactSummary    *pageArtifactSummary
+	HasBoard           bool
+	HasArtifact        bool
 	HasProject         bool
 	HasApplication     bool
 	PublicationVersion int64
@@ -532,8 +545,17 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		       p.created_at, p.updated_at,
 		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
 		       COALESCE(l.published,0), COALESCE(l.version,0),
- EXISTS(SELECT 1 FROM documents WHERE page_id=p.id)
+ EXISTS(SELECT 1 FROM documents WHERE page_id=p.id),
+ EXISTS(SELECT 1 FROM page_boards WHERE page_id=p.id),
+ EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=p.id),
+ COALESCE(ar.revision,0), COALESCE(ar.author_user_id,''), COALESCE(au.full_name,''),
+ COALESCE(ar.author_agent_id,''), COALESCE(aa.name,''), COALESCE(ar.author_run_id,''), COALESCE(ar.created_at,''),
+ MAX(COALESCE(ar.created_at,''),COALESCE((SELECT MAX(updated_at) FROM page_artifact_threads WHERE page_id=p.id),''),COALESCE((SELECT MAX(updated_at) FROM page_artifact_requests WHERE page_id=p.id),''))
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
+ LEFT JOIN page_artifacts pa ON pa.page_id=p.id
+ LEFT JOIN page_artifact_revisions ar ON ar.page_id=p.id AND ar.revision=pa.head_rev
+ LEFT JOIN users au ON au.id=ar.author_user_id
+ LEFT JOIN agents aa ON aa.id=ar.author_agent_id
 		WHERE p.workspace_id = ? AND `+scope.where+`
 		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
 	if err != nil {
@@ -544,11 +566,15 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 	var records []pageRecord
 	for rows.Next() {
 		var p pageRecord
+		var summary pageArtifactSummary
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.HasBoard, &p.HasArtifact, &summary.HeadRev, &summary.AuthorUserID, &summary.AuthorName, &summary.AuthorAgentID, &summary.AuthorAgentName, &summary.AuthorRunID, &summary.PublishedAt, &summary.LastActivityAt); err != nil {
 			return nil, err
+		}
+		if summary.HeadRev > 0 {
+			p.ArtifactSummary = &summary
 		}
 		records = append(records, p)
 	}
@@ -626,7 +652,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
 	rec := &row.rec
 	out := pageListWire{
-		HasDocument: rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasDocument: rec.HasDocument, HasBoard: rec.HasBoard, HasArtifact: rec.HasArtifact, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
 		Name:                rec.Name,
@@ -643,6 +669,9 @@ func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFol
 		CanRemoveFromFolder: row.canRemoveFromFolder,
 		Icon:                rec.Icon,
 		Color:               rec.Color,
+	}
+	if len(row.reach) > 0 {
+		out.ArtifactSummary = rec.ArtifactSummary
 	}
 	if rec.OwnerCrewID != "" {
 		out.Owner = "crew/" + row.ownerCrewSlug
@@ -1006,8 +1035,8 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if req.Panels != nil && rec.HasDocument {
-		replyError(w, 409, "document pages cannot contain panels")
+	if req.Panels != nil && (rec.HasDocument || rec.HasArtifact || rec.HasBoard) {
+		replyError(w, 409, "typed output pages cannot contain panels")
 		return
 	}
 	if req.Panels != nil {
@@ -1021,7 +1050,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	validate := base.Validate
-	if rec.HasDocument || (len(base.Spec.Panels) == 0 && req.Panels == nil && rec.OwnerUserID != "") {
+	if rec.HasDocument || rec.HasArtifact || rec.HasBoard || (len(base.Spec.Panels) == 0 && req.Panels == nil && rec.OwnerUserID != "") {
 		validate = base.ValidateEmpty
 	}
 	if err := validate(); err != nil {
@@ -1125,8 +1154,8 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := tx.ExecContext(r.Context(),
-		`UPDATE pages SET name = ?, description = NULLIF(?, ''), icon = NULLIF(?, ''), color = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ? AND spec_json = ?`,
-		base.Metadata.Name, base.Metadata.Description, icon, color, string(specJSON), now, rec.ID, originalSpec)
+		`UPDATE pages SET name = ?, description = NULLIF(?, ''), icon = NULLIF(?, ''), color = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ? AND spec_json = ? AND (NOT EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id UNION ALL SELECT 1 FROM page_boards WHERE page_id=pages.id) OR ?=0)`,
+		base.Metadata.Name, base.Metadata.Description, icon, color, string(specJSON), now, rec.ID, originalSpec, len(base.Spec.Panels))
 	if err != nil {
 		replyInternalError(w, h.logger, "update page", err)
 		return
@@ -1279,13 +1308,13 @@ func pageWorkspaceInvalidation(rec *pageRecord, hasPanels bool) map[string]any {
 }
 
 func pageHasPrivateOutputMetadata(rec *pageRecord, hasPanels bool) bool {
-	return rec.HasDocument || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
+	return rec.HasDocument || rec.HasArtifact || rec.HasBoard || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
 }
 
 // Use when panels are not already loaded, before deleting or moving the Page.
 // A failed classification must hide descriptive metadata, never disclose it.
 func (h *PageHandler) hasPrivateOutputMetadata(ctx context.Context, rec *pageRecord) bool {
-	if rec.HasDocument {
+	if rec.HasDocument || rec.HasArtifact || rec.HasBoard {
 		return true
 	}
 	if rec.OwnerUserID == "" || rec.HasProject || rec.HasApplication {
@@ -1309,11 +1338,13 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
  EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0),
- EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id)
+ EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id),
+ EXISTS(SELECT 1 FROM page_boards WHERE page_id=pages.id),
+ EXISTS(SELECT 1 FROM page_artifacts WHERE page_id=pages.id)
 		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.HasBoard, &p.HasArtifact)
 	if err != nil {
 		return nil, err
 	}
@@ -1705,7 +1736,7 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
 	out := pageWire{
-		HasDocument: rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasDocument: rec.HasDocument, HasBoard: rec.HasBoard, HasArtifact: rec.HasArtifact, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,

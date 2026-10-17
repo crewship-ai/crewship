@@ -735,10 +735,11 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 	out := make([]pageListWire, 0, len(moves))
 	for _, m := range moves {
 		if m.rec.FolderID != f.ID {
+			fromID := m.rec.FolderID
 			m.rec.FolderID = f.ID
 			m.rec.PagesVersion++
-			h.journalFolderMembership(r.Context(), wsID, user, m.rec, "moved", m.from, f.Slug)
-			broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": m.rec.ID, "slug": m.rec.Slug})
+			h.journalFolderMembership(r.Context(), wsID, user, m.rec, "moved", m.from, f.Slug, fromID, f.ID)
+			broadcastWorkspaceEvent(h.hub, wsID, "page.updated", h.folderMembershipInvalidation(r.Context(), m.rec))
 		}
 		index, err := h.loadPageIndex(r.Context(), wsID, viewer, pageOnly(m.rec.ID))
 		if err != nil {

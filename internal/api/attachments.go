@@ -351,12 +351,35 @@ func attachmentBlobStripe(workspaceID, sha string) uint32 {
 func storeAttachmentBlob(root, workspaceID string, data []byte) (sha, key string, err error) {
 	sum := sha256.Sum256(data)
 	sha = hex.EncodeToString(sum[:])
-	key = attachmentStorageKey(workspaceID, sha)
+	return writeAttachmentBlob(root, workspaceID, sha, func(w io.Writer) error {
+		_, err := w.Write(data)
+		return err
+	})
+}
 
+// storeAttachmentBlobStream publishes a prehashed, bounded stream using the
+// same workspace path, atomic rename and caller-held GC lock as byte uploads.
+// It verifies newly written bytes before exposing the content-addressed name.
+func storeAttachmentBlobStream(root, workspaceID, sha string, source io.Reader) (string, string, error) {
+	return writeAttachmentBlob(root, workspaceID, sha, func(w io.Writer) error {
+		digest := sha256.New()
+		n, err := io.Copy(io.MultiWriter(w, digest), io.LimitReader(source, maxAttachmentBytes+1))
+		if err != nil {
+			return err
+		}
+		if n > maxAttachmentBytes || hex.EncodeToString(digest.Sum(nil)) != sha {
+			return errors.New("attachment stream size or digest mismatch")
+		}
+		return nil
+	})
+}
+
+func writeAttachmentBlob(root, workspaceID, sha string, write func(io.Writer) error) (string, string, error) {
 	abs, err := attachmentBlobPath(root, workspaceID, sha)
 	if err != nil {
 		return "", "", err
 	}
+	key := attachmentStorageKey(workspaceID, sha)
 	if _, statErr := os.Stat(abs); statErr == nil {
 		return sha, key, nil
 	}
@@ -371,12 +394,8 @@ func storeAttachmentBlob(root, workspaceID string, data []byte) (sha, key string
 		return "", "", fmt.Errorf("create attachment temp: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer func() {
-		if err != nil {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if _, err = tmp.Write(data); err != nil {
+	defer os.Remove(tmpName)
+	if err = write(tmp); err != nil {
 		_ = tmp.Close()
 		return "", "", fmt.Errorf("write attachment: %w", err)
 	}
@@ -483,6 +502,39 @@ func attachmentBlobIsUnreferenced(ctx context.Context, db *sql.DB, workspaceID, 
 	}
 	if present > 0 {
 		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pipeline_run_artifacts a JOIN pipeline_runs r ON r.id=a.run_id WHERE r.workspace_id=? AND a.sha256=?`, workspaceID, sha).Scan(&refs); err != nil {
+			return false, err
+		}
+	}
+	if refs > 0 {
+		return false, nil
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE name='page_artifact_revisions'`).Scan(&present); err != nil {
+		return false, err
+	}
+	if present > 0 {
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM page_artifact_revisions a JOIN pages p ON p.id=a.page_id WHERE p.workspace_id=? AND a.sha256=?`, workspaceID, sha).Scan(&refs); err != nil {
+			return false, err
+		}
+	}
+	if refs > 0 {
+		return false, nil
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE name='page_board_files'`).Scan(&present); err != nil {
+		return false, err
+	}
+	if present > 0 {
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM page_board_files f JOIN pages p ON p.id=f.board_page_id WHERE p.workspace_id=? AND f.sha256=?`, workspaceID, sha).Scan(&refs); err != nil {
+			return false, err
+		}
+	}
+	if refs > 0 {
+		return false, nil
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE name='page_board_request_previews'`).Scan(&present); err != nil {
+		return false, err
+	}
+	if present > 0 {
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM page_board_request_previews p JOIN page_board_requests r ON r.id=p.request_id WHERE r.workspace_id=? AND p.sha256=?`, workspaceID, sha).Scan(&refs); err != nil {
 			return false, err
 		}
 	}

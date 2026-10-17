@@ -1,5 +1,7 @@
 "use client"
 
+import { ArtifactResultCards } from "./artifact-result-cards"
+import { ArtifactCreationControl } from "./artifact-creation-control"
 import { ChatSessionSource } from "./chat-session-source"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
@@ -270,7 +272,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     }
     const relative = relativeToAgent(path, chatAgent?.crewId, chatAgent?.slug)
     if (!isClientArtifactPath(relative)) {
-      toast.error("This file is not available in Artifacts")
+      toast.error("This file is not available in Files")
       return
     }
     const title = path.split("/").pop() || path
@@ -1206,7 +1208,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       onEditUserMessage={canChat && !isStreaming ? editAndResendWithPin : undefined}
       resolveAuthorName={resolveAuthorName}
       resolveAskProvenance={resolveAskProvenance}
-      footer={<>{entityStatus}<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} /></>}
+      footer={<>{entityStatus}<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />{workspaceId && sessionId && <ArtifactResultCards key={`${workspaceId}:${sessionId}`} workspaceId={workspaceId} chatId={sessionId} isStreaming={isStreaming} currentUserId={currentUserId} />}</>}
     />
   ) : (
     <Conversation>
@@ -1259,7 +1261,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           ))}
         </AnimatePresence>
         {entityStatus}
-        <StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />
+        <><StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />{workspaceId && sessionId && <ArtifactResultCards key={`${workspaceId}:${sessionId}`} workspaceId={workspaceId} chatId={sessionId} isStreaming={isStreaming} currentUserId={currentUserId} />}</>
         <PinToTopSpacer pinNonce={pinNonce} pinTurnId={lastUserTurnId} sessionId={sessionId} />
       </ConversationContent>
       <ConversationScrollButton />
@@ -1305,6 +1307,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       <div className="relative flex flex-col h-full">
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
         <ReconnectBanner status={connectionStatus} />
+        <ArtifactCreationControl key={sessionId} workspaceId={workspaceId} sessionId={sessionId} isStreaming={isStreaming} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
           <ConnectionBadge status={connectionStatus} />
@@ -1404,6 +1407,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     <div className="relative flex h-full">
       <div className={cn("flex flex-col overflow-hidden min-w-0", executionProfile === "trusted" && artifactFocus && artifactOpen ? "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} />
+        <ArtifactCreationControl key={sessionId} workspaceId={workspaceId} sessionId={sessionId} isStreaming={isStreaming} />
         {sharedRestrictedChat && <p className="border-b px-4 py-2 text-xs text-muted-foreground" role="note">Shared conversation: messages are visible to the explicit participants. Changing participants starts a new context.</p>}
         {/* Who you are talking to, not the session id. The strip carries the
             agent (face, status, role, crew, model, skills, credentials); the

@@ -197,7 +197,8 @@ vi.mock("@/hooks/use-abilities", () => ({
   useAbilities: () => ({ abilities: { can: () => false }, hasCapability: () => false }),
 }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
-vi.mock("@/lib/api-fetch", () => ({
+vi.mock("@/lib/api-fetch", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/api-fetch")>(),
   apiFetch: vi.fn(async (url: string) => ({
     ok: true,
     status: 200,

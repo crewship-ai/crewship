@@ -31,6 +31,8 @@ type Client struct {
 	hub              *Hub
 	userID           string
 	authSessionID    string
+	presenceWindow   time.Time
+	presenceCount    int
 	channels         map[string]bool
 	send             chan []byte
 	ctx              context.Context
@@ -75,6 +77,8 @@ func (c *Client) readPump() {
 		}
 
 		switch msg.Type {
+		case "presence":
+			c.handlePresence(msg)
 		case "subscribe":
 			c.subscribe(msg.Channel)
 		case "unsubscribe":
@@ -254,6 +258,25 @@ func (c *Client) subscribe(channel string) {
 		return
 	}
 
+	if isContentRoom(channel) {
+		c.mu.Lock()
+		count := 0
+		for ch := range c.channels {
+			if isContentRoom(ch) {
+				count++
+			}
+		}
+		already := c.channels[channel]
+		c.mu.Unlock()
+		if !already && count >= 8 {
+			c.trySendError(channel, "presence subscription limit reached")
+			return
+		}
+	}
+	if isContentRoom(channel) && !c.hub.joinPresence(c, channel, time.Now()) {
+		c.trySendError(channel, "presence room limit reached")
+		return
+	}
 	c.mu.Lock()
 	c.channels[channel] = true
 	c.mu.Unlock()
@@ -265,6 +288,9 @@ func (c *Client) subscribe(channel string) {
 	c.hub.channels[channel][c] = true
 	c.hub.mu.Unlock()
 
+	if isContentRoom(channel) {
+		c.hub.emitPresence(channel)
+	}
 	c.hub.logger.Debug("client subscribed", "user_id", c.userID, "channel", channel)
 }
 
@@ -272,6 +298,7 @@ func (c *Client) unsubscribe(channel string) {
 	if channel == "" {
 		return
 	}
+	defer c.hub.removePresence(c, channel)
 	c.mu.Lock()
 	delete(c.channels, channel)
 	c.mu.Unlock()

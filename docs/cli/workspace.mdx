@@ -33,6 +33,8 @@ The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace
 | `workspace delete [slug-or-id]` | Delete a workspace (OWNER only, irreversible). Requires `--confirm <slug>`. |
 | `workspace logo set <file>` | Upload or replace the current workspace's logo (PNG, JPEG or WebP, max 2MB; ADMIN+). |
 | `workspace logo remove` | Remove the logo; the workspace is drawn with its initial again (ADMIN+). |
+| `workspace page-ownership list [--owner <user-id>]` | Review Artifact/Board metadata, owners and eligible successors (ADMIN/OWNER). |
+| `workspace page-ownership transfer <page-id> --expected-owner <id> --successor <id>` | Immediately transfer a reviewed output to an existing reader (ADMIN/OWNER). |
 | `workspace member list` | List members of the active workspace. |
 | `workspace member add <user-id>` | Add an existing user to the workspace. Takes a **user** id. |
 | `workspace member role <member-id-or-user-id> <ROLE>` | Change a member's role (`MANAGER+`, ladder-guarded). |
@@ -478,6 +480,96 @@ Revoke an unaccepted invitation without removing or changing an existing member.
 ```bash
 crewship workspace invite revoke INVITATION_ID
 ```
+
+## `crewship workspace artifact-policy show`
+
+Read the selected workspace's agent artifact policy as a human workspace
+OWNER/ADMIN. The response contains `enabled`, the explicit `crew_ids` allowlist
+and its `version`. An unsaved policy is disabled at version 0.
+
+```bash
+crewship --workspace WORKSPACE workspace artifact-policy show
+```
+
+## `crewship workspace artifact-policy set`
+
+Replace the switch and complete crew allowlist using the version you reviewed.
+This does not grant Page access or authorize a run: an agent still needs the
+human's explicit authorization, a live run and the required Page grant.
+
+| Flag | Required | Description |
+| --- | --- | --- |
+| `--base-version` | Yes | Version returned by `show`; 0 for an unsaved policy. |
+| `--enabled` | Yes | Explicit `--enabled=true` or `--enabled=false`. |
+| `--crew-id` | One of these | Complete allowlist of crew IDs, comma-separated or repeated. |
+| `--clear-crews` | One of these | Explicitly empty the allowlist; excludes `--crew-id`. |
+
+```bash
+crewship --workspace WORKSPACE workspace artifact-policy set --base-version 0 --enabled=true --crew-id CREW_ID
+crewship --workspace WORKSPACE workspace artifact-policy set --base-version 1 --enabled=false --clear-crews
+```
+
+A concurrent policy edit returns a conflict. Read and review the current policy
+before submitting a new version; the CLI never overwrites it automatically.
+
+## `crewship workspace page-ownership`
+
+Review ownership before a member leaves or an account is deleted. Only a live
+human workspace `ADMIN` or `OWNER` may list or transfer these outputs. The list
+contains Artifact and Board metadata and eligible human successors who already
+have current read access; it does not include HTML source or Board scenes.
+
+### `workspace page-ownership list`
+
+```bash
+crewship workspace page-ownership list --owner departing-user-id --format json
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--owner <user-id>` | (all owners) | Filter by the current owner's user ID. |
+| `--limit <number>` | `25` | Maximum outputs per response, from `1` to `100`. |
+| `--cursor <token>` | (first page) | Opaque `next_cursor` returned by the preceding response. |
+
+Follow `next_cursor` until it is absent to review every owned output. Keep the
+same workspace and owner filter while following a cursor; changing either starts
+a new list without a cursor. Studio provides **Load more outputs** for the same
+bounded traversal.
+
+The JSON envelope is `{ "pages": [...], "next_cursor": "..." }`; the cursor is
+omitted at the end. Each page includes `id`, `slug`, `name`, `type`,
+`owner_user_id`, `owner_name` and `eligible_successors` (`user_id`, `name`,
+`email`).
+
+### `workspace page-ownership transfer`
+
+```bash
+crewship workspace page-ownership transfer page-id \
+  --expected-owner departing-user-id --successor existing-reader-id --format json
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--expected-owner <user-id>` | (required) | Reviewed current owner. A changed owner causes a conflict. |
+| `--successor <user-id>` | (required) | Eligible successor returned by `list`, with current read access. |
+
+The positional Page ID and both explicit user IDs are required. The command
+returns the transferred page summary.
+
+**Privacy consequence:** transfer takes effect immediately and gives the new
+owner control of the private output and its retained history. Content and history
+stay with the Page. Existing grants are rechecked under
+current permissions; the new owner may need to review sharing. Linked sources
+keep independent access checks, and no grants are added.
+The server rechecks the successor's current eligibility. If no successor is
+eligible, ask the current owner to share the Page through its existing sharing
+controls, then list again. Review every affected output and transfer it
+explicitly before retrying the departure.
+
+A changed owner returns `409`; the command does not refresh or retry a transfer
+with a different expected owner. List again and review the current state before
+sending a new explicit transfer. The equivalent Studio controls are under
+**Settings → General → Artifact and Board ownership**.
 
 ## `crewship workspace member access explain <member-id-or-user-id>`
 

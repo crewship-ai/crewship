@@ -343,7 +343,7 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 	writeJSON(w, 200, response)
 }
 
-const pageOwnershipHelp = "Ask a workspace administrator to resolve ownership. For Docs, Artifacts and Boards, review eligible readers with crewship workspace page-ownership list and select a human successor with crewship workspace page-ownership transfer, then retry."
+const pageOwnershipHelp = "Ask a workspace administrator to resolve ownership. For Artifacts and Boards, select a human successor in Settings > General > Artifact and Board ownership. For Docs and Slides, review eligible readers with crewship workspace page-ownership list and select a human successor with crewship workspace page-ownership transfer, then retry."
 
 func replyPageOwnershipConflict(w http.ResponseWriter, prefix string, e *ErrPagesNeedManualTransfer) {
 	writeJSON(w, http.StatusConflict, pageOwnershipConflictPayload(prefix, e, true))

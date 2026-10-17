@@ -25,6 +25,7 @@ import { EvidenceFacts } from "./evidence-facts"
 import { ActReceipt, receiptOf } from "./run-needs-human-actions"
 import { KindActions } from "./kind-actions"
 import type { InboxActFn } from "./run-needs-human-actions"
+import { PageRequestResult } from "./page-request-result"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import {
   absolute, attentionBadge, canRole, deciderCopy, decisionMetaFor, expiresIn, linkToOpen, payloadNumber, remainingLabel, riskLevelOf,
@@ -154,6 +155,9 @@ const CONTEXT_HIDE_KEYS = new Set([
   "pipeline_slug",
   "request_id",
   "request_type",
+  "request_kind",
+  "page_id",
+  "result_revision",
 ])
 
 function humanizeKey(k: string): string {
@@ -634,6 +638,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
           </section>
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
             {messageLinks.map((l, index) => <Button asChild key={l.href} size="sm" variant={index === 0 ? "default" : "outline"}><Link href={l.href}><l.icon className="mr-1.5 h-3.5 w-3.5 shrink-0" />{l.label}</Link></Button>)}
+            {item.kind === "message" && item.payload?.subkind === "page_request_result" && <PageRequestResult key={item.id} item={item} />}
             {actReceipt && <ActReceipt receipt={actReceipt} />}
             {!isResolved && <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={false} onAct={onAct} hideMessageLinks />}
           </div>

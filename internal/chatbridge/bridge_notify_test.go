@@ -245,3 +245,36 @@ func TestHandleChatMessage_OrdinaryExecutionFailureRemainsFailed(t *testing.T) {
 		t.Fatalf("ordinary failure updates: %+v", resolver.runUpdates)
 	}
 }
+
+// Inject the orchestrator boundary error: protected-output reconciliation is
+// covered by orchestrator tests; this verifies the chat resolver never races it
+// by writing a terminal result without an observed exit code.
+func TestHandleChatMessage_HostCaptureUnconfirmedRemainsNonterminal(t *testing.T) {
+	resolver := &capResolver{info: baseInfo()}
+	ctr := &scriptedContainer{agentExecErr: fmt.Errorf("terminal capture: %w", orchestrator.ErrHostCaptureUnconfirmed)}
+	b := testBridgeWithContainer(t, resolver, ctr)
+	var events []ws.ChatEvent
+	err := b.HandleChatMessage(context.Background(), "user-1", "sess-host-capture", "hello", func(e ws.ChatEvent) { events = append(events, e) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolver.runCreates) != 1 {
+		t.Fatalf("run creates: %d", len(resolver.runCreates))
+	}
+	if len(resolver.runUpdates) != 0 {
+		t.Fatalf("capture loss must stay nonterminal: %+v", resolver.runUpdates)
+	}
+	done := 0
+	for _, e := range events {
+		if e.Type == "error" {
+			t.Fatalf("observer loss emitted terminal error: %+v", e)
+		}
+		meta, _ := e.Metadata.(map[string]any)
+		if e.Type == "done" && meta["reason"] == "host_capture_unconfirmed" {
+			done++
+		}
+	}
+	if done != 1 {
+		t.Fatalf("stream closures=%d, want 1", done)
+	}
+}

@@ -69,6 +69,8 @@
  */
 
 import * as React from "react"
+import { PageBoardView } from "./page-board-view"
+import { PageArtifactView } from "./page-artifact"
 import Link from "next/link"
 import { refHref, refLabel } from "@/lib/entity-refs"
 import { ChevronLeft, ChevronRight } from "lucide-react"
@@ -247,6 +249,7 @@ export function useArrivalFlash(signature: string | null, durationMs = PANEL_ARR
 }
 
 export interface PageViewProps {
+  onArtifactDirtyChange?: (dirty: boolean) => void
   /** Where the editor hands focus back when it closes. */
   headingRef?: React.Ref<HTMLHeadingElement>
   page: PageRecord | null
@@ -282,6 +285,7 @@ export interface PageViewProps {
 
 export function PageView({
   headingRef,
+  onArtifactDirtyChange,
   page,
   slug,
   loading,
@@ -400,6 +404,7 @@ export function PageView({
         <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
           <PageBody
             headingRef={headingRef}
+            onArtifactDirtyChange={onArtifactDirtyChange}
             page={page}
             slug={slug}
             loading={loading}
@@ -420,6 +425,7 @@ export function PageView({
 
 function PageBody({
   headingRef,
+  onArtifactDirtyChange,
   page,
   slug,
   loading,
@@ -508,7 +514,7 @@ function PageBody({
             {page.name}
           </h1>
           <p className="text-xs text-muted-foreground">
-            {panels.length} {panels.length === 1 ? "panel" : "panels"}
+            {page.hasBoard ? "Board" : page.hasArtifact ? "HTML artifact" : `${panels.length} ${panels.length === 1 ? "panel" : "panels"}`}
             {page.description ? ` · ${page.description}` : ""}
           </p>
         </div>
@@ -524,7 +530,7 @@ function PageBody({
         )}
       </div>
 
-      {panels.length === 0 ? (
+      {workspaceId && page.hasBoard ? <PageBoardView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} pageId={page.id} onDirtyChange={onArtifactDirtyChange} /> : workspaceId && (page.hasArtifact || page.artifactEligible) ? <PageArtifactView key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} pageId={page.id} onDirtyChange={onArtifactDirtyChange} /> : panels.length === 0 ? (
         <EmptyState
           icon={CONCEPT_ICON.pages}
           title="This page declares no panels"

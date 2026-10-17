@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -33,6 +34,9 @@ func ownershipFixture(t *testing.T, table string) (*pagesTransferRig, *Workspace
 	return r, h
 }
 
+const ownershipArtifactContentQuery = `(SELECT sha256 FROM page_artifact_revisions r WHERE r.page_id=page_artifacts.page_id AND r.revision=page_artifacts.head_rev)`
+const ownershipBoardContentQuery = `(SELECT json_extract(element_json,'$.text') FROM page_board_elements e WHERE e.board_page_id=page_boards.page_id AND e.element_id=page_boards.page_id || '-private-element')`
+
 func seedOwnershipOutput(t *testing.T, db *sql.DB, workspace, pageID, table string) {
 	t.Helper()
 	var installed bool
@@ -43,6 +47,41 @@ func seedOwnershipOutput(t *testing.T, db *sql.DB, workspace, pageID, table stri
 		mustExec(t, db, `CREATE TABLE `+table+`(page_id TEXT PRIMARY KEY REFERENCES pages(id), private_content TEXT)`)
 	}
 	switch ownershipContentColumn(t, db, table) {
+	case ownershipArtifactContentQuery:
+		content := []byte("NEVER_EXPOSE_THIS")
+		root := t.TempDir()
+		sha, _, err := storeAttachmentBlob(root, workspace, content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Custody retains the actual immutable HTML bytes, not a synthetic
+		// column on the production head. Check them before TempDir cleanup.
+		t.Cleanup(func() {
+			got, err := readAttachmentBlob(root, workspace, sha)
+			if err != nil || !bytes.Equal(got, content) {
+				t.Errorf("private Artifact bytes changed: %v", err)
+			}
+		})
+		manifest, err := json.Marshal(map[string]any{"format_version": 1, "runtime_profile": "static-html-v1", "entrypoint": "index.html", "files": []any{map[string]any{"path": "index.html", "mime": "text/html; charset=utf-8", "size_bytes": len(content), "sha256": sha}}, "source": nil})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, db, `INSERT INTO page_artifacts(page_id,head_rev) VALUES(?,1)`, pageID)
+		mustExec(t, db, `INSERT INTO page_artifact_revisions(id,page_id,revision,sha256,mutation_id,request_digest,created_at,manifest_json) VALUES(?,?,1,?,'ownership-seed',?,'2026-10-17T00:00:00Z',?)`, pageID+"-private-revision", pageID, sha, attachmentDigest([]byte("ownership-seed")), string(manifest))
+	case ownershipBoardContentQuery:
+		// Closed Excalidraw text element from the pinned public fixture,
+		// detached from its original container and retaining private text.
+		var element map[string]any
+		if err := json.Unmarshal([]byte(`{"id":"private-element","type":"text","x":0,"y":200,"width":133.837890625,"height":25,"angle":0,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":2,"strokeStyle":"solid","roughness":1,"opacity":100,"groupIds":[],"frameId":null,"index":"a3","roundness":null,"seed":153151818,"version":2,"versionNonce":572473366,"isDeleted":false,"boundElements":null,"updated":1791914664268,"link":null,"locked":false,"text":"NEVER_EXPOSE_THIS","fontSize":20,"fontFamily":5,"textAlign":"left","verticalAlign":"top","containerId":null,"originalText":"NEVER_EXPOSE_THIS","autoResize":true,"lineHeight":1.25}`), &element); err != nil {
+			t.Fatal(err)
+		}
+		element["id"] = pageID + "-private-element"
+		raw, err := json.Marshal(element)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, db, `INSERT INTO page_boards(page_id,seq,format) VALUES(?,1,'crewship-board-excalidraw-0.18.1-v1')`, pageID)
+		mustExec(t, db, `INSERT INTO page_board_elements(board_page_id,element_id,element_rev,element_json,updated_seq) VALUES(?,?,1,?,1)`, pageID, pageID+"-private-element", string(raw))
 	case "snapshot":
 		mustExec(t, db, `INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES(?,?,1,?,?)`, workspace, pageID, []byte("NEVER_EXPOSE_THIS"), []byte("[]"))
 	case "canonical_json":
@@ -55,13 +94,19 @@ func seedOwnershipOutput(t *testing.T, db *sql.DB, workspace, pageID, table stri
 
 func ownershipContentColumn(t *testing.T, db *sql.DB, table string) string {
 	t.Helper()
-	column := map[string]string{"documents": "snapshot", "slides_heads": "canonical_json"}[table]
+	column := map[string]string{"documents": "snapshot", "slides_heads": "canonical_json", "page_artifacts": "head_rev", "page_boards": "seq"}[table]
 	if column != "" {
 		var installed bool
 		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name=?)`, table, column).Scan(&installed); err != nil {
 			t.Fatal(err)
 		}
 		if installed {
+			if table == "page_artifacts" {
+				return ownershipArtifactContentQuery
+			}
+			if table == "page_boards" {
+				return ownershipBoardContentQuery
+			}
 			return column
 		}
 	}
@@ -115,7 +160,11 @@ func TestPrivateOwnershipExplicitTransferPreservesContentAndGrants(t *testing.T)
 			if err := r.db.QueryRow(`SELECT owner_user_id FROM pages WHERE id='private-output'`).Scan(&owner); err != nil || owner != "reader" {
 				t.Fatalf("owner %s %v", owner, err)
 			}
-			if err := r.db.QueryRow(`SELECT ` + ownershipContentColumn(t, r.db, table) + ` FROM ` + table + ` WHERE page_id='private-output'`).Scan(&content); err != nil || content != "NEVER_EXPOSE_THIS" {
+			wantContent := "NEVER_EXPOSE_THIS"
+			if ownershipContentColumn(t, r.db, table) == ownershipArtifactContentQuery {
+				wantContent = attachmentDigest([]byte(wantContent))
+			}
+			if err := r.db.QueryRow(`SELECT ` + ownershipContentColumn(t, r.db, table) + ` FROM ` + table + ` WHERE page_id='private-output'`).Scan(&content); err != nil || content != wantContent {
 				t.Fatalf("private content changed %s %v", content, err)
 			}
 			if err := r.db.QueryRow(`SELECT granted_by_user_id FROM page_grants WHERE page_id='private-output'`).Scan(&issuer); err != nil || issuer != r.userID {

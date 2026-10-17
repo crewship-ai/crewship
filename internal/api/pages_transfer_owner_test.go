@@ -14,6 +14,8 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -386,5 +388,83 @@ func TestPagesOwnerTransfer_RefusalBlocksRestOfErasure(t *testing.T) {
 	}
 	if status != "failed" {
 		t.Errorf("gdpr_actions status = %q, want failed (the audit trail must record the refusal)", status)
+	}
+}
+
+func TestPagesOwnerTransferHumanOnlyTypesOnDeparture(t *testing.T) {
+	for _, kind := range []string{"artifact", "board"} {
+		for _, erase := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/erase=%v", kind, erase), func(t *testing.T) {
+				r := pagesTransferSetup(t)
+				r.seedCrew(t, "crewA", "Crew A", "crew-a")
+				r.seedCrewMember(t, "crewA", r.userID)
+				r.seedPage(t, "human-page", "human-page", "Private output", r.userID, "")
+				if kind == "artifact" {
+					execOrFatal(t, r.db, `INSERT INTO page_artifacts(page_id,head_rev) VALUES('human-page',1)`)
+				} else {
+					execOrFatal(t, r.db, `INSERT INTO page_boards(page_id,seq,format) VALUES('human-page',0,'crewship-board-excalidraw-0.18.1-v1')`)
+				}
+				if erase {
+					w := httptest.NewRecorder()
+					r.h.DeleteUserData(w, r.deleteReq(t, "human-owned-output"))
+					if w.Code != http.StatusConflict {
+						t.Fatalf("want explicit transfer conflict, status %d: %s", w.Code, w.Body.String())
+					}
+				} else {
+					var manual *ErrPagesNeedManualTransfer
+					if err := departWorkspace(t.Context(), r.db, r.spy, r.adminID, r.wsID, r.userID); !errors.As(err, &manual) {
+						t.Fatalf("want explicit transfer conflict, got %v", err)
+					}
+				}
+				var owner string
+				var crew sql.NullString
+				if err := r.db.QueryRow(`SELECT owner_user_id,owner_crew_id FROM pages WHERE id='human-page'`).Scan(&owner, &crew); err != nil || owner != r.userID || crew.Valid {
+					t.Fatalf("owner %q crew %v err %v", owner, crew, err)
+				}
+			})
+		}
+	}
+}
+
+func TestPagesOwnerTransferHumanOnlyRefusesIneligibleSuccessorsAtomically(t *testing.T) {
+	for _, why := range []string{"suspended", "restricted", "foreign workspace", "ordinary member"} {
+		t.Run(why, func(t *testing.T) {
+			r := pagesTransferSetup(t)
+			r.seedCrew(t, "crewA", "Crew A", "crew-a")
+			r.seedCrewMember(t, "crewA", r.userID)
+			r.seedPage(t, "regular-page", "regular-page", "Panel Page", r.userID, "")
+			r.seedPage(t, "human-page", "human-page", "Artifact", r.userID, "")
+			execOrFatal(t, r.db, `INSERT INTO page_artifacts(page_id,head_rev) VALUES('human-page',1)`)
+			switch why {
+			case "suspended":
+				execOrFatal(t, r.db, `UPDATE users SET suspended_at='2026-10-14T00:00:00Z' WHERE id=?`, r.adminID)
+			case "restricted":
+				// Guest mode cannot coexist with an administrator membership.
+				execOrFatal(t, r.db, `UPDATE workspace_members SET role='MEMBER',access_mode='restricted' WHERE user_id=?`, r.adminID)
+			case "foreign workspace":
+				execOrFatal(t, r.db, `INSERT INTO workspaces(id,name,slug) VALUES('other-workspace','Other','other')`)
+				execOrFatal(t, r.db, `UPDATE workspace_members SET workspace_id='other-workspace' WHERE user_id=?`, r.adminID)
+			case "ordinary member":
+				execOrFatal(t, r.db, `UPDATE workspace_members SET role='MEMBER' WHERE user_id=?`, r.adminID)
+			}
+			var manual *ErrPagesNeedManualTransfer
+			err := departWorkspace(t.Context(), r.db, r.spy, r.adminID, r.wsID, r.userID)
+			if !errors.As(err, &manual) {
+				t.Fatalf("want manual-transfer conflict, got %v", err)
+			}
+			var pages, members, notices int
+			if err = r.db.QueryRow(`SELECT COUNT(*) FROM pages WHERE owner_user_id=?`, r.userID).Scan(&pages); err != nil {
+				t.Fatal(err)
+			}
+			if err = r.db.QueryRow(`SELECT COUNT(*) FROM workspace_members WHERE workspace_id=? AND user_id=?`, r.wsID, r.userID).Scan(&members); err != nil {
+				t.Fatal(err)
+			}
+			if err = r.db.QueryRow(`SELECT COUNT(*) FROM inbox_items`).Scan(&notices); err != nil {
+				t.Fatal(err)
+			}
+			if pages != 2 || members != 1 || notices != 0 {
+				t.Fatalf("partial departure: pages=%d members=%d notices=%d", pages, members, notices)
+			}
+		})
 	}
 }

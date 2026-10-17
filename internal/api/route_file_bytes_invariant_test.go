@@ -61,6 +61,7 @@ var fileBytesFunnelHandlers = map[string]string{
 // entry here is a claim that has to be checked against the handler's actual
 // source, not assumed from its name.
 var fileBytesExemptHandlers = map[string]string{
+	"PageHandler.GetBoardFile":     "reads a Board-ACL-authorized immutable workspace+SHA256 CAS blob (readBoardRaster); verifies digest, bounded PNG/JPEG MIME and dimensions, never accesses crew/agent output storage",
 	"PipelineHandler.RunArtifacts": "reads an immutable workspace-scoped content-addressed blob; original file snapshots are confined to crew shared storage using os.Root",
 	"AttachmentHandler.Download": "reads a content-addressed blob keyed by workspace_id+sha256 " +
 		"(readAttachmentBlob, attachments.go) — never touches the crew/agent output tree at all",

@@ -107,34 +107,4 @@ func newDocCommand() *cobra.Command {
 	return root
 }
 
-// Re-encode JSON even for human output: untrusted source stays escaped text,
-// including terminal control characters, rather than executing or opening HTML.
-func printPageArtifactResponse(cmd *cobra.Command, response *http.Response) error {
-	defer response.Body.Close()
-	if err := pageCheckError(response); err != nil {
-		return err
-	}
-	const limit = 64 << 20 // JSON escaping can expand the 10 MiB source sixfold.
-	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
-	if err != nil {
-		return err
-	}
-	if len(data) > limit {
-		return fmt.Errorf("artifact response exceeds limit")
-	}
-	var payload any
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return err
-	}
-	safe, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	var writeErr error
-	if err := resolvedFormatter(cmd).AutoHuman(payload, func() { _, writeErr = fmt.Fprintln(cmd.OutOrStdout(), string(safe)) }); err != nil {
-		return err
-	}
-	return writeErr
-}
-
 func init() { rootCmd.AddCommand(newDocCommand()) }

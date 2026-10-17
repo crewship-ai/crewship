@@ -51,6 +51,11 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"document_checkpoints":  IntentInclude,
 	"document_writer_fence": IntentExcludeRuntime, // installation-local SQL serialization singleton
 
+	"artifact_workspace_writes":             IntentExcludeRuntime, // per-installation rolling write-rate receipts are initialized anew on restore
+	"artifact_creation_authorizations":      IntentExcludeRuntime, // explicit live-run creation opt-in must not survive restore
+	"page_artifact_request_updates":         IntentInclude,        // immutable typed progress/reply history, never live authority
+	"page_artifact_requests":                IntentInclude,        // history restored with live dispatch authority cleared
+	"page_artifact_run_delegations":         IntentExcludeRuntime, // restoring history must never resurrect a live run's publication authority
 	"restricted_workflow_recipe_bindings":   IntentExcludeRuntime, // frozen private recipe authority requires fresh admission after restore
 	"restricted_workflow_provider_policies": IntentExcludeRuntime, // immutable provider policies belong to private queued authority
 	"restricted_workflow_delegate_slots":    IntentExcludeRuntime, // active host delegation slots cannot survive restore
@@ -197,10 +202,38 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// page_folder_acl is the folder's sharing (#2533), inherited by every
 	// page in it: a restore that lost it would silently narrow who reaches
 	// those pages, the same audit-trail loss page_grants guards against.
-	"page_folder_acl": IntentInclude,
-	"pages":           IntentInclude,
-	"page_panels":     IntentInclude,
-	"page_versions":   IntentInclude,
+	"page_folder_acl":                 IntentInclude,
+	"pages":                           IntentInclude,
+	"page_panels":                     IntentInclude,
+	"page_versions":                   IntentInclude,
+	"page_boards":                     IntentInclude,
+	"page_board_files":                IntentInclude,
+	"page_board_element_permissions":  IntentExcludeRuntime, // Live one-batch human-element authority is never restored.
+	"page_board_run_delegations":      IntentExcludeRuntime, // live run edit authority is never restored
+	"page_board_elements":             IntentInclude,
+	"page_board_mutations":            IntentInclude,
+	"page_board_artifact_placements":  IntentInclude,
+	"page_artifacts":                  IntentInclude,
+	"page_artifact_mutation_receipts": IntentInclude,
+	"page_artifact_creations":         IntentInclude,
+	"page_artifact_revisions":         IntentInclude,
+	"page_board_source_history":       IntentInclude,
+	"page_board_write_audit":          IntentInclude,
+	"page_board_request_previews":     IntentInclude,
+	"page_board_requests":             IntentInclude,
+	"page_board_request_files":        IntentInclude,
+	"page_board_request_sources":      IntentInclude,
+	"page_board_threads":              IntentInclude,
+	"page_board_comment_history":      IntentInclude,
+	"page_board_comment_reactions":    IntentInclude,
+	"page_board_comments":             IntentInclude,
+	"page_board_comment_mutations":    IntentInclude,
+	"page_artifact_threads":           IntentInclude,
+	"page_artifact_copies":            IntentInclude,
+	"page_artifact_comment_history":   IntentInclude,
+	"page_artifact_comment_reactions": IntentInclude,
+	"page_artifact_comments":          IntentInclude,
+	"page_artifact_comment_mutations": IntentInclude,
 	// Durable draft metadata and revision audit. Source files live outside
 	// SQLite; until file-phase integration, back up page_projects_path alongside
 	// the DB (docs/prd/pages-apps-v1.md). Never silently drop the metadata.

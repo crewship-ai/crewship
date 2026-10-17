@@ -139,6 +139,8 @@ describe("PagesLayout", () => {
     renderLayout([FLEET])
     await waitFor(() => expect(screen.getByText("Flotila .201")).toBeTruthy())
     expect(screen.queryByRole("button", {name:/^New page$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New board$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New artifact$/})).toBeNull()
     expect(screen.queryByRole("button", {name:/^Import$/})).toBeNull()
     expect(screen.queryByRole("button",{name:"New folder"})).toBeNull()
   })
@@ -147,6 +149,8 @@ describe("PagesLayout", () => {
     access.role="VIEWER"
     renderLayout([])
     expect(screen.queryByRole("button", {name:/^New page$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New board$/})).toBeNull()
+    expect(screen.queryByRole("button", {name:/^New artifact$/})).toBeNull()
     expect(screen.queryByText(/Or author one as YAML/)).toBeNull()
   })
 
@@ -155,12 +159,16 @@ describe("PagesLayout", () => {
     renderLayout([])
     expect(screen.getAllByRole("button", {name:/^New page$/}).length).toBeGreaterThan(0)
     expect(screen.getAllByRole("button", {name:/^Import$/}).length).toBeGreaterThan(0)
+    expect(screen.getByRole("button", {name:/^New board$/})).toBeTruthy()
+    expect(screen.getByRole("button", {name:/^New artifact$/})).toBeTruthy()
   })
   it("preserves an explicit VIEWER page.create grant", () => {
     access.role="VIEWER";access.capabilities=["page.create"]
     renderLayout([])
     expect(screen.getAllByRole("button", {name:/^New page$/}).length).toBeGreaterThan(0)
     expect(screen.getAllByRole("button", {name:/^Import$/}).length).toBeGreaterThan(0)
+    expect(screen.getByRole("button", {name:/^New board$/})).toBeTruthy()
+    expect(screen.getByRole("button", {name:/^New artifact$/})).toBeTruthy()
     expect(screen.queryByRole("button",{name:"New folder"})).toBeNull()
   })
 

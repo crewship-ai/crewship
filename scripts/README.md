@@ -40,6 +40,8 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 | [check-chat-table-worker.mjs](check-chat-table-worker.mjs), [check-chat-xlsx-worker.mjs](check-chat-xlsx-worker.mjs) | Chromium acceptance of built `out/chat-workers` bundles with synthetic CSV/XLSX; runs through `pnpm test:chat-worker` / `pnpm test:chat-xlsx-worker` in CI Playwright PR subset; no live server or external parser |
 | [prepare-chat-workers.mjs](prepare-chat-workers.mjs) | Bundles chat preview workers as local JavaScript before frontend dev/build; public output is generated and ignored |
 | [prepare-pdf-assets.mjs](prepare-pdf-assets.mjs) | Prepares browser PDF assets; invoked by frontend dev/build commands |
+| [prepare-board-assets.mjs](prepare-board-assets.mjs) | Copies pinned Excalidraw fonts and license notices for Board fixtures; `--production` prepares local assets for dev/build |
+| [prepare-board-converter.mjs](prepare-board-converter.mjs) | Builds the pinned Mermaid converter into a local browser IIFE; called by Board asset preparation for fixtures and production. Generated `public/board-converter/runner.js` is ignored; production needs no Node process. |
 | [gen-avatar-fixtures.mjs](gen-avatar-fixtures.mjs) | Regenerates avatar validator test fixtures |
 | [generate-team-avatars.mjs](generate-team-avatars.mjs) | Generates demo team portraits; distinct from validator fixtures |
 | [gen-notices.sh](gen-notices.sh) | Regenerates third-party notices from Go dependencies; invoked by `make notices` |
@@ -179,3 +181,52 @@ runs `go vet -tags conformance ./...`, which compiles this test but does not
 execute Chromium. Executing either tagged test set requires the explicit browser
 environment and real static export; missing configuration fails rather than skips.
 `go test -tags conformance ./...` therefore also requires those prerequisites.
+
+
+`acceptance-artifact-workflow-browser.mjs` is invoked by the Linux-only
+`TestArtifactWorkflowBrowser` harness (`artifact_workflow_browser` or
+`conformance` build tag). Build the real static export first. It uses an owned
+httptest server, migrated temporary database and synthetic preauthenticated DB
+sessions with production authorization routes; it does not mock HTTP, perform
+login, execute agents, send email, create Docker resources or contact dev4.
+It verifies HTML upload, commenter discussion and dispatch denial, exact saved
+revision comparison, and restore preserving the original comment anchor.
+
+```bash
+crewship-heavy pnpm exec prisma generate # generated TypeScript types only
+crewship-heavy pnpm build
+crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_ARTIFACT_WORKFLOW_BROWSER=1 go test -tags artifact_workflow_browser ./internal/api -run '^TestArtifactWorkflowBrowser$' -count=1 -timeout 6m
+```
+
+`CREWSHIP_ARTIFACT_WORKFLOW_OUTPUT` optionally chooses a local report directory;
+otherwise output uses an OS temporary directory. Fixture session tokens remain
+in a private mode-0600 temporary file that the Go test removes. Missing opt-in,
+static export or Chromium fails rather than skips. The conformance tag permits
+compile-only checks (`-run '^$'`); this harness is executed by the Artifact Runtime Regression production-workflow
+CI job and does not establish real-agent acceptance or login-flow coverage.
+
+`acceptance-board-mermaid-browser.mjs` is called only by Linux-only
+`TestBoardMermaidWorkflowBrowser` (`board_mermaid_workflow_browser` or
+compile-only `conformance`). It uses migrated temporary storage, real Router
+handlers and production UI with two synthetic authenticated sessions. The
+canonical converter bootstrap and built pinned runner use separate owned HTTPS
+loopback sites. It seeds admitted Mermaid source without executing an agent.
+An aborted insertion before network leaves the job ready across client loss;
+two independently converted proposals are held before the real POSTs race.
+The test checks one commit, the existing-result receipt and reload persistence.
+It also sends HTML, directives, links, oversized source and an unsupported
+diagram directly through the canonical converter's one-shot MessageChannel,
+bypassing Studio prevalidation. It requires opaque-origin, readable rejection
+without geometry or Studio DOM execution. A third owned HTTPS canary has a
+successful browser reachability control; hostile resource successes fail in
+both browser evidence and server counters. Attempted and failed requests are
+recorded without claiming zero DNS/TCP speculation or general network silence.
+It mocks no API responses and creates no Docker or persistent dev resources.
+
+```bash
+crewship-heavy env PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" CREWSHIP_BOARD_MERMAID_BROWSER=1 go test -tags board_mermaid_workflow_browser ./internal/api -run '^TestBoardMermaidWorkflowBrowser$' -count=1 -timeout 6m
+```
+
+Build the real static export first. Missing Chromium, export or opt-in fails;
+`CREWSHIP_BOARD_MERMAID_OUTPUT` selects the evidence directory. Synthetic session
+credentials remain in a private temporary file removed by the Go fixture.
