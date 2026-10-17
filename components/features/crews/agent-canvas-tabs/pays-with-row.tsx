@@ -154,14 +154,16 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
   const load = React.useCallback(async () => {
     setLoadError(null)
     try {
+      // A new agent (New agent › Access) has no id and no bindings yet: only
+      // the seats are read, never another agent's bindings.
       const [listRes, bindRes] = await Promise.all([
         apiFetch(`/api/v1/credentials?workspace_id=${ws}&kind=provider_login`),
-        apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}&scope=AGENT&agent_id=${encodeURIComponent(agentId)}`),
+        agentId ? apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}&scope=AGENT&agent_id=${encodeURIComponent(agentId)}`) : null,
       ])
       if (!listRes.ok) throw new Error(`HTTP ${listRes.status}`)
-      if (!bindRes.ok) throw new Error(`HTTP ${bindRes.status}`)
+      if (bindRes && !bindRes.ok) throw new Error(`HTTP ${bindRes.status}`)
       const list = await listRes.json()
-      const body = (await bindRes.json()) as { bindings?: BindingRow[] }
+      const body = (bindRes ? await bindRes.json() : { bindings: [] }) as { bindings?: BindingRow[] }
       setSeats(Array.isArray(list) ? (list as LoginCredential[]).filter((c) => c?.login) : [])
       setBindings(Array.isArray(body?.bindings) ? body.bindings : [])
     } catch (err) {

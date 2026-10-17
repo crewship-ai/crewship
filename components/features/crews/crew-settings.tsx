@@ -11,9 +11,8 @@ import type { CrewMember } from "@/lib/types/crew"
 
 import { CrCard, CrLine, CrNote } from "./cr-card"
 import { CrewMembers } from "./crew-members"
-import { CrewRestartButton } from "./crew-restart-button"
 import { SettingsTab } from "./crew-canvas-tabs/settings-tab"
-import type { AgentSummary, CrewIntegration, CrewRecord } from "./crew-canvas-tabs/types"
+import type { AgentSummary, CrewRecord } from "./crew-canvas-tabs/types"
 
 /** Commands that exist in the CLI today for this crew. */
 export function crewCommands(slug: string): string[] {
@@ -28,20 +27,16 @@ export function CrewSettings({
   workspaceId,
   crew,
   agents,
-  integrations,
   patch,
   onApplyAvatarStyle,
   onDelete,
-  onSaved,
 }: {
   workspaceId: string
   crew: CrewRecord
   agents: AgentSummary[]
-  integrations: CrewIntegration[] | null
   patch: (body: Record<string, unknown>) => Promise<void>
   onApplyAvatarStyle: (resetOverrides: boolean) => void
   onDelete?: () => void
-  onSaved: () => void
 }) {
   const { role } = useAbilities()
   const isAdmin = role === "OWNER" || role === "ADMIN"
@@ -64,7 +59,6 @@ export function CrewSettings({
         workspaceId={workspaceId}
         crew={crew}
         agentsForCrew={agents}
-        integrations={integrations}
         patch={patch}
         applyAvatarStyle={onApplyAvatarStyle}
         onDelete={onDelete}
@@ -81,12 +75,6 @@ export function CrewSettings({
             <CrewMembers members={members} crewId={crew.id} workspaceId={workspaceId} canEdit={isAdmin} onMembersChange={setMembers} />
           </div>
         )}
-      </CrCard>
-
-      <CrCard title="Container" concept="crews">
-        <div className="border-t border-border p-3">
-          <CrewRestartButton workspaceId={workspaceId} crewId={crew.id} name={crew.name} onRestart={onSaved} />
-        </div>
       </CrCard>
 
       <CrCard title="Command line" concept="settings">

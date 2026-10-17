@@ -11,7 +11,7 @@
 // =============================================================================
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { CreateAgentDialog } from "../create-agent-dialog"
 
 vi.mock("next/navigation", () => ({
@@ -88,37 +88,29 @@ describe("<CreateAgentDialog> — leaving with unsaved input", () => {
   })
 })
 
-describe("<CreateAgentDialog> — the template row", () => {
-  // It was six PersonaChips + "All 30 templates" + "Blank": eight pills that
-  // wrap to two rows at the surface's 800px and take the top of the form
-  // before any field is reached, for a control that is optional.
-  it("is one control, not a row of pills", () => {
+describe("<CreateAgentDialog> — Start from", () => {
+  // Template was a popover row over the form; New agent asks once, on the
+  // Who step, how to start: blank, a template (the catalogue on the step) or
+  // a copy of an agent.
+  it("is one choice of three, blank by default, with no catalogue until asked", () => {
     renderDialog()
-    const trigger = screen.getByRole("button", { name: /Choose a template/i })
-    expect(trigger).toHaveTextContent(/Blank — browse \d+ templates/)
-
-    // None of the featured personas are on the form any more; they live in
-    // the catalogue behind this row, with the other two dozen.
-    expect(screen.queryByRole("button", { name: /Filip —/ })).toBeNull()
-    expect(screen.queryByRole("button", { name: /Start blank — no template/ })).toBeNull()
+    const group = screen.getByRole("radiogroup", { name: "Start from" })
+    const options = within(group).getAllByRole("radio")
+    expect(options.map((o) => o.querySelector("b")?.textContent)).toEqual(["Blank agent", "Agent template", "Copy an agent"])
+    expect(options[0]).toHaveAttribute("aria-checked", "true")
+    expect(screen.queryByRole("button", { name: /Filip/ })).toBeNull()
   })
 
-  it("states the pick, and only then offers a way to undo it", async () => {
+  it("a template fills the instructions, and Blank undoes it", async () => {
     renderDialog()
-    // Clear is not a permanent second control competing for the same decision.
-    expect(screen.queryByRole("button", { name: /^Clear$/ })).toBeNull()
-
-    fireEvent.click(screen.getByRole("button", { name: /Choose a template/i }))
-    const first = await screen.findByRole("button", { name: /Filip/ })
-    fireEvent.click(first)
-
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /Choose a template/i })).toHaveTextContent(/Filip/),
-    )
-    fireEvent.click(screen.getByRole("button", { name: /^Clear$/ }))
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /Choose a template/i })).toHaveTextContent(/Blank/),
-    )
+    fireEvent.click(screen.getByRole("radio", { name: /Agent template/ }))
+    fireEvent.click(await screen.findByRole("button", { name: /Filip/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 4: Instructions" }))
+    await waitFor(() => expect((screen.getByRole("textbox", { name: "Agent system prompt" }) as HTMLTextAreaElement).value).not.toBe(""))
+    fireEvent.click(screen.getByRole("button", { name: "Step 1: Who" }))
+    fireEvent.click(screen.getByRole("radio", { name: /Blank agent/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 4: Instructions" }))
+    expect((screen.getByRole("textbox", { name: "Agent system prompt" }) as HTMLTextAreaElement).value).toBe("")
   })
 })
 

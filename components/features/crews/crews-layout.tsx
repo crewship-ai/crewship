@@ -174,6 +174,7 @@ export function CrewsLayout({
 
   const [dockRequest, setDockRequest] = useState<{ tab: BottomTab; at: number } | null>(null)
   const openTerminal = useCallback(() => setDockRequest({ tab: "terminal", at: Date.now() }), [])
+  const openFiles = useCallback(() => setDockRequest({ tab: "files", at: Date.now() }), [])
 
   const bottomContext = useMemo(() => {
     if (selectedAgent) {
@@ -282,11 +283,12 @@ export function CrewsLayout({
                 tab={crewTabFromParam(tab)}
                 onTabChange={(t) => setTab(tabParam(t))}
                 onCrewChanged={onRefresh}
-                onSelectAgent={(slug) => {
+                onSelectAgent={(slug, agentTab) => {
                   const a = agents.find((x) => x.slug === slug)
-                  update({ agent: slug, crew: a?.crew_id ? crews.find((c) => c.id === a.crew_id)?.slug ?? selectedCrewSlug : selectedCrewSlug })
+                  update({ agent: slug, crew: a?.crew_id ? crews.find((c) => c.id === a.crew_id)?.slug ?? selectedCrewSlug : selectedCrewSlug, tab: agentTab ? tabParam(agentTab) : null })
                 }}
                 onOpenTerminal={openTerminal}
+                onOpenFiles={openFiles}
                 onBackToCrews={() => { setLastCrew(null); selectCrew(null) }}
                 provisioning={provisioning}
               />

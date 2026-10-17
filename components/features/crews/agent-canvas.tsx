@@ -15,6 +15,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
 import { PageError, PageNotFound } from "@/components/layout/page-state"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useSessionSafe } from "@/hooks/use-auth"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
@@ -33,7 +34,9 @@ import {
 import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
 import { CreateAgentDialog } from "./create-agent/create-agent-dialog"
 import { AgentOverview } from "./workspace-overview"
-import { MemoryWorkspace } from "./memory-workspace"
+import { AgentMemoryCards } from "./agent-memory"
+import { TeammateMessages } from "./agent-teammate-messages"
+import { AgentInstructionsExtras } from "./agent-instructions-extras"
 import { AgentPageBar } from "./crews-bar"
 import { CrCard, CrLine, HeadChip, LeadMark, LeadStar } from "./cr-card"
 import { TOOL_ACCESS_LABEL } from "./crew-team"
@@ -100,8 +103,14 @@ export function AgentCanvas({
   useEffect(() => { if (agent) onLoaded?.(agent) }, [agent, onLoaded])
 
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
-  const { abilities } = useAbilities()
+  const { abilities, role } = useAbilities()
+  const { data: session } = useSessionSafe()
   const canDelete = abilities.can("delete", "Agent")
+  const canUpdate = abilities.can("update", "Agent")
+  const isAdmin = role === "OWNER" || role === "ADMIN"
+  // Persona PUT/DELETE are roleCreate (MANAGER+), like creating an agent.
+  const canEditPersona = abilities.can("create", "Agent")
+  const [personaRev, setPersonaRev] = useState(0)
   const [revision, setRevision] = useState(0)
   const [inboxError, setInboxError] = useState<string | null>(null)
   const [activityError, setActivityError] = useState<string | null>(null)
@@ -117,6 +126,7 @@ export function AgentCanvas({
   // Inbox + cost summary (used by stats strip + InboxBanner).
   const [inbox, setInbox] = useState<InboxSummary>({ count: 0 })
   const [peerMessages, setPeerMessages] = useState<PeerMessageRowType[]>([])
+  const [peersUnavailable, setPeersUnavailable] = useState(false)
   const agentId = agent?.id
   useEffect(() => {
     if (!agentId) return
@@ -126,6 +136,7 @@ export function AgentCanvas({
     setInbox({ count: 0 })
     setInboxError(null)
     setPeerMessages([])
+    setPeersUnavailable(false)
     apiFetch(`/api/v1/agents/${agentId}/inbox?workspace_id=${workspaceId}`)
       .then((r) => { if (!r.ok) throw new Error(`Activity could not be loaded (${r.status}).`); return r.json() })
       .then((data) => {
@@ -139,8 +150,9 @@ export function AgentCanvas({
         if (approvals) parts.push(`${approvals} approval${approvals === 1 ? "" : "s"} pending`)
         setInbox({ count: total, summary: parts.join(" · "), cost: !unavailable.includes("cost") && typeof data.cost_usd_this_month === "number" ? data.cost_usd_this_month : undefined })
         setPeerMessages(peers)
+        setPeersUnavailable(unavailable.includes("peers"))
       })
-      .catch(() => { if (!cancelled) setInboxError("Approvals and activity summary could not be loaded.") })
+      .catch(() => { if (!cancelled) { setInboxError("Approvals and activity summary could not be loaded."); setPeersUnavailable(true) } })
     return () => { cancelled = true }
   }, [agentId, workspaceId, revision])
 
@@ -385,9 +397,22 @@ export function AgentCanvas({
                 </CrCard>
               )}
               <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onWork={() => onTabChange("tools")} revision={revision} />
+              <TeammateMessages messages={peerMessages} unavailable={peersUnavailable} />
             </>
           )}
-          {tab === "persona" && <CreateAgentDialog key={`persona:${editorKey}`} {...editorProps} inlineSections={["instructions", "chat"]} inlineLabel="Instructions" />}
+          {tab === "persona" && (
+            <>
+              <CreateAgentDialog key={`persona:${editorKey}:${personaRev}`} {...editorProps} inlineSections={["instructions", "chat"]} inlineLabel="Instructions" />
+              <AgentInstructionsExtras
+                workspaceId={workspaceId}
+                agentId={agent.id}
+                agentName={agent.name}
+                crew={agent.crew_id && agent.crew ? { id: agent.crew_id, name: agent.crew.name } : null}
+                canEdit={canEditPersona}
+                onReset={() => setPersonaRev((n) => n + 1)}
+              />
+            </>
+          )}
           {tab === "model" && (
             <>
               <CreateAgentDialog key={`model:${editorKey}`} {...editorProps} inlineSections={["model", "access"]} inlineLabel="Model and limits" />
@@ -415,7 +440,25 @@ export function AgentCanvas({
               onAgentChanged={onAgentChanged}
             />
           )}
-          {tab === "memory" && <MemoryWorkspace key={agent.id} workspaceId={workspaceId} agentId={agent.id} agentSlug={agent.slug} crewId={agent.crew_id ?? undefined} memoryEnabled={agent.memory_enabled} />}
+          {tab === "memory" && (
+            <AgentMemoryCards
+              key={agent.id}
+              workspaceId={workspaceId}
+              agentId={agent.id}
+              agentSlug={agent.slug}
+              agentName={agent.name}
+              crewId={agent.crew_id ?? undefined}
+              userId={session?.user.id}
+              userName={session?.user.name || undefined}
+              memoryEnabled={agent.memory_enabled}
+              canEdit={canUpdate}
+              canExport={isAdmin}
+              onMemoryEnabled={async (next) => {
+                await patch({ memory_enabled: next })
+                toast.success(next ? `${agent.name} remembers between runs` : `${agent.name} no longer adds saved knowledge to its runs`)
+              }}
+            />
+          )}
           {tab === "settings" && (
             <>
               <CreateAgentDialog key={`identity:${editorKey}`} {...editorProps} inlineSections={["identity"]} inlineLabel="Identity" />
