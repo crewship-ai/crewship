@@ -297,11 +297,15 @@ read and write to others.
    `owner_crew_id`. An agent-created page records the authorising human as owner and the agent as
    `created_by_agent_id`; an agent never owns permissions, it acts under one. A crew-owned page is
    the natural home for a crew's own status board and needs no personal owner at all.
-1b. **When a user owner leaves the workspace, the page transfers to a crew, it is not deleted.**
+1b. **When a user owner leaves the workspace, a regular panel page transfers to a crew, it is not deleted.**
    Target crew, in order: the crew that owns the most panels on that page, else the crew the
    departing user belonged to. The transfer emits a journal entry and notifies workspace
    ADMIN/OWNER through the existing notification path, so a role that does not leave can reassign
    the page. A page must never be orphaned and must never silently vanish.
+
+   Private Documents, Artifacts, Boards and Slides retain human custody and
+   require an explicit reassignment through the workspace page-ownership API or
+   `crewship workspace page-ownership` commands before the owner can leave.
 
    ⚠ **An earlier draft ended that list with "else none", which is the orphan the same rule
    forbids.** Corrected 2026-08-12 during implementation. The database enforces it rather than

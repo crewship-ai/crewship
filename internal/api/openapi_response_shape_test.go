@@ -50,6 +50,8 @@ var responseShapeContracts = []struct {
 	{name: "ChatProposalPage", pointer: "/components/schemas/ChatProposalPage", value: proposalPage{}},
 	{name: "MemberAccessPolicy", pointer: "/components/schemas/MemberAccessPolicy", value: access.Policy{}},
 	{name: "AccessPresetPreview", pointer: "/components/schemas/AccessPresetPreview", value: access.PresetPreview{}},
+	{name: "WorkspacePageOwnershipListResponse", pointer: "/components/schemas/WorkspacePageOwnershipListResponse", value: WorkspacePageOwnershipListResponse{}},
+	{name: "WorkspacePageOwnershipSummary", pointer: "/components/schemas/WorkspacePageOwnershipSummary", value: WorkspacePageOwnershipSummary{}},
 	{name: "RoutineOriginBinding", pointer: "/components/schemas/RoutineOriginBinding", value: routineOriginBindingResponse{}},
 	{name: "FailedIssueMutationJob", pointer: "/components/schemas/FailedIssueMutationJob", value: failedIssueMutationJob{}},
 	{name: "FailedIssueMutationPage", pointer: "/components/schemas/FailedIssueMutationPage", value: failedIssueMutationPage{}},
