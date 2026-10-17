@@ -17,7 +17,7 @@ import {
   kpisFromInsights,
 } from "@/components/features/dashboard/dashboard-overview"
 import { DashCard, DashNote } from "@/components/features/dashboard/dash-card"
-import { DashSegment } from "@/components/features/dashboard/dash-segment"
+import { Segmented } from "@/components/ui/segmented"
 import { DashboardHead, dashboardMeta, greeting, nextScheduledRun, useMinuteClock } from "@/components/features/dashboard/dashboard-head"
 import { DashboardEmpty } from "@/components/features/dashboard/dashboard-empty"
 import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/components/features/dashboard/run-volume-chart"
@@ -70,7 +70,7 @@ function DashboardBar({ value, onChange }: { value: DashboardWindow; onChange: (
       ariaLabel="Dashboard"
       // The greeting below is the page's h1; the top bar only names the area.
       heading={false}
-      actions={<DashSegment label="Dashboard time window" options={WINDOWS} value={value} onChange={onChange} className="max-md:hidden" />}
+      actions={<Segmented ariaLabel="Dashboard time window" size="xs" options={WINDOWS} value={value} onChange={onChange} className="max-md:hidden" />}
     />
   )
 }
