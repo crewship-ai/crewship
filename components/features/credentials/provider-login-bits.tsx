@@ -14,6 +14,7 @@ import { getBrand } from "@/lib/credential-providers/registry"
 import { brandTileColors } from "@/lib/credentials/brand-tile"
 import type { StatusTone } from "@/lib/format-status"
 import {
+  accountState,
   formatClock,
   loginStatusLabel,
   type LoginCredential,
@@ -37,6 +38,19 @@ export function LoginStatusPill({ credential, className }: { credential: LoginCr
       label={label}
       className={cn("whitespace-nowrap", className)}
       data-testid={`login-status-${status}`}
+    />
+  )
+}
+
+/** An AI provider account's state as the Vault's cards and list print it: Ready, Not used, Sign in again. */
+export function AccountStateMark({ credential, className }: { credential: LoginCredential; className?: string }) {
+  const s = accountState(credential)
+  return (
+    <StatusPill
+      tone={PILL_TONE[s.tone]}
+      label={s.label}
+      className={cn("whitespace-nowrap", className)}
+      data-testid={`account-state-${s.key}`}
     />
   )
 }

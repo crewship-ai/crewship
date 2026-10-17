@@ -149,8 +149,6 @@
   "components/features/credentials/credential-setup-summary.tsx": 1,
   "components/features/credentials/credential-tier-badge.tsx": 2,
   "components/features/credentials/provider-login-detail.tsx": 7,
-  "components/features/credentials/provider-logins-panel.tsx": 3,
-  "components/features/credentials/provider-logins-sidebar.tsx": 3,
   "components/features/crews/agent-canvas-cards.tsx": 6,
   "components/features/crews/agent-canvas-managers.tsx": 6,
   "components/features/crews/agent-canvas-tabs/memory-export-button.tsx": 1,
