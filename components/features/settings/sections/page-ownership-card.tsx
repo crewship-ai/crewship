@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from "@/components/ui/alert-dialog"
 import { usePageOwnership } from "@/hooks/use-page-ownership"
-import { PageOwnershipError, type PageOwnership } from "@/lib/page-ownership"
+import { PageOwnershipError, pageOwnershipLabels, type PageOwnership } from "@/lib/page-ownership"
 import { SettingsCard, nativeSelect } from "../shared"
 
 export function PageOwnershipCard({ workspaceId, role }: { workspaceId: string; role: string | null }) {
@@ -53,12 +53,12 @@ function OwnershipList({ pages, transfer }: { pages: PageOwnership[]; transfer: 
   return <>
     {transfer.error && <p role="alert" className="text-sm text-destructive">{transfer.error instanceof PageOwnershipError && transfer.error.status === 409 ? "Ownership changed. Review the refreshed owner and choose a successor again. " : ""}{transfer.error.message}</p>}
     {transfer.isSuccess && <p role="status" className="text-sm">Ownership transferred. Review any remaining outputs before retrying the departure.</p>}
-    {!pages.length && <p className="text-sm text-muted-foreground">No Artifacts or Boards for this owner.</p>}
+    {!pages.length && <p className="text-sm text-muted-foreground">No private outputs for this owner.</p>}
     <ul className="divide-y" aria-label="Artifact and Board ownership">
       {pages.map(page => {
         const successor = page.eligible_successors.find(candidate => candidate.user_id === successors[page.id])
         return <li key={`${page.id}:${page.owner_user_id}`} className="space-y-3 py-4">
-          <div className="min-w-0 text-sm"><Link className="break-words font-medium underline underline-offset-4" href={`/pages/${encodeURIComponent(page.slug)}`}>{page.name || page.slug}</Link><p className="break-words text-muted-foreground">{page.type === "artifact" ? "Artifact" : "Board"} · Owner: {page.owner_name || page.owner_user_id}</p></div>
+          <div className="min-w-0 text-sm"><Link className="break-words font-medium underline underline-offset-4" href={`/pages/${encodeURIComponent(page.slug)}`}>{page.name || page.slug}</Link><p className="break-words text-muted-foreground">{pageOwnershipLabels[page.type]} · Owner: {page.owner_name || page.owner_user_id}</p></div>
           {page.eligible_successors.length ? <div className="flex flex-col gap-2 md:flex-row md:items-end">
             <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm"><label htmlFor={`${successorId}-${page.id}`}>New owner for {page.name || page.slug}</label>
               <select id={`${successorId}-${page.id}`} className={`${nativeSelect} w-full`} value={successor?.user_id ?? ""} disabled={transfer.isPending} onChange={event => { setSuccessors(previous => ({ ...previous, [page.id]: event.target.value })); transfer.reset() }}>

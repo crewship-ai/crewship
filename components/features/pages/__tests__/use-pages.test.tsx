@@ -552,3 +552,10 @@ it("keeps Board pages distinct from empty pages eligible for HTML artifacts", ()
   expect(toPageView({ slug: "drawing", owner: "user/owner", panels: [], has_board: true })).toMatchObject({ hasBoard: true, hasArtifact: false, artifactEligible: false })
   expect(toPageView({ slug: "empty", owner: "user/owner", panels: [] })).toMatchObject({ hasBoard: false, artifactEligible: true })
 })
+
+it("preserves a true native descriptor independently of stable identity availability", () => {
+  expect(toPageView({id:"native",slug:"doc",has_document:true}).hasDocument).toBe(true)
+  expect(toPageView({slug:"doc",has_document:true}).hasDocument).toBe(true)
+  expect(toPageView({id:"legacy",slug:"page"}).hasDocument).toBe(false)
+  expect(toPageView({id:"legacy",slug:"page",has_document:"true" as unknown as boolean}).hasDocument).toBe(false)
+})

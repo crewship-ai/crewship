@@ -142,6 +142,7 @@ export interface WirePage {
   artifact_summary?: ArtifactSummary
   has_board?: boolean
   has_artifact?: boolean
+  has_document?: boolean
   /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
   /**
@@ -487,6 +488,8 @@ export interface PageView {
   hasBoard?: boolean
   hasArtifact?: boolean
   artifactEligible?: boolean
+  /** Confirmed native Document descriptor; missing means a legacy Page. */
+  hasDocument?: boolean
   id: string
   slug: string
   name: string
@@ -632,13 +635,14 @@ export function toPageView(raw: WirePage): PageView {
   const slug = trimmed(raw.slug) ?? ""
   return {
     id: trimmed(raw.id) ?? slug,
+    hasDocument: raw.has_document === true,
     slug,
     name: trimmed(raw.name) ?? slug,
     description: trimmed(raw.description),
     hasBoard: raw.has_board === true,
     hasArtifact: raw.has_artifact === true,
     artifactSummary: raw.artifact_summary,
-    artifactEligible: Boolean(raw.owner?.startsWith("user/") && tally.total === 0 && !raw.has_application && !raw.has_project && !raw.has_board),
+    artifactEligible: Boolean(raw.owner?.startsWith("user/") && tally.total === 0 && !raw.has_application && !raw.has_project && !raw.has_board && !raw.has_document),
     ownerRef: ownerRefOf(raw),
     ownerLabel: ownerLabelOf(raw),
     reach: reachOf(raw),
@@ -1113,7 +1117,8 @@ export function usePages(workspaceId: string | null | undefined): UsePagesResult
 
   usePagesRealtime(workspaceId)
 
-  const pages = useMemo(() => (query.data ?? []).map(toPageView), [query.data])
+  const denied = query.error instanceof PagesRequestError && [401,403,404].includes(query.error.status)
+  const pages = useMemo(() => (denied ? [] : query.data ?? []).map(toPageView), [query.data,denied])
 
   return {
     pages,

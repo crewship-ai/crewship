@@ -244,7 +244,6 @@ export interface RealtimeEvent {
   channel?: string
   payload: Record<string, unknown>
   timestamp: Date
-  channel?: string
 }
 
 type EventCallback = (event: RealtimeEvent) => void

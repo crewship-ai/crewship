@@ -174,3 +174,34 @@ it("loads every output page and resets the opaque cursor and rows when the owner
   expect(query.has("cursor")).toBe(false)
   expect(query.get("limit")).toBe("25")
 })
+
+
+it.each([ ["document", "Doc"], ["slides", "Slides"] ])("renders %s custody metadata with its own label and reviewed transfer", async (type,label) => {
+  let row={...initial(),type}
+  vi.mocked(apiFetch).mockImplementation(async (_url,init)=> {
+    if(init?.method==="POST") {
+      const body=JSON.parse(String(init.body));writes.push({url:String(_url),body})
+      row={...row,owner_user_id:body.successor_user_id,owner_name:"Existing reader",eligible_successors:[]}
+      return Response.json(row)
+    }
+    return Response.json({pages:[row]})
+  })
+  render(view())
+  await screen.findByText(`${label} · Owner: Departing owner`)
+  expect(screen.queryByText("Could not read output ownership.")).toBeNull()
+  expect(document.querySelector("iframe")).toBeNull()
+  await chooseAndReview()
+  expect(writes).toHaveLength(0)
+  fireEvent.click(screen.getByRole("button",{name:"Confirm ownership transfer"}))
+  await screen.findByText(`${label} · Owner: Existing reader`)
+  expect(writes).toEqual([{url:"/api/v1/workspaces/ws/page-ownership/page-1?workspace_id=ws",body:{expected_owner_user_id:"departing",successor_user_id:"reader"}}])
+})
+
+it("keeps a mixed four-type custody list visible instead of dropping the entire response",async()=>{
+  const rows=["artifact","board","document","slides"].map((type,index)=>({...initial(),id:`page-${index}`,slug:`private-${type}`,name:`Private ${type}`,type}))
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({pages:rows}))
+  render(view())
+  for(const row of rows) await screen.findByRole("link",{name:row.name})
+  for(const label of ["Artifact","Board","Doc","Slides"])expect(screen.getByText(`${label} · Owner: Departing owner`)).toBeInTheDocument()
+  expect(writes).toHaveLength(0)
+})
