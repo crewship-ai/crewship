@@ -1,77 +1,74 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { motion, useReducedMotion } from "motion/react"
-import { AlertTriangle, ChevronRight, CircleDashed, Library, Sparkles, Users, type LucideIcon } from "lucide-react"
+import { AlertTriangle, Archive, Bot, Check, CircleDashed, Library, Search, Sparkles, type LucideIcon } from "lucide-react"
 
 import {
-  SidebarFacet,
-  SidebarFacetOption,
-  SidebarFilterPopover,
+  SidebarActiveChip,
+  SidebarActiveChips,
   SidebarRow,
   SidebarSearch,
   SidebarSection,
   SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
-import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
+import { SourceMark } from "./skill-marks"
 import {
-  DOMAIN_ORDER,
-  MATURITY_LABEL,
+  FACET_KEYS,
+  STATUS_LABEL,
   TRUST_LABEL,
+  TRUST_LEVELS,
+  VIEW_LABEL,
+  activeFilterCount,
   domainMeta,
-  explorerCounts,
-  popoverFilterCount,
-  skillTrust,
-  sourceLabel,
+  panelCounts,
+  type FacetCount,
+  type FacetKey,
   type SkillFilters,
   type SkillRow,
+  type SkillSourceKind,
+  type SkillStatus,
   type SkillsAgent,
   type SkillsCrew,
   type SkillsView,
-  type TrustLevel,
 } from "./skills-model"
 
-// The /skills left sidebar (#3033), the same explorer as Routines and Issues:
-// search + Filter + collapse, then View buckets with count pills, then the
-// workspace's crews with their agents (the agent filter the page lacked),
-// then the domains in use. Facets that are not worth a section live in the
-// kit's Filter popover.
+// The Skills secondary panel (Harbor 2 #3396): search, the active filters,
+// the views (keys 1–6), then the facets Source, Domain, Trust, Status and Used
+// by crew. Each facet picks one value; its counts leave its own pick out.
 
-const VIEWS: { id: SkillsView; label: string; icon: LucideIcon; tone: string }[] = [
-  { id: "all", label: "All skills", icon: Library, tone: "text-foreground/70" },
-  { id: "assigned", label: "On agents", icon: Users, tone: "text-primary" },
-  { id: "unassigned", label: "Not assigned", icon: CircleDashed, tone: "text-muted-foreground" },
-  { id: "attention", label: "Needs a look", icon: AlertTriangle, tone: "text-warn" },
-  { id: "proposed", label: "Proposed by agents", icon: Sparkles, tone: "text-purple" },
-]
-
-const TRUST_LEVELS: TrustLevel[] = ["verified", "unverified", "unscanned", "flagged"]
-
-function CountPill({ n, selected }: { n: number; selected: boolean }) {
-  return (
-    <span
-      className={cn(
-        "rounded-full px-1.5 py-px text-micro tabular-nums",
-        n === 0 ? "text-muted-foreground-soft" : selected ? "bg-primary/15 text-primary-hover" : "bg-foreground/[0.05] text-muted-foreground",
-      )}
-    >
-      {n}
-    </span>
-  )
+const VIEW_ICON: Record<SkillsView, LucideIcon> = {
+  library: Library,
+  used: Bot,
+  unused: CircleDashed,
+  attention: AlertTriangle,
+  proposed: Sparkles,
+  archived: Archive,
 }
 
-function Stagger({ i, children }: { i: number; children: React.ReactNode }) {
-  const reduce = useReducedMotion()
+const SOURCE_TOP = 5
+
+function sourceKind(key: string): SkillSourceKind {
+  if (key === "builtin") return "builtin"
+  if (key === "workspace") return "workspace"
+  return key.includes(":") ? "vendor" : "repo"
+}
+
+function Count({ n }: { n: number }) {
+  return <span className="ml-auto font-mono text-micro tabular-nums text-muted-foreground-soft">{n.toLocaleString("en-US").replace(/,/g, " ")}</span>
+}
+
+function Option({ on, onToggle, children, n, testId }: { on: boolean; onToggle: () => void; children: React.ReactNode; n: number; testId?: string }) {
   return (
-    <motion.div
-      initial={reduce ? false : { opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], delay: Math.min(i, 12) * 0.018 }}
-    >
-      {children}
-    </motion.div>
+    <SidebarRow selected={on} onSelect={onToggle} data-testid={testId}>
+      <span className={cn("flex size-3.5 shrink-0 items-center justify-center rounded-sm border", on ? "border-primary bg-primary text-primary-foreground" : "border-control-border")} aria-hidden>
+        {on && <Check className="size-2.5" />}
+      </span>
+      <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-foreground/85">{children}</span>
+      <Count n={n} />
+    </SidebarRow>
   )
 }
 
@@ -80,238 +77,188 @@ export interface SkillsExplorerProps {
   agents: SkillsAgent[]
   crews: SkillsCrew[]
   proposedCount: number
+  /** Proposed by agents shows only to roles that may approve. */
+  canReview: boolean
   filters: SkillFilters
   onChange: (patch: Partial<SkillFilters>) => void
   /** Called after a pick, so a phone can close the panel sheet. */
   onPicked?: () => void
+  /** Whether a skill is open: the view rows are then not "selected". */
+  skillOpen?: boolean
 }
 
-export function SkillsExplorer({
-  skills,
-  agents,
-  crews,
-  proposedCount,
-  filters,
-  onChange,
-  onPicked,
-}: SkillsExplorerProps) {
-  const [open, setOpen] = useState({ view: true, holders: true, domain: true })
-  // Few crews start open; many start folded so the domains stay in reach.
-  // Only an explicit toggle is stored, so crews that load later still get
-  // the default.
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
-  const counts = useMemo(() => explorerCounts(skills, filters), [skills, filters])
+export function visibleViews(canReview: boolean): SkillsView[] {
+  return (["library", "used", "unused", "attention", "proposed", "archived"] as SkillsView[]).filter((v) => v !== "proposed" || canReview)
+}
 
-  const agentsByCrew = useMemo(() => {
-    const m = new Map<string, SkillsAgent[]>()
-    for (const a of agents) {
-      const key = a.crew_id ?? ""
-      m.set(key, [...(m.get(key) ?? []), a])
-    }
-    for (const list of m.values()) list.sort((a, b) => a.name.localeCompare(b.name))
-    return m
-  }, [agents])
-
-  const domains = useMemo(() => {
-    const present = new Set(skills.map((s) => s.category))
-    if (filters.domain) present.add(filters.domain)
-    return DOMAIN_ORDER.filter((d) => present.has(d))
-  }, [skills, filters.domain])
+export function SkillsExplorer({ skills, agents, crews, proposedCount, canReview, filters, onChange, onPicked, skillOpen = false }: SkillsExplorerProps) {
+  const counts = useMemo(() => panelCounts(skills, filters), [skills, filters])
+  const [open, setOpen] = useState<Record<FacetKey, boolean | undefined>>({ source: undefined, domain: undefined, trust: undefined, status: undefined, crewId: undefined })
+  const [pickQuery, setPickQuery] = useState("")
+  const [pickOpen, setPickOpen] = useState(false)
 
   const pick = (patch: Partial<SkillFilters>) => {
     onChange(patch)
     onPicked?.()
   }
+  const toggle = <K extends FacetKey>(key: K, value: SkillFilters[K]) => pick({ [key]: filters[key] === value ? null : value } as Partial<SkillFilters>)
+  // A facet with a pick starts open; one without starts folded, so the
+  // views stay in reach (v67: a facet opens on demand).
+  const isOpen = (k: FacetKey) => open[k] ?? filters[k] != null
+  const flip = (k: FacetKey) => setOpen((o) => ({ ...o, [k]: !isOpen(k) }))
 
-  const facetCounts = useMemo(() => {
-    const src = new Map<string, number>()
-    const trust = new Map<TrustLevel, number>()
-    const mat = new Map<string, number>()
-    let needs = 0
-    for (const s of skills) {
-      src.set(s.source, (src.get(s.source) ?? 0) + 1)
-      const t = skillTrust(s).level
-      trust.set(t, (trust.get(t) ?? 0) + 1)
-      const m = (s.maturity ?? "COMMUNITY").toUpperCase()
-      mat.set(m, (mat.get(m) ?? 0) + 1)
-      if (s.needs_credentials?.length) needs++
-    }
-    return { src, trust, mat, needs }
-  }, [skills])
+  const libraryTotal = counts.views.library
+  const sourceLabel = (key: string) => counts.sources.find((s) => s.key === key)?.label ?? key
+  const agent = filters.agentId ? agents.find((a) => a.id === filters.agentId) : undefined
+  const crewName = (id: string) => crews.find((c) => c.id === id)?.name ?? "Crew"
 
-  const toggleIn = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v])
-  let row = 0
+  const chips: { key: string; label: string; remove: () => void }[] = []
+  if (filters.agentId) chips.push({ key: "agent", label: `Agent: ${agent?.name ?? "agent"}`, remove: () => onChange({ agentId: null }) })
+  if (filters.source) chips.push({ key: "source", label: sourceLabel(filters.source), remove: () => onChange({ source: null }) })
+  if (filters.domain) chips.push({ key: "domain", label: domainMeta(filters.domain).label, remove: () => onChange({ domain: null }) })
+  if (filters.trust) chips.push({ key: "trust", label: TRUST_LABEL[filters.trust], remove: () => onChange({ trust: null }) })
+  if (filters.status) chips.push({ key: "status", label: STATUS_LABEL[filters.status], remove: () => onChange({ status: null }) })
+  if (filters.crewId) chips.push({ key: "crew", label: `Used by ${crewName(filters.crewId)}`, remove: () => onChange({ crewId: null }) })
+  const any = activeFilterCount(filters) > 0
+  const clearAll = () => onChange(Object.fromEntries([...FACET_KEYS.map((k) => [k, null]), ["agentId", null]]) as Partial<SkillFilters>)
+
+  const sourcesShown: FacetCount[] = counts.sources.slice(0, SOURCE_TOP)
+  if (filters.source && !sourcesShown.some((s) => s.key === filters.source)) {
+    const cur = counts.sources.find((s) => s.key === filters.source)
+    if (cur) sourcesShown.push(cur)
+  }
+  const pq = pickQuery.trim().toLowerCase()
+  const picked = [...counts.sources].sort((a, b) => a.label.localeCompare(b.label)).filter((s) => !pq || s.label.toLowerCase().includes(pq))
+
+  const domains = [...counts.domain.entries()].sort((a, b) => b[1] - a[1])
+  const crewRows = crews.map((c) => ({ crew: c, n: counts.crew.get(c.id) ?? 0 })).filter((x) => x.n > 0 || filters.crewId === x.crew.id)
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" data-slot="skills-panel">
       <SidebarToolbar>
         <div data-skills-search className="min-w-0 flex-1">
-          <SidebarSearch value={filters.query} onValueChange={(query) => onChange({ query })} placeholder="Search skills, agents…" />
+          <SidebarSearch
+            value={filters.query}
+            onValueChange={(query) => onChange({ query })}
+            placeholder={`Search ${libraryTotal.toLocaleString("en-US").replace(/,/g, " ")} skills by name, description or source…`}
+            aria-label="Search skills"
+          />
         </div>
-        <SidebarFilterPopover
-          label="Filter skills"
-          activeCount={popoverFilterCount(filters)}
-          onClear={() => onChange({ sources: [], trust: [], maturities: [], needsCredential: false })}
-          panelClassName="min-w-[230px] max-h-[420px]"
-        >
-          <SidebarFacet first label="Source" resetLabel="Any source" resetActive={filters.sources.length === 0} onReset={() => onChange({ sources: [] })}>
-            {[...facetCounts.src.keys()].sort().map((src) => (
-              <SidebarFacetOption key={src} active={filters.sources.includes(src)} onToggle={() => onChange({ sources: toggleIn(filters.sources, src) })}>
-                <span className="flex-1">{sourceLabel(src)}</span>
-                <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{facetCounts.src.get(src)}</span>
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-          <SidebarFacet label="Trust" resetLabel="Any trust" resetActive={filters.trust.length === 0} onReset={() => onChange({ trust: [] })}>
-            {TRUST_LEVELS.map((t) => (
-              <SidebarFacetOption key={t} active={filters.trust.includes(t)} onToggle={() => onChange({ trust: toggleIn(filters.trust, t) })}>
-                <span className="flex-1">{TRUST_LABEL[t]}</span>
-                <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{facetCounts.trust.get(t) ?? 0}</span>
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-          <SidebarFacet label="Maturity" resetLabel="Any maturity" resetActive={filters.maturities.length === 0} onReset={() => onChange({ maturities: [] })}>
-            {Object.entries(MATURITY_LABEL).map(([m, label]) => (
-              <SidebarFacetOption key={m} active={filters.maturities.includes(m)} onToggle={() => onChange({ maturities: toggleIn(filters.maturities, m) })}>
-                <span className="flex-1">{label}</span>
-                <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{facetCounts.mat.get(m) ?? 0}</span>
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-          <SidebarFacet label="Requirements" resetLabel="Any" resetActive={!filters.needsCredential} onReset={() => onChange({ needsCredential: false })}>
-            <SidebarFacetOption active={filters.needsCredential} onToggle={() => onChange({ needsCredential: !filters.needsCredential })}>
-              <span className="flex-1">Needs a credential</span>
-              <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{facetCounts.needs}</span>
-            </SidebarFacetOption>
-          </SidebarFacet>
-        </SidebarFilterPopover>
       </SidebarToolbar>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
-        {/* ── View ── single-select buckets */}
-        <SidebarSection
-          label="View"
-          count={VIEWS.length}
-          collapsible
-          collapsed={!open.view}
-          onToggle={() => setOpen((o) => ({ ...o, view: !o.view }))}
-          className="border-b border-foreground/[0.06] pb-1.5"
-        >
-          {VIEWS.map((v) => {
-            const n = v.id === "proposed" ? proposedCount : counts.views[v.id]
-            const selected = filters.view === v.id
-            const Icon = v.icon
-            return (
-              <Stagger key={v.id} i={row++}>
-                <SidebarRow selected={selected} onSelect={() => pick({ view: v.id })} data-testid={`skills-view-${v.id}`}>
-                  <Icon className={cn("h-3.5 w-3.5 shrink-0", v.tone, n === 0 && !selected && "opacity-40")} />
-                  <span className={cn("flex-1 truncate", n === 0 && !selected ? "text-muted-foreground-soft" : "text-foreground/80")}>{v.label}</span>
-                  <CountPill n={n} selected={selected} />
+        <SidebarActiveChips className="pt-1">
+          {chips.map((c) => (
+            <SidebarActiveChip key={c.key} label={c.label} onRemove={c.remove}>
+              {c.label}
+            </SidebarActiveChip>
+          ))}
+        </SidebarActiveChips>
+
+        <SidebarSection label="Views">
+          <nav aria-label="Skill views">
+            {visibleViews(canReview).map((v) => {
+              const Icon = VIEW_ICON[v]
+              const n = v === "proposed" ? proposedCount : counts.views[v]
+              const selected = !skillOpen && filters.view === v
+              return (
+                <SidebarRow key={v} selected={selected} onSelect={() => pick({ view: v })} data-testid={`skills-view-${v}`}>
+                  <Icon className={cn("size-3.5 shrink-0", v === "attention" && n > 0 ? "text-warn" : "text-muted-foreground")} aria-hidden />
+                  <span className="min-w-0 flex-1 truncate text-foreground/85">{VIEW_LABEL[v]}</span>
+                  <Count n={n} />
                 </SidebarRow>
-              </Stagger>
-            )
-          })}
+              )
+            })}
+          </nav>
         </SidebarSection>
 
-        {/* ── Crews & agents ── who holds what */}
         <SidebarSection
-          label="Crews & agents"
-          count={agents.length}
-          collapsible
-          collapsed={!open.holders}
-          onToggle={() => setOpen((o) => ({ ...o, holders: !o.holders }))}
-          className="border-b border-foreground/[0.06] pb-1.5"
-        >
-          {crews.length === 0 && agents.length === 0 && (
-            <p className="px-3 py-1.5 text-label text-muted-foreground-soft">No agents in this workspace yet.</p>
+          label="Filter"
+          count={any ? activeFilterCount(filters) : undefined}
+          actions={
+            any ? (
+              <button type="button" onClick={clearAll} className="text-micro text-primary-hover hover:underline">
+                Clear
+              </button>
+            ) : undefined
+          }
+        />
+
+        <SidebarSection label="Source" collapsible collapsed={!isOpen("source")} onToggle={() => flip("source")}>
+          {sourcesShown.map((s) => (
+            <Option key={s.key} on={filters.source === s.key} onToggle={() => toggle("source", s.key)} n={s.count}>
+              <SourceMark kind={sourceKind(s.key)} size={16} />
+              <span className="truncate">{s.label}</span>
+            </Option>
+          ))}
+          {counts.sources.length > SOURCE_TOP && (
+            <Popover open={pickOpen} onOpenChange={setPickOpen}>
+              <PopoverTrigger asChild>
+                <button type="button" className="kit-tap mx-1.5 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1 text-left text-label text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground">
+                  <Search className="size-3.5" aria-hidden />
+                  All {counts.sources.length} sources…
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-72 p-0" aria-label="Source">
+                <div className="border-b border-border p-2">
+                  <SidebarSearch value={pickQuery} onValueChange={setPickQuery} placeholder="Search owner or repository…" autoFocus />
+                </div>
+                <div className="max-h-72 overflow-y-auto py-1">
+                  {picked.map((s) => (
+                    <button
+                      key={s.key}
+                      type="button"
+                      aria-pressed={filters.source === s.key}
+                      onClick={() => {
+                        setPickOpen(false)
+                        toggle("source", s.key)
+                      }}
+                      className={cn("kit-tap flex w-full items-center gap-2 px-3 py-1.5 text-left text-label hover:bg-foreground/[0.05]", filters.source === s.key && "text-primary-hover")}
+                    >
+                      <SourceMark kind={sourceKind(s.key)} size={16} />
+                      <span className="min-w-0 flex-1 truncate">{s.label}</span>
+                      <span className="font-mono text-micro tabular-nums text-muted-foreground-soft">{s.count}</span>
+                    </button>
+                  ))}
+                  {picked.length === 0 && <p className="px-3 py-2 text-label text-muted-foreground">No source matches.</p>}
+                </div>
+              </PopoverContent>
+            </Popover>
           )}
-          {crews.map((c) => {
-            const isOpen = expanded[c.id] ?? (crews.length <= 3 || filters.crewId === c.id)
-            const crewSelected = filters.crewId === c.id && !filters.agentId
-            const members = agentsByCrew.get(c.id) ?? []
-            return (
-              <div key={c.id}>
-                <Stagger i={row++}>
-                  <SidebarRow
-                    selected={crewSelected}
-                    aria-expanded={isOpen}
-                    data-testid={`skills-crew-${c.slug}`}
-                    onSelect={() => {
-                      // Picking a crew opens it; picking it again clears the
-                      // filter and folds it back.
-                      if (crewSelected) {
-                        setExpanded((e) => ({ ...e, [c.id]: false }))
-                        pick({ crewId: null, agentId: null })
-                      } else {
-                        setExpanded((e) => ({ ...e, [c.id]: true }))
-                        pick({ crewId: c.id, agentId: null })
-                      }
-                    }}
-                  >
-                    <CrewIcon icon={c.icon ?? "users"} color={c.color} size="sm" className="h-[18px] w-[18px] rounded-md [&>svg]:h-3 [&>svg]:w-3" />
-                    <span className="flex-1 truncate text-foreground/80">{c.name}</span>
-                    <ChevronRight
-                      aria-hidden
-                      className={cn("h-3 w-3 shrink-0 text-muted-foreground-soft transition-transform duration-150", isOpen && "rotate-90")}
-                    />
-                    <span className="w-5 text-right font-mono text-micro tabular-nums text-muted-foreground-soft">{counts.byCrew.get(c.id) ?? 0}</span>
-                  </SidebarRow>
-                </Stagger>
-                {isOpen &&
-                  members.map((a) => {
-                    const n = counts.byAgent.get(a.id) ?? 0
-                    const selected = filters.agentId === a.id
-                    return (
-                      <Stagger key={a.id} i={row++}>
-                        <SidebarRow
-                          indent
-                          selected={selected}
-                          data-testid={`skills-agent-${a.slug}`}
-                          onSelect={() => pick(selected ? { agentId: null } : { agentId: a.id, crewId: c.id })}
-                        >
-                          <AgentAvatar
-                            seed={a.avatar_seed ?? a.slug}
-                            style={a.avatar_style}
-                            avatarUrl={a.avatar_url}
-                            alt=""
-                            width={16}
-                            height={16}
-                            className="h-4 w-4 shrink-0 rounded-full bg-foreground/[0.04]"
-                          />
-                          <span className={cn("flex-1 truncate", n === 0 && !selected ? "text-muted-foreground-soft" : "text-foreground/80")}>{a.name}</span>
-                          <span className="w-5 text-right font-mono text-micro tabular-nums text-muted-foreground-soft">{n}</span>
-                        </SidebarRow>
-                      </Stagger>
-                    )
-                  })}
-              </div>
-            )
-          })}
         </SidebarSection>
 
-        {/* ── Domain ── only the ones in use */}
-        <SidebarSection
-          label="Domain"
-          count={domains.length}
-          collapsible
-          collapsed={!open.domain}
-          onToggle={() => setOpen((o) => ({ ...o, domain: !o.domain }))}
-        >
-          {domains.map((d) => {
-            const meta = domainMeta(d)
-            const n = counts.byDomain.get(d) ?? 0
-            const selected = filters.domain === d
-            const Icon = meta.icon
-            return (
-              <Stagger key={d} i={row++}>
-                <SidebarRow selected={selected} onSelect={() => pick({ domain: selected ? null : d })}>
-                  <Icon className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground", n === 0 && !selected && "opacity-40")} />
-                  <span className={cn("flex-1 truncate", n === 0 && !selected ? "text-muted-foreground-soft" : "text-foreground/80")}>{meta.label}</span>
-                  <span className="w-5 text-right font-mono text-micro tabular-nums text-muted-foreground-soft">{n}</span>
-                </SidebarRow>
-              </Stagger>
-            )
-          })}
+        <SidebarSection label="Domain" collapsible collapsed={!isOpen("domain")} onToggle={() => flip("domain")}>
+          {domains.map(([d, n]) => (
+            <Option key={d} on={filters.domain === d} onToggle={() => toggle("domain", d)} n={n}>
+              {domainMeta(d).label}
+            </Option>
+          ))}
+        </SidebarSection>
+
+        <SidebarSection label="Trust" collapsible collapsed={!isOpen("trust")} onToggle={() => flip("trust")}>
+          {TRUST_LEVELS.map((t) => (
+            <Option key={t} on={filters.trust === t} onToggle={() => toggle("trust", t)} n={counts.trust.get(t) ?? 0}>
+              {TRUST_LABEL[t]}
+            </Option>
+          ))}
+        </SidebarSection>
+
+        <SidebarSection label="Status" collapsible collapsed={!isOpen("status")} onToggle={() => flip("status")}>
+          {(Object.keys(STATUS_LABEL) as SkillStatus[]).map((st) => (
+            <Option key={st} on={filters.status === st} onToggle={() => toggle("status", st)} n={counts.status.get(st) ?? 0}>
+              {STATUS_LABEL[st]}
+            </Option>
+          ))}
+        </SidebarSection>
+
+        <SidebarSection label="Used by crew" collapsible collapsed={!isOpen("crewId")} onToggle={() => flip("crewId")}>
+          {crewRows.length === 0 && <p className="px-3 py-1 text-label text-muted-foreground-soft">No crew uses a skill yet.</p>}
+          {crewRows.map(({ crew, n }) => (
+            <Option key={crew.id} on={filters.crewId === crew.id} onToggle={() => toggle("crewId", crew.id)} n={n} testId={`skills-crew-${crew.slug}`}>
+              <CrewIcon icon={crew.icon ?? "users"} color={crew.color} size="sm" className="h-4 w-4 rounded-sm [&>svg]:h-2.5 [&>svg]:w-2.5" />
+              <span className="truncate">{crew.name}</span>
+            </Option>
+          ))}
         </SidebarSection>
       </div>
     </div>
