@@ -10,17 +10,12 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { formatStatus } from "@/lib/format-status"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { Checkbox } from "@/components/ui/checkbox"
-import { SettingsCard, SettingsRow, settingsControl, controlHeight } from "../shared"
+import { SettingsCard, SettingsRow, settingsControl } from "../shared"
 import { useDirtyForm } from "@/hooks/use-dirty-form"
 import { SaveFooter } from "@/components/ui/save-footer"
+import { ChangePasswordDialog } from "./change-password-dialog"
 
 // Browser sessions and CLI tokens used to be the last card here. They are
 // their own section now (sessions-section.tsx, Settings › Sessions & tokens),
@@ -38,8 +33,17 @@ function CopyableText({ value, mono }: { value: string; mono?: boolean }) {
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            onClick={() => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
-            className={cn("text-xs text-muted-foreground hover:text-foreground transition-colors truncate text-right", mono && "font-mono")}
+            type="button"
+            aria-label={`Copy ${value}`}
+            onClick={() => {
+              navigator.clipboard.writeText(value).then(
+                () => toast.success("Email copied"),
+                () => toast.error("Couldn’t copy the email", { duration: 6000 }),
+              )
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1500)
+            }}
+            className={cn("text-control text-primary-hover hover:underline underline-offset-2 truncate text-right", mono && "font-mono")}
           >
             {value}
           </button>
@@ -158,18 +162,8 @@ export function ProfileSection({
   const nameTrimmed = nameForm.draft.name.trim()
   const nameValid = nameTrimmed.length >= 1 && nameTrimmed.length <= 100
 
-  // ── Change-password dialog state (#867.1) ──
+  // ── Change-password dialog (#867.1; its own form, change-password-dialog) ──
   const [pwOpen, setPwOpen] = useState(false)
-  const [pwCurrent, setPwCurrent] = useState("")
-  const [pwNew, setPwNew] = useState("")
-  const [pwConfirm, setPwConfirm] = useState("")
-  // Opt-in: also revoke every CLI token. Off by default so a rotation does not
-  // silently break a script or a teammate's paired terminal.
-  const [pwRevokeTokens, setPwRevokeTokens] = useState(false)
-  const [pwTokensRevoked, setPwTokensRevoked] = useState(0)
-  const [pwSaving, setPwSaving] = useState(false)
-  const [pwError, setPwError] = useState<string | null>(null)
-  const [pwDone, setPwDone] = useState(false)
 
   const initials = (displayName ?? "U").split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
 
@@ -188,116 +182,84 @@ export function ProfileSection({
     void refreshSession()
   }), [nameForm, refreshSession])
 
-  const resetPwForm = useCallback(() => {
-    setPwCurrent(""); setPwNew(""); setPwConfirm(""); setPwError(null); setPwDone(false)
-    setPwRevokeTokens(false); setPwTokensRevoked(0)
-  }, [])
-
-  const changePassword = useCallback(async () => {
-    if (pwNew.length < 8) { setPwError("New password must be at least 8 characters"); return }
-    if (pwNew !== pwConfirm) { setPwError("New passwords do not match"); return }
-    setPwSaving(true)
-    setPwError(null)
-    try {
-      const res = await apiFetch("/api/v1/users/me/password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ current_password: pwCurrent, new_password: pwNew, revoke_cli_tokens: pwRevokeTokens }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        setPwError(typeof body?.error === "string" ? body.error : "Failed to change password")
-        return
-      }
-      const done = await res.json().catch(() => null)
-      setPwTokensRevoked(typeof done?.cli_tokens_revoked === "number" ? done.cli_tokens_revoked : 0)
-      setPwDone(true)
-    } catch {
-      setPwError("Failed to change password")
-    } finally {
-      setPwSaving(false)
-    }
-  }, [pwCurrent, pwNew, pwConfirm, pwRevokeTokens])
-
   return (
     <div className="space-y-5">
       {/* ── Account ── */}
       <SettingsCard icon={User} title="Account" description="Your identity on this instance">
-        <SettingsRow label="Profile picture">
-          <div className="flex flex-col items-end gap-1.5">
-            <div className="flex items-center gap-2.5">
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt="Your avatar"
-                  className="h-9 w-9 rounded-full object-cover ring-2 ring-border"
-                />
-              ) : (
-                <div className="h-9 w-9 rounded-full bg-primary ring-2 ring-border flex items-center justify-center text-primary-foreground text-xs font-semibold">
-                  {initials}
-                </div>
-              )}
-              {!restricted && (<>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={AVATAR_ACCEPT}
-                className="hidden"
-                onChange={onPickAvatar}
-                aria-label="Upload profile picture"
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 px-2.5 text-xs"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={avatarUploading}
-              >
-                {avatarUploading ? <Spinner className="h-3 w-3" /> : (avatarUrl ? "Change" : "Upload")}
-              </Button>
-              {avatarUrl && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                  onClick={() => void removeAvatar()}
-                  disabled={avatarUploading}
-                >
-                  Remove
-                </Button>
-              )}
-              </>)}
+        <SettingsRow
+          label="Profile picture"
+          // The rule — or why the last pick was refused — under the label: an
+          // upload saves at once, so there is nothing for the save bar.
+          description={restricted ? undefined : avatarError
+            ? <span role="alert" className="text-destructive">{avatarError}</span>
+            : "PNG, JPEG, or WebP · max 2MB · saves at once"}
+        >
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt="Your avatar"
+              className="h-10 w-10 rounded-full object-cover ring-2 ring-border"
+            />
+          ) : (
+            <div className="h-10 w-10 rounded-full bg-primary ring-2 ring-border flex items-center justify-center text-primary-foreground text-xs font-semibold">
+              {initials}
             </div>
-            {!restricted && (avatarError
-              ? <span className="text-label text-destructive">{avatarError}</span>
-              : <span className="text-micro text-muted-foreground">PNG, JPEG, or WebP · max 2MB</span>)}
-          </div>
+          )}
+          {!restricted && (<>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={AVATAR_ACCEPT}
+            className="hidden"
+            onChange={onPickAvatar}
+            aria-label="Upload profile picture"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={avatarUploading}
+          >
+            {avatarUploading ? <Spinner className="h-3 w-3" /> : (avatarUrl ? "Change" : "Upload")}
+          </Button>
+          {avatarUrl && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => void removeAvatar()}
+              disabled={avatarUploading}
+            >
+              Remove
+            </Button>
+          )}
+          </>)}
         </SettingsRow>
-        <SettingsRow label="Email">
-          {userEmail ? <CopyableText value={userEmail} mono /> : <span className="text-xs text-muted-foreground">Not set</span>}
+        <SettingsRow label="Email" description={userEmail ? "Click to copy" : undefined}>
+          {userEmail ? <CopyableText value={userEmail} mono /> : <span className="text-control text-muted-foreground">Not set</span>}
         </SettingsRow>
         {restricted ? (
           <SettingsRow label="Full name">
-            <span className="text-xs text-muted-foreground">{userName || "Not set"}</span>
+            <span className="text-control text-muted-foreground">{userName || "Not set"}</span>
           </SettingsRow>
         ) : (<>
-        <SettingsRow label="Full name">
-          <div className="flex flex-col items-end gap-1">
-            <Input
-              value={nameForm.draft.name}
-              onChange={(e) => nameForm.set("name", e.target.value)}
-              maxLength={100}
-              aria-label="Full name"
-              aria-invalid={(nameForm.isDirty && !nameValid) || undefined}
-              placeholder="Not set"
-              // Right-aligned like every other value in this card (email,
-              // password, role): the column reads down one edge.
-              className={cn(settingsControl, "text-right")}
-              disabled={nameForm.status === "saving"}
-            />
-            {/* A format problem belongs under its field; a failed write goes to the corner. */}
-            {nameForm.isDirty && !nameValid && <span className="text-label text-destructive">Name must be 1-100 characters</span>}
-          </div>
+        <SettingsRow
+          label="Full name"
+          // A format problem belongs under its field; a failed write goes to the corner.
+          description={nameForm.isDirty && !nameValid
+            ? <span className="text-destructive">Name must be 1-100 characters</span>
+            : "1–100 characters"}
+        >
+          <Input
+            value={nameForm.draft.name}
+            onChange={(e) => nameForm.set("name", e.target.value)}
+            maxLength={100}
+            aria-label="Full name"
+            aria-invalid={(nameForm.isDirty && !nameValid) || undefined}
+            placeholder="Not set"
+            className={settingsControl}
+            disabled={nameForm.status === "saving"}
+          />
         </SettingsRow>
         <SaveFooter
           dirty={nameForm.isDirty}
@@ -309,83 +271,15 @@ export function ProfileSection({
           onSave={saveName}
         />
         </>)}
-        <SettingsRow label="Password">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground tracking-[0.2em]">••••••••</span>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 text-micro px-2"
-              onClick={() => { resetPwForm(); setPwOpen(true) }}
-            >
-              Change
-            </Button>
-          </div>
+        <SettingsRow label="Password" description="Changing it signs out your other sessions">
+          <span className="font-mono text-control tracking-[0.2em] text-muted-foreground" aria-hidden>••••••••</span>
+          <Button size="sm" variant="outline" onClick={() => setPwOpen(true)}>
+            Change
+          </Button>
         </SettingsRow>
       </SettingsCard>
 
-      {/* ── Change password dialog ── */}
-      <AlertDialog open={pwOpen} onOpenChange={(o) => { setPwOpen(o); if (!o) resetPwForm() }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-sm">Change password</AlertDialogTitle>
-            <AlertDialogDescription className="text-xs">
-              {pwDone
-                ? pwRevokeTokens
-                  ? `Password changed. Your other browser sessions have been signed out and ${pwTokensRevoked} CLI token${pwTokensRevoked === 1 ? "" : "s"} revoked.`
-                  : "Password changed. Your other browser sessions have been signed out. CLI tokens keep working."
-                : "Enter your current password and choose a new one (at least 8 characters). This signs out your other browser sessions."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-
-          {!pwDone && (
-            <div className="space-y-3 py-1">
-              <div className="space-y-1">
-                <Label htmlFor="pw-current" className="text-xs">Current password</Label>
-                <Input id="pw-current" type="password" value={pwCurrent} autoComplete="current-password"
-                  onChange={(e) => setPwCurrent(e.target.value)} className={controlHeight} disabled={pwSaving} />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="pw-new" className="text-xs">New password</Label>
-                <Input id="pw-new" type="password" value={pwNew} autoComplete="new-password"
-                  onChange={(e) => setPwNew(e.target.value)} className={controlHeight} disabled={pwSaving} />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="pw-confirm" className="text-xs">Confirm new password</Label>
-                <Input id="pw-confirm" type="password" value={pwConfirm} autoComplete="new-password"
-                  onChange={(e) => setPwConfirm(e.target.value)} className={controlHeight} disabled={pwSaving} />
-              </div>
-              <label className="flex items-start gap-2 pt-1 text-xs">
-                <Checkbox
-                  checked={pwRevokeTokens}
-                  onCheckedChange={(v) => setPwRevokeTokens(v === true)}
-                  disabled={pwSaving}
-                  aria-label="Also revoke all CLI tokens"
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-medium">Also revoke all CLI tokens</span>
-                  <span className="block text-muted-foreground">Every terminal and script signed in as you stops working until it signs in again.</span>
-                </span>
-              </label>
-              {pwError && <p className="text-label text-destructive">{pwError}</p>}
-            </div>
-          )}
-
-          <AlertDialogFooter>
-            {pwDone ? (
-              <AlertDialogAction className="h-7 text-xs" onClick={() => setPwOpen(false)}>Done</AlertDialogAction>
-            ) : (
-              <>
-                <AlertDialogCancel className="h-7 text-xs" disabled={pwSaving}>Cancel</AlertDialogCancel>
-                <Button className="h-7 text-xs" onClick={() => void changePassword()} disabled={pwSaving}>
-                  {pwSaving ? <Spinner className="h-3 w-3" /> : "Change password"}
-                </Button>
-              </>
-            )}
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ChangePasswordDialog open={pwOpen} onOpenChange={setPwOpen} />
 
       {!restricted && (<>
       {/* ── Workspace ── */}
@@ -394,17 +288,17 @@ export function ProfileSection({
           {role ? (
             <StatusPill tone={ROLE_TONE[role] ?? "muted"} label={formatStatus(role).label} />
           ) : (
-            <span className="text-xs text-muted-foreground">Not assigned</span>
+            <span className="text-control text-muted-foreground">Not assigned</span>
           )}
         </SettingsRow>
         {workspaceName && (
           <SettingsRow label="Organization">
-            <span className="text-xs text-muted-foreground">{workspaceName}</span>
+            <span className="text-control text-foreground">{workspaceName}</span>
           </SettingsRow>
         )}
         {joinedAt && (
           <SettingsRow label="Joined">
-            <span className="text-micro text-muted-foreground font-mono tabular-nums">
+            <span className="text-control text-foreground font-mono tabular-nums">
               {new Date(joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
             </span>
           </SettingsRow>

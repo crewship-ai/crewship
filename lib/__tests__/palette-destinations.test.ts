@@ -21,7 +21,7 @@ describe("paletteDestinations", () => {
       expect(ids(owner), id).toContain(id)
       expect(ids(member), id).not.toContain(id)
     }
-    expect(ids(member)).toContain("settings:profile:sessions-and-access")
+    expect(ids(member)).toContain("settings:sessions:cli-tokens")
     expect(ids(member)).toContain("act:issue")
   })
 

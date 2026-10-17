@@ -39,7 +39,9 @@ import {
 } from "./crew-links-model"
 import { CrewProfile, CrewTile, LinkMap, agentsLine } from "./crew-profile"
 import { useCrewLinks } from "./use-crew-links"
-import { settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
+import { SettingsPageHead, settingsTable, settingsTh, settingsTd, settingsTableRowLink } from "@/components/features/settings/shared"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { PageEmpty, PageError } from "@/components/layout/page-state"
 
 type View = "crew" | "all" | "matrix"
 const VIEWS: { key: View; label: string; icon: typeof List }[] = [
@@ -227,6 +229,16 @@ export function CrewLinksPage() {
         <div className="space-y-3 p-4 md:p-6"><Skeleton className="h-10 rounded-lg" /><Skeleton className="h-[320px] rounded-card" /></div>
       ) : (
         <div className="space-y-4 p-4 md:p-6">
+          <SettingsPageHead icon={Link2} title="Crew links" description="Which crew may hand work to which, and share files. Managers and up change links." />
+          {crews.length === 0 && !loadError && (
+            <PageEmpty
+              className="max-w-none px-0 py-0"
+              icon={Users}
+              title="No crews to link yet"
+              description="A link lets one crew hand work to another. Create a crew first."
+              primary={{ label: "Create a crew", href: "/crews" }}
+            />
+          )}
           {chips.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5" data-slot="crew-links-chips">
               {chips.map((c) => (
@@ -251,9 +263,12 @@ export function CrewLinksPage() {
             {!canManage && <span className="ml-auto">Read-only — Managers and up change links.</span>}
           </div>
           {loadError && (
-            <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              Current access could not be verified. What you see may be out of date. <button type="button" className="underline" onClick={() => void links.reload()}>Retry</button>
-            </p>
+            <PageError
+              className="max-w-none px-0 py-0"
+              title="Current access could not be verified"
+              description="What you see may be out of date."
+              onRetry={() => void links.reload()}
+            />
           )}
           {filesUnknown && (
             <p className="rounded-lg border border-border bg-surface-subtle px-3 py-2 text-xs text-muted-foreground">
@@ -273,6 +288,20 @@ export function CrewLinksPage() {
           <Legend />
         </div>
       )}
+      <ConfirmDialog
+        open={links.pendingUnlink !== null}
+        onOpenChange={(o) => { if (!o) links.cancelUnlink() }}
+        title={links.pendingUnlink ? `Unlink ${links.pendingUnlink.self.name} and ${links.pendingUnlink.other.name}?` : "Unlink?"}
+        description="Agents will no longer be able to hand work between them."
+        consequences={[
+          { tone: "lost", text: "Work handoff in both directions" },
+          { tone: "lost", text: "Shared-file access between the two crews" },
+          { tone: "kept", text: "Both crews, their agents and their files" },
+        ]}
+        confirmLabel="Unlink"
+        destructive
+        onConfirm={links.confirmUnlink}
+      />
     </DrillPage>
   )
 }
