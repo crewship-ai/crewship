@@ -2409,3 +2409,18 @@ request; 422 invalid content; 429 temporary operation limit; 500 storage failure
 Page read and list responses include `has_document`, which identifies saved native
 document content. Page creation accepts `allow_empty: true` to stage a human-owned
 Page without panels; combining this flag with panels or a crew owner is refused.
+
+## Saved documents from a chat
+
+`GET /api/v1/chats/{chatId}/artifact-results` returns a `results` array of up to
+20 saved Document links, newest first. Each result includes `page_id`,
+`type: "document"`, `page_slug`, `title`, the creation `revision`, `created_at`,
+`agent_id`, `agent_name`, `run_id` and `on_behalf_of_user_id`. The creation
+revision is zero; it does not claim to be the document's current revision.
+
+This is a human read. Scoped CLI credentials require `pages:read`, and both chat
+access and the current Page ACL apply. Hidden results are omitted without a
+hidden count. Results contain no document contents, transcript or execution
+credentials. A missing or inaccessible chat returns 404; invalid credentials
+return 401, missing CLI scope returns 403, and disabled Documents return 503.
+Completed and recovered runs retain their saved links for authorized readers.

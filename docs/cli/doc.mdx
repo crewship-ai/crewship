@@ -75,3 +75,13 @@ state again and decide on a new edit; the command never rebases it automatically
 For a lost confirmation, resend the original request with its original ID.
 The receipt identifies the durable revision; a successful exact retry does not
 create another write. Revoked credentials cannot replay saved requests.
+
+## `crewship doc chat-results <chat-id>`
+
+List saved documents linked to an accessible chat. This command requires your
+current human credential, `pages:read` for scoped CLI tokens, access to the chat
+and access to each document. Unavailable documents are omitted. Results contain
+saved links and provenance, without document contents or transcript text.
+
+A completed or recovered run does not erase its saved result. The command
+rechecks your current access; the original run does not regain permission.
