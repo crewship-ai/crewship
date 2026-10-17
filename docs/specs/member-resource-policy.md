@@ -186,7 +186,9 @@ A refusal returns generic 429, `Cache-Control: no-store` and rounded-up
 `Retry-After` seconds; it discloses no audience or workspace counts.
 
 The lazy limiter retains at most 4096 user/workspace entries and 257 audiences
-per entry (256 valid List projects plus all-projects). Capacity overflow is the
+per entry (256 valid List projects plus all-projects), and 32768 audiences
+globally. Existing audiences remain usable at capacity; a refused new audience
+does not allocate an empty account or charge either budget. Capacity overflow is the
 same transient 429; active entries are never evicted to grant a fresh burst.
 Idle entries expire after at least five minutes and the configured full-refill
 interval. Rate settings are exposed in Rate Limiters; process restart resets
