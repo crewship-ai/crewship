@@ -36,7 +36,8 @@ import { CrewPicker } from "@/components/features/crews/crew-picker"
 import { apiFetch } from "@/lib/api-fetch"
 import { ApiError, toApiError } from "@/lib/api-error"
 import { storeAgentAvatar } from "@/lib/agent-avatar-persist"
-import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
 import type { AgentPersona } from "@/lib/entities"
 import { AvatarPickerBody } from "@/components/features/crews/avatar-picker-dialog"
@@ -241,7 +242,6 @@ export function CreateAgentDialog({
   }, [draft.slug])
 
   const seed = draft.avatarSeed || draft.slug || draft.name || "agent"
-  const avatarUrl = getAgentAvatarUrl(seed, draft.avatarStyle)
   const requiresCrew = draft.agentRole === "LEAD"
   const finalPrompt = resolveFinalPrompt(draft)
   const isPromptFromTemplate =
@@ -650,7 +650,7 @@ export function CreateAgentDialog({
                 aria-expanded={pickerOpen}
                 className="mt-5 h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-foreground/10 bg-muted outline-none transition-colors hover:border-primary/50 focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20"
               >
-                <img src={avatarUrl} alt="" aria-hidden="true" className="h-full w-full object-cover" />
+                <AgentAvatar seed={seed} style={draft.avatarStyle} aria-hidden="true" className="h-full w-full rounded-none object-cover" />
               </button>
 
               <div className="min-w-0 flex-1">
