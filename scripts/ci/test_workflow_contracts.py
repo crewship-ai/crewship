@@ -18,6 +18,18 @@ class WorkflowContracts(unittest.TestCase):
     def job(self, text, name):
         return re.search(r'^  ' + re.escape(name) + r':\n(.*?)(?=^  [a-z][\w-]*:\n|\Z)', text, re.M | re.S).group(1)
 
+    def test_document_creation_executes_in_the_required_pages_lane(self):
+        ci = self.text('ci.yml')
+        lane = self.job(ci, 'pages-apps')
+        self.assertIn("if: needs.changes.outputs.code == 'true'", lane)
+        self.assertIn('timeout-minutes: 45', lane)
+        self.assertIn('node-version: 24.21.0', lane)
+        self.assertIn('pnpm --dir tools/docs-service install --frozen-lockfile', lane)
+        self.assertIn('python3 scripts/ci/document-create-acceptance.py', lane)
+        self.assertNotIn('continue-on-error', lane)
+        self.assertLess(lane.index('bash scripts/test-pages-apps.sh'), lane.index('node-version: 24.21.0'))
+        self.assertLess(lane.index('document-create-acceptance.py'), lane.index('Preserve Pages test evidence'))
+
     def test_osv_covers_every_shipped_npm_lockfile(self):
         security = self.text('security.yml')
         osv = self.job(security, 'osv-scan')
