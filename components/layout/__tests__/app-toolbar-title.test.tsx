@@ -73,7 +73,7 @@ describe("AppToolbar — the top bar names the area (Harbor 2, #3350)", () => {
     ["/routines", "Routines"],
     ["/integrations", "Integrations"],
     ["/admin", "Admin"],
-    ["/journal", "Journal"],
+    ["/activity", "Activity"],
   ])("%s names the area %s", (route, area) => {
     const header = renderToolbarAt(route)
     expect(header.firstElementChild).toHaveTextContent(new RegExp(`^${area}$`))

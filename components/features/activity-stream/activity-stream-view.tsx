@@ -84,7 +84,7 @@ import { cn } from "@/lib/utils"
 
 import { ActivityDetail } from "./activity-detail"
 import { FeedTable, RunHistoryStrip, type AgentResolver } from "./activity-feed-table"
-import { ActivityPanel } from "./activity-panel"
+import { ActivityPanel, type LedgerSection } from "./activity-panel"
 import { ActivityPeek } from "./activity-peek"
 import { ActivityRange } from "./activity-range"
 import { ActivityRunPage } from "./activity-run-page"
@@ -206,10 +206,16 @@ function DisplayMenu({
 export function ActivityStreamView({
   workspaceId,
   onOpenSection,
+  journalLedgers = false,
+  modeSegment,
 }: {
   workspaceId: string
-  /** Open one of the ledgers (work queue, webhook deliveries). See ActivityWorkspace. */
-  onOpenSection?: (section: "work" | "deliveries") => void
+  /** Open one of the ledgers. See ActivityWorkspace. */
+  onOpenSection?: (section: LedgerSection) => void
+  /** OWNER / ADMIN: list the technical log and fleet runs under Ledgers (F-02). */
+  journalLedgers?: boolean
+  /** The Activity / Spend segment, first in the top bar (admins only). */
+  modeSegment?: React.ReactNode
 }) {
   const isMobile = useIsMobile()
   const lookup = useJournalLookup()
@@ -721,6 +727,8 @@ export function ActivityStreamView({
         heading={record != null || path.stops.length > 0}
         actions={
           <>
+            {modeSegment}
+            {modeSegment && <span aria-hidden className="mx-1 h-5 w-px bg-border" />}
             {!isMobile && <ActivityRange value={range} onChange={setRange} now={now} />}
             <Button size="icon-sm" variant="ghost" aria-label="Export CSV" title="Export CSV" onClick={exportCsv} disabled={feed.length === 0}>
               <Download className="size-4" aria-hidden />
@@ -739,6 +747,7 @@ export function ActivityStreamView({
             crews={panelOptions.crews}
             sources={panelOptions.sources}
             onOpenLedger={onOpenSection}
+            journalLedgers={journalLedgers}
           />
         </SecondaryPanel>
 
