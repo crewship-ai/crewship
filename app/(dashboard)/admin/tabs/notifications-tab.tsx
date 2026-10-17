@@ -2,15 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { Bell, ChevronRight, Mail, MessageSquare, Siren, Smartphone, type LucideIcon } from "lucide-react"
+import { Bell, Check, ChevronRight, Info, Mail, MessageSquare, Send, Siren, Smartphone, Webhook, type LucideIcon } from "lucide-react"
 import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { Switch } from "@/components/ui/switch"
-import { Skeleton } from "@/components/ui/skeleton"
-import { StatusDot } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
-import { SettingsCard, SettingsRow, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { PageError, PageLoading } from "@/components/layout/page-state"
+import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
+import { AdminStrip } from "./admin-kit"
 import { ProviderMark } from "@/components/features/integrations/provider-marks"
 import { apiFetch } from "@/lib/api-fetch"
 import { withWs, wsParam } from "@/lib/admin-workspace-query"
@@ -103,8 +104,7 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
     return m
   }, [channels])
 
-  const handleToggle = useCallback(async (provider: string, next: boolean) => {
-    setPending(null)
+  const handleToggle = useCallback(async (provider: string, next: boolean): Promise<boolean> => {
     setTogglingProvider(provider)
     // Optimistic flip.
     setProviders((prev) => prev.map((p) => (p.provider === provider ? { ...p, enabled: next } : p)))
@@ -122,17 +122,19 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
         throw new Error(errBody?.error ?? errBody?.detail ?? `HTTP ${res.status}`)
       }
       toast.success(`${provider} ${next ? "allowed" : "switched off"}`)
+      return true
     } catch (e) {
       // Roll back on failure.
       setProviders((prev) => prev.map((p) => (p.provider === provider ? { ...p, enabled: !next } : p)))
       toast.error(e instanceof Error ? e.message : "Failed to update provider")
+      return false
     } finally {
       setTogglingProvider(null)
     }
   }, [workspaceId])
 
-  // Switching off a provider channels send through silences them, so the row
-  // asks first; an unused one flips straight away.
+  // Switching off a provider channels send through silences them, so it asks
+  // first (the shared confirmation); an unused one flips straight away.
   const requestToggle = useCallback((provider: string, next: boolean) => {
     if (!next && (usage[provider] ?? 0) > 0) {
       setPending(provider)
@@ -152,71 +154,72 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
   }, [categories, providers])
 
   if (loading && providers.length === 0) {
-    return <Skeleton className="h-[160px] rounded-xl" />
+    return <PageLoading rows={4} className="px-0 py-0" />
   }
 
   const on = providers.filter((p) => p.enabled).length
-  const usedCount = providers.filter((p) => (usage[p.provider] ?? 0) > 0).length
+  const channelTotal = channels?.length ?? 0
+  const pendingInfo = pending ? providers.find((p) => p.provider === pending) : undefined
+  const pendingName = pendingInfo ? pendingInfo.label ?? pendingInfo.provider : ""
+  const pendingCount = pending ? usage[pending] ?? 0 : 0
 
   return (
     <div className="space-y-4">
-      <SettingsSummary>
-        <SummaryItem n={on}>of {providers.length} providers allowed</SummaryItem>
-        {channels !== null && <SummaryItem n={usedCount}>in use by channels</SummaryItem>}
-        {emailConfigured === false && <SummaryItem tone="warn">Email not set up</SummaryItem>}
-        {/* This page decides what MAY be connected; the channels live on
-            /integrations. Instance policy is not workspace usage. */}
-        <Link href="/integrations?tab=notifications&section=connections" className="ml-auto inline-flex items-center gap-1 font-medium text-primary-hover hover:underline">
-          Channels live in Integrations
-          <ChevronRight className="size-3" />
-        </Link>
-      </SettingsSummary>
+      {/* What the switch does, before any switch (Harbor 2 banner). This page
+          decides what MAY be connected; the channels live in Integrations. */}
+      <div role="note" data-slot="notifications-banner" className="flex flex-wrap items-center gap-3 rounded-card bg-primary/10 px-3.5 py-2.5 text-primary-hover">
+        <Info className="size-4 shrink-0" aria-hidden />
+        <div className="min-w-0 flex-[1_1_15rem]">
+          <b className="block font-semibold text-foreground">One switch for the whole Crewship</b>
+          <span className="block text-label text-muted-foreground">
+            A service switched off here disappears from Add channel in every workspace, and its existing channels stop sending.
+            Workspaces then choose their own channels in Integrations › Channels.
+          </span>
+        </div>
+        <Button asChild variant="outline" size="sm" className="h-7 px-2.5 text-xs">
+          <Link href="/integrations?tab=notifications&section=connections">Open Channels<ChevronRight className="size-3" /></Link>
+        </Button>
+      </div>
+
+      <AdminStrip label="Notifications at a glance" items={[
+        { slot: "allowed", icon: <Check />, label: "Services allowed", value: `${on} of ${providers.length}` },
+        ...(channels !== null ? [{ slot: "channels", icon: <Send />, label: "Channels using them", value: `${channelTotal} in this workspace` }] : []),
+        { slot: "email", icon: <Mail />, label: "Email", value: emailConfigured === null ? "Unknown" : emailConfigured ? "Resend · configured" : "Not set up" },
+      ]} />
 
       {error ? (
-        <div className="rounded-card border border-border bg-card px-4 py-6 text-center text-label text-muted-foreground">
-          Failed to load providers ({error})
-        </div>
+        <PageError className="px-0 py-0" title="Couldn’t load the notification services" detail={`${error} from GET /api/v1/notification-providers`} onRetry={() => void refresh()} />
       ) : (
         groups.map((g) => {
           const folded = !expanded[g.key] && g.items.length > FOLD_AT + 1
           const items = folded ? g.items.slice(0, FOLD_AT) : g.items
           return (
             <SettingsCard key={g.key} icon={CATEGORY_ICON[g.key] ?? Bell} tint={CATEGORY_TINT[g.key] ?? "var(--purple)"}
-              title={g.label} description={g.hint || undefined}
-              actions={<span className="font-mono text-micro text-muted-foreground">{g.items.filter((p) => p.enabled).length}/{g.items.length} allowed</span>}>
+              title={g.label} description={g.hint || undefined}>
               {items.map((p) => {
                 const n = usage[p.provider] ?? 0
                 const name = p.label ?? p.provider
                 return (
-                  <div key={p.provider} data-provider={p.provider} className="border-b border-border last:border-b-0">
-                    <div className="flex items-center gap-3 px-4 py-2.5">
-                      {/* The provider's own mark — the same component Integrations
-                          draws one click away. */}
-                      <ProviderMark provider={p.provider} label={name} className={cn("h-7 w-7", !p.enabled && "opacity-60")} />
-                      <span className={cn("min-w-0 flex-1", !p.enabled && "opacity-60")}>
-                        <span className="block text-control">{name}</span>
-                        {p.blurb && <span className="block truncate text-label text-muted-foreground-soft" title={p.blurb}>{p.blurb}</span>}
-                      </span>
-                      <span className="flex shrink-0 items-center justify-end gap-2 sm:w-64">
-                        {n > 0 && <span className="rounded-full bg-primary/10 px-1.5 font-mono text-micro text-primary-hover">{n} channel{n === 1 ? "" : "s"}</span>}
-                        {!p.enabled && <StatusPill tone="muted" label="Off" />}
-                        <Switch
-                          checked={p.enabled}
-                          disabled={togglingProvider === p.provider}
-                          onCheckedChange={(next) => requestToggle(p.provider, next === true)}
-                          aria-label={`${p.enabled ? "Disable" : "Enable"} ${p.provider}`}
-                        />
-                      </span>
-                    </div>
-                    {pending === p.provider && (
-                      <div role="alert" className="flex flex-wrap items-center gap-2 px-4 pb-3 text-label">
-                        <span className="flex-1 text-warn">
-                          {n} channel{n === 1 ? "" : "s"} stop delivering if you switch {name} off. Nothing more leaves through it.
-                        </span>
-                        <Button size="xs" variant="ghost" onClick={() => setPending(null)}>Keep on</Button>
-                        <Button size="xs" variant="destructive" onClick={() => void handleToggle(p.provider, false)}>Switch off</Button>
-                      </div>
-                    )}
+                  <div key={p.provider} data-provider={p.provider} className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
+                    {/* The provider's own mark — the same component Integrations
+                        draws one click away. */}
+                    <ProviderMark provider={p.provider} label={name} className={cn("h-7 w-7", !p.enabled && "opacity-60")} />
+                    <span className={cn("min-w-0 flex-1", !p.enabled && "opacity-60")}>
+                      <span className="block text-control font-medium">{name}</span>
+                      {p.blurb && <span className="block truncate text-label text-muted-foreground" title={p.blurb}>{p.blurb}</span>}
+                    </span>
+                    <span className="flex shrink-0 items-center justify-end gap-2.5">
+                      {channels !== null && (
+                        <span className="text-label text-muted-foreground">{n > 0 ? `${n} channel${n === 1 ? "" : "s"}` : "not used"}</span>
+                      )}
+                      {!p.enabled && <StatusPill tone="muted" label="Off" />}
+                      <Switch
+                        checked={p.enabled}
+                        disabled={togglingProvider === p.provider}
+                        onCheckedChange={(next) => requestToggle(p.provider, next === true)}
+                        aria-label={`${p.enabled ? "Disable" : "Enable"} ${p.provider}`}
+                      />
+                    </span>
                   </div>
                 )
               })}
@@ -232,20 +235,30 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
         })
       )}
 
-      <SettingsCard icon={Mail} tint="var(--info)" title="Built-in transports" description="Always available; configured on the server, not switched here">
-        <SettingsRow label="Email" description="Resend · set RESEND_API_KEY and RESEND_FROM">
-          <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
-            <StatusDot status={emailConfigured ? "COMPLETED" : emailConfigured === false ? "BLOCKED" : "PENDING"} />
-            {emailConfigured === null ? "Unknown" : emailConfigured ? "Ready" : "Not set up"}
-            {channels !== null && (usage.email ?? 0) > 0 && ` · ${usage.email} channels`}
-          </span>
+      <SettingsCard icon={Mail} tint="var(--info)" title="Built-in transports" description="Always available; set in the server environment">
+        <SettingsRow lead={Mail} label="Email" description="Resend · set RESEND_API_KEY and RESEND_FROM">
+          <StatusPill tone={emailConfigured ? "success" : emailConfigured === false ? "warn" : "muted"}
+            label={emailConfigured === null ? "Unknown" : emailConfigured ? "Configured" : "Not set up"} />
+          {channels !== null && (usage.email ?? 0) > 0 && <span className="text-label text-muted-foreground">{usage.email} channels</span>}
         </SettingsRow>
-        <SettingsRow label="Signed webhooks" description="HTTPS POST with an HMAC signature header">
-          <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
-            <StatusDot status="COMPLETED" />Ready{channels !== null && (usage.webhook ?? 0) > 0 && ` · ${usage.webhook} channels`}
-          </span>
+        <SettingsRow lead={Webhook} label="Signed webhooks" description="HTTPS POST with an HMAC signature header">
+          <StatusPill tone="success" label="Available" />
+          {channels !== null && (usage.webhook ?? 0) > 0 && <span className="text-label text-muted-foreground">{usage.webhook} channels</span>}
         </SettingsRow>
       </SettingsCard>
+
+      <ConfirmDialog open={pending !== null} onOpenChange={(o) => { if (!o) setPending(null) }} destructive
+        title={`Switch ${pendingName} off?`}
+        description="For the whole Crewship: it disappears from Add channel in every workspace."
+        consequences={[
+          { tone: "lost", text: `${pendingCount} channel${pendingCount === 1 ? "" : "s"} stop sending through ${pendingName}` },
+          { tone: "kept", text: "The channels stay; switching it back on resumes them" },
+        ]}
+        confirmLabel="Switch off"
+        onConfirm={async () => {
+          if (!pending) return
+          if (!(await handleToggle(pending, false))) throw new Error("not switched off")
+        }} />
     </div>
   )
 }
