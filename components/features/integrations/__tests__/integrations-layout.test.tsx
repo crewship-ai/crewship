@@ -190,6 +190,18 @@ describe("Integrations on four spaces", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Channels" })).toBeInTheDocument()
   })
 
+  it("an empty space has its own call to action beside the one top-bar primary", async () => {
+    mocks.channels = []
+    window.history.replaceState({}, "", "/integrations?space=channels")
+    render(<IntegrationsLayout workspaceId="ws" />)
+    expect(await screen.findByRole("heading", { name: "No channels yet" })).toBeInTheDocument()
+    const primaries = document.querySelectorAll("[data-action=space-primary]")
+    expect(primaries).toHaveLength(1)
+    expect(primaries[0]).toHaveAccessibleName("Add channel")
+    fireEvent.click(primaries[0])
+    expect(await screen.findByRole("navigation", { name: "Add channel steps" })).toBeInTheDocument()
+  })
+
   it("keys 1–4 switch spaces", async () => {
     render(<IntegrationsLayout workspaceId="ws" />)
     await screen.findByRole("heading", { level: 1, name: "Tools" })
