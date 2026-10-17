@@ -44,6 +44,8 @@ export interface ConfirmDialogProps {
   destructive?: boolean
   /** Require this exact text before the confirm button enables. */
   typeToConfirm?: string
+  /** Keep the confirm button off until the field slot is filled in. */
+  confirmDisabled?: boolean
   /** Called on confirm; the dialog closes when it resolves. Required unless `closeOnly`. */
   onConfirm?: () => void | Promise<void>
   /**
@@ -77,6 +79,7 @@ export function ConfirmDialog({
   typeToConfirm,
   onConfirm,
   closeOnly = false,
+  confirmDisabled = false,
   children,
 }: ConfirmDialogProps) {
   const cancelLabel = cancelLabelProp ?? (closeOnly ? "Close" : "Cancel")
@@ -92,7 +95,7 @@ export function ConfirmDialog({
   }, [open])
 
   const gated = typeToConfirm != null && typed.trim() !== typeToConfirm
-  const disabled = busy || gated
+  const disabled = busy || gated || confirmDisabled
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>

@@ -133,6 +133,33 @@ test.describe("Admin console", () => {
     await expect(page.getByRole("region", { name: "Keep for" })).toBeVisible()
   })
 
+  // ADM-01 (#3493): a dry run that changes nothing is a Close-only dialog.
+  test("ADM-01 a no-op dry run shows a Close-only dialog, not a toast", async ({ page }) => {
+    test.skip(!(await isInstanceAdmin(page)), "needs an instance administrator in E2E_EMAIL")
+    await seed(page, PINNED)
+    await page.route("**/api/v1/admin/instance/retention", async (route) => {
+      if (route.request().method() !== "PUT") return route.fallback()
+      await route.fulfill({ json: { applied: false, dry_run: true, preview_id: "p0", changes: [] } })
+    })
+    await page.goto("/admin?tab=retention")
+    const row = page.locator("[data-slot=retention-table] [data-key]").first()
+    await expect(row).toBeVisible()
+    const group = row.getByRole("group")
+    // Pick a window other than the current one so Save appears.
+    const options = group.getByRole("button")
+    const n = await options.count()
+    for (let i = 0; i < n; i++) {
+      if ((await options.nth(i).getAttribute("aria-pressed")) !== "true") { await options.nth(i).click(); break }
+    }
+    await page.getByRole("button", { name: "Save" }).click()
+    const dialog = page.getByRole("alertdialog")
+    await expect(dialog).toContainText("Nothing to change")
+    await expect(dialog.getByRole("button", { name: "Close" })).toBeVisible()
+    await expect(dialog.getByRole("button")).toHaveCount(1)
+    await dialog.getByRole("button", { name: "Close" }).click()
+    await expect(dialog).toBeHidden()
+  })
+
   // ADM-03 (#3493): Data retention and the Backups pages share the scope
   // module instead of importing each other. Each opens from a cold load —
   // whichever is evaluated first — without a page error.
