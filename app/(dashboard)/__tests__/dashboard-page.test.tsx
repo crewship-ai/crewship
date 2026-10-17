@@ -137,6 +137,32 @@ it("keeps the window in the top bar while the page is still loading", async () =
   expect(screen.queryByRole("button", { name: "Retry results" })).not.toBeInTheDocument()
 })
 
+it("slow load says Still loading after 10 s and Retry reads agents and crews again", async () => {
+  vi.useFakeTimers()
+  state.crews.isPending = true
+  render(<DashboardPage />)
+  await act(async () => {})
+  expect(screen.queryByText("Still loading…")).not.toBeInTheDocument()
+  await act(async () => { vi.advanceTimersByTime(10_000) })
+  expect(screen.getByText("Still loading…")).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+  expect(state.crews.refetch).toHaveBeenCalledTimes(1)
+  expect(state.agents.refetch).toHaveBeenCalledTimes(1)
+})
+
+it("the greeting is the page's one h1; the top bar title is not a heading", async () => {
+  const slot = document.createElement("div")
+  slot.dataset.areaTitle = "Dashboard"
+  document.body.appendChild(slot)
+  act(() => useAppStore.getState().setPageBarSlot(slot))
+  render(<DashboardPage />)
+  await loaded()
+  const h1s = screen.getAllByRole("heading", { level: 1 })
+  expect(h1s).toHaveLength(1)
+  expect(h1s[0]).toBe(screen.getByTestId("dashboard-greeting"))
+  slot.remove()
+})
+
 it("greeting by local time and meta omits zero parts", async () => {
   vi.useFakeTimers({ toFake: ["Date"] })
   vi.setSystemTime(new Date(2026, 9, 15, 9, 12))

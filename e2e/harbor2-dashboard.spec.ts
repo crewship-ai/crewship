@@ -112,17 +112,35 @@ test.describe("states", () => {
     await expect(page.getByRole("region", { name: /Run volume/ })).toBeVisible()
   })
 
-  test("loading keeps the window in the top bar and says Still loading after a second", async ({ page }) => {
+  test("slow load keeps the window in the top bar and shows Still loading with Retry after 10 s", async ({ page }) => {
     await seed(page)
+    await page.clock.install()
+    // Crews answer only once the test lets them: the page stays loading.
+    let release!: () => void
+    const held = new Promise<void>((r) => { release = r })
     await page.route(/\/api\/v1\/crews\?/, async (route: Route) => {
-      await new Promise((r) => setTimeout(r, 2500))
-      await route.continue()
+      await held
+      await route.continue().catch(() => {})
     })
     await page.goto("/")
     await expect(page.locator("[data-state=loading]")).toBeVisible()
     await expect(page.locator("header").first().getByRole("group", { name: "Dashboard time window" })).toBeVisible()
-    await expect(page.getByText("Still loading…")).toBeVisible({ timeout: 2000 })
+    // The skeleton carries the first seconds without a note.
+    await page.clock.runFor(2_000)
+    await expect(page.getByText("Still loading…")).toBeHidden()
+    await page.clock.runFor(8_000)
+    await expect(page.getByText("Still loading…")).toBeVisible()
+    await expect(page.locator("[data-state=loading]").getByRole("button", { name: "Retry" })).toBeVisible()
+    release()
     await expect(page.getByTestId("dashboard-greeting")).toBeVisible({ timeout: 10_000 })
+  })
+
+  test("the greeting is the page's one h1", async ({ page }) => {
+    await seed(page)
+    await page.goto("/")
+    await expect(page.getByTestId("dashboard-greeting")).toBeVisible()
+    await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1)
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^Good (morning|afternoon|evening)/)
   })
 
   test("empty workspace shows Your workspace is ready with New crew", async ({ page }) => {
