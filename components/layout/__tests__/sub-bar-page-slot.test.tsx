@@ -11,7 +11,16 @@ vi.mock("next/navigation", () => ({ usePathname: () => pathname }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile }))
 
 import { useAppStore } from "@/lib/store"
-import { SubBar, SubBarPrimary } from "../sub-bar"
+import * as SubBarKit from "../sub-bar"
+
+const { SubBar, SubBarPrimary } = SubBarKit
+// COM-12: read through the namespace so the file still loads, and the cases
+// fail one by one, before the export exists.
+function SubBarActions({ children }: { children: React.ReactNode }) {
+  const Actions = (SubBarKit as unknown as { SubBarActions?: React.ComponentType<{ children: React.ReactNode }> }).SubBarActions
+  if (!Actions) throw new Error("SubBarActions is not exported from sub-bar")
+  return <Actions>{children}</Actions>
+}
 
 function withSlot(area = "Issues") {
   const slot = document.createElement("div")
@@ -84,6 +93,72 @@ describe("SubBar in the top bar", () => {
     expect(h1.className).toMatch(/sr-only/)
     // The heading stays for assistive technology, but the 36 px row is gone.
     expect(container.querySelector(".min-h-9")).toBeNull()
+  })
+
+  // COM-06 (#3481): Dashboard passes its window control as an action hidden
+  // below md; the row then held nothing visible and drew an empty 36 px strip.
+  it("on a phone collapses the row when every action is hidden there, and keeps them mounted", () => {
+    withSlot("Dashboard")
+    mobile = true
+    const { container } = render(
+      <SubBar title="Dashboard" actions={<button type="button" style={{ display: "none" }}>Last 7 days</button>} />,
+    )
+    const row = container.querySelector("[data-slot=sub-bar-row]")
+    expect(row).not.toBeNull()
+    expect(row).toHaveAttribute("data-empty")
+    expect(row?.className).toMatch(/data-\[empty\]:hidden/)
+    expect(screen.getByRole("heading", { level: 1, name: "Dashboard", hidden: true })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Last 7 days", hidden: true })).toBeInTheDocument()
+  })
+
+  it("on a phone keeps the row while one action is visible", () => {
+    withSlot("Dashboard")
+    mobile = true
+    const { container } = render(
+      <SubBar
+        title="Dashboard"
+        actions={<><button type="button" style={{ display: "none" }}>Window</button><SubBarPrimary>Customize</SubBarPrimary></>}
+      />,
+    )
+    expect(container.querySelector("[data-slot=sub-bar-row]")).not.toHaveAttribute("data-empty")
+    expect(screen.getByRole("button", { name: "Customize" })).toBeVisible()
+  })
+
+  // COM-12 (#3481): a page deeper in the tree than its layout's SubBar (the
+  // routine page under the Routines layout) puts its actions in the bar
+  // through the kit, not through a portal target the layout hands down.
+  it("SubBarActions puts a page's actions into the SubBar rendered elsewhere, after the bar's own", () => {
+    const slot = withSlot("Routines")
+    const { rerender } = render(
+      <>
+        <SubBar title="Weekly scan" actions={<SubBarPrimary>Edit</SubBarPrimary>} />
+        <section><SubBarActions><button type="button">Run now</button></SubBarActions></section>
+      </>,
+    )
+    const actions = slot.querySelector("[data-slot=sub-bar-actions]")
+    expect(actions).not.toBeNull()
+    expect(actions).toContainElement(screen.getByRole("button", { name: "Run now" }))
+    expect([...actions!.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Edit", "Run now"])
+    rerender(<SubBar title="Weekly scan" actions={<SubBarPrimary>Edit</SubBarPrimary>} />)
+    expect(screen.queryByRole("button", { name: "Run now" })).toBeNull()
+  })
+
+  it("SubBarActions works on a phone, in the page's own row", () => {
+    withSlot("Routines")
+    mobile = true
+    const { container } = render(
+      <>
+        <SubBar title="Weekly scan" />
+        <SubBarActions><button type="button">Run now</button></SubBarActions>
+      </>,
+    )
+    const actions = container.querySelector("[data-slot=sub-bar-actions]")
+    expect(actions).toContainElement(screen.getByRole("button", { name: "Run now" }))
+  })
+
+  it("SubBarActions renders nothing while no SubBar is on screen", () => {
+    render(<SubBarActions><button type="button">Run now</button></SubBarActions>)
+    expect(screen.queryByRole("button", { name: "Run now" })).toBeNull()
   })
 
   it("leaves the page's one h1 to a page that shows its own heading", () => {
