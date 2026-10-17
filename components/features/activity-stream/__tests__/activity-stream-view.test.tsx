@@ -305,6 +305,40 @@ describe("ActivityStreamView", () => {
     expect(window.location.search).toBe("?bundle=off")
   })
 
+  it("three updates to one issue on one day show as one story row with a story Peek", async () => {
+    const upd = (id: string, h: number, from: string, to: string): JournalEntry => ({ ...change, id, ts: yesterday(h), payload: { from, to } })
+    mock.list.mockReturnValue(listState({ entries: [upd("s3", 11, "In progress", "In review"), upd("s2", 10, "Todo", "In progress"), upd("s1", 9, "Backlog", "Todo")] }))
+    show()
+    const row = await within(table()).findByText("3 updates")
+    expect(within(table()).getByText("Todo → In progress → In review")).toBeVisible()
+    // One row for the three, not three rows.
+    expect(table().querySelectorAll("[data-row-id=s1],[data-row-id=s2],[data-row-id=s3]")).toHaveLength(0)
+    fireEvent.click(row)
+    const peek = await screen.findByTestId("activity-peek-story")
+    expect(peek).toHaveTextContent("What happened, in order")
+    expect(peek).toHaveTextContent("3 updates about one issue on one day")
+    const steps = within(peek).getAllByRole("button", { name: /Status changed/ })
+    expect(steps).toHaveLength(3)
+    // Oldest first, the way it happened.
+    expect(steps[0]).toHaveTextContent("Backlog → Todo")
+    expect(within(peek).getByRole("button", { name: /Everything about CRW-1 Fix flaky login/ })).toBeVisible()
+    // A step opens that change in the Peek.
+    fireEvent.click(steps[0])
+    expect(await screen.findByTestId("activity-peek-change")).toHaveTextContent("Backlog")
+    expect(window.location.search).toBe("?entry=s1")
+  })
+
+  it("Display › Group repeated runs off lists a story's updates one by one", async () => {
+    const upd = (id: string, h: number): JournalEntry => ({ ...change, id, ts: yesterday(h) })
+    mock.list.mockReturnValue(listState({ entries: [upd("s3", 11), upd("s2", 10), upd("s1", 9)] }))
+    show()
+    await within(table()).findByText("3 updates")
+    fireEvent.click(screen.getByRole("button", { name: /Display/ }))
+    fireEvent.click(await screen.findByRole("switch", { name: "Group repeated runs" }))
+    await waitFor(() => expect(within(table()).queryByText("3 updates")).toBeNull())
+    expect(table().querySelectorAll("[data-row-id=s1],[data-row-id=s2],[data-row-id=s3]")).toHaveLength(3)
+  })
+
   it("old lens links group the list", async () => {
     window.history.replaceState(null, "", "/activity?lens=agents")
     show()

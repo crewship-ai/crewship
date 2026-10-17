@@ -9,6 +9,7 @@ import {
   changeSentence,
   feedCsv,
   feedUrlParams,
+  foldStories,
   groupFeed,
   inRange,
   mergeFeed,
@@ -22,6 +23,7 @@ import {
   workFromChain,
   workPasses,
   type FeedUrlState,
+  type StoryItem,
   type WorkItem,
 } from "@/lib/activity-feed"
 
@@ -153,6 +155,87 @@ describe("work and change rows merge by time, repeated runs bundle per routine p
     const csv = feedCsv(bundleRepeats(runs, NOW))
     expect(csv.trim().split("\n")).toHaveLength(4)
     expect(csv).toContain("d5")
+  })
+})
+
+describe("change stories: several updates to one object on one day are one row", () => {
+  const issueCtx = { issueLabel: (id: string) => (id === "m1" ? "CRW-1 Fix flaky login" : id === "m2" ? "CRW-2 Docs" : undefined) }
+  const status = (id: string, h: number, from: string, to: string, over: Partial<JournalEntry> = {}) =>
+    changeFromEntry(entry(id, { ts: at(14, h), mission_id: "m1", payload: { from, to }, ...over }), issueCtx)!
+  const three = () => [status("e3", 11, "In progress", "In review"), status("e2", 10, "Todo", "In progress"), status("e1", 9, "Backlog", "Todo")]
+  const crw1 = [{ id: "m1", identifier: "CRW-1", title: "Fix flaky login" }]
+
+  it("folds three updates to one issue on one day into a story, in the order they happened", () => {
+    const out = foldStories(three(), NOW)
+    expect(out).toHaveLength(1)
+    const st = out[0] as StoryItem
+    expect(st.type).toBe("story")
+    expect(st.title).toBe("CRW-1 Fix flaky login")
+    expect(st.objectKind).toBe("issue")
+    expect(st.missionId).toBe("m1")
+    // Newest first like the list; the row's time is the last update.
+    expect(st.items.map((x) => x.id)).toEqual(["e3", "e2", "e1"])
+    expect(st.ts).toBe(Date.parse(at(14, 11)))
+    expect(st.first).toBe(Date.parse(at(14, 9)))
+    expect(st.flow).toBe("Todo → In progress → In review")
+    expect(st.diff).toBe("In progress → In review")
+    expect(st.who).toEqual(["A person"])
+  })
+
+  it("keeps two updates, or updates on different days, as rows of their own", () => {
+    expect(foldStories(three().slice(0, 2), NOW).map((x) => x.type)).toEqual(["change", "change"])
+    const spread = [status("a", 11, "A", "B"), status("b", 10, "B", "C"), status("c", 9, "C", "D", { ts: at(13, 9) })]
+    expect(foldStories(spread, NOW).map((x) => x.id)).toEqual(["a", "b", "c"])
+    const twoIssues = [status("a", 11, "A", "B"), status("b", 10, "B", "C", { mission_id: "m2" }), status("c", 9, "C", "D")]
+    expect(foldStories(twoIssues, NOW).map((x) => x.id)).toEqual(["a", "b", "c"])
+  })
+
+  it("names the first three steps and ends with … when there are more", () => {
+    const four = [status("e4", 12, "In review", "Done"), ...three()]
+    expect((foldStories(four, NOW)[0] as StoryItem).flow).toBe("Todo → In progress → In review → …")
+  })
+
+  it("lets completed agent work on the issue join its story; nothing that needs a person, no routine runs", () => {
+    const agentWork = work(chain("w1", { routine_slug: undefined, started_by_kind: "issue", first_activity: at(14, 10, 30), agents: [{ id: "a1", name: "Scout", assignments: 1 }], issues: crw1 }))
+    const failedWork = work(chain("w2", { routine_slug: undefined, failed: true, first_activity: at(14, 10, 40), issues: crw1 }))
+    const routineRun = work(chain("w3", { first_activity: at(14, 10, 50), issues: crw1 }))
+    const out = foldStories(mergeFeed([agentWork, failedWork, routineRun], three()), NOW)
+    expect(out.map((x) => x.type)).toEqual(["work", "work", "story"])
+    expect(out.slice(0, 2).map((x) => x.id)).toEqual(["w3", "w2"])
+    const st = out[2] as StoryItem
+    expect(st.items.map((x) => x.id)).toEqual(["e3", "w1", "e2", "e1"])
+    expect(st.flow).toBe("Todo → In progress → Scout worked on it → …")
+    expect(st.who).toEqual(["A person", "Scout"])
+    expect(st.agents).toEqual([{ id: "a1", name: "Scout" }])
+  })
+
+  it("never folds what is still going on", () => {
+    const live = work(chain("w1", { routine_slug: undefined, running_runs: 1, first_activity: at(14, 10, 30), issues: crw1 }))
+    const out = foldStories(mergeFeed([live], three()), NOW)
+    expect(out[0].id).toBe("w1")
+    expect(out[1].type).toBe("story")
+  })
+
+  it("folds updates to one page the same way", () => {
+    const page = (id: string, h: number) =>
+      changeFromEntry(entry(id, { ts: at(14, h), entry_type: "page.spec.changed", payload: { page_id: "pg1", page_title: "Weekly report" } }))!
+    const st = foldStories([page("p3", 11), page("p2", 10), page("p1", 9)], NOW)[0] as StoryItem
+    expect(st.type).toBe("story")
+    expect(st.objectKind).toBe("artifact")
+    expect(st.title).toBe("Weekly report")
+    expect(st.flow).toBe("Changed → Changed → Changed")
+  })
+
+  it("leaves other kinds of change alone", () => {
+    const cred = (id: string, h: number) =>
+      changeFromEntry(entry(id, { ts: at(14, h), entry_type: "credential.revealed", payload: { credential_name: "GitHub" } }))!
+    expect(foldStories([cred("c3", 11), cred("c2", 10), cred("c1", 9)], NOW).map((x) => x.type)).toEqual(["change", "change", "change"])
+  })
+
+  it("exports a story as its updates, one line each", () => {
+    const csv = feedCsv(foldStories(three(), NOW))
+    expect(csv.trim().split("\n")).toHaveLength(4)
+    expect(csv).toContain("e1")
   })
 })
 
