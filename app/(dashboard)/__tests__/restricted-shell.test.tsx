@@ -144,10 +144,10 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     fireEvent.change(input,{target:{value:"preserved draft"}})
     workspacesPayload=[]
     await act(async()=>{await refreshWorkspaceSettings()})
-    expect(screen.getByRole("dialog",{name:"Selected workspace is unavailable"})).toBeInTheDocument()
+    expect(screen.getByRole("dialog",{name:"Alpha is unavailable"})).toBeInTheDocument()
     workspacesStatus=500
     await act(async()=>{await refreshWorkspaceSettings()})
-    expect(screen.getByRole("dialog",{name:"Selected workspace is unavailable"})).toBeInTheDocument()
+    expect(screen.getByRole("dialog",{name:"Alpha is unavailable"})).toBeInTheDocument()
     expect(screen.getByTestId("local-draft")).toBe(input)
     workspacesStatus=200
     workspacesPayload=[RESTRICTED_A]
@@ -163,7 +163,7 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     expect(requests).toEqual(["GET /api/v1/workspaces"])
     expect(sockets).toEqual([])
     expect(screen.queryByTestId("page")).toBeNull()
-    expect(screen.queryByText("Not available with your access")).toBeNull()
+    expect(screen.queryByText("Chat isn’t part of your access")).toBeNull()
   })
 
   it("stays restricted in a workspace where the membership is trusted (mixed membership)", async () => {
@@ -217,7 +217,7 @@ describe("dashboard shell for a restricted account (#2861)", () => {
   it("shows the unavailable page for a forbidden URL and never mounts the screen", async () => {
     nav.pathname = "/issues"
     mount()
-    expect(await screen.findByText("Not available with your access")).toBeInTheDocument()
+    expect(await screen.findByText("Issues isn’t part of your access")).toBeInTheDocument()
     expect(screen.queryByTestId("page")).toBeNull()
     expect(screen.getByRole("link", { name: "Go to Chat" })).toHaveAttribute("href", "/chat")
     await settle(300)
@@ -235,7 +235,7 @@ describe("dashboard shell for a restricted account (#2861)", () => {
   it("fails closed when a restricted row carries no surfaces", async () => {
     workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: undefined }]
     mount()
-    expect(await screen.findByText("Not available with your access")).toBeInTheDocument()
+    expect(await screen.findByText("Chat isn’t part of your access")).toBeInTheDocument()
     expect(screen.queryByTestId("page")).toBeNull()
   })
 

@@ -1,4 +1,4 @@
-import { Skeleton } from "@/components/ui/skeleton"
+import { PageLoading, QUIET_LOAD_MS } from "@/components/layout/page-state"
 
 /**
  * The route-transition gap. Individual pages already render their own
@@ -6,18 +6,11 @@ import { Skeleton } from "@/components/ui/skeleton"
  * destination and that component existing there was nothing at all — on a
  * phone's slower CPU and network that blank window is long enough to read as
  * a dropped tap, which invites a second one.
+ *
+ * Harbor 2 G08: the kit's loading state, list-shaped — nothing for the first
+ * second, then the skeleton, then "Still loading…" after ten. An area whose
+ * page is cards can ship its own loading.tsx with `variant="cards"`.
  */
 export default function DashboardLoading() {
-  return (
-    <div className="space-y-4 p-4 sm:p-6" aria-busy="true" aria-label="Loading">
-      <Skeleton className="h-6 w-40" />
-      <Skeleton className="h-4 w-64" />
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }, (_, i) => (
-          <Skeleton key={i} className="h-20" />
-        ))}
-      </div>
-      <Skeleton className="h-48" />
-    </div>
-  )
+  return <PageLoading delay={QUIET_LOAD_MS} />
 }

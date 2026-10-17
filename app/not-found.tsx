@@ -1,27 +1,56 @@
 "use client"
 
-import { FileQuestion } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import Link from "next/link"
+import { Search } from "lucide-react"
 
-export default function NotFound() {
+import DashboardLayout from "@/app/(dashboard)/layout"
+import { AppFrame, BareState } from "@/components/layout/app-frame"
+import { PageNotFound } from "@/components/layout/page-state"
+import { SubBar } from "@/components/layout/sub-bar"
+import { useAuthAvailable, useSessionSafe } from "@/hooks/use-auth"
+import { useAppStore } from "@/lib/store"
+
+const DESCRIPTION = "The link may be old, or the page was moved."
+
+/** The 404 inside the app: the shell stays, the content says what happened. */
+function NotFoundInShell() {
+  const openPalette = useAppStore((s) => s.setCommandPaletteOpen)
   return (
-    <div className="flex min-h-screen items-center justify-center p-6 bg-background">
-      <Card className="w-full max-w-md">
-        <CardContent className="flex flex-col items-center py-10 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted mb-4">
-            <FileQuestion className="h-6 w-6 text-muted-foreground" />
-          </div>
-          <h2 className="text-lg font-semibold">Page Not Found</h2>
-          <p className="mt-1 text-sm text-muted-foreground max-w-sm">
-            The page you are looking for does not exist or has been moved.
-          </p>
-          <Button asChild className="mt-6">
-            <Link href="/">Go to Dashboard</Link>
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
+    <>
+      <SubBar icon={Search} title="Not found" ariaLabel="Not found" />
+      <PageNotFound
+        title="This page doesn’t exist"
+        description={DESCRIPTION}
+        primary={{ label: "Go to Dashboard", href: "/" }}
+        secondary={{ label: "Search", icon: Search, onClick: () => openPalette(true) }}
+      />
+    </>
+  )
+}
+
+/**
+ * Unknown route (Harbor 2 G05). Signed in, it renders inside the app shell —
+ * rail, top bar, Search — so the person is not thrown out of the app by an
+ * old link. Signed out (or outside the auth provider), it is the bare state
+ * on the ground with the lockup.
+ */
+export default function NotFound() {
+  const authAvailable = useAuthAvailable()
+  const { status } = useSessionSafe()
+  if (authAvailable && status === "loading") return <AppFrame />
+  if (authAvailable && status === "authenticated") {
+    return (
+      <DashboardLayout>
+        <NotFoundInShell />
+      </DashboardLayout>
+    )
+  }
+  return (
+    <BareState>
+      <PageNotFound
+        title="This page doesn’t exist"
+        description={DESCRIPTION}
+        primary={{ label: "Go to Dashboard", href: "/" }}
+      />
+    </BareState>
   )
 }

@@ -5,8 +5,11 @@ import { usePathname, useRouter } from "next/navigation"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useRouteScrollRestoration } from "@/hooks/use-route-scroll-restoration"
 import { MobileTabBar } from "@/components/layout/mobile-tab-bar"
-import { Spinner } from "@/components/ui/spinner"
-import { useSession } from "@/hooks/use-auth"
+import { useAuth, useSession } from "@/hooks/use-auth"
+import { AppFrame } from "@/components/layout/app-frame"
+import { AppBannerProvider } from "@/components/layout/app-banners"
+import { PageLoading } from "@/components/layout/page-state"
+import { loginRedirectUrl } from "@/lib/login-redirect"
 
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { AppToolbar } from "@/components/layout/app-toolbar"
@@ -21,7 +24,6 @@ import { bindWorkspaceSession, useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode, useAccessModeWatcher, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
 import { restrictedHome, restrictedPathAllowed } from "@/lib/restricted-surfaces"
 import { RestrictedUnavailable } from "@/components/layout/restricted-unavailable"
-import { Button } from "@/components/ui/button"
 import { RealtimeToasts } from "@/components/layout/realtime-toasts"
 import { RealtimeStatusBanner } from "@/components/layout/realtime-status-banner"
 import { NotificationSoundEvents } from "@/components/layout/notification-sound-events"
@@ -35,6 +37,7 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   const { status, data: session } = useSession()
+  const { signOut } = useAuth()
   useLayoutEffect(() => {
     if (status !== "loading") bindWorkspaceSession(status === "authenticated" ? session?.user.id ?? null : null)
   }, [status, session?.user.id])
@@ -72,41 +75,39 @@ export default function DashboardLayout({
     if (restrictedLanding) router.replace(restrictedLanding)
   }, [restrictedLanding, router])
 
+  // Whether this tab has had a session: an explicit Log out lands on the plain
+  // login page, a visitor who never signed in keeps the screen they asked for.
+  const hadSession = useRef(false)
+  if (status === "authenticated") hadSession.current = true
   useEffect(() => {
     if (status === "unauthenticated") {
       // Immediate redirect — no spinner, no delay
-      window.location.replace("/login")
+      window.location.replace(loginRedirectUrl(window.location.pathname, window.location.search, hadSession.current))
     }
   }, [status])
 
   if (status === "loading" || status === "unauthenticated") {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Spinner className="h-6 w-6 text-muted-foreground-soft" />
-      </div>
-    )
+    return <AppFrame />
   }
 
   // Until the access mode is known, nothing below may mount: the shell and
   // every page start requests that a restricted session is refused. The
   // workspace list (allowlisted for everyone) is the only request in flight.
   if (accessMode === "loading" && !workspaceUnavailable && !independentPage) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background">
-        {workspacesError ? (
-          <>
-            <p role="alert" className="text-sm text-muted-foreground">Could not load your workspaces.</p>
-            <Button variant="outline" size="sm" onClick={() => { void refreshWorkspaces() }}>Retry</Button>
-          </>
-        ) : (
-          <Spinner className="h-6 w-6 text-muted-foreground-soft" />
-        )}
-      </div>
+    return workspacesError ? (
+      <AppFrame
+        state="error"
+        onRetry={() => { void refreshWorkspaces() }}
+        onSignOut={() => { void signOut().then(() => { window.location.href = "/login" }) }}
+      />
+    ) : (
+      <AppFrame />
     )
   }
 
   return (
     <RealtimeProvider>
+    <AppBannerProvider>
       {/* Workspace-scoped journal lookup (crew/agent/mission id → name,
           slug, color). One fetch shared by every journal surface — the
           journal page, crew-journal, and the crew/agent activity feeds —
@@ -123,6 +124,8 @@ export default function DashboardLayout({
           <AppSidebar />
           <SidebarInset>
             <AppToolbar />
+            {/* One banner at a time (app-banners.tsx): each asks the queue
+                for the slot, highest priority first. */}
             <RealtimeStatusBanner />
             {/* /system/runtime and /system/version are not on the
                 restricted allowlist. */}
@@ -132,7 +135,7 @@ export default function DashboardLayout({
               <WorkspaceAvailabilityBoundary enabled={!independentPage}>
               {restrictedBlocked && !workspaceUnavailable
                 ? restrictedLanding
-                  ? <div className="flex justify-center py-16"><Spinner className="h-6 w-6 text-muted-foreground-soft" /></div>
+                  ? <PageLoading />
                   : <RestrictedUnavailable home={surfaces ? restrictedHome(surfaces) : null} pathname={pathname} />
                 : children}
               </WorkspaceAvailabilityBoundary>
@@ -152,6 +155,7 @@ export default function DashboardLayout({
         <WorkspaceAccentStyle />
       </ActiveRoutineRunsProvider>
       </JournalLookupProvider>
+    </AppBannerProvider>
     </RealtimeProvider>
   )
 }
