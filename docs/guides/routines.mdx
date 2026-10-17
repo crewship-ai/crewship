@@ -83,8 +83,18 @@ recipe version. Routine budgets remain guardrails, not invoices.
 
 ### Edit and Test
 
-**New routine** offers AI authoring, copying an existing recipe or writing one.
-These paths use the same durable draft. **Edit** is one scrolling document:
+**New routine** (Manager and above, or press `C` on `/routines`) is a five-step
+wizard: **Basics** (name, ID, crew), **When** (manually, on a schedule with a
+preview of the next starts, once, or "when an app calls", which is added on the
+routine page after saving), **Steps** (agent task, ask a person, notify, wait,
+create or comment on an issue, call a web API, run another routine), **Limits**
+(cost per run, run one at a time or side by side) and **Test and save**. Saving
+needs a passing test from the last five minutes; a routine with a web call,
+credentials or outside hosts is saved for a Manager review instead of turned on.
+**Save as draft** keeps it unpublished. From Basics you can also copy an
+existing routine's steps and limits (not its triggers), hand a description to
+the crew lead in chat, import a bundle, or see the CLI commands.
+**Edit** is one scrolling document:
 identity, Inputs, steps and schedule. A selected step has **Edit / Test** tools.
 **Code** edits the same buffer, preserving unsupported keys and expressions.
 **Publication changes** is a collapsed review inside the document.
@@ -117,11 +127,12 @@ Crewship is unusual among workflow systems because **agents author routines**, n
     You can also just **describe a routine in chat** — "make a routine that summarizes yesterday's commits and posts to Slack." A crew **Lead** carries the bundled **`routine-author`** skill (an authoring playbook): it clarifies the essentials, grounds the DSL in the crew's `[CONNECTED INTEGRATIONS]` and `[AVAILABLE ROUTINES]`, writes and test-runs the routine, then tells you whether it went live or landed as a **proposed** routine for a Manager to approve (see [Governance](#governance--agent-proposes-human-approves-the-risky-ones)).
   </Card>
   <Card title="UI" icon="browser">
-    Open `/routines`, choose **New routine**, then write or copy a recipe.
-    Edit the document or its Code view, use **Save draft** for unfinished work
-    and **Publish** to make it available. Existing routines use the same editor
-    through **Edit**. The server enforces permissions, draft revisions and the
-    publication test proof for both paths.
+    Open `/routines` and choose **New routine**: the wizard builds the steps,
+    the trigger and the limits, tests the routine without side effects and
+    turns it on (or sends it for a Manager review). **Save as draft** keeps
+    unfinished work unpublished. Existing routines are changed through **Edit**.
+    The server enforces permissions, draft revisions and the test proof for
+    every path.
   </Card>
   <Card title="CLI" icon="terminal">
     Scaffold a starting file with `crewship routine init -o file.json` (a minimal valid one-step skeleton) or clone an existing routine with `crewship routine init --from <slug> -o file.json`. Then `crewship routine save --name "..." --definition file.json --author-crew <crew-slug-or-id>`. The server validates the DSL on save (same gate as the UI). CI-friendly: validate offline first with `crewship routine validate file.json`, then save. Print the machine-readable authoring contract with `crewship routine schema` (wire it into an editor for autocomplete, or hand it to an agent authoring a routine).
