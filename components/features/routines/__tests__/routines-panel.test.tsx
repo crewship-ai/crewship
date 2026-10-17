@@ -234,6 +234,32 @@ describe("<RoutinesExplorer> triggers, next run and spend (RT-02)", () => {
   })
 })
 
+describe("<RoutinesExplorer> facets inside the panel (RT-01, kit COM-01)", () => {
+  it("Filter opens the facet block in the panel's flow, not a floating popover; Escape closes it", () => {
+    renderPanel()
+    const trigger = screen.getByRole("button", { name: /Filter/ })
+    fireEvent.click(trigger)
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    const block = screen.getByRole("group", { name: "Filter routines" })
+    expect(block).toHaveAttribute("data-slot", "facet-block")
+    expect(screen.queryByTestId("sidebar-filter-dismiss")).not.toBeInTheDocument()
+    const headers = Array.from(block.querySelectorAll("[data-slot=facet] > div > button[aria-expanded]")).map((b) => b.textContent)
+    expect(headers).toEqual([expect.stringMatching(/^Status/), expect.stringMatching(/^Last run/), expect.stringMatching(/^Trigger/), expect.stringMatching(/^Crew/), expect.stringMatching(/^Visibility/)])
+    fireEvent.keyDown(within(block).getAllByRole("button")[0], { key: "Escape" })
+    expect(screen.queryByRole("group", { name: "Filter routines" })).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
+  it("a facet header names its choice and clears just that facet", () => {
+    const props = renderPanel({ filters: { ...filters, lifecycle: "proposed", crewId: "crew_fin" } })
+    fireEvent.click(screen.getByRole("button", { name: /Filter/ }))
+    const block = screen.getByRole("group", { name: "Filter routines" })
+    expect(within(block).getByRole("button", { name: /^Status\s*Proposed/ })).toBeInTheDocument()
+    fireEvent.click(within(block).getByRole("button", { name: "Clear Status" }))
+    expect(props.onChange).toHaveBeenCalledWith({ ...filters, lifecycle: "all", crewId: "crew_fin" })
+  })
+})
+
 describe("<RoutinesExplorer> select several (RT-03, PNL-03)", () => {
   const bulk = () => ({ canTurnOff: true, onTurnOff: vi.fn(async () => {}), onRunNow: vi.fn(async () => {}) })
 
