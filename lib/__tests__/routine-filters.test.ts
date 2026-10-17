@@ -92,3 +92,28 @@ describe("matchesRoutineFilters — the other facets still apply", () => {
     expect(matchesRoutineFilters(base, { ...all, authorAgentId: "a1" }, new Map())).toBe(false)
   })
 })
+
+// Harbor 2 facets: Status is the routine's own state (live, changes not
+// live, proposed, turned off) and Crew is the routine's owning crew — the
+// panel groups by it, so the filter must agree with the groups.
+describe("matchesRoutineFilters — Status and Crew facets", () => {
+  const row = { ...base, lifecycle: "active", hasDraft: false, crewId: "crew_a" } as RoutineFilterInput
+  it.each([
+    ["active", { lifecycle: "active" }, true],
+    ["active", { lifecycle: "proposed" }, false],
+    ["draft", { hasDraft: true }, true],
+    ["draft", { hasDraft: false }, false],
+    ["proposed", { lifecycle: "proposed" }, true],
+    ["disabled", { lifecycle: "disabled" }, true],
+    ["disabled", { lifecycle: "active" }, false],
+  ] as const)("Status %s on %j → %s", (lifecycle, over, expected) => {
+    expect(matchesRoutineFilters({ ...row, ...over }, { ...all, lifecycle }, new Map())).toBe(expected)
+  })
+  it("a routine with no status reads as active", () => {
+    expect(matchesRoutineFilters({ ...row, lifecycle: undefined }, { ...all, lifecycle: "active" }, new Map())).toBe(true)
+  })
+  it("Crew keeps only that crew's routines", () => {
+    expect(matchesRoutineFilters(row, { ...all, crewId: "crew_a" }, new Map())).toBe(true)
+    expect(matchesRoutineFilters(row, { ...all, crewId: "crew_b" }, new Map())).toBe(false)
+  })
+})
