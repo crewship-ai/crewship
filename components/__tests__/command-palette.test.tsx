@@ -51,7 +51,7 @@ async function group(name: RegExp) {
 }
 
 describe("CommandPalette — feature coverage", () => {
-  it.each(["Inbox", "Approvals", "Activity", "Routines", "Integrations"])(
+  it.each(["Inbox", "Activity", "Routines", "Integrations"])(
     "exposes the %s feature in navigation",
     (label) => {
       openPalette()
@@ -71,6 +71,16 @@ describe("CommandPalette — feature coverage", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "journal" } })
     await waitFor(() => expect(document.body.querySelector("[data-href='/activity']")).not.toBeNull())
     expect(document.body.querySelector("[data-href='/activity']")).toHaveTextContent("Activity")
+  })
+
+  // Approval requests are decided in the Inbox; /approvals is only a redirect
+  // for old links. Offering it beside "Decisions waiting" listed one place twice.
+  it("offers approvals as Inbox decisions, not the retired /approvals page", async () => {
+    openPalette()
+    await group(/navigation/i)
+    const hrefs = [...document.body.querySelectorAll("[data-href]")].map((el) => el.getAttribute("data-href"))
+    expect(hrefs).not.toContain("/approvals")
+    expect(screen.queryByText("Approvals")).not.toBeInTheDocument()
   })
 
   it("drops Marketplace, which has no page and 404s", () => {
