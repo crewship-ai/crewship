@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { daysUntil, displayName, personStatus, ROLES, STATUS_LABEL, type Person, type PersonStatus, type Role } from "./people-model"
-import { inlineControl, nativeSelect } from "@/components/features/settings/shared"
+import { nativeSelect } from "@/components/features/settings/shared"
 import { StatusPill } from "@/components/ui/status-pill"
 import type { StatusTone } from "@/lib/format-status"
 import { ROLE_ICON } from "@/components/features/settings/members/member-bits"
@@ -120,30 +120,3 @@ export function SetupLinkBox({ url, expiresAt, onDone }: { url: string; expiresA
   )
 }
 
-/** A confirmation that asks in place, under the row it belongs to. */
-export function InlineConfirm({ message, confirmLabel, onConfirm, onCancel, typeToConfirm, busy }: {
-  message: React.ReactNode
-  confirmLabel: string
-  onConfirm: () => void
-  onCancel: () => void
-  /** When set, the button stays disabled until this exact text is typed. */
-  typeToConfirm?: string
-  busy?: boolean
-}) {
-  const [typed, setTyped] = React.useState("")
-  const id = React.useId()
-  const ok = !typeToConfirm || typed.trim() === typeToConfirm
-  return (
-    <div role="alert" className="flex flex-wrap items-center gap-2 px-4 pb-3 text-label">
-      <span className="min-w-0 flex-1 text-warn">{message}</span>
-      {typeToConfirm && (
-        <>
-          <label htmlFor={id} className="text-muted-foreground">Type <span className="font-mono text-foreground">{typeToConfirm}</span></label>
-          <Input id={id} value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className={cn(inlineControl, "w-44 font-mono")} />
-        </>
-      )}
-      <Button size="xs" variant="ghost" onClick={onCancel} disabled={busy}>Cancel</Button>
-      <Button size="xs" variant="destructive" onClick={onConfirm} disabled={!ok || busy}>{confirmLabel}</Button>
-    </div>
-  )
-}

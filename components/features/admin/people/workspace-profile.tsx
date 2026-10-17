@@ -11,7 +11,8 @@ import { WeekLine, WorkspaceTile, ago } from "@/app/(dashboard)/admin/tabs/admin
 import {
   daysUntil, displayName, isLastOwner, isPersonal, membersOf, ownersOf, personStatus, roleIn, type Person, type Role, type Workspace,
 } from "./people-model"
-import { InlineConfirm, PersonLabel, RoleSelect, SetupLinkBox, StatusChip, roleLabel } from "./people-parts"
+import { PersonLabel, RoleSelect, SetupLinkBox, StatusChip, roleLabel } from "./people-parts"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import type { SetupLink, usePeople } from "./use-people"
 import { cn } from "@/lib/utils"
 
@@ -41,6 +42,7 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
   const [newOwner, setNewOwner] = React.useState("")
   const [confirm, setConfirm] = React.useState<"transfer" | "delete" | null>(null)
   const nonOwners = members.filter((p) => roleIn(p, ws.id) !== "OWNER")
+  const newOwnerPerson = newOwner ? people.find((p) => p.id === newOwner) : undefined
   const runs = ws.runs_by_day ?? []
   const personal = isPersonal(ws)
   const [renaming, setRenaming] = React.useState(false)
@@ -148,11 +150,16 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
                   </Button>
                 </span>
               </div>
-              {removing === p.id && (
-                <InlineConfirm busy={busy === key} message={`${displayName(p)} loses access to ${ws.name}. Pages they own move to someone who stays.`}
-                  confirmLabel="Remove" onCancel={() => setRemoving(null)}
-                  onConfirm={async () => { await actions.removeAccess(p.id, ws.id, `${displayName(p)} removed from ${ws.name}`); setRemoving(null) }} />
-              )}
+              <ConfirmDialog open={removing === p.id} onOpenChange={(o) => { if (!o) setRemoving(null) }} destructive
+                title={`Remove ${displayName(p)} from ${ws.name}?`}
+                consequences={[
+                  { tone: "lost", text: `${displayName(p)} loses access to ${ws.name}` },
+                  { tone: "kept", text: "Pages they own move to someone who stays" },
+                ]}
+                confirmLabel="Remove"
+                onConfirm={async () => {
+                  if (!(await actions.removeAccess(p.id, ws.id, `${displayName(p)} removed from ${ws.name}`))) throw new Error("refused")
+                }} />
             </div>
           )
         })}
@@ -200,25 +207,35 @@ export function WorkspaceProfile({ ws, people, busy, actions, onDeleted }: {
           </select>
           <Button size="sm" variant="outline" className="border-destructive/40 text-destructive" disabled={!newOwner} onClick={() => setConfirm("transfer")}>Transfer</Button>
         </SettingsRow>
-        {confirm === "transfer" && newOwner && (
-          <InlineConfirm busy={busy === `t:${ws.id}`}
-            message={`${displayName(people.find((p) => p.id === newOwner)!)} becomes the owner of ${ws.name}.`}
-            confirmLabel="Transfer" onCancel={() => setConfirm(null)}
+        {newOwnerPerson && (
+          <ConfirmDialog open={confirm === "transfer"} onOpenChange={(o) => { if (!o) setConfirm(null) }}
+            title={`Make ${displayName(newOwnerPerson)} the owner of ${ws.name}?`}
+            consequences={[
+              { tone: "warn", text: `${displayName(newOwnerPerson)} becomes the owner of ${ws.name}` },
+              { tone: "kept", text: "The current owner stays on as Admin" },
+            ]}
+            confirmLabel="Transfer"
             onConfirm={async () => {
-              const to = people.find((p) => p.id === newOwner)!
-              await actions.transfer(ws.id, newOwner, `${displayName(to)} now owns ${ws.name}`)
-              setConfirm(null); setNewOwner("")
+              if (!(await actions.transfer(ws.id, newOwnerPerson.id, `${displayName(newOwnerPerson)} now owns ${ws.name}`))) throw new Error("refused")
+              setNewOwner("")
             }} />
         )}
         <SettingsRow label="Delete workspace" description={`Removes ${ws._count_crews} crews, ${ws._count_agents} agents and their history`}>
           <Button size="sm" variant="outline" className="border-destructive/40 text-destructive" onClick={() => setConfirm("delete")}>Delete…</Button>
         </SettingsRow>
-        {confirm === "delete" && (
-          <InlineConfirm typeToConfirm={ws.slug} busy={busy === `d:${ws.id}`}
-            message={`${ws.name} and everything in it is deleted.`} confirmLabel={`Delete ${ws.name}`}
-            onCancel={() => setConfirm(null)}
-            onConfirm={async () => { const ok = await actions.deleteWorkspace(ws.id, ws.slug, `${ws.name} deleted`); if (ok) onDeleted() }} />
-        )}
+        <ConfirmDialog open={confirm === "delete"} onOpenChange={(o) => { if (!o) setConfirm(null) }} destructive
+          title={`Delete ${ws.name}?`}
+          description={`${ws.name} and everything in it is deleted. This cannot be undone.`}
+          consequences={[
+            { tone: "lost", text: `${ws._count_crews} crews, ${ws._count_agents} agents and their history` },
+            { tone: "kept", text: "The people keep their accounts and every other workspace" },
+          ]}
+          typeToConfirm={ws.slug}
+          confirmLabel={`Delete ${ws.name}`}
+          onConfirm={async () => {
+            if (!(await actions.deleteWorkspace(ws.id, ws.slug, `${ws.name} deleted`))) throw new Error("refused")
+            onDeleted()
+          }} />
       </SettingsDangerCard>
 
       <Link href={`/admin/people?view=access`} className="inline-flex items-center gap-1 text-label text-primary-hover hover:underline">

@@ -11,7 +11,8 @@ import { WorkspaceTile, ago } from "@/app/(dashboard)/admin/tabs/admin-kit"
 import {
   adminSourceLabel, daysUntil, displayName, isLastOwner, personStatus, roleIn, type Person, type Role, type Workspace,
 } from "./people-model"
-import { InlineConfirm, PersonAvatar, RoleSelect, SetupLinkBox, StatusChip, roleLabel } from "./people-parts"
+import { PersonAvatar, RoleSelect, SetupLinkBox, StatusChip, roleLabel } from "./people-parts"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import type { SetupLink, usePeople } from "./use-people"
 import { cn } from "@/lib/utils"
 
@@ -120,12 +121,16 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
                   </Button>
                 </span>
               </div>
-              {removing === m.workspace_id && (
-                <InlineConfirm busy={busy === key}
-                  message={`${name} loses access to ${m.name}. Pages they own there move to someone who stays.`}
-                  confirmLabel="Remove" onCancel={() => setRemoving(null)}
-                  onConfirm={async () => { await actions.removeAccess(person.id, m.workspace_id, `${name} removed from ${m.name}`); setRemoving(null) }} />
-              )}
+              <ConfirmDialog open={removing === m.workspace_id} onOpenChange={(o) => { if (!o) setRemoving(null) }} destructive
+                title={`Remove ${name} from ${m.name}?`}
+                consequences={[
+                  { tone: "lost", text: `${name} loses access to ${m.name}` },
+                  { tone: "kept", text: "Pages they own there move to someone who stays" },
+                ]}
+                confirmLabel="Remove"
+                onConfirm={async () => {
+                  if (!(await actions.removeAccess(person.id, m.workspace_id, `${name} removed from ${m.name}`))) throw new Error("refused")
+                }} />
             </div>
           )
         })}
@@ -233,12 +238,17 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
                 <UserRound />Suspend…
               </Button>
             </SettingsRow>
-            {confirm === "suspend" && (
-              <InlineConfirm busy={busy === `s:${person.id}`}
-                message={`${name} is signed out everywhere and cannot sign in until reactivated.`}
-                confirmLabel={`Suspend ${firstName}`} onCancel={() => setConfirm(null)}
-                onConfirm={async () => { await actions.suspend(person.id, "", `${name} suspended`); setConfirm(null) }} />
-            )}
+            <ConfirmDialog open={confirm === "suspend"} onOpenChange={(o) => { if (!o) setConfirm(null) }} destructive
+              title={`Suspend ${name}?`}
+              description={`${name} cannot sign in until reactivated.`}
+              consequences={[
+                { tone: "lost", text: "Their sessions end first, then every CLI token stops working" },
+                { tone: "kept", text: "Their workspace access stays for when you reactivate them" },
+              ]}
+              confirmLabel={`Suspend ${firstName}`}
+              onConfirm={async () => {
+                if (!(await actions.suspend(person.id, "", `${name} suspended`))) throw new Error("refused")
+              }} />
           </>
         )}
       </SettingsDangerCard>
