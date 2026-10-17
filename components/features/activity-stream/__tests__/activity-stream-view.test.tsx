@@ -278,9 +278,13 @@ describe("ActivityStreamView", () => {
     await screen.findByTestId("activity-peek-change")
     fireEvent.click(screen.getByRole("button", { name: "Open full record" }))
     await screen.findByText("CRW-1 moved to In review", { selector: "h1" })
-    const h1s = screen.getAllByRole("heading", { level: 1 })
-    expect(h1s).toHaveLength(1)
-    expect(h1s[0]).toHaveTextContent(/^CRW-1 moved to In review$/)
+    // Counted in the DOM: the closing Peek still hides the page from the
+    // accessibility tree for a moment, and every h1 counts, hidden or not.
+    await waitFor(() => {
+      const h1s = document.querySelectorAll("h1")
+      expect(h1s).toHaveLength(1)
+      expect(h1s[0]).toHaveTextContent(/^CRW-1 moved to In review$/)
+    })
   })
 
   it("keys 1–4 switch views and the view is written to the URL", async () => {

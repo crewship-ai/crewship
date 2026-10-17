@@ -200,9 +200,10 @@ describe("change stories: several updates to one object on one day are one row",
     const failedWork = work(chain("w2", { routine_slug: undefined, failed: true, first_activity: at(14, 10, 40), issues: crw1 }))
     const routineRun = work(chain("w3", { first_activity: at(14, 10, 50), issues: crw1 }))
     const out = foldStories(mergeFeed([agentWork, failedWork, routineRun], three()), NOW)
-    expect(out.map((x) => x.type)).toEqual(["work", "work", "story"])
-    expect(out.slice(0, 2).map((x) => x.id)).toEqual(["w3", "w2"])
-    const st = out[2] as StoryItem
+    // The story sits where its newest update is (11:00), above the 10:50 and 10:40 work.
+    expect(out.map((x) => x.type)).toEqual(["story", "work", "work"])
+    expect(out.slice(1).map((x) => x.id)).toEqual(["w3", "w2"])
+    const st = out[0] as StoryItem
     expect(st.items.map((x) => x.id)).toEqual(["e3", "w1", "e2", "e1"])
     expect(st.flow).toBe("Todo → In progress → Scout worked on it → …")
     expect(st.who).toEqual(["A person", "Scout"])
@@ -212,8 +213,9 @@ describe("change stories: several updates to one object on one day are one row",
   it("never folds what is still going on", () => {
     const live = work(chain("w1", { routine_slug: undefined, running_runs: 1, first_activity: at(14, 10, 30), issues: crw1 }))
     const out = foldStories(mergeFeed([live], three()), NOW)
-    expect(out[0].id).toBe("w1")
-    expect(out[1].type).toBe("story")
+    expect(out.map((x) => x.type)).toEqual(["story", "work"])
+    expect(out[1].id).toBe("w1")
+    expect((out[0] as StoryItem).items.map((x) => x.id)).toEqual(["e3", "e2", "e1"])
   })
 
   it("folds updates to one page the same way", () => {
