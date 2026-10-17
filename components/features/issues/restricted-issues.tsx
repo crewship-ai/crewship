@@ -116,7 +116,7 @@ export function RestrictedIssues({ identifier }: { identifier?: string | null })
   // Render only a successful projection for this viewer/workspace/detail.
   // A definitive denial clears it; React Query cache/placeholder data cannot
   // restore denied titles on a later rate limit or failed query.
-  const visibleIssues = lastView?.scope === filterScope && lastView.identifier === identifier ? lastView.items : undefined
+  const visibleIssues = (query.data !== undefined || limited) && lastView?.scope === filterScope && lastView.identifier === identifier ? lastView.items : undefined
   return <main className="mx-auto w-full max-w-4xl space-y-4 p-4 md:p-6">
     <div className="flex items-center justify-between"><h1 className="text-lg font-semibold">{identifier ? "Issue" : "Issues shared with you"}</h1>{identifier ? <Link href="/issues" className="text-sm text-primary">Back to issues</Link> : <Button variant="outline" disabled={searchBlocked} onClick={() => { void query.refetch(); void projects.refetch() }}>Refresh</Button>}</div>
     <p className="text-sm text-muted-foreground">Your project grants decide which issues you can list, read and contribute to. Only comments explicitly shared with this project appear here.</p>
