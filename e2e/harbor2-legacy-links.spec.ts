@@ -32,12 +32,15 @@ test.describe("/approvals", () => {
     await page.waitForURL(/\/inbox\?attention=approvals&agent_id=ag_1$/, { timeout: 10_000 })
   })
 
-  // The Inbox does not read agent_id yet (Agent facet is a follow-up on the
-  // Inbox side and needs the server filter). Flip to test() when it lands.
-  test.fixme("/approvals?agent_id=ag_1 → Inbox filtered to that agent", async ({ page }) => {
+  // The Inbox reads agent_id as its Agent facet (#3485 INB-01, PR #3515). The
+  // server has no agent filter yet (#3455), so the facet narrows the loaded
+  // feed. ag_1 is no agent in the seed: the chip says so and nothing matches.
+  test("/approvals?agent_id=ag_1 → Inbox filtered to that agent", async ({ page }) => {
     await seed(page)
     await page.goto("/approvals?agent_id=ag_1")
     await expect(page.getByRole("button", { name: /^Remove filter Agent:/ })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Remove filter Agent: unknown" })).toBeVisible()
+    await expect(page.getByText("Nothing matches these filters.")).toBeVisible()
   })
 
   test("/approvals?status=decided → Inbox History", async ({ page }) => {
