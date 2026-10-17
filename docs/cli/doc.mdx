@@ -34,6 +34,10 @@ retry the same input with the same mutation ID. Changing that input conflicts;
 a retry never creates another document. Creation keeps the requesting human as
 owner and does not grant the run continued access to read or edit the document.
 
+An agent can also call `doc_create` in the Crewship routines MCP tools with the
+same four fields. The tool uses the same run permission and saved result; an
+exact retry can recover that result across the CLI and MCP interfaces.
+
 ## `crewship doc status`
 
 Read whether document support is configured on the selected instance. This
