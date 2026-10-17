@@ -434,7 +434,7 @@ function WorkspaceIntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         actions={
           <>
             <SubBarIconButton icon={Terminal} aria-label="Command line" title="Command line" onClick={() => setCliOpen(true)} />
-            <SubBarPrimary icon={Plus} onClick={primary} aria-label={meta.add}>
+            <SubBarPrimary icon={Plus} onClick={primary} aria-label={meta.add} data-action="space-primary">
               <span className="max-sm:sr-only">{meta.add}</span>
             </SubBarPrimary>
           </>
