@@ -3,24 +3,12 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { Check } from "lucide-react"
 
-import * as NoteKit from "../note"
-import * as ChoiceKit from "../choice-tile"
+import { Note } from "../note"
+import { ChoiceTile } from "../choice-tile"
 
 // COM-08 (#3481): the setup card (#3414) drew a quiet note and choice tiles
 // locally; other dialogs need the same two pieces, so they live in the kit
 // with the setup card's API.
-type NoteProps = React.ComponentProps<"div"> & { tone?: "info" | "warn"; icon?: typeof Check }
-type TileProps = { icon?: typeof Check; leading?: React.ReactNode; title: React.ReactNode; description?: React.ReactNode; active: boolean; onClick: () => void; meta?: React.ReactNode }
-function Note(props: NoteProps) {
-  const C = (NoteKit as unknown as { Note?: React.ComponentType<NoteProps> }).Note
-  if (!C) throw new Error("Note is not exported")
-  return <C {...props} />
-}
-function ChoiceTile(props: TileProps) {
-  const C = (ChoiceKit as unknown as { ChoiceTile?: React.ComponentType<TileProps> }).ChoiceTile
-  if (!C) throw new Error("ChoiceTile is not exported")
-  return <C {...props} />
-}
 
 describe("Note", () => {
   it("is a quiet info note by default, with its icon hidden from assistive technology", () => {
