@@ -98,6 +98,24 @@ test.describe("setup card — desktop", () => {
     await expect(page.getByRole("button", { name: "Step 1: Workspace" })).toBeVisible()
   })
 
+  // ONB-01 (#3496): the command snippet takes its sizes from the type tokens,
+  // so it follows the Text size setting instead of a fixed 11 px.
+  test("step 2 command snippet uses the micro text token", async ({ page }) => {
+    await mockSetup(page, { preferredLanguage: "English" })
+    await page.goto("/onboarding")
+    const caption = page.getByText("Run this on your machine, then paste the output above:")
+    await expect(caption).toBeVisible()
+    const [got, token] = await caption.evaluate((el) => {
+      const probe = document.createElement("span")
+      probe.className = "text-micro"
+      document.body.appendChild(probe)
+      const want = getComputedStyle(probe).fontSize
+      probe.remove()
+      return [getComputedStyle(el).fontSize, want]
+    })
+    expect(got).toBe(token)
+  })
+
   test("reload on step 2 returns to step 2", async ({ page }) => {
     await mockSetup(page, { preferredLanguage: "English" })
     await page.goto("/onboarding")
