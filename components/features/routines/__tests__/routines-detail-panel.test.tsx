@@ -458,7 +458,8 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
   })
 
   it("Test run in the run dialog posts …/dry_run with the inputs (R14)", async () => {
-    mockFor(WITH_INPUTS)
+    // Test run tests the live version, so the routine must be published.
+    mockFor({ ...WITH_INPUTS, head_version: 2 } as typeof ROUTINE)
     render(<RoutinesDetailPanel {...defaultProps} slug="routine-a" />)
     await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
     fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))

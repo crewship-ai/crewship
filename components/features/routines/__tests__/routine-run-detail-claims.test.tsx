@@ -286,7 +286,9 @@ it.each(["current", "3"])("Run again retries an uncertain start with the same ke
   render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
   fireEvent.click(screen.getByRole("button", { name: "Run again" }))
   await screen.findByDisplayValue("2026-08")
-  fireEvent.change(screen.getByLabelText("Recipe version"), { target: { value: selectedVersion } })
+  // The version is a kit Select (no native select in the run dialog, R14).
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Recipe version" }), { key: "ArrowDown" })
+  fireEvent.click(await screen.findByRole("option", { name: selectedVersion === "current" ? "Current recipe" : new RegExp(`v${selectedVersion}$`) }))
   await waitFor(() => expect(screen.getByRole("button", { name: "Run now" })).not.toBeDisabled())
   fireEvent.click(screen.getByRole("button", { name: "Run now" }))
   await screen.findByText("Response lost")

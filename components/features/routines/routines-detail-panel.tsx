@@ -1,5 +1,6 @@
 "use client"
 
+import { formatRoutineTime } from "@/lib/routine-time"
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Play, Check, Ban, Inbox, Eye, Upload, Power } from "lucide-react"
@@ -283,7 +284,7 @@ export function RoutinesDetailPanel({
     slug: string
     inputs: RoutineInputSpec[]
     /** Test asks the same questions, then dry-runs. */
-    mode?: "run" | "test"
+    mode?: "run" | "test" | "later"
   } | null>(null)
 
   // The Run button's two paths. A routine with declared inputs opens the
@@ -479,11 +480,34 @@ export function RoutinesDetailPanel({
       setBusyAction(null)
     }
   }
+  // Test opens the same dialog on Test run (v67 D-RTRUN).
   const startTest = () => {
     if (!routine || routine.slug !== slug) return
-    const specs = routineInputSpecs(routine.definition)
-    if (specs.length) setPendingRun({ workspaceId, slug, inputs: specs, mode: "test" })
-    else void runTest()
+    setPendingRun({ workspaceId, slug, inputs: routineInputSpecs(routine.definition), mode: "test" })
+  }
+
+  // Later: a one-time start. The server holds it until fire_at and lists it
+  // with the routine's triggers, where it can be cancelled.
+  const planStart = async (inputs: Record<string, unknown>, fireAt: string, pinnedVersion: number | null) => {
+    if (!routine || routine.slug !== slug) return
+    setBusyAction("later")
+    try {
+      const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inputs, fire_at: fireAt, ...(pinnedVersion != null ? { pinned_version: pinnedVersion } : {}) }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error((data && (data.error || extractProblemDetail(data))) || `The start was refused (${res.status}).`)
+      }
+      toast.success("Start planned", { description: `${formatRoutineTime(fireAt)} · cancel it in Triggers` })
+      onChanged()
+    } catch (e) {
+      toast.error("Could not plan the start", { description: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setBusyAction(null)
+    }
   }
 
   // A schedule the circuit breaker turned off. Turning it back on is the
@@ -809,10 +833,14 @@ export function RoutinesDetailPanel({
         draft={routine?.draft}
         inputs={pendingRun?.slug === slug && pendingRun.workspaceId === workspaceId ? pendingRun.inputs : null}
         routineName={routine?.name || slug}
-        submitLabel={pendingRun?.mode === "test" ? "Test" : "Run"}
-        submitting={busyAction === "run" || busyAction === "test"}
+        // R14 (v67 D-RTRUN): Run now · Test run (Manager and above, POST
+        // …/dry_run on the live version) · Later (a one-time start, POST
+        // …/run with fire_at and, when pinned, pinned_version).
+        modes={["run", ...(canEdit && published && lifecycle === "active" ? (["test"] as const) : []), "later"]}
+        initialMode={pendingRun?.mode ?? "run"}
+        submitting={busyAction === "run" || busyAction === "test" || busyAction === "later"}
         onCancel={() => setPendingRun(null)}
-        onRun={(inputs) => {
+        onRun={(inputs, options) => {
           // Refuse a submit whose form was built for a different routine.
           // Unreachable while the effect above closes the dialog on every
           // selection change — which is the point of having it.
@@ -820,9 +848,10 @@ export function RoutinesDetailPanel({
             setPendingRun(null)
             return
           }
-          const mode = pendingRun.mode
+          const mode = options?.mode ?? pendingRun.mode ?? "run"
           setPendingRun(null)
           if (mode === "test") void runTest(inputs)
+          else if (mode === "later" && options?.fireAt) void planStart(inputs, options.fireAt, options.pinnedVersion ?? null)
           else void triggerAction("run", inputs)
         }}
       />
