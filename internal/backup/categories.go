@@ -191,7 +191,8 @@ var TableCategory = map[string]string{
 	"agents": CategoryAgents, "crew_connections": CategoryAgents, "crew_mcp_servers": CategoryAgents,
 	"agent_skills": CategoryAgents, "agent_mcp_bindings": CategoryAgents, "agent_config_history": CategoryAgents, "agent_slug_reservations": CategoryAgents,
 	"crew_templates": CategoryAgents, "workspace_members": CategoryAgents, "access_grants": CategoryAgents,
-	"workspace_invitations": CategoryAgents, "workspace_mcp_servers": CategoryAgents,
+	"access_preset_selections": CategoryAgents,
+	"workspace_invitations":    CategoryAgents, "workspace_mcp_servers": CategoryAgents,
 	"feature_flag_overrides": CategoryAgents, "budget_limits": CategoryAgents, "hooks_config": CategoryAgents,
 	"automations": CategoryAgents, "keeper_governance_settings": CategoryAgents, "retention_settings": CategoryAgents,
 	"notification_channels": CategoryAgents, "user_notification_prefs": CategoryAgents,
@@ -341,6 +342,7 @@ func (f categoryFilter) filterDump(d *DBDump) []string {
 			dropped = append(dropped, name)
 		}
 	}
+	dropDanglingPresetSelections(d)
 	sort.Strings(dropped)
 	return dropped
 }
