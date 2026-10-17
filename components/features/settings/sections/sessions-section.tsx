@@ -3,36 +3,17 @@
 import { useCallback, useEffect, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { toast } from "@/lib/toast"
-import {
-  Copy,
-  Check,
-  Key,
-  Plus,
-  Trash2,
-  Clock,
-  Terminal,
-  Eye,
-  EyeOff,
-  AlertTriangle,
-  Shield,
-  ChevronRight, MonitorSmartphone } from "lucide-react"
+import { Copy, Check, Key, Plus, Terminal, Eye, EyeOff, AlertTriangle, Shield, ChevronRight } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
 import { Spinner } from "@/components/ui/spinner"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { StatusPill } from "@/components/ui/status-pill"
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
-import { SettingsCard, SettingsEmpty, controlHeight } from "../shared"
+import { SettingsCard, SettingsCardActions, SettingsEmpty, SettingsRow, SettingsSegmented, controlHeight } from "../shared"
 import { DeviceSessions } from "./device-sessions"
 
 // Settings › Account › Sessions & tokens: who can act as you right now.
@@ -97,33 +78,23 @@ interface CLIToken {
 // the source of truth at issue time, the UI just mirrors the list
 // so users can pick from a menu instead of typing strings.
 //
-// Grouped by resource for the dialog's layout. Each group's "*"
-// wildcard is the top-of-group selector; selecting it disables the
-// per-action checkboxes (the user has chosen "all actions on this
-// resource").
+// One checkbox per scope (Harbor 2 draws them flat). Every resource has a
+// single gated action today, so a per-resource "*" said the same thing as
+// the one action beside it and is not offered.
 //
 // Only actions that actually gate a route are offered — reads are not
 // scope-gated yet and there is no route-mapped agents:run, so those would
 // mint tokens that grant/gate nothing. This mirrors the backend allowlist
 // (and the reverse invariant TestEveryMintableScopeMapsToARoute). They come
 // back here when a route requires them.
-const SCOPE_GROUPS: Array<{ resource: string; actions: string[] }> = [
-  { resource: "agents", actions: ["write"] },
-  { resource: "crews", actions: ["write"] },
-  { resource: "credentials", actions: ["write"] },
-  { resource: "skills", actions: ["write"] },
-  { resource: "webhooks", actions: ["write"] },
-  { resource: "workspace", actions: ["admin"] },
-]
-
-// Token-tier visual marker. Distinct colour from workspace-role so
-// a glance can't confuse "OWNER role on the workspace" with "ADMIN
-// tier on this token". Admin tier uses a warning-tinted style to
-// reinforce the "more dangerous, shorter lifetime" contract.
-const tierCls: Record<string, string> = {
-  STANDARD: "bg-muted text-muted-foreground border-border",
-  ADMIN: "bg-destructive/10 text-destructive border-destructive/40",
-}
+const SCOPES = [
+  "agents:write",
+  "crews:write",
+  "credentials:write",
+  "skills:write",
+  "webhooks:write",
+  "workspace:admin",
+] as const
 
 // Expiry presets — labels the user picks, mapped to seconds the
 // API accepts. 0 means "no expiry" (only valid for STANDARD); ADMIN
@@ -163,7 +134,6 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
   const [tokenVisible, setTokenVisible] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<CLIToken | null>(null)
   const [showRevokedTokens, setShowRevokedTokens] = useState(false)
-  const [revoking, setRevoking] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
   // Patch J/K + M2: tier + scopes + expiry form state.
@@ -241,33 +211,29 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
     }
   }, [tokenTier, tokenExpirySeconds])
 
+  // ConfirmDialog waits for this: a refusal throws, so the dialog stays open
+  // where the person can retry or cancel, and the reason is the error toast.
   async function handleRevoke() {
     if (!revokeTarget) return
     const name = revokeTarget.name
-    setRevoking(true)
+    let res: Response
     try {
-      // apiFetch RESOLVES on a 4xx/5xx — it does not throw. The previous
-      // version awaited it, ignored res.ok, and swallowed everything in
-      // `catch {}`, so a refused revoke closed the dialog and refreshed the
-      // list exactly like a successful one. The token stayed put and nothing
-      // said why, which reads as "delete is broken".
-      const res = await apiFetch(`/api/v1/auth/cli-tokens/${revokeTarget.id}`, { method: "DELETE" })
-      if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        const detail = typeof body?.error === "string" ? body.error : `HTTP ${res.status}`
-        toast.error(`Couldn't revoke ${name}`, { description: detail })
-        return
-      }
-      toast.success(`Revoked ${name}`)
-      setRevokeTarget(null)
-      fetchTokens()
+      res = await apiFetch(`/api/v1/auth/cli-tokens/${revokeTarget.id}`, { method: "DELETE" })
     } catch (e) {
-      toast.error(`Couldn't revoke ${name}`, {
-        description: e instanceof Error ? e.message : undefined,
-      })
-    } finally {
-      setRevoking(false)
+      toast.error(`Couldn't revoke ${name}`, { description: e instanceof Error ? e.message : undefined })
+      throw e
     }
+    // apiFetch RESOLVES on a 4xx/5xx — it does not throw. A version that
+    // ignored res.ok closed the dialog and refreshed the list exactly like a
+    // successful revoke; the token stayed and nothing said why.
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      const detail = typeof body?.error === "string" ? body.error : `HTTP ${res.status}`
+      toast.error(`Couldn't revoke ${name}`, { description: detail })
+      throw new Error(detail)
+    }
+    toast.success(`Revoked ${name}`)
+    fetchTokens()
   }
 
   function handleCopyToken(text: string) {
@@ -276,337 +242,248 @@ export function SessionsSection({ sessionExpires, onSignOut, restricted = false 
     setTimeout(() => setTokenCopied(false), 2000)
   }
 
+  function cancelCreate() {
+    setShowCreateForm(false)
+    setTokenName("")
+    setTokenTier("STANDARD")
+    setTokenExpirySeconds(0)
+    setTokenScopes(new Set())
+    setCreateError(null)
+  }
+
   const activeTokens = tokens.filter((t) => !t.revoked_at)
   const revokedTokens = tokens.filter((t) => t.revoked_at)
+  // ADMIN tokens never live forever and at most seven days (cli_token.go).
+  const expiryOptions = EXPIRY_PRESETS
+    .filter((p) => restricted || tokenTier !== "ADMIN" || (p.value !== 0 && p.value <= 7 * 24 * 60 * 60))
+    .map((p) => ({ value: p.value, label: p.label }))
 
   return (
-    <div className="space-y-5">
-      {/* ── New token reveal ── */}
-      <AnimatePresence>
-        {newToken && (
-          <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }}>
-            <div className="rounded-xl border border-primary/30 bg-primary/[0.04] p-4">
-              <div className="flex items-start gap-2.5 mb-3">
-                <div className="h-6 w-6 rounded-md bg-primary/15 flex items-center justify-center shrink-0">
-                  <Key className="h-3 w-3 text-primary" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                    Token created
-                    {newToken.tier && (
-                      <Badge
-                        variant="outline"
-                        className={cn("text-micro font-medium px-1.5 py-0 leading-none h-4", tierCls[newToken.tier])}
-                      >
-                        {newToken.tier === "ADMIN" && <Shield className="h-2.5 w-2.5 mr-0.5" />}
-                        {newToken.tier}
-                      </Badge>
-                    )}
-                  </h4>
-                  <p className="text-label text-muted-foreground">
-                    {newToken.tier === "ADMIN"
-                      ? "Admin-tier token — short-lived (≤7d), per-use audited. Treat as a single-use disposable."
-                      : "Copy now — it won’t be shown again."}
-                  </p>
-                </div>
-                <Button variant="ghost" size="sm" className="h-6 text-micro text-muted-foreground" onClick={() => setNewToken(null)}>Dismiss</Button>
-              </div>
-              <div className="bg-muted/60 border border-border/60 rounded-md p-2 flex items-center gap-2">
-                <Terminal className="h-3 w-3 text-muted-foreground shrink-0" />
-                <code className="flex-1 text-micro font-mono text-foreground break-all select-all leading-relaxed">
-                  {tokenVisible ? newToken.token : newToken.token.slice(0, 18) + "•".repeat(24)}
-                </code>
-                <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={() => setTokenVisible(!tokenVisible)} aria-label={tokenVisible ? "Hide token" : "Show token"}>
-                  {tokenVisible ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                </Button>
-                <Button variant="ghost" size="sm" className={cn("h-6 gap-1 text-micro", tokenCopied ? "text-foreground" : "text-muted-foreground")} onClick={() => handleCopyToken(newToken.token)}>
-                  {tokenCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                  {tokenCopied ? "Copied" : "Copy"}
-                </Button>
-              </div>
-              <p className="mt-2 text-micro text-muted-foreground font-mono">
-                $ crewship auth login --token &lt;token&gt;
-              </p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="space-y-4">
+      {/* ── Browsers & devices ── (its own card, device-sessions.tsx) */}
+      <DeviceSessions onSignOut={onSignOut} currentExpiresIn={expiresIn} />
 
-      {/* ── Sessions & access ──
-          One card answering one question: who can act as me right now?
-          Browser sessions and CLI tokens live in separate tables and behave
-          differently — a session is discovered (unnamed, carries UA + IP,
-          expires on its own), a token is minted (you named it, chose a tier
-          and scopes, saw the secret once) — so they render as two labelled
-          groups rather than one flat list. Splitting them across two cards
-          made someone hunting a compromise have to know to look twice. */}
-      <SettingsCard icon={MonitorSmartphone}
-        title="Sessions &amp; access"
-        description="Everything that can sign in as you right now. Don't recognise something? End it."
+      {/* ── CLI tokens ──
+          A session is discovered (unnamed, carries UA + IP, expires on its
+          own); a token is minted (you named it, chose a tier and scopes, saw
+          the secret once). Two cards, one per kind, under one section head
+          that asks the one question: who can act as me right now? */}
+      <SettingsCard
+        icon={Terminal}
+        title="CLI tokens"
+        description="For the crewship CLI, scripts and CI"
+        actions={!showCreateForm ? (
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowCreateForm(true)}>
+            <Plus className="size-3" />New token
+          </Button>
+        ) : undefined}
       >
-        <DeviceSessions onSignOut={onSignOut} currentExpiresIn={expiresIn} />
-
-        <div className="flex items-center justify-between px-4 pt-3 pb-1.5 border-t border-border/40">
-          <span className="text-micro uppercase tracking-[0.1em] text-muted-foreground-soft font-semibold">
-            CLI tokens
-          </span>
-          {!showCreateForm && (
-            <Button size="sm" variant="ghost" className="h-6 px-2 gap-1.5 text-label" onClick={() => setShowCreateForm(true)}>
-              <Plus className="size-3" />New token
-            </Button>
+        {/* ── New token reveal ── shown once, right where it was made. */}
+        <AnimatePresence>
+          {newToken && (
+            <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.15 }}>
+              <div className="mx-4 my-3 rounded-card border border-primary/30 bg-primary/[0.04] p-3" data-slot="new-token">
+                <div className="mb-2.5 flex items-start gap-2.5">
+                  <Key className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary-hover" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <h4 className="flex items-center gap-1.5 text-control font-semibold text-foreground">
+                      Token created
+                      <TierPill tier={newToken.tier} />
+                    </h4>
+                    <p className="text-label text-muted-foreground">
+                      {newToken.tier === "ADMIN"
+                        ? "Admin-tier token — short-lived (≤7d), per-use audited. Copy now — it won’t be shown again."
+                        : "Copy now — it won’t be shown again."}
+                    </p>
+                  </div>
+                  <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setNewToken(null)}>Dismiss</Button>
+                </div>
+                <div className="flex items-center gap-2 rounded-md border border-border bg-surface-subtle p-2">
+                  <Terminal className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                  <code className="flex-1 select-all break-all font-mono text-label leading-relaxed text-foreground">
+                    {tokenVisible ? newToken.token : newToken.token.slice(0, 18) + "•".repeat(24)}
+                  </code>
+                  <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" onClick={() => setTokenVisible(!tokenVisible)} aria-label={tokenVisible ? "Hide token" : "Show token"}>
+                    {tokenVisible ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                  </Button>
+                  <Button variant="ghost" size="sm" className={cn("gap-1", tokenCopied ? "text-foreground" : "text-muted-foreground")} onClick={() => handleCopyToken(newToken.token)}>
+                    {tokenCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                    {tokenCopied ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+                <p className="mt-2 font-mono text-label text-muted-foreground">
+                  $ crewship auth login --token &lt;token&gt;
+                </p>
+              </div>
+            </motion.div>
           )}
-        </div>
+        </AnimatePresence>
 
-        {/* Create form — full token issuance dialog with tier, scopes,
-            expiry. Animates open inline rather than via modal so the
-            generated token reveal (below) sits next to the form. */}
+        {/* Create form — inline (the mockup and the product), so the reveal
+            above sits where the token was made. */}
         <AnimatePresence>
           {showCreateForm && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-              <div className="px-4 py-4 border-b border-border/40 space-y-3">
-                {/* Name */}
-                <div className="space-y-1">
-                  <Label htmlFor="token-name" className="text-label">Token name</Label>
-                  <Input
-                    id="token-name"
-                    value={tokenName} onChange={(e) => setTokenName(e.target.value)}
-                    placeholder="e.g. MacBook Pro, ci-deploy-bot"
-                    className={controlHeight}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleCreateToken()}
-                    autoFocus
-                  />
-                </div>
-
-                {/* Tier + expiry on one row — both are short-list selects */}
-                <div className={restricted ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                  {!restricted && <div className="space-y-1">
-                    <Label className="text-label flex items-center gap-1.5">
-                      Tier
-                      <TooltipProvider delayDuration={0}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="cursor-help text-muted-foreground">ⓘ</span>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-xs text-label">
-                            <strong>STANDARD</strong> is the normal CLI token — your full
-                            workspace role. <strong>ADMIN</strong> is HMAC-keyed,
-                            short-lived (≤7d), per-use audited; OWNER role required to
-                            issue.
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </Label>
-                    <Select value={tokenTier} onValueChange={(v) => setTokenTier(v as "STANDARD" | "ADMIN")}>
-                      <SelectTrigger className={controlHeight}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="STANDARD" className="text-xs">Standard</SelectItem>
-                        <SelectItem value="ADMIN" className="text-xs">
-                          <span className="flex items-center gap-1.5">
-                            <Shield className="h-3 w-3 text-destructive" />
-                            Admin (OWNER only)
-                          </span>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>}
-
+              <form
+                className="mx-4 my-3 grid gap-3 rounded-card border border-border bg-surface-subtle p-3"
+                onSubmit={(e) => { e.preventDefault(); void handleCreateToken() }}
+                aria-label="New CLI token"
+              >
+                <div className={restricted ? "grid gap-3" : "grid gap-3 sm:grid-cols-2"}>
                   <div className="space-y-1">
-                    <Label className="text-label">Expires</Label>
-                    <Select
-                      value={String(tokenExpirySeconds)}
-                      onValueChange={(v) => setTokenExpirySeconds(Number(v))}
-                    >
-                      <SelectTrigger className={controlHeight}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {EXPIRY_PRESETS
-                          // ADMIN can't choose Never — backend rejects with 400.
-                          .filter((p) => restricted || tokenTier !== "ADMIN" || p.value !== 0)
-                          // ADMIN can't exceed 7d ceiling.
-                          .filter((p) => restricted || tokenTier !== "ADMIN" || p.value <= 7 * 24 * 60 * 60)
-                          .map((p) => (
-                            <SelectItem key={p.value} value={String(p.value)} className="text-xs">
-                              {p.label}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
+                    <Label htmlFor="token-name" className="text-label">Token name</Label>
+                    <Input
+                      id="token-name"
+                      value={tokenName} onChange={(e) => setTokenName(e.target.value)}
+                      placeholder="e.g. MacBook Pro, ci-deploy-bot"
+                      className={controlHeight}
+                      autoFocus
+                    />
                   </div>
+                  {!restricted && (
+                    <div className="space-y-1">
+                      <span className="block text-label font-medium">Tier</span>
+                      <SettingsSegmented
+                        label="Tier"
+                        value={tokenTier}
+                        onChange={setTokenTier}
+                        options={[{ value: "STANDARD", label: "Standard" }, { value: "ADMIN", label: "Admin (OWNER only)" }]}
+                      />
+                    </div>
+                  )}
                 </div>
 
-                {/* Scopes — three-column grid of checkboxes grouped by resource.
-                    Empty selection = unrestricted (full role inherited).
-                    Selecting <resource>:* implicitly grants every action under
-                    that resource; the per-action checkboxes stay enabled so the
-                    user can mix-and-match (backend's canScope handles both shapes). */}
-                {!restricted && <div className="space-y-1.5">
-                  <Label className="text-label flex items-center justify-between">
-                    <span>Scopes {tokenScopes.size > 0 && <span className="text-muted-foreground">({tokenScopes.size} selected)</span>}</span>
-                    {tokenScopes.size > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setTokenScopes(new Set())}
-                        className="text-micro text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </Label>
-                  <p className="text-micro text-muted-foreground">
-                    Leave empty for unrestricted token (full role permissions).
-                    Pick scopes to narrow — e.g. <code className="font-mono">agents:write</code> for a CI bot that only manages agents.
-                  </p>
-                  <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 border border-border/40 rounded-md p-2.5 bg-muted/20">
-                    {SCOPE_GROUPS.map((group) => (
-                      <div key={group.resource} className="space-y-1">
-                        <div className="text-micro font-semibold text-muted-foreground uppercase tracking-wide">
-                          {group.resource}
-                        </div>
-                        <label className="flex items-center gap-1.5 text-label cursor-pointer">
+                <div className="space-y-1">
+                  <span className="block text-label font-medium">Expires</span>
+                  <SettingsSegmented label="Expires" value={tokenExpirySeconds} onChange={setTokenExpirySeconds} options={expiryOptions} />
+                  {!restricted && <span className="block text-label text-muted-foreground">Admin tokens last 7 days at most</span>}
+                </div>
+
+                {/* Scopes — one checkbox per scope the backend can gate.
+                    Empty selection = unrestricted (full role inherited). */}
+                {!restricted && (
+                  <fieldset className="space-y-1">
+                    <legend className="flex w-full items-center justify-between text-label font-medium">
+                      <span>Scopes {tokenScopes.size > 0 && <span className="font-normal text-muted-foreground">({tokenScopes.size} selected)</span>}</span>
+                      {tokenScopes.size > 0 && (
+                        <button type="button" onClick={() => setTokenScopes(new Set())} className="text-label font-normal text-muted-foreground hover:text-foreground">
+                          Clear
+                        </button>
+                      )}
+                    </legend>
+                    <div className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-3">
+                      {SCOPES.map((scope) => (
+                        <label key={scope} className="kit-tap flex cursor-pointer items-center gap-2 text-label">
                           <Checkbox
-                            checked={tokenScopes.has(`${group.resource}:*`)}
+                            checked={tokenScopes.has(scope)}
                             onCheckedChange={(checked) => {
                               const next = new Set(tokenScopes)
-                              const wild = `${group.resource}:*`
-                              if (checked) next.add(wild)
-                              else next.delete(wild)
+                              if (checked) next.add(scope)
+                              else next.delete(scope)
                               setTokenScopes(next)
                             }}
-                            className="h-3 w-3"
+                            aria-label={scope}
                           />
-                          <span className="font-mono text-micro">*</span>
-                          <span className="text-muted-foreground text-micro">(all)</span>
+                          <span className="font-mono">{scope}</span>
                         </label>
-                        {group.actions.map((action) => {
-                          const scope = `${group.resource}:${action}`
-                          return (
-                            <label key={scope} className="flex items-center gap-1.5 text-label cursor-pointer">
-                              <Checkbox
-                                checked={tokenScopes.has(scope)}
-                                onCheckedChange={(checked) => {
-                                  const next = new Set(tokenScopes)
-                                  if (checked) next.add(scope)
-                                  else next.delete(scope)
-                                  setTokenScopes(next)
-                                }}
-                                className="h-3 w-3"
-                              />
-                              <span className="font-mono text-micro">{action}</span>
-                            </label>
-                          )
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                </div>}
+                      ))}
+                    </div>
+                    <span className="block text-label text-muted-foreground">Leave empty for unrestricted token (full role permissions).</span>
+                  </fieldset>
+                )}
                 {restricted && <p className="text-xs text-muted-foreground">This token uses your current Guest grants. It cannot open resources your account cannot access.</p>}
 
                 {/* Inline error from backend (unknown scope, OWNER-only, etc.) */}
                 {createError && (
-                  <div className="text-label text-destructive bg-destructive/10 border border-destructive/30 rounded-md px-2.5 py-1.5 flex items-start gap-1.5">
-                    <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+                  <div role="alert" className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-label text-destructive">
+                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
                     <span>{createError}</span>
                   </div>
                 )}
 
-                <div className="flex items-center justify-end gap-2 pt-1">
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => {
-                    setShowCreateForm(false)
-                    setTokenName("")
-                    setTokenTier("STANDARD")
-                    setTokenExpirySeconds(0)
-                    setTokenScopes(new Set())
-                    setCreateError(null)
-                  }}>Cancel</Button>
-                  <Button size="sm" className="h-7 px-3 text-xs gap-1" onClick={handleCreateToken} disabled={creating || !tokenName.trim()}>
+                <div className="flex items-center justify-end gap-2">
+                  <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={cancelCreate}>Cancel</Button>
+                  <Button type="submit" size="sm" className="gap-1" disabled={creating || !tokenName.trim()}>
                     {creating && <Spinner className="h-3 w-3" />}Create token
                   </Button>
                 </div>
-              </div>
+              </form>
             </motion.div>
           )}
         </AnimatePresence>
 
         {/* Token list */}
         {tokensLoading ? (
-          <div className="px-4 py-6 text-center">
+          <div className="px-4 py-6 text-center" role="status" aria-label="Loading CLI tokens">
             <Spinner className="h-3.5 w-3.5 text-muted-foreground mx-auto" />
           </div>
         ) : tokens.length === 0 && !showCreateForm ? (
-          <SettingsEmpty>No tokens yet</SettingsEmpty>
+          <SettingsEmpty>No CLI tokens. Create one for the crewship CLI, scripts or CI.</SettingsEmpty>
         ) : (
           <>
             {activeTokens.map((token) => <TokenListItem key={token.id} token={token} onRevoke={() => setRevokeTarget(token)} />)}
 
-            {/* Revoked tokens are collapsed. The card says "everything that
-                can sign in as you right now" — a revoked token cannot, and
-                on a real account a run of struck-through rows pushed the
-                live ones out of view, on the one screen whose job is
-                spotting live access. Still reachable, because "did my
-                revoke actually stick?" should not need the audit log. */}
+            {/* Revoked tokens are collapsed. The card says what can sign in as
+                you right now — a revoked token cannot, and on a real account
+                a run of struck-through rows pushed the live ones out of view.
+                Still reachable, because "did my revoke actually stick?"
+                should not need the audit log. */}
             {revokedTokens.length > 0 && (
               <>
-                <button
-                  type="button"
-                  onClick={() => setShowRevokedTokens((v) => !v)}
-                  aria-expanded={showRevokedTokens}
-                  className="w-full flex items-center gap-1.5 px-4 py-2 text-label text-muted-foreground hover:text-foreground/80 transition-colors border-b border-border/40 last:border-b-0"
-                >
-                  <ChevronRight className={cn("size-3 transition-transform", showRevokedTokens && "rotate-90")} />
-                  {revokedTokens.length} revoked
-                </button>
                 {showRevokedTokens && revokedTokens.map((token) => (
-                  <div key={token.id} className="flex items-center justify-between px-4 py-2 border-b border-border/40 last:border-b-0 opacity-40">
-                    <span className="text-xs text-muted-foreground line-through">{token.name}</span>
-                    <span className="text-micro text-muted-foreground font-mono">revoked</span>
+                  <div key={token.id} className="flex items-center justify-between border-b border-border px-4 py-2 opacity-60">
+                    <span className="font-mono text-control text-muted-foreground line-through">{token.name}</span>
+                    <span className="font-mono text-label text-muted-foreground">revoked</span>
                   </div>
                 ))}
+                <SettingsCardActions className="pt-2.5">
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="gap-1 px-0 text-primary-hover"
+                    onClick={() => setShowRevokedTokens((v) => !v)}
+                    aria-expanded={showRevokedTokens}
+                  >
+                    <ChevronRight className={cn("size-3 transition-transform", showRevokedTokens && "rotate-90")} />
+                    {revokedTokens.length} revoked
+                  </Button>
+                </SettingsCardActions>
               </>
             )}
           </>
         )}
       </SettingsCard>
 
-      {/* Revoke dialog */}
-      <AlertDialog open={!!revokeTarget} onOpenChange={(open) => !open && setRevokeTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-sm">
-              <AlertTriangle className="h-4 w-4 text-destructive" />Revoke token
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-xs">
-              Revoke <strong>{revokeTarget?.name}</strong>? CLI sessions using this token will be disconnected immediately.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleRevoke} className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={revoking}>
-              {revoking && <Spinner className="h-3 w-3 mr-1.5" />}Revoke
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={!!revokeTarget}
+        onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}
+        title={`Revoke ${revokeTarget?.name ?? "token"}?`}
+        description="Terminals, scripts and CI using this token are disconnected at once."
+        consequences={[
+          { tone: "lost", text: "The token stops working everywhere it is used" },
+          { tone: "kept", text: "Your other tokens and browser sessions" },
+        ]}
+        confirmLabel="Revoke"
+        destructive
+        onConfirm={handleRevoke}
+      />
     </div>
   )
 }
 
+/** The token's tier, as the one status pill: Admin in the warning tone. */
+function TierPill({ tier }: { tier: string }) {
+  return tier === "ADMIN"
+    ? <StatusPill tone="warn" label="Admin" />
+    : <StatusPill tone="muted" label="Standard" />
+}
+
 // ── TokenListItem ─────────────────────────────────────────────────────
 //
-// Renders a single active CLI token row with the full v99/M2 picture:
-// tier badge (visual differentiator between STANDARD and the more-
-// dangerous ADMIN), scope pill chips (so the user remembers what the
-// token can do without opening DB), and an expires countdown that
-// turns destructive-red when ≤24h remain. Pre-M2 tokens (no tier in
-// the response) render exactly like STANDARD/unrestricted so the
-// list stays backwards-compatible with older API versions.
-//
-// Lives inside sessions-section.tsx (not a separate file) so the
-// shared hooks (useTimeUntil, timeAgo) and styling primitives stay
-// co-located — moving it out would require a public types module
-// that nothing else in the tree needs yet.
+// One active CLI token as a settings row: the name in mono with its tier,
+// and on the right what it can do, when it expires and when it was last
+// used — then Revoke. Pre-M2 tokens (no tier in the response) render
+// exactly like STANDARD/unrestricted.
 function TokenListItem({
   token,
   onRevoke,
@@ -618,76 +495,45 @@ function TokenListItem({
   const tier = token.tier ?? "STANDARD"
   const scopes = token.scopes ?? []
 
-  // ≤24h = visual warning; ≤0 = already expired (validator will
-  // refuse on next use but the row may not have been auto-revoked
-  // yet, so the UI still flags it).
-  const expiresDestructive = token.expires_at
+  // ≤24h = visual warning; ≤0 = already expired (validator will refuse on
+  // next use but the row may not have been auto-revoked yet).
+  const expiresSoon = token.expires_at
     ? new Date(token.expires_at).getTime() - Date.now() <= 24 * 60 * 60 * 1000
     : false
 
   return (
-    <div className="px-4 py-2.5 border-b border-border/40 last:border-b-0 space-y-1.5">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-foreground truncate">{token.name}</span>
-        <Badge
-          variant="outline"
-          className={cn("text-micro font-medium px-1.5 py-0 leading-none h-4", tierCls[tier])}
-        >
-          {tier === "ADMIN" && <Shield className="h-2.5 w-2.5 mr-0.5" />}
-          {tier}
-        </Badge>
-        <div className="flex-1" />
-        <span className="text-micro text-muted-foreground font-mono flex items-center gap-1 shrink-0">
-          <Clock className="h-2.5 w-2.5" />{timeAgo(token.created_at)}
+    <SettingsRow
+      lead={tier === "ADMIN" ? Shield : Key}
+      label={
+        <span className="inline-flex flex-wrap items-center gap-2">
+          <span className="truncate font-mono">{token.name}</span>
+          <TierPill tier={tier} />
         </span>
-        {token.last_used_at && (
-          <span className="text-micro text-muted-foreground font-mono hidden sm:inline shrink-0">
-            used {timeAgo(token.last_used_at)}
-          </span>
-        )}
-        <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
-        <TooltipProvider delayDuration={0}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* Named after the token, not "Revoke token": a screen-reader
-                  user tabbing a list of five identical buttons has no other
-                  way to tell which one they are on. */}
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onRevoke} aria-label={`Revoke ${token.name}`}>
-                <Trash2 className="h-3 w-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left" className="text-label">Revoke</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      </div>
-
-      {/* Scope pills + expiry — second line, only when there's
-          actually something to show. Empty scopes + no expiry =
-          token inherits full role and lives forever; no need to
-          stamp empty pills there. */}
-      {(scopes.length > 0 || token.expires_at) && (
-        <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
-          {scopes.map((s) => (
-            <span
-              key={s}
-              className="text-micro font-mono bg-muted text-muted-foreground border border-border/60 rounded-sm px-1 py-0 leading-tight"
-            >
-              {s}
-            </span>
-          ))}
-          {token.expires_at && expiresIn && (
-            <span
-              className={cn(
-                "text-micro font-mono flex items-center gap-0.5",
-                expiresDestructive ? "text-destructive" : "text-muted-foreground"
-              )}
-            >
-              <Clock className="h-2 w-2" />
-              expires {expiresIn === "Expired" ? "now" : `in ${expiresIn}`}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
+      }
+      description={`Created ${timeAgo(token.created_at)}`}
+    >
+      <span className="text-label text-muted-foreground">
+        {scopes.length > 0 ? scopes.join(" · ") : "unrestricted"}
+        {" · "}
+        <span className={cn(expiresSoon && "text-destructive")}>
+          {token.expires_at && expiresIn
+            ? `expires ${expiresIn === "Expired" ? "now" : `in ${expiresIn}`}`
+            : "expires never"}
+        </span>
+        {token.last_used_at && ` · used ${timeAgo(token.last_used_at)}`}
+      </span>
+      {/* Named after the token, not "Revoke token": a screen-reader user
+          tabbing a list of five identical buttons has no other way to tell
+          which one they are on. */}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+        onClick={onRevoke}
+        aria-label={`Revoke ${token.name}`}
+      >
+        Revoke
+      </Button>
+    </SettingsRow>
   )
 }
