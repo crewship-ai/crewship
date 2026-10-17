@@ -513,3 +513,5 @@ Selected output content is capped at 256 KiB before loading; the encoded
 response is capped at 1 MiB. Oversized details return 413 while list metadata
 remains available. Final and step outputs are credential-scrubbed on read,
 including historical stored content; final output is also scrubbed on persist.
+
+Preset selection workspace, membership, resource and selector foreign keys have leading indexes. The workspace index also covers member lookups, so parent cleanup and scoped backup reads avoid scanning every selection.

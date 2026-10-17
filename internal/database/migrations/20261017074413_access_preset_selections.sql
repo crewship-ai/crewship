@@ -18,6 +18,12 @@ CREATE TABLE access_preset_selections (
        OR (resource_kind='project' AND project_id IS NOT NULL AND routine_id IS NULL)),
     UNIQUE(member_id,project_id), UNIQUE(member_id,routine_id)
 );
+-- Cover FK parent cleanup and workspace/member selection lookups.
+CREATE INDEX idx_access_preset_selections_workspace ON access_preset_selections(workspace_id,member_id);
+CREATE INDEX idx_access_preset_selections_project ON access_preset_selections(project_id);
+CREATE INDEX idx_access_preset_selections_routine ON access_preset_selections(routine_id);
+CREATE INDEX idx_access_preset_selections_selector ON access_preset_selections(selected_by);
+
 CREATE TRIGGER access_preset_binding_insert BEFORE INSERT ON access_preset_selections
 WHEN NOT EXISTS(SELECT 1 FROM workspace_members WHERE id=NEW.member_id AND workspace_id=NEW.workspace_id)
   OR (NEW.resource_kind='project' AND NOT EXISTS(SELECT 1 FROM projects WHERE id=NEW.project_id AND workspace_id=NEW.workspace_id))

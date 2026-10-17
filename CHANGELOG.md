@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Index preset selection ownership, resources and selectors for parent cleanup and scoped backup lookups.
+
 - **Revoked project data stays hidden during connection errors.** Shared project details, milestones and issue deletion previews require a fresh successful read after access is refused; cached responses and late saves cannot restore the old view.
 
 - Guests with explicit project Read+Manage can open a known-project management link without List. The screen reuses reviewed metadata/milestone forms, preserves drafts during temporary workspace-directory loss, and optionally previews a known issue for confirmed deletion with the separate Delete issues share, without issue discovery or broader grants.
