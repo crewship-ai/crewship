@@ -4,16 +4,36 @@ import { test, expect, type Page } from "@playwright/test"
 // in a real browser, the phone list → section → back, the save bar on a typed
 // edit, the destructive confirmations and the old ?tab= links.
 //
-// Run as an OWNER of a seeded workspace (global-setup signs in). Nothing here
-// is saved: edits are discarded, dialogs are cancelled, a created token is
-// revoked again.
+// Run as an ADMIN or OWNER of a seeded workspace (global-setup signs in; the
+// dev slots use admin-baseline, an ADMIN). The owner-only Danger zone is
+// checked twice: hidden for the signed-in ADMIN, and, with the role the
+// browser sees raised to OWNER, the confirmation itself (cancelled, so the
+// server is never asked). Nothing here is saved: edits are discarded,
+// dialogs are cancelled, a created token is revoked again.
 
-const PINNED = { crewship_sidebar_mode: "pinned", "crewship-appearance-sync": "0" }
+// The card anatomy (32 px fields, 50 px card header) is specified at the
+// Small text size; pin it so a device or account that stored Standard does
+// not change the measurement. Sync off keeps the account's stored size out.
+const PINNED = { crewship_sidebar_mode: "pinned", "crewship-appearance-sync": "0", "crewship-text-size": "small" }
 
 async function seed(page: Page, entries: Record<string, string>) {
   await page.addInitScript((e) => {
     for (const [k, v] of Object.entries(e)) localStorage.setItem(k, v)
   }, entries)
+}
+
+/** Shows the signed-in user as the OWNER of every workspace, in the browser
+ *  only, and collects the workspaces' slugs. */
+async function asOwner(page: Page) {
+  const slugs: string[] = []
+  await page.route("**/api/v1/workspaces", async (route) => {
+    if (route.request().method() !== "GET") return route.continue()
+    const res = await route.fetch()
+    const rows = (await res.json()) as { slug: string; currentUserRole: string }[]
+    for (const r of rows) { r.currentUserRole = "OWNER"; slugs.push(r.slug) }
+    await route.fulfill({ response: res, json: rows })
+  })
+  return slugs
 }
 
 async function height(page: Page, selector: string) {
@@ -61,12 +81,28 @@ test.describe("desktop", () => {
     await expect(bar).toBeHidden()
   })
 
-  test("T06 delete workspace asks for the slug and can be cancelled", async ({ page }) => {
+  test("T06 the Danger zone is the owner's alone", async ({ page }) => {
     await seed(page, PINNED)
     await page.goto("/settings?tab=general")
-    await page.getByRole("button", { name: "Delete workspace…" }).click()
+    await expect(page.getByRole("region", { name: "Privileged credentials" })).toBeVisible()
+    await expect(page.getByRole("region", { name: "Danger zone" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Delete workspace…" })).toHaveCount(0)
+  })
+
+  test("T06 delete workspace asks for the slug and can be cancelled", async ({ page }) => {
+    await seed(page, PINNED)
+    const slugs = await asOwner(page)
+    await page.goto("/settings?tab=general")
+    await page.getByRole("region", { name: "Danger zone" }).getByRole("button", { name: "Delete workspace…" }).click()
     const dialog = page.getByRole("alertdialog")
-    await expect(dialog.getByRole("button", { name: "Delete workspace" })).toBeDisabled()
+    const confirm = dialog.getByRole("button", { name: "Delete workspace" })
+    await expect(confirm).toBeDisabled()
+    const slug = (await dialog.locator("label code").textContent())!.trim()
+    expect(slugs).toContain(slug)
+    await dialog.getByLabel(/to confirm/).fill(`${slug}-not`)
+    await expect(confirm).toBeDisabled()
+    await dialog.getByLabel(/to confirm/).fill(slug)
+    await expect(confirm).toBeEnabled()
     await dialog.getByRole("button", { name: "Cancel" }).click()
     await expect(dialog).toBeHidden()
   })
@@ -141,9 +177,13 @@ test.describe("phone", () => {
     await expect(list.getByRole("button", { name: "General" })).toBeVisible()
   })
 
-  test("T09 ?card= scrolls to the card", async ({ page }) => {
-    await page.goto("/settings?tab=general&card=danger-zone")
-    await expect(page.getByRole("region", { name: "Danger zone" })).toBeInViewport()
+  // The last card an ADMIN sees on General, well below the fold at 390 x 844
+  // (the Danger zone is owner-only and absent for the dev slots' ADMIN).
+  test("T09 ?card= scrolls to and focuses the card at 390", async ({ page }) => {
+    await page.goto("/settings?tab=general&card=privileged-credentials")
+    const card = page.getByRole("region", { name: "Privileged credentials" })
+    await expect(card).toHaveAttribute("data-focused", "true")
+    await expect(card).toBeInViewport()
   })
 
   test("rows wrap their control under the label instead of overflowing", async ({ page }) => {
