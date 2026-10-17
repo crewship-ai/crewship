@@ -45,9 +45,10 @@ same page.
 - **Views** — **Mine** (routines you published) or **Workspace**; keys `1` and
   `2`. The choice is remembered for you (`calendar.view` preference).
 - **Crews** — narrows to the routines a crew authored.
-- **Filter › Status** — At risk (a run that could not finish), Waiting for
-  someone, Planned, Done. Nothing checked means everything; active filters show
-  as chips you can remove.
+- **Filter › Status** — the Filter button opens the facets inside the panel,
+  under the search (`Esc` closes them). At risk (a run that could not finish),
+  Waiting for someone, Planned, Done. Nothing checked means everything; active
+  filters show as chips you can remove.
 - **Search** (`/`) looks through the dates already loaded.
 
 Above the views, **Need you soon** lists up to four runs that wait for a person
@@ -74,7 +75,8 @@ you see it, and where the date comes from.
 - **Repeating** — a schedule with presets or a cron expression and a time zone;
   the next three starts come from the server
   (`GET …/pipeline-schedules/preview`). Only Owner, Admin, Manager or members
-  with the `routine.create` capability can add one; everyone else sees why.
+  with the `routine.create` capability can add one; for everyone else
+  **Repeating** is a disabled choice with the reason under it.
 
 ## From the command line
 
