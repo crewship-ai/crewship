@@ -45,6 +45,7 @@ A screen that cannot answer 1 says so in one line, not with an empty pane.
 | Disabled primary button | a one-line reason beside it | onboarding's `blocking reason` pattern |
 | Irreversible action | `AlertDialog` that says what is lost and where to recover | Skip setup, delete, nuke |
 | Filters in a secondary panel | `useSidebarFacets` + `SidebarFacetBlock` + `SidebarInlineFacet` (`components/layout/sidebar-facets`) | the Filter button opens the facets INSIDE the panel under its toolbar (never a floating popover); each facet folds, names its choice and clears alone; at most 6 values, the rest behind "All N…" (searchable); counts over the whole space. While the block is closed, active facets show as `SidebarActiveChip`s named "Facet: Value". `SidebarFilterPopover` is only for surfaces without a panel |
+| Two to five views of one thing | `Segmented` (`components/ui/segmented`) | one radio group (arrows, Home / End, one tab stop); `count` after a label, `title` for the reason a segment is disabled. No local segmented copies |
 | Saving typed-in values | `PageSaveProvider` + `PageSaveBar` (`components/ui/page-save-bar`); cards register through `useDirtyForm` + `SaveFooter`, `SettingsSaveBar` or `usePageSave` | see "Saving" below |
 
 ### Saving
