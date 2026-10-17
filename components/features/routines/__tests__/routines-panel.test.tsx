@@ -283,6 +283,59 @@ describe("<RoutinesExplorer> select several (RT-03, PNL-03)", () => {
   })
 })
 
+describe("<RoutinesExplorer> runs of the open routine (RT-07, v67 rtPanel)", () => {
+  const today = new Date()
+  today.setHours(8, 0, 0, 0)
+  const longAgo = new Date(today.getTime() - 30 * 86_400_000)
+  const rec = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    pipeline_id: "p",
+    pipeline_slug: "weekly",
+    status: "completed",
+    mode: "run",
+    started_at: today.toISOString(),
+    cost_usd: 0.1,
+    duration_ms: 61_000,
+    triggered_via: "schedule",
+    ...over,
+  })
+  const runsOf = (over: Record<string, unknown> = {}) => ({
+    routineName: "Weekly report",
+    runs: [rec("run_20", { status: "waiting" }), rec("run_19"), rec("run_16", { status: "failed", started_at: longAgo.toISOString(), triggered_via: "manual" })],
+    current: "run_20",
+    onPeek: vi.fn(),
+    onBack: vi.fn(),
+    ...over,
+  })
+
+  it("lists the routine's runs by status and day; a row opens the peek", () => {
+    const r = runsOf()
+    renderPanel({ runsOf: r as never, view: null, selectedSlug: "weekly" })
+    expect(screen.getByRole("button", { name: "All routines" })).toBeInTheDocument()
+    expect(screen.getByText("Weekly report")).toBeInTheDocument()
+    const status = screen.getByRole("group", { name: "Run status" })
+    expect(within(status).getByRole("button", { name: /^All\s*3/ })).toBeInTheDocument()
+    expect(within(status).getByRole("button", { name: /Waiting for a person\s*1/ })).toBeInTheDocument()
+    expect(within(status).getByRole("button", { name: /Could not finish\s*1/ })).toBeInTheDocument()
+    expect(screen.getByRole("group", { name: "Today" })).toBeInTheDocument()
+    expect(screen.getByRole("group", { name: "Earlier" })).toBeInTheDocument()
+    // The routines list is not shown while the runs are.
+    expect(screen.queryByText("Invoice intake")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /run_16/ }))
+    expect(r.onPeek).toHaveBeenCalledWith("run_16")
+  })
+
+  it("a status narrows the runs; All routines goes back to the list", () => {
+    const r = runsOf()
+    renderPanel({ runsOf: r as never, view: null, selectedSlug: "weekly" })
+    fireEvent.click(within(screen.getByRole("group", { name: "Run status" })).getByRole("button", { name: /Could not finish/ }))
+    expect(screen.queryByRole("button", { name: /run_19/ })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /run_16/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "All routines" }))
+    expect(r.onBack).toHaveBeenCalled()
+  })
+})
+
 describe("routineRowState", () => {
   it.each([
     [{ status: "proposed" }, null, "Proposed"],

@@ -23,6 +23,7 @@ const h = vi.hoisted(() => ({
   agents: [] as Record<string, unknown>[],
   role: "OWNER",
   executions: null as Record<string, unknown>[] | null,
+  artifactCount: null as number | null,
 }))
 
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
@@ -70,9 +71,18 @@ vi.mock("@/components/features/activity/run-evidence-panel", () => ({
 vi.mock("../routine-execution-history", () => ({
   RoutineExecutionHistory: () => <div data-testid="execution-history" />,
 }))
-vi.mock("../routine-run-artifacts", () => ({
-  RoutineRunArtifacts: () => <div data-testid="run-artifacts" />,
-}))
+vi.mock("../routine-run-artifacts", async () => {
+  const React = await import("react")
+  return {
+    // Reports the files it listed, the way the real list does once loaded.
+    RoutineRunArtifacts: ({ onCount }: { onCount?: (n: number) => void }) => {
+      React.useEffect(() => {
+        if (h.artifactCount != null) onCount?.(h.artifactCount)
+      }, [onCount])
+      return <div data-testid="run-artifacts" />
+    },
+  }
+})
 
 function baseRun(overrides: Record<string, unknown> = {}) {
   return {
@@ -102,6 +112,7 @@ beforeEach(() => {
   h.agents = []
   h.role = "OWNER"
   h.executions = null
+  h.artifactCount = null
 })
 
 /** jsdom does not toggle <details> on a summary click; drive it the way the
@@ -691,6 +702,16 @@ describe("routine run page (Harbor 2)", () => {
     const bar = rows[1].querySelector("i") as HTMLElement
     expect(bar.style.left).toBe("25%")
     expect(bar.style.width).toBe("75%")
+  })
+
+  it("Steps shows the step list with the inspector, and Produced counts the run's files (RT-06)", async () => {
+    h.dsl = { steps: [{ id: "a", type: "http" }, { id: "b", type: "agent_run" }] }
+    h.executions = [{ id: "e1", step_id: "a", status: "completed", attempt: 1, started_at: "2026-09-08T08:00:00Z", ended_at: "2026-09-08T08:00:10Z" }]
+    h.artifactCount = 2
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    expect(screen.getByRole("list", { name: "Steps of this run" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Step inspector" })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId("run-kpis")).toHaveTextContent(/Produced\s*2/))
   })
 
   it("Copy for AI copies a markdown trace without secrets", async () => {
