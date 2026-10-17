@@ -12,6 +12,10 @@ export interface SegmentedOption<T extends string> {
   /** Accessible name when `label` is only an icon or a short glyph. */
   ariaLabel?: string
   disabled?: boolean
+  /** A count after the label (Dashboard window filters); not part of the name. */
+  count?: number
+  /** A hint on hover: the reason a segment is disabled, or what it shows. */
+  title?: string
 }
 
 /**
@@ -21,8 +25,11 @@ export interface SegmentedOption<T extends string> {
  * jump, only the selected segment is in the tab order. `fill` stretches the
  * segments across the width (a phone toolbar, a panel header).
  *
- * Issues, Dashboard and Calendar still carry local copies; they move here in
- * their own area work.
+ * The one kit control (COM-02, #3481). Local copies move here in their own
+ * area work: Dashboard `DashSegment` (`label` → `ariaLabel`), Issues'
+ * display `Segmented` (`id` → `value`, `label` → `ariaLabel`), Vault AI
+ * providers and Give to agents, Routines' create dialogs and Calendar's
+ * One time / Repeating (`hint` → `title`, plus `disabled` when blocked).
  */
 export function Segmented<T extends string>({
   value,
@@ -94,6 +101,7 @@ export function Segmented<T extends string>({
             role="radio"
             aria-checked={on}
             aria-label={o.ariaLabel}
+            title={o.title}
             disabled={o.disabled}
             tabIndex={i === tabStop ? 0 : -1}
             onClick={() => { if (!on) onChange(o.value) }}
@@ -101,7 +109,9 @@ export function Segmented<T extends string>({
             data-state={on ? "on" : "off"}
             className={cn(
               "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 transition-colors coarse:h-11",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-45",
+              // A disabled segment keeps pointer events, so its title (the
+              // reason) still shows on hover.
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45",
               size === "xs" ? "h-6 text-xs" : "h-7 text-sm",
               fill && "flex-1",
               on
@@ -111,6 +121,11 @@ export function Segmented<T extends string>({
           >
             {Icon && <Icon className="size-3.5 shrink-0" aria-hidden />}
             {o.label}
+            {o.count != null && (
+              <span data-slot="segmented-count" aria-hidden className="font-mono text-micro tabular-nums text-muted-foreground-soft">
+                {o.count}
+              </span>
+            )}
           </button>
         )
       })}
