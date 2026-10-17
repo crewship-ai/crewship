@@ -96,6 +96,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ Tokens with limited scopes can no longer create successor tokens or pairing codes. Use an interactive sign-in to create credentials; trusted full-role token creation remains available.
 
 - Internal foundations preserve explicit versioned resource-preset choice provenance through backup and fork restore. Existing grants remain unchanged and no preset selector/API/CLI is enabled yet; immutable v1 bundles, managed-edit invalidation and empty migration state prepare #3271.
+- Internal preset planning reads one live-authority snapshot and explains exact bundle changes, preserved issuers and independent consequences without changing any grants. Empty grant collections remain JSON arrays; unavailable unrelated historical resource grants remain preserved without granting authority. Confirmation checksums do not authorize access; public preview and application remain disabled pending the next #3271 slices.
 
 - Guests with an explicit routine View share can inspect its definition without an execution runtime or agent Run grants. Stored Run grants retain their existing invocation-only disclosure; View does not expose another person’s private runs. UI, CLI and access explanations use the same live issuer policy.
 - Guests with explicit project Read and Manage shares can edit shared project names and descriptions. UI and CLI preserve review snapshots and refuse conflicting saves; private project metadata and unrelated operations remain inaccessible.

@@ -141,6 +141,17 @@ backfill or automatic reissue. Applying and previewing these bundles, including
 regular-results disclosure and retained destructive consequences, require the
 subsequent API/CLI/UI work tracked by #3271.
 
+An internal transaction-scoped planner now computes explicit before/after
+operations, retained issuer/timestamp provenance, deliberate reissue intent and
+independent Results, execution, destructive and file-role consequences. Its
+confirmation digest binds the current member incarnation/revision, caller and
+issuer authority, resource state and immutable definition in one snapshot.
+The selected resource is validated live; FK-valid historical grants for unrelated unavailable resources remain in the canonical before/after plan without regaining resource authority. The planner performs no writes and the digest supplies no authority. No public
+preset preview or application endpoint, CLI command or selector is enabled by
+this internal slice; transport and atomic application remain follow-up work.
+An empty starting grant collection serializes as `before: []`, including in the
+canonical confirmation fingerprint; preview collections remain JSON arrays.
+
 Supported operations:
 
 | Resource | Operations | Current scope |
