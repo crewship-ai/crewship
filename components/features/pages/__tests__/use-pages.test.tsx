@@ -559,3 +559,7 @@ it("preserves a true native descriptor independently of stable identity availabi
   expect(toPageView({id:"legacy",slug:"page"}).hasDocument).toBe(false)
   expect(toPageView({id:"legacy",slug:"page",has_document:"true" as unknown as boolean}).hasDocument).toBe(false)
 })
+
+it("never offers legacy HTML publication for an empty native Document", () => {
+  expect(toPageView({ id: "document", slug: "document", owner: "user/owner", panels: [], has_document: true })).toMatchObject({ hasDocument: true, artifactEligible: false })
+})
