@@ -1,30 +1,20 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { motion } from "motion/react"
 import { toast } from "@/lib/toast"
-import {
-  ArrowUpRight, Bot, Palette, ShieldCheck, CheckCircle2, Clock, FolderTree, MessageSquare,
-  MoreHorizontal, Pencil, RotateCcw, Square, Trash2,
-} from "lucide-react"
-import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
+import { Brain, CalendarClock, ChevronLeft, Clock, Lock, RotateCcw, Trash2 } from "lucide-react"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { AgentRingAvatar } from "./agent-ring-avatar"
 import { getModelLabel } from "@/lib/cli-adapters"
-import { getCrewDotColor } from "@/lib/crew-icons"
+import { adapterLabel } from "@/lib/credentials/provider-logins"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { Pill } from "@/components/ui/detail"
 import { StatusPill } from "@/components/ui/status-pill"
+import { PageSaveBar, PageSaveProvider } from "@/components/ui/page-save-bar"
+import { PageError, PageNotFound } from "@/components/layout/page-state"
+import { useAbilities } from "@/hooks/use-abilities"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
@@ -39,13 +29,15 @@ import {
   CanvasTabPanel,
   useEntityFetch,
   usePatchEntity,
-  useResetTabOnSlugChange,
 } from "./canvas-base"
 import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
 import { CreateAgentDialog } from "./create-agent/create-agent-dialog"
-import { EntityWork } from "./entity-work"
 import { AgentOverview } from "./workspace-overview"
 import { MemoryWorkspace } from "./memory-workspace"
+import { AgentPageBar } from "./crews-bar"
+import { CrCard, CrLine, HeadChip, LeadMark, LeadStar } from "./cr-card"
+import { TOOL_ACCESS_LABEL } from "./crew-team"
+import { AGENT_TABS, type AgentTab } from "./crews-tabs"
 import type {
   AgentRecord,
   ChatRow as ChatRowType,
@@ -56,23 +48,6 @@ import type {
 
 export type { ChatRow, RunRow, AgentSkillRow, AgentCredRow, PeerMessageRow } from "./agent-canvas-tabs/types"
 
-type AgentTab = "overview" | "work" | "memory"
-
-const TABS: Array<{ id: AgentTab; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "work", label: "Work" },
-  { id: "memory", label: "Memory" },
-]
-
-/** Brand mark for the model in the identity line. */
-function providerMark(provider: string | null | undefined) {
-  const p = (provider ?? "").toUpperCase()
-  if (p === "OPENAI") return <OpenAIIcon className="h-3 w-3 shrink-0" />
-  if (p === "GOOGLE") return <GeminiIcon className="h-3 w-3 shrink-0 text-[#4285F4]" />
-  if (p === "ANTHROPIC") return <AnthropicIcon className="h-3 w-3 shrink-0 text-[#D97757]" />
-  return <Bot className="h-3 w-3 shrink-0 text-muted-foreground" />
-}
-
 export interface AgentCanvasProps {
   workspaceId: string
   agentSlug: string
@@ -81,11 +56,18 @@ export interface AgentCanvasProps {
   onAgentChanged: (nextSlug?: string) => void
   onLoaded?: (agent: AgentRecord) => void
   onSelectCrew: (slug: string | null) => void
-  /** Open the bottom panel pre-targeted to the Files tab. Wired by CrewsLayout. */
-  onOpenFiles?: () => void
+  /** The open tab (?tab=), already mapped from legacy values. */
+  tab: AgentTab
+  onTabChange: (tab: AgentTab) => void
+  /** Opens the dock on the Terminal tab for this agent. */
+  onOpenTerminal: () => void
 }
 
-/** Agent workspace: activity, assigned work and memory; editing shares the creation form. */
+/**
+ * The agent page (Harbor 2): back to its crew, one head, and the tabs
+ * Overview · Instructions · Model and limits · Tools and access · Memory ·
+ * Settings. Editing happens in the tabs through the page's one save bar.
+ */
 export function AgentCanvas({
   workspaceId,
   agentSlug,
@@ -93,7 +75,9 @@ export function AgentCanvas({
   onAgentChanged,
   onLoaded,
   onSelectCrew,
-  onOpenFiles,
+  tab,
+  onTabChange,
+  onOpenTerminal,
 }: AgentCanvasProps) {
   const router = useRouter()
   const {
@@ -115,24 +99,13 @@ export function AgentCanvas({
 
   useEffect(() => { if (agent) onLoaded?.(agent) }, [agent, onLoaded])
 
-  const [tab, setTab] = useState<AgentTab>("overview")
-  const accessRef = useRef<HTMLDetailsElement>(null)
-  const redirectMenuFocus = useRef(false)
-  const [accessRequested, setAccessRequested] = useState(false)
-  useEffect(() => {
-    if (tab !== "work" || !accessRequested || !accessRef.current) return
-    accessRef.current.open = true
-    accessRef.current.scrollIntoView({ block: "start" })
-    setAccessRequested(false)
-  }, [tab, accessRequested])
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
-  const [editOpen, setEditOpen] = useState(false)
+  const { abilities } = useAbilities()
+  const canDelete = abilities.can("delete", "Agent")
   const [revision, setRevision] = useState(0)
   const [inboxError, setInboxError] = useState<string | null>(null)
   const [activityError, setActivityError] = useState<string | null>(null)
 
-  // Reset to Overview when switching agents.
-  useResetTabOnSlugChange<AgentTab>(agentSlug, setTab, "overview")
 
   useRealtimeEvent("agent.status", useCallback((event) => {
     if (agent && event.payload?.agent_id === agent.id) {
@@ -293,22 +266,19 @@ export function AgentCanvas({
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast.success(`Agent "${agent.name}" deleted`)
       onAgentChanged()
+      onSelectCrew(agent.crew?.slug ?? null)
     } catch (err) {
       toast.error(`Delete failed: ${err instanceof Error ? err.message : err}`)
       throw err
     }
-  }, [agent, onAgentChanged, workspaceId])
+  }, [agent, onAgentChanged, onSelectCrew, workspaceId])
 
-  if (loading || error || !agent) {
-    return (
-      <CanvasShell
-        loading={loading}
-        error={loading ? null : (error ?? "agent not found")}
-        notLoadedLabel="Could not load agent"
-      >
-        {null}
-      </CanvasShell>
-    )
+  if (loading) return <CanvasShell loading error={null} notLoadedLabel="">{null}</CanvasShell>
+  if (error && /not found/.test(error)) {
+    return <PageNotFound what="agent" description={<>No agent is called “{agentSlug}” in this workspace. It may have been deleted, or the link is wrong.</>} back={{ label: "Back to crews", onClick: () => onSelectCrew(null) }} />
+  }
+  if (error || !agent) {
+    return <PageError title="The agent could not be loaded" description={error ?? undefined} onRetry={() => void fetchAgent()} />
   }
 
   const ghost = isGhost(agent)
@@ -317,232 +287,157 @@ export function AgentCanvas({
   const isPendingHire = agent.ephemeral === true && agent.status === "PENDING_REVIEW" && !ghost
   const ttl = agent.ephemeral && !ghost ? ttlRemaining(agent.expires_at) : ""
   const hireReason = latestHireReason(agent.hire_reason)
+  const crewName = agent.crew?.name ?? null
+  const tool = TOOL_ACCESS_LABEL[agent.tool_profile]
+  const editorKey = `${agent.id}:${agent.updated_at}`
+  const editorProps = {
+    workspaceId,
+    open: true,
+    onOpenChange: () => {},
+    defaultCrewSlug: agent.crew?.slug ?? null,
+    crews,
+    agent,
+    onCreated: (slug: string) => { onAgentChanged(slug); void fetchAgent(); setRevision((n) => n + 1) },
+  }
 
   return (
-    <CanvasShell loading={false} error={null} notLoadedLabel="">
-      {/* Header — variant C: name and actions share the top line, state and
-          identity drop to the second. The name stops competing with the
-          buttons, and the whole thing costs two lines instead of four. */}
-      <motion.header
-        layout
-        initial={{ opacity: 0, y: 4 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.16, ease: "easeOut" }}
-        className="border-b border-border pb-3"
-      >
-      {/* The avatar stands beside BOTH header lines rather than inside the
-          first. It used to be a 32px square next to a 24px name, which made
-          the face — now that agents wear real portraits — the smallest thing
-          in its own title bar. At 48px it spans the name and the status line
-          together, which is also what makes a style like Croodles legible at
-          all: those are line drawings, and a line drawing at 20px is a smudge. */}
-      <div className="flex items-start gap-3">
-        <button
-          type="button"
-          onClick={() => setAvatarPickerOpen(true)}
-          className="group mt-0.5 shrink-0"
-          title="Change avatar"
-        >
-          <AgentRingAvatar
-            seed={agent.avatar_seed || agent.name}
-            style={agent.avatar_style || agent.crew?.avatar_style}
-            avatarUrl={agent.avatar_url}
-            crewColor={agent.crew?.color}
-            engine={agent.llm_provider}
-            size="lg"
-            className="transition-transform group-hover:scale-[1.04]"
-          />
-        </button>
-
-        <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="type-title leading-none">{agent.name}</h1>
-          <span className="type-row font-mono text-muted-foreground">{agent.slug}</span>
-
-          <div className="ml-auto flex items-center gap-2">
-            <Button asChild variant="soft" size="sm">
-              <Link href={`/chat/${encodeURIComponent(agent.slug)}`}>
-                <MessageSquare />
-                Chat
-              </Link>
-            </Button>
-            {isRunning && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleStop}
-                className="border-destructive/30 bg-destructive/15 text-destructive hover:bg-destructive/25 hover:text-destructive"
-              >
-                <Square className="fill-current" />
-                Stop
-              </Button>
-            )}
-            {isPendingHire && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleApproveHire}
-                className="border-success/30 bg-success/20 text-success hover:bg-success/30 hover:text-success"
-              >
-                <CheckCircle2 />
-                Approve hire
-              </Button>
-            )}
-            {ghost && (
-              <Button variant="outline" size="sm" onClick={handleRehire}>
-                <RotateCcw />
-                Re-hire
-              </Button>
-            )}
-            {onOpenFiles && (
-              <Button variant="outline" size="sm" onClick={onOpenFiles}>
-                <FolderTree />
-                Files
-              </Button>
-            )}
-            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}><Pencil /> Edit</Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon-sm" title="More actions" aria-label="Agent actions">
-                  <MoreHorizontal />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64 rounded-xl p-1.5" onCloseAutoFocus={(event) => {
-                if (redirectMenuFocus.current) {
-                  event.preventDefault()
-                  redirectMenuFocus.current = false
-                  accessRef.current?.querySelector("summary")?.focus()
-                  accessRef.current?.scrollIntoView({ block: "start" })
-                }
-              }}>
-                <DropdownMenuItem onSelect={() => setAvatarPickerOpen(true)} className="gap-3 rounded-lg p-2.5">
-                  <Palette className="h-4 w-4 text-purple" />
-                  <span>Change avatar<span className="block text-xs text-muted-foreground">Give this agent its own look</span></span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => { redirectMenuFocus.current = true; setTab("work"); setAccessRequested(true) }} className="gap-3 rounded-lg p-2.5">
-                  <ShieldCheck className="h-4 w-4 text-primary" />
-                  <span>Skills and access<span className="block text-xs text-muted-foreground">Capabilities and permissions</span></span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => setConfirmDelete(true)}
-                  className="flex items-center gap-3 rounded-lg p-2.5 text-destructive focus:bg-destructive/10 focus:text-destructive"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  <span>Delete agent</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-
-        <div className="mt-1.5 flex flex-wrap items-center gap-2">
-          <StatusPill status={statusKey} live={isRunning} size="md" />
-          {agent.agent_role === "LEAD" && <Pill tone="purple">Lead</Pill>}
-          {agent.ephemeral && !ghost && (
-            <Pill tone="warn">
-              <Clock className="h-3 w-3" />
-              ephemeral{ttl && ` · ${ttl}`}
-            </Pill>
-          )}
-          {/* Role · crew · model is the first thing read after the name, so it
-              takes the row role rather than the caption one. type-meta is for
-              a timestamp in the corner of a card, not for the line that says
-              what this agent IS. */}
-          <span className="type-row flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-            {agent.role_title && <span>{agent.role_title}</span>}
-            {agent.crew && (
-              <>
-                {agent.role_title && <span className="opacity-40">·</span>}
-                <button
-                  type="button"
-                  onClick={() => onSelectCrew(agent.crew!.slug)}
-                  className="font-mono text-[11px] hover:underline"
-                  style={{ color: agent.crew.color ? getCrewDotColor(agent.crew.color) : "var(--primary-hover)" }}
-                >
-                  {agent.crew.name}
-                </button>
-              </>
-            )}
-            {agent.llm_model && (
-              <>
-                <span className="opacity-40">·</span>
-                <span className="inline-flex items-center gap-1.5" title={agent.llm_model}>
-                  {providerMark(agent.llm_provider)}
-                  {getModelLabel(agent.llm_model)}
-                </span>
-              </>
-            )}
-          </span>
-        </div>
-        </div>
-      </div>
-
-        {agent.description && (
-          <p className="type-row mt-2 max-w-prose text-muted-foreground">{agent.description}</p>
-        )}
-        {isPendingHire && (
-          <p className="type-row mt-2 inline-flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-warn/90">
-            <Clock className="mt-px h-3.5 w-3.5 shrink-0" />
-            <span>
-              Requesting to join <b className="font-medium">{agent.crew?.name ?? "crew"}</b> — approve to add it.
-              {hireReason && <> · {hireReason}</>}
-            </span>
-          </p>
-        )}
-        {ghost && <p className="type-row mt-2 text-muted-foreground">Expired ephemeral hire — re-hire to bring it back.</p>}
-      </motion.header>
-
-      <AvatarPickerDialog
-        open={avatarPickerOpen}
-        onOpenChange={setAvatarPickerOpen}
-        agentName={agent.name}
-        seed={agent.avatar_seed}
-        style={agent.avatar_style}
-        crewStyle={agent.crew?.avatar_style ?? null}
-        onSave={handleAvatarSave}
+    <PageSaveProvider>
+      <AgentPageBar
+        agent={agent}
+        crewName={crewName}
+        running={isRunning}
+        onTerminal={agent.crew_id ? onOpenTerminal : undefined}
+        onStop={handleStop}
       />
+      <CanvasShell loading={false} error={null} notLoadedLabel="">
+        {agent.crew && (
+          <button type="button" onClick={() => onSelectCrew(agent.crew!.slug)} className="-mb-3 inline-flex items-center gap-1 text-label text-muted-foreground hover:text-foreground coarse:min-h-11">
+            <ChevronLeft className="size-3.5" aria-hidden /> {agent.crew.name}
+          </button>
+        )}
+        <header className="flex items-start gap-4" data-testid="agent-header">
+          <button type="button" onClick={() => setAvatarPickerOpen(true)} className="group shrink-0" title="Change avatar" aria-label="Change avatar">
+            <span className="relative block">
+              <AgentRingAvatar
+                seed={agent.avatar_seed || agent.name}
+                style={agent.avatar_style || agent.crew?.avatar_style}
+                avatarUrl={agent.avatar_url}
+                crewColor={agent.crew?.color}
+                engine={agent.llm_provider}
+                size="lg"
+                className="transition-transform group-hover:scale-[1.04]"
+              />
+              {agent.agent_role === "LEAD" && <LeadStar className="-right-0.5 -top-0.5 size-4" />}
+            </span>
+          </button>
+          <div className="min-w-0 flex-1">
+            <h1 className="type-title flex items-center gap-2">{agent.name}{agent.agent_role === "LEAD" && <LeadMark />}</h1>
+            <p className="mt-1 text-body text-muted-foreground">
+              {[agent.role_title, crewName ? `in ${crewName}` : null].filter(Boolean).join(" ")}
+              {agent.cli_adapter && <> · {adapterLabel(agent.cli_adapter)}</>}
+              {agent.llm_model && <> · {getModelLabel(agent.llm_model)}</>}
+            </p>
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+              <StatusPill status={statusKey} live={isRunning} size="md" />
+              {agent.ephemeral && (
+                <HeadChip icon={<Clock className="size-3.5" aria-hidden />} tone={ghost ? undefined : "warn"}>
+                  {ghost ? "Temporary · expired" : isPendingHire ? "Temporary · waiting for approval" : `Temporary${ttl ? ` · ${ttl}` : ""}`}
+                </HeadChip>
+              )}
+              {tool && <HeadChip icon={<Lock className="size-3.5" aria-hidden />}><span title={tool.hint}>{tool.label}</span></HeadChip>}
+              <HeadChip icon={<Brain className="size-3.5" aria-hidden />}>Memory {agent.memory_enabled ? "on" : "off"}</HeadChip>
+            </div>
+          </div>
+        </header>
 
-      {/* Menu — two entries plus the one link that leaves the screen */}
-      <div className="flex items-center gap-4 border-b border-border">
-        <CanvasTabs<AgentTab> tabs={TABS} active={tab} onChange={setTab} idPrefix="agent-canvas" label="Agent sections" />
-        <Link
-          href={`/activity?agent=${encodeURIComponent(agent.id)}`}
-          className="ml-auto inline-flex shrink-0 items-center gap-1 pb-2 text-label text-muted-foreground transition-colors hover:text-primary"
-        >
-          Activity
-          <ArrowUpRight className="h-3 w-3" />
-        </Link>
-      </div>
+        <AvatarPickerDialog
+          open={avatarPickerOpen}
+          onOpenChange={setAvatarPickerOpen}
+          agentName={agent.name}
+          seed={agent.avatar_seed}
+          style={agent.avatar_style}
+          crewStyle={agent.crew?.avatar_style ?? null}
+          onSave={handleAvatarSave}
+        />
 
-      <CanvasTabPanel idPrefix="agent-canvas" active={tab} className="space-y-6">
-      {tab === "overview" && <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onWork={() => setTab("work")} revision={revision} />}
-      {tab === "work" && <EntityWork workspaceId={workspaceId} agentId={agent.id} crewId={agent.crew_id ?? undefined} slug={agent.slug} name={agent.name} />}
-      {tab === "work" && (
-        <details ref={accessRef} className="scroll-mt-4 rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Skills and access</summary><div className="mt-4"><OverviewTab
-          accessOnly
-          workspaceId={workspaceId}
-          agent={agent}
-          crews={crews}
-          inbox={inbox}
-          chats={chats}
-          runs={runs}
-          peerMessages={peerMessages}
-          patch={patch}
-          onStop={isRunning ? handleStop : undefined}
-          // The "Waiting on your decision" notice used to render with no
-          // button at all (audit-fleet.md §6 P1.3): it stated the agent was
-          // stopped and offered nothing. The inbox filtered to this agent is
-          // where the decision is taken.
-          onOpenInbox={() => router.push(entityHref({ kind: "inbox", agentSlug: agent.slug }))}
-          onOpenConfig={() => setEditOpen(true)}
-          onAgentChanged={onAgentChanged}
-        /></div></details>
-      )}
+        <CanvasTabs<AgentTab> tabs={AGENT_TABS} active={tab} onChange={onTabChange} idPrefix="agent-canvas" label="Agent sections" />
 
-      {tab === "memory" && <MemoryWorkspace key={agent.id} workspaceId={workspaceId} agentId={agent.id} agentSlug={agent.slug} crewId={agent.crew_id ?? undefined} memoryEnabled={agent.memory_enabled} />}
-      </CanvasTabPanel>
-      <CreateAgentDialog agent={agent} workspaceId={workspaceId} open={editOpen} onOpenChange={setEditOpen} defaultCrewSlug={agent.crew?.slug ?? null} crews={crews} onCreated={(slug) => { onAgentChanged(slug); void fetchAgent(); setRevision((n) => n + 1) }} />
+        <CanvasTabPanel idPrefix="agent-canvas" active={tab} className="space-y-4 pb-24">
+          {tab === "overview" && (
+            <>
+              {isPendingHire && (
+                <CrCard title={`${agent.name} waits for your approval`} concept="inbox" data-testid="agent-hire-decision">
+                  <CrLine
+                    title={hireReason ? `“${hireReason}”` : "A temporary hire"}
+                    sub="It starts only after you approve."
+                    right={
+                      <>
+                        <Button asChild variant="ghost" size="sm"><Link href={entityHref({ kind: "inbox", agentSlug: agent.slug })}>Review in Inbox</Link></Button>
+                        <Button size="sm" onClick={() => void handleApproveHire()}>Approve hire</Button>
+                      </>
+                    }
+                  />
+                </CrCard>
+              )}
+              {ghost && (
+                <CrCard title="This temporary hire has expired" concept="crews">
+                  <CrLine title="Its runs and notes stay." sub="Rehire it to bring it back with its notes." right={<Button variant="outline" size="sm" onClick={() => void handleRehire()}><RotateCcw className="size-3.5" aria-hidden /> Rehire</Button>} />
+                </CrCard>
+              )}
+              <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onWork={() => onTabChange("tools")} revision={revision} />
+            </>
+          )}
+          {tab === "persona" && <CreateAgentDialog key={`persona:${editorKey}`} {...editorProps} inlineSections={["instructions", "chat"]} inlineLabel="Instructions" />}
+          {tab === "model" && (
+            <>
+              <CreateAgentDialog key={`model:${editorKey}`} {...editorProps} inlineSections={["model", "access"]} inlineLabel="Model and limits" />
+              <div className="flex items-start gap-2.5 rounded-card border border-border bg-card px-4 py-3 text-body text-muted-foreground">
+                <CalendarClock className="mt-0.5 size-4 shrink-0" aria-hidden />
+                <span className="flex-1">Schedules and webhooks moved to Routines.</span>
+                <Button asChild variant="ghost" size="sm"><Link href="/routines">Routines</Link></Button>
+              </div>
+            </>
+          )}
+          {tab === "tools" && (
+            <OverviewTab
+              accessOnly
+              workspaceId={workspaceId}
+              agent={agent}
+              crews={crews}
+              inbox={inbox}
+              chats={chats}
+              runs={runs}
+              peerMessages={peerMessages}
+              patch={patch}
+              onStop={isRunning ? handleStop : undefined}
+              onOpenInbox={() => router.push(entityHref({ kind: "inbox", agentSlug: agent.slug }))}
+              onOpenConfig={() => onTabChange("model")}
+              onAgentChanged={onAgentChanged}
+            />
+          )}
+          {tab === "memory" && <MemoryWorkspace key={agent.id} workspaceId={workspaceId} agentId={agent.id} agentSlug={agent.slug} crewId={agent.crew_id ?? undefined} memoryEnabled={agent.memory_enabled} />}
+          {tab === "settings" && (
+            <>
+              <CreateAgentDialog key={`identity:${editorKey}`} {...editorProps} inlineSections={["identity"]} inlineLabel="Identity" />
+              <CrCard title="Command line" concept="settings">
+                {[`crewship agent get ${agent.slug}`, `crewship agent update ${agent.slug}`, `crewship agent logs ${agent.slug}`].map((cmd) => (
+                  <CrLine key={cmd} title={<code className="font-mono text-label">{cmd}</code>} />
+                ))}
+              </CrCard>
+              {canDelete && (
+                <CrCard title="Danger zone" concept="settings">
+                  <CrLine
+                    title="Delete agent"
+                    sub="The agent stops and leaves its crew. It cannot be undone."
+                    right={<Button variant="destructive" size="sm" onClick={() => setConfirmDelete(true)}><Trash2 className="size-3.5" aria-hidden /> Delete agent…</Button>}
+                  />
+                </CrCard>
+              )}
+            </>
+          )}
+        </CanvasTabPanel>
+      </CanvasShell>
+      <PageSaveBar />
 
       <ConfirmDialog
         open={confirmDelete}
@@ -558,7 +453,7 @@ export function AgentCanvas({
         destructive
         onConfirm={handleDelete}
       />
-    </CanvasShell>
+    </PageSaveProvider>
   )
 }
 

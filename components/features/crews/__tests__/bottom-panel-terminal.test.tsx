@@ -28,3 +28,10 @@ it.each(["connecting", "connected", "disconnected", "error"] as TerminalStatus[]
   unmount()
   expect(disconnect).toHaveBeenCalledOnce()
 })
+
+it("crew context opens a shell without agent_slug, in /crew/shared", () => {
+  terminal.mockReturnValue({ status: "connected", disconnect })
+  render(<BottomPanelTerminal crewId="crew-id" crewSlug="research" agentName="research" />)
+  expect(screen.getByText("· /crew/shared")).toBeInTheDocument()
+  expect(terminal).toHaveBeenLastCalledWith(expect.objectContaining({ crewId: "crew-id", crewSlug: "research", agentSlug: undefined, mode: "shell" }))
+})
