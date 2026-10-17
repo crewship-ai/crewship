@@ -91,7 +91,7 @@ describe("<RoutineRunSteps>", () => {
     fireEvent.click(screen.getByRole("button", { name: /compare/i }))
     expect(screen.getByRole("region", { name: "Step inspector" })).toHaveTextContent('"changes": 3')
     fireEvent.click(screen.getByRole("button", { name: /approve/i }))
-    expect(screen.getByRole("region", { name: "Step inspector" })).toHaveTextContent("No output recorded for this step")
+    expect(screen.getByRole("region", { name: "Step inspector" })).toHaveTextContent("No response was recorded for this step")
   })
 
   it("Input shows the run's inputs and what the step was asked to do", () => {

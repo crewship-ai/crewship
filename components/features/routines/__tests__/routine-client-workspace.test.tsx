@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { RoutineRunDetail } from "../routine-run-detail"
 import { RoutineResultContent } from "../routine-result-content"
 import { RoutineStepSpine } from "../routine-step-spine"
@@ -106,9 +106,10 @@ describe("client routine workspace", () => {
     expect(error).toBeVisible()
     expect(error.closest("details")).toBeNull()
     expect(error.parentElement).toHaveTextContent("Check the customer service")
-    expect(document.querySelector('details[data-step-id="internal_probe"]')).toHaveAttribute(
-      "open",
-    )
+    // RT-RUN: the failed step is the one open in the step inspector.
+    const steps = screen.getByRole("list", { name: "Steps of this run" })
+    expect(within(steps).getByRole("button", { name: /Check the customer service/ })).toHaveAttribute("aria-current", "true")
+    expect(screen.getByRole("region", { name: "Step inspector" })).toHaveTextContent("Check the customer service")
   })
   it("leads with the recorded report without disguising failed completion", async () => {
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
@@ -118,10 +119,10 @@ describe("client routine workspace", () => {
     expect(screen.getByText("Result failed")).toBeInTheDocument()
     expect(await screen.findByRole("heading", { name: "Service report" })).toBeInTheDocument()
     expect(screen.getByText("Recorded files")).toBeInTheDocument()
-    expect(screen.queryByTestId("map")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /^map$/ }))
-    expect(screen.getByTestId("map")).toHaveTextContent("historical-step")
-    expect(screen.getByTestId("map")).not.toHaveTextContent("new-head")
+    // The steps are the executed recipe's, never the current head's.
+    const steps = screen.getByRole("list", { name: "Steps of this run" })
+    expect(steps).toHaveTextContent("historical-step")
+    expect(steps).not.toHaveTextContent("new-head")
   })
   it("requires an explicit stop decision and calls the existing cancel endpoint once", async () => {
     h.run = {
@@ -156,11 +157,8 @@ describe("client routine workspace", () => {
     // is behind a second row of tabs any more.
     expect(screen.getByText("Original prompt")).toBeInTheDocument()
     expect(screen.getByText("Saved answer")).toBeInTheDocument()
-    expect(
-      document.querySelector('[data-step-id="historical-step"] > summary'),
-    ).toHaveTextContent("Ask an agent")
-    fireEvent.click(screen.getByRole("button", { name: /^map$/ }))
-    expect(screen.getByTestId("map")).toHaveTextContent("historical-step")
+    const steps = screen.getByRole("list", { name: "Steps of this run" })
+    expect(within(steps).getByRole("button", { name: /historical-step/ })).toHaveTextContent("Ask an agent")
   })
   it("keeps unavailable step evidence distinct from no output", () => {
     h.run = { ...h.run, step_outputs_available: false, output: undefined }

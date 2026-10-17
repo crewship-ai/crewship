@@ -3,7 +3,9 @@
 import { formatRoutineTime } from "@/lib/routine-time"
 
 import { describeStep } from "@/lib/routine-step-describe"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { RoutineRunSteps } from "./routine-run-steps"
 import { createPortal } from "react-dom"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -22,14 +24,12 @@ import { RoutinePreviousRuns, RoutineRunPeek } from "./routine-run-peek"
 import { RoutineRunTimeline } from "./routine-run-timeline"
 import { useTrace } from "@/hooks/use-trace"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
-import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
 import { RunEvidencePanel } from "@/components/features/activity/run-evidence-panel"
 import { declaredCredentialTypes, readableOriginSource, routineRunOrigin } from "@/lib/routine-run-provenance"
 import { RoutineRunArtifacts } from "./routine-run-artifacts"
 import { RoutineExecutionHistory } from "./routine-execution-history"
 import { RoutineExecutionInsights } from "./routine-execution-insights"
-import { RoutineStepSpine } from "./routine-step-spine"
 import { useRunExecutions } from "@/hooks/use-run-executions"
 import { RoutineApprovalBanner } from "./routine-approval-banner"
 import { Button } from "@/components/ui/button"
@@ -73,7 +73,6 @@ type RoutineDetailWithDraft = RoutineDetail & { draft?: RoutineDraftSummary | nu
 import { RoutineSavedInputs, readableFieldName } from "./routine-saved-inputs"
 import { REPORTED_USAGE_HINT, formatReportedUsage } from "./routine-cost-format"
 
-const EMPTY = new Map()
 
 /** Shared run surface: every entry point loads the run directly, including old runs. */
 interface RoutineRunDetailProps {
@@ -122,7 +121,6 @@ export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, o
     ["queued", "running", "waiting", "paused"].includes(run?.status ?? ""),
   )
   const bars = useMemoBars(executions.rows)
-  const [selectedStep, setSelectedStep] = useState<string | null>(null)
   const { role, capabilities } = useAbilities()
   const canRun = routinePermissions(role, capabilities).run
   // Stopping a run is POST …/runs/{id}/cancel, Owner and Admin on the server.
@@ -151,21 +149,18 @@ export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, o
   const [stopping, setStopping] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [confirmStop, setConfirmStop] = useState(false)
+  // KPI "Produced": the files the run left, as the results list reports them.
+  const [producedState, setProduced] = useState<{ runId: string; count: number; more: boolean } | null>(null)
+  const produced = producedState?.runId === runId ? producedState : null
+  const reportProduced = useCallback((count: number, more: boolean) => setProduced({ runId, count, more }), [runId])
+  const phone = useIsMobile()
   // One disclosure holds every piece of evidence a finished run leaves behind;
   // both lazy lists inside it mount on the first open.
   const [showTechnical, setShowTechnical] = useState(false)
   useEffect(() => {
-    setSelectedStep(null)
     setConfirmStop(false)
     setShowTechnical(false)
   }, [runId])
-  const tokens = useMemo(
-    () =>
-      approval.waitpoint && !approval.waitpoint.decision_form
-        ? new Map([[approval.waitpoint.step_id, approval.waitpoint.token]])
-        : EMPTY,
-    [approval.waitpoint],
-  )
   if (!run && error === "run: 404")
     return (
       <div className="p-6">
@@ -309,10 +304,6 @@ export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, o
         .exec(run.output.slice(run.output.lastIndexOf("---HANDOFF---")))?.[1]
         ?.trim()
     : undefined
-  const selectedStepId =
-    dsl?.steps?.find((s) => s.id === (selectedStep || run.current_step_id))?.id ||
-    dsl?.steps?.[0]?.id ||
-    null
   const presentation = routineRunPresentation(run)
   const currentStep = dsl?.steps?.find((s) => s.id === run.current_step_id)
   const active = ["queued", "running", "waiting", "paused"].includes(run.status)
@@ -442,25 +433,6 @@ export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, o
       )}
     </DetailCard>
   )
-  const spineRecord = {
-    lookup: (stepId: string) => ({
-      execution: executions.byStep.get(stepId),
-      hasOutput: Object.hasOwn(run.step_outputs ?? {}, stepId),
-      output: run.step_outputs?.[stepId],
-    }),
-    outputsAvailable: run.step_outputs_available !== false,
-    subSpans: run.sub_spans as Record<string, unknown> | undefined,
-    currentStepId: run.current_step_id,
-    failedStepId: run.failed_at_step,
-    active,
-    executionsError: executions.error,
-    executionsTruncated: executions.truncated,
-    onRetryExecutions: executions.refresh,
-    onLoadMoreExecutions: executions.loadMore,
-  }
-  // The graph is one view of the step list, not a place of its own, and it is
-  // as tall as the recipe it draws.
-  const mapHeight = Math.min(560, Math.max(300, (dsl?.steps?.length ?? 1) * 78))
   const copyForAI = () => {
     const md = runTraceMarkdown(
       { ...run, pipeline_version: run.pipeline_version ?? null, duration_ms: run.duration_ms ?? null, cost_usd: run.cost_usd ?? null },
@@ -630,7 +602,7 @@ export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, o
         <Kpi label="Duration" value={!active && run.duration_ms != null ? formatDurationMs(run.duration_ms) : active ? "running" : "—"} />
         <Kpi label="Cost" value={formatReportedUsage(run.cost_usd)} note={cap != null ? `of $${cap.toFixed(2)} cap` : undefined} />
         <Kpi label="Steps" value={doneSteps != null && totalSteps ? `${doneSteps} / ${totalSteps}` : totalSteps ? `— / ${totalSteps}` : "—"} />
-        <Kpi label="Version" value={run.pipeline_version != null ? `v${run.pipeline_version}` : "—"} />
+        <Kpi label="Produced" value={produced ? `${produced.count}${produced.more ? "+" : ""}` : "—"} note={produced && produced.count > 0 ? (produced.count === 1 && !produced.more ? "file" : "files") : undefined} />
       </dl>
       {siblings.length > 1 && (
         <RoutinePreviousRuns runs={siblings} current={runId} onPeek={setPeek} />
@@ -778,6 +750,7 @@ export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, o
         active={active}
         compact
         noFinalResult={!run.output && run.step_outputs_available !== false}
+        onCount={reportProduced}
       />
 
       <RoutineExecutionInsights
@@ -797,34 +770,23 @@ export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, o
       )}
       {dsl && stepView === "time" && (executions.rows?.length ?? 0) > 0 ? (
         <RoutineRunTimeline bars={bars} nameOf={(id) => { const s = dsl.steps?.find((x) => x.id === id); return s ? describeStep(s, 1).title : id }} />
-      ) : dsl ? (
-        <RoutineStepSpine
-          behavior={run.behavior}
+      ) : dsl?.steps?.length ? (
+        // RT-RUN: the steps with an inspector (Output · Input · Log · Details).
+        <RoutineRunSteps
+          key={`steps-${runId}`}
           workspaceId={workspaceId}
-          definition={dsl}
-          record={spineRecord}
-          initialLimit={12}
-          map={({ openStep }) => (
-            <div className="overflow-hidden" style={{ height: mapHeight }}>
-              <TraceCanvas
-                run={run}
-                dsl={dsl}
-                workspaceId={workspaceId}
-                selectedStepId={selectedStepId}
-                onStepSelect={(id) => {
-                  setSelectedStep(id)
-                  if (id) openStep(id)
-                }}
-                waitpointTokensByStepId={tokens}
-                heatmapBuckets={EMPTY}
-                stepMetrics={EMPTY}
-                initialFocus="all"
-                centerOnSelect
-                recenterOnResize
-              />
-            </div>
-          )}
+          runId={runId}
+          steps={dsl.steps}
+          executions={executions.byStep}
+          outputs={run.step_outputs_available === false ? null : run.step_outputs}
+          runInputs={run.inputs}
+          currentStepId={run.current_step_id}
+          failedStepId={run.failed_at_step}
+          limits={{ costCap: cap, concurrency: concurrencyLine(dsl) }}
+          phone={phone}
         />
+      ) : dsl ? (
+        <p className="rounded-xl border border-border/60 bg-card p-4 text-sm text-muted-foreground">This recipe has no steps.</p>
       ) : (
         <p className="rounded-xl border border-border/60 bg-card p-4 text-sm text-muted-foreground">
           The historical recipe is unavailable. Recorded outputs and activity remain
@@ -832,6 +794,22 @@ export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, o
         </p>
       )}
 
+      {executions.error && (
+        <p role="alert" className="text-xs text-destructive">
+          The step records could not be loaded, so states and times are missing.{" "}
+          <button type="button" className="underline" onClick={executions.refresh}>
+            Retry
+          </button>
+        </p>
+      )}
+      {executions.truncated && (
+        <p className="text-xs text-muted-foreground">
+          Only the first recorded executions are shown.{" "}
+          <button type="button" className="text-primary underline" onClick={executions.loadMore}>
+            Load more
+          </button>
+        </p>
+      )}
       <RoutineSavedInputs key={`inputs-${runId}`} values={run.inputs} definition={dsl} />
 
       {/* Live work is what the reader came for while a run is going, so it stays
@@ -976,6 +954,14 @@ export function RoutineRunDetail({ workspaceId, runId, actionsTarget, onClose, o
       </details>
     </div>
   )
+}
+
+/** How many runs of this routine may go at once, from the executed recipe. */
+function concurrencyLine(dsl: unknown): string | null {
+  const d = (dsl ?? {}) as { max_concurrent?: unknown; concurrency_key?: unknown }
+  if (typeof d.max_concurrent === "number" && d.max_concurrent > 1) return `Up to ${d.max_concurrent} at a time`
+  if (typeof d.concurrency_key === "string" && d.concurrency_key) return "1 at a time; a new start waits in line"
+  return null
 }
 
 function useMemoBars(rows: { step_id: string; status: string; started_at: string; ended_at: string; attempt: number }[] | null) {

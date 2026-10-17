@@ -22,6 +22,8 @@ interface RoutineRunArtifactsProps {
   active: boolean
   compact?: boolean
   noFinalResult?: boolean
+  /** Reports how many files the run produced once the list loads (the run page's Produced figure). */
+  onCount?: (count: number, more: boolean) => void
 }
 
 export function RoutineRunArtifacts({
@@ -30,6 +32,7 @@ export function RoutineRunArtifacts({
   active,
   compact = false,
   noFinalResult = false,
+  onCount,
 }: RoutineRunArtifactsProps) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -47,6 +50,7 @@ export function RoutineRunArtifacts({
         const data = await res.json()
         if (!signal.aborted) {
           setArtifacts(data.artifacts)
+          onCount?.(Array.isArray(data.artifacts) ? data.artifacts.length : 0, !!data.next_cursor)
           setCursor(data.next_cursor)
           setError(null)
         }
