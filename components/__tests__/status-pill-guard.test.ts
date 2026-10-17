@@ -41,9 +41,6 @@ const ALLOWED: Record<string, Record<string, string>> = {
     RolePill: "a neutral role label, deliberately colourless; follow-up: fold into Badge",
     RestrictedPill: "a neutral access-mode label; follow-up: fold into Badge",
   },
-  "components/features/skills/skills-explorer.tsx": {
-    CountPill: "a rail count with a selected state, not a status; follow-up: fold into Badge",
-  },
   "components/features/activity-stream/activity-status-rows.tsx": {
     CountPill: "a rail count with a selected state, not a status; follow-up: fold into Badge",
   },

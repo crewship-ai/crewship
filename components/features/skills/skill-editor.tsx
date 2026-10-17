@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input"
 import { useGenerateSkill, useImportSkill } from "@/hooks/use-skills"
 import { CREW_ICON_CATEGORIES, getCrewIconDef, searchCrewIcons } from "@/lib/entities"
 import { cn } from "@/lib/utils"
-import { SkillTile } from "./skill-card"
+import { SkillTile } from "./skill-marks"
 import { SKILL_BODY_TEMPLATE, patchFrontmatter, skillMarkdown, slugifySkill, type SkillMeta } from "./skill-doc"
 import { DOMAIN_ORDER, domainMeta, skillIconName, skillName, skillTags, type SkillDetail } from "./skills-model"
 
@@ -36,7 +36,7 @@ import { DOMAIN_ORDER, domainMeta, skillIconName, skillName, skillTags, type Ski
 // also how Edit saves, and refuses to overwrite a built-in skill.
 
 export type SkillEditorTarget =
-  | { kind: "new" }
+  | { kind: "new"; method?: "describe" | "write" }
   | { kind: "edit"; skill: SkillDetail; panel?: "icon" }
   | { kind: "duplicate"; skill: SkillDetail }
 
@@ -65,7 +65,7 @@ interface Draft {
 
 function draftFor(target: SkillEditorTarget): Draft {
   if (target.kind === "new") {
-    return { method: "describe", name: "", icon: null, category: "CUSTOM", prompt: "", description: "", body: SKILL_BODY_TEMPLATE, credentials: "" }
+    return { method: target.method ?? "describe", name: "", icon: null, category: "CUSTOM", prompt: "", description: "", body: SKILL_BODY_TEMPLATE, credentials: "" }
   }
   const s = target.skill
   return {
