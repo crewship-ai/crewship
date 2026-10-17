@@ -2,26 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 
 // =============================================================================
-// /journal reads its whole filter set out of the URL exactly once — at mount.
-// `initialTab`, `traceId`, `initialTimeRange`, `initialSeverity` and
-// `initialMuted` are all `useMemo(…, [])` or lazy `useState` initialisers, and
-// nothing re-reads `searchParams` afterwards.
-//
-// That is fine for a cold load and broken for everything else. The Runs tab
-// pushes `/journal?tab=timeline&trace_id=<id>` when a row is clicked — the
-// SAME pathname, so the App Router re-renders JournalPage without unmounting
-// it. The URL changes, the tab does not, and the user is left staring at the
-// runs table while the address bar claims Timeline. Every in-app link into
-// `/journal?…` from an already-mounted journal has the same problem.
-//
-// The mirror effect in the other direction is incomplete too: it writes
-// `time`, `from`/`to`, `crew_id`, `agent_id`, `trace_id`, `severity`, `mute`
-// and `tab`, but never `q`. A shared "here is the failure I found" link loses
-// the query that found it. And it writes with `router.replace`, so Back skips
-// the entire filter history and leaves the page.
-//
-// The Runs tab mirrors nothing at all: window, trigger, status and page are
-// local component state, so a Runs view cannot be sent to anyone.
+// The Journal's technical log and fleet runs, inside Activity (F-02). The URL
+// is the filter state, exactly as it was on /journal — every value is a pure
+// read of `searchParams`, writes happen in handlers, and a same-pathname push
+// (a run row opening its trace) moves the whole view. These cases are the old
+// /journal URL-state suite, carried over to /activity?section=log|runs.
 // =============================================================================
 
 let searchParams = new URLSearchParams()
@@ -35,21 +20,15 @@ const replace = vi.fn((url: string) => {
 vi.mock("next/navigation", () => ({
   useSearchParams: () => searchParams,
   useRouter: () => ({ push, replace }),
-  usePathname: () => "/journal",
+  usePathname: () => "/activity",
 }))
 
-let role = "OWNER"
+const role = "OWNER"
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-1", loading: false, role, capabilities: null }),
 }))
 vi.mock("@/hooks/use-abilities", () => ({
-  useAbilities: () => ({
-    role,
-    loading: false,
-    abilities: null,
-    capabilities: null,
-    hasCapability: () => true,
-  }),
+  useAbilities: () => ({ role, loading: false, abilities: null, capabilities: null, hasCapability: () => true }),
 }))
 
 // Per-user preferences are NOT part of the URL contract (see the test at the
@@ -85,11 +64,16 @@ vi.mock("@/lib/api-fetch", () => ({
 vi.mock("@/components/features/logs/resources-strip", () => ({
   ResourcesStrip: () => <div data-testid="resources-strip" />,
 }))
-vi.mock("@/components/features/journal/journal-spend-view", () => ({
-  JournalSpendView: () => <div data-testid="spend-view" />,
-}))
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+let savedViewsProps: any = {}
+vi.mock("@/components/features/journal/journal-saved-views", () => ({
+  JournalSavedViews: (props: Record<string, unknown>) => {
+    savedViewsProps = props
+    return <div data-testid="saved-views" />
+  },
+}))
+
 let logsPanelProps: any = {}
 vi.mock("@/components/features/logs/logs-panel", () => ({
   LogsPanel: (props: Record<string, unknown>) => {
@@ -122,7 +106,12 @@ vi.mock("@/components/features/journal/runs-view", () => ({
 }))
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-import JournalPage from "../page"
+import { JournalLedger } from "../journal-ledger"
+
+/** What ActivityWorkspace does: `?section=` picks the view. */
+function Harness() {
+  return <JournalLedger view={searchParams.get("section") === "runs" ? "runs" : "log"} />
+}
 
 /** Every URL the page wrote, in order. */
 function writtenUrls(): string[] {
@@ -136,33 +125,40 @@ function lastPushed(): string {
 
 function mountAt(query: string) {
   searchParams = new URLSearchParams(query)
-  return render(<JournalPage />)
+  return render(<Harness />)
 }
 
 beforeEach(() => {
-  role = "OWNER"
   push.mockClear()
   replace.mockClear()
   listParams = {}
   logsPanelProps = {}
   runsViewProps = {}
+  savedViewsProps = {}
 })
 
-describe("JournalPage — URL as the source of truth", () => {
-  it("hydrates the tab from ?tab= on a cold load", async () => {
-    mountAt("tab=runs")
+describe("JournalLedger — the URL is the source of truth", () => {
+  it("names the view in the Activity top bar", async () => {
+    mountAt("section=log")
+    await screen.findByTestId("logs-panel")
+    expect(screen.getAllByText("Technical log").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Crew Journal")).toBeNull()
+  })
+
+  it("hydrates the runs ledger from ?section=runs on a cold load", async () => {
+    mountAt("section=runs")
     expect(await screen.findByTestId("runs-view")).toBeTruthy()
   })
 
   // THE row-click bug. RunsView pushes the same pathname with a new query,
   // so the router re-renders the page without unmounting it.
-  it("follows a same-pathname navigation into another tab", async () => {
-    const { rerender } = mountAt("tab=runs")
+  it("follows a same-pathname navigation from the runs into the log", async () => {
+    const { rerender } = mountAt("section=runs")
     expect(await screen.findByTestId("runs-view")).toBeTruthy()
 
     // Exactly what runs-view.tsx does on a row click.
-    push("/journal?tab=timeline&trace_id=msg_1788028824981726523")
-    rerender(<JournalPage />)
+    push("/activity?section=log&trace_id=msg_1788028824981726523")
+    rerender(<Harness />)
 
     const panel = await screen.findByTestId("logs-panel")
     expect(screen.queryByTestId("runs-view")).toBeNull()
@@ -173,11 +169,11 @@ describe("JournalPage — URL as the source of truth", () => {
   })
 
   it("follows a same-pathname navigation that only changes a filter", async () => {
-    const { rerender } = mountAt("")
+    const { rerender } = mountAt("section=log")
     await screen.findByTestId("logs-panel")
 
-    push("/journal?severity=error&crew_id=crew-9")
-    rerender(<JournalPage />)
+    push("/activity?section=log&severity=error&crew_id=crew-9")
+    rerender(<Harness />)
 
     await waitFor(() => {
       expect(listParams.severity).toBe("error")
@@ -185,18 +181,25 @@ describe("JournalPage — URL as the source of truth", () => {
     })
   })
 
+  it("switches between the log and the runs and keeps the section in the URL", async () => {
+    mountAt("section=log&crew_id=c1")
+    await screen.findByTestId("logs-panel")
+    screen.getByRole("tab", { name: /Fleet runs/ }).click()
+    await waitFor(() => expect(lastPushed()).toBe("/activity?section=runs&crew_id=c1"))
+  })
+
   it("writes the search query into the URL", async () => {
-    mountAt("")
+    mountAt("section=log")
     await screen.findByTestId("logs-panel")
 
     logsPanelProps.onServerSearch("routine:nightly-digest outcome:failed")
     await waitFor(() => {
-      expect(writtenUrls().some((u) => u.includes("q=routine"))).toBe(true)
+      expect(writtenUrls().some((u) => u.startsWith("/activity?") && u.includes("section=log") && u.includes("q=routine"))).toBe(true)
     })
   })
 
   it("restores the search query from the URL", async () => {
-    mountAt("q=payment+declined")
+    mountAt("section=log&q=payment+declined")
     const panel = await screen.findByTestId("logs-panel")
     expect(panel.getAttribute("data-query")).toBe("payment declined")
     await waitFor(() => {
@@ -207,21 +210,18 @@ describe("JournalPage — URL as the source of truth", () => {
   // router.replace makes Back skip the whole filter history and leave the
   // page. Filter changes are navigations the user should be able to undo.
   it("pushes a filter change so Back steps through it", async () => {
-    mountAt("")
+    mountAt("section=log")
     await screen.findByTestId("logs-panel")
 
     logsPanelProps.onSeverityChange("error")
     await waitFor(() => {
       expect(lastPushed()).toContain("severity=error")
     })
+    expect(lastPushed()).toContain("section=log")
   })
 
-  // LogsPanel's "clear all filters" (and its Escape shortcut) calls three
-  // setters in one handler. `router.push` does not update `searchParams`
-  // synchronously, so each write sees the query string this render was given
-  // — without composition the last write silently discards the others.
   it("composes two filter writes made in the same handler", async () => {
-    mountAt("")
+    mountAt("section=log")
     await screen.findByTestId("logs-panel")
 
     logsPanelProps.onSeverityChange("error")
@@ -234,7 +234,7 @@ describe("JournalPage — URL as the source of truth", () => {
   })
 
   it("does not stack a history entry for a write that changes nothing", async () => {
-    mountAt("severity=error")
+    mountAt("section=log&severity=error")
     await screen.findByTestId("logs-panel")
 
     logsPanelProps.onSeverityChange("error")
@@ -245,15 +245,15 @@ describe("JournalPage — URL as the source of truth", () => {
     expect(push.mock.calls.length).toBe(0)
   })
 
-  it("mirrors the Runs window / status / trigger into the URL", async () => {
-    mountAt("tab=runs")
+  it("mirrors the runs window / status / trigger into the URL", async () => {
+    mountAt("section=runs")
     await screen.findByTestId("runs-view")
 
     runsViewProps.onStatusFilterChange("FAILED")
     await waitFor(() => {
       expect(lastPushed()).toContain("run_status=FAILED")
     })
-    expect(lastPushed()).toContain("tab=runs")
+    expect(lastPushed()).toContain("section=runs")
 
     runsViewProps.onWindowChange("7d")
     await waitFor(() => {
@@ -261,8 +261,8 @@ describe("JournalPage — URL as the source of truth", () => {
     })
   })
 
-  it("hydrates the Runs filters from the URL", async () => {
-    mountAt("tab=runs&run_window=7d&run_status=FAILED&run_trigger=CRON&run_page=3")
+  it("hydrates the runs filters from the URL", async () => {
+    mountAt("section=runs&run_window=7d&run_status=FAILED&run_trigger=CRON&run_page=3")
     const view = await screen.findByTestId("runs-view")
     expect(view.getAttribute("data-window")).toBe("7d")
     expect(view.getAttribute("data-status")).toBe("FAILED")
@@ -270,19 +270,12 @@ describe("JournalPage — URL as the source of truth", () => {
     expect(view.getAttribute("data-page")).toBe("3")
   })
 
-  // A page number from the previous filter set almost always lands on an
-  // empty result. Reset it in the same navigation, not a second one.
-  // Every Runs filter narrows the result set, so any of them can strand the
-  // reader on a page that no longer exists — page 3 of a 7-day window is
-  // routinely empty once the window is 24h. Covered as a table rather than one
-  // case because the original only exercised status, and the window handler
-  // shipped without the reset precisely because nothing asked it for one.
   it.each([
     ["status", () => runsViewProps.onStatusFilterChange("FAILED"), "run_status=FAILED"],
     ["trigger", () => runsViewProps.onTriggerFilterChange("CRON"), "run_trigger=CRON"],
     ["window", () => runsViewProps.onWindowChange("7d"), "run_window=7d"],
-  ])("drops the Runs page number when the %s filter changes", async (_name, act, expected) => {
-    mountAt("tab=runs&run_page=3")
+  ])("drops the runs page number when the %s filter changes", async (_name, act, expected) => {
+    mountAt("section=runs&run_page=3")
     await screen.findByTestId("runs-view")
 
     act()
@@ -292,8 +285,8 @@ describe("JournalPage — URL as the source of truth", () => {
     expect(lastPushed()).not.toContain("run_page")
   })
 
-  it("keeps the trace focus clearable from the timeline", async () => {
-    mountAt("trace_id=t-1")
+  it("keeps the trace focus clearable from the log", async () => {
+    mountAt("section=log&trace_id=t-1")
     const panel = await screen.findByTestId("logs-panel")
     expect(panel.getAttribute("data-trace")).toBe("t-1")
 
@@ -304,14 +297,8 @@ describe("JournalPage — URL as the source of truth", () => {
     expect(lastPushed()).not.toContain("trace_id")
   })
 
-  // Per-user reading preferences are deliberately NOT in the URL: a shared
-  // link must not impose the sender's wrap / sort / refresh cadence on the
-  // reader, and they already persist per user via /api/v1/me/preferences.
   it("hydrates an issue focus from ?mission_id=, sends it to the list, and clears it", async () => {
-    // The issue page links "Journal for ENG-4" with the identifier; the
-    // server resolves it. The page must carry it to the query and hand the
-    // panel a clearable focus, or the link lands on the unfiltered timeline.
-    mountAt("mission_id=ENG-4")
+    mountAt("section=log&mission_id=ENG-4")
     await waitFor(() => expect(listParams.mission_id).toBe("ENG-4"))
     expect(logsPanelProps.missionId).toBe("ENG-4")
     ;(logsPanelProps.onClearMissionId as () => void)()
@@ -319,13 +306,23 @@ describe("JournalPage — URL as the source of truth", () => {
   })
 
   it("reads crew and agent slugs the way entityHref writes them", async () => {
-    mountAt("crew_id=engineering&agent_id=robin")
+    mountAt("section=log&crew_id=engineering&agent_id=robin")
     await waitFor(() => expect(listParams.crew_id).toBe("engineering"))
     expect(listParams.agent_id).toBe("robin")
   })
 
+  // Z29: the older `?crew=` / `?agent=` slug spelling.
+  it("reads the older crew= / agent= spelling", async () => {
+    mountAt("section=log&crew=engineering&agent=robin")
+    await waitFor(() => expect(listParams.crew_id).toBe("engineering"))
+    expect(listParams.agent_id).toBe("robin")
+  })
+
+  // Per-user reading preferences are deliberately NOT in the URL: a shared
+  // link must not impose the sender's wrap / sort / refresh cadence on the
+  // reader, and they already persist per user via /api/v1/me/preferences.
   it("keeps per-user reading preferences out of the URL", async () => {
-    mountAt("")
+    mountAt("section=log")
     await screen.findByTestId("logs-panel")
 
     logsPanelProps.onRefreshRateChange("10s")
@@ -337,34 +334,35 @@ describe("JournalPage — URL as the source of truth", () => {
   })
 })
 
-describe("JournalPage — tab RBAC", () => {
-  it.each(["MEMBER", "MANAGER", "VIEWER"])(
-    "keeps a %s out of the technical log and sends them to Activity (#2979)",
-    async (r) => {
-      role = r
-      mountAt("tab=spend")
-      expect(await screen.findByText(/kept for workspace admins/i)).toBeTruthy()
-      expect(screen.getByRole("link", { name: /Open Activity/ })).toHaveAttribute("href", "/activity")
-      expect(screen.queryByTestId("logs-panel")).toBeNull()
-      expect(screen.queryByTestId("spend-view")).toBeNull()
-    },
-  )
+describe("JournalLedger — saved views keep the Journal's vocabulary", () => {
+  it("stores the runs ledger as tab=runs and the log without a tab", async () => {
+    const { rerender } = mountAt("section=runs&run_status=FAILED")
+    await screen.findByTestId("runs-view")
+    expect(savedViewsProps.filters).toEqual({ tab: "runs", run_status: "FAILED" })
 
-  it("keeps an admin-only tab for an admin", async () => {
-    role = "ADMIN"
-    mountAt("tab=spend")
-    expect(await screen.findByTestId("spend-view")).toBeTruthy()
+    searchParams = new URLSearchParams("section=log&severity=error")
+    rerender(<Harness />)
+    await screen.findByTestId("logs-panel")
+    expect(savedViewsProps.filters).toEqual({ severity: "error" })
   })
 
-  it("falls back to the timeline for an unknown tab", async () => {
-    mountAt("tab=wat")
-    expect(await screen.findByTestId("logs-panel")).toBeTruthy()
+  it.each([
+    [{ tab: "runs", run_status: "FAILED" }, "/activity?section=runs&run_status=FAILED"],
+    [{ severity: "error" }, "/activity?section=log&severity=error"],
+    [{ tab: "timeline", trace_id: "t-1" }, "/activity?section=log&trace_id=t-1"],
+    [{ tab: "spend" }, "/activity?mode=spend"],
+    [{}, "/activity?section=log"],
+  ])("applies %j as %s", async (params, target) => {
+    mountAt("section=log&q=old")
+    await screen.findByTestId("logs-panel")
+    savedViewsProps.onApply(params)
+    expect(lastPushed()).toBe(target)
   })
 })
 
-describe("JournalPage — queryParams assembly", () => {
+describe("JournalLedger — queryParams assembly", () => {
   it("turns muted groups into exclude_entry_type", async () => {
-    mountAt("mute=container&severity=warn")
+    mountAt("section=log&mute=container&severity=warn")
     await screen.findByTestId("logs-panel")
     await waitFor(() => {
       expect(listParams.severity).toBe("warn")
@@ -373,7 +371,7 @@ describe("JournalPage — queryParams assembly", () => {
   })
 
   it("routes structured search tokens to server params", async () => {
-    mountAt("q=agent%3Aviktor+boom")
+    mountAt("section=log&q=agent%3Aviktor+boom")
     await screen.findByTestId("logs-panel")
     await waitFor(() => {
       expect(listParams.agent_id).toBe("viktor")
