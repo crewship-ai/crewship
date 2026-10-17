@@ -203,8 +203,9 @@ tab bar. Any other URL shows "Not available with your access" without mounting
 the screen, so none of its requests are sent. `/` goes to the first available
 surface (Chat when authorized). Selection uses the current workspace row, never
 another membership's projection. Settings shows
-only account security: password, browser sessions and revoking CLI tokens.
-Profile edits and issuing new tokens are not on the allowlist. A restricted row
+only account security: password, browser sessions, revoking CLI tokens and
+own CLI bootstrap from a verified browser session. Profile edits and minting
+successor credentials from a CLI bearer are not on the allowlist. A restricted row
 without `restricted_surfaces` allows nothing (fail closed).
 
 Navigation is an existence projection: it stops after the first authorized
@@ -266,7 +267,10 @@ the self-scoped token endpoint. The middleware supplies verified identity and
 authentication kind to the restricted classifier before evaluating this rule.
 CLI bearer credentials cannot use this new Guest minting entrypoint, preserving
 their scope ceiling. Minted tokens retain account restriction, object grants,
-existing tier/scope checks and ordinary self-revocation behavior.
+existing tier/scope checks and ordinary self-revocation behavior. Browser device
+pairing start/poll uses the same verified-session boundary. The account menu
+offers Connect CLI to trusted and Guest accounts once access mode is resolved;
+it does not expose trusted-only profile, notification or system-version reads.
 
 
 Pages’ existing grant resolver now also requires an active trusted issuer account, including no Guest restriction elsewhere. This applies to workspace administrators, user owners and owning crew members. Stored Page grants remain available to administrators with an account-status reason when inactive. The two Pages ACL models have not yet been migrated to access_grants.

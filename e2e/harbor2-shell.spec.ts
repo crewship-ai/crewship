@@ -75,6 +75,9 @@ test.describe("touch", () => {
         await seed(page, PINNED)
         await page.goto("/issues")
         await expect(page.locator("header").first()).toBeVisible()
+        // The page's own actions join the top bar after it mounts; measure
+        // them too, not just the shell's buttons.
+        await expect(page.getByRole("button", { name: /new issue/i }).first()).toBeVisible()
         const small = await page.evaluate(() => {
           const out: string[] = []
           document.querySelectorAll("header button, [data-sidebar=sidebar] button, nav[aria-label=Primary] a, nav[aria-label=Primary] button").forEach((el) => {

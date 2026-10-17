@@ -83,11 +83,15 @@ let events: ChatEvent[] = []
 const created = () => events.filter((e) => e.name === "chat_session_created")
 
 function installFetch() {
+  const rows = new Set<string>()
   creates = []
   global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     const u = String(url)
     const method = (init?.method ?? "GET").toUpperCase()
-    if (u.includes("/execution-profile")) {return {ok:true,status:200,json:async()=>({mode:"trusted"})} as unknown as Response}
+    if (u.includes("/execution-profile")) {
+      const exists = rows.has(u.split("/chats/")[1].split("/")[0])
+      return { ok: exists, status: exists ? 200 : 404, json: async () => exists ? { mode: "trusted" } : { error: "Chat not found" } } as unknown as Response
+    }
     if (u.includes("/messages")) {
       return { ok: true, status: 200, json: async () => ({ messages: [] }) } as unknown as Response
     }
@@ -100,6 +104,7 @@ function installFetch() {
       if (createStatus >= 400) {
         return { ok: false, status: createStatus, json: async () => ({ error: "nope" }) } as unknown as Response
       }
+      rows.add(body.session_id)
       return { ok: true, status: createStatus, json: async () => ({ id: body.session_id }) } as unknown as Response
     }
     return { ok: true, status: 200, json: async () => [] } as unknown as Response

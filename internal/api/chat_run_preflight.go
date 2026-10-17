@@ -101,7 +101,12 @@ func (r *Router) chatRunPreflight(w http.ResponseWriter, req *http.Request) {
 		mode = harbormaster.ModeAsync
 	}
 	args := map[string]any{"agent_slug": slug, "agent_role": role}
-	matches, reason, _ := harbormaster.NewEvaluatorWithDefaults().Evaluate(req.Context(), "agent_run", args)
+	evaluator, err := harbormaster.EvaluatorForCrew(req.Context(), r.db, audience.WorkspaceID, crew, nil)
+	if err != nil {
+		replyError(w, 503, "run_preflight_unavailable")
+		return
+	}
+	matches, reason, _ := evaluator.Evaluate(req.Context(), "agent_run", args)
 	if mode != harbormaster.ModeNone && matches {
 		mode, _, err = harbormaster.AdjustMode(req.Context(), r.db, audience.WorkspaceID, "agent_run", args, mode)
 		if err != nil {

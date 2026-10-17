@@ -40,9 +40,11 @@ describe("Harbor 2 fonts", () => {
 })
 
 describe("Harbor 2 shape", () => {
-  it("cards are 10 px (0.625rem) and controls keep the 6/8/10/14 scale", () => {
+  it("cards are 10 px at every text size and controls keep the 6/8/10/14 scale", () => {
     const css = read("app/globals.css")
-    expect(css).toMatch(/--radius-card:\s*0\.625rem;/)
+    // A radius is drawn, not read: it does not grow with the text size
+    // (0.625rem measured 9.29 px at Small, found by the Settings e2e).
+    expect(css).toMatch(/--radius-card:\s*10px;/)
     expect(css).toMatch(/--radius:\s*0\.625rem;/)
   })
 })

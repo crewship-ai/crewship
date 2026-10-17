@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
+
+const menuAccess = vi.hoisted(() => ({ mode: "trusted" as "trusted" | "restricted" | "loading", api: vi.fn() }))
+vi.mock("@/hooks/use-access-mode", () => ({
+  useAccessMode: () => menuAccess.mode,
+  useRestrictedSurfaces: () => menuAccess.mode === "trusted" ? null : menuAccess.mode === "restricted" ? ["account_security"] : [],
+  useTrustedWorkspaceId: () => menuAccess.mode === "trusted" ? "ws-test" : null,
+}))
 
 // Radix DropdownMenu relies on pointer-capture + scrollIntoView, which
 // happy-dom doesn't implement. Polyfill them so the menu can open in the
@@ -27,7 +34,7 @@ vi.mock("@/hooks/use-auth", () => ({
 }))
 // The menu reads the session list and the build when it opens; neither is
 // what these tests are about.
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: () => Promise.resolve({ ok: false, json: () => Promise.resolve(null) }) }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: menuAccess.api }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtime: () => ({ status: "connected" }) }))
 vi.mock("@/hooks/use-engine-status", () => ({ useEngineStatus: () => ({ status: "connected" }) }))
 vi.mock("@/hooks/use-crews-status", () => ({ useCrewsStatus: () => null }))
@@ -62,7 +69,30 @@ function openUserMenu() {
 }
 
 describe("AppToolbar — user menu", () => {
-  beforeEach(() => cleanup())
+  beforeEach(() => {
+    cleanup()
+    menuAccess.mode = "trusted"
+    menuAccess.api.mockReset().mockImplementation((path: string) => Promise.resolve(path === "/api/v1/auth/pair/start"
+      ? { ok: true, json: () => Promise.resolve({ code: "TEST-PAIR", expires_at: new Date(Date.now() + 600_000).toISOString() }) }
+      : { ok: false, json: () => Promise.resolve(null) }))
+  })
+
+  it.each(["trusted", "restricted"] as const)("%s account can open ordinary CLI pairing", async mode => {
+    menuAccess.mode = mode
+    openUserMenu()
+    fireEvent.click(screen.getByRole("menuitem", { name: /connect cli/i }))
+    expect(await screen.findByRole("dialog", { name: /connect cli/i })).toBeVisible()
+    await waitFor(() => expect(menuAccess.api).toHaveBeenCalledWith("/api/v1/auth/pair/start", expect.objectContaining({ method: "POST" })))
+    await waitFor(() => expect(screen.getByTestId("pair-command")).toHaveTextContent("TEST-PAIR"))
+    if (mode === "restricted") expect(menuAccess.api.mock.calls.some(([path]) => path === "/api/v1/system/version")).toBe(false)
+  })
+
+  it("does not start pairing while account access is loading", () => {
+    menuAccess.mode = "loading"
+    openUserMenu()
+    expect(screen.queryByRole("menuitem", { name: /connect cli/i })).not.toBeInTheDocument()
+    expect(menuAccess.api.mock.calls.some(([path]) => path === "/api/v1/auth/pair/start")).toBe(false)
+  })
 
   it("shows the actual membership and workspace in the profile header", () => {
     openUserMenu()
