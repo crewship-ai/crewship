@@ -105,14 +105,35 @@ it("every workspace ticked previews and confirms as null, not the ids on screen"
   expect(applies()[0][3]).toBe("p-all")
 })
 
-it("no-op change shows Close only: no dialog, no Apply, it says there is nothing to change", async () => {
+it("no-op change shows Close only: a notice with one Close button, no Apply, no toast", async () => {
   h.put.mockResolvedValueOnce({ ok: true, data: { dry_run: true, preview_id: "p0", changes: [] } })
   render(<RetentionBody rows={rows} ctx={ctx("a")} />)
   pickInbox("30 d")
   fireEvent.click(screen.getByRole("button", { name: "Save" }))
-  await waitFor(() => expect(h.toast.info).toHaveBeenCalledWith(NOTHING_TO_CHANGE))
-  expect(screen.queryByRole("alertdialog")).toBeNull()
+  const dialog = await screen.findByRole("alertdialog")
+  expect(within(dialog).getByText(NOTHING_TO_CHANGE)).toBeInTheDocument()
+  expect(within(dialog).getByRole("button", { name: "Close" })).toBeInTheDocument()
+  expect(within(dialog).queryByRole("button", { name: "Apply" })).toBeNull()
+  expect(within(dialog).queryByRole("button", { name: "Cancel" })).toBeNull()
+  expect(h.toast.info).not.toHaveBeenCalled()
   expect(applies()).toHaveLength(0)
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }))
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+})
+
+it("a 409 whose refreshed preview is empty ends in the same Close-only notice", async () => {
+  render(<RetentionBody rows={rows} ctx={ctx("a")} />)
+  pickInbox("30 d")
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await screen.findByRole("alertdialog")
+  h.put.mockResolvedValueOnce({ ok: false, unavailable: false, status: 409, error: "changed" })
+  h.put.mockResolvedValueOnce({ ok: true, data: { dry_run: true, preview_id: "p9", changes: [] } })
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }))
+  expect(await screen.findByText(NOTHING_TO_CHANGE)).toBeInTheDocument()
+  const dialog = screen.getByRole("alertdialog")
+  expect(within(dialog).queryByRole("button", { name: "Apply" })).toBeNull()
+  expect(within(dialog).getByRole("button", { name: "Close" })).toBeInTheDocument()
+  expect(h.toast.info).not.toHaveBeenCalled()
 })
 
 it("409 keeps dialog: nothing is written and the dialog shows the new preview", async () => {
