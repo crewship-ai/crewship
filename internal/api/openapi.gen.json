@@ -113670,6 +113670,9 @@
                           "has_application": {
                             "type": "boolean"
                           },
+                          "has_document": {
+                            "type": "boolean"
+                          },
                           "has_project": {
                             "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                             "type": "boolean"
@@ -114972,6 +114975,9 @@
                         "has_application": {
                           "type": "boolean"
                         },
+                        "has_document": {
+                          "type": "boolean"
+                        },
                         "has_project": {
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
@@ -115300,6 +115306,9 @@
                           ]
                         },
                         "has_application": {
+                          "type": "boolean"
+                        },
+                        "has_document": {
                           "type": "boolean"
                         },
                         "has_project": {
@@ -115642,6 +115651,9 @@
                             ]
                           },
                           "has_application": {
+                            "type": "boolean"
+                          },
+                          "has_document": {
                             "type": "boolean"
                           },
                           "has_project": {
@@ -116070,6 +116082,9 @@
                       "has_application": {
                         "type": "boolean"
                       },
+                      "has_document": {
+                        "type": "boolean"
+                      },
                       "has_project": {
                         "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                         "type": "boolean"
@@ -116254,6 +116269,10 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "allow_empty": {
+                    "description": "Explicitly stage an empty Page owned by the current human for a Document. Panels are refused in this mode.",
+                    "type": "boolean"
+                  },
                   "color": {
                     "description": "The page's colour, a crew palette key. Same pointer rule as icon; a value outside the palette is refused by name (400).",
                     "type": "string"
@@ -116434,6 +116453,9 @@
                       ]
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_document": {
                       "type": "boolean"
                     },
                     "has_project": {
@@ -116650,6 +116672,9 @@
                       ]
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_document": {
                       "type": "boolean"
                     },
                     "has_project": {
@@ -117497,6 +117522,9 @@
                     "has_application": {
                       "type": "boolean"
                     },
+                    "has_document": {
+                      "type": "boolean"
+                    },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
@@ -117711,6 +117739,9 @@
                       ]
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_document": {
                       "type": "boolean"
                     },
                     "has_project": {
@@ -118412,6 +118443,9 @@
                     "has_application": {
                       "type": "boolean"
                     },
+                    "has_document": {
+                      "type": "boolean"
+                    },
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
@@ -118888,6 +118922,9 @@
                       ]
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_document": {
                       "type": "boolean"
                     },
                     "has_project": {
@@ -126923,6 +126960,9 @@
                           ]
                         },
                         "has_application": {
+                          "type": "boolean"
+                        },
+                        "has_document": {
                           "type": "boolean"
                         },
                         "has_project": {
