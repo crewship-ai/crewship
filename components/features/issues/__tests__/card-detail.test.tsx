@@ -233,7 +233,7 @@ describe("IssueCardDetail", () => {
     expect(screen.getByRole("link", { name: /open run/i })).toHaveAttribute("href", "/activity?run=run_1")
     expect(screen.getByText("run not recorded")).toBeInTheDocument()
     // The Related card names the crew, the journal and Activity as links.
-    expect(screen.getByRole("link", { name: /trace ENG-4/i })).toHaveAttribute("href", "/journal?mission_id=ENG-4")
+    expect(screen.getByRole("link", { name: /trace ENG-4/i })).toHaveAttribute("href", "/activity?mission=ENG-4")
     expect(screen.getByRole("link", { name: /all runs$/i }).getAttribute("href")).toMatch(/^\/activity\?mission=/)
   })
 
