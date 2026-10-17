@@ -12,6 +12,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- OpenAPI administrative member-access documents share the unchanged project/routine variants and complete resource-right union. Primitive operations remain independent; no preset or permission behavior changes.
+
+### Changed
+
 - OpenAPI administrative member-access documents reuse the existing agent-right shape as a named schema. Accepted operations and runtime permissions are unchanged.
 
 
