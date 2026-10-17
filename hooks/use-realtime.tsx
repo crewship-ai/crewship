@@ -251,6 +251,8 @@ interface RealtimeContextValue {
   status: WSStatus
   subscribe: (eventType: RealtimeEventType, callback: EventCallback) => () => void
   subscribeChannel: (channel: string) => () => void
+  /** "Retry now": reconnect at once instead of waiting for the backoff (optional so test doubles need not supply it). */
+  retry?: () => void
 }
 
 // Exported (only) so the guard test can check it against the Go emitters —
@@ -476,7 +478,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     dispatchEvent("realtime.reconnected", {})
   }, [dispatchEvent])
 
-  const { status: socketStatus, send } = useWebSocket({
+  const { status: socketStatus, send, retryNow } = useWebSocket({
     enabled: realtimeEnabled,
     url: getWsUrl(),
     getToken,
@@ -543,8 +545,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   )
 
   const contextValue = useMemo(
-    () => ({ status, subscribe, subscribeChannel }),
-    [status, subscribe, subscribeChannel],
+    () => ({ status, subscribe, subscribeChannel, retry: retryNow }),
+    [status, subscribe, subscribeChannel, retryNow],
   )
 
   return (

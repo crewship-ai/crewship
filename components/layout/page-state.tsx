@@ -6,13 +6,15 @@ import type { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { useAppBannerSlot } from "@/components/layout/app-banners"
 
 /**
  * Page states (Harbor 2 kit, #3366). Every page shows the same eight states
  * the same way, so a person always knows whether something is loading, empty,
  * filtered away, broken, closed to them, gone, offline or contested:
  *
- *   PageLoading      skeleton; after 1 s a quiet "Still loading…" note
+ *   PageLoading      optionally nothing for 1 s (`delay`), then the skeleton;
+ *                    after 10 s "Still loading…" with Retry
  *   PageEmpty        area tile, what belongs here, one primary action, an
  *                    example, and the CLI command that does the same
  *   PageNoResults    the filters that hid everything, Clear / Search all time
@@ -62,23 +64,51 @@ function ActionButton({ action, variant }: { action: PageAction; variant: "defau
 /** How long a load may take before the page says so (Harbor 2: no spinner on a full page). */
 export const SLOW_LOAD_MS = 10_000
 
-/** Skeleton rows or cards. After 10 s a note says it is still loading, with Retry when given. */
+/** How long a load stays blank before the skeleton shows (Harbor 2: under 1 s, nothing). */
+export const QUIET_LOAD_MS = 1_000
+
+/**
+ * True once `ms` have passed since mount; immediately true for 0.
+ * The 1 s / 10 s rule of the loading state, shared with the app frame.
+ */
+export function useElapsed(ms: number): boolean {
+  const [done, setDone] = React.useState(ms <= 0)
+  React.useEffect(() => {
+    if (ms <= 0) return
+    const t = setTimeout(() => setDone(true), ms)
+    return () => clearTimeout(t)
+  }, [ms])
+  return done
+}
+
+/**
+ * Skeleton rows or cards. After 10 s a note says it is still loading, with
+ * Retry when given. `delay` keeps the area blank first: a route that usually
+ * answers in under a second should not flash a skeleton (pass QUIET_LOAD_MS).
+ */
 export function PageLoading({
   variant = "list",
   rows = 7,
   className,
   onRetry,
+  delay = 0,
 }: {
   variant?: "list" | "cards"
   rows?: number
   className?: string
   onRetry?: () => void
+  /** Milliseconds of nothing before the skeleton appears. Default 0. */
+  delay?: number
 }) {
-  const [slow, setSlow] = React.useState(false)
-  React.useEffect(() => {
-    const t = setTimeout(() => setSlow(true), SLOW_LOAD_MS)
-    return () => clearTimeout(t)
-  }, [])
+  const shown = useElapsed(delay)
+  const slow = useElapsed(SLOW_LOAD_MS)
+  if (!shown) {
+    return (
+      <div className={cn("page-state page-state-wide", className)} role="status" aria-live="polite" aria-busy="true" data-state="loading" data-quiet="">
+        <span className="sr-only">Loading</span>
+      </div>
+    )
+  }
   return (
     <div className={cn("page-state page-state-wide", className)} role="status" aria-live="polite" aria-busy="true" data-state="loading">
       <span className="page-sk page-sk-h" />
@@ -193,16 +223,25 @@ export function PageError({
   title,
   description,
   onRetry,
+  retryLabel = "Retry",
   requestId,
+  errorId,
   detail,
+  actions,
   className,
 }: {
   title: string
   description?: React.ReactNode
   onRetry?: () => void
+  /** "Try again" on a crashed page, "Reload" outside the app frame. */
+  retryLabel?: string
   requestId?: string
+  /** A render error has no request; its digest goes in the footer instead. */
+  errorId?: string
   /** Extra technical detail for the footer ("503 from GET /api/v1/…"). */
   detail?: React.ReactNode
+  /** Quiet footer links on the right: Copy details, System status, Go to Dashboard. */
+  actions?: React.ReactNode
   className?: string
 }) {
   return (
@@ -217,22 +256,29 @@ export function PageError({
           {onRetry && (
             <Button size="sm" onClick={onRetry}>
               <RefreshCw className="size-3.5" aria-hidden />
-              Retry
+              {retryLabel}
             </Button>
           )}
         </header>
-        {(requestId || detail) && (
+        {(requestId || errorId || detail || actions) && (
           <footer>
             <Info className="size-3.5 shrink-0" aria-hidden />
-            <span>
+            <span className="min-w-0">
               {requestId && (
                 <>
                   Request <span className="font-mono">{requestId}</span>
                 </>
               )}
-              {requestId && detail && " · "}
+              {errorId && (
+                <>
+                  {requestId && " · "}
+                  Error ID <span className="font-mono">{errorId}</span>
+                </>
+              )}
+              {(requestId || errorId) && detail && " · "}
               {detail}
             </span>
+            {actions && <span className="page-ee-actions">{actions}</span>}
           </footer>
         )}
       </div>
@@ -248,6 +294,8 @@ export function PageNoAccess({
   admins,
   primary,
   secondary,
+  title,
+  description,
   className,
 }: {
   area: string
@@ -256,16 +304,28 @@ export function PageNoAccess({
   admins?: string[]
   primary?: PageAction
   secondary?: PageAction
+  /** Replaces "You can’t open {area}"; the restricted variant words it differently. */
+  title?: string
+  /**
+   * Replaces the role sentence. A restricted session must not learn who the
+   * admins are or that a role would help, so it passes its own sentence and
+   * no `admins`.
+   */
+  description?: React.ReactNode
   className?: string
 }) {
   return (
     <div className={cn("page-state", className)} data-state="no-access">
       <div className="page-es">
         <Tile icon={Lock} />
-        <h2>You can’t open {area}</h2>
+        <h2>{title ?? <>You can’t open {area}</>}</h2>
         <p>
-          {role && <>Your role is {role}. </>}
-          {needed ? <>{area} needs {needed} or above in this workspace.</> : <>Ask an admin for access.</>}
+          {description ?? (
+            <>
+              {role && <>Your role is {role}. </>}
+              {needed ? <>{area} needs {needed} or above in this workspace.</> : <>Ask an admin for access.</>}
+            </>
+          )}
         </p>
         {(primary || secondary) && (
           <div className="page-es-actions">
@@ -279,27 +339,43 @@ export function PageNoAccess({
   )
 }
 
-/** The thing is gone, or the link is wrong. */
+/**
+ * The thing is gone, or the link is wrong. A solid frame, not the dashed one
+ * of "empty for the first time", and never a create action: nothing here is
+ * the person's to make.
+ */
 export function PageNotFound({
   what = "page",
+  title,
   description,
   back,
+  primary,
+  secondary,
   className,
 }: {
   what?: string
+  /** Replaces "This {what} doesn’t exist", e.g. "This routine no longer exists". */
+  title?: string
   description?: React.ReactNode
+  /** A way back, drawn as the outline button (kept for existing callers). */
   back?: PageAction
+  /** The one filled button, e.g. "Go to Dashboard". */
+  primary?: PageAction
+  /** Beside it, e.g. "Search". */
+  secondary?: PageAction
   className?: string
 }) {
   return (
     <div className={cn("page-state", className)} data-state="not-found">
-      <div className="page-es">
+      <div className="page-es page-es-solid">
         <Tile icon={Search} />
-        <h2>This {what} doesn’t exist</h2>
+        <h2>{title ?? <>This {what} doesn’t exist</>}</h2>
         <p>{description ?? <>It may have been deleted, or the link is wrong.</>}</p>
-        {back && (
+        {(primary || secondary || back) && (
           <div className="page-es-actions">
-            <ActionButton action={back} variant="outline" />
+            {primary && <ActionButton action={primary} variant="default" />}
+            {secondary && <ActionButton action={secondary} variant="outline" />}
+            {back && <ActionButton action={back} variant="outline" />}
           </div>
         )}
       </div>
@@ -307,16 +383,25 @@ export function PageNotFound({
   )
 }
 
-/** One banner while live updates are paused; pair with StaleData. */
+/**
+ * One banner while live updates are paused; pair with StaleData.
+ *
+ * Inside the app shell it joins the shell's banner queue (app-banners.tsx):
+ * when the shell already says the connection is down, the page's own banner
+ * steps aside instead of saying it a second time. Outside the shell it always
+ * renders.
+ */
 export function OfflineBanner({ since, onRetry, className }: { since?: string; onRetry?: () => void; className?: string }) {
+  const visible = useAppBannerSlot("offline", true)
+  if (!visible) return null
   return (
     <div className={cn("page-banner page-banner-warn", className)} role="status" data-state="offline">
       <WifiOff className="size-4 shrink-0" aria-hidden />
       <span>
         <b>Reconnecting…</b> Live updates are paused.{since && <> You see data from {since}.</>}
       </span>
-      <span className="flex-1" />
-      {onRetry && <Button size="sm" variant="outline" onClick={onRetry}>Retry now</Button>}
+      <span className="page-banner-spacer" />
+      {onRetry && <Button size="sm" variant="outline" className="page-banner-action" onClick={onRetry}>Retry now</Button>}
     </div>
   )
 }

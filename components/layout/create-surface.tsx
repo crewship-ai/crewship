@@ -251,9 +251,25 @@ export interface CreateSurfaceProps {
    * `<h1>`; the layout, not the surface, owns the breadcrumb.
    */
   presentation?: "dialog" | "page"
+  /**
+   * A state the person cannot dismiss, only resolve (the unavailable
+   * workspace): Esc, an overlay click and the phone sheet's drag do nothing,
+   * there is no grabber, and the overlay is the opaque page ground — nothing
+   * behind it shows through. Pair it with a header without `onClose`.
+   */
+  blocking?: boolean
+  /**
+   * Phone sheet height. `"auto"` (default) grows with the content up to 92 %
+   * of the viewport; `"full"` fills it, for a surface whose body is a list or
+   * a blocking state that should own the screen.
+   */
+  phoneHeight?: "auto" | "full"
   className?: string
   children: React.ReactNode
 }
+
+/** Phone sheet that fills the viewport (CreateSurface `phoneHeight="full"`). */
+const SHELL_SHEET_FULL = "max-sm:h-dvh max-sm:max-h-dvh max-sm:rounded-none"
 
 export function CreateSurface({
   open,
@@ -266,6 +282,8 @@ export function CreateSurface({
   ariaLabel,
   restoreOpenerFocus = false,
   presentation = "dialog",
+  blocking = false,
+  phoneHeight = "auto",
   className,
   children,
 }: CreateSurfaceProps) {
@@ -397,10 +415,14 @@ export function CreateSurface({
 
   return (
     <>
-    <Dialog open={open} onOpenChange={requestOpenChange}>
+    <Dialog open={open} onOpenChange={blocking ? undefined : requestOpenChange}>
       <DialogContent
         ref={contentRef}
         aria-label={ariaLabel}
+        data-blocking={blocking || undefined}
+        overlayClassName={blocking ? "bg-background" : undefined}
+        onEscapeKeyDown={blocking ? (e) => e.preventDefault() : undefined}
+        onInteractOutside={blocking ? (e) => e.preventDefault() : undefined}
         // Radix's own opt-out for the missing-description warning. The header
         // renders a description when it has one and nothing when it does not;
         // echoing the title into an sr-only node to silence the warning is what
@@ -428,9 +450,10 @@ export function CreateSurface({
             openerRef.current.focus({ preventScroll: true })
           }
         }}
-        className={cn(SHELL_BASE, "p-0", "sm:max-h-[min(85vh,720px)]", SIZE_CLASS[size], SHELL_SHEET, className)}
+        className={cn(SHELL_BASE, "p-0", "sm:max-h-[min(85vh,720px)]", SIZE_CLASS[size], SHELL_SHEET, phoneHeight === "full" && SHELL_SHEET_FULL, className)}
       >
-        <SheetGrabber />
+        {/* A sheet that cannot be dismissed has nothing to drag. */}
+        {!blocking && <SheetGrabber />}
         <CloseGuard.Provider value={guard}>{children}</CloseGuard.Provider>
       </DialogContent>
     </Dialog>
@@ -604,7 +627,12 @@ export interface CreateSurfaceHeaderProps {
   accent?: AccentName
   /** Renders the back arrow. Absent = no arrow, not a disabled one. */
   onBack?: () => void
-  onClose: () => void
+  /**
+   * The ×. Omit it only for a surface that cannot be dismissed (a blocking
+   * state); then no close button renders at all, rather than one that does
+   * nothing.
+   */
+  onClose?: () => void
   /** Right of the title, left of the close — step counters, a mode switch. */
   meta?: React.ReactNode
   /**
@@ -702,15 +730,17 @@ export function CreateSurfaceHeader({
           </div>
         )}
 
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => guard(onClose)}
-          aria-label="Close"
-          className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-12 coarse:w-12 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        {onClose && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => guard(onClose)}
+            aria-label="Close"
+            className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-12 coarse:w-12 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       {/* No description means NO node.
@@ -1849,7 +1879,11 @@ export interface CreateSurfaceFooterProps extends Omit<React.ComponentProps<"div
   hint?: React.ReactNode
   /** A "Create more" switch or an attachment control — never a third button. */
   aside?: React.ReactNode
-  onCancel: () => void
+  /**
+   * The Cancel. Omit it only where there is nothing to cancel — a blocking
+   * state, a review whose one answer is Done; then the footer has no Cancel.
+   */
+  onCancel?: () => void
   cancelLabel?: string
   /** At most one. `Back`, `Skip to defaults`, `Preview`. */
   secondary?: React.ReactNode
@@ -1942,16 +1976,18 @@ export function CreateSurfaceFooter({
       <div className="flex-1 max-sm:hidden group-data-[mobile=true]/surface:hidden" />
       {aside}
       {/* type="button": inside a <form> a bare button submits it. */}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={() => (guardCancel ? guard(onCancel) : onCancel())}
-        disabled={busy}
-        className="h-8 text-xs coarse:h-12 max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm"
-      >
-        {cancelLabel}
-      </Button>
+      {onCancel && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => (guardCancel ? guard(onCancel) : onCancel())}
+          disabled={busy}
+          className="h-8 text-xs coarse:h-12 max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm"
+        >
+          {cancelLabel}
+        </Button>
+      )}
       {secondary}
       {primaryLabel != null && onPrimary != null && (
       <Button
