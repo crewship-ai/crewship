@@ -10,6 +10,7 @@ import { AppFrame } from "@/components/layout/app-frame"
 import { AppBannerProvider } from "@/components/layout/app-banners"
 import { PageLoading } from "@/components/layout/page-state"
 import { loginRedirectUrl } from "@/lib/login-redirect"
+import { BareNotFound, NotFoundInShell, useUnknownAppPath } from "@/components/layout/not-found-state"
 
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { AppToolbar } from "@/components/layout/app-toolbar"
@@ -68,8 +69,12 @@ export default function DashboardLayout({
   // Anything else renders the unavailable page instead of the screen, so the
   // screen's requests are never sent; the root goes to chat.
   const router = useRouter()
+  // A path the app has no page for. The static-export backend answers it with
+  // the root index.html, so this layout — not not-found.tsx — is what runs;
+  // it shows the not-found state in place of the (dashboard) page.
+  const unknownPath = useUnknownAppPath(pathname)
   const surfaces = useRestrictedSurfaces()
-  const restrictedBlocked = surfaces !== null && !restrictedPathAllowed(pathname, surfaces)
+  const restrictedBlocked = !unknownPath && surfaces !== null && !restrictedPathAllowed(pathname, surfaces)
   const restrictedLanding = restrictedBlocked && pathname === "/" ? restrictedHome(surfaces) : null
   useEffect(() => {
     if (restrictedLanding) router.replace(restrictedLanding)
@@ -80,12 +85,15 @@ export default function DashboardLayout({
   const hadSession = useRef(false)
   if (status === "authenticated") hadSession.current = true
   useEffect(() => {
-    if (status === "unauthenticated") {
+    // An unknown path is not a screen to come back to after login: signed out,
+    // it is the bare not-found state, not a detour through the login page.
+    if (status === "unauthenticated" && !unknownPath) {
       // Immediate redirect — no spinner, no delay
       window.location.replace(loginRedirectUrl(window.location.pathname, window.location.search, hadSession.current))
     }
-  }, [status])
+  }, [status, unknownPath])
 
+  if (status === "unauthenticated" && unknownPath) return <BareNotFound />
   if (status === "loading" || status === "unauthenticated") {
     return <AppFrame />
   }
@@ -133,7 +141,9 @@ export default function DashboardLayout({
             {trusted && <UpdateBanner />}
             <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
               <WorkspaceAvailabilityBoundary enabled={!independentPage}>
-              {restrictedBlocked && !workspaceUnavailable
+              {unknownPath
+                ? <NotFoundInShell />
+                : restrictedBlocked && !workspaceUnavailable
                 ? restrictedLanding
                   ? <PageLoading />
                   : <RestrictedUnavailable home={surfaces ? restrictedHome(surfaces) : null} pathname={pathname} />

@@ -4,7 +4,7 @@
 // card with Retry and leaves Log out reachable. A signed-out visitor keeps
 // the screen they asked for through the login page.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { loginRedirectUrl } from "@/lib/login-redirect"
@@ -43,6 +43,14 @@ import DashboardLayout from "../layout"
 import { _resetWorkspaceStoreForTests } from "@/hooks/use-workspace"
 
 let replaced: string | null = null
+/** The address bar. The router mock (vitest.setup.ts) keeps saying "/", as
+ *  Next does when the backend's SPA fallback hydrated the root page. */
+function goTo(pathname: string, search = "") {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    value: { pathname, search, href: "http://localhost" + pathname + search, replace: (u: string) => { replaced = u } },
+  })
+}
 beforeEach(() => {
   vi.useFakeTimers()
   auth.status = "loading"
@@ -50,10 +58,7 @@ beforeEach(() => {
   workspacesStatus = 200
   _resetWorkspaceStoreForTests()
   replaced = null
-  Object.defineProperty(window, "location", {
-    configurable: true,
-    value: { pathname: "/routines/weekly-scan", search: "?tab=runs", href: "http://localhost/routines/weekly-scan?tab=runs", replace: (u: string) => { replaced = u } },
-  })
+  goTo("/issues/CRE-12", "?tab=activity")
 })
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
@@ -80,7 +85,7 @@ describe("dashboard layout — before the session", () => {
   it("unauthenticated redirects with redirect=<path> so login brings the person back", () => {
     auth.status = "unauthenticated"
     mount()
-    expect(replaced).toBe("/login?redirect=%2Froutines%2Fweekly-scan%3Ftab%3Druns")
+    expect(replaced).toBe("/login?redirect=%2Fissues%2FCRE-12%3Ftab%3Dactivity")
   })
 
   it("an explicit Log out goes to the plain login page", () => {
@@ -105,6 +110,46 @@ describe("dashboard layout — before the session", () => {
     expect(document.querySelector(".app-frame-side")).not.toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Log out" }))
     expect(auth.signOut).toHaveBeenCalledOnce()
+  })
+})
+
+// The static-export backend answers a path without a page with the ROOT
+// index.html (SPA fallback), so this layout runs with the dashboard page as
+// its child and the router reporting "/". It must show the not-found state.
+describe("dashboard layout — a path the app has no page for", () => {
+  it("signed out: the bare not-found state, no detour through login", () => {
+    goTo("/does-not-exist")
+    auth.status = "unauthenticated"
+    mount()
+    expect(replaced).toBeNull()
+    expect(screen.getByText("This page doesn’t exist")).toBeInTheDocument()
+    expect(screen.getByRole("main")).toHaveClass("bare-state")
+    expect(screen.getByRole("link", { name: "Go to Dashboard" })).toHaveAttribute("href", "/")
+    expect(screen.queryByTestId("page")).toBeNull()
+  })
+
+  it("signed in: the not-found state inside the shell, and the page under it never mounts", async () => {
+    vi.useRealTimers()
+    goTo("/does-not-exist")
+    auth.status = "authenticated"
+    workspacesStatus = 200
+    mount()
+    expect(await screen.findByText("This page doesn’t exist", undefined, { timeout: 3000 })).toBeInTheDocument()
+    const state = screen.getByText("This page doesn’t exist").closest("[data-state=not-found]") as HTMLElement
+    expect(within(state).getByRole("button", { name: "Search" })).toBeInTheDocument()
+    expect(screen.queryByRole("main", { name: undefined })?.classList.contains("bare-state") ?? false).toBe(false)
+    expect(document.querySelector("[data-slot=sidebar-container], [data-slot=sidebar]")).not.toBeNull()
+    expect(screen.queryByTestId("page")).toBeNull()
+    expect(replaced).toBeNull()
+  })
+
+  it("a known deep path still mounts its page", async () => {
+    vi.useRealTimers()
+    goTo("/issues/CRE-12")
+    auth.status = "authenticated"
+    mount()
+    expect(await screen.findByTestId("page", undefined, { timeout: 3000 })).toBeInTheDocument()
+    expect(screen.queryByText("This page doesn’t exist")).toBeNull()
   })
 })
 
