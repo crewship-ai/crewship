@@ -4,10 +4,11 @@ import * as React from "react"
 import type { LucideIcon } from "lucide-react"
 import { Activity, AlertTriangle, Hand, List, ListChecks, Play, ScrollText, Webhook } from "lucide-react"
 
+import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
 import {
-  SidebarFacet,
-  SidebarFacetOption,
-  SidebarFilterPopover,
+  SidebarActiveChip,
+  SidebarActiveChips,
+  SidebarFilterButton,
   SidebarRow,
   SidebarSearch,
   SidebarSection,
@@ -77,6 +78,20 @@ export function ActivityPanel({
   const set = (patch: Partial<FeedFilters>) => onFilters({ ...filters, ...patch })
   const toggle = <K extends keyof FeedFilters>(k: K, v: FeedFilters[K]) => set({ [k]: filters[k] === v ? null : v } as Partial<FeedFilters>)
   const facets = activeFacetCount(filters)
+  const facetBlock = useSidebarFacets()
+  // The views (Needs a person, Running, Could not finish) are places, not facets: Clear keeps them.
+  const clearAll = () =>
+    onFilters({ ...filters, what: null, routine: null, agent: null, crew: null, source: null, issue: null, status: viewOfStatus(filters.status) ? filters.status : null })
+  const nameOf = (xs: PanelOption[], id: string) => xs.find((x) => x.id === id)?.label ?? id
+  type Chip = { key: keyof FeedFilters; label: string }
+  const chips = ([
+    filters.what ? { key: "what" as const, label: `What: ${filters.what === "work" ? "Runs and agent work" : filters.what === "changes" ? "Every change" : CHANGE_KIND_LABEL[filters.what]}` } : null,
+    filters.status && !viewOfStatus(filters.status) ? { key: "status" as const, label: `Status: ${WORK_STATUS_LABEL[filters.status]}` } : null,
+    filters.routine ? { key: "routine" as const, label: `Routine: ${nameOf(routines, filters.routine)}` } : null,
+    filters.agent ? { key: "agent" as const, label: `Who: ${nameOf(agents, filters.agent)}` } : null,
+    filters.crew ? { key: "crew" as const, label: `Crew: ${nameOf(crews, filters.crew)}` } : null,
+    filters.source ? { key: "source" as const, label: `Work started by: ${WORK_SOURCE_LABEL[filters.source]}` } : null,
+  ] as (Chip | null)[]).filter((c): c is Chip => c != null)
 
   const whats: { id: WhatFilter; label: string }[] = [
     { id: "work", label: "Runs and agent work" },
@@ -93,68 +108,72 @@ export function ActivityPanel({
           placeholder="Search runs, issues, people…"
           aria-label="Search activity"
         />
-        <SidebarFilterPopover
-          label="Filter activity"
-          activeCount={facets}
-          onClear={() => onFilters({ ...filters, what: null, routine: null, agent: null, crew: null, source: null, issue: null, status: viewOfStatus(filters.status) ? filters.status : null })}
-          panelClassName="w-[260px] max-h-[min(520px,70dvh)]"
-        >
-          <SidebarFacet first label="What" resetLabel="Everything" resetActive={!filters.what} onReset={() => set({ what: null })}>
-            {whats.map((w) => (
-              <SidebarFacetOption key={w.id} active={filters.what === w.id} onToggle={() => toggle("what", w.id)}>
-                {w.label}
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-          <SidebarFacet label="Status" resetLabel="Any status" resetActive={!filters.status} onReset={() => set({ status: null })}>
-            {(Object.keys(WORK_STATUS_LABEL) as WorkStatus[]).map((s) => (
-              <SidebarFacetOption key={s} active={filters.status === s} onToggle={() => toggle("status", s)}>
-                {WORK_STATUS_LABEL[s]}
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-          {routines.length > 0 && (
-            <SidebarFacet label="Routine" resetLabel="Every routine" resetActive={!filters.routine} onReset={() => set({ routine: null })}>
-              {routines.map((r) => (
-                <SidebarFacetOption key={r.id} active={filters.routine === r.id} onToggle={() => toggle("routine", r.id)}>
-                  <span className="min-w-0 flex-1 truncate">{r.label}</span>
-                  <span className="font-mono text-micro text-muted-foreground">{r.count}</span>
-                </SidebarFacetOption>
-              ))}
-            </SidebarFacet>
-          )}
-          {agents.length > 0 && (
-            <SidebarFacet label="Who" resetLabel="Anyone" resetActive={!filters.agent} onReset={() => set({ agent: null })}>
-              {agents.map((a) => (
-                <SidebarFacetOption key={a.id} active={filters.agent === a.id} onToggle={() => toggle("agent", a.id)}>
-                  <span className="min-w-0 flex-1 truncate">{a.label}</span>
-                  <span className="font-mono text-micro text-muted-foreground">{a.count}</span>
-                </SidebarFacetOption>
-              ))}
-            </SidebarFacet>
-          )}
-          {crews.length > 0 && (
-            <SidebarFacet label="Crew" resetLabel="Every crew" resetActive={!filters.crew} onReset={() => set({ crew: null })}>
-              {crews.map((c) => (
-                <SidebarFacetOption key={c.id} active={filters.crew === c.id} onToggle={() => toggle("crew", c.id)}>
-                  <span className="min-w-0 flex-1 truncate">{c.label}</span>
-                  <span className="font-mono text-micro text-muted-foreground">{c.count}</span>
-                </SidebarFacetOption>
-              ))}
-            </SidebarFacet>
-          )}
-          {sources.length > 0 && (
-            <SidebarFacet label="Work started by" resetLabel="Anything" resetActive={!filters.source} onReset={() => set({ source: null })}>
-              {sources.map((s) => (
-                <SidebarFacetOption key={s.id} active={filters.source === s.id} onToggle={() => toggle("source", s.id)}>
-                  <span className="min-w-0 flex-1 truncate">{WORK_SOURCE_LABEL[s.id]}</span>
-                  <span className="font-mono text-micro text-muted-foreground">{s.count}</span>
-                </SidebarFacetOption>
-              ))}
-            </SidebarFacet>
-          )}
-        </SidebarFilterPopover>
+        <SidebarFilterButton activeCount={facets} {...facetBlock.triggerProps}>
+          Filter
+        </SidebarFilterButton>
       </SidebarToolbar>
+      {!facetBlock.open && (
+        <SidebarActiveChips>
+          {chips.map((c) => (
+            <SidebarActiveChip key={c.key} label={c.label} onRemove={() => set({ [c.key]: null } as Partial<FeedFilters>)}>
+              {c.label}
+            </SidebarActiveChip>
+          ))}
+        </SidebarActiveChips>
+      )}
+      {/* The facets open inside the panel, under the toolbar (PNL-02, v67 panel() → pk-fx). */}
+      <SidebarFacetBlock {...facetBlock.blockProps} label="Filter activity" activeCount={facets} onClear={clearAll}>
+        <SidebarInlineFacet
+          label="What"
+          values={whats.map((w) => ({ value: w.id, label: w.label }))}
+          selected={filters.what}
+          onToggle={(v) => toggle("what", v as WhatFilter)}
+          onClear={() => set({ what: null })}
+        />
+        <SidebarInlineFacet
+          label="Status"
+          values={(Object.keys(WORK_STATUS_LABEL) as WorkStatus[]).map((st) => ({ value: st, label: WORK_STATUS_LABEL[st] }))}
+          selected={filters.status}
+          onToggle={(v) => toggle("status", v as WorkStatus)}
+          onClear={() => set({ status: null })}
+        />
+        {routines.length > 0 && (
+          <SidebarInlineFacet
+            label="Routine"
+            values={routines.map((r) => ({ value: r.id, label: r.label, count: r.count }))}
+            selected={filters.routine}
+            onToggle={(v) => toggle("routine", v)}
+            onClear={() => set({ routine: null })}
+          />
+        )}
+        {agents.length > 0 && (
+          <SidebarInlineFacet
+            label="Who"
+            values={agents.map((a) => ({ value: a.id, label: a.label, count: a.count }))}
+            selected={filters.agent}
+            onToggle={(v) => toggle("agent", v)}
+            onClear={() => set({ agent: null })}
+          />
+        )}
+        {crews.length > 0 && (
+          <SidebarInlineFacet
+            label="Crew"
+            values={crews.map((c) => ({ value: c.id, label: c.label, count: c.count }))}
+            selected={filters.crew}
+            onToggle={(v) => toggle("crew", v)}
+            onClear={() => set({ crew: null })}
+          />
+        )}
+        {sources.length > 0 && (
+          <SidebarInlineFacet
+            label="Work started by"
+            values={sources.map((src) => ({ value: src.id, label: WORK_SOURCE_LABEL[src.id], count: src.count }))}
+            selected={filters.source}
+            onToggle={(v) => toggle("source", v as WorkSource)}
+            onClear={() => set({ source: null })}
+          />
+        )}
+      </SidebarFacetBlock>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-3">
         <SidebarSection label="Views">

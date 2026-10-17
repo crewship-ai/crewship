@@ -34,7 +34,7 @@ The two are deliberately separate: the rail must still answer "where can I go" w
 - **You are chasing a failure.** The **Could not finish** status row narrows both the rail and the feed.
 - **You want accepted work or received webhooks.** The **Ledger** rows at the bottom of the rail switch it to the [work queue and webhook deliveries](#ledgers).
 
-To *author* a routine, go to [Routines](/guides/routines). A plain approval can be decided from the home's **Needs you** card or on the run page — it is the same item as in [Inbox](/guides/inbox), and an approval with a decision form opens on the run, where the form is. To read the raw event log, use `/journal` (workspace OWNER and ADMIN only, see [Crew Journal](/guides/crew-journal)).
+To *author* a routine, go to [Routines](/guides/routines). A plain approval can be decided from the home's **Needs you** card or on the run page — it is the same item as in [Inbox](/guides/inbox), and an approval with a decision form opens on the run, where the form is. To read the raw event log, use **Technical log** under Ledgers (`/activity?section=log`, workspace OWNER and ADMIN only, see [Crew Journal](/guides/crew-journal)); old `/journal` links redirect there.
 
 ## Key concepts
 
@@ -104,6 +104,10 @@ Every row's second line starts with what the row **is**:
 - **Agent**: agent work delegated from a chat or assigned by hand.
 
 What started the row follows after it. So *Routine · from QUA-1* (a routine started from an issue) never reads like *Issue · from QUA-1* (the issue being worked).
+
+### Change stories
+
+Three or more updates to **one issue or one page on one day** show as one row: the object, `N updates`, the first three steps in the order they happened (`Todo → In progress → In review → …`) and the last update's before → after. Finished agent work on the issue that no routine started joins its story. Work that is still running, waiting for a person or could not finish never folds, and neither does a routine run (repeated runs have their own `×N runs` row). The story's Peek lists every update, oldest first; each opens in the Peek on its own. Stories exist under **Group by → Time** with **Group repeated runs** on; turning that off in Display lists the updates one by one. CSV export always writes one line per update.
 
 ### Search and filters
 
@@ -298,7 +302,7 @@ Fourteen places across the product link into `/activity` with a query string the
 
 | Parameter | Lands on | Emitted by |
 |-----------|----------|------------|
-| `?run=<id>` | That run's drill-down | The Activity Bar, an inbox waitpoint, a routine's run rows |
+| `?run=<id>` | The run in the Peek over the list. A run outside the chosen range widens the range — to the shortest preset that holds both, else a custom range from the run's day — so the run is also a row of the list | The Activity Bar, an inbox waitpoint, a routine's run rows, Spend's most expensive work |
 | `?pipeline=<slug>` | The overview narrowed to that routine, over the loaded window | A routine's "view runs" |
 | `?mission=<id>` | That issue's drill-down | An issue card's "activity" |
 | `?status=active\|waiting\|failed\|done` | Selects that status row — a narrowing, not a destination | The Activity Bar's "view all" |
@@ -390,6 +394,21 @@ A piece of work opens in a panel beside the page, with its agent and crew by nam
 Each ledger reads its whole window — and the Work queue also every piece of work not yet finished, however old, so work stuck for days stays in **Needs you**. Past 1,000 rows the lanes card says the view is capped.
 
 Only the open ledger is mounted, so opening one does not start the journal stream.
+
+## Spend
+
+OWNER and ADMIN see an **Activity / Spend** switch in the top bar (`?mode=spend`); anyone else who opens that link lands on the Activity list. Spend reads, top to bottom:
+
+- **Spend · 24 h**, **Spend · October** (the current month), **Model calls · 24 h** and **Most expensive** (the piece of work that cost most in the last 24 hours);
+- **By crew · October** — one bar per crew as its share of the month, spend without a crew as *No crew*;
+- **Most expensive work · 24 h** — each row opens the run in Activity;
+- the note *Admins only. On subscription plans the cost is an estimate, not money spent.*
+
+The windows are fixed: the last 24 hours (`GET /api/v1/journal/spend?window=24h`) and the calendar month so far (`GET /api/v1/paymaster/spend/by-crew?since=<the 1st>`). The top bar's time range does not change them. There is no workspace budget yet, so the month shows no "of $N budget". Each half fails on its own and says so; the other stays on screen.
+
+<Warning>
+The spend endpoints answer any workspace member today; *admins only* is a property of this page, not of the API (#3476).
+</Warning>
 
 ## Activity Bar (toolbar)
 

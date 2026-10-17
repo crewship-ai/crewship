@@ -53,11 +53,13 @@ import {
   changePasses,
   feedCsv,
   feedUrlParams,
+  foldStories,
   groupFeed,
   inRange,
   mergeFeed,
   parseFeedUrl,
   rangeBounds,
+  rangeIncluding,
   rangeLabel,
   runHistory,
   viewCounts,
@@ -77,6 +79,7 @@ import { runTone } from "@/lib/activity-run"
 import { ACTIVITY_HOME, activityTrail, backFrom, currentStop, jumpTo, openStop, selectStop, type ActivityPath, type ActivityStop } from "@/lib/activity-selection"
 import { NOISE_ENTRY_TYPES, shortId, type SpineLabels } from "@/lib/activity-stream"
 import { activityUrlParams, parseActivityUrl } from "@/lib/activity-url"
+import { lookupResolvers } from "@/lib/journal-redirect"
 import { useAppStore } from "@/lib/store"
 import { toast } from "@/lib/toast"
 import type { JournalEntry } from "@/lib/types/journal"
@@ -203,6 +206,27 @@ function DisplayMenu({
   )
 }
 
+/**
+ * Whether the element holds an h1 of its own, kept current as it renders: a
+ * run page names itself only once it has loaded, and some of its states
+ * (loading, not found, the routine run detail) never do.
+ */
+function useHoldsHeading(el: HTMLElement | null): boolean {
+  const [holds, setHolds] = React.useState(false)
+  React.useLayoutEffect(() => {
+    if (!el) {
+      setHolds(false)
+      return
+    }
+    const check = () => setHolds(el.querySelector("h1") != null)
+    check()
+    const observer = new MutationObserver(check)
+    observer.observe(el, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [el])
+  return holds
+}
+
 export function ActivityStreamView({
   workspaceId,
   onOpenSection,
@@ -251,6 +275,20 @@ export function ActivityStreamView({
     setRecord(null)
   }, [])
   React.useEffect(() => setLimit(PAGE), [filters, group, bundle, range])
+
+  // Links from other pages may name an agent or a crew by slug and an issue
+  // by its identifier (entityHref, old Journal links); the list filters on
+  // ids. Once the lookup knows them, the filter — and the URL — say the id.
+  React.useEffect(() => {
+    if (lookup.loading) return
+    const resolve = lookupResolvers(lookup)
+    setFiltersRaw((f) => {
+      const agent = f.agent ? (resolve.agent?.(f.agent) ?? f.agent) : f.agent
+      const crew = f.crew ? (resolve.crew?.(f.crew) ?? f.crew) : f.crew
+      const issue = f.issue ? (resolve.issue?.(f.issue) ?? f.issue) : f.issue
+      return agent === f.agent && crew === f.crew && issue === f.issue ? f : { ...f, agent, crew, issue }
+    })
+  }, [lookup, filters.agent, filters.crew, filters.issue])
 
   React.useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(filters.q.trim()), 280)
@@ -339,19 +377,25 @@ export function ActivityStreamView({
   }, [changesWanted, journal.entries, agentName, issueLabel, routineName, range, now])
 
   const effective = React.useMemo(() => ({ ...filters, q: debouncedQ }), [filters, debouncedQ])
+  // Display › Group repeated runs: repeated routine runs become one row, and
+  // under Group by Time so do several updates to one object on one day.
+  const fold = React.useCallback(
+    (xs: FeedItem[]) => bundleRepeats(group === "time" ? foldStories(xs, now) : xs, now),
+    [group, now],
+  )
   const feed = React.useMemo(() => {
     const merged = mergeFeed(
       allWork.filter((w) => workPasses(w, effective, filterCtx)),
       allChanges.filter((c) => changePasses(c, effective, filterCtx)),
     )
-    return bundle ? bundleRepeats(merged, now) : merged
-  }, [allWork, allChanges, effective, filterCtx, bundle, now])
+    return bundle ? fold(merged) : merged
+  }, [allWork, allChanges, effective, filterCtx, bundle, fold])
   const shown = React.useMemo(() => feed.slice(0, limit), [feed, limit])
   const groups = React.useMemo(() => groupFeed(shown, group, now, { routineName }), [shown, group, now, routineName])
   const counts = React.useMemo(
     () =>
-      viewCounts(allWork, allChanges, effective, filterCtx, bundle ? (xs) => bundleRepeats(xs, now) : undefined),
-    [allWork, allChanges, effective, filterCtx, bundle, now],
+      viewCounts(allWork, allChanges, effective, filterCtx, bundle ? fold : undefined),
+    [allWork, allChanges, effective, filterCtx, bundle, fold],
   )
 
   /* ---------------- panel options ---------------- */
@@ -405,10 +449,9 @@ export function ActivityStreamView({
       if (!id) return null
       for (const x of feed) {
         if (x.id === id) return x
-        if (x.type === "work" && x.runs) {
-          const r = x.runs.find((y) => y.id === id)
-          if (r) return r
-        }
+        const inner = x.type === "story" ? x.items : x.type === "work" ? x.runs : undefined
+        const r = inner?.find((y) => y.id === id)
+        if (r) return r
       }
       const loose = allWork.find((w) => w.id === id)
       if (loose) return loose
@@ -419,6 +462,17 @@ export function ActivityStreamView({
     [feed, allWork, chainsQ.chains, routineName],
   )
   const peekItem = findItem(peekId)
+
+  // A `?run=` link to work outside the range widens the range so the run is
+  // in the list too, not only in the Peek. Once, for the link that opened the
+  // page; a range the reader picks afterwards stays theirs.
+  const widenFor = React.useRef(initial.peek ?? null)
+  React.useEffect(() => {
+    if (!widenFor.current || !peekItem || peekItem.id !== widenFor.current) return
+    widenFor.current = null
+    if (peekItem.type === "work" && peekItem.active) return
+    setRange((r) => rangeIncluding(r, peekItem.ts, now))
+  }, [peekItem, now])
 
   // A run the link named that the index does not hold (older than the 200
   // newest workflows, or outside the range) opens as its own page instead.
@@ -507,8 +561,12 @@ export function ActivityStreamView({
     const next = url ? `${window.location.pathname}?${url}` : window.location.pathname
     const moved = lastPosition.current !== position
     lastPosition.current = position
-    if (window.location.pathname + window.location.search === next) return
+    // A move is a history entry even when the address stays the same (a
+    // change's Peek → its full record are both ?entry=): an open Peek holds an
+    // overlay entry of its own, and closing it unwinds that entry with Back,
+    // which would land here as a popstate and drop the record just opened.
     if (moved) window.history.pushState(null, "", next)
+    else if (window.location.pathname + window.location.search === next) return
     else window.history.replaceState(null, "", next)
   }, [url, position])
 
@@ -653,6 +711,13 @@ export function ActivityStreamView({
 
   /* ---------------- render ---------------- */
 
+  // One h1 on every page (ACT-01). The list draws the view title as its h1.
+  // A run or record page draws its own once it knows its name; until then —
+  // and in states that never name themselves — the top bar's path is the h1.
+  const [pageEl, setPageEl] = React.useState<HTMLDivElement | null>(null)
+  const pageNamesItself = useHoldsHeading(pageEl)
+  const onPage = record != null || path.stops.length > 0
+
   const listBody = (
     <>
       {chainsQ.error && (
@@ -722,9 +787,7 @@ export function ActivityStreamView({
         title="Activity"
         section={path.stops.length > 0 ? (stop?.label ?? "Run") : title}
         ariaLabel="Activity"
-        // The list shows the view title as its own h1; the top bar's path
-        // then stays plain text so the page keeps exactly one.
-        heading={record != null || path.stops.length > 0}
+        heading={onPage && !pageNamesItself}
         actions={
           <>
             {modeSegment}
@@ -755,7 +818,7 @@ export function ActivityStreamView({
           {offline && <OfflineBanner onRetry={stream.reconnect} />}
 
           {record ? (
-            <div className="animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
+            <div ref={setPageEl} className="animate-in fade-in-0 slide-in-from-right-3 duration-200 ease-out">
               <ActivityDetail
                 entry={record}
                 workspaceId={workspaceId}
@@ -777,7 +840,7 @@ export function ActivityStreamView({
               />
             </div>
           ) : path.stops.length > 0 ? (
-            <div className="flex min-h-0 flex-col">
+            <div ref={setPageEl} className="flex min-h-0 flex-col">
               <nav aria-label="Activity trail" className="flex shrink-0 items-center gap-1 border-b border-border bg-card/40 px-4 py-2 text-label">
                 <Button size="sm" variant="ghost" onClick={() => setPath(ACTIVITY_HOME)}>
                   <ChevronLeft className="size-3.5" aria-hidden />

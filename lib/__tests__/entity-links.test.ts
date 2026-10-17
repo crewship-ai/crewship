@@ -50,9 +50,16 @@ describe("entityHref", () => {
     expect(entityHref({ kind: "integrations" })).toBe("/integrations")
   })
 
+  it("sends a journal reference straight to Activity, in Activity's own keys (F-02)", () => {
+    expect(entityHref({ kind: "journal" })).toBe("/activity")
+    expect(entityHref({ kind: "journal", crewSlug: "ops", agentSlug: "riley", missionId: "ENG-1", traceId: "run_1" })).toBe(
+      "/activity?crew=ops&agent=riley&mission=ENG-1&run=run_1",
+    )
+  })
+
   it("encodes and drops empty params", () => {
     expect(entityHref({ kind: "chat", agentSlug: "a b", sessionId: "" })).toBe("/chat/a%20b")
-    expect(entityHref({ kind: "journal", missionId: "m/1" })).toBe("/journal?mission_id=m%2F1")
+    expect(entityHref({ kind: "journal", missionId: "m/1" })).toBe("/activity?mission=m%2F1")
     expect(entityHref({ kind: "credentials" })).toBe("/credentials")
   })
 })

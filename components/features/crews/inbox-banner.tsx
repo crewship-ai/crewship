@@ -37,10 +37,10 @@ export function InboxBanner({ agentId, count, summary }: InboxBannerProps) {
         {summary && <div className="text-xs text-muted-foreground truncate">{summary}</div>}
       </div>
       <Link
-        href={`/journal?agent_id=${encodeURIComponent(agentId)}&entry_type=escalation,approval.requested,peer.message`}
+        href={`/activity?view=need&agent=${encodeURIComponent(agentId)}`}
         className="text-xs px-3 py-1.5 rounded bg-warn/20 hover:bg-warn/30 text-warn border border-warn/30 shrink-0"
       >
-        Open inbox
+        Open in Activity
       </Link>
     </section>
   )

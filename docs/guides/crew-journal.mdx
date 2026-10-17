@@ -534,7 +534,7 @@ crewship run insights -o json        # machine-readable for scripting
 
 ### Spend — cost rollup
 
-Cost attribution already flows end-to-end through the journal (`cost.incurred` entries) and `pipeline_runs.cost_usd` — the Spend tab is a rollup surface over data that already exists, not a new cost-tracking mechanism.
+Cost attribution already flows end-to-end through the journal (`cost.incurred` entries) and `pipeline_runs.cost_usd` — the Spend tab is a rollup surface over data that already exists, not a new cost-tracking mechanism. In the app it is **Activity › Spend** now; what that page shows is in [Activity › Spend](/guides/activity#spend).
 
 No single journal entry type carries all of (day, crew, agent, routine) at once: `cost.incurred` has `crew_id`/`agent_id` as first-class columns but no routine linkage; `pipeline_runs.cost_usd` (denormalized from the same cost ledger) has routine linkage but not per-agent breakdown. Rather than an artificial join, the rollup returns multiple breakdown sections in one response — the same shape `journal.RunInsights` already uses for `by_trigger`/`by_model`/`by_agent`.
 

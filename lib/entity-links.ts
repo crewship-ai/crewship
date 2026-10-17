@@ -57,10 +57,10 @@ export function entityHref(ref: EntityRef): string {
     case "run":
       return withQuery("/activity", { run: ref.runId, pipeline: ref.pipelineSlug })
     case "journal":
-      // /journal reads crew_id / agent_id (the server resolves a slug as
-      // readily as an id — resolveJournalRefs), so these are the keys the
-      // page owns rather than aliases it has to learn.
-      return withQuery("/journal", { crew_id: ref.crewSlug, agent_id: ref.agentSlug, mission_id: ref.missionId, trace_id: ref.traceId })
+      // The Journal is Activity now (F-02): straight to the list, in its own
+      // keys. Activity reads a slug or an issue identifier as readily as an
+      // id (it resolves them through the workspace lookup).
+      return withQuery("/activity", { crew: ref.crewSlug, agent: ref.agentSlug, mission: ref.missionId, run: ref.traceId })
     case "page":
       return `/pages/${enc(ref.slug)}`
     case "credential":

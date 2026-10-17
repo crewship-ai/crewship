@@ -18,10 +18,12 @@ import {
   WORK_STATUS_LABEL,
   WORK_STATUS_TONE,
   changeSentence,
+  dayLabel,
   runHistory,
   whenLabel,
   type ChangeItem,
   type FeedItem,
+  type StoryItem,
   type WorkItem,
 } from "@/lib/activity-feed"
 import { workflowHandle, workflowSentence } from "@/lib/activity-lenses"
@@ -31,7 +33,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 
-import { CHANGE_ICON, RunHistoryStrip, SOURCE_ICON, StatusGlyph } from "./activity-feed-table"
+import { CHANGE_ICON, KindGlyph, RunHistoryStrip, SOURCE_ICON, StatusGlyph } from "./activity-feed-table"
 
 export interface ActivityPeekProps {
   workspaceId: string
@@ -68,6 +70,9 @@ export function ActivityPeek(props: ActivityPeekProps) {
 
   if (shown.type === "work") {
     return <WorkPeek {...props} item={shown} open={open} onPrev={onPrev} onNext={onNext} />
+  }
+  if (shown.type === "story") {
+    return <StoryPeek {...props} item={shown} open={open} onPrev={onPrev} onNext={onNext} />
   }
   return <ChangePeek {...props} item={shown} open={open} onPrev={onPrev} onNext={onNext} />
 }
@@ -112,6 +117,8 @@ function ObjectChip({ icon: Icon, label, href, onClick }: { icon: LucideIcon; la
       </Link>
     )
   }
+  // Nothing to open (a page: Activity has no page filter yet): a label, not a dead button.
+  if (!onClick) return <span className={cls}>{body}</span>
   return (
     <button type="button" onClick={onClick} className={cls}>
       {body}
@@ -498,6 +505,97 @@ function ChangePeek({
             )}
           </Section>
         )}
+      </div>
+    </Peek>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ *  Story — several updates to one object on one day (v67 `acstory`)
+ * ------------------------------------------------------------------ */
+
+const STORY_OBJECT_WORD: Record<StoryItem["objectKind"], string> = { issue: "issue", artifact: "page" }
+
+function StoryStep({ item, now, onPick }: { item: WorkItem | ChangeItem; now: number; onPick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      className="kit-tap flex w-full min-w-0 items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left hover:bg-muted"
+    >
+      {item.type === "work" ? <StatusGlyph status={item.status} size="sm" /> : <KindGlyph kind={item.kind} size="sm" />}
+      <span className="min-w-0 flex-1">
+        <b className="block truncate text-body font-medium">{item.type === "work" ? item.title : item.action}</b>
+        <small className="block truncate text-label text-muted-foreground">
+          {item.type === "work"
+            ? `${WORK_STATUS_LABEL[item.status]} · ${item.agents[0]?.name ?? "An agent"}`
+            : [item.diff, item.who].filter(Boolean).join(" · ")}
+          {` · ${whenLabel(item.ts, now)}`}
+        </small>
+      </span>
+    </button>
+  )
+}
+
+function StoryPeek({
+  item,
+  open,
+  onClose,
+  onPrev,
+  onNext,
+  now,
+  onPickRun,
+  onShowIssue,
+}: ActivityPeekProps & { item: StoryItem; open: boolean }) {
+  const word = STORY_OBJECT_WORD[item.objectKind]
+  const Icon = CHANGE_ICON[item.objectKind]
+  return (
+    <Peek
+      open={open}
+      onOpenChange={(o) => !o && onClose()}
+      title={item.title}
+      subtitle={`${item.items.length} updates`}
+      onPrev={onPrev}
+      onNext={onNext}
+      footer={
+        item.missionId ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={() => onShowIssue(item.missionId!)}>
+              Everything about this issue
+            </Button>
+          </div>
+        ) : undefined
+      }
+    >
+      <div className="grid gap-4" data-testid="activity-peek-story">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusPill tone="muted" label={dayLabel(item.ts, now)} />
+          <span className="text-label text-muted-foreground">
+            {whenLabel(item.first, now)} – {whenLabel(item.ts, now)} · {item.who.join(", ")}
+          </span>
+        </div>
+        <p className="text-body text-foreground/80">
+          {item.items.length} updates about one {word} on one day, shown as one row so the list stays readable. Turn off Group repeated runs in
+          Display to list them one by one.
+        </p>
+
+        <Section icon={List} title="What happened, in order">
+          <div className="grid">
+            {item.items
+              .slice()
+              .reverse()
+              .map((x) => (
+                <StoryStep key={x.id} item={x} now={now} onPick={() => onPickRun(x.id)} />
+              ))}
+          </div>
+        </Section>
+
+        <Section icon={Link2} title="Related">
+          <div className="flex flex-wrap gap-1.5">
+            <ObjectChip icon={Icon} label={item.title} onClick={item.missionId ? () => onShowIssue(item.missionId!) : undefined} />
+          </div>
+          {item.missionId && <LinkButton onClick={() => onShowIssue(item.missionId!)}>Everything about {item.title}</LinkButton>}
+        </Section>
       </div>
     </Peek>
   )

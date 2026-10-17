@@ -248,14 +248,14 @@ const NAV_ITEMS: Array<{ title: string; href: string; icon: typeof Network; keyw
   { title: "Crews", href: "/crews", icon: Network, keywords: ["agents", "roster", "canvas"] },
   { title: "Inbox", href: "/inbox", icon: Inbox, keywords: [] },
   { title: "Approvals", href: "/approvals", icon: ClipboardCheck, keywords: [] },
-  { title: "Activity", href: "/activity", icon: Activity, keywords: ["runs", "traces"] },
+  // The Journal is Activity now (F-02): typing "journal" lands here.
+  { title: "Activity", href: "/activity", icon: Activity, keywords: ["runs", "traces", "journal", "audit"] },
   { title: "Routines", href: "/routines", icon: CalendarClock, keywords: ["pipelines"] },
   { title: "Pages", href: "/pages", icon: LayoutTemplate, keywords: ["dashboards", "panels"] },
   { title: "Integrations", href: "/integrations", icon: Plug, keywords: ["mcp", "notifications", "channels"] },
   { title: "Skills", href: "/skills", icon: Zap, keywords: [] },
   { title: "Credentials", href: "/credentials", icon: Key, keywords: ["secrets", "tokens"] },
-  { title: "Journal", href: "/journal", icon: Activity, keywords: ["audit"] },
-  { title: "Runs", href: "/journal?tab=runs", icon: Activity, keywords: [] },
+  { title: "Runs", href: "/activity?what=work", icon: Activity, keywords: [] },
   { title: "Settings", href: "/settings", icon: Settings, keywords: [] },
   { title: "Admin", href: "/admin", icon: ShieldCheck, keywords: [] },
 ]

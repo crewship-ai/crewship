@@ -22,8 +22,13 @@ vi.mock("../activity-stream-view", () => ({
 vi.mock("@/components/features/journal/journal-ledger", () => ({
   JournalLedger: ({ view, actions }: { view: string; actions?: React.ReactNode }) => <><p>Journal ledger {view}</p>{actions}</>,
 }))
-vi.mock("@/components/features/journal/journal-spend-view", () => ({
-  JournalSpendView: () => <p>Spend ledger</p>,
+vi.mock("../activity-spend", () => ({
+  ActivitySpendView: () => (
+    <>
+      <h1>Spend</h1>
+      <p>Spend ledger</p>
+    </>
+  ),
 }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mocks.mobile }))
 // The panel reads its remembered collapse from the user's preferences.
@@ -314,6 +319,14 @@ describe("the Journal inside Activity (F-02)", () => {
       expect(screen.queryByRole("button", { name: "Rail: Technical log" })).toBeNull()
       v.unmount()
     }
+  })
+
+  it("the Spend view keeps one h1: its own page title", () => {
+    window.history.replaceState(null, "", "/activity?mode=spend")
+    render(<ActivityWorkspace workspaceId="ws-a" />)
+    const h1s = screen.getAllByRole("heading", { level: 1 })
+    expect(h1s).toHaveLength(1)
+    expect(h1s[0]).toHaveTextContent(/^Spend$/)
   })
 
   it("marks Spend as the current side on the Spend view", () => {

@@ -27,6 +27,7 @@ import {
   type ChangeKind,
   type FeedGroup,
   type FeedItem,
+  type StoryItem,
   type WorkItem,
   type WorkSource,
   type WorkStatus,
@@ -262,6 +263,48 @@ export function ChangeRow({
   )
 }
 
+/** Several updates to one issue or page on one day (v67 `srow`). */
+export function StoryRow({
+  item,
+  now,
+  selected,
+  onSelect,
+  resolveAgent,
+}: {
+  item: StoryItem
+  now: number
+  selected: boolean
+  onSelect: () => void
+  resolveAgent?: AgentResolver
+}) {
+  return (
+    <button
+      type="button"
+      data-row-id={item.id}
+      data-selected={selected}
+      aria-current={selected || undefined}
+      onClick={onSelect}
+      className={cn(FEED_GRID, ROW, "py-2")}
+    >
+      <KindGlyph kind={item.objectKind} />
+      <span className="min-w-0">
+        <b className="block truncate font-medium text-foreground">
+          {item.title}
+          <span className="ml-1.5 inline-block rounded-sm bg-muted px-1.5 align-[1px] text-micro font-semibold text-muted-foreground ring-1 ring-border">
+            {item.items.length} updates
+          </span>
+        </b>
+        <small className="block truncate text-label text-muted-foreground">{item.flow}</small>
+      </span>
+      <AgentStack agents={item.agents} resolve={resolveAgent} />
+      <span className="hidden truncate font-mono text-label text-muted-foreground md:block" title={item.diff}>
+        {item.diff ?? ""}
+      </span>
+      <span className="text-right font-mono text-label text-muted-foreground md:hidden xl:block">{whenLabel(item.ts, now)}</span>
+    </button>
+  )
+}
+
 export function GroupHeader({ group }: { group: FeedGroup }) {
   return (
     <div
@@ -295,7 +338,9 @@ export function FeedTable({
         <div key={g.key} role="presentation">
           <GroupHeader group={g} />
           {g.items.map((x) =>
-            x.type === "work" ? (
+            x.type === "story" ? (
+              <StoryRow key={x.id} item={x} now={now} selected={selectedId === x.id} onSelect={() => onSelect(x)} resolveAgent={resolveAgent} />
+            ) : x.type === "work" ? (
               <WorkRow key={x.id} item={x} now={now} selected={selectedId === x.id} onSelect={() => onSelect(x)} resolveAgent={resolveAgent} />
             ) : (
               <ChangeRow key={x.id} item={x} now={now} selected={selectedId === x.id} onSelect={() => onSelect(x)} resolveAgent={resolveAgent} />

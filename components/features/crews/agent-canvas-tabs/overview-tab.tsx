@@ -357,8 +357,8 @@ export function OverviewTab({
             { id: "run", label: "Running" },
           ]}
           items={runItems}
-          footerLabel="Open in Journal"
-          footerHref={`/journal?agent=${encodeURIComponent(agent.slug)}`}
+          footerLabel="Open in Activity"
+          footerHref={`/activity?what=work&agent=${encodeURIComponent(agent.id)}`}
         />
 
         <DetailCell
