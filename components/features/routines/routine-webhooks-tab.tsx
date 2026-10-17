@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
-import { Card, EmptyState, Pill, FieldLabel } from "./_shared"
+import { Card, Pill, FieldLabel } from "./_shared"
+import { EmptyState } from "@/components/layout/empty-state"
 import { RoutineWebhookEditorDialog } from "./routine-webhook-editor-dialog"
 
 // RoutineWebhooksTab — event-driven trigger CRUD restyled for the
@@ -130,6 +131,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
       {ours.length === 0 && !formOpen ? (
         <Card title="Webhooks">
           <EmptyState
+            size="compact"
             icon={Webhook}
             title="No webhooks yet"
             description="Create a webhook endpoint that triggers this routine on HTTP POST. Every endpoint is HMAC-signed: supply a secret or one is generated for you, and it is shown once at creation."

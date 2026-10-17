@@ -31,7 +31,7 @@ import {
 } from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
 import { matchesRoutineFilters, routineFilterInput } from "@/lib/routine-filters"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { RoutineGlyph } from "./routine-glyph"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
@@ -282,10 +282,10 @@ export function RoutinesExplorer({
                               : "text-muted-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground",
                           )}
                         >
-                          <span
+                          <AgentAvatar
+                            seed={a.id}
                             aria-hidden
-                            className="h-4 w-4 shrink-0 rounded-full bg-cover bg-center"
-                            style={{ backgroundImage: `url(${getAgentAvatarUrl(a.id)})` }}
+                            className="h-4 w-4 shrink-0 object-cover"
                           />
                           <span className="truncate flex-1">{a.name}</span>
                           <span className="text-[10px] tabular-nums text-muted-foreground-soft">
@@ -531,10 +531,9 @@ export function RoutinesExplorer({
                         {/* The author lives here, not on the row: a face on
                             every row was a second icon column. */}
                         {routine.author_agent_id && (
-                          <img
-                            alt=""
-                            src={getAgentAvatarUrl(routine.author_agent_id)}
-                            className="h-3.5 w-3.5 shrink-0 rounded-full object-cover"
+                          <AgentAvatar
+                            seed={routine.author_agent_id}
+                            className="h-3.5 w-3.5 shrink-0 object-cover"
                           />
                         )}
                         {routine.slug}

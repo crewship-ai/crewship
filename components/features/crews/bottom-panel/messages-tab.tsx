@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, PeerMessage } from "./types"
-import { EmptyState, formatTime } from "./shared"
+import { PanelEmptyText, formatTime } from "./shared"
 
 /**
  * Messages — pulls peer messages from the agent inbox. The inbox response
@@ -38,14 +38,14 @@ export function MessagesTab({ workspaceId, context }: { workspaceId: string; con
     return () => { cancelled = true }
   }, [context, workspaceId])
 
-  if (!context) return <EmptyState>Select an agent to see its inbox messages.</EmptyState>
-  if (context.kind !== "agent") return <EmptyState>Messages are per-agent — select one in the explorer.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
-  if (messages === null || counters === null) return <EmptyState>Loading…</EmptyState>
+  if (!context) return <PanelEmptyText>Select an agent to see its inbox messages.</PanelEmptyText>
+  if (context.kind !== "agent") return <PanelEmptyText>Messages are per-agent — select one in the explorer.</PanelEmptyText>
+  if (error) return <PanelEmptyText><span className="text-destructive">Failed to load: {error}</span></PanelEmptyText>
+  if (messages === null || counters === null) return <PanelEmptyText>Loading…</PanelEmptyText>
 
   const totalCounters = counters.escalations + counters.assignments + counters.approvals
   if (messages.length === 0 && totalCounters === 0) {
-    return <EmptyState>No messages or escalations for {context.agentName}.</EmptyState>
+    return <PanelEmptyText>No messages or escalations for {context.agentName}.</PanelEmptyText>
   }
 
   return (

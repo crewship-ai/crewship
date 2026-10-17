@@ -6,7 +6,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { REPORTED_USAGE_HINT, formatReportedUsage } from "@/components/features/routines/routine-cost-format"
 
 import type { BottomPanelContext } from "./types"
-import { EmptyState, formatRelative, statusColor } from "./shared"
+import { PanelEmptyText, formatRelative, statusColor } from "./shared"
 
 // One row covers both modes. Issue runs are agent task-executions
 // (assignments) → agent_name / task / result_summary. Routine runs are
@@ -69,14 +69,14 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
     return () => { cancelled = true }
   }, [url])
 
-  if (!context) return <EmptyState>Select an issue or routine to see its runs.</EmptyState>
+  if (!context) return <PanelEmptyText>Select an issue or routine to see its runs.</PanelEmptyText>
   if (context.kind !== "mission" && context.kind !== "routine") {
-    return <EmptyState>Runs are shown per issue or routine.</EmptyState>
+    return <PanelEmptyText>Runs are shown per issue or routine.</PanelEmptyText>
   }
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
-  if (runs === null) return <EmptyState>Loading…</EmptyState>
+  if (error) return <PanelEmptyText><span className="text-destructive">Failed to load: {error}</span></PanelEmptyText>
+  if (runs === null) return <PanelEmptyText>Loading…</PanelEmptyText>
   if (runs.length === 0) {
-    return <EmptyState>No runs yet — start the issue (or trigger the routine) to see executions here.</EmptyState>
+    return <PanelEmptyText>No runs yet — start the issue (or trigger the routine) to see executions here.</PanelEmptyText>
   }
 
   const isMission = context.kind === "mission"

@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
-import { EmptyState, formatRelative, statusColor } from "./shared"
+import { PanelEmptyText, formatRelative, statusColor } from "./shared"
 import { describeCron } from "@/lib/cron-describe"
 
 // Subset of internal/api scheduleResponse we render.
@@ -84,11 +84,11 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
     }
   }
 
-  if (!context) return <EmptyState>Select a routine to see its schedule.</EmptyState>
-  if (context.kind !== "routine") return <EmptyState>Schedule is shown per routine.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
-  if (loading) return <EmptyState>Loading…</EmptyState>
-  if (!schedule) return <EmptyState>This routine has no schedule — it runs only when triggered manually.</EmptyState>
+  if (!context) return <PanelEmptyText>Select a routine to see its schedule.</PanelEmptyText>
+  if (context.kind !== "routine") return <PanelEmptyText>Schedule is shown per routine.</PanelEmptyText>
+  if (error) return <PanelEmptyText><span className="text-destructive">Failed to load: {error}</span></PanelEmptyText>
+  if (loading) return <PanelEmptyText>Loading…</PanelEmptyText>
+  if (!schedule) return <PanelEmptyText>This routine has no schedule — it runs only when triggered manually.</PanelEmptyText>
 
   const cells: Array<{ k: string; v: React.ReactNode }> = [
     { k: "Runs", v: (
